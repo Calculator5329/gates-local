@@ -26,7 +26,24 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
     }
     return "";
   });
-  return { calls, errors, items, content: content.trim() };
+  if (items.length > 0) return { calls, errors, items, content: content.trim() };
+  // Gemma-style models answer in a fence instead. Exactly one ```json or ```tool_code
+  // block holding {name, arguments|parameters} is a call; more than one, or JSON of
+  // another shape, is ordinary answer text. A fence that does not parse is a bad call.
+  const fences = [...content.matchAll(/```(?:json|tool_code)[ \t]*\n([\s\S]*?)```/gi)];
+  if (fences.length !== 1) return { calls, errors, items, content: content.trim() };
+  const [fence, body] = fences[0]!;
+  let value: unknown;
+  try { value = JSON.parse(body!.trim()); }
+  catch {
+    invalid("Fenced tool call must contain a JSON object with name and arguments");
+    return { calls, errors, items, content: content.replace(fence, "").trim() };
+  }
+  const shaped = typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as { name?: unknown }).name === "string"
+    && ("arguments" in value || "parameters" in value);
+  if (!shaped) return { calls, errors, items, content: content.trim() };
+  calls.push(value); items.push({ call: value });
+  return { calls, errors, items, content: content.replace(fence, "").trim() };
 }
 
 export function record(value: unknown): Record<string, unknown> {

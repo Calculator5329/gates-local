@@ -27,4 +27,5 @@ export type ModelEvent =
 export type LoopEvent = Exclude<ModelEvent, { type: "complete" }>
   | { type: "tool"; step: ToolStep }
   | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; images: string[]; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
-export type ModelStream = (messages: readonly ModelMessage[]) => AsyncIterable<ModelEvent>;
+/** `tools: false` is the final-answer request after a budget ran out: send no tool definitions. */
+export type ModelStream = (messages: readonly ModelMessage[], options?: { tools: boolean }) => AsyncIterable<ModelEvent>;
