@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   const catalog = createModelCatalog(() => runtime.baseUrl());
 
   let server: WsServer | undefined;
-  const sources = createSources({ dataDir });
+  const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
   const app: App = createApp({
     store,
     sources,

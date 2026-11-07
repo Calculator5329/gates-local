@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { createSources } from "./index.ts";
+import { createSources, SQLITE_FILE_REFUSED } from "./index.ts";
 const children: ChildProcess[] = [];
 // One prerequisite probe; do not mistake an unsupported nested process for a snapshot failure.
 const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8", timeout: 2000 });
@@ -42,7 +42,81 @@ describe("Library registry", () => {
     const docs = path.join(root, "docs"); mkdirSync(docs);
     expect(await sources.add({ kind: "folder", path: docs })).toMatchObject({ state: "ready" });
   });
-  it("reads only the snapshot until an explicit refresh, retaining the old snapshot", async () => {
+  it("refuses a SQLite database added as a file", async () => {
+    const { root, sources } = setup();
+    const file = path.join(root, "notes.txt");
+    const db = new DatabaseSync(file); db.exec("CREATE TABLE t(n)"); db.close();
+    await expect(sources.add({ kind: "file", path: file })).rejects.toThrow(SQLITE_FILE_REFUSED);
+    expect(SQLITE_FILE_REFUSED).toBe("This is a SQLite database; add it as a database source so the model reads a snapshot, never the live file.");
+    const nearly = path.join(root, "nearly.txt"); writeFileSync(nearly, "SQLite format 3 but text");
+    expect(await sources.add({ kind: "file", path: nearly })).toMatchObject({ state: "ready" });
+  });
+  it("keeps snapshots private and keeps one per source: 0600 files in a 0700 folder, replaced on refresh, deleted on remove", async () => {
+    const { root, dataDir, sources } = setup();
+    const file = path.join(root, "private.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n); INSERT INTO t VALUES(1)"); live.close();
+    chmodSync(file, 0o600);
+    const snapshots = path.join(dataDir, "snapshots");
+    const source = await sources.add({ kind: "sqlite", path: file });
+    for (let i = 0; i < 3; i++) await sources.refresh(source.id);
+    expect(statSync(snapshots).mode & 0o777).toBe(0o700);
+    expect(readdirSync(snapshots, { recursive: true })).toEqual([`${source.id}.db`]);
+    expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
+    sources.remove(source.id);
+    expect(readdirSync(snapshots, { recursive: true })).toEqual([]);
+  });
+  it("a failed snapshot leaves no pending file and records the error", async () => {
+    const { root, dataDir, sources } = setup();
+    const file = path.join(root, "live.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n)"); live.close();
+    const source = await sources.add({ kind: "sqlite", path: file });
+    const snapshots = path.join(dataDir, "snapshots");
+    // A folder where the snapshot goes makes the final rename fail after VACUUM INTO wrote the pending copy.
+    rmSync(path.join(snapshots, `${source.id}.db`)); mkdirSync(path.join(snapshots, `${source.id}.db`));
+    expect(await sources.refresh(source.id)).toMatchObject({ state: "error" });
+    expect(readdirSync(snapshots).filter(name => name.endsWith(".pending.db"))).toEqual([]);
+  });
+  it("a source mid-refresh loads back as its last good state", async () => {
+    const { root, dataDir, sources } = setup();
+    const file = path.join(root, "live.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n)"); live.close();
+    const source = await sources.add({ kind: "sqlite", path: file });
+    const refreshing = sources.refresh(source.id);
+    expect(sources.list()[0]).toMatchObject({ state: "refreshing" });
+    expect(createSources({ dataDir }).list()).toEqual([source]);
+    await refreshing;
+    // An older registry that did persist "refreshing" loads as ready while the snapshot exists.
+    writeFileSync(path.join(dataDir, "sources.json"), JSON.stringify([{ ...source, state: "refreshing" }]));
+    expect(createSources({ dataDir }).list()).toMatchObject([{ id: source.id, state: "ready" }]);
+  });
+  it("makes the snapshot off the event loop", async () => {
+    const { root, sources } = setup();
+    const file = path.join(root, "big.db");
+    const live = new DatabaseSync(file);
+    live.exec("CREATE TABLE t(b); WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 40) INSERT INTO t SELECT randomblob(1048576) FROM c");
+    live.close();
+    const source = await sources.add({ kind: "sqlite", path: file });
+    let last = performance.now();
+    let maxGap = 0;
+    const tick = setInterval(() => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }, 1);
+    const started = performance.now();
+    try { await sources.refresh(source.id); } finally { clearInterval(tick); }
+    const duration = performance.now() - started;
+    maxGap = Math.max(maxGap, performance.now() - last);
+    expect(duration).toBeGreaterThan(20);
+    expect(maxGap).toBeLessThan(duration / 2);
+  });
+  it("keeps a corrupt sources.json aside and starts with no sources", () => {
+    const { dataDir } = setup();
+    writeFileSync(path.join(dataDir, "sources.json"), "{not json");
+    const log = vi.fn();
+    const sources = createSources({ dataDir, now: () => 1234, log });
+    expect(sources.list()).toEqual([]);
+    expect(readFileSync(path.join(dataDir, "sources.json.bad-1234"), "utf8")).toBe("{not json");
+    expect(existsSync(path.join(dataDir, "sources.json"))).toBe(false);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("sources.json.bad-1234"));
+  });
+  it("reads only the snapshot until an explicit refresh", async () => {
     const { root, dataDir, sources } = setup();
     const file = path.join(root, "live.db");
     const live = new DatabaseSync(file);
@@ -65,8 +139,17 @@ describe("Library registry", () => {
     const { root, sources } = setup();
     const file = path.join(root, "live.db");
     const db = new DatabaseSync(file);
-    db.exec("PRAGMA journal_mode=WAL; CREATE TABLE pair (id INTEGER PRIMARY KEY, value INTEGER); INSERT INTO pair VALUES (1,0),(2,0)");
-    const child = spawn(process.execPath, ["--input-type=module", "-e", `import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(process.argv[1]); let n=0; const write=()=>{db.exec('BEGIN IMMEDIATE'); db.prepare('UPDATE pair SET value=?').run(++n); db.exec('COMMIT');}; write(); process.stdout.write('ready\\n'); setInterval(write,1);`, file], { stdio: ["ignore", "pipe", "pipe"] });
+    // ~2000 rows of 900 bytes span ~500 pages; every transaction rewrites all of them, adds rows,
+    // and keeps meta.total equal to the row count. A torn snapshot breaks one of those two facts.
+    db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE rows (id INTEGER PRIMARY KEY, gen INTEGER, pad BLOB); CREATE TABLE meta (total INTEGER);
+      WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM c WHERE i < 2000) INSERT INTO rows (gen, pad) SELECT 0, randomblob(900) FROM c;
+      INSERT INTO meta VALUES (2000)`);
+    const writer = `import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync(process.argv[1]); let n=0;
+      const write=()=>{ const k=1+(n++%7); db.exec('BEGIN IMMEDIATE'); db.exec('UPDATE rows SET gen=gen+1, pad=randomblob(900)');
+        for (let i=0;i<k;i++) db.exec('INSERT INTO rows (gen, pad) VALUES ((SELECT gen FROM rows LIMIT 1), randomblob(900))');
+        db.prepare('UPDATE meta SET total=total+?').run(k); db.exec('COMMIT'); };
+      write(); process.stdout.write('ready\\n'); setInterval(write,1);`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", writer, file], { stdio: ["ignore", "pipe", "pipe"] });
     children.push(child);
     let stderr = "";
     child.stderr!.on("data", data => { stderr += String(data); });
@@ -81,10 +164,14 @@ describe("Library registry", () => {
         expect(refreshed.snapshotAt).toBeTypeOf("number");
         expect(refreshed.sizeBytes).toBeGreaterThan(0);
         const snapshot = new DatabaseSync(sources.entries()[0]!.snapshotPath!, { readOnly: true });
-        try { expect(snapshot.prepare("SELECT COUNT(DISTINCT value) AS n FROM pair").get()?.n).toBe(1); expect(snapshot.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok"); }
-        finally { snapshot.close(); }
+        try {
+          const { rows, total } = snapshot.prepare("SELECT (SELECT COUNT(*) FROM rows) AS rows, (SELECT total FROM meta) AS total").get()!;
+          expect(total).toBe(rows);
+          expect(snapshot.prepare("SELECT COUNT(DISTINCT gen) AS n FROM rows").get()?.n).toBe(1);
+          expect(snapshot.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+        } finally { snapshot.close(); }
       }
-      expect(db.prepare("SELECT value FROM pair LIMIT 1").get()?.value).toBeGreaterThan(0);
+      expect(db.prepare("SELECT gen FROM rows LIMIT 1").get()?.gen).toBeGreaterThan(0);
     } finally { db.close(); child.kill(); }
   });
 });
