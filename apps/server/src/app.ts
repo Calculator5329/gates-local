@@ -1,0 +1,249 @@
+// The server's handlers: every contracts method wired onto the thread store,
+// the Ollama runtime, the model catalog, the fit check and the streamed turn.
+// main.ts only parses flags and owns the process; tests drive this directly.
+//
+// A chat turn: one active turn per thread, a ready runtime, a fit verdict
+// other than refuse; then the user message persists, the reply streams on
+// chat.event and only the finished assistant message reaches the store.
+import { randomUUID } from "node:crypto";
+import type { Channel, Payload } from "@gates-local/contracts";
+import { streamTurn } from "./chat/stream.ts";
+import type { TurnMessage } from "./chat/types.ts";
+import { checkFit, type FitDeps } from "./fit/fit.ts";
+import type { FitReport } from "./fit/types.ts";
+import type { ModelCatalog } from "./runtime/models.ts";
+import type { OllamaRuntime } from "./runtime/runtime.ts";
+import type { ThreadStore } from "./threads/store.ts";
+import type { Handlers } from "./ws/server.ts";
+
+/**
+ * Codes the handlers here throw. packages/contracts lists only the
+ * protocol's own codes (WireErrorCode, "Handlers may add their own codes");
+ * clients switch on these strings.
+ */
+export type AppErrorCode =
+  | "turn-active" // the thread already has a turn streaming
+  | "runtime-not-ready" // no ready Ollama to talk to
+  | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
+  | "cancelled" // the turn was cancelled (or its thread deleted) before it started
+  | "shutting-down"; // the server is stopping and takes no new turns
+
+export class AppError extends Error {
+  override readonly name = "AppError";
+  readonly code: AppErrorCode;
+  /** The refusing report, for wont-fit. Not on the wire (the message carries it). */
+  readonly report?: FitReport;
+  constructor(code: AppErrorCode, message: string, report?: FitReport) {
+    super(message);
+    this.code = code;
+    if (report !== undefined) this.report = report;
+  }
+}
+
+export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
+type WireEvent = Payload<"chat.event">["event"];
+
+export interface AppDeps {
+  readonly store: ThreadStore;
+  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange">;
+  readonly catalog: ModelCatalog;
+  /** Bound late: main creates the ws server after the handlers. */
+  readonly push: Push;
+  /** nvidia-smi, meminfo, clock and margins for the fit check; defaults read the real machine. */
+  readonly fit?: Omit<FitDeps, "baseUrl">;
+  /** Ollama's think flag for every turn; omitted from the request when undefined. */
+  readonly think?: boolean;
+  readonly newId?: () => string;
+  readonly log?: (line: string) => void;
+}
+
+export interface App {
+  readonly handlers: Handlers;
+  /** Turns streaming now (or reserved and starting). */
+  activeTurns(): number;
+  /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */
+  shutdown(): Promise<void>;
+}
+
+interface Turn {
+  readonly turnId: string;
+  readonly threadId: string;
+  readonly controller: AbortController;
+  /** Resolves once the turn has pushed its last event and left the registry. */
+  readonly ended: Promise<void>;
+}
+
+export function createApp(deps: AppDeps): App {
+  const { store, runtime, catalog } = deps;
+  const log = deps.log ?? ((line: string) => console.error(`[app] ${line}`));
+  const newId = deps.newId ?? randomUUID;
+  const turns = new Map<string, Turn>();
+  const byThread = new Map<string, Turn>();
+  let closing = false;
+
+  const push: Push = (channel, payload) => {
+    try {
+      deps.push(channel, payload);
+    } catch (e) {
+      log(`push ${channel} failed: ${(e as Error).message}`);
+    }
+  };
+
+  const refreshModels = () => {
+    catalog.refresh().catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
+  };
+  const offRuntime = runtime.onChange((status) => {
+    push("runtime.changed", status);
+    refreshModels();
+  });
+  const offCatalog = catalog.onChange((models) => push("models.changed", models));
+
+  /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
+  const reserve = (threadId: string): { turn: Turn; end: () => void } => {
+    let end!: () => void;
+    const ended = new Promise<void>((resolve) => (end = resolve));
+    const turn: Turn = { turnId: newId(), threadId, controller: new AbortController(), ended };
+    turns.set(turn.turnId, turn);
+    byThread.set(threadId, turn);
+    return {
+      turn,
+      end: () => {
+        turns.delete(turn.turnId);
+        if (byThread.get(threadId) === turn) byThread.delete(threadId);
+        end();
+      },
+    };
+  };
+
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[]) => {
+    const { turnId, threadId, controller } = turn;
+    const emit = (event: WireEvent) => push("chat.event", { turnId, threadId, event });
+    try {
+      for await (const event of streamTurn({
+        baseUrl,
+        model,
+        messages,
+        numCtx,
+        signal: controller.signal,
+        threadId,
+        ...(deps.think === undefined ? {} : { think: deps.think }),
+      })) {
+        if (event.type !== "done") {
+          emit(event);
+          continue;
+        }
+        // A cancel that lands with the done line still wins: nothing persists.
+        if (controller.signal.aborted) {
+          emit({ type: "error", code: "cancelled", message: "cancelled as the reply finished; not saved" });
+          return;
+        }
+        let saved;
+        try {
+          saved = store.appendMessage(event.message);
+        } catch (e) {
+          const code = (e as { code?: unknown }).code;
+          emit({ type: "error", code: typeof code === "string" ? code : "internal", message: `reply not saved: ${(e as Error).message}` });
+          return;
+        }
+        emit({ type: "done", message: saved, stopReason: event.stopReason });
+        push("threads.changed", { threadId });
+        return;
+      }
+    } catch (e) {
+      log(`turn ${turnId} failed: ${(e as Error).message}`);
+      emit({ type: "error", code: "internal", message: (e as Error).message });
+    } finally {
+      end();
+    }
+  };
+
+  const cancelThreadTurn = async (threadId: string) => {
+    const turn = byThread.get(threadId);
+    if (turn === undefined) return;
+    turn.controller.abort();
+    await turn.ended;
+  };
+
+  const handlers = {
+    "threads.list": () => store.listThreads(),
+    "threads.create": ({ title }) => {
+      const thread = store.createThread(title === undefined ? {} : { title });
+      push("threads.changed", { threadId: thread.id });
+      return thread;
+    },
+    "threads.get": ({ threadId }) => store.getThread(threadId),
+    "threads.rename": ({ threadId, title }) => {
+      const thread = store.renameThread(threadId, title);
+      push("threads.changed", { threadId });
+      return thread;
+    },
+    "threads.delete": async ({ threadId }) => {
+      await cancelThreadTurn(threadId);
+      store.deleteThread(threadId);
+      push("threads.changed", { threadId });
+      return { threadId };
+    },
+
+    "models.list": async () => catalog.current() ?? (await catalog.refresh()).models,
+    "models.refresh": async () => (await catalog.refresh()).models,
+
+    "runtime.status": () => runtime.status(),
+
+    "fit.check": async ({ model, numCtx }) => {
+      const baseUrl = runtime.baseUrl();
+      if (baseUrl === undefined) throw notReady();
+      return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+    },
+
+    "chat.send": async ({ threadId, content, model, numCtx }) => {
+      if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
+      const active = byThread.get(threadId);
+      if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
+      store.getThread(threadId); // thread-not-found before anything is reserved
+      const { turn, end } = reserve(threadId);
+      let started = false;
+      try {
+        const baseUrl = runtime.baseUrl();
+        if (baseUrl === undefined) throw notReady();
+        const { report } = await checkFit({ ...deps.fit, baseUrl, model, numCtx });
+        if (report.verdict === "refuse") {
+          throw new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
+        }
+        if (turn.controller.signal.aborted) throw new AppError("cancelled", "the turn was cancelled before it started");
+        const userMessage = store.appendMessage({ threadId, role: "user", content });
+        push("threads.changed", { threadId });
+        const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
+        started = true;
+        void runTurn(turn, end, baseUrl, model, numCtx, history);
+        return { turnId: turn.turnId, userMessage };
+      } finally {
+        if (!started) end();
+      }
+    },
+
+    "chat.cancel": ({ turnId }) => {
+      const turn = turns.get(turnId);
+      if (turn === undefined || turn.controller.signal.aborted) return { cancelled: false };
+      turn.controller.abort();
+      return { cancelled: true };
+    },
+  } satisfies Handlers;
+
+  function notReady(): AppError {
+    const s = runtime.status();
+    return new AppError("runtime-not-ready", `Ollama is not ready (${s.state}${s.detail ? `: ${s.detail}` : ""}).`);
+  }
+
+  return {
+    handlers,
+    activeTurns: () => turns.size,
+    async shutdown() {
+      closing = true;
+      offRuntime();
+      offCatalog();
+      const pending = [...turns.values()];
+      for (const t of pending) t.controller.abort();
+      await Promise.all(pending.map((t) => t.ended));
+    },
+  };
+}
