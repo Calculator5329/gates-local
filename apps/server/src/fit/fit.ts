@@ -7,7 +7,13 @@
 //
 // A download size alone never proves a fit: the estimate adds KV cache and
 // overhead, and a measured /api/ps report replaces it after a real load.
-import { NUM_CTX_FLOOR, RAM_SAFETY_MARGIN_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
+import {
+  NUM_CTX_FLOOR,
+  PREDOWNLOAD_KV_FRACTION_PER_16K,
+  RAM_SAFETY_MARGIN_BYTES,
+  RUNTIME_OVERHEAD_BYTES,
+  VRAM_SAFETY_MARGIN_BYTES,
+} from "./constants.ts";
 import { checkNumCtx, estimateNeed, parseArchInfo, type EstimateOptions } from "./estimate.ts";
 import { formatBytes, formatGb } from "./format.ts";
 import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemAvailable } from "./gpu.ts";
@@ -256,6 +262,55 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   const result: ModelsFit = { checks, runnable, gpu: readings.gpu };
   if (runnable.length === 0) result.refusal = noModelFits(checks.map((c) => c.report), deps.numCtx);
   return result;
+}
+
+export interface FitSurvey {
+  gpu: GpuSnapshot;
+  memAvailableBytes: number;
+  /** One report per model whose check ran; a model whose check failed (no /api/show geometry, say) is absent. */
+  reports: Map<string, FitReport>;
+}
+
+/** Fits each named installed model at one num_ctx from a single GPU and RAM reading, skipping failures. */
+export async function surveyFit(deps: FitDeps & { numCtx: number; models: readonly string[] }): Promise<FitSurvey> {
+  const readings = await takeReadings(deps);
+  const reports = new Map<string, FitReport>();
+  for (const name of deps.models) {
+    try {
+      reports.set(name, (await fitWithReadings(deps, name, deps.numCtx, readings)).report);
+    } catch {
+      // This model gets no verdict; the others still do.
+    }
+  }
+  return { gpu: readings.gpu, memAvailableBytes: readings.memAvailableBytes, reports };
+}
+
+/**
+ * A rough fit for a model that is not downloaded yet, so there is no
+ * /api/show geometry: weights are the download size, the KV cache is taken
+ * as PREDOWNLOAD_KV_FRACTION_PER_16K of it per 16k tokens, plus the usual
+ * overhead. Always source "estimate"; the message says it is pre-download.
+ */
+export function estimateBeforeDownload(input: {
+  model: string;
+  numCtx: number;
+  downloadBytes: number;
+  freeVramBytes: number;
+  memAvailableBytes: number;
+  measuredAt: number;
+  margins?: Margins;
+}): FitReport {
+  const kv = Math.round(input.downloadBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (input.numCtx / NUM_CTX_FLOOR));
+  return decideFit({
+    model: input.model,
+    numCtx: input.numCtx,
+    needBytes: input.downloadBytes + kv + RUNTIME_OVERHEAD_BYTES,
+    freeVramBytes: input.freeVramBytes,
+    memAvailableBytes: input.memAvailableBytes,
+    measuredAt: input.measuredAt,
+    ...(input.margins ? { margins: input.margins } : {}),
+    note: `rough estimate before download (weights from the ${formatGb(input.downloadBytes)} download, KV cache ${formatGb(kv)}, overhead ${formatGb(RUNTIME_OVERHEAD_BYTES)})`,
+  });
 }
 
 export function noModelFits(reports: readonly FitReport[], numCtx: number): string {
