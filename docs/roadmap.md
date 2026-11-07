@@ -118,6 +118,33 @@ never shows a whisper stop, start or restart.
       *Accept:* a 16k thread that crosses its budget compacts and continues;
       the prefix bytes are identical across turns.
 
+## Next: setup with an AI assistant (decision 2026-11-07)
+
+- [ ] Tier table (`setup/tiers.json`): the best text and image model per
+      hardware tier (NVIDIA by VRAM, no GPU by system memory), dated.
+      *Accept:* every entry names its source, download size, memory at 16k
+      and license; the research behind it is in `docs/research/`.
+- [ ] `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
+      system memory, disk free, CPU, Ollama and ComfyUI found, models
+      installed).
+      *Accept:* fixtures for NVIDIA 16 GB with whisper, NVIDIA 8 GB, no GPU
+      with 16 GB and no GPU with 8 GB; real runs on this machine and Geordi.
+- [ ] `pnpm setup:plan`: the text model and context, the image model or
+      none, the downloads and their sizes, each with a plain reason.
+      *Accept:* each fixture gets its tier's picks; a plan never exceeds the
+      measured free memory.
+- [ ] `pnpm setup:apply --yes`: Ollama, models and (when chosen) ComfyUI
+      and image weights through the app's own install paths, resumable,
+      with progress; refuses without `--yes`.
+      *Accept:* with fakes, every step in order; a killed run resumes.
+- [ ] `setup/` folder: `AGENTS.md` (run, show, ask, apply, check, report),
+      `CLAUDE.md` pointing to it, `README.md` for the manual path.
+      *Accept:* a fresh agent on Geordi told "look at this folder and set me
+      up" gets a working app with only the user's yes; transcript in
+      `docs/evidence/`.
+- [ ] Settings shows the same plan with no agent, and a "Set up with an AI
+      assistant" line with the folder path and the sentence to say.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

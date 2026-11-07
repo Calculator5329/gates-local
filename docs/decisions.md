@@ -99,3 +99,46 @@ and configure and being able to hook into personal databases and tool calls
 and stuff.You could also make sure it's working on Linux on this computer and
 then if you have time, run a sub-agent on Jord y to get it working on that
 Windows computer so it's working for both.”
+
+## 2026-11-07 · Setup with an AI assistant, on any device
+
+**Decided:** Gates Local ships a `setup/` folder that a coding agent (Claude
+Code, Codex) can be pointed at: "look at this folder and set me up". The
+agent reads the folder's `AGENTS.md` (`CLAUDE.md` points to it), runs the
+app's own probe to read the device (OS, GPU vendor and memory, system
+memory, disk, CPU, what is already installed), asks the app for a plan (the
+best text model and context, the best image model or none, what downloads
+and how big), shows the plan, and on the user's yes runs the app's own
+install and download commands, then checks with one reply and, where images
+are on, one image. The manual path stays: first run already installs Ollama
+and one model by itself; the agent path adds what first run leaves out
+(image generation, more models, Library sources, tuning).
+**Any device:** the plan comes from the measured device, never one fixed
+default. A device with no GPU gets text models sized to its system memory,
+and image generation offered only as the smallest CPU-capable model with
+its measured time per image, off unless the user says yes.
+**The app does the deciding, the agent does the talking:** the probe, the
+model choice and the installs are app commands with JSON output and tests
+(`pnpm setup:probe`, `setup:plan`, `setup:apply`), so a fresh agent on any
+machine gets the same answer and Settings can show the same plan with no
+agent at all. The folder's instructions keep the agent to: run, show, ask,
+apply, check, report.
+**Models:** a dated tier table in the repo (text and image per hardware
+tier, each with its source, download size, memory at 16k and license),
+researched now and refreshed per release. An agent may suggest a newer
+model it finds, and installs it only on the user's yes.
+**Agent rules in the folder:** official sources and published checksums
+only; sizes shown before any download; nothing system-wide without asking;
+never stop a process the app did not start; on Ethan's machine the GPU rules
+in `AGENTS.md` apply (whisper is never touched).
+**Proof:** the Windows lane on Geordi (no GPU) is the first real test: a
+fresh agent there is pointed at the folder and sets the app up.
+**Owner text (voice-to-text, in chat):** “Also it'd be nice if in the setup
+it had setup instructions in a way that like I could download it, install
+it, and then like tell Claude code "hey look at this folder" and it could get
+me set up with the best of models in terms of local image generation and
+text like automatically. Like a Claude enabled setup if you don't want to do
+it manually that'd be kind of cool and then work on any device even if it
+doesn't have a GPU like it gets whatever is the best that your device can
+handle.”
+
