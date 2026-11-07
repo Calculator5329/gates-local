@@ -10,6 +10,8 @@ import { type Channel, type Client, type Payload, type SocketLike, WireError, cr
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { type App, createApp } from "../src/app.ts";
+import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
+import type { ImageModule } from "../src/image/module.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
@@ -87,7 +89,8 @@ interface Rig {
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
 }
 
-async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
+/** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => ImageModule } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   const ollama = await startFakeServer({
@@ -123,10 +126,12 @@ async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
   const storedAtDonePush: number[] = [];
 
   let server: WsServer | undefined;
+  const lease = opts.image ? createGpuLease() : undefined;
   const app = createApp({
     store,
     runtime,
     catalog,
+    ...(lease && opts.image ? { lease, image: opts.image(lease) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { threadId, event } = p as Payload<"chat.event">;
@@ -357,6 +362,51 @@ describe("chat.send", () => {
     expect((await r.client.call("fit.check", { model: MODEL, numCtx: 16384 })).verdict).toBe("spills");
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+  });
+});
+
+/** A fake image module: an idle ComfyUI with this owner; stopIdle claims the GPU alone, as image/module.ts does. */
+function idleComfy(owner: "app" | "external", onStop: () => void) {
+  let stops = 0;
+  const build = (lease: GpuLease) => ({
+    current: () => ({ state: "ready", owner }),
+    stopIdle: () => lease.run("image", undefined, async () => { stops += 1; onStop(); }),
+  }) as unknown as ImageModule;
+  return { build, stops: () => stops };
+}
+
+describe("chat.send frees an idle ComfyUI the app started", () => {
+  it("stops it before the turn claims the GPU and measures again when the turn would not fit beside it", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = idleComfy("app", () => { if (gpu) gpu.freeMib = 15000; });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    const t = await r.client.call("threads.create", {});
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(1);
+  });
+
+  it("leaves it running when the turn fits beside it", async () => {
+    const comfy = idleComfy("app", () => undefined);
+    const r = await rig({ image: comfy.build });
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(0);
+  });
+
+  it("never stops a ComfyUI the app did not start, and still refuses", async () => {
+    const comfy = idleComfy("external", () => undefined);
+    const r = await rig({ image: comfy.build });
+    const t = await r.client.call("threads.create", {});
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    expect(err.code).toBe("wont-fit");
+    expect(comfy.stops()).toBe(0);
   });
 });
 

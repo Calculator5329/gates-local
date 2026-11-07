@@ -283,13 +283,16 @@ export function createApp(deps: AppDeps): App {
         load = deps.models?.loader?.reserve(model);
         const baseUrl = runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
+        const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+        // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the
+        // GPU alone, so it runs before this turn's own claim: a nested claim would wait on itself.
+        if (deps.image?.current().owner === "app" && (await fit()).verdict !== "fits") await deps.image.stopIdle();
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         try {
           releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
         } catch {
           throw new AppError("cancelled", "the turn was cancelled before it started");
         }
-        const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
         let report: FitReport;
         try {
           report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit();
