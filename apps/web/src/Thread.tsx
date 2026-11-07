@@ -1,0 +1,338 @@
+// The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
+// are memoised by message, so a streaming token re-renders only the live turn.
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Message, ToolStep } from "@gates-local/contracts";
+import { describeModel, replyMeta, turnTime } from "./format.ts";
+import { Icon } from "./icons.tsx";
+import { Markdown } from "./markdown.tsx";
+import { focusComposer } from "./Sidebar.tsx";
+import { retry, unqueue } from "./session.ts";
+import { NA, type Queued, type State, setState, useStore } from "./store.ts";
+import { closeTip, esc } from "./ui.tsx";
+
+const EMPTY: readonly Message[] = [];
+const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
+
+function useTicker(ms: number, on: boolean): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    const t = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(t);
+  }, [ms, on]);
+  return now;
+}
+
+/** Copy, with the check-mark flash (F60): the icon and tip read "Copied" for 1.2 s. */
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(false), 1200);
+    return () => clearTimeout(t);
+  }, [done]);
+  return (
+    <button
+      type="button"
+      className="ibtn xs"
+      data-copy
+      data-tip={done ? "Copied" : "Copy"}
+      aria-label="Copy"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).catch(() => undefined);
+        setDone(true);
+      }}
+    >
+      <Icon id={done ? "check" : "copy"} />
+    </button>
+  );
+}
+
+function ActRow({ text, meta, regen }: { text: string; meta: string; regen: boolean }) {
+  return (
+    <div className="a-act">
+      <CopyButton text={text} />
+      {regen ? (
+        <button
+          type="button"
+          className="ibtn xs"
+          data-regen
+          data-tip="Regenerate"
+          aria-label="Regenerate"
+          onClick={() => {
+            closeTip();
+            retry();
+          }}
+        >
+          <Icon id="redo" />
+        </button>
+      ) : null}
+      <span className="meta">{meta}</span>
+    </div>
+  );
+}
+
+function UserBubble({ text, time, queued }: { text: string; time: string; queued?: Queued }) {
+  return (
+    <div className={`turn u${queued ? " queued" : ""}`} tabIndex={0} aria-label="Your message">
+      <div className="u-row">
+        <div className="u-act">
+          <span className="tm">{time}</span>
+          <button
+            type="button"
+            className="ibtn xs"
+            data-edit
+            data-tip="Edit"
+            aria-label="Edit"
+            onClick={() => {
+              setState({ draft: text });
+              focusComposer();
+            }}
+          >
+            <Icon id="pencil" />
+          </button>
+          <CopyButton text={text} />
+        </div>
+        <div className="bubble">{text}</div>
+      </div>
+      {queued ? (
+        <div className="u-q">
+          <span className="u-qs" role="status">
+            <Icon id="clock" cls="s14" />
+            {queued.waitFor === "download" ? "Sends when the download finishes" : "Sends when setup finishes"}
+          </span>
+          <button
+            type="button"
+            className="qa"
+            data-unqueue
+            onClick={() => {
+              closeTip();
+              unqueue(queued.id);
+              focusComposer();
+            }}
+          >
+            Cancel send
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ThinkLine({ secs, text }: { secs: number | undefined; text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="think" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="th-i">
+          <Icon id="bulb" />
+        </span>
+        <span>{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
+        <span className="th-x">
+          <Icon id="down" />
+        </span>
+      </button>
+      <div className="think-body">{text}</div>
+    </>
+  );
+}
+
+const TOOL_LABEL: Record<string, string> = { read: "Read", sql: "SQL", shell: "Shell", note: "Note", image: "Image" };
+const toolLabel = (name: string) => TOOL_LABEL[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
+const duration = (ms: number | undefined) => (ms === undefined ? "" : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+
+/** A tool step row; `stopped` marks a step that was running when the user pressed Stop. */
+function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const st = stopped && step.state === "running" ? "rej" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
+  const label = toolLabel(step.name);
+  const meta =
+    st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : [label, duration(step.durationMs)].filter((x) => x !== "").join(" · ");
+  const [cmd = "", ...rest] = (step.detail ?? "").split("\n");
+  const out = rest.join("\n").trim();
+  const toggle = () => setOpen(!open);
+  return (
+    <div
+      className="wr"
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      data-tool-row
+      onClick={(e) => {
+        if (!(e.target instanceof Element && e.target.closest(".wr-body"))) toggle();
+      }}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <div className="wr-line">
+        <span className="wr-st" data-st>
+          {st === "run" ? <Icon id="spin" cls="spin" /> : <Icon id={st === "rej" ? "xc" : "checkc"} />}
+        </span>
+        <span className="wr-h">{step.summary}</span>
+        <span className="wr-m">{meta}</span>
+        <span className="wr-x">
+          <Icon id="down" />
+        </span>
+      </div>
+      <div className="wr-body">
+        {cmd !== "" ? (
+          <p className="cmd">
+            <span>$ </span>
+            {cmd}
+          </p>
+        ) : null}
+        {out !== "" ? <p className="out">{out}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/** A generated image from the server's /files route; a quiet placeholder when it is gone. */
+function ImageOut({ path }: { path: string }) {
+  const origin = useStore((s) => s.serverOrigin);
+  const token = useStore((s) => s.fileToken);
+  const [missing, setMissing] = useState(false);
+  if (missing || origin === null) {
+    return (
+      <div className="img-miss">
+        <Icon id="image" />
+        Image not available
+      </div>
+    );
+  }
+  const src = `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
+}
+
+const AsstTurn = memo(function AsstTurn({ msg, last }: { msg: Message; last: boolean }) {
+  const catalog = useStore(catalogOf);
+  const ft = useStore((s) => s.firstToken[msg.id]);
+  const name = describeModel(msg.model ?? "", catalog).name;
+  return (
+    <div className="turn a done" tabIndex={0} aria-label="Reply">
+      {msg.thinking ? <ThinkLine secs={ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))} text={msg.thinking} /> : null}
+      {(msg.tools ?? []).map((t) => (
+        <ToolRow key={t.callId} step={t} />
+      ))}
+      {msg.content !== "" ? <Markdown text={msg.content} /> : null}
+      {(msg.images ?? []).map((p) => (
+        <ImageOut key={p} path={p} />
+      ))}
+      <ActRow text={msg.content} meta={replyMeta(name, msg, ft)} regen={last} />
+    </div>
+  );
+});
+
+const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
+  return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
+});
+
+/** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. */
+function Working({ startedAt, loading }: { startedAt: number; loading: boolean }) {
+  const now = useTicker(250, true);
+  const secs = Math.floor((now - startedAt) / 1000);
+  return (
+    <div className="working">
+      <Icon id="spin" cls="spin" />
+      <span className="ph">{loading ? "Loading into GPU memory…" : "Thinking"}</span>
+      <span className="el">{secs >= 1 ? `· ${secs} s` : ""}</span>
+    </div>
+  );
+}
+
+function LiveTurnView({ threadId }: { threadId: string }) {
+  const live = useStore((s) => (s.live?.threadId === threadId ? s.live : null));
+  const catalog = useStore(catalogOf);
+  const loading = useStore((s) => (s.live ? s.loads[s.live.model]?.state === "loading" : false));
+  if (live === null) return null;
+  const end = live.end;
+  const name = describeModel(live.model, catalog).name;
+  const running = live.tools.some((t) => t.state === "running");
+  const showThink = live.thinking !== "" && (live.text !== "" || live.tools.length > 0 || end !== undefined);
+  return (
+    <>
+      {live.pendingUser !== null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
+      <div className={`turn a${end ? " done" : ""}`} tabIndex={0} aria-label="Reply">
+        {showThink ? <ThinkLine secs={live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000))} text={live.thinking} /> : null}
+        {live.tools.map((t) => (
+          <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
+        ))}
+        {live.text !== "" ? <Markdown text={live.text} caret={end === undefined} /> : null}
+        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} /> : null}
+        {end?.kind === "stopped" ? (
+          <div className="stopped">
+            <span>Stopped after {end.secs} s</span>
+            <button type="button" className="qa" data-regen onClick={retry}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {end?.kind === "error" ? (
+          <div className="err-line" data-tip={esc(end.message)}>
+            <Icon id="alert" cls="s14" />
+            <span>{end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
+            <button type="button" className="qa" onClick={retry}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {end ? <ActRow text={live.text} meta={name} regen={false} /> : null}
+      </div>
+    </>
+  );
+}
+
+const QUEUED_NONE: readonly Queued[] = [];
+
+/** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
+export function Timeline({ threadId }: { threadId: string }) {
+  const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
+  const queuedAll = useStore((s) => (s.queued.length === 0 ? QUEUED_NONE : s.queued));
+  const queued = queuedAll.filter((q) => q.threadId === threadId);
+  const tl = useRef<HTMLDivElement>(null);
+  const col = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  const lastAsst = messages.findLastIndex((m) => m.role === "assistant");
+
+  // a newly opened thread starts at its end
+  useLayoutEffect(() => {
+    const el = tl.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    stick.current = true;
+  }, [threadId]);
+
+  useEffect(() => {
+    const el = tl.current;
+    const c = col.current;
+    if (!el || !c) return;
+    const onScroll = () => {
+      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    };
+    const ro = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(c);
+    ro.observe(el);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  return (
+    <div className="tl" ref={tl}>
+      <div className="col" ref={col}>
+        {messages.map((m, i) => (m.role === "user" ? <UserTurn key={m.id} msg={m} /> : <AsstTurn key={m.id} msg={m} last={i === lastAsst && i === messages.length - 1} />))}
+        {queued.map((q) => (
+          <UserBubble key={q.id} text={q.text} time={turnTime(q.at)} queued={q} />
+        ))}
+        <LiveTurnView threadId={threadId} />
+      </div>
+    </div>
+  );
+}

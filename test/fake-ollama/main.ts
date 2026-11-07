@@ -1,5 +1,5 @@
 // CLI for the fake Ollama: node test/fake-ollama/main.ts --port <n> [--scenario <name>] [--gpu-state <file>]
-// Prints `fake ollama on <url>` once listening; exits on SIGTERM, SIGINT or stdin EOF.
+// Prints `fake ollama on <url>` once listening; exits on SIGTERM or SIGINT.
 import { parseArgs } from "node:util";
 import { SCENARIOS, startFakeOllama, type Scenario } from "./fake-ollama.ts";
 

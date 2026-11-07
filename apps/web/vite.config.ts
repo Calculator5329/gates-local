@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({ plugins: [react()] });
+// base "./" so the packaged desktop app can load the build from file://
+export default defineConfig({ base: "./", plugins: [react()] });
