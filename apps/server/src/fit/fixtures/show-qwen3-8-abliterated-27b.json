@@ -1,0 +1,59 @@
+{
+ "details": {
+  "parent_model": "hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:IQ3_M",
+  "format": "gguf",
+  "family": "qwen35",
+  "families": [
+   "qwen35"
+  ],
+  "parameter_size": "26.9B",
+  "quantization_level": "IQ3_M",
+  "runner": "llamacpp"
+ },
+ "model_info": {
+  "general.architecture": "qwen35",
+  "general.basename": "qwen38-ara",
+  "general.file_type": 27,
+  "general.parameter_count": 26895998464,
+  "general.quantization_version": 2,
+  "general.sampling.temp": 1,
+  "general.sampling.top_k": 20,
+  "general.sampling.top_p": 0.95,
+  "general.size_label": "27B",
+  "general.type": "model",
+  "general.version": "v5",
+  "quantize.imatrix.chunks_count": 159,
+  "quantize.imatrix.dataset": "/root/corpus/tiny_shakespeare.txt",
+  "quantize.imatrix.entries_count": 496,
+  "quantize.imatrix.file": "/root/rvn/imatrix.dat",
+  "qwen35.attention.head_count": 24,
+  "qwen35.attention.head_count_kv": 4,
+  "qwen35.attention.key_length": 256,
+  "qwen35.attention.layer_norm_rms_epsilon": 1e-06,
+  "qwen35.attention.value_length": 256,
+  "qwen35.block_count": 64,
+  "qwen35.context_length": 262144,
+  "qwen35.embedding_length": 5120,
+  "qwen35.feed_forward_length": 17408,
+  "qwen35.full_attention_interval": 4,
+  "qwen35.rope.dimension_count": 64,
+  "qwen35.rope.dimension_sections": [
+   11,
+   11,
+   10,
+   0
+  ],
+  "qwen35.rope.freq_base": 10000000,
+  "qwen35.ssm.conv_kernel": 4,
+  "qwen35.ssm.group_count": 16,
+  "qwen35.ssm.inner_size": 6144,
+  "qwen35.ssm.state_size": 128,
+  "qwen35.ssm.time_step_rank": 48
+ },
+ "capabilities": [
+  "completion",
+  "vision",
+  "tools",
+  "thinking"
+ ]
+}
