@@ -61,6 +61,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       shortfallBytes: 1_500_000_000,
       source: "measured",
       measuredAt: 1_762_500_004_000,
+      message: "qwen3:14b at num_ctx 32768 spills 1.50 GB to system RAM.",
     },
   },
   "chat.send": {
@@ -75,7 +76,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "chat.event": [
     { turnId: "turn-1", threadId: "t1", event: { type: "thinking", text: "greet" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
-    { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage } },
+    { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "error", code: "runtime-gone", message: "Ollama stopped" } },
   ],
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],

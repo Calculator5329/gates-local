@@ -84,13 +84,16 @@ export const FitReport = S.Struct({
   shortfallBytes: S.optional(Count),
   source: S.Literals(["measured", "estimate"]),
   measuredAt: Millis,
+  /** One sentence that names the numbers behind the verdict. */
+  message: S.optional(S.String),
 });
 export type FitReport = typeof FitReport.Type;
 
 export const ChatEvent = S.Union([
   S.Struct({ type: S.Literal("delta"), text: S.String }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
-  S.Struct({ type: S.Literal("done"), message: Message }),
+  // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
+  S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
   S.Struct({ type: S.Literal("error"), code: S.String, message: S.String }),
 ]);
 export type ChatEvent = typeof ChatEvent.Type;
