@@ -8,6 +8,9 @@
 import { randomUUID } from "node:crypto";
 import type { Channel, Payload } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
+import { streamToolTurn } from "./chat/tools.ts";
+import type { Sources } from "./sources/index.ts";
+import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
 import type { FitReport } from "./fit/types.ts";
@@ -72,6 +75,9 @@ export interface AppDeps {
   readonly fit?: Omit<FitDeps, "baseUrl">;
   /** Ollama's think flag for every turn; omitted from the request when undefined. */
   readonly think?: boolean;
+  readonly sources?: Sources;
+  readonly toolsEnabled?: () => boolean;
+  readonly generateImage?: (prompt: string, signal: AbortSignal) => Promise<string>;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
   /**
@@ -129,6 +135,7 @@ export function createApp(deps: AppDeps): App {
     refreshModels();
   });
   const offCatalog = catalog.onChange((models) => push("models.changed", models));
+  const offSources = deps.sources?.onChange(sources => push("sources.changed", sources));
 
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
   const reserve = (threadId: string): { turn: Turn; end: () => void } => {
@@ -147,7 +154,7 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
     const { turnId, threadId, controller } = turn;
     const emit = (event: WireEvent) => {
       // Only text means the model answered; an error, cancel or end goes through end() below.
@@ -155,15 +162,23 @@ export function createApp(deps: AppDeps): App {
       push("chat.event", { turnId, threadId, event });
     };
     try {
-      for await (const event of streamTurn({
+      const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
+      const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
+      // The image tool is offered only when this turn asked for it and image generation is wired.
+      const image = options.image === true && deps.generateImage !== undefined;
+      const useTools = (wantsTools && sources.length > 0) || image;
+      const think = options.think ?? deps.think;
+      const input = {
         baseUrl,
         model,
         messages,
         numCtx,
         signal: controller.signal,
         threadId,
-        ...(deps.think === undefined ? {} : { think: deps.think }),
-      })) {
+        ...(think === undefined ? {} : { think }),
+      };
+      const events = useTools ? streamToolTurn({ ...input, sources, generateImage: deps.generateImage, image }) : streamTurn(input);
+      for await (const event of events) {
         if (event.type !== "done") {
           emit(event);
           continue;
@@ -204,6 +219,7 @@ export function createApp(deps: AppDeps): App {
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
+    ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });
@@ -234,7 +250,7 @@ export function createApp(deps: AppDeps): App {
       return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
@@ -275,7 +291,7 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
-        void runTurn(turn, end, baseUrl, model, numCtx, history, load);
+        void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) {
@@ -305,6 +321,7 @@ export function createApp(deps: AppDeps): App {
       closing = true;
       offRuntime();
       offCatalog();
+      offSources?.();
       const pending = [...turns.values()];
       for (const t of pending) t.controller.abort();
       await Promise.all(pending.map((t) => t.ended));

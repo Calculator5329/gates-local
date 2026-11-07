@@ -15,7 +15,9 @@
     "verify:image": "vitest run apps/server/src/image",
     "verify:gpu": "vitest run apps/server/src/gpu",
     "e2e": "playwright test -c test/e2e/playwright.config.ts --project=e2e",
-    "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots"
+    "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots",
+    "verify:tools": "vitest run packages/harness apps/server/src/chat/tools.test.ts --reporter=verbose",
+    "verify:sources": "vitest run apps/server/src/sources --reporter=verbose"
   },
   "devDependencies": {
     "@gates-local/contracts": "workspace:*",

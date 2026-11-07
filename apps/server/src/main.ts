@@ -19,6 +19,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
+import { createSources } from "./sources/index.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 import { createGpuLease } from "./gpu/lease.ts";
@@ -136,10 +137,12 @@ async function main(): Promise<void> {
     onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
     ollamaUrl: () => runtime.baseUrl(),
   });
+  const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
   const app: App = createApp({
     image,
     lease: gpuLease,
     store,
+    sources,
     runtime,
     catalog,
     fit,
