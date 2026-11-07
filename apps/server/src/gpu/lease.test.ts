@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGpuLease } from "./lease.ts";
+
+const effects = vi.hoisted(() => ({ calls: [] as string[] }));
+vi.mock("node:child_process", () => Object.fromEntries(["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"].map((name) => [name, (...args: unknown[]) => { effects.calls.push(`${name} ${args.map(String).join(" ")}`); }])));
+afterEach(() => { vi.unstubAllGlobals(); effects.calls.length = 0; });
 
 describe("app GPU lease", () => {
   it("queues heavy jobs FIFO, with no whisper job or side effects", async () => {
+    vi.stubGlobal("fetch", (...args: unknown[]) => { effects.calls.push(`fetch ${args.map(String).join(" ")}`); return Promise.resolve(Response.json({})); });
     const lease = createGpuLease();
     const log: string[] = [];
     const release = await lease.acquire("chat");
@@ -14,6 +19,8 @@ describe("app GPU lease", () => {
     await Promise.all([image, dream]);
     expect(log).toEqual(["image", "dream"]);
     expect(lease.status()).toEqual({ holder: null, waiting: [] });
+    expect(effects.calls.filter((call) => /whisper(?:-server)?/i.test(call))).toEqual([]);
+    expect(effects.calls).toEqual([]);
   });
   it("removes an aborted waiter without releasing the current holder", async () => {
     const lease = createGpuLease();

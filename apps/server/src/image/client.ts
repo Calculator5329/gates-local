@@ -2,7 +2,8 @@ import { Option, Schema as S } from "effect";
 import { setTimeout as delay } from "node:timers/promises";
 import { CHECKPOINT, LORA, workflow } from "./workflow.ts";
 
-const Stats = S.Struct({ system: S.Record(S.String, S.Unknown), devices: S.Array(S.Unknown) });
+const Device = S.Struct({ type: S.optional(S.String), torch_vram_total: S.optional(S.Finite) });
+const Stats = S.Struct({ system: S.Record(S.String, S.Unknown), devices: S.Array(Device) });
 const Prompt = S.Struct({ prompt_id: S.String });
 const Frame = S.Struct({ type: S.String, data: S.Record(S.String, S.Unknown) });
 const Image = S.Struct({ filename: S.String, subfolder: S.optional(S.String), type: S.optional(S.String) });
@@ -17,6 +18,10 @@ export interface ComfyClientDeps {
   requestTimeoutMs?: number;
 }
 
+export class ComfyCancelTimeoutError extends Error {
+  constructor() { super("ComfyUI did not release the image job within 30 s"); this.name = "ComfyCancelTimeoutError"; }
+}
+
 export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
   const request = async (route: string, init?: RequestInit, signal?: AbortSignal) => {
     const timeout = AbortSignal.timeout(deps.requestTimeoutMs ?? 10_000);
@@ -24,15 +29,16 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
     if (!response.ok) throw new Error(`ComfyUI ${route.split("?")[0]} returned HTTP ${response.status}.`);
     return response;
   };
-  const post = (route: string, body: unknown) => request(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const queue = async () => S.decodeUnknownSync(Queue)(await (await request("/queue")).json());
+  const post = (route: string, body: unknown, signal?: AbortSignal) => request(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, signal);
+  const queue = async (signal?: AbortSignal) => S.decodeUnknownSync(Queue)(await (await request("/queue", undefined, signal)).json());
   return {
+    async stats(signal?: AbortSignal) { return S.decodeUnknownSync(Stats)(await (await request("/system_stats", undefined, signal)).json()); },
     async healthy() {
-      try { S.decodeUnknownSync(Stats)(await (await request("/system_stats")).json()); return true; }
+      try { await this.stats(); return true; }
       catch { return false; }
     },
     async idle() { const q = await queue(); return q.queue_running.length === 0 && q.queue_pending.length === 0; },
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void): Promise<Buffer> {
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}): Promise<Buffer> {
       const info = S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json());
       const select = (node: string, field: string, wanted: string) => {
         const loader = S.decodeUnknownOption(LoaderInfo)(info[node]);
@@ -42,7 +48,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         return choice;
       };
       const graph = workflow(prompt, Math.floor(Math.random() * 2 ** 32), select("CheckpointLoaderSimple", "ckpt_name", CHECKPOINT), select("LoraLoader", "lora_name", LORA));
-      // /interrupt is global. Do not submit into another client's queue.
+      // Do not submit into another client's queue.
       if (!await this.idle()) throw new Error("ComfyUI is busy with another job. Wait for it to finish, then retry.");
       signal.throwIfAborted();
       const url = new URL(`${baseUrl}/ws`); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; url.searchParams.set("clientId", clientId);
@@ -51,6 +57,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       let settled = false;
       const isSettled = () => settled;
       let success = false;
+      let renderFailure: Error | undefined;
       const pending: { type: string; data: Record<string, unknown> }[] = [];
       let done!: () => void, fail!: (error: Error) => void;
       const completed = new Promise<void>((resolve, reject) => { done = () => { settled = true; resolve(); }; fail = (error) => { settled = true; reject(error); }; });
@@ -114,25 +121,49 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         const bytes = Buffer.from(await (await request(`/view?${params}`, undefined, signal)).arrayBuffer());
         if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("ComfyUI returned a result that is not a PNG.");
         success = true;
+        fetched();
         return bytes;
+      } catch (error) {
+        renderFailure = error instanceof Error ? error : new Error(String(error));
+        throw renderFailure;
       } finally {
         signal.removeEventListener("abort", aborted);
         ws.removeEventListener("message", message); ws.removeEventListener("close", closed); ws.removeEventListener("error", closed); ws.close();
-        if (promptId && !success) await this.cancelPrompt(promptId);
+        if (promptId && !success) {
+          try { await this.cancelPrompt(promptId); }
+          catch (error) {
+            // Cleanup must not replace the render failure (especially a dead ComfyUI).
+            if (renderFailure) Object.assign(renderFailure, { cancelDetail: `${error instanceof Error ? error.message : String(error)}. ComfyUI may still be running the prompt.` });
+          }
+        }
       }
     },
     async cancelPrompt(promptId: string) {
-      // Keep the lease until Comfy confirms our prompt has left both queues.
-      // If Comfy dies the failed request ends this wait, too.
-      for (;;) {
-        const next = await queue();
-        const pending = next.queue_pending.some((row) => row[1] === promptId);
-        const running = next.queue_running.some((row) => row[1] === promptId);
-        if (!pending && !running) return;
-        if (pending) await post("/queue", { delete: [promptId] });
-        if (running) await post("/interrupt", {});
-        await delay(100);
-      }
+      // Bound cleanup even if Comfy ignores interruption. Chat remeasures real
+      // free VRAM before loading after the lease is released.
+      const deadline = new AbortController();
+      const timeout = setTimeout(() => deadline.abort(new ComfyCancelTimeoutError()), 30_000);
+      try {
+        for (;;) {
+          deadline.signal.throwIfAborted();
+          const next = await queue(deadline.signal);
+          const pending = next.queue_pending.some((row) => row[1] === promptId);
+          const running = next.queue_running.some((row) => row[1] === promptId);
+          if (!pending && !running) return;
+          if (pending) await post("/queue", { delete: [promptId] }, deadline.signal);
+          if (running) await post("/interrupt", { prompt_id: promptId }, deadline.signal);
+          await new Promise<void>((resolve, reject) => {
+            const finish = () => { deadline.signal.removeEventListener("abort", abort); resolve(); };
+            const timer = setTimeout(finish, 100);
+            const abort = () => { clearTimeout(timer); reject(deadline.signal.reason); };
+            deadline.signal.addEventListener("abort", abort, { once: true });
+            if (deadline.signal.aborted) { deadline.signal.removeEventListener("abort", abort); abort(); }
+          });
+        }
+      } catch (error) {
+        if (deadline.signal.aborted) throw deadline.signal.reason;
+        throw error;
+      } finally { clearTimeout(timeout); }
     },
   };
 }

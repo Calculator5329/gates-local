@@ -30,7 +30,8 @@ export async function realCheck(dataDir: string, comfyUrl?: string) {
   const before = await whisperSnapshot();
   const gpu = await readGpu();
   console.log(JSON.stringify({ whisperBefore: before, freeBytes: gpu.freeBytes, imageEstimateBytes: IMAGE_ESTIMATED_BYTES }));
-  assert(gpu.freeBytes >= IMAGE_ESTIMATED_BYTES, "not enough measured free VRAM for the conservative image estimate; no image attempted and no models unloaded");
+  // The module checks the remaining estimate after crediting healthy ComfyUI's
+  // resident bytes. A full-free-memory precheck would reject every warm job.
   const store = openThreadStore(path.join(dataDir, "real-check.sqlite"));
   let terminal: ImageEvent | undefined;
   let progressFrames = 0;

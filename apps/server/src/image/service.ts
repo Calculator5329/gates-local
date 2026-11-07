@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 
 export interface ComfyService {
-  inspect(): Promise<{ present: boolean; active: boolean; pid: number }>;
+  inspect(): Promise<{ present: boolean; active: boolean; activeState: string; pid: number }>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -15,14 +15,15 @@ const run: Systemctl = (args) => new Promise((resolve, reject) => {
 export function createComfyService(platform = process.platform, systemctl: Systemctl = run): ComfyService {
   return {
     async inspect() {
-      if (platform !== "linux") return { present: false, active: false, pid: 0 };
+      if (platform !== "linux") return { present: false, active: false, activeState: "unknown", pid: 0 };
       try {
         const text = await systemctl(["--user", "show", "comfyui.service", "--property=LoadState,ActiveState,MainPID"]);
         const fields = new Map(text.trim().split("\n").map((line) => {
           const index = line.indexOf("="); return [line.slice(0, index), line.slice(index + 1)];
         }));
-        return { present: fields.get("LoadState") === "loaded", active: fields.get("ActiveState") === "active", pid: Number(fields.get("MainPID")) || 0 };
-      } catch { return { present: false, active: false, pid: 0 }; }
+        const activeState = fields.get("ActiveState") ?? "unknown";
+        return { present: fields.get("LoadState") === "loaded", active: activeState === "active", activeState, pid: Number(fields.get("MainPID")) || 0 };
+      } catch { return { present: false, active: false, activeState: "unknown", pid: 0 }; }
     },
     async start() {
       if (platform !== "linux") throw new Error("ComfyUI auto-start requires Linux; set a running ComfyUI address in Settings.");
