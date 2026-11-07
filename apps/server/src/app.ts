@@ -18,6 +18,7 @@ import type { ThreadStore } from "./threads/store.ts";
 import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageModule } from "./image/module.ts";
+import type { GpuLease } from "./gpu/lease.ts";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -81,6 +82,11 @@ export interface AppDeps {
    */
   readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
   readonly image?: ImageModule;
+  /**
+   * The app's one GPU lease. A turn holds a shared chat claim from just after
+   * its reservation to its end, so an image job never runs beside a stream.
+   */
+  readonly lease?: Pick<GpuLease, "acquire">;
 }
 
 export interface App {
@@ -233,7 +239,13 @@ export function createApp(deps: AppDeps): App {
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
-      const { turn, end } = reserve(threadId);
+      const { turn, end: endTurn } = reserve(threadId);
+      let releaseGpu: (() => void) | undefined;
+      // Every way a turn ends goes through end(): the GPU claim goes with it.
+      const end = () => {
+        releaseGpu?.();
+        endTurn();
+      };
       let load: TurnReservation | undefined;
       let started = false;
       try {
@@ -241,6 +253,12 @@ export function createApp(deps: AppDeps): App {
         load = deps.models?.loader?.reserve(model);
         const baseUrl = runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
+        // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
+        try {
+          releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
+        } catch {
+          throw new AppError("cancelled", "the turn was cancelled before it started");
+        }
         const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
         let report: FitReport;
         try {

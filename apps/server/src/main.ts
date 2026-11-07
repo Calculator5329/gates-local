@@ -106,6 +106,8 @@ async function main(): Promise<void> {
   };
 
   let server: WsServer | undefined;
+  // One lease for the process: chat turns and loads share it, image jobs hold it alone.
+  const gpuLease = createGpuLease();
   let services: ModelServices;
   try {
     services = await createModelServices({
@@ -117,6 +119,7 @@ async function main(): Promise<void> {
       },
       // Tests point the GPU and memory reads at fakes; the GPU status and every fit use them.
       fit,
+      lease: gpuLease,
       log,
     });
   } catch (e) {
@@ -124,7 +127,6 @@ async function main(): Promise<void> {
     die(`cannot open settings in ${dataDir}: ${(e as Error).message}`, 1);
   }
   const { runtime, catalog } = services;
-  const gpuLease = createGpuLease();
   const image = createImageModule({
     dataDir, store, lease: gpuLease,
     push: (channel, payload) => server?.push(channel, payload),
@@ -136,6 +138,7 @@ async function main(): Promise<void> {
   });
   const app: App = createApp({
     image,
+    lease: gpuLease,
     store,
     runtime,
     catalog,

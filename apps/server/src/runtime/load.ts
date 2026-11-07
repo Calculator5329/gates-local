@@ -22,6 +22,7 @@
 // app's any more) and every completion that started under the old runtime
 // is dropped.
 import type { FitReport, ModelLoad } from "@gates-local/contracts";
+import type { GpuLease } from "../gpu/lease.ts";
 import { canonicalTag } from "./recommended.ts";
 import { GenerateResponse, decode, parseJson } from "./schemas.ts";
 import type { LoadedModel } from "./types.ts";
@@ -53,9 +54,9 @@ export class AdmitCancelled extends Error {
 
 /**
  * Runs `fn` with the load gate held; the gate is released when `fn` settles.
- * Integration seam: the coordinator binds this to the GPU lease's exclusive
- * claim; this branch has no gpu/ module, so the default is an in-process
- * FIFO mutex.
+ * An in-process FIFO mutex: it orders residency reads, fits and loads among
+ * the chat claims that share the GPU lease (gpu/lease.ts). A turn's admit
+ * runs inside the turn's own lease claim; load() takes its own claim.
  */
 export type LoadGate = <T>(fn: () => Promise<T>) => Promise<T>;
 
@@ -125,6 +126,8 @@ export interface ModelLoaderDeps {
   readonly fit: (model: string, numCtx: number) => Promise<FitReport>;
   /** The load gate; default an in-process FIFO mutex (see LoadGate). */
   readonly gate?: LoadGate;
+  /** models.load holds a shared chat claim, so it never loads beside an image job. */
+  readonly lease?: Pick<GpuLease, "run">;
   /** After a load the app caused, so the GPU status refreshes (gpu watcher poke). */
   readonly onLoaded?: () => void;
   readonly log?: (line: string) => void;
@@ -211,7 +214,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         send(d);
         return d;
       };
-      return gate(async (): Promise<ModelLoad> => {
+      const claim = <T>(fn: () => Promise<T>): Promise<T> => (deps.lease ? deps.lease.run("chat", undefined, fn) : fn());
+      return claim(() => gate(async (): Promise<ModelLoad> => {
         if (gen !== generation) return dropped();
         const here = await resident(baseUrl, gen);
         if (here?.has(tag) && !owned.has(tag)) {
@@ -237,7 +241,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         if (gen !== generation) return dropped();
         loaded(model, numCtx);
         return { model, numCtx, state: "ready" };
-      });
+      }));
     },
 
     reserve(model) {

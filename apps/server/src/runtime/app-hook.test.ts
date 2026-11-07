@@ -9,6 +9,7 @@ import path from "node:path";
 import type { Channel, ModelLoad } from "@gates-local/contracts";
 import { afterEach, expect, it } from "vitest";
 import { createApp } from "../app.ts";
+import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { openThreadStore } from "../threads/store.ts";
@@ -44,7 +45,7 @@ function deferred(): { promise: Promise<void>; release: () => void } {
 }
 
 /** A fake Ollama with MODEL installed, `ps` as /api/ps, and the app, runtime, loader and handlers around it. */
-async function setup(ps: string[], routes: Record<string, Route>) {
+async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLease) {
   const tags = [MODEL];
   const ollama: FakeServer = await startFakeServer({
     "GET /": (_b, res) => {
@@ -79,6 +80,7 @@ async function setup(ps: string[], routes: Record<string, Route>) {
     fit: async () => {
       throw new Error("not used by a turn");
     },
+    ...(lease ? { lease } : {}),
   });
   const handlers = createRuntimeHandlers({
     baseUrl: () => runtime.baseUrl(),
@@ -93,6 +95,7 @@ async function setup(ps: string[], routes: Record<string, Route>) {
     catalog,
     push,
     models: { handlers, loader },
+    ...(lease ? { lease } : {}),
     fit: {
       runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "16303, 1303, 15000\n" : ""),
       readMeminfo: async () => "MemAvailable: 30000000 kB\n",
@@ -204,4 +207,85 @@ it("R-07: a send while the model's DELETE is pending refuses before any fit", as
   expect(app.activeTurns()).toBe(0);
   del.release();
   await removing;
+});
+
+const reply = (res: import("node:http").ServerResponse) => {
+  res.writeHead(200, { "content-type": "application/x-ndjson" });
+  res.write(line({ model: MODEL, message: { role: "assistant", content: "hi" }, done: false }));
+  res.end(line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", eval_count: 1, prompt_eval_count: 1 }));
+};
+const chats = (ollama: FakeServer) => ollama.requests.filter((r) => r.method === "POST" && r.path === "/api/chat").length;
+
+it("a turn waits while an image job holds the GPU, then streams once the job ends", async () => {
+  const lease = createGpuLease();
+  const releaseImage = await lease.acquire("image");
+  const { app, ollama, send } = await setup([MODEL], { "POST /api/chat": (_b, res) => reply(res) }, lease);
+  let sent = false;
+  const sending = send().then(() => (sent = true));
+  await sleep(100);
+  expect([sent, chats(ollama)]).toEqual([false, 0]);
+  expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: ["chat"] });
+  releaseImage();
+  await sending;
+  await until(() => app.activeTurns() === 0);
+  expect(chats(ollama)).toBe(1);
+  expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+});
+
+it("an image job waits until a streaming turn ends", async () => {
+  const lease = createGpuLease();
+  const held = deferred();
+  const { app, ollama, send } = await setup([MODEL], {
+    "POST /api/chat": async (_b, res) => {
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(line({ model: MODEL, message: { role: "assistant", content: "hi" }, done: false }));
+      await held.promise;
+      res.end(line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", eval_count: 1, prompt_eval_count: 1 }));
+    },
+  }, lease);
+  await send();
+  await until(() => chats(ollama) === 1);
+  let imaged = false;
+  const image = lease.run("image", undefined, async () => { imaged = true; });
+  await sleep(100);
+  expect(imaged).toBe(false);
+  expect(lease.status()).toEqual({ holder: "chat", holders: 1, waiting: ["image"] });
+  held.release();
+  await image;
+  expect(imaged).toBe(true);
+  await until(() => app.activeTurns() === 0);
+});
+
+it("a turn that ends in an error, or is cancelled while it waits for the GPU, gives its claim back", async () => {
+  const lease = createGpuLease();
+  const { app, send } = await setup([MODEL], {
+    "POST /api/chat": (_b, res) => json(res, 500, { error: "boom" }),
+  }, lease);
+  await send();
+  await until(() => app.activeTurns() === 0);
+  expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+
+  const releaseImage = await lease.acquire("image");
+  const waiting = send();
+  await sleep(50);
+  expect(lease.status().waiting).toEqual(["chat"]);
+  await app.shutdown();
+  await expect(waiting).rejects.toMatchObject({ code: "cancelled" });
+  expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: [] });
+  releaseImage();
+  expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+});
+
+it("models.load does nothing while an image job holds the GPU", async () => {
+  const lease = createGpuLease();
+  const releaseImage = await lease.acquire("image");
+  const { app, ollama } = await setup([MODEL], {}, lease);
+  const before = ollama.requests.length;
+  let done = false;
+  const loading = Promise.resolve(app.handlers["models.load"]?.({ model: MODEL, numCtx: 16384 }, { clientId: 1 })).then(() => (done = true));
+  await sleep(100);
+  expect([done, ollama.requests.length - before]).toEqual([false, 0]);
+  releaseImage();
+  await loading;
+  expect(ollama.requests.slice(before).some((r) => r.path === "/api/ps")).toBe(true);
 });

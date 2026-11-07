@@ -10,6 +10,7 @@ import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
 import { createSettingsHandlers } from "../settings/handlers.ts";
 import { openSettingsStore, type SettingsStore } from "../settings/store.ts";
+import type { GpuLease } from "../gpu/lease.ts";
 import type { Handlers } from "../ws/server.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
 import { createModelLoader, type ModelLoader } from "./load.ts";
@@ -48,6 +49,8 @@ export interface ModelServicesOptions {
   readonly log?: (line: string) => void;
   /** The nvidia-smi runner and meminfo reader for the GPU status and every fit check (tests inject fakes). */
   readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
+  /** The app's one GPU lease: models.load takes a shared chat claim on it. */
+  readonly lease?: GpuLease;
 }
 
 export async function createModelServices(options: ModelServicesOptions): Promise<ModelServices> {
@@ -108,6 +111,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
       return (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report;
     },
     onLoaded: () => gpu.poke(),
+    ...(options.lease ? { lease: options.lease } : {}),
     log,
   });
   pulls = createPullManager({
