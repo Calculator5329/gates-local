@@ -2,11 +2,15 @@
   "name": "@gates-local/desktop",
   "private": true,
   "type": "module",
+  "main": "out/main.cjs",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node scripts/build.ts",
+    "start": "node scripts/build.ts && electron .",
+    "smoke": "node scripts/build.ts && node scripts/smoke.ts"
   },
   "devDependencies": {
     "electron": "^45.2.3"

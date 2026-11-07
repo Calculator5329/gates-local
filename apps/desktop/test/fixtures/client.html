@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>fake web client</title></head>
+<body>
+<p id="status">fake client</p>
+<script>
+// Stand-in web client for scripts/smoke.ts: reads the bridge like the real one must.
+window.__states = [];
+window.gatesLocal.onState((state) => window.__states.push(state.status));
+window.gatesLocal.getServerUrl().then((url) => {
+  window.__serverUrl = url;
+  document.getElementById("status").textContent = "connected";
+});
+</script>
+</body>
+</html>
