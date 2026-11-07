@@ -1,0 +1,848 @@
+{
+  "checked": "2026-11-07",
+  "report": "/home/ethan/.cache/gates-local-design/research/setup-tiers-2026-11.md",
+  "picks": [
+    {
+      "modality": "text",
+      "tier": "nvidia-6gb",
+      "pick": "first",
+      "name": "Qwen 3.5 4B",
+      "ollama_tag": "qwen3.5:4b",
+      "download_gb": 3.3,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 4.84,
+      "memory_16k_kind": "computed",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": null,
+      "why": "Newest official small Qwen with tools, thinking and vision; ~1 GB headroom on 6 GB",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.5/tags",
+        "https://huggingface.co/Qwen/Qwen3.5-4B"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-6gb",
+      "pick": "alt",
+      "name": "Bonsai 2 9B",
+      "ollama_tag": "bonsai-2:9b",
+      "download_gb": 3.2,
+      "quantization": "q2_0 (ternary)",
+      "memory_16k_gb": null,
+      "memory_16k_kind": "unverified",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": null,
+      "why": "9B in ternary weights at half the size of 4-bit; quality is a vendor claim",
+      "notes": "min Ollama version for q2_0 unverified",
+      "source": [
+        "https://ollama.com/library/bonsai-2",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-8gb",
+      "pick": "first",
+      "name": "Qwen 3.5 9B",
+      "ollama_tag": "qwen3.5:9b",
+      "download_gb": 6.6,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 7.26,
+      "memory_16k_kind": "measured (runner, Ethan's RTX 5070 Ti, num_ctx not recorded; computed 8.21)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 67.7,
+        "hardware": "RTX 5060 Ti, 4K ctx",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "Consensus 8 GB pick across 2026-10/11 guides; app's existing default",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.5/tags",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/",
+        "local: apps/server/src/fit/fit.ts:103"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-8gb",
+      "pick": "alt",
+      "name": "MiMo V2.6 9B",
+      "ollama_tag": "mimo-v2.6:9b",
+      "download_gb": 6.6,
+      "quantization": "unverified",
+      "memory_16k_gb": 7.26,
+      "memory_16k_kind": "est. (same base as qwen3.5:9b)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "MIT",
+      "speed": null,
+      "why": "Qwen3.5-9B fine-tune; vendor-reported gains on tool/agent benchmarks (Toolathlon 25.9->35.2)",
+      "notes": "4 days old, no independent check; default tag size range 6.6-8.7 GB",
+      "source": [
+        "https://ollama.com/library/mimo-v2.6"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-12gb",
+      "pick": "first",
+      "name": "Gemma 4 12B",
+      "ollama_tag": "gemma4:12b",
+      "download_gb": 8.0,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 9.4,
+      "memory_16k_kind": "computed",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 97.1,
+        "hardware": "RTX 4090",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "Consensus 12 GB pick; vision+audio+tools+thinking",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/gemma4/tags",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/",
+        "https://www.promptquorum.com/local-llms"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-12gb",
+      "pick": "alt",
+      "name": "Bonsai 2 27B",
+      "ollama_tag": "bonsai-2:27b",
+      "download_gb": 8.3,
+      "quantization": "q2_0 (ternary)",
+      "memory_16k_gb": null,
+      "memory_16k_kind": "unverified",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 44.2,
+        "hardware": "RTX 5060 Ti",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "27B-class in 12 GB; quality is a vendor claim",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/bonsai-2",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-16gb",
+      "pick": "first",
+      "name": "gpt-oss 20B",
+      "ollama_tag": "gpt-oss:20b",
+      "download_gb": 13.8,
+      "quantization": "MXFP4",
+      "memory_16k_gb": 13.0,
+      "memory_16k_kind": "measured at 32K on T4 (computed 15.67 overstated: estimator misses SWA)",
+      "tools": true,
+      "thinking": "levels low/medium/high, no off",
+      "vision": false,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 94.5,
+        "hardware": "RTX 5060 Ti, 4K ctx",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "Every 16 GB guide's pick; stays on GPU to 64K",
+      "notes": "On Ethan's card whisper+media-vault leave ~12 GB, so his chat tier is effectively 12 GB",
+      "source": [
+        "https://ollama.com/library/gpt-oss/tags",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/",
+        "https://localllm.in/blog/best-local-llms-16gb-vram"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-16gb",
+      "pick": "alt",
+      "name": "Gemma 4 12B Q8",
+      "ollama_tag": "gemma4:12b-it-q8_0",
+      "download_gb": 13.0,
+      "quantization": "Q8_0",
+      "memory_16k_gb": 14.4,
+      "memory_16k_kind": "computed (approx)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": null,
+      "why": "Keeps vision that gpt-oss lacks, higher quant",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/gemma4/tags"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-24gb-plus",
+      "pick": "first",
+      "name": "Qwen 3.8 27B",
+      "ollama_tag": "qwen3.8:27b",
+      "download_gb": 18.0,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 20.1,
+      "memory_16k_kind": "computed (local qwen3.8 geometry)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0 (per base on HF repack card)",
+      "speed": {
+        "tok_s": 120.3,
+        "hardware": "RTX 4090",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "Highest open model under 40B on AA Progress Index v1 (303 Xhigh)",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.8/tags",
+        "https://artificialanalysis.ai/models/open-source/small",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "nvidia-24gb-plus",
+      "pick": "alt",
+      "name": "Gemma 4 26B A4B",
+      "ollama_tag": "gemma4:26b",
+      "download_gb": 18.0,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 19.7,
+      "memory_16k_kind": "computed (local abliterated twin)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 311.7,
+        "hardware": "RTX 4090",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      },
+      "why": "MoE 4B active, ~2.6x faster than qwen3.8:27b; MMLU-Pro 82.6 (vendor)",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/gemma4",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-8gb",
+      "pick": "first",
+      "name": "Qwen 3.5 2B",
+      "ollama_tag": "qwen3.5:2b",
+      "download_gb": 2.7,
+      "quantization": "Q8_0 (default tag)",
+      "memory_16k_gb": 3.9,
+      "memory_16k_kind": "computed",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": "14-16",
+        "hardware": "4 vCPU VM (11th gen i7, AVX-512), thinking off, Ollama 0.40.11",
+        "kind": "measured",
+        "source": "https://computingforgeeks.com/ollama-local-llm-fedora-cpu/"
+      },
+      "why": "Tools and vision at usable CPU speed; run with think:false",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.5/tags",
+        "https://computingforgeeks.com/ollama-local-llm-fedora-cpu/",
+        "https://artificialanalysis.ai/models/open-source/tiny"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-8gb",
+      "pick": "alt",
+      "name": "Llama 3.2 3B",
+      "ollama_tag": "llama3.2:3b",
+      "download_gb": 2.0,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": null,
+      "memory_16k_kind": "not computed",
+      "tools": true,
+      "thinking": false,
+      "vision": false,
+      "license": "Llama 3.2 Community License (restrictions)",
+      "speed": {
+        "tok_s": 23.81,
+        "hardware": "Framework 13, Ryzen AI 5 340, 16 GB, CPU only",
+        "kind": "measured",
+        "source": "https://github.com/geerlingguy/ai-benchmarks"
+      },
+      "why": "Most CPU measurements of any small model; never thinks",
+      "notes": null,
+      "source": [
+        "https://github.com/geerlingguy/ai-benchmarks",
+        "https://computingforgeeks.com/ollama-models-cheat-sheet/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-16gb",
+      "pick": "first",
+      "name": "Qwen 3.5 4B",
+      "ollama_tag": "qwen3.5:4b",
+      "download_gb": 3.3,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 4.84,
+      "memory_16k_kind": "computed",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": "~7",
+        "hardware": "4 vCPU",
+        "kind": "est. (scaled from qwen3.5:2b, loose)",
+        "source": "https://computingforgeeks.com/ollama-local-llm-fedora-cpu/"
+      },
+      "why": "Quality step over 2b with room for OS and Electron",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.5/tags"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-16gb",
+      "pick": "alt",
+      "name": "Qwen 3.5 9B",
+      "ollama_tag": "qwen3.5:9b",
+      "download_gb": 6.6,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 7.26,
+      "memory_16k_kind": "measured on GPU (computed 8.21)",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": "2-8",
+        "hardware": "laptop CPU, 7B class",
+        "kind": "est. (third-party estimate)",
+        "source": "https://www.promptquorum.com/local-llms"
+      },
+      "why": "Best quality that fits; slow",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/qwen3.5/tags"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-32gb-plus",
+      "pick": "first",
+      "name": "gpt-oss 20B",
+      "ollama_tag": "gpt-oss:20b",
+      "download_gb": 13.8,
+      "quantization": "MXFP4",
+      "memory_16k_gb": 13.0,
+      "memory_16k_kind": "measured on GPU",
+      "tools": true,
+      "thinking": "levels, no off",
+      "vision": false,
+      "license": "Apache-2.0",
+      "speed": {
+        "tok_s": 8.52,
+        "hardware": "Framework 13 mainboard (MetaComputing AI PC), CPU only",
+        "kind": "measured",
+        "source": "https://github.com/geerlingguy/ai-benchmarks"
+      },
+      "why": "MoE 3.6B active: small-model speed, 20B quality",
+      "notes": null,
+      "source": [
+        "https://github.com/geerlingguy/ai-benchmarks",
+        "https://ollama.com/library/gpt-oss/tags"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "text",
+      "tier": "cpu-32gb-plus",
+      "pick": "alt",
+      "name": "Gemma 4 26B A4B",
+      "ollama_tag": "gemma4:26b",
+      "download_gb": 18.0,
+      "quantization": "Q4_K_M",
+      "memory_16k_gb": 19.7,
+      "memory_16k_kind": "computed",
+      "tools": true,
+      "thinking": true,
+      "vision": true,
+      "license": "Apache-2.0",
+      "speed": null,
+      "why": "MoE 4B active, keeps vision, thinking can be off; CPU speed unverified",
+      "notes": null,
+      "source": [
+        "https://ollama.com/library/gemma4"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-16gb-plus",
+      "pick": "first",
+      "name": "FLUX.2 Klein 4B fp8",
+      "weights": [
+        {
+          "repo": "black-forest-labs/FLUX.2-klein-4b-fp8",
+          "file": "flux-2-klein-4b-fp8.safetensors",
+          "gb": 4.071
+        },
+        {
+          "repo": "Comfy-Org/Flux-2-Klein-4B",
+          "file": "split_files/text_encoders/qwen_3_4b.safetensors",
+          "gb": 8.045
+        },
+        {
+          "repo": "Comfy-Org/Flux-2-Klein-4B",
+          "file": "split_files/vae/flux2-vae.safetensors",
+          "gb": 0.336
+        }
+      ],
+      "download_gb": 12.45,
+      "memory_gb": 12.2,
+      "memory_kind": "measured peak, Ethan's RTX 5070 Ti",
+      "steps": 4,
+      "time": {
+        "seconds": 7.04,
+        "size": "768x512",
+        "kind": "measured warm, Ethan's RTX 5070 Ti",
+        "source": "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+      },
+      "license": "Apache-2.0",
+      "license_flag": null,
+      "comfyui_workflow": "core nodes: UNETLoader + CLIPLoader(flux2) + Flux2Scheduler + SamplerCustomAdvanced (local-ai-lab/workflows/flux-default.json)",
+      "notes": null,
+      "source": [
+        "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8",
+        "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B",
+        "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-16gb-plus",
+      "pick": "alt",
+      "name": "Z-Image-Turbo int8",
+      "weights": [
+        {
+          "repo": "Comfy-Org/Z-Image-Turbo",
+          "file": "split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+          "gb": 6.201
+        },
+        {
+          "repo": "Comfy-Org/Z-Image-Turbo",
+          "file": "split_files/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
+          "gb": 5.632
+        },
+        {
+          "repo": "Comfy-Org/Z-Image-Turbo",
+          "file": "split_files/vae/ae.safetensors",
+          "gb": 0.335
+        }
+      ],
+      "download_gb": 12.17,
+      "memory_gb": 8,
+      "memory_kind": "est. (third-party guides)",
+      "steps": 8,
+      "time": {
+        "seconds": 14,
+        "size": "1024x1024",
+        "kind": "est./unverified third-party table, RTX 3060 12 GB",
+        "source": "https://localaimaster.com/blog/z-image-turbo-comfyui"
+      },
+      "license": "Apache-2.0",
+      "license_flag": null,
+      "comfyui_workflow": "ComfyUI built-in Z-Image template",
+      "notes": "int8_convrot needs recent ComfyUI; min version unverified",
+      "source": [
+        "https://huggingface.co/Comfy-Org/Z-Image-Turbo",
+        "https://comfy.org/workflows/model/z-image/"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-8-12gb",
+      "pick": "first",
+      "name": "FLUX.2 Klein 4B fp8 (fp4 text encoder)",
+      "weights": [
+        {
+          "repo": "black-forest-labs/FLUX.2-klein-4b-fp8",
+          "file": "flux-2-klein-4b-fp8.safetensors",
+          "gb": 4.071
+        },
+        {
+          "repo": "Comfy-Org/Flux-2-Klein-4B",
+          "file": "split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors",
+          "gb": 3.848
+        },
+        {
+          "repo": "Comfy-Org/Flux-2-Klein-4B",
+          "file": "split_files/vae/flux2-vae.safetensors",
+          "gb": 0.336
+        }
+      ],
+      "download_gb": 8.26,
+      "memory_gb": null,
+      "memory_kind": "unverified below 16 GB",
+      "steps": 4,
+      "time": null,
+      "license": "Apache-2.0",
+      "license_flag": null,
+      "comfyui_workflow": "same core-node graph",
+      "notes": "fp4 encoder speed on pre-Blackwell unverified; fallback bf16 qwen_3_4b with offload",
+      "source": [
+        "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B",
+        "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-8-12gb",
+      "pick": "alt",
+      "name": "SDXL-Lightning 4-step",
+      "weights": [
+        {
+          "repo": "ByteDance/SDXL-Lightning",
+          "file": "sdxl_lightning_4step.safetensors",
+          "gb": 6.938,
+          "sha256": "e0d996ee0013e79d9d3561f50fcafb9a17e3ff07b780358e3b66d67932c4d490"
+        }
+      ],
+      "download_gb": 6.94,
+      "memory_gb": 7.86,
+      "memory_kind": "measured peak GiB on 16 GB card (includes caching)",
+      "steps": 4,
+      "time": {
+        "seconds": 0.587,
+        "size": "768x512",
+        "kind": "measured warm, Ethan's RTX 5070 Ti",
+        "source": "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+      },
+      "license": "openrail++",
+      "license_flag": null,
+      "comfyui_workflow": "core nodes (CheckpointLoaderSimple); ByteDance comfyui/sdxl_lightning_workflow_full.json",
+      "notes": "512x512 output is noise; use >=768",
+      "source": [
+        "https://huggingface.co/ByteDance/SDXL-Lightning",
+        "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-6gb",
+      "pick": "first",
+      "name": "SDXL-Lightning 4-step",
+      "weights": [
+        {
+          "repo": "ByteDance/SDXL-Lightning",
+          "file": "sdxl_lightning_4step.safetensors",
+          "gb": 6.938,
+          "sha256": "e0d996ee0013e79d9d3561f50fcafb9a17e3ff07b780358e3b66d67932c4d490"
+        }
+      ],
+      "download_gb": 6.94,
+      "memory_gb": null,
+      "memory_kind": "unverified on 6 GB (relies on ComfyUI low-VRAM offload)",
+      "steps": 4,
+      "time": null,
+      "license": "openrail++",
+      "license_flag": null,
+      "comfyui_workflow": "core nodes",
+      "notes": null,
+      "source": [
+        "https://huggingface.co/ByteDance/SDXL-Lightning"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "nvidia-6gb",
+      "pick": "alt",
+      "name": "SD-Turbo",
+      "weights": [
+        {
+          "repo": "stabilityai/sd-turbo",
+          "file": "sd_turbo.safetensors",
+          "gb": 5.215
+        }
+      ],
+      "download_gb": 5.215,
+      "memory_gb": null,
+      "memory_kind": "est. under 6 GB, not measured",
+      "steps": 1,
+      "time": null,
+      "license": "Stability AI Community License",
+      "license_flag": "non-commercial; commercial only under US$1M revenue",
+      "comfyui_workflow": "core nodes (SD Turbo example)",
+      "notes": "512x512 only",
+      "source": [
+        "https://huggingface.co/stabilityai/sd-turbo",
+        "https://huggingface.co/stabilityai/sd-turbo/raw/main/LICENSE.md"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "cpu",
+      "pick": "first",
+      "name": "SD-Turbo",
+      "weights": [
+        {
+          "repo": "stabilityai/sd-turbo",
+          "file": "sd_turbo.safetensors",
+          "gb": 5.215
+        }
+      ],
+      "download_gb": 5.215,
+      "memory_gb": null,
+      "memory_kind": "est. 6-8 GB RAM fp32, not measured",
+      "steps": 1,
+      "time": {
+        "seconds": 7.8,
+        "size": "512x512",
+        "kind": "measured, i7-12700, FastSD CPU PyTorch (NOT ComfyUI)",
+        "source": "https://github.com/rupeshs/fastsdcpu"
+      },
+      "license": "Stability AI Community License",
+      "license_flag": "non-commercial; commercial only under US$1M revenue",
+      "comfyui_workflow": "ComfyUI --cpu, core nodes",
+      "notes": "off by default; opt-in after showing the time",
+      "source": [
+        "https://github.com/rupeshs/fastsdcpu",
+        "https://huggingface.co/stabilityai/sd-turbo"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "modality": "image",
+      "tier": "cpu",
+      "pick": "alt",
+      "name": "SDXL-Lightning 2-step",
+      "weights": [
+        {
+          "repo": "ByteDance/SDXL-Lightning",
+          "file": "sdxl_lightning_2step.safetensors",
+          "gb": 6.938
+        }
+      ],
+      "download_gb": 6.94,
+      "memory_gb": 14,
+      "memory_kind": "est. >=14 GB RAM fp32, not measured; offer only at 32 GB+",
+      "steps": 2,
+      "time": {
+        "seconds": 18,
+        "size": "768x768",
+        "kind": "measured, i7-12700, FastSD CPU PyTorch (NOT ComfyUI)",
+        "source": "https://github.com/rupeshs/fastsdcpu"
+      },
+      "license": "openrail++",
+      "license_flag": null,
+      "comfyui_workflow": "ComfyUI --cpu, core nodes",
+      "notes": null,
+      "source": [
+        "https://github.com/rupeshs/fastsdcpu",
+        "https://huggingface.co/ByteDance/SDXL-Lightning"
+      ],
+      "checked": "2026-11-07"
+    }
+  ],
+  "excluded": [
+    {
+      "name": "Qwen-Image-2.1",
+      "reason": "Qwen Research License (non-commercial)",
+      "source": [
+        "https://huggingface.co/Qwen/Qwen-Image-2.1",
+        "https://huggingface.co/Comfy-Org/Qwen-Image-2.1"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "name": "FLUX 3 Image [klein]",
+      "reason": "FLUX Kommunity License (<US$5M revenue), gated repo, 25-31 GB peak on B200 at 1024^2",
+      "source": [
+        "https://huggingface.co/black-forest-labs/flux-3-image-klein"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "name": "FLUX.2 [klein] 9B",
+      "reason": "FLUX Non-Commercial License",
+      "source": [
+        "https://bfl.ai/blog/flux2-klein-towards-interactive-visual-intelligence"
+      ],
+      "checked": "2026-11-07"
+    },
+    {
+      "name": "ifm/k2-horizon:7b",
+      "reason": "reasoning cannot be turned off; needs >=32k ctx; drops reasoning across turns",
+      "source": [
+        "https://ollama.com/ifm/k2-horizon"
+      ],
+      "checked": "2026-11-07"
+    }
+  ],
+  "design_names": [
+    {
+      "design": "Qwen 3.5 9B",
+      "tag": "qwen3.5:9b",
+      "exists": true
+    },
+    {
+      "design": "Qwen 3.5 14B",
+      "tag": "qwen3.5:14b",
+      "exists": false,
+      "note": "no 14b size in qwen3.5"
+    },
+    {
+      "design": "Gemma 4 12B",
+      "tag": "gemma4:12b",
+      "exists": true
+    },
+    {
+      "design": "Gemma 3 12B abliterated",
+      "tag": "gemma3-abliterated:12b-q4",
+      "exists": "local alias only",
+      "pull_from": "hf.co/mlabonne/gemma-3-12b-it-abliterated-GGUF (no tools, no thinking; Gemma license)"
+    },
+    {
+      "design": "gpt-oss 20B",
+      "tag": "gpt-oss:20b",
+      "exists": true
+    },
+    {
+      "design": "Gemma 4 26B abliterated",
+      "tag": "gemma4-abliterated:26b",
+      "exists": "local alias only",
+      "pull_from": "hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_M"
+    },
+    {
+      "design": "Qwen 3.8 27B abliterated",
+      "tag": "qwen3.8-abliterated:27b",
+      "exists": "local alias only",
+      "pull_from": "hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:IQ3_M (or huihui_ai/Qwen3.8-abliterated:27b-q3_K, 14 GB)"
+    }
+  ],
+  "installs": {
+    "ollama": {
+      "version": "v0.40.15",
+      "published": "2026-11-03",
+      "checksums": "sha256sum.txt asset + per-asset digests",
+      "assets": {
+        "linux-amd64": {
+          "file": "ollama-linux-amd64.tar.zst",
+          "mb": 1543.5,
+          "sha256": "628c018404a4206493efd38e46251c154ede5141b8b8dc85c659b3b027c47379"
+        },
+        "windows-amd64-zip": {
+          "file": "ollama-windows-amd64.zip",
+          "mb": 1614.9,
+          "sha256": "9ca74a7ab66ec86870b1eecac7df160df08dc4e3a291ab5d2d59bcf9310221c6"
+        },
+        "windows-installer": {
+          "file": "OllamaSetup.exe",
+          "mb": 1689.7,
+          "sha256": "106ef3d2a02437810fba6f574914b1413c512ea84ddd4f184c8e7f434b6f5564",
+          "admin": false
+        }
+      },
+      "env": {
+        "OLLAMA_HOST": "127.0.0.1:<port> (default 11434)",
+        "OLLAMA_MODELS": "<app>/models"
+      },
+      "source": [
+        "https://github.com/ollama/ollama/releases/tag/v0.40.15",
+        "https://docs.ollama.com/faq",
+        "https://raw.githubusercontent.com/ollama/ollama/main/docs/windows.mdx",
+        "https://raw.githubusercontent.com/ollama/ollama/main/docs/linux.mdx"
+      ],
+      "checked": "2026-11-07"
+    },
+    "comfyui": {
+      "version": "v0.44.0",
+      "published": "2026-11-04",
+      "repo": "Comfy-Org/ComfyUI",
+      "windows_portable": {
+        "nvidia": {
+          "file": "ComfyUI_windows_portable_nvidia.7z",
+          "mb": 2054.4,
+          "sha256": "7170c2db49c182a81adcc051e80234f99dd891656fb200737f87797876348f96",
+          "python": "3.13",
+          "torch": "cu130",
+          "cpu_only": "README says it works CPU-only"
+        },
+        "nvidia_cu126": {
+          "file": "ComfyUI_windows_portable_nvidia_cu126.7z",
+          "mb": 1945.6,
+          "python": "3.12",
+          "note": "10-series and older only"
+        },
+        "cpu": null
+      },
+      "linux_manual": {
+        "python": "3.13 (3.12 fallback)",
+        "torch_nvidia": "pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu130",
+        "torch_cpu": "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu (standard PyTorch index; not in ComfyUI README)",
+        "run_cpu": "python main.py --cpu"
+      },
+      "signatures": "none found; GitHub asset sha256 digests only",
+      "source": [
+        "https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.44.0",
+        "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/master/README.md"
+      ],
+      "checked": "2026-11-07"
+    }
+  }
+}

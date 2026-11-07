@@ -144,6 +144,31 @@ never shows a whisper stop, start or restart.
       `docs/evidence/`.
 - [ ] Settings shows the same plan with no agent, and a "Set up with an AI
       assistant" line with the folder path and the sentence to say.
+- [ ] Every model name the app offers for download is a real, pullable
+      name. The research (`docs/research/setup-tiers-2026-11.md` §1.1)
+      found `qwen3.5:14b` does not exist (in `docs/design/shell.html`,
+      `packages/contracts/src/testing.ts` and lane/build-runtime's
+      `runtime/recommended.ts`), and three of Ethan's models are local
+      aliases that fail on any other device.
+      *Accept:* the download catalog is read from `setup/tiers.json`; a test
+      fails on a catalog name that is not in it; tier entries store the
+      pullable name (`hf.co/...:QUANT` or `namespace/name:tag`), never an
+      alias.
+- [ ] Fit estimator counts implicit sliding-window layers. `/api/show` for
+      gpt-oss and Gemma 3 names a window but no pattern, so `fit/estimate.ts`
+      counts every layer as full: gpt-oss:20b computes 15.67 GB at 16k
+      against 13.0 GB measured at 32K on a T4 (research §0.6), which wrongly
+      refuses it on a 16 GB card.
+      *Accept:* per-architecture default patterns (gptoss 1:1, gemma3 5:1)
+      with fixture tests; one real load of `gemma3-abliterated:12b-q4` at
+      16k on this machine within 10% of the estimate.
+- [ ] No-GPU plans turn thinking off by default (qwen3.5:2b took 4 min 37 s
+      with thinking on, 4 s off, research §0.9); gpt-oss on CPU runs at
+      "low". Image licences: Qwen-Image-2.1 (Qwen Research License) and
+      SD-Turbo (Stability Community License) are never a default pick; a
+      plan may offer one only as an opt-in with its licence named (SD-Turbo
+      is the only measured CPU option under 32 GB of RAM).
+      *Accept:* plan fixture tests for both.
 
 ## Later: slices 5 to 7
 
