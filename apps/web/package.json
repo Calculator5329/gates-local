@@ -1,0 +1,21 @@
+{
+  "name": "@gates-local/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "vite --host 127.0.0.1 --port 5187 --strictPort",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@gates-local/contracts": "workspace:*",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "vite": "^8.3.6"
+  }
+}

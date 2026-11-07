@@ -1,0 +1,14 @@
+{
+  "name": "@gates-local/desktop",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  }
+}
