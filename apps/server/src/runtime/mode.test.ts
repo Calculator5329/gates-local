@@ -1,16 +1,16 @@
 // Runtime modes (system / app), the switch between them, and the Windows
 // paths with the platform injected. Fakes only: a fake Ollama server, a
-// fake `ollama` binary, a fake PowerShell/taskkill runner.
-import { existsSync } from "node:fs";
+// fake `ollama` binary, a fake PowerShell runner.
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeStatus } from "@gates-local/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpGet } from "./http.ts";
-import { readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
-import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile } from "./paths.ts";
-import { createOllamaRuntime, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
+import { readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
+import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
+import { ADOPTED_WINDOWS_DETAIL, createOllamaRuntime, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch } from "./switch.ts";
-import { type FakeOllama, freePort, removeDir, startFakeOllama, tmpDir, writeFakeBinary } from "./test-fakes.ts";
+import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
 let work: string;
@@ -79,6 +79,71 @@ describe("runtimeMode app", () => {
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
     expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir) });
     expect(rt.startedByThisProcess()).toBe(true);
+  });
+
+  it("R-11: never reuses an Ollama it did not start on the app port: starts on the next free one, and a restart adopts it", async () => {
+    const base = await freePortRun(2);
+    const other = await startFakeOllama({ port: base });
+    try {
+      writeFakeBinary(installedBinary(appDataDir, VERSION));
+      const rt = await runtime({ mode: "app", appPort: base, externalBaseUrl: await nothingAt() });
+      const s = await rt.ensure();
+      expect(s).toMatchObject({ state: "ready", owner: "app", baseUrl: `http://127.0.0.1:${base + 1}` });
+      expect(s.detail).toContain(`Another Ollama, not started by this app, is on port ${base}; the app uses port ${base + 1}.`);
+      expect(readRecord(ownedStateFile(appDataDir))?.baseUrl).toBe(`http://127.0.0.1:${base + 1}`);
+      expect(other.requests.every((r) => r.startsWith("GET "))).toBe(true);
+
+      // A server restart: the record is ours and names the port to adopt.
+      const pid = readRecord(ownedStateFile(appDataDir))?.pid;
+      const again = await runtime({ mode: "app", appPort: base, externalBaseUrl: await nothingAt() });
+      expect(await again.ensure()).toMatchObject({ state: "ready", owner: "app", baseUrl: `http://127.0.0.1:${base + 1}` });
+      expect(again.startedByThisProcess()).toBe(false);
+      expect(readRecord(ownedStateFile(appDataDir))?.pid).toBe(pid);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("R-11: with all ten ports held by other programs it is blocked and starts nothing", async () => {
+    const base = await freePortRun(10);
+    const others = await Promise.all(Array.from({ length: 10 }, (_, i) => startFakeOllama({ port: base + i })));
+    try {
+      writeFakeBinary(installedBinary(appDataDir, VERSION));
+      const rt = await runtime({ mode: "app", appPort: base, externalBaseUrl: await nothingAt() });
+      const s = await rt.ensure();
+      expect(s).toMatchObject({
+        state: "wrong-service",
+        owner: "none",
+        detail: `Ports ${base} to ${base + 9} are all in use by other programs, so the app cannot start its own Ollama.`,
+      });
+      expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    } finally {
+      await Promise.all(others.map((o) => o.close()));
+    }
+  });
+
+  it("R-14: two data dirs keep separate ownership records and logs but share the install and the models folder", async () => {
+    const base = await freePortRun(2);
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const stateA = path.join(work, "instance-a");
+    const stateB = path.join(work, "instance-b");
+    const a = await runtime({ mode: "app", appPort: base, stateDir: stateA, externalBaseUrl: await nothingAt() });
+    const b = await runtime({ mode: "app", appPort: base, stateDir: stateB, externalBaseUrl: await nothingAt() });
+    const sa = await a.ensure();
+    const sb = await b.ensure();
+    expect(sa).toMatchObject({ state: "ready", owner: "app" });
+    expect(sb).toMatchObject({ state: "ready", owner: "app" });
+    const recA = readRecord(ownedStateFile(stateA));
+    const recB = readRecord(ownedStateFile(stateB));
+    expect(recA?.baseUrl).toBe(sa.baseUrl);
+    expect(recB?.baseUrl).toBe(sb.baseUrl);
+    expect(recA?.pid).not.toBe(recB?.pid);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    expect(existsSync(serveLogFile(stateA)) && existsSync(serveLogFile(stateB))).toBe(true);
+    for (const s of [sa, sb]) {
+      const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
+      expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir) });
+    }
   });
 });
 
@@ -166,29 +231,73 @@ describe("Windows (platform injected)", () => {
     expect(readWindowsProc(4242, () => '{"ProcessId":7,"CreationDate":"x","CommandLine":"y"}')).toBeUndefined();
   });
 
-  it("stops its own recorded process with taskkill on the PID tree, and never one whose identity changed", async () => {
+  it("R-12: a recorded PID is never killed by number: a live record is adopted, a reused PID is not ours", async () => {
     const file = path.join(work, "owned.json");
     const rec = { pid: 4242, startTime: "/Date(1)/", command: "C:\\Tools\\ollama.exe serve", baseUrl: "http://127.0.0.1:11435", binary: "C:\\Tools\\ollama.exe", startedAt: 1 };
-    let alive = true;
     const calls: string[] = [];
-    const run: SyncRunner = (file_, args) => {
-      if (file_ === "taskkill.exe") {
-        calls.push(args.join(" "));
-        alive = false;
-        return "";
-      }
-      return alive ? JSON.stringify({ ProcessId: 4242, CreationDate: "/Date(1)/", CommandLine: rec.command }) : "";
+    const run: SyncRunner = (file_) => {
+      calls.push(file_);
+      return JSON.stringify({ ProcessId: 4242, CreationDate: "/Date(1)/", CommandLine: rec.command });
     };
     writeRecord(file, rec);
-    expect(await stopOwned(file, 500, { platform: "win32", run })).toEqual({ stopped: true, pid: 4242 });
-    expect(calls).toEqual(["/PID 4242 /T"]);
+    expect(await stopOwned(file, 500, { platform: "win32", run })).toEqual({ stopped: false, reason: "adopted" });
+    expect(existsSync(file)).toBe(true);
 
-    writeRecord(file, rec);
-    const reused: SyncRunner = (file_, args) => {
-      if (file_ === "taskkill.exe") calls.push(args.join(" "));
+    const reused: SyncRunner = (file_) => {
+      calls.push(file_);
       return JSON.stringify({ ProcessId: 4242, CreationDate: "/Date(2)/", CommandLine: rec.command });
     };
     expect(await stopOwned(file, 500, { platform: "win32", run: reused })).toMatchObject({ stopped: false, reason: "not-ours" });
-    expect(calls).toEqual(["/PID 4242 /T"]);
+    expect(calls.every((c) => c === "powershell.exe")).toBe(true);
+  });
+
+  /** PowerShell CIM answers for whatever PID is asked, from this machine's process table; every call is logged. */
+  function cimFake(calls: string[]): SyncRunner {
+    return (file_, args) => {
+      calls.push(file_);
+      const pid = Number(/ProcessId=(\d+)/.exec(args.at(-1) ?? "")?.[1]);
+      try {
+        process.kill(pid, 0);
+      } catch {
+        return "";
+      }
+      return JSON.stringify({ ProcessId: pid, CreationDate: "/Date(1)/", CommandLine: "ollama.exe serve" });
+    };
+  }
+
+  it("R-12: a child this process spawned is unloaded, then killed through its handle; no taskkill", async () => {
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const calls: string[] = [];
+    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt(), env: { PATH: "", FAKE_LOADED: "m:latest,n:7b" } });
+    const s = await rt.ensure();
+    expect(s).toMatchObject({ state: "ready", owner: "app" });
+    expect(rt.startedByThisProcess()).toBe(true);
+    const r = await rt.stop();
+    expect(r).toMatchObject({ stopped: true });
+    expect(await isUp(s.baseUrl)).toBe(false);
+    const log = readFileSync(serveLogFile(appDataDir), "utf8");
+    const term = log.indexOf("got SIGTERM");
+    expect(term).toBeGreaterThan(0);
+    expect(log.indexOf("unloaded m:latest")).toBeGreaterThan(0);
+    expect(log.indexOf("unloaded m:latest")).toBeLessThan(term);
+    expect(log.indexOf("unloaded n:7b")).toBeLessThan(term);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    expect(calls.every((c) => c === "powershell.exe")).toBe(true);
+  });
+
+  it("R-12: an app Ollama adopted from an earlier run is left running with a plain reason", async () => {
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const calls: string[] = [];
+    const appPort = await freePort();
+    const opts = { mode: "app", platform: "win32", procRun: cimFake(calls), appPort, externalBaseUrl: await nothingAt() } as const;
+    const earlier = await runtime(opts);
+    const s = await earlier.ensure();
+    const later = await runtime(opts);
+    expect(await later.ensure()).toMatchObject({ state: "ready", owner: "app", baseUrl: s.baseUrl });
+    expect(await later.stop()).toEqual({ stopped: false, reason: "adopted" });
+    expect(later.status().detail).toBe(ADOPTED_WINDOWS_DETAIL);
+    expect(await isUp(s.baseUrl)).toBe(true);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(true);
+    expect(calls.every((c) => c === "powershell.exe")).toBe(true);
   });
 });

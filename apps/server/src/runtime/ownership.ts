@@ -3,9 +3,11 @@
 // is "ours"; anything else is left alone.
 //
 // Linux reads /proc. Windows has no /proc: identity comes from one
-// PowerShell CIM query (creation date and command line), and a stop is
-// `taskkill /T` on the PID tree. The platform and the command runner are
-// injectable so both paths are tested on Linux.
+// PowerShell CIM query (creation date and command line). Windows never
+// stops a process by PID number (a check-then-kill can hit a reused PID):
+// runtime.ts stops the child it spawned through its handle, and a record
+// from an earlier run is "adopted" and left running. The platform and the
+// command runner are injectable so both paths are tested on Linux.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -109,21 +111,14 @@ export function checkOwnership(file: string, on: ProcPlatform = {}): OwnershipCh
 export type StopResult =
   | { stopped: true; pid: number }
   | { stopped: false; reason: "no-record" | "gone" }
+  /** Windows: ours, from an earlier run, with no handle to stop it through; left running. */
+  | { stopped: false; reason: "adopted" }
   | { stopped: false; reason: "not-ours"; detail: string };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function signal(pid: number, sig: NodeJS.Signals, on: ProcPlatform): void {
-  if ((on.platform ?? process.platform) === "win32") {
-    // No process groups or signals: taskkill the tree (the runners are children), /F for the hard stop.
-    try {
-      (on.run ?? runSync)("taskkill.exe", ["/PID", String(pid), "/T", ...(sig === "SIGKILL" ? ["/F"] : [])]);
-    } catch {
-      // already gone, or it refused the polite request; the hard stop follows
-    }
-    return;
-  }
-  // The app starts Ollama as a process-group leader so its runners go too.
+/** POSIX only. The app starts Ollama as a process-group leader so its runners go too. */
+function signal(pid: number, sig: NodeJS.Signals): void {
   try {
     process.kill(-pid, sig);
   } catch {
@@ -138,7 +133,8 @@ function signal(pid: number, sig: NodeJS.Signals, on: ProcPlatform): void {
 /**
  * Stop the recorded process only when PID, start time and command all still
  * match. A record that no longer matches is cleared (it is our file) but the
- * process it names is never signalled.
+ * process it names is never signalled. On Windows nothing is killed here:
+ * a live record is "adopted" (runtime.ts stops its own child by handle).
  */
 export async function stopOwned(file: string, graceMs = 5000, on: ProcPlatform = {}): Promise<StopResult> {
   const check = checkOwnership(file, on);
@@ -151,8 +147,9 @@ export async function stopOwned(file: string, graceMs = 5000, on: ProcPlatform =
     clearRecord(file);
     return { stopped: false, reason: "not-ours", detail: check.detail };
   }
+  if ((on.platform ?? process.platform) === "win32") return { stopped: false, reason: "adopted" };
   const { pid } = check.record;
-  signal(pid, "SIGTERM", on);
+  signal(pid, "SIGTERM");
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
     if (checkOwnership(file, on).kind !== "ours") break;
@@ -160,7 +157,7 @@ export async function stopOwned(file: string, graceMs = 5000, on: ProcPlatform =
   }
   // Re-verify before the hard kill: never SIGKILL a PID that was reused.
   if (checkOwnership(file, on).kind === "ours") {
-    signal(pid, "SIGKILL", on);
+    signal(pid, "SIGKILL");
     for (let i = 0; i < 40 && checkOwnership(file, on).kind === "ours"; i++) await sleep(50);
   }
   clearRecord(file);

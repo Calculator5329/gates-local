@@ -57,18 +57,24 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
   if (settings.loadNote) log(settings.loadNote);
 
-  // Late-bound so the switch can abort downloads made against the old runtime.
+  // Late-bound so the switch can abort downloads made against the old runtime
+  // and tell the loader the runtime changed. The loader also feeds the GPU
+  // status's ownership, and the watcher refreshes after loads.
   let pulls: PullManager | undefined;
+  let loader: ModelLoader | undefined;
   const runtime = createRuntimeSwitch({
     initialMode: settings.get().runtimeMode,
-    make: (mode: RuntimeMode) => createOllamaRuntime({ ...options.runtime, mode }),
-    beforeSwitch: () => pulls?.stop(),
+    // The ownership record and serve log follow --data-dir; the install and the models folder stay shared.
+    make: (mode: RuntimeMode) => createOllamaRuntime({ ...options.runtime, mode, stateDir: options.dataDir }),
+    beforeSwitch: () => {
+      pulls?.stop();
+      // Before the new runtime's ensure: what the app owned in the old one is not its own any more.
+      loader?.runtimeChanged();
+    },
     log,
   });
   const catalog = createModelCatalog(() => runtime.baseUrl(), { minIntervalMs: MODELS_REFRESH_MIN_MS });
 
-  // Late-bound: the loader feeds the GPU status's ownership and the watcher refreshes after loads.
-  let loader: ModelLoader | undefined;
   const whisperPid = cached(() => systemdMainPid("whisper-server.service"), WHISPER_PID_TTL_MS);
   const gpu = createGpuWatcher({
     read: () =>
