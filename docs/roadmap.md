@@ -76,6 +76,23 @@ never shows a whisper stop, start or restart.
       and put the reason in the refusal text.
 - [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
       when 11435 is busy with another service.
+- [ ] Cancel a turn that waits for the GPU: a turn queued behind an image
+      job holds no claim yet, and Stop only aborts once the claim lands.
+      *Accept:* a test queues a turn behind a held image claim, presses
+      Stop, and the turn ends cancelled with the image job untouched.
+- [ ] Windows process trees: `child.kill()` leaves Ollama's runner
+      children alive on Windows. Kill the tree (`taskkill /T`) through the
+      runtime's spawn seam. *Accept:* on Geordi, stopping the app-owned
+      Ollama leaves no `ollama*.exe` process.
+- [ ] Thinking pill follows the model: add `ModelInfo.capabilities` from
+      `/api/show` and grey the pill out for a model without "thinking"
+      (the server already drops `think` for those, 24877a4).
+      *Accept:* picking gemma3 greys the pill; picking qwen3.5 lights it.
+- [ ] Tools default reaches the turn (439a230): an E2E that sets Tools off
+      in Settings and sees a turn with no tool definitions in the request.
+- [ ] `think` on a model without thinking: Ollama's 400 was read from its
+      source, not run. Send `think: true` to gemma3 on the real runtime and
+      record the answer in the evidence log.
 
 ## Next: slices 2 to 4
 
