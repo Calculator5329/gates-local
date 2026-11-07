@@ -37,7 +37,9 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       try { await this.stats(); return true; }
       catch { return false; }
     },
-    async idle() { const q = await queue(); return q.queue_running.length === 0 && q.queue_pending.length === 0; },
+    /** Nothing queued and nothing running, except possibly `except` (our own prompt stuck past its cancel deadline). */
+    async idle(except?: string) { const q = await queue(); return q.queue_pending.length === 0 && q.queue_running.every((row) => except !== undefined && row[1] === except); },
+    async running(signal?: AbortSignal) { return (await queue(signal)).queue_running.map((row) => String(row[1])); },
     async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}): Promise<Buffer> {
       const info = S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json());
       const select = (node: string, field: string, wanted: string) => {
@@ -133,7 +135,12 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
           try { await this.cancelPrompt(promptId); }
           catch (error) {
             // Cleanup must not replace the render failure (especially a dead ComfyUI).
-            if (renderFailure) Object.assign(renderFailure, { cancelDetail: `${error instanceof Error ? error.message : String(error)}. ComfyUI may still be running the prompt.` });
+            if (renderFailure) {
+              const timedOut = error instanceof ComfyCancelTimeoutError;
+              Object.assign(renderFailure, timedOut
+                ? { cancelDetail: `${error.message}. ComfyUI may still be running the prompt.`, stuckPromptId: promptId }
+                : { cancelDetail: `Stopping the prompt failed: ${error instanceof Error ? error.message : String(error)}.` });
+            }
           }
         }
       }

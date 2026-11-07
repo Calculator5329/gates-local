@@ -7,7 +7,7 @@ import type { ImageEvent } from "@gates-local/contracts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, imageFitError, type ImageDeps } from "./module.ts";
+import { createImageModule, imageFitError, isLocalHost, type ImageDeps } from "./module.ts";
 import { createImageHandlers } from "./handlers.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -172,6 +172,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("error"); expect(f.module.current().state).toBe("error"); expect(f.lease.status().holder).toBeNull();
     expect(f.events.at(-1)?.message).toMatch(/ComfyUI disconnected while making the image/);
     expect(f.module.current().detail).toMatch(/offline/);
+    expect(f.module.current().detail).not.toMatch(/may still be running/); expect(f.module.current().owner).toBe("none");
     f.configure({ die: false, answering: true, missingModel: true }); const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
     expect(f.events.at(-1)?.message).toMatch(/sdxl_lightning_4step.*install/i);
   });
@@ -201,12 +202,15 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
 
   it.each(["unit-pid", "system-stats", "unknown-pid"])("credits a warm external Comfy on the second image without unloading chat (%s)", async (source) => {
     const gib = 1024 ** 3;
-    const f = await fixture({ requiredBytes: 9 * gib }); f.configure({ freeBytes: 10 * gib });
+    let free = 10 * gib;
+    // unknown-pid: the unit has no MainPID; a stray pid-0 row of 1 byte must not stand in for ComfyUI's /system_stats reservation.
+    const f = await fixture({ requiredBytes: 9 * gib, ...(source === "unknown-pid" ? { readGpu: async () => ({ freeBytes: free, holders: "ComfyUI", tenants: [{ pid: 0, usedBytes: 1 }] }) } : {}) });
+    f.configure({ freeBytes: 10 * gib });
     if (source === "system-stats") f.configure({ comfyUrl: "http://localhost:8188" });
     if (source === "unknown-pid") f.configure({ pid: 0 });
     const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
     expect(f.events.at(-1)?.state).toBe("done");
-    f.configure({ freeBytes: 2.5 * gib, resident: 7.9 * gib });
+    free = 2.5 * gib; f.configure({ freeBytes: 2.5 * gib, resident: 7.9 * gib });
     const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
     expect(f.events.at(-1)?.state).toBe("done");
     expect(f.calls).not.toContain("/api/generate"); expect(f.ollamaPosts).toEqual([]);
@@ -321,6 +325,48 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     await f.module.wait(jobId);
     expect(terminal).toMatchObject({ state: "error", message: expect.stringContaining("run timeout") });
     expect(holder).toBeNull();
+  });
+
+  it("falls back to ComfyUI's own torch reservation when its MainPID has no measured GPU row", async () => {
+    const gib = 1024 ** 3;
+    const f = await fixture({ requiredBytes: 9 * gib, readGpu: async () => ({ freeBytes: 2.5 * gib, holders: "ComfyUI ([N/A])", tenants: [{ pid: 42 }] }) });
+    f.configure({ resident: 7.9 * gib });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)?.state).toBe("done"); expect(f.ollamaPosts).toEqual([]);
+  });
+
+  it.each(["0.0.0.0", "127.0.0.2", "[::ffff:127.0.0.1]", "192.168.1.20", "mybox"])("runs the VRAM fit for a ComfyUI on this machine at %s", async (host) => {
+    const f = await fixture({ localAddresses: () => ["192.168.1.20", "mybox"] });
+    f.configure({ comfyUrl: `http://${host}:8188`, gpuError: true });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("nvidia-smi failed") });
+    expect(f.measurements()).toBeGreaterThan(0); expect(f.calls).not.toContain("/prompt");
+  });
+
+  it("names local and remote hosts", () => {
+    const own = ["192.168.1.20", "[fe80::1]", "mybox"];
+    for (const h of ["localhost", "a.localhost", "127.0.0.1", "127.9.9.9", "0.0.0.0", "[::]", "[::1]", new URL("http://[::ffff:127.0.0.1]").hostname, "192.168.1.20", "[fe80::1]", "MyBox"]) expect(isLocalHost(h, own), h).toBe(true);
+    for (const h of ["192.168.1.21", "remote-comfy", "10.0.0.5", "[2001:db8::1]", "128.0.0.1"]) expect(isLocalHost(h, own), h).toBe(false);
+  });
+
+  it.each(["done", "error"])("leaves no job timer behind after a %s job on an external Comfy", async (end) => {
+    const f = await fixture(); vi.useFakeTimers();
+    if (end === "error") f.configure({ missingModel: true });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)?.state).toBe(end); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("remembers its own prompt stuck past the cancel deadline: refuses in its own words, and idle stop still stops the app's ComfyUI", async () => {
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(jobId);
+    await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(jobId);
+    expect(f.module.current()).toMatchObject({ owner: "app", detail: expect.stringMatching(/may still be running/) });
+    const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("earlier image from this app") });
+    await f.module.stopIdle();
+    expect(f.calls).toContain("stop"); expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
   });
 
   it("finishes the PNG and thread attachment when cancel arrives after fetching the bytes", async () => {

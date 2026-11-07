@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -27,6 +28,8 @@ export interface ImageDeps extends ComfyClientDeps {
   idleMs?: number;
   startupTimeoutMs?: number;
   jobTimeoutMs?: number;
+  /** This machine's own addresses and name; tests inject them. */
+  localAddresses?(): readonly string[];
 }
 
 export interface ImageModule {
@@ -41,6 +44,31 @@ export interface ImageModule {
 }
 
 const DEFAULT_URL = "http://127.0.0.1:8188";
+
+/** This machine's host name and interface addresses, written the way the URL parser writes a hostname. */
+export function localAddresses(): string[] {
+  const out = [os.hostname().toLowerCase()];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list ?? []) out.push(a.family === "IPv6" ? new URL(`http://[${a.address.split("%")[0]}]`).hostname : a.address);
+  }
+  return out;
+}
+
+/**
+ * True when a ComfyUI at this host runs on this machine's GPU: loopback (all
+ * of 127.0.0.0/8 and its IPv4-mapped IPv6 form), the wildcard address that
+ * ComfyUI prints when started with --listen, and this machine's own
+ * interface addresses and host name. Only then do the VRAM fit and the chat
+ * unload apply.
+ */
+export function isLocalHost(hostname: string, own: readonly string[] = localAddresses()): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost") || h === "0.0.0.0" || h === "[::]" || h === "[::1]") return true;
+  if (/^127(\.\d{1,3}){3}$/.test(h)) return true;
+  // The URL parser writes ::ffff:127.x.y.z as [::ffff:7fxx:yyzz].
+  if (/^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(h)) return true;
+  return own.includes(h);
+}
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
@@ -61,6 +89,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let activeJob: string | undefined;
+  /** Our own prompt that ignored the 30 s cancel deadline; ComfyUI may still be running it. */
+  let stuck: { baseUrl: string; promptId: string } | undefined;
   const emit: Push = (channel, payload) => { try { deps.push(channel, payload); } catch { /* a disconnected client cannot strand a GPU job */ } };
   const update = (next: ImageStatus): ImageStatus => { status = next; emit("image.status", status); return status; };
   const config = () => {
@@ -69,7 +99,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw imageError("image-config", "Set a ComfyUI HTTP address without credentials or query parameters in Settings.");
     const baseUrl = url.href.replace(/\/$/, "");
     return { enabled: settings.imageGen, baseUrl, managed: baseUrl === DEFAULT_URL && settings.comfyUrl === undefined,
-      loopback: ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname) };
+      loopback: isLocalHost(url.hostname, deps.localAddresses?.() ?? localAddresses()) };
   };
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const clearIdle = () => { clearTimeout(idleTimer); idleTimer = undefined; };
@@ -115,9 +145,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const unit = stats && cfg.managed ? await service.inspect() : undefined;
     const resident = (gpu: Awaited<ReturnType<typeof measure>>) => {
       if (!stats) return 0;
-      const bytes = unit && unit.present && unit.pid > 0
-        ? (gpu.tenants ?? []).filter((tenant) => tenant.pid === unit.pid).reduce((sum, tenant) => sum + (tenant.usedBytes ?? 0), 0)
-        : stats.devices[0]?.torch_vram_total ?? 0;
+      let bytes: number | undefined;
+      if (unit && unit.present && unit.pid > 0) {
+        const sum = (gpu.tenants ?? []).filter((tenant) => tenant.pid === unit.pid).reduce((total, tenant) => total + (tenant.usedBytes ?? 0), 0);
+        if (sum > 0) bytes = sum;
+      }
+      // No measured row for the MainPID (not listed, or [N/A]): ComfyUI's own torch reservation is still only its memory.
+      bytes ??= stats.devices[0]?.torch_vram_total ?? 0;
       return Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
     };
     let gpu = await measure();
@@ -196,6 +230,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             const deadline = new AbortController();
             signal = AbortSignal.any([controller.signal, deadline.signal]);
             timeout = setTimeout(() => { timedOut = true; deadline.abort(new Error("Image run timed out.")); }, deps.jobTimeoutMs ?? 600_000);
+            timeout.unref();
             const latest = config();
             if (!latest.enabled) throw imageError("image-off", "Image generation was turned off while this job waited.");
             cfg = latest;
@@ -203,6 +238,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
             await fit(cfg, signal);
             const comfy = await ensure(cfg.baseUrl, cfg.managed, signal);
+            if (stuck?.baseUrl === cfg.baseUrl) {
+              if ((await comfy.running(signal)).includes(stuck.promptId)) throw new Error("ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
+              stuck = undefined;
+            }
             await fit(cfg, signal); // startup or another GPU app may have changed the room
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             event("running", { progress: 0 });
@@ -226,9 +265,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         } catch (error) {
           const message = timedOut && !controller.signal.aborted ? "Image exceeded its run timeout. Retry when ComfyUI is ready." : detail(error);
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
+          const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
+          if (stuckPromptId) stuck = { baseUrl: cfg.baseUrl, promptId: stuckPromptId };
           event(controller.signal.aborted ? "cancelled" : "error", { message });
           if (cancelDetail && activeJob === jobId) {
-            update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl, detail: `${message} ${cancelDetail}` });
+            // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
+            update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : stuckPromptId ? "external" : "none", baseUrl: cfg.baseUrl, detail: `${message} ${cancelDetail}` });
           } else if (controller.signal.aborted && activeJob === jobId) {
             const healthy = await client(cfg.baseUrl).healthy();
             if (activeJob === jobId) update({ state: healthy ? "ready" : "stopped", owner: owned?.baseUrl === cfg.baseUrl ? "app" : healthy ? "external" : "none", baseUrl: cfg.baseUrl });
@@ -259,12 +301,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const unit = await service.inspect();
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
-        if (!await client(owned.baseUrl).idle()) { armIdle(); return; }
+        // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
+        if (!await client(owned.baseUrl).idle(stuck?.baseUrl === owned.baseUrl ? stuck.promptId : undefined)) { armIdle(); return; }
         const latest = await service.inspect();
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
         await service.stop();
         const baseUrl = owned.baseUrl; owned = undefined;
+        if (stuck?.baseUrl === baseUrl) stuck = undefined;
         update({ state: "stopped", owner: "none", baseUrl });
       });
     },

@@ -10,11 +10,21 @@ The module reads settings through `settings()`, app-loaded chat models
 through `appLoadedModels()`, and GPU room through `readGpu()`. Production
 defaults use `fit/gpu.ts`; tests inject every runtime dependency. A custom
 ComfyUI URL is discovery-only. Windows never runs systemctl. Local GPU fit
-and chat unloading apply only to loopback ComfyUI hosts (`127.0.0.1`,
-`::1`, `localhost`). A remote address skips both entirely. A healthy
-loopback ComfyUI reporting only `cpu` devices also skips VRAM fit; the
-setup lane will add the RAM check. Other unreadable loopback GPU reports
-still refuse generation.
+and chat unloading apply only to a ComfyUI on this machine: loopback
+(`127.0.0.0/8`, `::1`, `localhost`, and the IPv4-mapped IPv6 form), the
+`0.0.0.0` address ComfyUI prints when started with `--listen`, and this
+machine's own interface addresses and host name (`isLocalHost` in
+`module.ts`). Any other address skips both entirely. A healthy local
+ComfyUI reporting only `cpu` devices also skips VRAM fit; the setup lane
+will add the RAM check. Other unreadable local GPU reports still refuse
+generation.
+
+ComfyUI's resident memory is credited from the managed unit's MainPID rows
+in nvidia-smi; when that pid has no measured row, from ComfyUI's own
+`/system_stats` `torch_vram_total`. A prompt of ours that outlives the
+30 s cancel deadline is remembered: the next image is refused in words
+that say it is ours, and the idle stop (and app exit) still stops an
+app-started ComfyUI while only that prompt runs.
 
 Service inspection preserves the raw `ActiveState`. Only `inactive` and
 `failed` units may be started and adopted by the app. An `active`,
@@ -84,8 +94,8 @@ systemctl; systemd provides no atomic owner claim.
 and fake Ollama, never the real services or GPU. New tests in this lane
 are diagnostic probes, not independent acceptance evidence. Full
 `pnpm verify` also runs the repository's pre-existing checks.
-Review-01 fixes, observed red mutations, final fake checks and sandbox
-limitations are recorded in [review-01-evidence.md](review-01-evidence.md).
+Review-01 fixes and their observed red mutations are recorded in the
+lane's evidence outside the repo and summarized in `docs/evidence/2026-11.md`.
 
 The coordinator can run the deliberately separate real check:
 
