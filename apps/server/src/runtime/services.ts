@@ -4,7 +4,7 @@
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
 import type { Channel, Payload, RuntimeMode } from "@gates-local/contracts";
-import { checkFit } from "../fit/fit.ts";
+import { checkFit, type FitDeps } from "../fit/fit.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
@@ -46,6 +46,8 @@ export interface ModelServicesOptions {
   /** Extra runtime options (external URL, allowInstall). */
   readonly runtime?: Omit<RuntimeOptions, "mode">;
   readonly log?: (line: string) => void;
+  /** The nvidia-smi runner and meminfo reader for the GPU status and every fit check (tests inject fakes). */
+  readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
 }
 
 export async function createModelServices(options: ModelServicesOptions): Promise<ModelServices> {
@@ -79,6 +81,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   const gpu = createGpuWatcher({
     read: () =>
       readGpuStatus({
+        ...options.fit,
         whisperPid,
         listeningPids: procListeningPids,
         modelLabel,
@@ -102,7 +105,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     fit: async (model, numCtx) => {
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw new Error("Ollama is not running.");
-      return (await checkFit({ baseUrl, model, numCtx })).report;
+      return (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report;
     },
     onLoaded: () => gpu.poke(),
     log,

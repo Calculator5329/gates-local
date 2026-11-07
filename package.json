@@ -13,7 +13,9 @@
     "verify": "pnpm typecheck && pnpm lint && pnpm test",
     "verify:runtime": "vitest run apps/server/src/settings apps/server/src/fit apps/server/src/runtime",
     "verify:image": "vitest run apps/server/src/image",
-    "verify:gpu": "vitest run apps/server/src/gpu"
+    "verify:gpu": "vitest run apps/server/src/gpu",
+    "e2e": "playwright test -c test/e2e/playwright.config.ts --project=e2e",
+    "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots"
   },
   "devDependencies": {
     "@gates-local/contracts": "workspace:*",
