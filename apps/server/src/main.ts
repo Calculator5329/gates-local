@@ -143,6 +143,8 @@ async function main(): Promise<void> {
     lease: gpuLease,
     store,
     sources,
+    // A turn that does not say runs tools when Settings has them on.
+    toolsEnabled: () => services.settings.get().tools,
     runtime,
     catalog,
     fit,
