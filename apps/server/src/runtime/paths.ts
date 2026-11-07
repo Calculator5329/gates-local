@@ -134,8 +134,9 @@ export function detectModelsDir(env: Env = process.env, home = os.homedir(), sys
 
 /**
  * First executable `ollama` on PATH, if any. On Windows PATH is
- * `;`-separated (and may be spelled `Path`), each PATHEXT extension is
- * tried, and existence counts as executable.
+ * `;`-separated (and may be spelled `Path`), only `.exe` is tried (a
+ * `.cmd` or `.bat` shim is not a binary the app can own and stop by
+ * handle), and existence counts as executable.
  */
 export function findOnPath(
   env: Env = process.env,
@@ -146,11 +147,11 @@ export function findOnPath(
   const win = platform === "win32";
   const p = pathFor(platform);
   const search = (win ? (env.PATH ?? env.Path) : env.PATH) ?? "";
-  const exts = win && p.extname(name) === "" ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+  const exts = win && p.extname(name) === "" ? [".exe"] : [""];
   for (const dir of search.split(win ? ";" : ":")) {
     if (!dir) continue;
     for (const ext of exts) {
-      const candidate = p.join(dir, name + ext.toLowerCase());
+      const candidate = p.join(dir, name + ext);
       if (isExecutable(candidate)) return candidate;
     }
   }
