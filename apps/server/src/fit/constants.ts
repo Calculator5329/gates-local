@@ -19,5 +19,13 @@ export const RUNTIME_OVERHEAD_BYTES = 1 * GIB;
 /** f16 KV cache (Ollama's default OLLAMA_KV_CACHE_TYPE). */
 export const KV_BYTES_PER_ELEMENT = 2;
 
+/**
+ * Before a download there is no architecture to size the KV cache from, so
+ * the catalog takes it as this share of the download per 16k tokens. A rule
+ * of thumb, not a measurement; the real estimate replaces it once the model
+ * is installed and /api/show gives its geometry.
+ */
+export const PREDOWNLOAD_KV_FRACTION_PER_16K = 0.1;
+
 /** Extra tokens a sliding-window layer keeps beyond its window (one batch). */
 export const SWA_BATCH_TOKENS = 512;

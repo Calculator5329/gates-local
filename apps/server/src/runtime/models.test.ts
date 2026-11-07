@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { json, startFakeServer } from "../fit/fake-http.ts";
 import { RuntimeResponseError, createModelCatalog, listLoaded, listModels } from "./models.ts";
 import { type FakeOllama, type FakeTag, startFakeOllama } from "./test-fakes.ts";
 import type { ModelInfo } from "./types.ts";
@@ -84,5 +85,52 @@ describe("model catalog refresh", () => {
   it("an absent runtime is an empty list", async () => {
     const catalog = createModelCatalog(() => undefined);
     expect(await catalog.refresh()).toEqual({ models: [], changed: true });
+  });
+
+  it("R-09: a slow fetch from the old runtime that lands after the new one's changes nothing", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const old = await startFakeServer({
+      "GET /api/tags": async (_b, res) => {
+        await held;
+        json(res, 200, { models: [gemma] });
+      },
+    });
+    try {
+      let url = old.baseUrl;
+      const catalog = createModelCatalog(() => url);
+      const emitted: string[][] = [];
+      catalog.onChange((m) => emitted.push(m.map((x) => x.name)));
+      const stale = catalog.refresh();
+      await new Promise((r) => setTimeout(r, 20));
+      url = fake.baseUrl; // the runtime switched
+      await catalog.refresh();
+      release();
+      // The old fetch answers its own caller and nothing else.
+      expect((await stale).models.map((m) => m.name)).toEqual(["gemma3:4b"]);
+      expect(catalog.current()?.map((m) => m.name)).toEqual(["qwen3:8b"]);
+      expect(emitted).toEqual([["qwen3:8b"]]);
+    } finally {
+      release();
+      await old.close();
+    }
+  });
+
+  it("makes at most one real /api/tags call per interval unless forced, and never reuses a failure", async () => {
+    let t = 0;
+    const catalog = createModelCatalog(() => fake.baseUrl, { minIntervalMs: 2000, now: () => t });
+    const tagCalls = () => fake.requests.filter((r) => r === "GET /api/tags").length;
+    await Promise.all([catalog.refresh(), catalog.refresh(), catalog.refresh()]);
+    t = 1999;
+    await catalog.refresh();
+    expect(tagCalls()).toBe(1);
+    await catalog.refresh({ force: true });
+    expect(tagCalls()).toBe(2);
+    t = 4000;
+    fake.rawTags = "not json";
+    await expect(catalog.refresh()).rejects.toBeInstanceOf(RuntimeResponseError);
+    fake.rawTags = undefined;
+    await catalog.refresh();
+    expect(tagCalls()).toBe(4);
   });
 });

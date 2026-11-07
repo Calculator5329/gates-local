@@ -1,0 +1,8 @@
+2444, /usr/bin/kwin_wayland, 117
+428377, /usr/bin/whisper-server, 2202
+512000, /usr/local/bin/ollama, 6926
+733100, /home/ethan/ComfyUI/.venv/bin/python, 3110
+2303957, /home/ethan/.local/share/media-vault/vision-runtime/bin/python, 1822
+4192851, /app/extra/chrome --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --crashpad-hand, 121
+2947897, falkon, 88
+2948011, falkon, 86

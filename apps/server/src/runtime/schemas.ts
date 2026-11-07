@@ -33,6 +33,12 @@ export const PsResponse = Schema.Struct({
   ),
 });
 
+/** POST /api/generate with stream false: one object; a load that failed may still be HTTP 200 with `error`. */
+export const GenerateResponse = Schema.Struct({
+  done: Schema.optionalKey(Schema.Boolean),
+  error: Schema.optionalKey(Schema.String),
+});
+
 export const OwnedRecord = Schema.Struct({
   pid: Schema.Number,
   startTime: Schema.String,

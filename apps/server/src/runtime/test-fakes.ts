@@ -96,10 +96,34 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
+/** `count` consecutive loopback ports nothing listens on (each bound briefly, then released). */
+export async function freePortRun(count: number): Promise<number> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const base = 20_000 + Math.floor(Math.random() * 40_000);
+    const held: http.Server[] = [];
+    let ok = true;
+    for (let port = base; port < base + count; port++) {
+      const server = http.createServer();
+      try {
+        await listen(server, port);
+        held.push(server);
+      } catch {
+        ok = false;
+        break;
+      }
+    }
+    await Promise.all(held.map((s) => close(s)));
+    if (ok) return base;
+  }
+  throw new Error(`no run of ${count} free ports found`);
+}
+
 /**
  * Source of a fake `ollama` executable: `serve` listens on OLLAMA_HOST and
- * answers like Ollama; GET /fake/env reports OLLAMA_MODELS. CommonJS so it
- * runs from an extensionless file with no package.json nearby.
+ * answers like Ollama; GET /fake/env reports OLLAMA_MODELS. FAKE_LOADED (a
+ * comma list) seeds /api/ps; POST /api/generate with keep_alive 0 unloads
+ * one. Unloads and SIGTERM are logged to stdout (the serve log). CommonJS
+ * so it runs from an extensionless file with no package.json nearby.
  */
 export function fakeOllamaScript(version = "0.0.2-fake-app"): string {
   return `#!${process.execPath}
@@ -108,17 +132,27 @@ const [cmd] = process.argv.slice(2);
 if (cmd === "--version" || cmd === "-v") { console.log("ollama version is ${version}"); process.exit(0); }
 if (cmd !== "serve") { console.error("fake ollama: unknown command " + cmd); process.exit(2); }
 const [host, port] = (process.env.OLLAMA_HOST || "127.0.0.1:11434").split(":");
+const loaded = (process.env.FAKE_LOADED || "").split(",").filter(Boolean);
 const server = http.createServer((req, res) => {
   const json = (b) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
   if (req.url === "/") { res.writeHead(200); res.end("Ollama is running"); }
   else if (req.url === "/api/version") json({ version: "${version}" });
   else if (req.url === "/api/tags") json({ models: [{ name: "fake:1b", digest: "d1", size: 1, modified_at: "2026-01-01T00:00:00Z" }] });
-  else if (req.url === "/api/ps") json({ models: [] });
+  else if (req.url === "/api/ps") json({ models: loaded.map((name) => ({ name, size: 1, size_vram: 1 })) });
+  else if (req.url === "/api/generate" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const b = JSON.parse(body || "{}");
+      if (b.keep_alive === 0 && loaded.includes(b.model)) { loaded.splice(loaded.indexOf(b.model), 1); console.log("unloaded " + b.model); }
+      json({ model: b.model, response: "", done: true });
+    });
+  }
   else if (req.url === "/fake/env") json({ OLLAMA_MODELS: process.env.OLLAMA_MODELS ?? null, OLLAMA_HOST: process.env.OLLAMA_HOST });
   else { res.writeHead(404); res.end(); }
 });
 server.listen(Number(port), host, () => console.log("fake ollama listening on " + host + ":" + port));
-process.on("SIGTERM", () => { server.close(); process.exit(0); });
+process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(); process.exit(0); });
 `;
 }
 

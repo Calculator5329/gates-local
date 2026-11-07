@@ -11,6 +11,7 @@ import { streamTurn } from "./chat/stream.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
 import type { FitReport } from "./fit/types.ts";
+import { AdmitCancelled, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
@@ -70,6 +71,13 @@ export interface AppDeps {
   readonly think?: boolean;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
+  /**
+   * Settings, GPU status, catalog, downloads and preloading (built in main
+   * from settings/, fit/ and runtime/), plus the loader: a turn reserves its
+   * model before its first await and runs its fit inside the load gate
+   * (admit), which pushes models.load around a turn whose model is not resident.
+   */
+  readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
 }
 
 export interface App {
@@ -130,9 +138,13 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[]) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad) => {
     const { turnId, threadId, controller } = turn;
-    const emit = (event: WireEvent) => push("chat.event", { turnId, threadId, event });
+    const emit = (event: WireEvent) => {
+      // Only text means the model answered; an error, cancel or end goes through end() below.
+      if (event.type === "delta" || event.type === "thinking") load?.firstToken();
+      push("chat.event", { turnId, threadId, event });
+    };
     try {
       for await (const event of streamTurn({
         baseUrl,
@@ -168,6 +180,7 @@ export function createApp(deps: AppDeps): App {
       log(`turn ${turnId} failed: ${(e as Error).message}`);
       emit({ type: "error", code: "internal", message: (e as Error).message });
     } finally {
+      load?.end();
       end();
     }
   };
@@ -180,6 +193,7 @@ export function createApp(deps: AppDeps): App {
   };
 
   const handlers = {
+    ...deps.models?.handlers,
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });
@@ -216,11 +230,21 @@ export function createApp(deps: AppDeps): App {
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
       const { turn, end } = reserve(threadId);
+      let load: TurnReservation | undefined;
       let started = false;
       try {
+        // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
+        load = deps.models?.loader?.reserve(model);
         const baseUrl = runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
-        const { report } = await checkFit({ ...deps.fit, baseUrl, model, numCtx });
+        const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+        let report: FitReport;
+        try {
+          report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit();
+        } catch (e) {
+          if (e instanceof AdmitCancelled) throw new AppError("cancelled", "the turn was cancelled before it started");
+          throw e;
+        }
         if (report.verdict === "refuse") {
           throw new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
         }
@@ -229,10 +253,13 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
-        void runTurn(turn, end, baseUrl, model, numCtx, history);
+        void runTurn(turn, end, baseUrl, model, numCtx, history, load);
         return { turnId: turn.turnId, userMessage };
       } finally {
-        if (!started) end();
+        if (!started) {
+          load?.end();
+          end();
+        }
       }
     },
 
