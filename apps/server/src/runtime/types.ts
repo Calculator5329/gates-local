@@ -1,0 +1,50 @@
+// Plain shapes shared inside the runtime module. The contracts package
+// mirrors RuntimeStatus and ModelInfo as Schemas for the wire.
+
+export type RuntimeState =
+  | "ready"
+  | "starting"
+  | "installing"
+  | "missing"
+  | "stopped"
+  | "wrong-service"
+  | "error";
+
+export type RuntimeOwner = "external" | "app" | "none";
+
+export type RuntimeStatus = {
+  state: RuntimeState;
+  owner: RuntimeOwner;
+  baseUrl: string;
+  version?: string;
+  detail?: string;
+};
+
+export type ModelInfo = {
+  name: string;
+  digest: string;
+  sizeBytes: number;
+  family?: string;
+  parameterSize?: string;
+  quantization?: string;
+  modifiedAt: string;
+};
+
+/** A model the runtime currently holds in memory (`/api/ps`). */
+export type LoadedModel = {
+  name: string;
+  sizeBytes: number;
+  sizeVramBytes: number;
+  expiresAt?: string;
+};
+
+export type InstallPhase = "download" | "verify" | "extract" | "done";
+
+export type InstallProgress = {
+  phase: InstallPhase;
+  version: string;
+  receivedBytes: number;
+  totalBytes: number;
+};
+
+export type Listener<T> = (value: T) => void;
