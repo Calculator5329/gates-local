@@ -59,10 +59,26 @@ seats stop raising it.
 | F18 | Sidebar: selected row clearly brighter, one time format per age band, full-title tooltip, plain "Ctrl N" text, streaming dot in the time slot, install percentage in the runtime footer, Settings with a gear and space above it | C1-16 C1-17 M1-15 M1-19 | open |
 | F19 | A small monochrome app mark before "Gates Local" | C1-30 | open |
 | F20 | Coordinator addition for out-of-box clarity (no seat asked): a first-run screen (found Ollama / installing / no models yet, each with one primary action) and a real Settings screen | owner brief | open |
+| F21 | Memory proposals: the diff holds only what the user asked; the assistant says in one line what it proposes before the approval tray | J1-01 | open |
+| F22 | Runtime banners sit on a new or empty thread, never above a finished conversation; send disabled with a tooltip while the runtime is not ready | J1-02 | open |
+| F23 | The context meter is hidden on a new thread until the first turn | J1-05 | open |
+| F24 | Hover actions never reserve space in the turn flow and never collide with the next turn; one disclosure convention (chevron at the left, like "Thought for 4s"); no trailing check when the status text already says done | J1-09 J1-10 | open |
+| F25 | Review screenshots hide the design-drawer trigger (the `D` key still opens it); it is not product chrome | J1-13 | open |
+| F26 | Example data stays plausible: a model's need at 16k exceeds its size on disk; diff gutters number correctly; a loaded model's popover plots its measured size | J1-07 J1-15 | open |
 
 ## Gemini flub
 
 The jester's notes go here, one line each, after the coordinator checks them
 against the screenshots.
 
-- Round 1: report pending.
+Round 1 (jester score kept out; 15 findings, of which 6 add something new and
+were confirmed in the screenshots as F21-F26; the rest duplicate F01-F19,
+one is dismissed and one is not confirmed):
+
+- Called a harness-only keyboard shortcut in the losing direction a blocker
+  (J1-03): typing a digit in A's empty picker search switches models.
+- Read the harness HTML source when the brief gave it only screenshots, then
+  graded `syncSend()` and CSS line numbers. Out of brief, but it found why
+  B's turns have dead space (24 px of hover row reserved in flow).
+- Said B's picker search field is squeezed to about 180 px; the screenshot
+  shows the full placeholder with room to spare.
