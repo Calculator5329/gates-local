@@ -12,6 +12,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
+import { createSources } from "./sources/index.ts";
 import { createModelCatalog } from "./runtime/models.ts";
 import { createOllamaRuntime } from "./runtime/runtime.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
@@ -81,8 +82,10 @@ async function main(): Promise<void> {
   const catalog = createModelCatalog(() => runtime.baseUrl());
 
   let server: WsServer | undefined;
+  const sources = createSources({ dataDir });
   const app: App = createApp({
     store,
+    sources,
     runtime,
     catalog,
     push: (channel, payload) => server?.push(channel, payload),

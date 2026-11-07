@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json && pnpm -r --no-bail typecheck",
     "lint": "oxlint --deny-warnings apps packages test",
     "test": "vitest run",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test"
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "verify:tools": "vitest run packages/harness apps/server/src/chat/tools.test.ts --reporter=verbose",
+    "verify:sources": "vitest run apps/server/src/sources --reporter=verbose"
   },
   "devDependencies": {
     "@gates-local/contracts": "workspace:*",

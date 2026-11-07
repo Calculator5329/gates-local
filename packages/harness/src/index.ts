@@ -1,2 +1,6 @@
-// The turn loop and the four tools (slice 4). Empty until then.
-export const HARNESS_VERSION = 0;
+export const HARNESS_VERSION = 1;
+export * from "./types.ts";
+export * from "./parser.ts";
+export * from "./loop.ts";
+export * from "./tools.ts";
+export * from "./prompt.ts";

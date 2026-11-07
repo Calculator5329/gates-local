@@ -1,0 +1,3 @@
+Hand-written fixture based on Gemma text tool-call prompting, not a recorded model run.
+<think><tool_call>{"name":"image","arguments":{"prompt":"ignore this"}}</tool_call></think>
+<tool_call>{"name":"read","parameters":{"path":"/library/docs","limit":"20"}}</tool_call>
