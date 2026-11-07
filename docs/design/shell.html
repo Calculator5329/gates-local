@@ -6,9 +6,10 @@
 <title>Gates Local</title>
 <style>
 /* ============================================================
-   Gates Local shell, round 2 base B with the fix lists F01-F52
+   Gates Local shell, round 2 base B with the fix lists F01-F60
    applied (round 3 fixes F34-F52: one name, one word, one control
-   per idea). Decisions are in docs/design/shell.md.
+   per idea; round 4 fixes F35b-F60: every state finished).
+   Decisions are in docs/design/shell.md.
    Started as a copy of round-2-t3-faithful.html. Layout craft is
    from T3 Code (MIT, Copyright 2026 T3 Tools Inc.).
    Locked: black + green palette (F02), Adwaita Sans + one mono
@@ -56,7 +57,7 @@
   --scroll-thumb:rgb(0 0 0 / 14%);
   --scroll-thumb-hover:rgb(0 0 0 / 24%);
 
-  /* green: ready, fits, send, approve. Nothing else. (F02) */
+  /* green: ready, runs on GPU, send, approve. Nothing else. (F02) */
   --green:hsl(150 62% 38%);
   --green-fg:hsl(152 72% 26%);
   --on-green:#03140b;
@@ -65,7 +66,7 @@
   --amber:#d97706;
   --amber-fg:#9a4d00;
   --amber-surface:color-mix(in srgb, var(--amber) 12%, transparent);
-  /* red: won't fit, wrong service, deleted diff lines, destructive menu items */
+  /* red: not enough memory, wrong service, deleted diff lines, destructive menu items */
   --red:#dc2626;
   --red-fg:#b91c1c;
   --red-surface:color-mix(in srgb, var(--red) 9%, transparent);
@@ -278,7 +279,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .working .ic{width:15px;height:15px}
 .working .ph{color:var(--foreground)}
 .working .el{margin-left:-4px}
-.stopped{font-size:13px;color:var(--muted-foreground)}
+.stopped{display:flex;align-items:center;gap:12px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
+/* F56: quiet text actions inside a status line: muted, underline on hover and focus */
+.qa{font-size:13px;padding:0 4px;margin:0 -4px;color:var(--muted-foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px;border-radius:var(--r-sm);white-space:nowrap;transition:color .12s,text-decoration-color .12s}
+.qa:hover,.qa:focus-visible{color:var(--foreground);text-decoration-color:currentColor}
+.prog-l .qa{margin-left:auto}
+/* F43b: a message waiting for setup: a muted clock line under the bubble, right-aligned */
+.u-q{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:6px;font-size:13px;color:var(--muted-foreground)}
+.turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
 /* F50: a text caret at the stream head until the turn ends */
 .caret{display:inline-block;width:2px;height:1.05em;margin-left:2px;vertical-align:-.17em;background:var(--foreground);border-radius:1px;animation:blink 1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
@@ -336,24 +344,27 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ctl.sq{width:30px;padding:0;justify-content:center}
 .ctl .chev{width:14px;height:14px;margin:0 -2px;opacity:.8}
 .ctl .vd{width:7px;height:7px;border-radius:50%;flex:none}
-.vd.fits{background:var(--green)}.vd.spill{background:var(--amber)}.vd.no{background:var(--red)}.vd.off{background:var(--faint)}
+.vd.gpu{background:var(--green)}.vd.spill{background:var(--amber)}.vd.no{background:var(--red)}.vd.off{background:var(--faint)}
 /* F35: the one verdict label: a dot plus the label in its color; detail after it is muted */
 .vl{display:inline-flex;align-items:center;gap:8px;color:var(--green-fg);white-space:nowrap}
 .vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
 .vdet{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .ctl .vtxt.spill{color:var(--amber-fg)}.ctl .vtxt.no{color:var(--red-fg)}
-/* F38: Thinking (and Image) is one control. Label and bulb dim when off in both treatments.
+/* F38b: Thinking (and Image) is one control. Off is a state, never a disabled look: the label stays
+   at secondary-text contrast and reads "Thinking off"; the switch keeps a visible track and knob.
    think=switch (default): a plain switch with the label beside it, no pill border.
-   think=pill: a pill alone, raised and "Thinking" when on, outlined, dimmed and "Thinking off" when off. */
+   think=pill: a pill alone, raised and "Thinking" when on, outlined and "Thinking off" when off. */
 .pill{height:30px;display:inline-flex;align-items:center;gap:7px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);margin-left:2px;transition:background-color .12s,color .12s,box-shadow .12s}
 .pill:hover{background:var(--hover)}
 .pill .ic{width:15px;height:15px}
-.pill[aria-pressed="false"] .lead,.pill[aria-pressed="false"] .plbl{opacity:.55}
-.pill[aria-pressed="false"]:hover .lead,.pill[aria-pressed="false"]:hover .plbl{opacity:.8}
+.pill[aria-pressed="false"]{color:var(--muted-foreground)}
+.pill[aria-pressed="false"]:hover{color:var(--foreground)}
 .pill .poff{display:none}
-.psw{display:none;width:24px;height:14px;border-radius:999px;background:var(--track);position:relative;flex:none;box-shadow:inset 0 0 0 1px var(--border-strong);transition:background-color .15s,box-shadow .15s}
+.pill[aria-pressed="false"] .poff{display:inline;margin-left:-7px}   /* one word space after the label, not the flex gap */
+.psw{display:none;width:24px;height:14px;border-radius:999px;background:var(--track);position:relative;flex:none;box-shadow:inset 0 0 0 1px var(--muted-foreground);transition:background-color .15s,box-shadow .15s}
 .psw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--muted-foreground);transition:transform .15s,background-color .15s}
+.pill[aria-pressed="false"]:hover .psw::after{background:var(--foreground)}
 [aria-pressed="true"] .psw,[aria-checked="true"] .psw{background:var(--foreground);box-shadow:none}
 [aria-pressed="true"] .psw::after,[aria-checked="true"] .psw::after{transform:translateX(10px);background:var(--background)}
 .mi .chk{display:none}
@@ -362,15 +373,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 :root[data-think="pill"] .pill[aria-pressed="true"]{background:var(--selected)}
 :root[data-think="pill"] .pill[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--foreground) 16%,transparent)}
 :root[data-think="pill"] .pill[aria-pressed="false"]{box-shadow:inset 0 0 0 1px var(--border-strong)}
-:root[data-think="pill"] .pill[aria-pressed="false"] .poff{display:inline;opacity:.55}
-:root[data-think="pill"] .pill[aria-pressed="false"]:hover .poff{opacity:.8}
 :root[data-think="pill"] .mi[aria-checked="true"] .chk{display:block;margin-left:auto;align-self:center;color:var(--foreground)}
 /* F43: every composer control dims the same while chat is blocked */
 .composer.blocked .gate,.composer.blocked .gate:hover{color:var(--faint);background:transparent}
 .composer.blocked .gate .lead,.composer.blocked .gate .plbl{opacity:1}
 .composer.blocked .gate .psw{background:transparent;box-shadow:inset 0 0 0 1px var(--faint)}
 .composer.blocked .gate .psw::after{background:var(--faint)}
-/* F37: the context meter is a chip in the chip cluster: "Context 60%", tokens in the tooltip; hidden below half and on a new thread */
+/* F37b: the context meter is a chip in the chip cluster: "Context 60% used", tokens in the tooltip; hidden below half and on a new thread */
 .meter{height:30px;padding:0 10px;margin-left:2px;border-radius:var(--r-ctl);display:inline-flex;align-items:center;gap:5px;font-size:14px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap;transition:background-color .12s,color .12s}
 .meter:hover{background:var(--hover);color:var(--foreground)}
 .meter.hi{color:var(--amber-fg)}
@@ -413,6 +422,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .btn.approve:hover{background:color-mix(in srgb,var(--green) 88%,#fff)}
 .btn.outline{border-color:var(--border-strong);color:var(--foreground)}
 .btn.outline:hover{background:var(--hover)}
+/* F59: an outline button with nothing to act on yet: muted, no hover */
+.btn.outline:disabled,.btn.outline:disabled:hover{color:var(--faint);border-color:var(--border);background:transparent;cursor:default}
 .btn.outline.pressed{background:var(--selected);border-color:var(--border-strong)}
 .btn.ghost{color:var(--muted-foreground)}
 .btn.ghost:hover{background:var(--hover);color:var(--foreground)}
@@ -472,7 +483,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mini-seg button{height:24px;padding:0 9px;border-radius:6px;font-size:12.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;transition:color .12s,background-color .12s}
 .mini-seg button:hover{color:var(--foreground);background:var(--hover)}
 .mini-seg button.on{background:var(--popover);color:var(--foreground);box-shadow:0 0 0 1px var(--border-strong)}
-.pk-list{max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px}
+/* F55: the first view always ends between rows (sizePkList trims max-height to the last whole row),
+   the list keeps 8 px under its last row, and the thumb shows whenever the list overflows */
+/* the thumb is drawn by the page (.pk-sb), so it shows even where the platform hides scrollbars */
+.pk-wrap{position:relative}
+.pk-list{position:relative;max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px 4px 8px;scrollbar-width:none}
+.pk-wrap:has(.pk-sb.on) .pk-list{padding-right:12px}
+.pk-list::-webkit-scrollbar{display:none}
+.pk-sb{position:absolute;top:4px;right:3px;bottom:4px;width:4px;pointer-events:none;display:none}
+.pk-sb.on{display:block}
+.pk-sb i{position:absolute;left:0;right:0;border-radius:2px;background:var(--scroll-thumb-hover)}
 /* F35: group labels are section headers: a rule above, equal space above and below the label, dot + label in its color */
 .pk-g{display:flex;align-items:center;gap:8px;padding:10px 8px;font-size:13px;font-weight:500;color:var(--green-fg)}
 .pk-g+.pk-r,.pk-g:first-child{margin-top:0}
@@ -525,7 +545,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fp-v{display:flex;align-items:center;gap:8px;font-size:14px}
 .fp-h+.fp-v{margin-top:12px}
 .fp-v b{font-weight:500}
-.fp-v b.fits{color:var(--green-fg)}.fp-v b.spill{color:var(--amber-fg)}.fp-v b.no{color:var(--red-fg)}
+.fp-v b.gpu{color:var(--green-fg)}.fp-v b.spill{color:var(--amber-fg)}.fp-v b.no{color:var(--red-fg)}
 .fp-v .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .fp-n{font-size:13px;color:var(--muted-foreground);margin-top:4px;font-variant-numeric:tabular-nums}
 .fp-n+.fp-row{margin-top:8px}
@@ -533,7 +553,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fp-mt+.bar{margin-top:0}
 .meas{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 /* F36: the visible line under every context control: what context is, and what the choice costs */
-.ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px}
+.ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
 .ctx-k{font-weight:500;color:var(--foreground)}
 .meas div{display:flex;flex-direction:column}
 .meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
@@ -557,7 +577,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .srow+.srow{border-top:1px solid var(--border)}
 .sl{flex:1;min-width:0}
 .sl b{display:block;font-size:14px;font-weight:500}
-.sl .d{display:block;font-size:13px;color:var(--muted-foreground);margin-top:2px}
+.sl .d{display:block;font-size:13px;color:var(--muted-foreground);margin-top:2px;text-wrap:pretty}
 .sv{flex:none;display:flex;align-items:center;gap:8px}
 .sv .mono{font-size:13px}
 .path{font-family:var(--font-mono);font-size:13px;color:var(--foreground);background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:6px;padding:4px 8px}
@@ -583,7 +603,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mrow{display:flex;align-items:center;gap:12px;padding:10px 16px;width:100%;text-align:left;transition:background-color .1s}
 .mrow+.mrow{border-top:1px solid var(--border)}
 .mrow:hover{background:var(--hover)}
-.mrow .rd{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--border-strong);flex:none;position:relative}
+/* F57: unselected radios use the secondary-icon tone; a downloading row's radio is dashed and faint */
+.mrow .rd{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--muted-foreground);flex:none;position:relative}
+.mrow .rd.dl{box-shadow:none;border:1.5px dashed var(--faint)}
 .mrow.on .rd{box-shadow:inset 0 0 0 1.5px var(--foreground)}
 .mrow.on .rd::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--foreground)}
 .mrow.dis{cursor:not-allowed}.mrow.dis:hover{background:transparent}.mrow.dis .mn{color:var(--muted-foreground)}
@@ -639,7 +661,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fr-st{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted-foreground);margin-bottom:12px}
 .fr-st .dot{width:7px;height:7px;border-radius:50%}
 .fr h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
-.fr .sub{font-size:15px;color:var(--muted-foreground);margin:8px 0 24px;line-height:1.55}
+.fr .sub{font-size:15px;color:var(--muted-foreground);margin:8px 0 24px;line-height:1.55;text-wrap:pretty}
 .fr-card{border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--card);padding:16px}
 .fr-m{display:flex;align-items:center;gap:12px}
 .fr-m .nm{font-size:15px;font-weight:500}
@@ -659,6 +681,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fr-cta .btn{gap:8px}
 .fr-sub{font-size:13.5px;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
 .fr-note{font-size:13.5px;color:var(--muted-foreground);margin-top:12px}
+.fr .sub .link,.fr-note .link{font-size:inherit}
 .fr-foot{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted-foreground);margin-top:40px;padding-top:16px;border-top:1px solid var(--border)}
 .fr-foot .ic{color:var(--muted-foreground)}
 
@@ -769,7 +792,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
           <div class="dock" id="dock" role="region" aria-label="Pending approval">
             <div class="dk-h"><span class="dk-k"><span class="dot"></span>Waiting for approval</span><span class="dk-t">Note edit</span><span class="dk-f tipd" tabindex="0" data-tip="<span class=&quot;mono&quot;>~/.gates/notes/reading.md</span>">reading.md</span><span class="dk-n">+1 −1</span></div>
             <div class="diff"><pre id="diffPre"></pre></div>
-            <div class="dk-a"><span class="hint">Reply below to change the note · Ctrl Enter approves</span><button type="button" class="btn outline" id="rejectBtn">Reject</button><button type="button" class="btn approve" id="approveBtn" data-tip="Approve (Ctrl Enter)">Approve</button></div>
+            <div class="dk-a"><span class="hint">Enter requests changes · Ctrl Enter approves</span><button type="button" class="btn outline" id="rejectBtn">Reject</button><button type="button" class="btn approve" id="approveBtn" data-tip="Approve (Ctrl Enter)">Approve</button></div>
           </div>
           <div class="att" id="att"></div>
           <textarea class="ta" id="ta" rows="1" placeholder="Ask anything…"></textarea>
@@ -777,10 +800,10 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
             <div class="cf-l">
               <button type="button" class="ctl sq gate" id="plusBtn" aria-haspopup="menu" aria-expanded="false" data-tip="Attach a file, add to your library, images"><svg class="ic"><use href="#i-plus"/></svg></button>
               <button type="button" class="ctl gate" id="modelBtn" aria-haspopup="listbox" aria-expanded="false"><span id="modelLbl">Qwen 3.5 9B</span><svg class="ic chev"><use href="#i-down"/></svg></button>
-              <button type="button" class="ctl gate" id="fitBtn" aria-haspopup="dialog" aria-expanded="false"><span class="vd fits" id="fitDot"></span><span id="fitLbl" class="tab">16k · fits</span><svg class="ic chev"><use href="#i-down"/></svg></button>
+              <button type="button" class="ctl gate" id="fitBtn" aria-haspopup="dialog" aria-expanded="false"><span class="vd gpu" id="fitDot"></span><span id="fitLbl" class="tab">16k · on GPU</span><svg class="ic chev"><use href="#i-down"/></svg></button>
               <button type="button" class="pill gate" id="thinkBtn" aria-pressed="true"><svg class="ic lead"><use href="#i-bulb"/></svg><span class="plbl">Thinking</span><span class="poff">&nbsp;off</span><span class="psw" aria-hidden="true"></span></button>
               <button type="button" class="pill gate" id="imageBtn" aria-pressed="false" hidden><svg class="ic lead"><use href="#i-image"/></svg><span class="plbl">Image</span><span class="poff">&nbsp;off</span><span class="psw" aria-hidden="true"></span></button>
-              <button type="button" class="meter" id="meterBtn" aria-label="Context used" hidden>Context <span id="meterPct"></span></button>
+              <button type="button" class="meter" id="meterBtn" aria-label="Context used" hidden><span>Context <span id="meterPct"></span> used</span></button>
             </div>
             <div class="cf-r">
               <button type="submit" class="send" id="sendBtn" aria-label="Send message" disabled></button>
@@ -800,8 +823,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 </div>
 
 <div class="pop" id="picker" role="listbox">
-  <div class="pk-h"><div class="pk-hin"><svg class="ic"><use href="#i-search"/></svg><input id="pkSearch" placeholder="Search models"><span class="pk-cap" id="pkCap">Fit shown at 16k</span></div></div>
-  <div class="pk-list" id="pkList"></div>
+  <div class="pk-h"><div class="pk-hin"><svg class="ic"><use href="#i-search"/></svg><input id="pkSearch" placeholder="Search models"><span class="pk-cap" id="pkCap">Estimated at 16k</span></div></div>
+  <div class="pk-wrap"><div class="pk-list" id="pkList"></div><div class="pk-sb" id="pkSb" aria-hidden="true"><i id="pkThumb"></i></div></div>
 </div>
 <div class="pop" id="fitpop" role="dialog" aria-label="GPU memory"></div>
 <div class="pop menu" id="plusMenu" role="menu"></div>
@@ -814,7 +837,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 <div class="tip" id="tip"></div>
 
 <aside class="drawer" id="drawer" aria-label="Design drawer">
-  <div class="dr-h"><b>Design<span>shell · round 3 fixes</span></b><button class="ibtn" id="drClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+  <div class="dr-h"><b>Design<span>shell · round 4 fixes</span></b><button class="ibtn" id="drClose" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
   <div class="dr-b" id="drawerBody"></div>
 </aside>
 
@@ -871,17 +894,18 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   function model(id) { for (var i = 0; i < MODELS.length; i++) if (MODELS[i].id === id) return MODELS[i]; return MODELS[0]; }
   function nameOf(id) { var m = MODELS.filter(function (x) { return x.id === id; })[0] || catalog(id); return m ? m.name : id; }
   function installed(id) { return MODELS.some(function (m) { return m.id === id; }); }
-  function gb(x) { return x.toFixed(1) + ' GB'; }        /* one decimal everywhere (F16) */
+  function gb(x) { return x.toFixed(1) + ' GB'; }   /* one decimal everywhere (F16); a number never wraps away from its unit */
   function dlPct(id) { return Math.round(dlx[id] * 100); }
   function dlActive() { for (var k in dlx) return k; return null; }
-  /* F35: exactly three verdict labels, always a dot plus the label in its color. "fits" is the composer chip's word only.
-     amt is secondary detail in muted text: what runs from system memory, or how much is missing */
+  /* F35: exactly three verdict labels, always a dot plus the label in its color.
+     F35b: the composer chip uses the defined short form of the same verdict ("on GPU", "system memory",
+     "not enough memory"); its tooltip carries the full label. amt is secondary detail in muted text */
   function verdict(id, ctx) { return verdictFor(model(id).need[ctx], ctx); }
   function verdictFor(need, ctx) {
-    if (need <= AVAIL) return { k: 'fits', need: need, amt: 0, chip: 'fits', word: 'Runs on GPU', more: AVAIL - need };
+    if (need <= AVAIL) return { k: 'gpu', need: need, amt: 0, chip: 'on GPU', word: 'Runs on GPU', more: AVAIL - need };
     if (need <= AVAIL + SPILL_LIMIT) { var s = need - AVAIL; return { k: 'spill', need: need, amt: s, chip: 'system memory', word: 'Uses system memory · slower', detail: gb(s) + ' in system memory' }; }
     var sh = need - AVAIL - SPILL_LIMIT;
-    return { k: 'no', need: need, amt: sh, chip: "won't fit", word: 'Not enough memory at ' + ctx + 'k', detail: 'needs ' + gb(sh) + ' more' };
+    return { k: 'no', need: need, amt: sh, chip: 'not enough memory', word: 'Not enough memory at ' + ctx + 'k', detail: 'needs ' + gb(sh) + ' more' };
   }
   function vlabel(v, cls) { return '<span class="' + (cls || 'vl') + ' ' + v.k + '"><span class="vd ' + v.k + '"></span>' + v.word + '</span>'; }
 
@@ -1008,7 +1032,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       var on = !$('tl').hidden && state.view !== 'settings' && state.thread === id;
       var live = streaming && streaming.thread === id;
       html += '<button class="sb-row' + (on ? ' on' : '') + '" data-th="' + id + '" data-tipt="' + esc(t.title) + '"><span class="t">' + esc(t.title) + '</span>' +
-        (live ? '<span class="live" aria-label="Writing"></span>' : '<span class="ago">' + t.ago + '</span>') + '</button>';
+        (live ? '<span class="live" aria-label="Reply in progress"></span>' : '<span class="ago">' + t.ago + '</span>') + '</button>';
     });
     $('sbList').innerHTML = any ? html : '<div class="sb-empty">No thread matches.</div>';
     /* F33: one selected row in Settings. The section nav marks where you are; the footer entry has no job there, so it hides */
@@ -1032,15 +1056,18 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   $('searchIn').addEventListener('blur', function () { if (!this.value) closeSearch(); });
 
   /* ================= timeline rendering ================= */
+  /* F60: reply and message actions use the 16 px glyphs and stroke of the composer and sidebar, centred in 24 px targets */
+  /* F43b: a message sent during setup is a real turn with a muted clock line under it, not a draft */
   function userHTML(t) {
-    return '<div class="turn u" tabindex="0" aria-label="Your message"><div class="u-row"><div class="u-act"><span class="tm">' + esc(t.time || 'now') + '</span>' +
-      '<button class="ibtn xs" data-edit data-tip="Edit">' + icon('pencil', 's14') + '</button>' +
-      '<button class="ibtn xs" data-copy data-tip="Copy">' + icon('copy', 's14') + '</button></div>' +
-      '<div class="bubble">' + esc(t.text) + '</div></div></div>';
+    return '<div class="turn u' + (t.queued ? ' queued' : '') + '" tabindex="0" aria-label="Your message"><div class="u-row"><div class="u-act"><span class="tm">' + esc(t.time || 'now') + '</span>' +
+      '<button class="ibtn xs" data-edit data-tip="Edit">' + icon('pencil') + '</button>' +
+      '<button class="ibtn xs" data-copy data-tip="Copy">' + icon('copy') + '</button></div>' +
+      '<div class="bubble">' + esc(t.text) + '</div></div>' +
+      (t.queued ? '<div class="u-q" role="status">' + icon('clock', 's14') + (t.queued === 'download' ? 'Sends when the download finishes' : 'Sends when setup finishes') + '</div>' : '') + '</div>';
   }
   function actHTML(meta) {
-    return '<div class="a-act"><button class="ibtn xs" data-copy data-tip="Copy">' + icon('copy', 's14') + '</button>' +
-      '<button class="ibtn xs" data-regen data-tip="Regenerate">' + icon('redo', 's14') + '</button>' +
+    return '<div class="a-act"><button class="ibtn xs" data-copy data-tip="Copy">' + icon('copy') + '</button>' +
+      '<button class="ibtn xs" data-regen data-tip="Regenerate">' + icon('redo') + '</button>' +
       '<span class="meta">' + esc(meta || '') + '</span></div>';
   }
   function thinkHTML(it) {
@@ -1084,7 +1111,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   function scrollEnd() { var tl = $('tl'); tl.scrollTop = tl.scrollHeight; }
   function flash(btn) {
     var old = btn.innerHTML, tip = btn.getAttribute('data-tip');
-    btn.innerHTML = icon('check', 's14'); btn.setAttribute('data-tip', 'Copied');
+    btn.innerHTML = icon('check'); btn.setAttribute('data-tip', 'Copied');
     setTimeout(function () { btn.innerHTML = old; btn.setAttribute('data-tip', tip); }, 1200);
   }
   $('col').addEventListener('click', function (e) {
@@ -1235,12 +1262,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     return '21 MB/s · about ' + Math.ceil(left / 60) + ' min left';
   }
   /* F43: setup is two steps: Ollama (active, neutral progress), then the first model (muted, next) */
-  function stepsHTML() {
+  function stepsHTML(cancel) {
     var s = installShown(), m = model('qwen3.5:9b');
     return '<div class="steps"><div class="step"><div class="step-h"><span class="sn">Ollama</span><span class="sz" id="instTxt">' + s[0].toFixed(1) + ' of ' + s[1].toFixed(1) + ' GB</span></div>' +
       '<div class="prog" role="progressbar" aria-label="Ollama download" aria-valuenow="' + installPct() + '"><i id="instBar" style="width:' + installPct() + '%"></i></div></div>' +
       '<div class="step next"><div class="step-h"><span class="sn">' + m.name + '</span><span class="sz">' + gb(m.disk) + ' · next</span></div></div></div>' +
-      '<div class="prog-l"><span id="instRate">' + installEta() + '</span></div>';
+      '<div class="prog-l"><span id="instRate">' + installEta() + '</span>' +
+      (cancel ? '<button type="button" class="qa" data-fr="cancel-ollama">Cancel download</button>' : '') + '</div>';
   }
   function stepsTick() {
     if (!$('instBar')) return;
@@ -1258,7 +1286,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   };
   var PLACEHOLDER = {
     ready: 'Ask anything…',
-    installing: 'Type now; it sends when Ollama is ready',
+    installing: 'Type now; it sends when setup finishes',
     starting: 'Chat starts when Ollama is running…',
     missing: 'Install Ollama to start chatting',
     wrong: 'Chat starts when Ollama answers on its port'
@@ -1308,7 +1336,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     $('bannerSlot').innerHTML = s === 'ready' ? '' : bannerHTML(s);
     clearInterval(installTimer); installTimer = null;
     if (s === 'installing') installTimer = setInterval(installTick, 1000);
-    if (s === 'starting') setTimeout(function () { if (rtState() === 'starting') { state.runtime = 'ready'; if (state.view === 'runtime') rtLive = true; refreshRuntime(); } }, 2500);
+    if (s === 'starting') setTimeout(function () { if (rtState() === 'starting') { state.runtime = 'ready'; if (state.view === 'runtime') rtLive = true; refreshRuntime(); flushQueued(); } }, 2500);
   }
   function installTick() {
     installGot = Math.min(INSTALL_TOTAL, installGot + INSTALL_RATE);
@@ -1338,29 +1366,32 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     if (blocked) $('cards').setAttribute('inert', ''); else $('cards').removeAttribute('inert');
     var m = model(state.model);
     /* F34: the chip leads with the friendly name; the tag is in its tooltip */
-    $('modelLbl').textContent = rt === 'installing' ? m.name + ' · downloads next' : m.name;
+    var fdl = firstDlOn();
+    $('modelLbl').textContent = rt === 'installing' ? m.name + ' · downloads next' : fdl ? m.name + ' · downloading ' + dlPctFirst() + '%' : m.name;
     if (blocked) {
       $('fitDot').className = 'vd off';
       $('fitLbl').textContent = state.ctx + 'k';
-      $('fitBtn').setAttribute('data-tip', 'The fit check runs once Ollama is ready.');
+      $('fitBtn').setAttribute('data-tip', 'GPU memory is checked once Ollama is ready.');
     } else {
       $('fitDot').className = 'vd ' + v.k;
       $('fitLbl').innerHTML = state.ctx + 'k · <span class="vtxt ' + v.k + '">' + v.chip + '</span>';
-      $('fitBtn').setAttribute('data-tip', '<b>' + esc(m.name) + '</b> at ' + state.ctx + 'k: ' + v.word + '. Click for GPU memory.');
+      $('fitBtn').setAttribute('data-tip', '<b>' + esc(m.name) + '</b> at ' + state.ctx + 'k: ' + v.word.replace(/ at \d+k$/, '') + '. Click for GPU memory.');
     }
     $('modelBtn').setAttribute('data-tip', rt === 'installing'
       ? '<b>' + esc(m.name) + '</b> downloads after Ollama (' + gb(m.disk) + ').'
       : '<b>' + esc(m.name) + '</b> · <span class="mono">' + esc(m.id) + '</span> · ' + m.q + ' · ' + gb(m.disk) + ' on disk');
-    /* F37: "Context 60%" in the chip cluster; tokens in the tooltip; hidden below half and on a new thread */
+    /* F37b: "Context 60% used" in the chip cluster; tokens in the tooltip; hidden below half and on a new thread */
     var used = state.view === 'new' ? 0 : (THREADS[state.thread] ? THREADS[state.thread].ctxUsed || 0 : 0);
     var cap = state.ctx * 1024, pct = Math.min(1, used / cap);
     $('meterPct').textContent = Math.round(pct * 100) + '%';
     $('meterBtn').classList.toggle('hi', pct > 0.85);
     $('meterBtn').hidden = pct < 0.5 || blocked;
     $('meterBtn').setAttribute('data-tip', 'Context used: ' + (used / 1000).toFixed(1) + 'k of ' + state.ctx + 'k tokens');
-    /* placeholder (F01, F43). A pending note keeps the normal one: the hint lives in the approval panel (F41) */
+    /* placeholder (F01, F43b). F53: while a note edit waits, the composer is where changes are asked for */
     var ta = $('ta');
-    ta.placeholder = PLACEHOLDER[rt] || PLACEHOLDER.ready;
+    ta.placeholder = composer.classList.contains('pending') ? 'Describe changes to this note…' : fdl && !blocked ? 'Type now; it sends when the download finishes' : (PLACEHOLDER[rt] || PLACEHOLDER.ready);
+    /* F43b: during setup (or the first model's download) a typed message can be sent; it waits in the thread */
+    var queueable = (rt === 'installing' || fdl) && (state.view === 'new' || state.view === 'thread' || state.view === 'runtime');
     /* send / stop (F02) */
     var send = $('sendBtn');
     if (streaming) {
@@ -1368,8 +1399,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       send.setAttribute('aria-label', 'Stop'); send.setAttribute('data-tip', 'Stop');
     } else {
       send.className = 'send'; send.innerHTML = ARROW; send.setAttribute('aria-label', 'Send message');
-      send.disabled = blocked || v.k === 'no' || !ta.value.trim();
-      if (blocked) send.setAttribute('data-tip', 'Chat starts when Ollama is ready');
+      send.disabled = (blocked && !queueable) || (!blocked && v.k === 'no') || !ta.value.trim();
+      if (queueable) send.setAttribute('data-tip', (ta.value.trim() ? 'Send (Enter). It goes out when ' : 'Type now; it sends when ') + (fdl && !blocked ? 'the download finishes' : 'setup finishes'));
+      else if (blocked) send.setAttribute('data-tip', 'Chat starts when Ollama is ready');
       else if (v.k === 'no') send.setAttribute('data-tip', esc(m.name) + ': not enough memory at ' + state.ctx + 'k. It needs an estimated ' + gb(v.amt) + ' more. Pick a smaller model or context.');
       else if (!ta.value.trim()) send.setAttribute('data-tip', 'Type a message to send');
       else send.setAttribute('data-tip', 'Send (Enter)');
@@ -1441,17 +1473,31 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   function submit() {
     var ta = $('ta'), text = ta.value.trim();
     if (!text || streaming || $('sendBtn').disabled) return;
-    if (state.view === 'new') {
+    /* F43b: during setup the message is sent into the thread and waits there */
+    var queued = rtState() === 'installing' ? 'setup' : firstDlOn() ? 'download' : false;
+    if (queued === 'setup') rtLive = true;
+    if (state.view === 'new' || (state.view === 'runtime' && !$('draft').hidden)) {
       var id = 'n' + Date.now();
       THREADS[id] = { title: text.length > 48 ? text.slice(0, 46) + '…' : text, group: 'Today', ago: 'now', ctxUsed: 300, turns: [] };
       ORDER.unshift(id); state.thread = id; state.view = 'thread'; renderView(); syncDrawer();
     }
     ta.value = ''; autoGrow(); $('att').innerHTML = '';
     var turn = { k: 'user', text: text, time: nowTime() };
+    if (queued) turn.queued = queued;
     THREADS[state.thread].turns.push(turn);
     $('col').insertAdjacentHTML('beforeend', userHTML(turn));
-    scrollEnd();
-    startStream(pickScript(text), state.thread);
+    scrollEnd(); renderComposerState();
+    if (!queued) startStream(pickScript(text), state.thread);
+  }
+  /* F43b: once setup finishes, waiting messages go out in order (the harness answers the last one) */
+  function flushQueued() {
+    var th = THREADS[state.thread];
+    if (!th || state.view !== 'thread' || streaming) return;
+    var q = th.turns.filter(function (t) { return t.queued; });
+    if (!q.length) return;
+    q.forEach(function (t) { delete t.queued; });
+    $('col').querySelectorAll('.turn.u.queued').forEach(function (el) { el.classList.remove('queued'); var s = el.querySelector('.u-q'); if (s) s.remove(); });
+    startStream(pickScript(q[q.length - 1].text), state.thread);
   }
   function pickScript(text) { return /remember/i.test(text) ? SCRIPTS.remember : /book|library|read/i.test(text) ? SCRIPTS.lib1 : SCRIPTS.generic; }
   function nowTime() { var d = new Date(); var h = d.getHours(), m = d.getMinutes(); return ((h % 12) || 12) + ':' + (m < 10 ? '0' : '') + m + (h < 12 ? ' AM' : ' PM'); }
@@ -1495,7 +1541,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     var ctl = { dead: false, timers: [], thread: threadId, start: Date.now(), phaseAt: Date.now(), row: null };
     streaming = ctl;
     var turn = document.createElement('div'); turn.className = 'turn a'; turn.tabIndex = 0; turn.setAttribute('aria-label', 'Reply'); $('col').appendChild(turn);
-    /* F50: "Thinking" counts from the turn start and shows no number before 1 s; "Writing…" has no counter */
+    /* F50: "Thinking" counts from the turn start and shows no number before 1 s. F58: the row exists only
+       before the first token; a tool phase shows its own running row instead */
     var status = document.createElement('div'); status.className = 'working';
     status.innerHTML = icon('spin', 'spin') + '<span class="ph">Thinking</span><span class="el"></span>';
     turn.appendChild(status); ctl.status = status; ctl.turn = turn; ctl.counting = true;
@@ -1504,7 +1551,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       if (ctl.counting && secs() >= 1) status.querySelector('.el').textContent = '· ' + secs() + ' s';
     }, 250);
     function later(fn, ms) { ctl.timers.push(setTimeout(function () { if (!ctl.dead) fn(); }, ms)); }
-    function phase(name) { ctl.counting = false; status.querySelector('.ph').textContent = name; status.querySelector('.el').textContent = ''; }
     function insert(html) { var tmp = document.createElement('div'); tmp.innerHTML = html; var last = null; while (tmp.firstChild) { last = tmp.firstChild; turn.insertBefore(last, status); } return last; }
     renderSidebar(); renderComposerState(); scrollEnd();
 
@@ -1532,8 +1578,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
         }, ctl);
       } else write();
     }, state.thinking ? 1400 : 300);
+    /* F58: once text arrives the caret is the only writing indicator; Stop and the sidebar dot stay */
     function write() {
-      status.hidden = false; phase('Writing…');
+      status.hidden = true; ctl.counting = false;
       var md = document.createElement('div'); md.className = 'md'; turn.insertBefore(md, status);
       streamHTML(md, script.md, finish, ctl);
     }
@@ -1552,7 +1599,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     if (ctl.row) { ctl.row.querySelector('[data-st]').innerHTML = icon('xc'); ctl.row.querySelector('.wr-m').textContent = 'stopped'; }
     if (ctl.turn) ctl.turn.querySelectorAll('.caret').forEach(function (c) { c.remove(); });
     if (!silent && ctl.turn) {
-      var s = document.createElement('div'); s.className = 'stopped'; s.textContent = 'Stopped after ' + Math.round((Date.now() - ctl.start) / 1000) + ' s';
+      /* F56: the stopped line carries its own quiet recovery */
+      var s = document.createElement('div'); s.className = 'stopped';
+      s.innerHTML = '<span>Stopped after ' + Math.round((Date.now() - ctl.start) / 1000) + ' s</span><button type="button" class="qa" data-regen>Retry</button>';
       ctl.turn.appendChild(s);
       /* F40: a stopped reply is finished too, so it gets the same hover and focus row */
       ctl.turn.insertAdjacentHTML('beforeend', actHTML(nameOf(state.model))); ctl.turn.classList.add('done');
@@ -1609,15 +1658,15 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   function renderPicker() {
     var q = $('pkSearch').value.trim().toLowerCase();
     /* F36: the picker only reports the context it judges fit at; the control lives in the GPU panel */
-    $('pkCap').textContent = 'Fit shown at ' + state.ctx + 'k';
-    var groups = { fits: [], spill: [], no: [] };
+    $('pkCap').textContent = 'Estimated at ' + state.ctx + 'k';
+    var groups = { gpu: [], spill: [], no: [] };
     function hit(m) { return !q || m.id.indexOf(q) >= 0 || m.name.toLowerCase().indexOf(q) >= 0; }
     MODELS.forEach(function (m) { if (hit(m)) groups[verdict(m.id, state.ctx).k].push(m); });
     /* F46: a model that is downloading sits in its fit group, inert, with the same words as the footer */
     var d = dlActive(), dc = d && catalog(d);
     if (dc && hit(dc)) groups[verdictFor(dc.need[state.ctx], state.ctx).k].push(dc);
     var h = '', idx = 0;
-    ['fits', 'spill', 'no'].forEach(function (g) {
+    ['gpu', 'spill', 'no'].forEach(function (g) {
       if (!groups[g].length) return;
       /* F35: the group header is the verdict label: a dot plus the words, in the verdict color */
       h += vlabel(verdictFor(groups[g][0].need[state.ctx], state.ctx), 'pk-g');
@@ -1638,16 +1687,42 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
           '<span class="pk-c">' + (sel ? icon('check') : '') + '</span>' +
           (dis ? '' : '<span class="pk-k">' + idx + '</span>') +
           '<div class="pk-m"><div class="pk-n">' + esc(m.name) + tag + '</div>' +
-          '<div class="pk-s">est. ' + gb(v.need) + ' at ' + state.ctx + 'k · ' + (v.k === 'fits' ? gb(m.disk) + ' on disk' : v.detail) + (m.id === LOADED.model ? ' · loaded' : '') + '</div></div></button>';
+          '<div class="pk-s">est. ' + gb(v.need) + ' at ' + state.ctx + 'k · ' + (v.k === 'gpu' ? gb(m.disk) + ' on disk' : v.detail) + (m.id === LOADED.model ? ' · loaded' : '') + '</div></div></button>';
       });
     });
     $('pkList').innerHTML = h || '<div class="pk-empty">No installed model matches.</div>';
     pkHi = -1;
+    if ($('picker').classList.contains('open')) sizePkList();
   }
+  /* F55: trim the list so its first view ends 4 px under the last whole row, never mid-row and
+     never on a group label; the thumb carries the "more below" cue */
+  function sizePkList() {
+    var L = $('pkList'); L.style.maxHeight = '';
+    var cap = Math.min(440, window.innerHeight - 180);
+    if (L.scrollHeight <= cap + 1) { pkThumb(); return; }
+    var end = 0;
+    for (var i = 0; i < L.children.length; i++) {
+      var k = L.children[i], b = k.offsetTop + k.offsetHeight;
+      if (b + 4 > cap) break;
+      if (k.classList.contains('pk-r')) end = b;
+    }
+    L.style.maxHeight = (end + 4) + 'px';
+    pkThumb();
+  }
+  /* the thin thumb shows whenever the list overflows, not only while scrolling */
+  function pkThumb() {
+    var L = $('pkList'), sb = $('pkSb'), over = L.scrollHeight > L.clientHeight + 1;
+    sb.classList.toggle('on', over); if (!over) return;
+    var track = L.clientHeight - 8, h = Math.max(24, track * L.clientHeight / L.scrollHeight);
+    var top = (track - h) * L.scrollTop / (L.scrollHeight - L.clientHeight);
+    $('pkThumb').style.height = h + 'px'; $('pkThumb').style.top = top + 'px';
+  }
+  $('pkList').addEventListener('scroll', pkThumb);
   function openPicker(kb) {
     closePops(); hideTip(); $('pkSearch').value = ''; renderPicker();
     $('picker').classList.toggle('kb', !!kb);
     place($('picker'), $('modelBtn'), 'start');
+    sizePkList(); place($('picker'), $('modelBtn'), 'start');
     openPop = $('picker'); openAnchor = $('modelBtn'); $('modelBtn').setAttribute('aria-expanded', 'true');
     setTimeout(function () { $('pkSearch').focus(); }, 0);
   }
@@ -1680,12 +1755,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   }
   /* F28: one plain line about context, a tooltip on every compact context control */
   var CTX_TIP = '<b>Context window.</b> How much conversation the model can keep in view. Larger windows use more memory.';
-  /* F36: the line under every context control says what the next size would cost, in words */
+  /* F36b: the line under every context control names the other size as the alternative:
+     "At 32k: still runs on GPU; uses 1.9 GB more." The selected size's verdict stays in the header */
   function ctxLine(id, ctx) {
     var other = ctx === 64 ? 32 : ctx === 32 ? 64 : 32, need = model(id).need;
-    var ov = verdict(id, other), d = need[other] - need[ctx];
-    var says = ov.k === 'fits' ? 'runs on GPU' : ov.k === 'spill' ? 'uses system memory, slower' : 'not enough memory';
-    return 'How much conversation the model can keep in view. <span class="ctx-k">' + other + 'k</span>: ' + says + ', ' + gb(Math.abs(d)) + (d > 0 ? ' more.' : ' less.');
+    var ov = verdict(id, other), cv = verdict(id, ctx), d = need[other] - need[ctx];
+    var says = ov.k === 'gpu' ? 'runs on GPU' : ov.k === 'spill' ? 'uses system memory, slower' : 'not enough memory';
+    if (ov.k === cv.k) says = 'still ' + (ov.k === 'no' ? 'not enough memory' : says);
+    return 'How much conversation the model can keep in view. <span class="ctx-k">At ' + other + 'k:</span> ' + says + '; ' + (ov.k === 'gpu' ? 'uses ' : 'needs ') + gb(Math.abs(d)) + (d > 0 ? ' more.' : ' less.');
   }
   var fitKey = '';
   /* one body for the docked panel (default) and the popover options: the compact summary first, the allocation below (F17b) */
@@ -1850,7 +1927,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
             ' data-tip="<b>' + esc(m.name) + '</b> · ' + m.q + ' · ' + gb(m.disk) + ' on disk · est. ' + gb(mv.need) + ' at ' + state.ctx + 'k"><span class="rd"></span><span class="mn">' + esc(m.name) + '<span class="tag">' + esc(m.id) + '</span></span>' + vlabel(mv, 'mv') + '</button>';
         }).join('') +
           /* F46: a download in progress shows here as an inert row, then the way to add another */
-          (dc ? '<div class="mrow dis" aria-disabled="true"><span class="rd" style="opacity:.4"></span><span class="mn">' + esc(dc.name) + '<span class="tag">' + esc(dc.id) + '</span></span><span class="mv dl">Downloading · ' + dlPct(d) + '%</span></div>' : '') +
+          (dc ? '<div class="mrow dis" aria-disabled="true"><span class="rd dl"></span><span class="mn">' + esc(dc.name) + '<span class="tag">' + esc(dc.id) + '</span></span><span class="mv dl">Downloading · ' + dlPct(d) + '%</span></div>' : '') +
           '<button class="mrow add" data-add>' + icon('plus') + 'Download another model…</button>' +
         '</div></div>' +
         /* F36: the default context; each chat changes its own in the GPU panel. One visible line, no micro-labels */
@@ -1928,14 +2005,15 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       '<div class="dl-a">' + act + '</div></div>';
   }
   function downloadPage() {
-    var rec = CATALOG.filter(function (c) { return verdictFor(c.need[state.ctx], state.ctx).k === 'fits'; });
+    var rec = CATALOG.filter(function (c) { return verdictFor(c.need[state.ctx], state.ctx).k === 'gpu'; });
     var more = CATALOG.filter(function (c) { return rec.indexOf(c) < 0; });
     return '<button class="crumb" data-add-back>' + icon('left', 's14') + 'Models</button>' +
-      head('Download a model', 'Picked for your RTX 5070 Ti. Fit is estimated at your default context, ' + state.ctx + 'k.') +
+      head('Download a model', 'Picked for your RTX 5070 Ti. Estimated at your default context, ' + state.ctx + 'k.') +
       '<div class="grp"><div class="grp-t">Recommended</div><div class="box">' + rec.map(dlRow).join('') + '</div></div>' +
       (more.length ? '<div class="grp"><div class="grp-t">' + (more.every(function (c) { return verdictFor(c.need[state.ctx], state.ctx).k === 'spill'; }) ? 'Also available · uses system memory' : 'Also available') + '</div><div class="box">' + more.map(dlRow).join('') + '</div></div>' : '') +
       grp('Something else', row('Any model from the Ollama library', 'Type its name as it appears on ollama.com/library.',
-        '<input class="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name"><button class="btn outline">Download</button>'));
+        /* F59: Download stays disabled until the field has a name */
+        '<input class="inp" id="customIn" placeholder="Model name, e.g. phi5:14b" aria-label="Model name"><button class="btn outline" id="customDl" disabled>Download</button>'));
   }
   function startDl(id) {
     var c = catalog(id); if (!c) return;
@@ -1954,6 +2032,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     if (openPop === $('picker')) renderPicker();
     renderRuntime();
   }
+  $('setIn').addEventListener('input', function (e) {
+    if (e.target.id === 'customIn') $('customDl').disabled = !e.target.value.trim();
+  });
   $('setIn').addEventListener('click', function (e) {
     var dc = e.target.closest('[data-dl-cancel]'); if (dc) { hideTip(); cancelDl(dc.dataset.dlCancel); return; }
     if (e.target.closest('[data-add]')) { state.add = true; renderSettings(); $('setView').scrollTop = 0; return; }
@@ -1997,37 +2078,62 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       '<tr><td>GPU memory</td><td>Estimated ' + gb(v.need) + ' of ' + gb(AVAIL) + ' available</td></tr>' +
       '</tbody></table></div>' + (extra || '') + '</div>';
   }
-  /* F44: one button, "Start chatting", in every state; the secondary link sits 16 px after it */
-  function frCta(link, linkAct) {
-    return '<div class="fr-cta"><button class="btn primary lg" data-fr="' + (state.first === 'installing' ? 'write' : state.first === 'nomodels' && !dl ? 'download' : 'start') + '">Start chatting' + icon('arrow', 's14') + '</button>' +
-      '<button class="link" data-fr="' + linkAct + '">' + link + '</button></div>';
+  /* F44b: the button names what it does in each state; the secondary link sits 16 px after it */
+  function frCta(label, act, link, linkAct) {
+    return '<div class="fr-cta"><button class="btn primary lg" data-fr="' + act + '">' + label + icon('arrow', 's14') + '</button>' +
+      (link ? '<button class="link" data-fr="' + linkAct + '">' + link + '</button>' : '') + '</div>';
   }
+  /* F54: a cancelled first download says what happened and where to go next */
+  var frCancel = null;   /* 'ollama' | 'model' after a cancel on the first-run screen */
+  function firstDlOn() { return !!(dl && dl.got < model('qwen3.5:9b').disk && state.view !== 'firstrun'); }
+  function dlPctFirst() { return Math.round(dl.got / model('qwen3.5:9b').disk * 100); }
   function renderFirst() {
     var f = state.first, h;
     if (f === 'found') {
       h = frShell('<span class="dot ok"></span>Ollama 0.40.4 · 6 local models',
         'Ready to chat',
         'Gates Local picked the best model for your GPU. Switch models in any chat.',
-        recCard('', true) + frCta('Change defaults in Settings', 'settings'));
+        recCard('', true) + frCta('Start chatting', 'start', 'Change defaults in Settings', 'settings'));
+    } else if (f === 'installing' && frCancel === 'ollama') {
+      h = frShell('<span class="dot warn"></span>Download cancelled',
+        'Ollama isn\'t installed',
+        'Gates Local needs Ollama to chat. Retry or point it at an existing install in <button class="link" data-fr="runtime">Settings › Runtime</button>.',
+        frCta('Retry download', 'retry'));
     } else if (f === 'installing') {
-      /* F43: two steps with one overall ETA, the same block as the banner */
+      /* F43: two steps with one overall ETA, the same block as the banner; F54: a quiet cancel beside it */
       h = frShell('<span class="dot run"></span>No Ollama found on this computer',
         'Setting up Ollama',
         'Gates Local is installing its own copy into its app folder. It won\'t change anything else on your system.',
-        '<div class="fr-card">' + stepsHTML() + '</div>' + frCta('Settings', 'settings') +
+        '<div class="fr-card">' + stepsHTML(true) + '</div>' + frCta('Start chatting', 'write', 'Settings', 'settings') +
         '<p class="fr-note">You can type now; replies start when setup finishes.</p>');
-    } else {
+    } else if (dl) {
+      /* F44b: during the first download the headline says so, and the chat can open to draft in */
       var m = model('qwen3.5:9b');
-      var extra = dl ? '<div class="prog" role="progressbar" aria-label="' + m.name + ' download"><i id="dlBar" style="width:' + (dl.got / m.disk * 100) + '%"></i></div><div class="prog-l"><span id="dlTxt">' + dl.got.toFixed(1) + ' of ' + gb(m.disk) + '</span><span id="dlRate">' + (dl.got >= m.disk ? 'Done' : '48 MB/s · about ' + Math.ceil((m.disk - dl.got) / 0.048 / 60) + ' min left') + '</span></div>' : '';
+      var extra = '<div class="prog" role="progressbar" aria-label="' + m.name + ' download" aria-valuenow="' + dlPctFirst() + '"><i id="dlBar" style="width:' + (dl.got / m.disk * 100) + '%"></i></div>' +
+        '<div class="prog-l"><span id="dlTxt">' + dl.got.toFixed(1) + ' of ' + gb(m.disk) + ' · 48 MB/s · about ' + Math.ceil((m.disk - dl.got) / 0.048 / 60) + ' min left</span>' +
+        '<button type="button" class="qa" data-fr="cancel-model">Cancel download</button></div>';
       h = frShell('<span class="dot ok"></span>Ollama 0.40.4 · no models yet',
-        'Download a model to start',
+        'Downloading your first model',
         'One model is enough. This one runs on your GPU with room for 16k of context.',
-        recCard(extra, dl && dl.got >= m.disk) + frCta('Choose another model', 'more') +
-        (dl && dl.got < m.disk ? '<p class="fr-note">You can type now; replies start when setup finishes.</p>' : ''));
+        recCard(extra, false) + frCta('Start chatting', 'chat') +
+        '<p class="fr-note">You can type now; replies start when the download finishes.</p>');
+    } else {
+      h = frShell('<span class="dot ok"></span>Ollama 0.40.4 · no models yet',
+        'Download your first model',
+        'One model is enough. This one runs on your GPU with room for 16k of context.',
+        /* after a cancel, the note's Settings › Models link replaces "Choose another model", so the route is named once */
+        recCard('', false) + (frCancel === 'model' ? frCta('Download and start', 'download') : frCta('Download and start', 'download', 'Choose another model', 'more')) +
+        (frCancel === 'model' ? '<p class="fr-note">Download cancelled. You can choose another model in <button class="link" data-fr="more">Settings › Models</button>.</p>' : ''));
     }
     $('firstView').innerHTML = h;
     clearInterval(installTimer); installTimer = null;
-    if (f === 'installing') installTimer = setInterval(firstInstallTick, 1000);
+    if (f === 'installing' && !frCancel) installTimer = setInterval(firstInstallTick, 1000);
+  }
+  /* the first model finished downloading: open the chat if still on this screen, send anything waiting */
+  function firstDlDone() {
+    clearInterval(dl.t); dl = null;
+    if (state.view === 'firstrun') { rtLive = false; state.runtime = 'ready'; state.view = 'new'; renderView(); syncDrawer(); $('ta').focus(); return; }
+    renderComposerState(); flushQueued();
   }
   function firstInstallTick() {
     installGot = Math.min(INSTALL_TOTAL, installGot + INSTALL_RATE);
@@ -2040,16 +2146,20 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     var a = b.dataset.fr;
     if (a === 'more') { openSettings('models', true); return; }
     if (a === 'start') { rtLive = false; state.runtime = 'ready'; dl = null; state.view = 'new'; renderView(); syncDrawer(); $('ta').focus(); }
+    else if (a === 'chat') { rtLive = false; state.runtime = 'ready'; state.view = 'new'; renderView(); syncDrawer(); $('ta').focus(); }
     else if (a === 'write') { rtLive = true; state.runtime = 'installing'; state.view = 'new'; renderView(); syncDrawer(); $('ta').focus(); }
     else if (a === 'settings') { if (state.first === 'installing') { rtLive = true; state.runtime = 'installing'; } openSettings(state.first === 'nomodels' ? 'models' : 'general'); }
+    else if (a === 'cancel-ollama') { frCancel = 'ollama'; renderFirst(); }
+    else if (a === 'retry') { frCancel = null; installGot = 0.02; renderFirst(); }
+    else if (a === 'runtime') { rtLive = true; state.runtime = 'missing'; openSettings('runtime'); }
+    else if (a === 'cancel-model') { clearInterval(dl.t); dl = null; frCancel = 'model'; renderFirst(); }
     else if (a === 'download') {
-      var m = model('qwen3.5:9b'); dl = { got: 0.3 };
+      var m = model('qwen3.5:9b'); frCancel = null; dl = { got: 0.3 };
       renderFirst();
       dl.t = setInterval(function () {
         dl.got = Math.min(m.disk, dl.got + 0.6);
-        if (state.view !== 'firstrun') { clearInterval(dl.t); return; }
-        renderFirst();
-        if (dl.got >= m.disk) clearInterval(dl.t);
+        if (dl.got >= m.disk) { firstDlDone(); return; }
+        if (state.view === 'firstrun') renderFirst(); else renderComposerState();
       }, 700);
     }
   });
@@ -2078,7 +2188,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
       if (f.sec) { h += '<div class="dr-sec">' + f.sec + '</div>'; return; }
       if (f.custom === 'contrast') { h += '<table class="ctr" id="ctr"></table>'; return; }
       if (f.custom === 'locked') {
-        h += '<ul class="locked"><li>Palette: black + green (F02); progress is gray (F02b)</li><li>Type: Adwaita Sans, JetBrainsMono Nerd Font (F03)</li><li>Prose column: 720 px (F04)</li><li>Spacing: 4 / 8 / 12 / 16 / 24 / 32 (F05)</li><li>Trust line: "Runs locally on your computer. Nothing you type leaves it." (F49)</li><li>Names: friendly name first, tag in mono (F34)</li><li>Fit: Runs on GPU / Uses system memory · slower / Not enough memory (F35)</li><li>Settings: one selected row, one header (F33, F51)</li></ul>';
+        h += '<ul class="locked"><li>Palette: black + green (F02); progress is gray (F02b)</li><li>Type: Adwaita Sans, JetBrainsMono Nerd Font (F03)</li><li>Prose column: 720 px (F04)</li><li>Spacing: 4 / 8 / 12 / 16 / 24 / 32 (F05)</li><li>Trust line: "Runs locally on your computer. Nothing you type leaves it." (F49)</li><li>Names: friendly name first, tag in mono (F34)</li><li>Verdict: Runs on GPU / Uses system memory · slower / Not enough memory; chip: on GPU / system memory / not enough memory (F35b)</li><li>Context: "Context 60% used" (F37b)</li><li>Settings: one selected row, one header (F33, F51)</li></ul>';
         return;
       }
       h += '<div class="fld" data-fld="' + f.k + '"' + (f.only && state.view !== f.only ? ' hidden' : '') + (f.only ? ' data-only="' + f.only + '"' : '') + '><div class="fl">' + f.label + '</div><div class="seg ' + (f.cls || '') + '" data-k="' + f.k + '">' +
@@ -2110,9 +2220,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
     else if (k === 'sources') { if (state.view === 'new') renderCards(); if (state.view === 'settings') renderSettings(); }
     else {
       if (k === 'runtime') { state.view = 'runtime'; rtLive = false; installGot = 1.02; }
-      if (k === 'first') { state.view = 'firstrun'; dl = null; installGot = 1.02; }
+      if (k === 'first') { state.view = 'firstrun'; if (dl) clearInterval(dl.t); dl = null; frCancel = null; installGot = 1.02; }
       if (k === 'section') { state.view = 'settings'; state.add = false; ownerConfirm = false; }
-      if (k === 'view') { rtLive = false; dl = null; state.runtime = state.runtime === 'ready' ? 'installing' : state.runtime; }
+      if (k === 'view') { rtLive = false; if (dl) clearInterval(dl.t); dl = null; frCancel = null; state.runtime = state.runtime === 'ready' ? 'installing' : state.runtime; }
       stopStream(true); renderView(); syncDrawer();
     }
   });
@@ -2137,7 +2247,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   if (params.has('dl')) { var dlp = clamp(+params.get('dl') || 0, 1, 99); dlx[DL_EXAMPLE] = dlp / 100; }
   if (state.runtime === 'ready') state.runtime = 'installing';
   if (params.get('shot') === '1') document.documentElement.classList.add('shot');
+  /* F54: ?first=installing&cancelled=1 or ?first=nomodels&cancelled=1 opens the cancelled first-run screen */
+  if (params.get('cancelled') === '1') frCancel = state.first === 'installing' ? 'ollama' : 'model';
+  /* F43b: ?queued=1 sends a message during setup, so the thread shows it waiting */
+  var queuedParam = params.get('queued') === '1';
+  if (queuedParam) { rtLive = true; state.runtime = 'installing'; if (state.view !== 'runtime') state.view = 'new'; }
   applyTheme(); buildDrawer(); renderView();
+  if (queuedParam) { $('ta').value = 'Summarize what changed in ~/docs this week.'; renderComposerState(); submit(); }
   if (params.get('drawer') === '1') toggleDrawer(true);
   window.__gl = { state: state, renderView: renderView, toggleDrawer: toggleDrawer, syncDrawer: syncDrawer, openSettings: openSettings, openPicker: openPicker, openFit: openFit, closeFitPanel: closeFitPanel, renderComposerState: renderComposerState };
 })();
