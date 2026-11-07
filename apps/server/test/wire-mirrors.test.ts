@@ -16,7 +16,7 @@ import {
 } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 
-import type { ChatEvent as ChatEvent, Message as ChatMessage } from "../src/chat/types.ts";
+import type { ChatEvent, Message as ChatMessage } from "../src/chat/types.ts";
 import { decideFit } from "../src/fit/fit.ts";
 import type { FitReport as FitFitReport } from "../src/fit/types.ts";
 import type { ModelInfo as RuntimeModelInfo, RuntimeStatus as RuntimeRuntimeStatus } from "../src/runtime/types.ts";
