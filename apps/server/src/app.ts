@@ -13,6 +13,7 @@ import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
+import { fetchShow } from "./fit/ollama.ts";
 import type { FitReport } from "./fit/types.ts";
 import { AdmitCancelled, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
@@ -111,6 +112,22 @@ interface Turn {
   readonly ended: Promise<void>;
 }
 
+/**
+ * The think flag a turn sends: none when /api/show lists the model's
+ * capabilities without "thinking". An Ollama that lists none, or a show that
+ * fails, keeps the request as asked; the chat request reports a real error.
+ */
+async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined): Promise<boolean | undefined> {
+  if (requested === undefined) return undefined;
+  let capabilities: readonly string[] | undefined;
+  try {
+    ({ capabilities } = await fetchShow(baseUrl, model));
+  } catch {
+    return requested;
+  }
+  return capabilities === undefined || capabilities.includes("thinking") ? requested : undefined;
+}
+
 export function createApp(deps: AppDeps): App {
   const { store, runtime, catalog } = deps;
   const log = deps.log ?? ((line: string) => console.error(`[app] ${line}`));
@@ -181,7 +198,8 @@ export function createApp(deps: AppDeps): App {
       // The image tool is offered only when this turn asked for it and image generation is wired.
       const image = options.image === true && deps.image !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
-      const think = options.think ?? deps.think;
+      // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
+      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think);
       const input = {
         baseUrl,
         model,

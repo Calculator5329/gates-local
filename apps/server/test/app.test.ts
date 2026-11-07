@@ -90,7 +90,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => ImageModule } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => ImageModule; show?: unknown } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   const ollama = await startFakeServer({
@@ -101,7 +101,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => Imag
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, TAGS),
     "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
-    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+    "POST /api/show": (_b, res) => json(res, 200, opts.show ?? SHOW),
     "POST /api/chat": (body, res) => chat(res, body),
   });
   cleanups.push(() => ollama.close());
@@ -362,6 +362,40 @@ describe("chat.send", () => {
     expect((await r.client.call("fit.check", { model: MODEL, numCtx: 16384 })).verdict).toBe("spills");
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+  });
+});
+
+/** One turn against a fake whose /api/show is `show`; returns the chat request body. */
+const sendWith = async (show: unknown, think: boolean) => {
+  const r = await rig({ show });
+  const bodies: Array<Record<string, unknown>> = [];
+  r.setChat((res, body) => {
+    bodies.push(body as Record<string, unknown>);
+    return quickReply(res, body);
+  });
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think });
+  await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+  return bodies[0]!;
+};
+/** The qwen3.5 show fixture with these capabilities, or with none listed. */
+const caps = (capabilities: string[] | undefined) => {
+  const { capabilities: _drop, ...rest } = SHOW as Record<string, unknown>;
+  return capabilities === undefined ? rest : { ...rest, capabilities };
+};
+
+describe("chat.send and the think flag", () => {
+  it("sends think as asked to a model that can think", async () => {
+    expect(await sendWith(caps(["completion", "thinking"]), true)).toMatchObject({ think: true });
+    expect(await sendWith(caps(["completion", "thinking"]), false)).toMatchObject({ think: false });
+  });
+
+  it("leaves think off the request for a model whose capabilities lack thinking", async () => {
+    expect(await sendWith(caps(["completion", "tools"]), true)).not.toHaveProperty("think");
+  });
+
+  it("keeps think as asked when Ollama lists no capabilities", async () => {
+    expect(await sendWith(caps(undefined), true)).toMatchObject({ think: true });
   });
 });
 
