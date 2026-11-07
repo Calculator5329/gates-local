@@ -36,7 +36,15 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     for (const l of listeners) l(s);
   };
   let off = inner.onChange(forward);
+  // ensure, discover, setMode and stopIfStartedHere run one after another, so
+  // a switch waits for an outstanding startup to settle before it decides
+  // whether the old runtime was started here (no orphaned app Ollama).
   let chain: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = chain.then(fn);
+    chain = run.catch(() => undefined);
+    return run;
+  };
 
   const stopIfStartedHere = async (rt: OllamaRuntime) => {
     if (!rt.startedByThisProcess()) return;
@@ -47,8 +55,8 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   return {
     status: () => inner.status(),
     baseUrl: () => inner.baseUrl(),
-    ensure: () => inner.ensure(),
-    discover: () => inner.discover(),
+    ensure: () => serial(() => inner.ensure()),
+    discover: () => serial(() => inner.discover()),
     startedByThisProcess: () => inner.startedByThisProcess(),
     mode: () => mode,
     onChange(listener) {
@@ -56,7 +64,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
       return () => listeners.delete(listener);
     },
     setMode(next) {
-      const run = chain.then(async () => {
+      return serial(async () => {
         if (next === mode) return inner.status();
         options.beforeSwitch?.();
         const old = inner;
@@ -70,9 +78,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
         forward(status);
         return status;
       });
-      chain = run.catch(() => undefined);
-      return run;
     },
-    stopIfStartedHere: () => stopIfStartedHere(inner),
+    stopIfStartedHere: () => serial(() => stopIfStartedHere(inner)),
   };
 }
