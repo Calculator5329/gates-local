@@ -17,9 +17,11 @@ export interface PullManager {
   cancel(name: string): boolean;
   /** Queued and running downloads, in order. */
   pending(): readonly PullProgress[];
-  /** Abort everything (server shutdown). */
+  /** Abort everything (a runtime switch, server shutdown); every job ends in a "cancelled" push. */
   stop(): void;
 }
+
+export const PULL_STOPPED_MESSAGE = "Download stopped because the runtime changed.";
 
 export interface PullManagerOptions {
   baseUrl: () => string | undefined;
@@ -42,6 +44,8 @@ interface Job {
   rateAt: number;
   rateBytes: number;
   rate?: number;
+  /** Set by stop(): the cancelled push says why. */
+  stopped?: boolean;
 }
 
 /** Ollama's error text, in words a person can act on. */
@@ -201,7 +205,7 @@ export function createPullManager(options: PullManagerOptions): PullManager {
       })
       .catch((e: unknown) => {
         if (job.controller.signal.aborted) {
-          setState(job, { state: "cancelled", completedBytes: job.progress.completedBytes, message: "Download cancelled." });
+          setState(job, { state: "cancelled", completedBytes: job.progress.completedBytes, message: job.stopped ? PULL_STOPPED_MESSAGE : "Download cancelled." });
           return;
         }
         const message = e instanceof PullFailure && e.plain ? e.message : plainPullError(job.name, e instanceof Error ? e.message : String(e));
@@ -246,8 +250,15 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     },
     pending: () => [...(running ? [running.progress] : []), ...queue.map((j) => j.progress)],
     stop() {
-      for (const j of queue.splice(0)) j.controller.abort();
-      running?.controller.abort();
+      for (const j of queue.splice(0)) {
+        j.controller.abort();
+        setState(j, { state: "cancelled", completedBytes: j.progress.completedBytes, message: PULL_STOPPED_MESSAGE });
+      }
+      // The running job's catch pushes its own "cancelled" once the abort lands.
+      if (running) {
+        running.stopped = true;
+        running.controller.abort();
+      }
     },
   };
 }

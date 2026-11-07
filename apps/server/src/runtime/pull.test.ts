@@ -2,7 +2,7 @@ import type { ServerResponse } from "node:http";
 import type { PullProgress } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
-import { createPullManager, plainPullError } from "./pull.ts";
+import { PULL_STOPPED_MESSAGE, createPullManager, plainPullError } from "./pull.ts";
 
 let server: FakeServer | undefined;
 afterEach(async () => {
@@ -110,6 +110,27 @@ describe("models.pull", () => {
     m.pull("big");
     await until(() => server?.requests.length === 2);
     m.stop();
+  });
+
+  it("R-10: stop() ends the running and the queued downloads with a terminal push each", async () => {
+    server = await startFakeServer({
+      "POST /api/pull": async (_b, res) => {
+        res.writeHead(200);
+        line(res, { status: "pulling aa", digest: "sha256:aa", total: 1000, completed: 100 });
+        await new Promise((r) => setTimeout(r, 10_000));
+      },
+    });
+    const pushes: PullProgress[] = [];
+    const m = createPullManager({ baseUrl: () => server?.baseUrl, push: (p) => pushes.push(p) });
+    m.pull("a");
+    m.pull("b");
+    await until(() => pushes.some((p) => p.name === "a" && p.completedBytes === 100));
+    m.stop();
+    await until(() => pushes.filter((p) => p.state === "cancelled").length === 2);
+    const last = (name: string) => pushes.filter((p) => p.name === name).at(-1);
+    expect(last("a")).toMatchObject({ state: "cancelled", message: PULL_STOPPED_MESSAGE });
+    expect(last("b")).toMatchObject({ state: "cancelled", message: "Download stopped because the runtime changed." });
+    expect(m.pending()).toEqual([]);
   });
 
   it("ends in error with Ollama's message in plain words", async () => {
