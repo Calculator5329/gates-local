@@ -45,6 +45,17 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    // Tool steps and generated image paths ride on the message as JSON
+    // arrays (contracts v2, 2026-11-07). NULL means none.
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE messages ADD COLUMN tools_json TEXT;
+        ALTER TABLE messages ADD COLUMN images_json TEXT;
+      `);
+    },
+  },
 ];
 
 export const LATEST_VERSION: number = MIGRATIONS.length;

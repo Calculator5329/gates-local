@@ -340,3 +340,43 @@ describe("concurrent connections (WAL)", () => {
     expect(writer.getThread(t.id).messages.map((m) => m.content)).toEqual(["one", "two", "three", "four"]);
   });
 });
+
+describe("tool steps and images (schema step 2)", () => {
+  it("round-trips tool steps and image paths, and refuses malformed ones", () => {
+    const s = store();
+    const t = s.createThread();
+    const tools = [
+      { callId: "c1", name: "sql", state: "done" as const, summary: "Read 12 rows from Notes", detail: "SELECT 1", durationMs: 41.5 },
+      { callId: "c2", name: "read", state: "error" as const, summary: "Could not read the file" },
+    ];
+    const m = s.appendMessage({ threadId: t.id, role: "assistant", content: "done", tools, images: ["images/a.png"] });
+    const back = s.getThread(t.id).messages[0]!;
+    expect(back).toEqual(m);
+    expect(back.tools).toEqual(tools);
+    expect(back.images).toEqual(["images/a.png"]);
+    // Empty arrays store as none.
+    const bare = s.appendMessage({ threadId: t.id, role: "assistant", content: "x", tools: [], images: [] });
+    expect(Object.keys(bare)).not.toContain("tools");
+    expect(Object.keys(s.getThread(t.id).messages[1]!)).not.toContain("images");
+
+    const bad = (patch: Record<string, unknown>) => () => s.appendMessage({ threadId: t.id, role: "assistant", content: "x", ...patch } as never);
+    expect(bad({ tools: [{ callId: "c", name: "sql", state: "maybe", summary: "s" }] })).toThrow(InvalidInputError);
+    expect(bad({ tools: [{ callId: "", name: "sql", state: "done", summary: "s" }] })).toThrow(InvalidInputError);
+    expect(bad({ tools: "nope" })).toThrow(InvalidInputError);
+    expect(bad({ images: [""] })).toThrow(InvalidInputError);
+  });
+
+  it("migrates a version-1 database with messages and keeps them", () => {
+    const path = join(dir, "v1.db");
+    const db = raw(path);
+    migrate(db, path, MIGRATIONS.slice(0, 1));
+    db.exec(`INSERT INTO threads VALUES ('t1', 'old', 1, 1);
+             INSERT INTO messages (id, thread_id, role, content, created_at) VALUES ('m1', 't1', 'user', 'hi', 2);`);
+    expect(pragma(db, "user_version")).toBe(1);
+    db.close();
+    const s = store(path);
+    expect(s.getThread("t1").messages).toEqual([{ id: "m1", threadId: "t1", role: "user", content: "hi", createdAt: 2 }]);
+    s.appendMessage({ threadId: "t1", role: "assistant", content: "ok", images: ["images/b.png"] });
+    expect(s.getThread("t1").messages[1]!.images).toEqual(["images/b.png"]);
+  });
+});

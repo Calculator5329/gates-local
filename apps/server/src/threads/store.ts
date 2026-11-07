@@ -14,7 +14,7 @@ import {
   ThreadNotFoundError,
 } from "./errors.ts";
 import { migrate } from "./migrations.ts";
-import { ROLES, type Message, type MessageStats, type NewMessage, type Role, type Thread, type ThreadWithMessages } from "./types.ts";
+import { ROLES, TOOL_STATES, type Message, type MessageStats, type NewMessage, type Role, type Thread, type ThreadWithMessages, type ToolStepRecord } from "./types.ts";
 
 export interface ThreadStoreOptions {
   /** Clock for createdAt/updatedAt; tests pin it. Defaults to Date.now. */
@@ -81,12 +81,14 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     messageExists: db.prepare("SELECT 1 AS hit FROM messages WHERE id = ?"),
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
-                             prompt_tokens, completion_tokens, duration_ms, num_ctx)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             prompt_tokens, completion_tokens, duration_ms, num_ctx,
+                             tools_json, images_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
-              prompt_tokens, completion_tokens, duration_ms, num_ctx
+              prompt_tokens, completion_tokens, duration_ms, num_ctx,
+              tools_json, images_json
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
   } satisfies Record<string, StatementSync>;
@@ -185,6 +187,8 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           s?.completionTokens ?? null,
           s?.durationMs ?? null,
           s?.numCtx ?? null,
+          msg.tools === undefined ? null : JSON.stringify(msg.tools),
+          msg.images === undefined ? null : JSON.stringify(msg.images),
         );
         stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
@@ -263,7 +267,46 @@ function checkNewMessage(input: unknown, now: () => number): Message {
   if (model !== undefined) msg.model = model;
   const stats = checkStats(v["stats"]);
   if (stats !== undefined) msg.stats = stats;
+  const tools = checkTools(v["tools"]);
+  if (tools !== undefined) msg.tools = tools;
+  const images = checkImages(v["images"]);
+  if (images !== undefined) msg.images = images;
   return msg;
+}
+
+function checkTools(value: unknown): ToolStepRecord[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new InvalidInputError("tools", "expected an array");
+  if (value.length === 0) return undefined;
+  return value.map((item: unknown, i): ToolStepRecord => {
+    const at = `tools[${i}]`;
+    if (typeof item !== "object" || item === null) throw new InvalidInputError(at, "expected an object");
+    const t = item as Record<string, unknown>;
+    checkId(`${at}.callId`, t["callId"]);
+    checkId(`${at}.name`, t["name"]);
+    const state = t["state"];
+    if (!TOOL_STATES.includes(state as ToolStepRecord["state"])) {
+      throw new InvalidInputError(`${at}.state`, `expected one of ${TOOL_STATES.join(", ")}`);
+    }
+    const summary = t["summary"];
+    if (typeof summary !== "string") throw new InvalidInputError(`${at}.summary`, "expected a string");
+    const step: ToolStepRecord = { callId: t["callId"], name: t["name"], state: state as ToolStepRecord["state"], summary };
+    const detail = checkOptionalString(`${at}.detail`, t["detail"]);
+    if (detail !== undefined) step.detail = detail;
+    const durationMs = checkCount(`${at}.durationMs`, t["durationMs"], false);
+    if (durationMs !== undefined) step.durationMs = durationMs;
+    return step;
+  });
+}
+
+function checkImages(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new InvalidInputError("images", "expected an array");
+  if (value.length === 0) return undefined;
+  return value.map((item: unknown, i) => {
+    if (typeof item !== "string" || item.length === 0) throw new InvalidInputError(`images[${i}]`, "expected a non-empty string");
+    return item;
+  });
 }
 
 // --------------------------------------------------------------------- rows
@@ -324,5 +367,9 @@ function messageFromRow(row: Row): Message {
     numCtx: optNum(row, "num_ctx"),
   });
   if (stats !== undefined) msg.stats = stats;
+  const tools = optStr(row, "tools_json");
+  if (tools !== undefined) msg.tools = JSON.parse(tools) as ToolStepRecord[];
+  const images = optStr(row, "images_json");
+  if (images !== undefined) msg.images = JSON.parse(images) as string[];
   return msg;
 }
