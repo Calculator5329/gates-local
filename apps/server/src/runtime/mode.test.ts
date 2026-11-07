@@ -52,6 +52,20 @@ async function runtime(over: Partial<RuntimeOptions>): Promise<OllamaRuntime> {
 const nothingAt = async () => `http://127.0.0.1:${await freePort()}`;
 const isUp = async (baseUrl: string) => (await httpGet(`${baseUrl}/api/version`, 500)).kind === "response";
 
+/** PowerShell CIM answers for whatever PID is asked, from this machine's process table; every call is logged. */
+function cimFake(calls: string[]): SyncRunner {
+  return (file_, args) => {
+    calls.push(file_);
+    const pid = Number(/ProcessId=(\d+)/.exec(args.at(-1) ?? "")?.[1]);
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return "";
+    }
+    return JSON.stringify({ ProcessId: pid, CreationDate: "/Date(1)/", CommandLine: "ollama.exe serve" });
+  };
+}
+
 describe("runtimeMode system", () => {
   it("uses the system Ollama and, when none answers, reports missing without starting the installed copy", async () => {
     system = await startFakeOllama({ version: "0.40.4" });
@@ -250,20 +264,6 @@ describe("Windows (platform injected)", () => {
     expect(await stopOwned(file, 500, { platform: "win32", run: reused })).toMatchObject({ stopped: false, reason: "not-ours" });
     expect(calls.every((c) => c === "powershell.exe")).toBe(true);
   });
-
-  /** PowerShell CIM answers for whatever PID is asked, from this machine's process table; every call is logged. */
-  function cimFake(calls: string[]): SyncRunner {
-    return (file_, args) => {
-      calls.push(file_);
-      const pid = Number(/ProcessId=(\d+)/.exec(args.at(-1) ?? "")?.[1]);
-      try {
-        process.kill(pid, 0);
-      } catch {
-        return "";
-      }
-      return JSON.stringify({ ProcessId: pid, CreationDate: "/Date(1)/", CommandLine: "ollama.exe serve" });
-    };
-  }
 
   it("R-12: a child this process spawned is unloaded, then killed through its handle; no taskkill", async () => {
     writeFakeBinary(installedBinary(appDataDir, VERSION));
