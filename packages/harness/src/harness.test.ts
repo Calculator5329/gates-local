@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseTextCalls, repairCall, toolBlock, trimOutput, runLoop } from "./index.ts";
+import { parseTextCalls, repairCall, toolBlock, toolDefinitions, trimOutput, runLoop } from "./index.ts";
 
 describe("text tool calls", () => {
   for (const family of ["qwen", "gemma"]) {
@@ -18,7 +18,7 @@ describe("text tool calls", () => {
     expect(repairCall({ name: "bash", arguments: '{"command":"ls","timeoutMs":"20"}' })).toMatchObject({ name: "shell", input: { timeoutMs: 20 } });
   });
   it("keeps the tool block under the 1000-token budget at an estimated 3 chars/token", () => {
-    for (const platform of ["linux", "win32"] as const) expect(Math.ceil(toolBlock(platform).length / 3)).toBeLessThan(1000);
+    for (const platform of ["linux", "win32"] as const) expect(Math.ceil(toolBlock(toolDefinitions(platform, { image: true })).length / 3)).toBeLessThan(1000);
   });
 });
 

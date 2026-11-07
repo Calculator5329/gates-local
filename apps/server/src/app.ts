@@ -137,13 +137,15 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], options: { tools?: boolean; think?: boolean } = {}) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
     const { turnId, threadId, controller } = turn;
     const emit = (event: WireEvent) => push("chat.event", { turnId, threadId, event });
     try {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
       const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
-      const useTools = wantsTools && sources.length > 0;
+      // The image tool is offered only when this turn asked for it and image generation is wired.
+      const image = options.image === true && deps.generateImage !== undefined;
+      const useTools = (wantsTools && sources.length > 0) || image;
       const think = options.think ?? deps.think;
       const input = {
         baseUrl,
@@ -154,7 +156,7 @@ export function createApp(deps: AppDeps): App {
         threadId,
         ...(think === undefined ? {} : { think }),
       };
-      const events = useTools ? streamToolTurn({ ...input, sources, generateImage: deps.generateImage }) : streamTurn(input);
+      const events = useTools ? streamToolTurn({ ...input, sources, generateImage: deps.generateImage, image }) : streamTurn(input);
       for await (const event of events) {
         if (event.type !== "done") {
           emit(event);
@@ -224,7 +226,7 @@ export function createApp(deps: AppDeps): App {
       return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, tools, think }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
@@ -243,7 +245,7 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
-        void runTurn(turn, end, baseUrl, model, numCtx, history, { tools, think });
+        void runTurn(turn, end, baseUrl, model, numCtx, history, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) end();

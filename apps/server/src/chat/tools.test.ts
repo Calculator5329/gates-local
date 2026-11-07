@@ -63,6 +63,47 @@ describe("tool chat transport", () => {
       expect(JSON.stringify(pushed)).toContain('"state":"running"');
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });
+  for (const image of [true, undefined]) {
+    it(`chat.send ${image ? "offers and runs" : "neither offers nor runs"} the image tool when image is ${image}`, async () => {
+      const root = mkdtempSync(path.join(tmpdir(), "gl-app-image-"));
+      const sources = createSources({ dataDir: path.join(root, "data") });
+      const file = path.join(root, "notes.txt"); writeFileSync(file, "hello");
+      await sources.add({ kind: "file", path: file });
+      const store = openThreadStore(path.join(root, "threads.db"));
+      const chatBodies: { tools?: { function: { name: string } }[] }[] = [];
+      const fetcher = vi.fn(async (url, init) => {
+        const pathname = new URL(String(url)).pathname;
+        if (pathname === "/api/show") return Response.json({ capabilities: ["tools"] });
+        if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
+        if (pathname === "/api/tags") return Response.json({ models: [] });
+        chatBodies.push(JSON.parse(String(init?.body)));
+        return chatBodies.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true }]) : ndjson([{ message: { content: "done" }, done: true }]);
+      });
+      vi.stubGlobal("fetch", fetcher);
+      const generateImage = vi.fn(async () => "images/cat.png");
+      const app = createApp({ store, sources, toolsEnabled: () => true, generateImage,
+        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
+        push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+      });
+      try {
+        const thread = store.createThread();
+        await app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, ...(image ? { image } : {}) }, { clientId: 1 });
+        await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
+        const offered = chatBodies[0]!.tools!.map(t => t.function.name);
+        const saved = store.getThread(thread.id).messages.at(-1);
+        if (image) {
+          expect(offered).toContain("image");
+          expect(generateImage).toHaveBeenCalledWith("a cat", expect.any(AbortSignal));
+          expect(saved).toMatchObject({ images: ["images/cat.png"], tools: [{ name: "image", state: "done" }] });
+        } else {
+          expect(offered).not.toContain("image");
+          expect(generateImage).not.toHaveBeenCalled();
+          expect(saved).toMatchObject({ tools: [{ name: "image", state: "error" }] });
+        }
+      } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
+    });
+  }
   for (const scenario of ["tools explicitly off", "tools default off", "empty Library"] as const) {
     it(`keeps the original plain turn for ${scenario}`, async () => {
       const root = mkdtempSync(path.join(tmpdir(), "gl-plain-tools-"));
