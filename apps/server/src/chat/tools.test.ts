@@ -10,6 +10,8 @@ import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
 
 const ndjson = (items: unknown[]) => new Response(items.map(i => JSON.stringify(i)).join("\n") + "\n");
+/** No ComfyUI is up, so chat.send has nothing to free before its claim. */
+const noComfy = () => ({ state: "stopped", owner: "none" });
 /** An image module over the app's real lease, shaped like image/module.ts: generate returns the id at once and the job claims the GPU alone. */
 const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) => {
   const jobs = new Map<string, AbortController>();
@@ -31,7 +33,7 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
     job?.abort(new Error("cancelled"));
     return { cancelled: job !== undefined };
   });
-  return { image: { generate, cancel } as unknown as ImageModule, generate, cancel, ran };
+  return { image: { current: noComfy, generate, cancel } as unknown as ImageModule, generate, cancel, ran };
 };
 /** A tool turn whose first reply calls the image tool; `second` answers the request after the tool ran. */
 const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>) => {
