@@ -146,8 +146,10 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const [open, setOpen] = useState(false);
   const st = stopped && step.state === "running" ? "rej" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
   const label = toolLabel(step.name);
+  // the contract has no read-only flag yet; a `-readonly` flag in the call is the evidence the design's word rests on
+  const ro = /(^|\s)-readonly(\s|$)/.test(step.detail ?? "") ? "read-only" : "";
   const meta =
-    st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : [label, duration(step.durationMs)].filter((x) => x !== "").join(" · ");
+    st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : [label, ro, duration(step.durationMs)].filter((x) => x !== "").join(" · ");
   const [cmd = "", ...rest] = (step.detail ?? "").split("\n");
   const out = rest.join("\n").trim();
   const toggle = () => setOpen(!open);

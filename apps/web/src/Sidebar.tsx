@@ -1,6 +1,6 @@
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer with the download and runtime rows.
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { rtInfo } from "./Banner.tsx";
 import { describeModel, gb, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
@@ -65,14 +65,15 @@ function ThreadList() {
         const w = when(t.updatedAt, now);
         const head = w.group !== last ? <div className="sb-group">{w.group}</div> : null;
         last = w.group;
+        // a Fragment, not a wrapper: .sb-group:first-child must match only the list's first heading
         return (
-          <div key={t.id} style={{ display: "contents" }}>
+          <Fragment key={t.id}>
             {head}
             <button type="button" className={`sb-row${on === t.id ? " on" : ""}`} data-tipt={t.title} onClick={() => openThread(t.id)}>
               <span className="t">{t.title}</span>
               {live === t.id ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{w.ago}</span>}
             </button>
-          </div>
+          </Fragment>
         );
       })}
     </nav>
