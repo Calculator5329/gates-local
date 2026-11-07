@@ -74,9 +74,14 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
   let models: ModelInfo[] | undefined;
   let last: { at: number; url: string | undefined; result: Promise<Refreshed> } | undefined;
   const listeners = new Set<Listener<readonly ModelInfo[]>>();
+  /** Bumped per fetch started; only the latest one, still for the current base URL, may set `models`. */
+  let latest = 0;
 
   const fetchNow = async (url: string | undefined): Promise<Refreshed> => {
+    const seq = ++latest;
     const next = url ? await listModels(url, timeoutMs) : [];
+    // An older fetch (or one from the runtime before a switch) answers its own caller and changes nothing.
+    if (seq !== latest || baseUrl() !== url) return { models: next, changed: false };
     const changed = models === undefined || key(models) !== key(next);
     models = next;
     if (changed) for (const l of listeners) l(next);
