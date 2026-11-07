@@ -14,6 +14,7 @@ never in these tables.
 | 2 | `shell.html` @ 3d60c2c | not seated | 8 | not seated | 8 (Sol alone) |
 | 3 | `shell.html` @ 4434f72 | 8 | 8.5 | 8 | 8.17 |
 | 4 | `shell.html` @ cd0f37a | not seated | 7.5 | not seated | 7.5 (Sol alone) |
+| 5 | `shell.html` @ 5e5037d | not seated | 8.5 | not seated | 8.5 (Sol alone) |
 
 Reference apps, round 1 (mean overall of the three seats): ChatGPT desktop
 8.7, Ollama 8.7, T3 Code 8.5, Claude desktop 8.2, Jan 8.0, LM Studio 7.8,
@@ -37,6 +38,14 @@ reply, downloads, the spill panel, light picker), and those new states drew
 most of the out-of-box and polish findings; and one of Sol's findings, its
 only blocker, is a misreading (G4-01, dismissed below). The picker clipping
 (G4-04) is a real regression from round 3.
+
+Reference apps, round 5 (Sol alone): T3 Code 9, ChatGPT desktop 9, Ollama
+8.5, Claude desktop 8.5, LM Studio 8, Jan 8, Open WebUI 7.5, Msty Studio 7.
+Gates Local 8.5, 0.5 behind the best (round 4: 1.0 behind), level with
+Ollama and Claude desktop, ahead of every other local-model app. This round
+showed 41 states, including every new edge state from round 4 (queued
+message, both cancelled downloads, picker end, custom model field), and all
+fourteen round-4 fixes read as fixed.
 
 Read the gap, not the raw score. Sol scored the same reference images half
 a point lower in round 2 than in round 1 (Ollama, T3 Code and ChatGPT 9 to
@@ -77,6 +86,16 @@ Category scores, round 4 (Sol alone):
 | shell r4 | 8.5 | 8 | 8.5 | 8 | 8 | 7.5 | 7.5 | 7 |
 | Best ref | 9 Ollama | 8.5 five apps | 8.5 four apps | 9 Ollama | 8.5 four apps | 8.5 four apps | 8.5 Ollama, ChatGPT | 9 T3 |
 | Gap | −0.5 | −0.5 | 0 | −1 | −0.5 | −1 | −1 | −2 |
+
+Category scores, round 5 (Sol alone):
+
+| | Hier. | Type | Color | Spacing | Icons | Consist. | Out-of-box | Polish |
+|---|---|---|---|---|---|---|---|---|
+| shell r5 | 9 | 8.5 | 9 | 8.5 | 8.5 | 8 | 8.5 | 8.5 |
+| Best ref | 9.5 Ollama | 9 T3, ChatGPT, Claude | 9 Ollama, T3, ChatGPT | 9 Ollama, T3, ChatGPT | 9 T3, ChatGPT | 9 T3 | 8.5 Ollama, ChatGPT | 9 T3, ChatGPT |
+| Gap | −0.5 | −0.5 | 0 | −0.5 | −0.5 | −1 | 0 | −0.5 |
+
+At or above every reference on Sol's scale: color, out-of-box clarity.
 
 ## Round 1 decision
 
@@ -181,20 +200,35 @@ S-34 show the whole sentence (crop `rounds/r4/_g401.png`). Raw report:
 
 | Fix | What | Closes | Status |
 |---|---|---|---|
-| F35b | The composer chip uses a defined short form of the same verdict words: "16k · on GPU", "64k · system memory", "64k · not enough memory"; the full label in its tooltip; no "fits" anywhere | F35 (G4) | open |
-| F36b | The consequence line names the alternative as one: "At 32k: still runs on GPU; uses 1.9 GB more." The selected choice's own verdict stays in the panel header | F36 (G4) | open |
-| F37b | The meter reads "Context 60% used" | F37 (G4) | open |
-| F38b | Thinking off keeps the label readable, reads "Thinking off", and the switch still looks operable | F38 (G4) | open |
-| F43b | Install placeholder "Type now; it sends when setup finishes"; a message sent during setup shows in the thread as queued ("Sends when setup finishes"), distinct from a draft | F43 (G4) | open |
-| F44b | No-models first run: the button names the download ("Download and start"); during the download the headline is "Downloading your first model" and "Start chatting" opens a chat to draft in | F44 (G4) | open |
-| F53 | While an approval waits, the composer placeholder is "Describe changes to this note…" with the line "Enter requests changes · Ctrl Enter approves" | G4-02 | open |
-| F54 | First-run downloads (Ollama and the first model) get a quiet "Cancel download" with one line on what follows | G4-03 | open |
-| F55 | The picker list ends between rows, has bottom padding and a visible thin scrollbar when it overflows; a downloading row never pushes a group out of sight without that cue | G4-04 (round-4 regression) | open |
-| F56 | A stopped reply shows a quiet "Retry" beside "Stopped after 3 s" | G4-05 | open |
-| F57 | Unselected radio outlines at the secondary-icon tone | G4-06 | open |
-| F58 | Once text arrives, the caret is the only writing indicator; the status row shows before the first token and during tools | G4-07 | open |
-| F59 | The custom-model Download button looks disabled until a name is typed | G4-08 | open |
-| F60 | Reply action glyphs at 16 px with the same stroke as the other icons, in 24 px targets | G4-09 | open |
+| F35b | The composer chip uses a defined short form of the same verdict words: "16k · on GPU", "64k · system memory", "64k · not enough memory"; the full label in its tooltip; no "fits" anywhere | F35 (G4) | fixed (G5) |
+| F36b | The consequence line names the alternative as one: "At 32k: still runs on GPU; uses 1.9 GB more." The selected choice's own verdict stays in the panel header | F36 (G4) | fixed (G5) |
+| F37b | The meter reads "Context 60% used" | F37 (G4) | fixed (G5) |
+| F38b | Thinking off keeps the label readable, reads "Thinking off", and the switch still looks operable | F38 (G4) | fixed (G5) |
+| F43b | Install placeholder "Type now; it sends when setup finishes"; a message sent during setup shows in the thread as queued ("Sends when setup finishes"), distinct from a draft | F43 (G4) | fixed (G5) |
+| F44b | No-models first run: the button names the download ("Download and start"); during the download the headline is "Downloading your first model" and "Start chatting" opens a chat to draft in | F44 (G4) | fixed (G5) |
+| F53 | While an approval waits, the composer placeholder is "Describe changes to this note…" with the line "Enter requests changes · Ctrl Enter approves" | G4-02 | fixed (G5) |
+| F54 | First-run downloads (Ollama and the first model) get a quiet "Cancel download" with one line on what follows | G4-03 | fixed (G5) |
+| F55 | The picker list ends between rows, has bottom padding and a visible thin scrollbar when it overflows; a downloading row never pushes a group out of sight without that cue | G4-04 (round-4 regression) | fixed (G5) |
+| F56 | A stopped reply shows a quiet "Retry" beside "Stopped after 3 s" | G4-05 | fixed (G5) |
+| F57 | Unselected radio outlines at the secondary-icon tone | G4-06 | fixed (G5) |
+| F58 | Once text arrives, the caret is the only writing indicator; the status row shows before the first token and during tools | G4-07 | fixed (G5) |
+| F59 | The custom-model Download button looks disabled until a name is typed | G4-08 | fixed (G5) |
+| F60 | Reply action glyphs at 16 px with the same stroke as the other icons, in 24 px targets | G4-09 | fixed (G5) |
+
+## Fix list (round 5)
+
+Sol alone. All fourteen round-4 items read as fixed; six new findings
+become F61-F66, all confirmed against the full-size shots, none dismissed.
+Raw report: `rounds/r5/council/G.md`.
+
+| Fix | What | Closes | Status |
+|---|---|---|---|
+| F61 | A queued message gets a quiet "Cancel send" beside its status; the text goes back to the composer; separate from cancelling the download | G5-01 | open |
+| F62 | Each installed model in the picker gets one short purpose line from the same words as the download page; the Ollama tag moves to the row's tooltip; the estimate stays secondary and rows keep one height | G5-02 | open |
+| F63 | A "Not enough memory" row offers a quiet "Memory details" that opens the GPU panel for that model, which says how much must be freed and by what; the row stays unselectable | G5-03 | open |
+| F64 | A download in Settings shows the first-run detail: bytes, speed, time left and a named "Cancel download" instead of "34%" and an × | G5-04 | open |
+| F65 | Settings "Sources" becomes "Library"; the chat actions and the page use one name; "sources" only for the folders and files inside it | G5-05 | open |
+| F66 | The custom model field gets "Browse the Ollama library ↗", opened in the system browser | G5-06 | open |
 
 ## Gemini flub
 
