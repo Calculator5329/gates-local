@@ -11,6 +11,7 @@ import { streamTurn } from "./chat/stream.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
 import type { FitReport } from "./fit/types.ts";
+import type { ModelLoader, TurnLoad } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
@@ -70,6 +71,12 @@ export interface AppDeps {
   readonly think?: boolean;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
+  /**
+   * Settings, GPU status, catalog, downloads and preloading (built in main
+   * from settings/, fit/ and runtime/), plus the hook that pushes
+   * models.load around a turn whose model is not resident.
+   */
+  readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "beginTurn"> };
 }
 
 export interface App {
@@ -130,9 +137,12 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[]) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad) => {
     const { turnId, threadId, controller } = turn;
-    const emit = (event: WireEvent) => push("chat.event", { turnId, threadId, event });
+    const emit = (event: WireEvent) => {
+      load?.firstToken();
+      push("chat.event", { turnId, threadId, event });
+    };
     try {
       for await (const event of streamTurn({
         baseUrl,
@@ -168,6 +178,7 @@ export function createApp(deps: AppDeps): App {
       log(`turn ${turnId} failed: ${(e as Error).message}`);
       emit({ type: "error", code: "internal", message: (e as Error).message });
     } finally {
+      load?.end();
       end();
     }
   };
@@ -180,6 +191,7 @@ export function createApp(deps: AppDeps): App {
   };
 
   const handlers = {
+    ...deps.models?.handlers,
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });
@@ -229,7 +241,7 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
-        void runTurn(turn, end, baseUrl, model, numCtx, history);
+        void runTurn(turn, end, baseUrl, model, numCtx, history, deps.models?.loader?.beginTurn(model, numCtx));
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) end();

@@ -1,15 +1,41 @@
 // Where the app keeps its own files, and where Ollama keeps models.
+// Functions that differ on Windows take the platform so tests can inject it;
+// they then use path.win32 rules whatever machine the test runs on.
 import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
-/** $XDG_DATA_HOME/gates-local, default ~/.local/share/gates-local. */
-export function defaultAppDataDir(env: Env = process.env, home = os.homedir()): string {
+const pathFor = (platform: NodeJS.Platform) => (platform === "win32" ? path.win32 : path.posix);
+
+/** %LOCALAPPDATA% (falling back to <home>\AppData\Local) on Windows. */
+function localAppData(env: Env, home: string): string {
+  const local = env.LOCALAPPDATA;
+  return local && path.win32.isAbsolute(local) ? local : path.win32.join(home, "AppData", "Local");
+}
+
+/**
+ * Windows: %LOCALAPPDATA%\GatesLocal. Elsewhere $XDG_DATA_HOME/gates-local,
+ * default ~/.local/share/gates-local.
+ */
+export function defaultAppDataDir(env: Env = process.env, home = os.homedir(), platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return path.win32.join(localAppData(env, home), "GatesLocal");
   const xdg = env.XDG_DATA_HOME;
   const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(home, ".local", "share");
   return path.join(base, "gates-local");
+}
+
+export const ollamaBinaryName = (platform: NodeJS.Platform = process.platform) => (platform === "win32" ? "ollama.exe" : "ollama");
+
+/** Where the official Windows installer puts Ollama for the current user. */
+export function windowsInstalledOllama(env: Env = process.env, home = os.homedir()): string {
+  return path.win32.join(localAppData(env, home), "Programs", "Ollama", "ollama.exe");
+}
+
+/** The models folder of the app's own Ollama in `app` runtime mode, kept apart from any system install. */
+export function appModelsDir(appDataDir: string, platform: NodeJS.Platform = process.platform): string {
+  return pathFor(platform).join(appDataDir, "models");
 }
 
 export function runtimeDir(appDataDir: string): string {
@@ -106,17 +132,52 @@ export function detectModelsDir(env: Env = process.env, home = os.homedir(), sys
   return all.find((d) => d.writable && d.hasModels) ?? all.find((d) => d.writable);
 }
 
-/** First executable `ollama` on PATH, if any. */
-export function findOnPath(env: Env = process.env, name = "ollama"): string | undefined {
-  for (const dir of (env.PATH ?? "").split(path.delimiter)) {
+/**
+ * First executable `ollama` on PATH, if any. On Windows PATH is
+ * `;`-separated (and may be spelled `Path`), each PATHEXT extension is
+ * tried, and existence counts as executable.
+ */
+export function findOnPath(
+  env: Env = process.env,
+  name = "ollama",
+  platform: NodeJS.Platform = process.platform,
+  isExecutable: (file: string) => boolean = executableCheck(platform),
+): string | undefined {
+  const win = platform === "win32";
+  const p = pathFor(platform);
+  const search = (win ? (env.PATH ?? env.Path) : env.PATH) ?? "";
+  const exts = win && p.extname(name) === "" ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+  for (const dir of search.split(win ? ";" : ":")) {
     if (!dir) continue;
-    const candidate = path.join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return candidate;
-    } catch {
-      // not here
+    for (const ext of exts) {
+      const candidate = p.join(dir, name + ext.toLowerCase());
+      if (isExecutable(candidate)) return candidate;
     }
   }
   return undefined;
+}
+
+/** A regular file this user may run; on Windows, any regular file. */
+export function executableCheck(platform: NodeJS.Platform = process.platform): (file: string) => boolean {
+  return (file) => {
+    try {
+      accessSync(file, platform === "win32" ? constants.F_OK : constants.X_OK);
+      return statSync(file).isFile();
+    } catch {
+      return false;
+    }
+  };
+}
+
+/** A system Ollama binary: PATH first, then (Windows) the installer's per-user location. */
+export function findSystemOllama(
+  env: Env = process.env,
+  home = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+  isExecutable: (file: string) => boolean = executableCheck(platform),
+): string | undefined {
+  const onPath = findOnPath(env, "ollama", platform, isExecutable);
+  if (onPath || platform !== "win32") return onPath;
+  const installed = windowsInstalledOllama(env, home);
+  return isExecutable(installed) ? installed : undefined;
 }

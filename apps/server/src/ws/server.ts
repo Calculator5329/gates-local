@@ -44,6 +44,8 @@ export interface WsServerOptions {
   readonly log?: (line: string) => void;
   /** Largest inbound frame. Default 16 MiB. */
   readonly maxPayloadBytes?: number;
+  /** Called with the number of open clients after each connect and close (the GPU poll runs only while it is above 0). */
+  readonly onClientCount?: (count: number) => void;
 }
 
 export interface WsServer {
@@ -144,6 +146,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
 
   wss.on("connection", (ws: WebSocket) => {
     clients.add(ws);
+    options.onClientCount?.(clients.size);
     const ctx: HandlerContext = { clientId: nextClientId++ };
     ws.on("message", (data, isBinary) => {
       // Binary frames fail the text check in decodeRequest and are dropped with a log.
@@ -151,7 +154,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       dispatch(ws, ctx, raw).catch((e: unknown) => log(`dispatch failed: ${String(e)}`));
     });
     ws.on("error", (e) => log(`client ${ctx.clientId} error: ${e.message}`));
-    ws.on("close", () => clients.delete(ws));
+    ws.on("close", () => {
+      if (clients.delete(ws)) options.onClientCount?.(clients.size);
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -174,6 +179,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     async close() {
       for (const ws of clients) ws.terminate();
       clients.clear();
+      options.onClientCount?.(0);
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => http.close((e) => (e ? reject(e) : resolve())));
     },

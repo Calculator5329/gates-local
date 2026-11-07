@@ -12,8 +12,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
-import { createModelCatalog } from "./runtime/models.ts";
-import { createOllamaRuntime } from "./runtime/runtime.ts";
+import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 
@@ -74,18 +73,26 @@ async function main(): Promise<void> {
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 
-  const runtime = createOllamaRuntime({
-    ...(ollamaUrl ? { externalBaseUrl: ollamaUrl } : {}),
-    allowInstall: !discoverOnly,
-  });
-  const catalog = createModelCatalog(() => runtime.baseUrl());
-
   let server: WsServer | undefined;
+  let services: ModelServices;
+  try {
+    services = await createModelServices({
+      dataDir,
+      push: (channel, payload) => server?.push(channel, payload),
+      runtime: { ...(ollamaUrl ? { externalBaseUrl: ollamaUrl } : {}), ...(discoverOnly ? { allowInstall: false } : {}) },
+      log,
+    });
+  } catch (e) {
+    store.close();
+    die(`cannot open settings in ${dataDir}: ${(e as Error).message}`, 1);
+  }
+  const { runtime, catalog } = services;
   const app: App = createApp({
     store,
     runtime,
     catalog,
     push: (channel, payload) => server?.push(channel, payload),
+    models: services,
     log,
   });
 
@@ -108,9 +115,9 @@ async function main(): Promise<void> {
     await step("cancel turns", () => app.shutdown());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());
-    // Only an app-owned Ollama that still matches its record is stopped. In
-    // discover-only mode nothing was started, so nothing is stopped either.
-    if (!discoverOnly) await step("stop runtime", () => runtime.stop());
+    // Only an app-owned Ollama this process started (and that still matches
+    // its record) is stopped. In discover-only mode nothing was started.
+    await step("close models", () => services.close({ stopRuntime: !discoverOnly }));
     process.exit(0);
   };
   process.stdin.on("end", () => void shutdown("stdin closed"));
@@ -124,6 +131,7 @@ async function main(): Promise<void> {
       token,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: app.handlers,
+      onClientCount: (n) => services.gpu.clientsChanged(n),
       log: (line) => log(`ws ${line}`),
     });
   } catch (e) {

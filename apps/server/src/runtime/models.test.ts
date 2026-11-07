@@ -85,4 +85,22 @@ describe("model catalog refresh", () => {
     const catalog = createModelCatalog(() => undefined);
     expect(await catalog.refresh()).toEqual({ models: [], changed: true });
   });
+
+  it("makes at most one real /api/tags call per interval unless forced, and never reuses a failure", async () => {
+    let t = 0;
+    const catalog = createModelCatalog(() => fake.baseUrl, { minIntervalMs: 2000, now: () => t });
+    const tagCalls = () => fake.requests.filter((r) => r === "GET /api/tags").length;
+    await Promise.all([catalog.refresh(), catalog.refresh(), catalog.refresh()]);
+    t = 1999;
+    await catalog.refresh();
+    expect(tagCalls()).toBe(1);
+    await catalog.refresh({ force: true });
+    expect(tagCalls()).toBe(2);
+    t = 4000;
+    fake.rawTags = "not json";
+    await expect(catalog.refresh()).rejects.toBeInstanceOf(RuntimeResponseError);
+    fake.rawTags = undefined;
+    await catalog.refresh();
+    expect(tagCalls()).toBe(4);
+  });
 });

@@ -7,17 +7,25 @@
 // does the app start a server, from its own install, then PATH, then a fresh
 // pinned install. A non-Ollama on the system port never gets a second server
 // on that port; the app-owned server lives on its own port.
+//
+// With a runtime mode (Settings › Runtime) the order narrows:
+// - "system" uses only the Ollama on the system port and never starts one.
+// - "app" skips the system port and runs the app's own copy on its own port
+//   with its own models folder (<data dir>/models).
+// Without a mode the full order above applies.
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import type { RuntimeMode } from "@gates-local/contracts";
 import { PINNED_OLLAMA } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
-import { checkOwnership, readProc, stopOwned, writeRecord, type StopResult } from "./ownership.ts";
+import { checkOwnership, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
 import {
   type Env,
+  appModelsDir,
   defaultAppDataDir,
   detectModelsDir,
   findModelsDirs,
-  findOnPath,
+  findSystemOllama,
   installedBinary,
   ownedStateFile,
   runtimeDir,
@@ -44,8 +52,17 @@ export type RuntimeOptions = {
   /** System-service model stores to look in; default SYSTEM_MODELS_DIRS. */
   systemModelsDirs?: readonly string[];
   manifest?: InstallManifest;
-  /** Install the pinned version when no binary is found. Default true. */
+  /**
+   * Install the pinned version when no binary is found. Default true on
+   * Linux x64 only: the pinned asset is the Linux amd64 build.
+   */
   allowInstall?: boolean;
+  /** Settings' runtimeMode; undefined uses the full discovery order. */
+  mode?: RuntimeMode;
+  platform?: NodeJS.Platform;
+  arch?: string;
+  /** Runs Windows' process queries and taskkill (tests inject a fake). */
+  procRun?: SyncRunner;
 };
 
 export type OllamaRuntime = {
@@ -58,6 +75,9 @@ export type OllamaRuntime = {
   ensure(): Promise<RuntimeStatus>;
   /** Stop the app-owned server, only if it still matches its record. */
   stop(): Promise<StopResult>;
+  /** This runtime object started the app-owned server that is running now (not adopted from an earlier run). */
+  startedByThisProcess(): boolean;
+  readonly mode: RuntimeMode | undefined;
   onChange(listener: Listener<RuntimeStatus>): () => void;
   onInstallProgress(listener: Listener<InstallProgress>): () => void;
 };
@@ -82,15 +102,20 @@ function tail(file: string, chars = 2000): string {
 
 export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime {
   const env = options.env ?? process.env;
-  const appDataDir = options.appDataDir ?? defaultAppDataDir(env, options.home);
+  const platform = options.platform ?? process.platform;
+  const on: ProcPlatform = { platform, ...(options.procRun ? { run: options.procRun } : {}) };
+  const mode = options.mode;
+  const appDataDir = options.appDataDir ?? defaultAppDataDir(env, options.home, platform);
   const externalBaseUrl = options.externalBaseUrl ?? DEFAULT_EXTERNAL_BASE_URL;
   const appPort = options.appPort ?? DEFAULT_APP_PORT;
   const appBaseUrl = `http://127.0.0.1:${appPort}`;
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
   const manifest = options.manifest ?? PINNED_OLLAMA;
-  const allowInstall = options.allowInstall ?? true;
+  const allowInstall = options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64");
   const stateFile = ownedStateFile(appDataDir);
+  /** The pid this object spawned and recorded, while it runs. */
+  let startedPid: number | undefined;
 
   let current: RuntimeStatus = { state: "stopped", owner: "none", baseUrl: externalBaseUrl, detail: "not checked yet" };
   const statusListeners = new Set<Listener<RuntimeStatus>>();
@@ -109,14 +134,27 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
-    const onPath = findOnPath(env);
+    const onPath = findSystemOllama(env, options.home, platform);
     return onPath ? { path: onPath, origin: "path" } : undefined;
   }
 
   async function classify(): Promise<Classified> {
-    const ext: ProbeResult = await probe(externalBaseUrl, probeTimeoutMs);
+    // "app" mode never looks at (or reuses) the system port.
+    const ext: ProbeResult = mode === "app" ? { kind: "none" } : await probe(externalBaseUrl, probeTimeoutMs);
     if (ext.kind === "ollama") {
       return { kind: "ready", status: { state: "ready", owner: "external", baseUrl: externalBaseUrl, version: ext.version } };
+    }
+    if (mode === "system") {
+      if (ext.kind === "wrong-service") return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail } };
+      return {
+        kind: "blocked",
+        status: {
+          state: "missing",
+          owner: "none",
+          baseUrl: externalBaseUrl,
+          detail: `No Ollama answers at ${externalBaseUrl}. Start your Ollama, or choose the app's own copy in Settings › Runtime.`,
+        },
+      };
     }
     const note =
       ext.kind === "wrong-service"
@@ -125,7 +163,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (appBaseUrl !== externalBaseUrl) {
       const app = await probe(appBaseUrl, probeTimeoutMs);
       if (app.kind === "ollama") {
-        const own = checkOwnership(stateFile);
+        const own = checkOwnership(stateFile, on);
         if (own.kind === "ours" && own.record.baseUrl === appBaseUrl) {
           return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version: app.version } };
         }
@@ -168,11 +206,19 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const logFile = serveLogFile(appDataDir);
     const log = openSync(logFile, "a");
     const childEnv: Record<string, string | undefined> = { ...env, OLLAMA_HOST: `127.0.0.1:${appPort}` };
-    const models = detectModelsDir(env, options.home, options.systemModelsDirs);
+    let models: { path: string; hasModels?: boolean } | undefined;
+    if (mode === "app") {
+      // Its own models folder, so it never writes into a system install's store.
+      models = { path: appModelsDir(appDataDir, platform) };
+      mkdirSync(models.path, { recursive: true });
+    } else {
+      models = detectModelsDir(env, options.home, options.systemModelsDirs);
+    }
     if (models) childEnv.OLLAMA_MODELS = models.path;
-    const readOnly = findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
+    const readOnly =
+      mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
     let exited: string | undefined;
-    const child = spawn(binary.path, ["serve"], { detached: true, stdio: ["ignore", log, log], env: childEnv });
+    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv });
     closeSync(log);
     child.on("error", (e) => {
       exited = e.message;
@@ -185,7 +231,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const fail = (why: string) => {
       if (child.pid && exited === undefined) {
         try {
-          process.kill(-child.pid, "SIGKILL");
+          // Our own child, still running: its group on POSIX; on Windows there are no groups.
+          if (platform === "win32") child.kill();
+          else process.kill(-child.pid, "SIGKILL");
         } catch {
           // gone
         }
@@ -212,7 +260,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     }
     if (version === undefined) return fail(`Ollama (${binary.path}) did not answer on port ${appPort} within ${startTimeoutMs} ms.`);
     // The answer must come from our child, not something that grabbed the port.
-    const proc = child.pid ? readProc(child.pid) : undefined;
+    const proc = child.pid ? readProc(child.pid, on) : undefined;
     if (exited !== undefined || !proc) return fail(`Ollama (${binary.path}) ${exited ?? "vanished"} while another process answered on port ${appPort}.`);
     writeRecord(stateFile, {
       pid: proc.pid,
@@ -222,6 +270,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       binary: binary.path,
       startedAt: Date.now(),
     });
+    startedPid = proc.pid;
     const modelsNote =
       (models ? ` Models from ${models.path}.` : "") +
       (readOnly ? ` Models in ${readOnly.path} belong to another user and are not writable here, so they are not shared.` : "");
@@ -272,10 +321,17 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     discover: () => serial(async () => setStatus(statusFor(await classify()))),
     ensure: () => serial(ensureOnce),
     async stop() {
-      const r = await stopOwned(stateFile);
+      const r = await stopOwned(stateFile, undefined, on);
+      if (r.stopped || r.reason !== "no-record") startedPid = undefined;
       if (r.stopped) setStatus({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail: `Stopped the app-owned Ollama (pid ${r.pid}).` });
       return r;
     },
+    startedByThisProcess() {
+      if (startedPid === undefined) return false;
+      const own = checkOwnership(stateFile, on);
+      return own.kind === "ours" && own.record.pid === startedPid;
+    },
+    mode,
     onChange(listener) {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
