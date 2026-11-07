@@ -266,28 +266,28 @@ crops under `rounds/r6/verify/`). Raw reports: `rounds/r6/council/{C,G,M,J}.md`.
 
 | Fix | What | Closes | Status |
 |---|---|---|---|
-| F62b | "Abliterated" gets one tooltip line where it appears ("A version with its refusals removed"); the row tooltip says "4-bit · 7.6 GB on disk" instead of Q4_K_M | F62 (C6, M6) | open |
-| F65b | The download page stops reusing "library": "Any model from ollama.com" and "Browse models on ollama.com ↗" | F65 (C6) | open |
-| SW5b | One download line everywhere (full-width bar, one line under it, grey "Cancel download" at rest); one quiet-action form (text link, underlined on hover) for Remove, Memory details and Cancel, bordered buttons only for actions that open a picker or a confirm; one name "Measured on last load"; one first-run secondary link label; one book icon for Library on every surface, the cylinder only on database rows | SW5 (C6, G6, M6, J6) | open |
-| F67 | The GPU panel says which model it inspects: "If you switch to Qwen 3.8 27B" for a candidate, the model name for the loaded one; its selector reads "Estimate at" and changes nothing; the loaded model keeps its row in the bar; opened from Settings it drops its own context row | G6-01, M6-01, C6-03, C6-16, J6-01 | open |
-| F68 | The bar draws what the words say: an amber segment for the part in system memory and a dashed shortfall past the end; the legend sums to the estimate (12.0 on GPU + 2.2 system = 14.2 GB); Whisper and other-app greys a clear step apart; the lock icon becomes the words "kept loaded" | C6-02, C6-07, M6-09, J6-03, C6-18 | open |
-| F69 | Cancelled first-run states keep an exit: S-73 adds "Use an existing Ollama" (opens Settings › Runtime) beside Retry; S-74 adds "Choose another model" beside "Download and start" | M6-03, J6-02 | open |
-| F70 | Pills read off at a glance within Ethan's pick: off is outline with label and icon at the muted ink, on is filled at the primary ink; during setup a pill is unavailable (40% and a tooltip saying why), one style for all three states everywhere | M6-06, C6-04, J6-04 | open |
-| F71 | One download card: a message sent during the first model download shows the same card as first run (bytes, speed, time left, Cancel download) in the thread under the queued turn, not only "downloading 14%" in the composer; the picker's downloading row carries the same line | C6-05, C6-06, M6-04, J6-06 | open |
-| F72 | Picker: a pinned "Download a model…" footer outside the scroll; a light scrim under the picker and the + menu; the row tooltip stays inside the picker in one line ("Needs about 9.3 GB · 12.0 GB free"); the hovered row keeps its fill while the tooltip shows | G6-02, M6-02, M6-05, C6-10 | open |
-| F73 | Settings › Library: "Remove from library" with the line "Your files stay where they are"; the read-only chips go (the intro says it once); "1,284 files" and "SQLite · 3 tables" replace tool and flag wording; an "Add a file" row or a subtitle that names only what can be added | G6-03, C6-15, J6-05 | open |
-| F74 | Status words: the dot carries the state colour and the words drop to secondary ink in lists (Settings › Models, the download page); light-theme amber darkens for small text; the install pulse never drops below 0.6 opacity | C6-08, M6-12, C6-17 | open |
-| F75 | System-memory picker rows show the total first: "est. 14.6 GB at 16k · 2.6 GB from system memory" | C6-01 | open |
-| F76 | GPU panel copy: one fact per line ("Estimated 8.2 GB · 12.0 GB free", then "Measured 6.9 GB on last load"); no line ends on a separator | C6-09 | open |
-| F77 | First-run subtitle on one line: "One model is enough, and this one fits your GPU." | C6-11 | open |
-| F78 | A row that cannot be picked dims its radio too; a downloading row shows the tool row's spinner ring instead of a dashed circle | C6-12, M6-11 | open |
-| F79 | Approval card: no Approve tooltip (the hint line says it); +1 and −1 tinted with the diff's muted green and red | C6-13, M6-10 | open |
-| F80 | A 24 px fade under the thread header | C6-14 | open |
-| F81 | Tab lands on a turn's Edit and Copy actions with a 2 px ring and offset; Thought and tool disclosures take the same ring | M6-08 | open |
-| F82 | Setup links under the starter cards join the grid as one quiet row aligned to it, never a lone centred line | M6-07 | open |
-| F83 | A truncated sidebar title shows the full title and date in a tooltip | M6-13 | open |
-| F84 | Tables in replies right-align numbers with tabular figures; units go in the header; a rule between rows | M6-14 | open |
-| F85 | While the runtime switch confirm is open, the row's own "Switch…" button hides | J6-07 | open |
+| F62b | "Abliterated" gets one tooltip line where it appears ("A version with its refusals removed"); the row tooltip says "4-bit · 7.6 GB on disk" instead of Q4_K_M | F62 (C6, M6) | built (r6-fix); r7 checks |
+| F65b | The download page stops reusing "library": "Any model from ollama.com" and "Browse models on ollama.com ↗" | F65 (C6) | built (r6-fix); r7 checks |
+| SW5b | One download line everywhere (full-width bar, one line under it, grey "Cancel download" at rest); one quiet-action form (text link, underlined on hover) for Remove, Memory details and Cancel, bordered buttons only for actions that open a picker or a confirm; one name "Measured on last load"; one first-run secondary link label; one book icon for Library on every surface, the cylinder only on database rows | SW5 (C6, G6, M6, J6) | built (r6-fix); r7 checks |
+| F67 | The GPU panel says which model it inspects: "If you switch to Qwen 3.8 27B" for a candidate, the model name for the loaded one; its selector reads "Estimate at" and changes nothing; the loaded model keeps its row in the bar; opened from Settings it drops its own context row | G6-01, M6-01, C6-03, C6-16, J6-01 | built (r6-fix); r7 checks |
+| F68 | The bar draws what the words say: an amber segment for the part in system memory and a dashed shortfall past the end; the legend sums to the estimate (12.0 on GPU + 2.2 system = 14.2 GB); Whisper and other-app greys a clear step apart; the lock icon becomes the words "kept loaded" | C6-02, C6-07, M6-09, J6-03, C6-18 | built (r6-fix); r7 checks |
+| F69 | Cancelled first-run states keep an exit: S-73 adds "Use an existing Ollama" (opens Settings › Runtime) beside Retry; S-74 adds "Choose another model" beside "Download and start" | M6-03, J6-02 | built (r6-fix); r7 checks |
+| F70 | Pills read off at a glance within Ethan's pick: off is outline with label and icon at the muted ink, on is filled at the primary ink; during setup a pill is unavailable (40% and a tooltip saying why), one style for all three states everywhere | M6-06, C6-04, J6-04 | built (r6-fix); r7 checks |
+| F71 | One download card: a message sent during the first model download shows the same card as first run (bytes, speed, time left, Cancel download) in the thread under the queued turn, not only "downloading 14%" in the composer; the picker's downloading row carries the same line | C6-05, C6-06, M6-04, J6-06 | built (r6-fix); r7 checks |
+| F72 | Picker: a pinned "Download a model…" footer outside the scroll; a light scrim under the picker and the + menu; the row tooltip stays inside the picker in one line ("Needs about 9.3 GB · 12.0 GB free"); the hovered row keeps its fill while the tooltip shows | G6-02, M6-02, M6-05, C6-10 | built (r6-fix); r7 checks |
+| F73 | Settings › Library: "Remove from library" with the line "Your files stay where they are"; the read-only chips go (the intro says it once); "1,284 files" and "SQLite · 3 tables" replace tool and flag wording; an "Add a file" row or a subtitle that names only what can be added | G6-03, C6-15, J6-05 | built (r6-fix); r7 checks |
+| F74 | Status words: the dot carries the state colour and the words drop to secondary ink in lists (Settings › Models, the download page); light-theme amber darkens for small text; the install pulse never drops below 0.6 opacity | C6-08, M6-12, C6-17 | built (r6-fix); r7 checks |
+| F75 | System-memory picker rows show the total first: "est. 14.6 GB at 16k · 2.6 GB from system memory" | C6-01 | built (r6-fix); r7 checks |
+| F76 | GPU panel copy: one fact per line ("Estimated 8.2 GB · 12.0 GB free", then "Measured 6.9 GB on last load"); no line ends on a separator | C6-09 | built (r6-fix); r7 checks |
+| F77 | First-run subtitle on one line: "One model is enough, and this one fits your GPU." | C6-11 | built (r6-fix); r7 checks |
+| F78 | A row that cannot be picked dims its radio too; a downloading row shows the tool row's spinner ring instead of a dashed circle | C6-12, M6-11 | built (r6-fix); r7 checks |
+| F79 | Approval card: no Approve tooltip (the hint line says it); +1 and −1 tinted with the diff's muted green and red | C6-13, M6-10 | built (r6-fix); r7 checks |
+| F80 | A 24 px fade under the thread header | C6-14 | built (r6-fix); r7 checks |
+| F81 | Tab lands on a turn's Edit and Copy actions with a 2 px ring and offset; Thought and tool disclosures take the same ring | M6-08 | built (r6-fix); r7 checks |
+| F82 | Setup links under the starter cards join the grid as one quiet row aligned to it, never a lone centred line | M6-07 | built (r6-fix); r7 checks |
+| F83 | A truncated sidebar title shows the full title and date in a tooltip | M6-13 | built (r6-fix); r7 checks |
+| F84 | Tables in replies right-align numbers with tabular figures; units go in the header; a rule between rows | M6-14 | built (r6-fix); r7 checks |
+| F85 | While the runtime switch confirm is open, the row's own "Switch…" button hides | J6-07 | built (r6-fix); r7 checks |
 
 Dismissed: J6-08 (S-31 and S-93 both put the time, Edit and Copy on the
 bubble's own line to its left; nothing flips), J6-09 (the meter's place
@@ -297,6 +297,17 @@ S-93 is example data; the real client shows the user's own threads).
 Next: an r6-fix design lane on `shell.html` while the build lanes run;
 round 7 is Sol alone on the fixed shell; the real client's screenshots
 (`rounds/app-1`) join the council once build-web merges.
+
+r6-fix (Opus 5.5 high, Edit only) built all 22 rows and declined none, with
+three deliberate deviations recorded in `shell.md`: the quiet action keeps
+a faint underline at rest, Download stays a bordered button, and the picker
+is 500 px rather than 472. The coordinator spot-checked 18 of the 164 shots
+before the commit. Known leftovers that round 7 judges on its own: the
+whisper tooltip (S-131) and the spill-row tooltip (S-149) cover part of
+the label they explain. The coordinator also replaced two tags that do not
+exist (`qwen3.5:14b`, `qwen3.5-vl:9b`) with the runtime catalog's
+`qwen3:14b` and `qwen3-vl:8b`, then re-rendered all 164 states into
+`rounds/r7/shots`.
 
 ## Gemini flub
 
