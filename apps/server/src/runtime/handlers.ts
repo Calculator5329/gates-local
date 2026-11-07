@@ -59,10 +59,13 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
     "models.cancelPull": ({ name }) => ({ cancelled: deps.pulls.cancel(name) }),
     "models.remove": async ({ name }) => {
       const baseUrl = ready();
-      if (deps.loader.inUse(name)) {
-        throw new ModelActionError("model-in-use", `${name} is answering in a chat right now. Stop that reply or wait for it to finish, then remove the model.`);
+      // Refuses while a turn holds the model; until done(), a new turn on it refuses too.
+      const done = deps.loader.beginRemove(name);
+      try {
+        await deleteModel(baseUrl, name);
+      } finally {
+        done();
       }
-      await deleteModel(baseUrl, name);
       await deps.catalog.refresh({ force: true });
       return { name };
     },
