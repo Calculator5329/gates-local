@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,6 +73,42 @@ describe("settings store", () => {
     expect(s.loadNote).toContain("does not match the settings shape");
     expect(existsSync(`${fileIn(dir)}.bad-2026-11-07T21-04-05-123Z`)).toBe(true);
     expect(s.get().defaultNumCtx).toBe(16384);
+  });
+
+  it("an interrupted write (the rename throws) leaves the old file intact, the settings unchanged and no temp file", async () => {
+    const dir = dataDir();
+    let fail = false;
+    const s = await openSettingsStore({
+      dataDir: dir,
+      systemOllamaAnswers: async () => true,
+      now: () => NOW,
+      rename: (from, to) => {
+        if (fail) throw new Error("EIO: power cut");
+        renameSync(from, to);
+      },
+    });
+    s.update({ defaultModel: "qwen3.5:9b" });
+    const before = readFileSync(fileIn(dir), "utf8");
+    fail = true;
+    expect(() => s.update({ defaultModel: "gemma3:4b", thinking: false })).toThrow(/power cut/);
+    expect(readFileSync(fileIn(dir), "utf8")).toBe(before);
+    expect(s.get()).toMatchObject({ defaultModel: "qwen3.5:9b", thinking: true });
+    expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
+    expect((await open(dir)).get().defaultModel).toBe("qwen3.5:9b");
+  });
+
+  it("two stores on one file: the later write wins and the file stays valid JSON", async () => {
+    const dir = dataDir();
+    const a = await open(dir);
+    const b = await open(dir);
+    a.update({ defaultModel: "qwen3.5:9b", theme: "dark" });
+    b.update({ defaultModel: "gemma3:4b" });
+    const onDisk = JSON.parse(readFileSync(fileIn(dir), "utf8")) as { version: number; settings: Record<string, unknown> };
+    expect(onDisk.version).toBe(1);
+    expect(onDisk.settings).toEqual(b.get());
+    expect(onDisk.settings).toMatchObject({ defaultModel: "gemma3:4b", theme: "system" });
+    expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
+    expect((await open(dir)).get().defaultModel).toBe("gemma3:4b");
   });
 });
 

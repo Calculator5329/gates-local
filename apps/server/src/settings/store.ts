@@ -3,7 +3,7 @@
 // rename). A file that does not decode, or that a newer build wrote, is kept
 // aside as `settings.json.bad-<time>` and defaults load; the user's file is
 // never lost silently. Other modules read settings through SettingsReader.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Settings, type SettingsPatch } from "@gates-local/contracts";
 import { Result, Schema as S } from "effect";
@@ -33,6 +33,8 @@ export interface SettingsStoreOptions {
   /** First run only: true picks runtimeMode "system", false "app". */
   systemOllamaAnswers: () => Promise<boolean>;
   now?: () => number;
+  /** The atomic write's rename (tests inject one that throws). Default fs.renameSync. */
+  rename?: (from: string, to: string) => void;
 }
 
 /** Defaults for a first run. runtimeMode comes from whether a system Ollama answers. */
@@ -68,11 +70,17 @@ function readFile(file: string): Loaded {
   return { kind: "ok", settings: decoded.success };
 }
 
-function writeAtomic(file: string, settings: Settings): void {
+function writeAtomic(file: string, settings: Settings, rename: (from: string, to: string) => void = renameSync): void {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify({ version: SETTINGS_FILE_VERSION, settings }, null, 2)}\n`);
-  renameSync(tmp, file);
+  try {
+    rename(tmp, file);
+  } catch (e) {
+    // The old file is untouched; do not leave the half-done write behind.
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 /** A filename-safe UTC stamp: 2026-11-07T21-04-05-123Z. */
@@ -113,7 +121,7 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
       loadNote = `${file} ${loaded.why}; kept it as ${aside} and loaded the defaults.`;
     }
     current = defaultSettings((await options.systemOllamaAnswers()) ? "system" : "app");
-    writeAtomic(file, current);
+    writeAtomic(file, current, options.rename);
   }
 
   const listeners = new Set<SettingsListener>();
@@ -123,7 +131,7 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
     update(patch) {
       const next = applyPatch(current, patch);
       if (sameSettings(next, current)) return current;
-      writeAtomic(file, next);
+      writeAtomic(file, next, options.rename);
       const previous = current;
       current = next;
       for (const l of listeners) l(next, previous);
