@@ -45,3 +45,27 @@ is still available if he wants to compare.
 **Owner text (voice-to-text, in chat):** “None of those look exactly right.
 Like the layout is too basic and too messy and think more T 3 code-like and I
 don't know, they just don't look polished at all.”
+
+## 2026-11-07 · Black and gray with green; a council hill climb picks the polish
+
+**Decided:** the look is dark mode, black and gray, with green highlights. It
+must work out of the box: a first-time user reaches a reply from a local model
+without opening settings, and settings hold the further customization. This
+overrides the round-2 brief's default accents (T3 blue, graphite and amber)
+and its "avoid dark green" note; the generic-tells review still applies.
+Polish is decided by a design council hill climb modeled on Theo's 2026-11-03
+video: Claude Opus 5.5 and GPT-6.1 Sol score screenshots per category beside
+professional alternatives each round, an implementer fixes the findings, and
+the loop repeats until Gates Local scores at or above every reference
+(`docs/design/council-rubric.md`). Ethan's replies to round screenshots
+outrank any score.
+**Owner text (voice-to-text, in chat):** “have the council evaluate the
+overall design, professionalness, UI UX, in the same way as T3.GG did in a
+recent video… comparing it to the scores and ratings of professional
+alternatives to the app and then just autonomously iterating over and over to
+improve.” And: “I was thinking kind of dark mode, black and gray, with maybe
+some green highlights. Sleek and professional. Very easy and simple to use
+right out of the box. Connects with local models very simply and easily. And
+then you can go into settings and customize further in all the ways that
+we've discussed. But you don't necessarily have to to have it working out of
+the box.”
