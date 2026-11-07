@@ -250,12 +250,16 @@ export function App() {
   }, []);
   const isSet = view === "settings";
   const isNew = view === "new" || threadId === null;
+  // first run covers the app; what is underneath takes no focus or clicks
+  const covered = noServer || view === "firstrun";
   return (
     <>
       <Sprite />
       <div className="app" id="app">
-        <Sidebar />
-        <main className="main">
+        <div style={{ display: "contents" }} inert={covered}>
+          <Sidebar />
+        </div>
+        <main className="main" inert={covered}>
           {isSet ? null : <Header isNew={isNew} />}
           <div className="work">
             {isSet ? (

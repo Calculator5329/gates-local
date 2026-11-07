@@ -87,7 +87,10 @@ export function Banner() {
   const rt = useStore(rtOf);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
+  // first run tells the runtime story itself; the banner under it stays quiet
+  const firstRun = useStore((s) => s.view === "firstrun");
   const port = portOf(baseUrl);
+  if (firstRun) return null;
   switch (rt) {
     case "ready":
       return null;

@@ -10,6 +10,7 @@ import { describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
 import { NA, type State, fitKey, useStore } from "./store.ts";
+import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
 
 function Shell({ st, title, sub, children }: { st: ReactNode; title: string; sub: ReactNode; children?: ReactNode }) {
@@ -49,7 +50,13 @@ function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; l
   );
 }
 
-const CTX_TIP = "How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
+/** Leave first run for a new thread with the cursor in the message box. */
+function startChat(): void {
+  finishFirstRun("chat");
+  focusComposer();
+}
+
+const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
 
 /** The recommended model card: name, verdict, purpose, and a Details disclosure. */
 function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; entry?: CatalogEntry | undefined; children?: ReactNode }) {
@@ -172,7 +179,7 @@ function NoModels() {
             </button>
           </div>
         </RecCard>
-        <Cta label="Start chatting" onGo={() => finishFirstRun("chat")} />
+        <Cta label="Start chatting" onGo={startChat} />
         <p className="fr-note">You can type now; replies start when the download finishes.</p>
       </Shell>
     );
@@ -232,7 +239,7 @@ function Found() {
       sub="Gates Local picked the best model for your GPU. Switch models in any chat."
     >
       {tag !== undefined ? <RecCard tag={tag} have /> : null}
-      <Cta label="Start chatting" onGo={() => finishFirstRun("chat")} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />
+      <Cta label="Start chatting" onGo={startChat} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />
     </Shell>
   );
 }
@@ -281,7 +288,7 @@ function Waiting({ installing }: { installing: boolean }) {
     >
       {installing ? (
         <>
-          <Cta label="Start chatting" onGo={() => finishFirstRun("chat")} link="Settings" onLink={() => finishFirstRun("general")} />
+          <Cta label="Start chatting" onGo={startChat} link="Settings" onLink={() => finishFirstRun("general")} />
           <p className="fr-note">You can type now; replies start when setup finishes.</p>
         </>
       ) : null}
