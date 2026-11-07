@@ -16,6 +16,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const png = Buffer.from("iVBORw0KGgo=", "base64");
+/** This machine is 192.168.1.20 and is called mybox; the hosts file maps mybox to 127.0.1.1. */
+const NAMES: Record<string, readonly string[]> = {
+  "mybox": ["127.0.1.1"], "mybox.home.arpa": ["192.168.1.20"], "remote-comfy": ["10.0.0.5"],
+  "elsewhere": ["10.0.0.9"], "split-name": ["10.0.0.7", "192.168.1.20"],
+};
+const fakeLookup = async (name: string) => {
+  const found = NAMES[name];
+  if (!found) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${name}`), { code: "ENOTFOUND" });
+  return found;
+};
+/** A host as config() passes it: the URL parser's hostname spelling. */
+const configHostname = (h: string) => new URL(`http://${h}:8188`).hostname;
 const instances: { close(): Promise<void> }[] = [];
 afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.all(instances.splice(0).map((i) => i.close())); });
 
@@ -25,7 +37,8 @@ async function fixture(options: Partial<ImageDeps> = {}) {
   const events: ImageEvent[] = [];
   const calls: string[] = [];
   let enabled = true, answering = true, present = true, pid = 42, freeBytes = 20_000;
-  let hold = false, missingModel = false, die = false, running = false;
+  let hold = false, missingModel = false, die = false;
+  const running = new Set<string>(); // hosts whose fake ComfyUI is running a prompt; each address has its own queue
   let swapPidOnQueue = false;
   let freeAfterStart: number | undefined;
   let activeOverride: boolean | undefined;
@@ -40,6 +53,8 @@ async function fixture(options: Partial<ImageDeps> = {}) {
   instances.push({ close: async () => store.close() });
   const module = createImageModule({
     dataDir, lease, store, requiredBytes: 10_000, idleMs: 20,
+    // No test reaches real DNS or this machine's real interfaces.
+    localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
     settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}) }),
     appLoadedModels: () => ["app-chat"], ollamaUrl: () => "http://fake-ollama",
     readGpu: async () => {
@@ -72,21 +87,21 @@ async function fixture(options: Partial<ImageDeps> = {}) {
         CheckpointLoaderSimple: { input: { required: { ckpt_name: [missingModel ? [] : ["sdxl_lightning_4step.safetensors"]] } } },
         LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
       });
-      if (url.pathname === "/queue") { if (queueErrors-- > 0) throw new Error("queue temporarily unavailable"); if (swapPidOnQueue) pid = 99; return Response.json({ queue_running: running ? [[1, "p1"]] : [], queue_pending: [] }); }
+      if (url.pathname === "/queue") { if (queueErrors-- > 0) throw new Error("queue temporarily unavailable"); if (swapPidOnQueue) pid = 99; return Response.json({ queue_running: running.has(url.host) ? [[1, "p1"]] : [], queue_pending: [] }); }
       if (url.pathname === "/prompt") {
-        running = true;
+        running.add(url.host);
         const body = JSON.parse(String(init?.body));
         expect(body.prompt["3"].inputs.text).toBe("a tree");
         queueMicrotask(() => {
           socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "progress", data: { prompt_id: "p1", value: 2, max: 4 } }) }));
-          if (die) { running = false; answering = false; socket?.dispatchEvent(new Event("close")); }
-          else if (!hold) { running = false; socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })); }
+          if (die) { running.delete(url.host); answering = false; socket?.dispatchEvent(new Event("close")); }
+          else if (!hold) { running.delete(url.host); socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })); }
         });
         return Response.json({ prompt_id: "p1" });
       }
       if (url.pathname === "/history/p1") return Response.json(hold ? {} : { p1: { outputs: { "8": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
       if (url.pathname === "/view") return new Response(png);
-      if (url.pathname === "/interrupt") { if (!stuck) running = false; return Response.json({}); }
+      if (url.pathname === "/interrupt") { if (!stuck) running.delete(url.host); return Response.json({}); }
       throw new Error(`unexpected ${url.pathname}`);
     },
     push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },
@@ -335,18 +350,21 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("done"); expect(f.ollamaPosts).toEqual([]);
   });
 
-  it.each(["0.0.0.0", "127.0.0.2", "[::ffff:127.0.0.1]", "192.168.1.20", "mybox"])("runs the VRAM fit for a ComfyUI on this machine at %s", async (host) => {
-    const f = await fixture({ localAddresses: () => ["192.168.1.20", "mybox"] });
+  it.each(["0.0.0.0", "127.0.0.2", "[::ffff:127.0.0.1]", "192.168.1.20", "mybox", "localhost.", "mybox.", "[::ffff:192.168.1.20]", "mybox.home.arpa", "no-such-name"])("runs the VRAM fit for a ComfyUI on this machine at %s", async (host) => {
+    const f = await fixture();
     f.configure({ comfyUrl: `http://${host}:8188`, gpuError: true });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("nvidia-smi failed") });
     expect(f.measurements()).toBeGreaterThan(0); expect(f.calls).not.toContain("/prompt");
   });
 
-  it("names local and remote hosts", () => {
-    const own = ["192.168.1.20", "[fe80::1]", "mybox"];
-    for (const h of ["localhost", "a.localhost", "127.0.0.1", "127.9.9.9", "0.0.0.0", "[::]", "[::1]", new URL("http://[::ffff:127.0.0.1]").hostname, "192.168.1.20", "[fe80::1]", "MyBox"]) expect(isLocalHost(h, own), h).toBe(true);
-    for (const h of ["192.168.1.21", "remote-comfy", "10.0.0.5", "[2001:db8::1]", "128.0.0.1"]) expect(isLocalHost(h, own), h).toBe(false);
+  it("names local and remote hosts by address, resolving names", async () => {
+    const own = ["192.168.1.20", "fe80::1"];
+    const local = ["localhost", "a.localhost", "localhost.", "127.0.0.1", "127.9.9.9", "0.0.0.0", "[::]", "[::1]", "[::ffff:127.0.0.1]", "[::ffff:192.168.1.20]",
+      "192.168.1.20", "[fe80::1]", "MyBox", "mybox.", "mybox.home.arpa", "split-name", "no-such-name"];
+    const remote = ["192.168.1.21", "remote-comfy", "remote-comfy.", "10.0.0.5", "[::ffff:10.0.0.5]", "[2001:db8::1]", "128.0.0.1", "elsewhere"];
+    for (const h of local) expect(await isLocalHost(configHostname(h), own, fakeLookup), h).toBe(true);
+    for (const h of remote) expect(await isLocalHost(configHostname(h), own, fakeLookup), h).toBe(false);
   });
 
   it.each(["done", "error"])("leaves no job timer behind after a %s job on an external Comfy", async (end) => {
@@ -367,6 +385,35 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("earlier image from this app") });
     await f.module.stopIdle();
     expect(f.calls).toContain("stop"); expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
+  });
+
+  it("keeps the app's own stuck prompt when another address's prompt also gets stuck, so idle stop still stops the app's ComfyUI", async () => {
+    const f = await fixture(); f.configure({ answering: false, hold: true, stuck: true }); vi.useFakeTimers();
+    const first = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.some((e) => e.progress === 0.5)).toBe(true));
+    f.module.cancel(first.jobId); await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(first.jobId);
+    expect(f.calls).toContain("start");
+    f.configure({ comfyUrl: "http://remote-comfy:8188" });
+    const second = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.events.filter((e) => e.progress === 0.5)).toHaveLength(2));
+    f.module.cancel(second.jobId); await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(second.jobId);
+    expect(f.module.current().detail).toMatch(/may still be running/);
+    await f.module.stopIdle();
+    expect(f.calls).toContain("stop");
+  });
+
+  it("clears and unrefs the job timer once the image bytes are fetched, before the PNG is written", async () => {
+    const f = await fixture({ jobTimeoutMs: 600_000 }); vi.useFakeTimers();
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const original = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).writeFile;
+    let duringWrite: { timers: number; jobTimerRef: boolean | undefined } | undefined;
+    const writer = vi.spyOn(files, "writeFile").mockImplementation(async (...args) => {
+      const job = timers.mock.results[timers.mock.calls.findIndex((call) => call[1] === 600_000)]?.value as NodeJS.Timeout | undefined;
+      if (String(args[0]).endsWith(".pending")) duringWrite = { timers: vi.getTimerCount(), jobTimerRef: job?.hasRef() };
+      await original(...args);
+    });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId); writer.mockRestore();
+    expect(f.events.at(-1)?.state).toBe("done"); expect(duringWrite).toEqual({ timers: 0, jobTimerRef: false });
   });
 
   it("finishes the PNG and thread attachment when cancel arrives after fetching the bytes", async () => {

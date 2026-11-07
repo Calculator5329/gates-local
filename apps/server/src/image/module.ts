@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import dns from "node:dns/promises";
+import net from "node:net";
 import os from "node:os";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -28,8 +30,10 @@ export interface ImageDeps extends ComfyClientDeps {
   idleMs?: number;
   startupTimeoutMs?: number;
   jobTimeoutMs?: number;
-  /** This machine's own addresses and name; tests inject them. */
+  /** This machine's own interface addresses; tests inject them. */
   localAddresses?(): readonly string[];
+  /** Every address a host name resolves to; tests inject it. */
+  lookupHost?(name: string): Promise<readonly string[]>;
 }
 
 export interface ImageModule {
@@ -45,29 +49,62 @@ export interface ImageModule {
 
 const DEFAULT_URL = "http://127.0.0.1:8188";
 
-/** This machine's host name and interface addresses, written the way the URL parser writes a hostname. */
-export function localAddresses(): string[] {
-  const out = [os.hostname().toLowerCase()];
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const a of list ?? []) out.push(a.family === "IPv6" ? new URL(`http://[${a.address.split("%")[0]}]`).hostname : a.address);
+/**
+ * One spelling per IP address: lowercase, no brackets or zone, IPv6 written
+ * the way the URL parser writes it, and an IPv4-mapped IPv6 address
+ * (::ffff:a.b.c.d, which the parser writes as ::ffff:XXXX:YYYY) as plain
+ * dotted IPv4. Anything that is not an IP literal comes back lowercased.
+ */
+export function canonicalAddress(address: string): string {
+  let a = address.toLowerCase().replace(/^\[(.*)\]$/, "$1").split("%")[0]!;
+  if (net.isIPv6(a)) {
+    a = new URL(`http://[${a}]`).hostname.slice(1, -1);
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(a);
+    if (mapped) {
+      const hi = parseInt(mapped[1]!, 16), lo = parseInt(mapped[2]!, 16);
+      a = `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+    }
   }
+  return a;
+}
+
+/** This machine's interface addresses, in canonicalAddress form. */
+export function localAddresses(): string[] {
+  const out: string[] = [];
+  for (const list of Object.values(os.networkInterfaces())) for (const a of list ?? []) out.push(canonicalAddress(a.address));
   return out;
 }
 
+const lookupHost = async (name: string): Promise<readonly string[]> =>
+  (await dns.lookup(name, { all: true, verbatim: true })).map((entry) => entry.address);
+
+/** Loopback (all of 127.0.0.0/8 and ::1), the wildcard addresses, or one of this machine's interfaces. */
+const isLocalAddress = (address: string, own: readonly string[]) => {
+  const a = canonicalAddress(address);
+  return /^127(\.\d{1,3}){3}$/.test(a) || a === "::1" || a === "0.0.0.0" || a === "::" || own.map(canonicalAddress).includes(a);
+};
+
 /**
- * True when a ComfyUI at this host runs on this machine's GPU: loopback (all
- * of 127.0.0.0/8 and its IPv4-mapped IPv6 form), the wildcard address that
- * ComfyUI prints when started with --listen, and this machine's own
- * interface addresses and host name. Only then do the VRAM fit and the chat
- * unload apply.
+ * True when a ComfyUI at this host runs on this machine's GPU; only then do
+ * the VRAM fit and the chat unload apply. An IP literal is local when it is
+ * loopback, the wildcard address ComfyUI prints when started with --listen,
+ * or one of this machine's interface addresses. A name is local when any
+ * address it resolves to is local; `localhost` and `*.localhost` always are.
+ * One trailing dot is ignored. When the name cannot be resolved the answer
+ * is true: an unknown host gets the fit, never a skipped one.
  */
-export function isLocalHost(hostname: string, own: readonly string[] = localAddresses()): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost") || h === "0.0.0.0" || h === "[::]" || h === "[::1]") return true;
-  if (/^127(\.\d{1,3}){3}$/.test(h)) return true;
-  // The URL parser writes ::ffff:127.x.y.z as [::ffff:7fxx:yyzz].
-  if (/^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(h)) return true;
-  return own.includes(h);
+export async function isLocalHost(hostname: string, own: readonly string[] = localAddresses(),
+  lookup: (name: string) => Promise<readonly string[]> = lookupHost): Promise<boolean> {
+  const h = hostname.toLowerCase().replace(/\.$/, "");
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  const literal = h.replace(/^\[(.*)\]$/, "$1");
+  if (net.isIP(literal)) return isLocalAddress(literal, own);
+  try {
+    const addresses = await lookup(h);
+    return addresses.length === 0 || addresses.some((address) => isLocalAddress(address, own));
+  } catch {
+    return true;
+  }
 }
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -89,8 +126,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let activeJob: string | undefined;
-  /** Our own prompt that ignored the 30 s cancel deadline; ComfyUI may still be running it. */
-  let stuck: { baseUrl: string; promptId: string } | undefined;
+  /**
+   * Our own prompts that ignored the 30 s cancel deadline, one per ComfyUI
+   * address; ComfyUI may still be running them. `pid` is the MainPID of the
+   * app-started ComfyUI that ran it, when the address was ours. A record
+   * goes when its prompt is no longer running or its process changed.
+   */
+  const stuck = new Map<string, { promptId: string; pid?: number }>();
   const emit: Push = (channel, payload) => { try { deps.push(channel, payload); } catch { /* a disconnected client cannot strand a GPU job */ } };
   const update = (next: ImageStatus): ImageStatus => { status = next; emit("image.status", status); return status; };
   const config = () => {
@@ -98,8 +140,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     const url = new URL(settings.comfyUrl ?? DEFAULT_URL);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw imageError("image-config", "Set a ComfyUI HTTP address without credentials or query parameters in Settings.");
     const baseUrl = url.href.replace(/\/$/, "");
-    return { enabled: settings.imageGen, baseUrl, managed: baseUrl === DEFAULT_URL && settings.comfyUrl === undefined,
-      loopback: isLocalHost(url.hostname, deps.localAddresses?.() ?? localAddresses()) };
+    return { enabled: settings.imageGen, baseUrl, managed: baseUrl === DEFAULT_URL && settings.comfyUrl === undefined, hostname: url.hostname };
   };
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const clearIdle = () => { clearTimeout(idleTimer); idleTimer = undefined; };
@@ -137,7 +178,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: gpu.tenants.map((t) => `${t.label} (${t.usedBytes === undefined ? "unknown" : gib(t.usedBytes)})`).join(", ") || "unlisted GPU occupants" };
   });
   const fit = async (cfg: ReturnType<typeof config>, signal: AbortSignal) => {
-    if (!cfg.loopback) return;
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost)) return;
+    signal.throwIfAborted();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
     if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return;
@@ -238,9 +280,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
             await fit(cfg, signal);
             const comfy = await ensure(cfg.baseUrl, cfg.managed, signal);
-            if (stuck?.baseUrl === cfg.baseUrl) {
-              if ((await comfy.running(signal)).includes(stuck.promptId)) throw new Error("ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
-              stuck = undefined;
+            const earlier = stuck.get(cfg.baseUrl);
+            if (earlier) {
+              if ((await comfy.running(signal)).includes(earlier.promptId)) throw new Error("ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
+              stuck.delete(cfg.baseUrl);
             }
             await fit(cfg, signal); // startup or another GPU app may have changed the room
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
@@ -266,7 +309,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const message = timedOut && !controller.signal.aborted ? "Image exceeded its run timeout. Retry when ComfyUI is ready." : detail(error);
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
-          if (stuckPromptId) stuck = { baseUrl: cfg.baseUrl, promptId: stuckPromptId };
+          if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
           event(controller.signal.aborted ? "cancelled" : "error", { message });
           if (cancelDetail && activeJob === jobId) {
             // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
@@ -299,16 +342,19 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       await deps.lease.run("image", undefined, async () => {
         if (!owned || jobs.size > 0) return;
         const unit = await service.inspect();
+        // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
+        // the next job at this address or a stop clears it.
+        const mine = stuck.get(owned.baseUrl);
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
         // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
-        if (!await client(owned.baseUrl).idle(stuck?.baseUrl === owned.baseUrl ? stuck.promptId : undefined)) { armIdle(); return; }
+        if (!await client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined)) { armIdle(); return; }
         const latest = await service.inspect();
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
         await service.stop();
         const baseUrl = owned.baseUrl; owned = undefined;
-        if (stuck?.baseUrl === baseUrl) stuck = undefined;
+        stuck.delete(baseUrl);
         update({ state: "stopped", owner: "none", baseUrl });
       });
     },

@@ -10,11 +10,16 @@ The module reads settings through `settings()`, app-loaded chat models
 through `appLoadedModels()`, and GPU room through `readGpu()`. Production
 defaults use `fit/gpu.ts`; tests inject every runtime dependency. A custom
 ComfyUI URL is discovery-only. Windows never runs systemctl. Local GPU fit
-and chat unloading apply only to a ComfyUI on this machine: loopback
-(`127.0.0.0/8`, `::1`, `localhost`, and the IPv4-mapped IPv6 form), the
-`0.0.0.0` address ComfyUI prints when started with `--listen`, and this
-machine's own interface addresses and host name (`isLocalHost` in
-`module.ts`). Any other address skips both entirely. A healthy local
+and chat unloading apply only to a ComfyUI on this machine (`isLocalHost`
+in `module.ts`). The check compares addresses, not names: it drops a
+trailing dot, brackets and a zone id, turns an IPv4-mapped IPv6 address
+into its IPv4 form, and resolves any host name through DNS. An address is
+local when it is loopback (`127.0.0.0/8`, `::1`), the `0.0.0.0` or `::`
+that ComfyUI prints when started with `--listen`, or one of this
+machine's interface addresses. `localhost` and `*.localhost` are local
+without a lookup. A name is local when any address it resolves to is
+local, and a name that does not resolve counts as local, so the fit runs
+rather than being skipped. Every other address skips both entirely. A healthy local
 ComfyUI reporting only `cpu` devices also skips VRAM fit; the setup lane
 will add the RAM check. Other unreadable local GPU reports still refuse
 generation.
