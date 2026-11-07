@@ -15,6 +15,7 @@ never in these tables.
 | 3 | `shell.html` @ 4434f72 | 8 | 8.5 | 8 | 8.17 |
 | 4 | `shell.html` @ cd0f37a | not seated | 7.5 | not seated | 7.5 (Sol alone) |
 | 5 | `shell.html` @ 5e5037d | not seated | 8.5 | not seated | 8.5 (Sol alone) |
+| 6 | `shell.html` @ 8ec0dea | 8 | 8.5 | 8 | 8.17 |
 
 Reference apps, round 1 (mean overall of the three seats): ChatGPT desktop
 8.7, Ollama 8.7, T3 Code 8.5, Claude desktop 8.2, Jan 8.0, LM Studio 7.8,
@@ -46,6 +47,18 @@ Ollama and Claude desktop, ahead of every other local-model app. This round
 showed 41 states, including every new edge state from round 4 (queued
 message, both cancelled downloads, picker end, custom model field), and all
 fourteen round-4 fixes read as fixed.
+
+Reference apps, round 6 (mean of Opus, Sol and Muse): ChatGPT desktop 9.0,
+T3 Code 8.83, Claude desktop 8.5, Ollama 8.17, Jan 7.67, LM Studio 7.5,
+Open WebUI 6.83, Msty Studio 6.5. Gates Local 8.17, 0.83 behind ChatGPT.
+The mean equals round 3's, but the category means rose in seven of eight
+categories and held in typography; the gap grew because the seats scored
+the same reference images higher (ChatGPT 8.67 to 9.0). Per seat against
+the local-model apps: Opus puts Gates Local half a point ahead of all of
+them, Sol level with Ollama, Muse half a point behind Ollama. Sol's own
+score held at 8.5 from round 5: the first flat round under the stop rule.
+The jester scored 9, kept out. Round 6 is the first snapshot with Ethan's
+picks locked (docked GPU panel; Thinking and Image pills that grey out).
 
 Read the gap, not the raw score. Sol scored the same reference images half
 a point lower in round 2 than in round 1 (Ollama, T3 Code and ChatGPT 9 to
@@ -96,6 +109,20 @@ Category scores, round 5 (Sol alone):
 | Gap | −0.5 | −0.5 | 0 | −0.5 | −0.5 | −1 | 0 | −0.5 |
 
 At or above every reference on Sol's scale: color, out-of-box clarity.
+
+Category means, round 6 (Opus, Sol, Muse):
+
+| | Hier. | Type | Color | Spacing | Icons | Consist. | Out-of-box | Polish |
+|---|---|---|---|---|---|---|---|---|
+| shell r6 | 8.67 | 8.17 | 8.5 | 8.33 | 8.0 | 7.83 | 8.83 | 8.17 |
+| Best ref | 9.17 Ollama | 9.0 ChatGPT | 8.67 T3, ChatGPT, Claude | 9.0 ChatGPT | 8.5 T3, ChatGPT | 9.0 ChatGPT | 8.5 Ollama | 9.17 T3, ChatGPT |
+| Gap | −0.5 | −0.83 | −0.17 | −0.67 | −0.5 | −1.17 | +0.33 | −1.0 |
+
+Against round 3 (the last full panel): hierarchy +0.34, color +0.33, icons
++0.17, consistency +0.33, out-of-box +0.66, polish +0.17; typography and
+spacing level. Out-of-box clarity is above every reference on the panel
+mean. Consistency and polish are the two widest gaps, and most round-6
+findings sit there.
 
 ## Round 1 decision
 
@@ -223,12 +250,53 @@ Raw report: `rounds/r5/council/G.md`.
 
 | Fix | What | Closes | Status |
 |---|---|---|---|
-| F61 | A queued message gets a quiet "Cancel send" beside its status; the text goes back to the composer; separate from cancelling the download | G5-01 | open |
-| F62 | Each installed model in the picker gets one short purpose line from the same words as the download page; the Ollama tag moves to the row's tooltip; the estimate stays secondary and rows keep one height | G5-02 | open |
+| F61 | A queued message gets a quiet "Cancel send" beside its status; the text goes back to the composer; separate from cancelling the download | G5-01 | fixed (C6, G6, M6) |
+| F62 | Each installed model in the picker gets one short purpose line from the same words as the download page; the Ollama tag moves to the row's tooltip; the estimate stays secondary and rows keep one height | G5-02 | partly fixed (G6 fixed; C6, M6 partly: F62b) |
 | F63 | A "Not enough memory" row offers a quiet "Memory details" that opens the GPU panel for that model, which says how much must be freed and by what; the row stays unselectable | G5-03 | open |
-| F64 | A download in Settings shows the first-run detail: bytes, speed, time left and a named "Cancel download" instead of "34%" and an × | G5-04 | open |
-| F65 | Settings "Sources" becomes "Library"; the chat actions and the page use one name; "sources" only for the folders and files inside it | G5-05 | open |
-| F66 | The custom model field gets "Browse the Ollama library ↗", opened in the system browser | G5-06 | open |
+| F64 | A download in Settings shows the first-run detail: bytes, speed, time left and a named "Cancel download" instead of "34%" and an × | G5-04 | fixed (C6, G6, M6) |
+| F65 | Settings "Sources" becomes "Library"; the chat actions and the page use one name; "sources" only for the folders and files inside it | G5-05 | partly fixed (G6, M6 fixed; C6 partly: F65b) |
+| F66 | The custom model field gets "Browse the Ollama library ↗", opened in the system browser | G5-06 | fixed (C6, G6, M6) |
+
+## Fix list (round 6)
+
+Full panel. F61, F63, F64 and F66 read as fixed on every seat; F62, F65 and
+the sweep are partly fixed and get a b item each. The new findings merge
+into F67-F85; each was checked against the full-size shots (montages and
+crops under `rounds/r6/verify/`). Raw reports: `rounds/r6/council/{C,G,M,J}.md`.
+
+| Fix | What | Closes | Status |
+|---|---|---|---|
+| F62b | "Abliterated" gets one tooltip line where it appears ("A version with its refusals removed"); the row tooltip says "4-bit · 7.6 GB on disk" instead of Q4_K_M | F62 (C6, M6) | open |
+| F65b | The download page stops reusing "library": "Any model from ollama.com" and "Browse models on ollama.com ↗" | F65 (C6) | open |
+| SW5b | One download line everywhere (full-width bar, one line under it, grey "Cancel download" at rest); one quiet-action form (text link, underlined on hover) for Remove, Memory details and Cancel, bordered buttons only for actions that open a picker or a confirm; one name "Measured on last load"; one first-run secondary link label; one book icon for Library on every surface, the cylinder only on database rows | SW5 (C6, G6, M6, J6) | open |
+| F67 | The GPU panel says which model it inspects: "If you switch to Qwen 3.8 27B" for a candidate, the model name for the loaded one; its selector reads "Estimate at" and changes nothing; the loaded model keeps its row in the bar; opened from Settings it drops its own context row | G6-01, M6-01, C6-03, C6-16, J6-01 | open |
+| F68 | The bar draws what the words say: an amber segment for the part in system memory and a dashed shortfall past the end; the legend sums to the estimate (12.0 on GPU + 2.2 system = 14.2 GB); Whisper and other-app greys a clear step apart; the lock icon becomes the words "kept loaded" | C6-02, C6-07, M6-09, J6-03, C6-18 | open |
+| F69 | Cancelled first-run states keep an exit: S-73 adds "Use an existing Ollama" (opens Settings › Runtime) beside Retry; S-74 adds "Choose another model" beside "Download and start" | M6-03, J6-02 | open |
+| F70 | Pills read off at a glance within Ethan's pick: off is outline with label and icon at the muted ink, on is filled at the primary ink; during setup a pill is unavailable (40% and a tooltip saying why), one style for all three states everywhere | M6-06, C6-04, J6-04 | open |
+| F71 | One download card: a message sent during the first model download shows the same card as first run (bytes, speed, time left, Cancel download) in the thread under the queued turn, not only "downloading 14%" in the composer; the picker's downloading row carries the same line | C6-05, C6-06, M6-04, J6-06 | open |
+| F72 | Picker: a pinned "Download a model…" footer outside the scroll; a light scrim under the picker and the + menu; the row tooltip stays inside the picker in one line ("Needs about 9.3 GB · 12.0 GB free"); the hovered row keeps its fill while the tooltip shows | G6-02, M6-02, M6-05, C6-10 | open |
+| F73 | Settings › Library: "Remove from library" with the line "Your files stay where they are"; the read-only chips go (the intro says it once); "1,284 files" and "SQLite · 3 tables" replace tool and flag wording; an "Add a file" row or a subtitle that names only what can be added | G6-03, C6-15, J6-05 | open |
+| F74 | Status words: the dot carries the state colour and the words drop to secondary ink in lists (Settings › Models, the download page); light-theme amber darkens for small text; the install pulse never drops below 0.6 opacity | C6-08, M6-12, C6-17 | open |
+| F75 | System-memory picker rows show the total first: "est. 14.6 GB at 16k · 2.6 GB from system memory" | C6-01 | open |
+| F76 | GPU panel copy: one fact per line ("Estimated 8.2 GB · 12.0 GB free", then "Measured 6.9 GB on last load"); no line ends on a separator | C6-09 | open |
+| F77 | First-run subtitle on one line: "One model is enough, and this one fits your GPU." | C6-11 | open |
+| F78 | A row that cannot be picked dims its radio too; a downloading row shows the tool row's spinner ring instead of a dashed circle | C6-12, M6-11 | open |
+| F79 | Approval card: no Approve tooltip (the hint line says it); +1 and −1 tinted with the diff's muted green and red | C6-13, M6-10 | open |
+| F80 | A 24 px fade under the thread header | C6-14 | open |
+| F81 | Tab lands on a turn's Edit and Copy actions with a 2 px ring and offset; Thought and tool disclosures take the same ring | M6-08 | open |
+| F82 | Setup links under the starter cards join the grid as one quiet row aligned to it, never a lone centred line | M6-07 | open |
+| F83 | A truncated sidebar title shows the full title and date in a tooltip | M6-13 | open |
+| F84 | Tables in replies right-align numbers with tabular figures; units go in the header; a rule between rows | M6-14 | open |
+| F85 | While the runtime switch confirm is open, the row's own "Switch…" button hides | J6-07 | open |
+
+Dismissed: J6-08 (S-31 and S-93 both put the time, Edit and Copy on the
+bubble's own line to its left; nothing flips), J6-09 (the meter's place
+beside the pills is F37b, locked), J6-10 (the sidebar history in S-86 and
+S-93 is example data; the real client shows the user's own threads).
+
+Next: an r6-fix design lane on `shell.html` while the build lanes run;
+round 7 is Sol alone on the fixed shell; the real client's screenshots
+(`rounds/app-1`) join the council once build-web merges.
 
 ## Gemini flub
 
@@ -259,3 +327,17 @@ merged into F40, F43, F46, F48 and F51; its two regression claims checked):
   S-32 shows no reply action row; the row it measured against is the next
   user turn's own hover row, invisible unless hovered.
 - Called F28 fixed; Opus, Sol and Muse all call it partly fixed.
+
+Round 6 (jester scored 9, kept out; 10 findings: 7 confirmed and merged
+into F67, F68, F69, F70, F71, F73 and F85, 3 dismissed):
+
+- Said the user-turn actions flip from below the bubble (S-31) to above it
+  (S-93). Both shots put the time, Edit and Copy on the bubble's own line,
+  to its left.
+- Asked to move the context meter beside the context chip, against F37b's
+  locked placement.
+- Called the history in the sidebar during setup a first-run flaw; those
+  shots show the "Ollama gone, threads kept" state, not a fresh install.
+- Scored Gates Local 9 overall, level with ChatGPT and T3 Code, while the
+  counted seats put it 0.5 to 1 behind them.
+
