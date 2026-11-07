@@ -6,9 +6,15 @@
 //
 // Knobs (environment):
 //   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins
-//   GATES_LOCAL_OLLAMA_URL       use this Ollama as the external one
+//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
+//                                never install or start one, and never probe another port
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
+//   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
+//                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
+//   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
@@ -74,10 +80,33 @@ async function main(): Promise<void> {
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 
+  // A pinned Ollama URL is the only Ollama: its port doubles as the app port,
+  // so a wrong service there never sends the probe to the real 11435.
+  let pinned: URL | undefined;
+  if (ollamaUrl) {
+    try {
+      pinned = new URL(ollamaUrl);
+    } catch {
+      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
+    }
+  }
   const runtime = createOllamaRuntime({
-    ...(ollamaUrl ? { externalBaseUrl: ollamaUrl } : {}),
-    allowInstall: !discoverOnly,
+    ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
+    allowInstall: !discoverOnly && !pinned,
   });
+  const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
+  const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
+  const fit = {
+    ...(smiCommand
+      ? {
+          runNvidiaSmi: (args: readonly string[]) =>
+            new Promise<string>((resolve, reject) =>
+              execFile(smiCommand, [...args], { timeout: 10_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+            ),
+        }
+      : {}),
+    ...(meminfoPath ? { readMeminfo: () => readFile(meminfoPath, "utf8") } : {}),
+  };
   const catalog = createModelCatalog(() => runtime.baseUrl());
 
   let server: WsServer | undefined;
@@ -85,6 +114,7 @@ async function main(): Promise<void> {
     store,
     runtime,
     catalog,
+    fit,
     push: (channel, payload) => server?.push(channel, payload),
     log,
   });
