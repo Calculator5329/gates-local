@@ -15,6 +15,8 @@ import { createApp, type App } from "./app.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
+import { createGpuLease } from "./gpu/lease.ts";
+import { createImageModule } from "./image/module.ts";
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -87,7 +89,18 @@ async function main(): Promise<void> {
     die(`cannot open settings in ${dataDir}: ${(e as Error).message}`, 1);
   }
   const { runtime, catalog } = services;
+  const gpuLease = createGpuLease();
+  const image = createImageModule({
+    dataDir, store, lease: gpuLease,
+    push: (channel, payload) => server?.push(channel, payload),
+    settings: () => services.settings.get(),
+    appLoadedModels: () => services.loader.appLoadedModels(),
+    // The loader forgets a model the image module unloaded (keep_alive 0).
+    onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
+    ollamaUrl: () => runtime.baseUrl(),
+  });
   const app: App = createApp({
+    image,
     store,
     runtime,
     catalog,
@@ -113,6 +126,7 @@ async function main(): Promise<void> {
       }
     };
     await step("cancel turns", () => app.shutdown());
+    await step("close image module", () => image.close());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());
     // Only an app-owned Ollama this process started (and that still matches
@@ -132,6 +146,7 @@ async function main(): Promise<void> {
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: app.handlers,
       onClientCount: (n) => services.gpu.clientsChanged(n),
+      dataDir,
       log: (line) => log(`ws ${line}`),
     });
   } catch (e) {

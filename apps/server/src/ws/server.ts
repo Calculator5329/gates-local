@@ -19,6 +19,7 @@ import {
   encodeResult,
 } from "@gates-local/contracts";
 import { type WebSocket, WebSocketServer } from "ws";
+import { serveImage } from "../image/files.ts";
 
 export interface HandlerContext {
   /** Stable per connection, for handlers that track who started what. */
@@ -46,6 +47,7 @@ export interface WsServerOptions {
   readonly maxPayloadBytes?: number;
   /** Called with the number of open clients after each connect and close (the GPU poll runs only while it is above 0). */
   readonly onClientCount?: (count: number) => void;
+  readonly dataDir?: string;
 }
 
 export interface WsServer {
@@ -93,7 +95,13 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   const allowed = new Set(options.allowedOrigins);
   const handlers = options.handlers;
 
-  const http = createServer((_req, res) => {
+  const http = createServer((req, res) => {
+    if (options.dataDir && (req.url ?? "").startsWith("/files/")) {
+      const verdict = admits(req);
+      if (!verdict.ok) { res.writeHead(verdict.status).end(); return; }
+      void serveImage(req, res, options.dataDir).catch(() => { if (!res.headersSent) res.writeHead(500).end(); });
+      return;
+    }
     res.writeHead(426, { "Content-Type": "text/plain" }).end("WebSocket only\n");
   });
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 });

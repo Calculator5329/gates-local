@@ -11,7 +11,9 @@
     "lint": "oxlint --deny-warnings apps packages test",
     "test": "vitest run",
     "verify": "pnpm typecheck && pnpm lint && pnpm test",
-    "verify:runtime": "vitest run apps/server/src/settings apps/server/src/fit apps/server/src/runtime"
+    "verify:runtime": "vitest run apps/server/src/settings apps/server/src/fit apps/server/src/runtime",
+    "verify:image": "vitest run apps/server/src/image",
+    "verify:gpu": "vitest run apps/server/src/gpu"
   },
   "devDependencies": {
     "@gates-local/contracts": "workspace:*",
