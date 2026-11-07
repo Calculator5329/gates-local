@@ -7,42 +7,42 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
-- [x] Scaffold the pnpm workspace (`apps/desktop`, `apps/server`, `apps/web`,
+- [x] <!-- workspace:id=work:418c8874-a153-5afd-bc19-9d2504e5ff48 --> Scaffold the pnpm workspace (`apps/desktop`, `apps/server`, `apps/web`,
       `packages/contracts`, `packages/harness`) with `CLAUDE.md`, roadmap,
       changelog and `pnpm verify` (typecheck, lint, unit tests).
       *Accept:* `pnpm verify` exits 0 on a fresh clone and non-zero on a
       planted type error.
-- [ ] Contracts: one WebSocket, typed RPC and push channels, Effect Schema
+- [ ] <!-- workspace:id=work:2b0bbe35-2dca-5b7c-96bd-2083d97a26f1 --> Contracts: one WebSocket, typed RPC and push channels, Effect Schema
       decode at both ends.
       *Accept:* a malformed message is refused at the boundary with a named
       error; round-trip tests cover every channel.
-- [ ] Thread store: SQLite WAL, completed messages persisted, token deltas in
+- [ ] <!-- workspace:id=work:92903769-ac74-5c41-8bf8-51fcebae0efb --> Thread store: SQLite WAL, completed messages persisted, token deltas in
       memory only.
       *Accept:* kill the server mid-stream; after restart the thread has every
       completed message and no partial one.
-- [ ] Runtime discovery: reuse a healthy Ollama; start an app-owned one when
+- [ ] <!-- workspace:id=work:d33c371c-75b7-5e3a-b211-091795aba823 --> Runtime discovery: reuse a healthy Ollama; start an app-owned one when
       none answers; never adopt or stop a service the app did not start.
       *Accept:* `pnpm verify:chat` covers existing, stopped, missing and
       wrong-service-on-port with fakes; one real run finds this machine's
       Ollama.
-- [ ] Own-folder Ollama (D1): get a pinned version into the app folder, check
+- [ ] <!-- workspace:id=work:a5c05b84-f413-5c13-ba03-88fa60c68c0d --> Own-folder Ollama (D1): get a pinned version into the app folder, check
       its hash, run it without root or a package manager.
       *Accept:* with Ollama off PATH, first launch installs and runs it; a bad
       hash refuses with a usable message and leaves nothing half-installed.
-- [ ] Model list from the runtime, refreshed on focus; no settings step
+- [ ] <!-- workspace:id=work:0bc2794e-815d-528b-b157-120dd656a6a4 --> Model list from the runtime, refreshed on focus; no settings step
       before the first chat.
       *Accept:* a model pulled in a terminal appears in the picker without a
       restart.
-- [ ] Electron main supervises the server; a server crash shows a restart
+- [ ] <!-- workspace:id=work:ae4ba4f7-b4a9-5325-b094-80cb7177ef91 --> Electron main supervises the server; a server crash shows a restart
       control, not a blank window.
       *Accept:* killing the server process shows the error state; restart
       brings the thread back.
-- [ ] First turn: streamed reply with explicit per-request `num_ctx` (16k
+- [ ] <!-- workspace:id=work:70e50906-9d79-5021-b756-4fbd075cac6d --> First turn: streamed reply with explicit per-request `num_ctx` (16k
       floor) and a fit check against measured free VRAM with whisper running.
       *Accept:* a real streamed reply on this machine at 16k, whisper
       unchanged; when no model fits 16k, a refusal names the shortfall.
 
-- [ ] Visual direction: round 1 of twelve GPT-image directions, Ethan's
+- [ ] <!-- workspace:id=work:d1a8d497-afe1-5133-a6c9-a6adb0a9a891 --> Visual direction: round 1 of twelve GPT-image directions, Ethan's
       picks, round 2 of many screens per kept direction, then tokens in
       `apps/web`.
       *Accept:* Ethan names the direction; a tokens file and the restyled
@@ -50,65 +50,65 @@ never shows a whisper stop, start or restart.
 
 ## Next: slices 2 to 4
 
-- [ ] GPU lease: one app-owned heavy job at a time; chat, image, bench and
+- [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and
       dream each ask for one.
       *Accept:* `pnpm verify:gpu`: a second job waits; cancel and a crashed
       job both release the lease; whisper absent from the call log.
-- [ ] Fit and spill: measure free VRAM, then show RAM spill per model at
+- [ ] <!-- workspace:id=work:aaf84c1c-752b-57ce-8fb6-e47a57c73a0d --> Fit and spill: measure free VRAM, then show RAM spill per model at
       16k, 32k and 64k in the picker.
       *Accept:* the numbers come from a measured load on this machine; an
       oversize job is refused, never attempted.
-- [ ] ComfyUI opt-in: discover or start the local install, unload app chat,
+- [ ] <!-- workspace:id=work:1d516a86-fbdc-5de2-9546-47ae95907661 --> ComfyUI opt-in: discover or start the local install, unload app chat,
       run one image, restore chat.
       *Accept:* `pnpm verify:image` with a fake; one real image on this
       machine with progress, cancel, chat restored and whisper unchanged.
-- [ ] Image presets measured in the room left beside whisper; a smaller
+- [ ] <!-- workspace:id=work:efd92470-9e03-54a8-97a0-00dd3401270c --> Image presets measured in the room left beside whisper; a smaller
       preset or a refusal when the room is short.
-- [ ] Turn loop in `packages/harness` (D3): pi's loop shape, a length stop
+- [ ] <!-- workspace:id=work:d69f75c9-1b4a-5781-a36c-dd4bb9a21052 --> Turn loop in `packages/harness` (D3): pi's loop shape, a length stop
       fails every pending call, format-error budget, head/tail elision.
       *Accept:* `pnpm verify:tools`: a truncated call never runs; three bad
       calls in a row end the turn with a message; a 50k-character output
       reaches the model as 5k head plus 5k tail.
-- [ ] Text-call parser for models without native tools, skipping anything
+- [ ] <!-- workspace:id=work:f242d6e1-bef2-5fa0-a6e1-733289be3a9c --> Text-call parser for models without native tools, skipping anything
       inside `<think>`; input repair ("20" to 20, bash to shell).
       *Accept:* recorded transcripts from the qwen and gemma families parse;
       a call inside `<think>` never runs.
-- [ ] Four tools (`shell`, `read`, `note`, `image`).
+- [ ] <!-- workspace:id=work:9ffa91c9-4805-5ac9-8f2b-9992efb5e15f --> Four tools (`shell`, `read`, `note`, `image`).
       *Accept:* the measured tool block stays under 1,000 tokens.
-- [ ] Sandbox: bwrap with a tmpfs root, read-only `/usr`, `VACUUM INTO`
+- [ ] <!-- workspace:id=work:583d61d4-807a-5e2d-8eea-cec47bb90fce --> Sandbox: bwrap with a tmpfs root, read-only `/usr`, `VACUUM INTO`
       snapshots at `/data`, no home, no network.
       *Accept:* `WITH … DELETE`, `PRAGMA user_version=7`, a write under
       `/data`, a read of `$HOME` and a network call all fail; a SELECT
       returns rows.
-- [ ] Sources (D2): the docs library plus databases Ethan adds; snapshot
+- [ ] <!-- workspace:id=work:391f5985-8f37-5492-a375-69565838a47f --> Sources (D2): the docs library plus databases Ethan adds; snapshot
       refresh and freshness on screen.
       *Accept:* a snapshot of a live WAL database under concurrent writes is
       consistent; a fresh install connects nothing personal.
-- [ ] Context accounting: fixed prefix, a reserve for the reply and a
+- [ ] <!-- workspace:id=work:ee5ef346-5832-5383-a0fe-8db10075a8d8 --> Context accounting: fixed prefix, a reserve for the reply and a
       summary, compaction at the selected window.
       *Accept:* a 16k thread that crosses its budget compacts and continues;
       the prefix bytes are identical across turns.
 
 ## Later: slices 5 to 7
 
-- [ ] Benchmarks: speed, tools and sql suites through the real turn code,
+- [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,
       recording model digest, runtime version, profile and harness revision.
       *Accept:* `pnpm bench:local --suite speed,tools,sql` writes a result
       file; a rerun on the same digest lands within the stated noise.
-- [ ] SQL choice: 30 to 50 questions, shell sqlite against the GatesAI typed
+- [ ] <!-- workspace:id=work:84bbfddd-dd93-5f89-9c16-444881d34e11 --> SQL choice: 30 to 50 questions, shell sqlite against the GatesAI typed
       query control on the same models; keep the winner, record the numbers.
-- [ ] Day-one defaults (model, window, profile) chosen from benchmark
+- [ ] <!-- workspace:id=work:7a6885e7-578f-5634-b406-293f893e850d --> Day-one defaults (model, window, profile) chosen from benchmark
       results, never from download size.
-- [ ] Gated memory (D4): "remember" saves a note with its source quote;
+- [ ] <!-- workspace:id=work:e4178083-647c-5e0b-a70c-b85b309cc47a --> Gated memory (D4): "remember" saves a note with its source quote;
       `note` proposals wait for approval.
       *Accept:* `pnpm verify:memory`: a rejected proposal leaves notes
       unchanged; an accepted one keeps the prior version.
-- [ ] Dream pass on an idle app queue: note corrections as a proposed diff,
+- [ ] <!-- workspace:id=work:e32473bb-b357-5dec-a1ca-03723b962e62 --> Dream pass on an idle app queue: note corrections as a proposed diff,
       never a live edit.
-- [ ] Installed handoff: Linux AppImage against real Ollama and ComfyUI,
+- [ ] <!-- workspace:id=work:07422dc2-24b2-5ad2-b2f1-398afb664287 --> Installed handoff: Linux AppImage against real Ollama and ComfyUI,
       selected models ready, whisper unchanged through success and failure.
       *Accept:* `pnpm release:smoke` on this machine plus a try-it packet for
       Ethan. Packaging does not authorize a release or publication.
-- [ ] Public repository: needs Ethan's explicit go for the visibility change
+- [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
-- [ ] Finetuning: scoped once benchmarks show a gap a finetune can close.
+- [ ] <!-- workspace:id=work:fbd76a2b-2cb1-5aeb-8864-bfc67cb7bf45 --> Finetuning: scoped once benchmarks show a gap a finetune can close.
