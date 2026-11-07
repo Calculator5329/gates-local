@@ -69,3 +69,33 @@ right out of the box. Connects with local models very simply and easily. And
 then you can go into settings and customize further in all the ways that
 we've discussed. But you don't necessarily have to to have it working out of
 the box.”
+
+## 2026-11-07 · The real app end to end, on Linux, then Windows
+
+**Decided:** while the design council keeps climbing, build the real app to
+the shell design (`docs/design/shell.html`, `shell.md`): the React client in
+`apps/web`, end-to-end tests, performance budgets, seamless Ollama (find,
+load, download, switch models) and GPU management, seamless ComfyUI,
+approachable Settings, and personal databases and tool calls through the
+Library. Linux on this machine first. Then Windows on Geordi, by a delegate
+working on that machine. This lifts "Linux only in v1" in `AGENTS.md`; macOS
+stays out.
+**What Windows changes (agent calls, with a veto):** Geordi has no NVIDIA GPU
+(Intel UHD 630, 16 GB RAM), so models run on the CPU there; the GPU status
+reports `vendor: "none"`, the fit check reads system memory, and the GPU
+panel says so in plain words. Whisper does not run there. bwrap does not
+exist on Windows, so the `shell` tool is off on Windows and `read` and `sql`
+run in-process against read-only snapshots.
+**Contracts:** the coordinator added the v2 method and push table (settings,
+GPU status, catalog, downloads, Library sources, tool steps, images) before
+the lanes started, so the client and the server lanes build against one
+table. A method with no handler answers `not-implemented`.
+**Owner text (voice-to-text, in chat):** “continue on the UI/UX scores and
+council scores and like getting it up to as good as the best references. Also
+making sure we have end to end tests and performance is great and that it's
+seamless with Ollama and loading things in and managing GPU and seamless with
+comfy UI and that the settings are very approachable and easy to understand
+and configure and being able to hook into personal databases and tool calls
+and stuff.You could also make sure it's working on Linux on this computer and
+then if you have time, run a sub-agent on Jord y to get it working on that
+Windows computer so it's working for both.”

@@ -16,6 +16,21 @@ import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
 import type { Handlers } from "./ws/server.ts";
 
+/** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
+type CoreMethod =
+  | "threads.list"
+  | "threads.create"
+  | "threads.get"
+  | "threads.rename"
+  | "threads.delete"
+  | "models.list"
+  | "models.refresh"
+  | "runtime.status"
+  | "fit.check"
+  | "chat.send"
+  | "chat.cancel";
+export type AppHandlers = Pick<Handlers, CoreMethod> & Partial<Handlers>;
+
 /**
  * Codes the handlers here throw. packages/contracts lists only the
  * protocol's own codes (WireErrorCode, "Handlers may add their own codes");
@@ -58,7 +73,7 @@ export interface AppDeps {
 }
 
 export interface App {
-  readonly handlers: Handlers;
+  readonly handlers: AppHandlers;
   /** Turns streaming now (or reserved and starting). */
   activeTurns(): number;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */
@@ -227,7 +242,7 @@ export function createApp(deps: AppDeps): App {
       turn.controller.abort();
       return { cancelled: true };
     },
-  } satisfies Handlers;
+  } satisfies AppHandlers;
 
   function notReady(): AppError {
     const s = runtime.status();

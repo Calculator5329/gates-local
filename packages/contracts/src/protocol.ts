@@ -2,7 +2,24 @@
 // boundary codecs both ends use. Decode functions never throw; a message
 // that does not decode comes back as a WireError with a named code.
 import { Result, Schema as S } from "effect";
-import { ChatEvent, FitReport, Message, ModelInfo, NumCtx, RuntimeStatus, Thread } from "./shapes.ts";
+import {
+  CatalogEntry,
+  ChatEvent,
+  FitReport,
+  GpuStatus,
+  ImageEvent,
+  ImageStatus,
+  Message,
+  ModelInfo,
+  NumCtx,
+  PullProgress,
+  RuntimeStatus,
+  Settings,
+  SettingsPatch,
+  Source,
+  SourceKind,
+  Thread,
+} from "./shapes.ts";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -49,6 +66,8 @@ function encodeWith(schema: S.Top, input: unknown, code: string, where: string):
 
 const NoParams = S.Struct({});
 const ThreadRef = S.Struct({ threadId: S.String });
+const ModelRef = S.Struct({ name: S.String });
+const SourceRef = S.Struct({ id: S.String });
 
 /** One definition for both ends: each method's params and result Schema. */
 export const methods = {
@@ -62,10 +81,39 @@ export const methods = {
   "runtime.status": { params: NoParams, result: RuntimeStatus },
   "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport },
   "chat.send": {
-    params: S.Struct({ threadId: S.String, content: S.String, model: S.String, numCtx: NumCtx }),
+    params: S.Struct({
+      threadId: S.String,
+      content: S.String,
+      model: S.String,
+      numCtx: NumCtx,
+      /** Thinking for this turn; omitted means the settings default. */
+      think: S.optional(S.Boolean),
+      /** Tool calls for this turn; omitted means the settings default. */
+      tools: S.optional(S.Boolean),
+      /** The model may make an image this turn (needs image generation set up). */
+      image: S.optional(S.Boolean),
+    }),
     result: S.Struct({ turnId: S.String, userMessage: Message }),
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
+  // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
+  "settings.get": { params: NoParams, result: Settings },
+  "settings.update": { params: SettingsPatch, result: Settings },
+  "gpu.status": { params: NoParams, result: GpuStatus },
+  "models.catalog": { params: NoParams, result: S.Array(CatalogEntry) },
+  "models.pull": { params: ModelRef, result: PullProgress },
+  "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }) },
+  "models.remove": { params: ModelRef, result: ModelRef },
+  "sources.list": { params: NoParams, result: S.Array(Source) },
+  "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source },
+  "sources.remove": { params: SourceRef, result: SourceRef },
+  "sources.refresh": { params: SourceRef, result: Source },
+  "image.status": { params: NoParams, result: ImageStatus },
+  "image.generate": {
+    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String) }),
+    result: S.Struct({ jobId: S.String }),
+  },
+  "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */
@@ -74,6 +122,14 @@ export const pushes = {
   "runtime.changed": { payload: RuntimeStatus },
   "models.changed": { payload: S.Array(ModelInfo) },
   "threads.changed": { payload: ThreadRef },
+  // ---- v2 surface (2026-11-07)
+  "settings.changed": { payload: Settings },
+  "gpu.changed": { payload: GpuStatus },
+  /** One per progress step of every download, until done, error or cancelled. */
+  "models.pull": { payload: PullProgress },
+  "sources.changed": { payload: S.Array(Source) },
+  "image.status": { payload: ImageStatus },
+  "image.event": { payload: ImageEvent },
 } as const;
 
 export type Methods = typeof methods;

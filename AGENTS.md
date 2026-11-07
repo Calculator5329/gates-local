@@ -17,7 +17,8 @@ full parity is a later decision.
 ## What it does not do
 
 - No cloud, API keys, embeddings or MCP servers in v1.
-- Linux only in v1. No Windows or macOS.
+- Linux first, Windows second (Ethan, 2026-11-07; `docs/decisions.md`).
+  No macOS in v1.
 - Never stops, evicts, restarts or reconfigures whisper. Chat, images,
   benchmarks and dreaming fit around it. Other GPU holders (media-vault,
   browsers) are occupants the fit check measures, never processes the app
