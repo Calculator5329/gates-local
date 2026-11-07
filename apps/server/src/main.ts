@@ -16,6 +16,8 @@ import { createModelCatalog } from "./runtime/models.ts";
 import { createOllamaRuntime } from "./runtime/runtime.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
+import { createGpuLease } from "./gpu/lease.ts";
+import { createImageModule } from "./image/module.ts";
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -81,7 +83,17 @@ async function main(): Promise<void> {
   const catalog = createModelCatalog(() => runtime.baseUrl());
 
   let server: WsServer | undefined;
+  const gpuLease = createGpuLease();
+  const image = createImageModule({
+    dataDir, store, lease: gpuLease,
+    push: (channel, payload) => server?.push(channel, payload),
+    // Merge seams: settings/runtime lanes supply the live settings and owned model list.
+    settings: () => ({ imageGen: false }),
+    appLoadedModels: () => [],
+    ollamaUrl: () => runtime.baseUrl(),
+  });
   const app: App = createApp({
+    image,
     store,
     runtime,
     catalog,
@@ -106,6 +118,7 @@ async function main(): Promise<void> {
       }
     };
     await step("cancel turns", () => app.shutdown());
+    await step("close image module", () => image.close());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());
     // Only an app-owned Ollama that still matches its record is stopped. In
@@ -124,6 +137,7 @@ async function main(): Promise<void> {
       token,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: app.handlers,
+      dataDir,
       log: (line) => log(`ws ${line}`),
     });
   } catch (e) {

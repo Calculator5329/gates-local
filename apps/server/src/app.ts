@@ -15,6 +15,8 @@ import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
 import type { Handlers } from "./ws/server.ts";
+import { createImageHandlers } from "./image/handlers.ts";
+import type { ImageModule } from "./image/module.ts";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -70,6 +72,7 @@ export interface AppDeps {
   readonly think?: boolean;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
+  readonly image?: ImageModule;
 }
 
 export interface App {
@@ -180,6 +183,7 @@ export function createApp(deps: AppDeps): App {
   };
 
   const handlers = {
+    ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });
