@@ -25,6 +25,12 @@
   sleek, simple out of the box; two T3 Code-shaped HTML harnesses carry
   that palette, and a council hill climb (`docs/design/council-rubric.md`)
   scores them against nine professional apps.
+- Design council rounds 1 and 2 (b881380, 8f509f3, 3d60c2c, 7a4e750):
+  round 1 seated Opus, Sol and Muse plus a jester; B won two seats to one
+  and became `docs/design/shell.html` with 26 fixes, a first-run screen and
+  a Settings screen. Round 2 (Sol alone) scored it 8 against a best
+  reference of 8.5: 0.5 behind, from 1.5 behind on the same seat's scale.
+  F02b-F33 are open; runs are logged in `docs/evidence/2026-11.md`.
 
 ## 2026-11-07: scaffold
 
