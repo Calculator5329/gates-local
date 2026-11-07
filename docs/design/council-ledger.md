@@ -13,6 +13,7 @@ never in these tables.
 | 1 | B: `round-2-t3-faithful.html` @ 229d293 | 6 | 7.5 | 7 | 6.8 |
 | 2 | `shell.html` @ 3d60c2c | not seated | 8 | not seated | 8 (Sol alone) |
 | 3 | `shell.html` @ 4434f72 | 8 | 8.5 | 8 | 8.17 |
+| 4 | `shell.html` @ cd0f37a | not seated | 7.5 | not seated | 7.5 (Sol alone) |
 
 Reference apps, round 1 (mean overall of the three seats): ChatGPT desktop
 8.7, Ollama 8.7, T3 Code 8.5, Claude desktop 8.2, Jan 8.0, LM Studio 7.8,
@@ -27,6 +28,15 @@ ChatGPT desktop 8.67, Claude desktop 8.33, Ollama 8.17, Jan 7.83, LM Studio
 7.67, Open WebUI 6.83, Msty Studio 6.5. Gates Local 8.17: level with Ollama,
 0.5 behind the best (round 1: 1.9 behind). Opus: ahead of every local-model
 app. Each seat's best reference: Opus 8.5 vs 8, Sol 9 vs 8.5, Muse 9 vs 8.
+
+Reference apps, round 4 (Sol alone): Ollama, T3 Code, ChatGPT desktop and
+Claude desktop 8.5, LM Studio 8, Jan 8, Open WebUI 7.5, Msty Studio 6.5.
+Gates Local 7.5, 1.0 behind the best on Sol's scale (round 3: 8.5 vs 9,
+0.5 behind). Two causes: round 4 showed 34 states instead of 27 (stopped
+reply, downloads, the spill panel, light picker), and those new states drew
+most of the out-of-box and polish findings; and one of Sol's findings, its
+only blocker, is a misreading (G4-01, dismissed below). The picker clipping
+(G4-04) is a real regression from round 3.
 
 Read the gap, not the raw score. Sol scored the same reference images half
 a point lower in round 2 than in round 1 (Ollama, T3 Code and ChatGPT 9 to
@@ -59,6 +69,14 @@ Category means, round 3 (Opus, Sol, Muse):
 
 Categories where a seat put Gates Local at or above every reference: Opus,
 color; Sol, spacing and out-of-box; Muse, none.
+
+Category scores, round 4 (Sol alone):
+
+| | Hier. | Type | Color | Spacing | Icons | Consist. | Out-of-box | Polish |
+|---|---|---|---|---|---|---|---|---|
+| shell r4 | 8.5 | 8 | 8.5 | 8 | 8 | 7.5 | 7.5 | 7 |
+| Best ref | 9 Ollama | 8.5 five apps | 8.5 four apps | 9 Ollama | 8.5 four apps | 8.5 four apps | 8.5 Ollama, ChatGPT | 9 T3 |
+| Gap | −0.5 | −0.5 | 0 | −1 | −0.5 | −1 | −1 | −2 |
 
 ## Round 1 decision
 
@@ -134,25 +152,49 @@ reports: `rounds/r3/council/{C,G,M,J}.md`. Consistency (−1.33) and polish
 
 | Fix | What | Closes | Status |
 |---|---|---|---|
-| F34 | One model name: "Qwen 3.5 9B" (friendly name with size) leads on the first-run card, composer chip, picker, Settings and download rows; the tag `qwen3.5:9b` is secondary, in mono | C3-02 G3-02 J3-04 M3-13 (naming) | open |
-| F35 | One fit vocabulary: the F15 labels "Runs on GPU", "Uses system memory · slower", "Not enough memory at 16k", always dot plus label in its color; "fits" only in the composer chip; "system memory" everywhere, never "RAM"; "est." in metadata, "Estimated" in sentences; picker group labels are real headers with equal spacing; a fixed 16 px check slot on every row | C3-03 C3-11 M3-03 G3-03 (label) | open |
-| F36 | One per-chat context control (GPU panel) plus the Settings default; the picker header loses its segmented control for a caption ("Fit shown at 16k"); the F28 line visible under each control with the selected choice's consequence; Settings segments lose their micro-labels | F28 C3-04 M3-08 (control) M3-11 (labels) | open |
-| F37 | The meter says what it measures: "Context 60%" with the token tooltip, in the chip cluster, away from send | M3-02 C3-16 | open |
-| F38 | Thinking is one control: the switch alone with its label (no pill border), or a pill alone that reads "Thinking off" when off; the `think` drawer switcher keeps these two, default switch; label and bulb dim when off | F07b C3-15 | open |
-| F39 | Light theme: secondary text one step darker; sidebar background distinct from the pane; a visible selected row; user bubble #e4e4e7 or a 1 px border | M3-06 C3-22 | open |
-| F40 | Turn rhythm: reply actions 8-10 px under the reply, the rest of the gap below them; equal gaps after every turn; 24 px hit targets with tooltips; the same hover and focus row on every finished reply; metrics in one slot | C3-12 M3-07 J3-02 | open |
-| F41 | Approval: the panel's "Reply to change the note…" becomes plain hint text, so the composer is the one input; "Waiting for approval" in sentence case with an amber dot; "Ctrl Enter" spelled the same everywhere | M3-04 C3-14 C3-19 | open |
-| F42 | The runtime-wrong action says what it does ("Look on port 11435 instead" or "Start Gates Local's copy on port 11435") | M3-05 | open |
-| F43 | Install: two steps with one ETA (Ollama 1.5 GB, then Qwen 3.5 9B 6.6 GB); the composer chip reads "downloads next"; placeholder "Type now; it sends when Ollama is ready"; every composer control dims equally; starter cards inert; the sidebar percentage computed from the shown bytes | C3-01 C3-07 C3-08 M3-09 J3-05 F26 (percent) | open |
-| F44 | First run: headline "Ready to chat", the Ollama version and model count on the status line; "Start chatting" in every state, with the helper "You can type now; replies start when setup finishes."; the secondary link always 16 px after the button; "Details" disclosure without the chip icon; no dotted underline on a label that is not interactive | G3-01 C3-17 C3-18 C3-21 M3-10 M3-13 (underlines) | open |
-| F45 | Runtime settings: one status row ("Running · Ollama 0.40.4", "Started by your system · port 11434. Gates Local won't stop it."); subtitle "Gates Local finds Ollama on its own."; switch row "Switch to Gates Local's copy" / "A private copy it starts and stops" / button "Switch…", hidden while its confirm is open; confirm list full width; paths break after slashes | G3-05 C3-05 C3-20 M3-12 | open |
-| F46 | Downloads: the row button becomes a neutral progress bar with percent and ×; the picker and sidebar footer show "Downloading · 34%"; Recommended holds only GPU-fit models, the system-memory one under "Also available · uses system memory"; the Settings card becomes a "+ Download another model…" footer row in the Default model card; review shots for each state | C3-06 G3-03 M3-11 (card) J3-03 | open |
-| F47 | Starter cards only for what works now; library and image setup become quieter links beneath | G3-04 | open |
-| F48 | GPU panel: legend tones at least 25% apart, Free as an outlined "Unused" segment; "of 12.0 GB available" in Settings and first run; no duplicate "runner holds" stat; legend sums equal the header; GPU name as a subtitle | C3-09 C3-10 M3-08 (tones) J3-06 F26 (legend) | open |
-| F49 | One trust line everywhere: "Runs locally on your computer. Nothing you type leaves it." | F09b J (F09) | open |
-| F50 | Streaming: a caret at the stream head until the turn ends; one working-dot color; "Writing…" counted from the turn start, or no counter | M3-01 C3-23 | open |
-| F51 | Settings has no "Settings" top bar above the section H1 or breadcrumb | J3-01 | open |
-| F52 | Polish batch: the expanded tool card symmetric with the column; sidebar footer "Ctrl ," legible or dropped; tool output order matches the answer | C3-13 M3-14 | open |
+| F34 | One model name: "Qwen 3.5 9B" (friendly name with size) leads on the first-run card, composer chip, picker, Settings and download rows; the tag `qwen3.5:9b` is secondary, in mono | C3-02 G3-02 J3-04 M3-13 (naming) | fixed (G4) |
+| F35 | One fit vocabulary: the F15 labels "Runs on GPU", "Uses system memory · slower", "Not enough memory at 16k", always dot plus label in its color; "fits" only in the composer chip; "system memory" everywhere, never "RAM"; "est." in metadata, "Estimated" in sentences; picker group labels are real headers with equal spacing; a fixed 16 px check slot on every row | C3-03 C3-11 M3-03 G3-03 (label) | partly (G4): composer chip says "fits" and "system memory"; F35b |
+| F36 | One per-chat context control (GPU panel) plus the Settings default; the picker header loses its segmented control for a caption ("Fit shown at 16k"); the F28 line visible under each control with the selected choice's consequence; Settings segments lose their micro-labels | F28 C3-04 M3-08 (control) M3-11 (labels) | partly (G4): the 32k line reads as the selected choice; F36b |
+| F37 | The meter says what it measures: "Context 60%" with the token tooltip, in the chip cluster, away from send | M3-02 C3-16 | not fixed (G4): used or left unstated; F37b |
+| F38 | Thinking is one control: the switch alone with its label (no pill border), or a pill alone that reads "Thinking off" when off; the `think` drawer switcher keeps these two, default switch; label and bulb dim when off | F07b C3-15 | partly (G4): off dims the label like a disabled control; F38b |
+| F39 | Light theme: secondary text one step darker; sidebar background distinct from the pane; a visible selected row; user bubble #e4e4e7 or a 1 px border | M3-06 C3-22 | fixed (G4) |
+| F40 | Turn rhythm: reply actions 8-10 px under the reply, the rest of the gap below them; equal gaps after every turn; 24 px hit targets with tooltips; the same hover and focus row on every finished reply; metrics in one slot | C3-12 M3-07 J3-02 | fixed (G4) |
+| F41 | Approval: the panel's "Reply to change the note…" becomes plain hint text, so the composer is the one input; "Waiting for approval" in sentence case with an amber dot; "Ctrl Enter" spelled the same everywhere | M3-04 C3-14 C3-19 | fixed (G4) |
+| F42 | The runtime-wrong action says what it does ("Look on port 11435 instead" or "Start Gates Local's copy on port 11435") | M3-05 | fixed (G4) |
+| F43 | Install: two steps with one ETA (Ollama 1.5 GB, then Qwen 3.5 9B 6.6 GB); the composer chip reads "downloads next"; placeholder "Type now; it sends when Ollama is ready"; every composer control dims equally; starter cards inert; the sidebar percentage computed from the shown bytes | C3-01 C3-07 C3-08 M3-09 J3-05 F26 (percent) | partly (G4): placeholder names Ollama though the model downloads after; F43b |
+| F44 | First run: headline "Ready to chat", the Ollama version and model count on the status line; "Start chatting" in every state, with the helper "You can type now; replies start when setup finishes."; the secondary link always 16 px after the button; "Details" disclosure without the chip icon; no dotted underline on a label that is not interactive | G3-01 C3-17 C3-18 C3-21 M3-10 M3-13 (underlines) | partly (G4): "Start chatting" starts a 6.6 GB download; F44b |
+| F45 | Runtime settings: one status row ("Running · Ollama 0.40.4", "Started by your system · port 11434. Gates Local won't stop it."); subtitle "Gates Local finds Ollama on its own."; switch row "Switch to Gates Local's copy" / "A private copy it starts and stops" / button "Switch…", hidden while its confirm is open; confirm list full width; paths break after slashes | G3-05 C3-05 C3-20 M3-12 | fixed (G4) |
+| F46 | Downloads: the row button becomes a neutral progress bar with percent and ×; the picker and sidebar footer show "Downloading · 34%"; Recommended holds only GPU-fit models, the system-memory one under "Also available · uses system memory"; the Settings card becomes a "+ Download another model…" footer row in the Default model card; review shots for each state | C3-06 G3-03 M3-11 (card) J3-03 | fixed (G4) |
+| F47 | Starter cards only for what works now; library and image setup become quieter links beneath | G3-04 | fixed (G4) |
+| F48 | GPU panel: legend tones at least 25% apart, Free as an outlined "Unused" segment; "of 12.0 GB available" in Settings and first run; no duplicate "runner holds" stat; legend sums equal the header; GPU name as a subtitle | C3-09 C3-10 M3-08 (tones) J3-06 F26 (legend) | fixed (G4) |
+| F49 | One trust line everywhere: "Runs locally on your computer. Nothing you type leaves it." | F09b J (F09) | fixed (G4) |
+| F50 | Streaming: a caret at the stream head until the turn ends; one working-dot color; "Writing…" counted from the turn start, or no counter | M3-01 C3-23 | fixed in the still (G4) |
+| F51 | Settings has no "Settings" top bar above the section H1 or breadcrumb | J3-01 | fixed (G4) |
+| F52 | Polish batch: the expanded tool card symmetric with the column; sidebar footer "Ctrl ," legible or dropped; tool output order matches the answer | C3-13 M3-14 | fixed (G4) |
+
+## Fix list (round 4)
+
+Sol alone. Six partly fixed items carry over as F35b-F44b; eight new
+findings become F53-F60. G4-01 is dismissed: at full resolution S-19 and
+S-34 show the whole sentence (crop `rounds/r4/_g401.png`). Raw report:
+`rounds/r4/council/G.md`.
+
+| Fix | What | Closes | Status |
+|---|---|---|---|
+| F35b | The composer chip uses a defined short form of the same verdict words: "16k · on GPU", "64k · system memory", "64k · not enough memory"; the full label in its tooltip; no "fits" anywhere | F35 (G4) | open |
+| F36b | The consequence line names the alternative as one: "At 32k: still runs on GPU; uses 1.9 GB more." The selected choice's own verdict stays in the panel header | F36 (G4) | open |
+| F37b | The meter reads "Context 60% used" | F37 (G4) | open |
+| F38b | Thinking off keeps the label readable, reads "Thinking off", and the switch still looks operable | F38 (G4) | open |
+| F43b | Install placeholder "Type now; it sends when setup finishes"; a message sent during setup shows in the thread as queued ("Sends when setup finishes"), distinct from a draft | F43 (G4) | open |
+| F44b | No-models first run: the button names the download ("Download and start"); during the download the headline is "Downloading your first model" and "Start chatting" opens a chat to draft in | F44 (G4) | open |
+| F53 | While an approval waits, the composer placeholder is "Describe changes to this note…" with the line "Enter requests changes · Ctrl Enter approves" | G4-02 | open |
+| F54 | First-run downloads (Ollama and the first model) get a quiet "Cancel download" with one line on what follows | G4-03 | open |
+| F55 | The picker list ends between rows, has bottom padding and a visible thin scrollbar when it overflows; a downloading row never pushes a group out of sight without that cue | G4-04 (round-4 regression) | open |
+| F56 | A stopped reply shows a quiet "Retry" beside "Stopped after 3 s" | G4-05 | open |
+| F57 | Unselected radio outlines at the secondary-icon tone | G4-06 | open |
+| F58 | Once text arrives, the caret is the only writing indicator; the status row shows before the first token and during tools | G4-07 | open |
+| F59 | The custom-model Download button looks disabled until a name is typed | G4-08 | open |
+| F60 | Reply action glyphs at 16 px with the same stroke as the other icons, in 24 px targets | G4-09 | open |
 
 ## Gemini flub
 
