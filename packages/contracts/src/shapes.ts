@@ -262,3 +262,63 @@ export const ImageEvent = S.Struct({
   message: S.optional(S.String),
 });
 export type ImageEvent = typeof ImageEvent.Type;
+
+// ---------------------------------------------------------------- setup
+
+/** What `setup.probe` reads about this machine before it plans models. */
+export const SetupProbe = S.Struct({
+  os: S.Struct({ platform: S.String, release: S.String, arch: S.String }),
+  cpu: S.Struct({ model: S.String, threads: PositiveInt }),
+  memory: S.Struct({ totalBytes: Count, availableBytes: Count }),
+  /** The same reading Settings' GPU panel shows; vendor "none" on a machine with no NVIDIA GPU. */
+  gpu: GpuStatus,
+  /** Free bytes on the disk that holds the app data folder. */
+  diskFreeBytes: Count,
+  ollama: S.NullOr(
+    S.Struct({ baseUrl: S.String, version: S.String, owner: RuntimeOwner, models: S.Array(S.String) }),
+  ),
+  comfy: S.NullOr(
+    S.Struct({
+      baseUrl: S.String,
+      owner: RuntimeOwner,
+      /** Where image weights go; unset when the probe could not find the install folder. */
+      modelsDir: S.optional(S.String),
+      devices: S.Array(
+        S.Struct({
+          name: S.String,
+          type: S.String,
+          vramTotalBytes: S.optional(Count),
+          vramFreeBytes: S.optional(Count),
+        }),
+      ),
+    }),
+  ),
+  probedAt: Millis,
+});
+export type SetupProbe = typeof SetupProbe.Type;
+
+/** One file the plan needs; `installed` means it is already on this machine. */
+export const SetupDownload = S.Struct({ what: S.String, bytes: Count, source: S.String, installed: S.Boolean });
+export type SetupDownload = typeof SetupDownload.Type;
+
+/** The models `setup.plan` picks for this machine, and what they cost to get. */
+export const SetupPlan = S.Struct({
+  text: S.Struct({
+    tier: S.String,
+    model: S.String,
+    numCtx: ContextSize,
+    /** Settings.thinking; true only for a model whose /api/show lists "thinking". */
+    think: S.Boolean,
+    reason: S.String,
+  }),
+  image: S.Struct({
+    tier: S.NullOr(S.String),
+    model: S.NullOr(S.String),
+    enabled: S.Boolean,
+    secondsPerImage: S.optional(S.Finite),
+    reason: S.String,
+  }),
+  downloads: S.Array(SetupDownload),
+  totalBytes: Count,
+});
+export type SetupPlan = typeof SetupPlan.Type;

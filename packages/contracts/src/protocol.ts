@@ -16,6 +16,8 @@ import {
   PullProgress,
   RuntimeStatus,
   Settings,
+  SetupPlan,
+  SetupProbe,
   SettingsPatch,
   Source,
   SourceKind,
@@ -117,6 +119,9 @@ export const methods = {
     result: S.Struct({ jobId: S.String }),
   },
   "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
+  // ---- setup (2026-11-07): read the machine, then plan models for it
+  "setup.probe": { params: NoParams, result: SetupProbe },
+  "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */
