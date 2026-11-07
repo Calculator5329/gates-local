@@ -50,7 +50,7 @@ export const Message = S.Struct({
   stats: S.optional(MessageStats),
   /** Tool calls the assistant made in this turn, in order. */
   tools: S.optional(S.Array(ToolStep)),
-  /** Server-local paths of images made in this turn. */
+  /** Images made in this turn, as paths relative to the server's data dir ("images/<jobId>.png"); the server serves them over HTTP. */
   images: S.optional(S.Array(S.String)),
 });
 export type Message = typeof Message.Type;
@@ -196,6 +196,20 @@ export const PullProgress = S.Struct({
 });
 export type PullProgress = typeof PullProgress.Type;
 
+/**
+ * A model moving into or out of memory. The server pushes "loading" when a
+ * turn or a preload starts a model that is not resident, "ready" once it
+ * answers, so the client can say "Loading into GPU memory" instead of
+ * waiting in silence.
+ */
+export const ModelLoad = S.Struct({
+  model: S.String,
+  numCtx: NumCtx,
+  state: S.Literals(["loading", "ready", "error", "unloaded"]),
+  message: S.optional(S.String),
+});
+export type ModelLoad = typeof ModelLoad.Type;
+
 /** A model the app recommends or the user can download, with the reason to pick it. */
 export const CatalogEntry = S.Struct({
   /** The Ollama tag, e.g. "qwen3.5:9b". */
@@ -243,7 +257,7 @@ export const ImageEvent = S.Struct({
   state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
   /** 0 to 1. */
   progress: S.optional(S.Finite),
-  /** Server-local path of the finished PNG. */
+  /** The finished PNG, relative to the server's data dir ("images/<jobId>.png"). */
   imagePath: S.optional(S.String),
   message: S.optional(S.String),
 });

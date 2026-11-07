@@ -12,6 +12,7 @@ import {
   Message,
   ModelInfo,
   NumCtx,
+  ModelLoad,
   PullProgress,
   RuntimeStatus,
   Settings,
@@ -104,6 +105,8 @@ export const methods = {
   "models.pull": { params: ModelRef, result: PullProgress },
   "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }) },
   "models.remove": { params: ModelRef, result: ModelRef },
+  /** Preload a model at a window after a fit check (the picker calls it on selection). */
+  "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad },
   "sources.list": { params: NoParams, result: S.Array(Source) },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source },
   "sources.remove": { params: SourceRef, result: SourceRef },
@@ -127,6 +130,7 @@ export const pushes = {
   "gpu.changed": { payload: GpuStatus },
   /** One per progress step of every download, until done, error or cancelled. */
   "models.pull": { payload: PullProgress },
+  "models.load": { payload: ModelLoad },
   "sources.changed": { payload: S.Array(Source) },
   "image.status": { payload: ImageStatus },
   "image.event": { payload: ImageEvent },

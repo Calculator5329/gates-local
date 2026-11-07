@@ -140,6 +140,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.pull": { params: { name: "qwen3.5:14b" }, result: { ...pull, state: "queued", completedBytes: 0 } },
   "models.cancelPull": { params: { name: "qwen3.5:14b" }, result: { cancelled: true } },
   "models.remove": { params: { name: "gemma3:4b" }, result: { name: "gemma3:4b" } },
+  "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
   "sources.list": { params: {}, result: [source] },
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },
@@ -160,7 +161,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     {
       turnId: "turn-1",
       threadId: "t1",
-      event: { type: "done", message: { ...assistantMessage, tools: [toolStep], images: ["/tmp/x.png"] }, stopReason: "stop" },
+      event: { type: "done", message: { ...assistantMessage, tools: [toolStep], images: ["images/j1.png"] }, stopReason: "stop" },
     },
   ],
   "runtime.changed": [runtime, { state: "missing", owner: "none", baseUrl: "http://127.0.0.1:11434", detail: "no answer" }],
@@ -169,10 +170,14 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
   "models.pull": [pull, { name: "qwen3.5:14b", state: "error", completedBytes: 0, message: "no space left" }],
+  "models.load": [
+    { model: "qwen3.5:9b", numCtx: 16384, state: "loading" },
+    { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },
+  ],
   "sources.changed": [[source], []],
   "image.status": [imageReady, { state: "off", owner: "none" }],
   "image.event": [
     { jobId: "j1", threadId: "t1", state: "running", progress: 0.4 },
-    { jobId: "j1", state: "done", imagePath: "/tmp/x.png" },
+    { jobId: "j1", state: "done", imagePath: "images/j1.png" },
   ],
 };
