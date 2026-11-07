@@ -12,6 +12,7 @@ never in these tables.
 | 1 | A: `round-2-instrument.html` @ 229d293 | 6.5 | 7 | 6 | 6.5 |
 | 1 | B: `round-2-t3-faithful.html` @ 229d293 | 6 | 7.5 | 7 | 6.8 |
 | 2 | `shell.html` @ 3d60c2c | not seated | 8 | not seated | 8 (Sol alone) |
+| 3 | `shell.html` @ 4434f72 | 8 | 8.5 | 8 | 8.17 |
 
 Reference apps, round 1 (mean overall of the three seats): ChatGPT desktop
 8.7, Ollama 8.7, T3 Code 8.5, Claude desktop 8.2, Jan 8.0, LM Studio 7.8,
@@ -20,6 +21,12 @@ Open WebUI 6.8, Msty Studio 6.5.
 Reference apps, round 2 (Sol alone, same images as round 1): Ollama 8.5,
 T3 Code 8.5, ChatGPT desktop 8.5, Claude desktop 8.5, LM Studio 8, Jan 8,
 Open WebUI 7.5, Msty Studio 7.
+
+Reference apps, round 3 (mean overall of the three seats): T3 Code 8.67,
+ChatGPT desktop 8.67, Claude desktop 8.33, Ollama 8.17, Jan 7.83, LM Studio
+7.67, Open WebUI 6.83, Msty Studio 6.5. Gates Local 8.17: level with Ollama,
+0.5 behind the best (round 1: 1.9 behind). Opus: ahead of every local-model
+app. Each seat's best reference: Opus 8.5 vs 8, Sol 9 vs 8.5, Muse 9 vs 8.
 
 Read the gap, not the raw score. Sol scored the same reference images half
 a point lower in round 2 than in round 1 (Ollama, T3 Code and ChatGPT 9 to
@@ -41,6 +48,17 @@ Category scores, round 2 (Sol alone):
 | shell r2 | 9 | 8 | 8.5 | 8.5 | 8 | 7.5 | 8 | 8 |
 | Best ref | 9.5 Ollama | 9 Claude | 8.5 five apps | 9 Ollama, T3, ChatGPT | 8.5 five apps | 9 Ollama | 8.5 ChatGPT | 9 T3, ChatGPT |
 | Gap | −0.5 | −1 | 0 | −0.5 | −0.5 | −1.5 | −0.5 | −1 |
+
+Category means, round 3 (Opus, Sol, Muse):
+
+| | Hier. | Type | Color | Spacing | Icons | Consist. | Out-of-box | Polish |
+|---|---|---|---|---|---|---|---|---|
+| shell r3 | 8.33 | 8.17 | 8.17 | 8.33 | 7.83 | 7.5 | 8.17 | 8.0 |
+| Best ref | 9.17 Ollama | 8.83 Claude | 8.67 T3 | 8.83 ChatGPT | 8.5 T3, ChatGPT | 8.83 T3 | 8.5 ChatGPT | 9.0 T3, ChatGPT |
+| Gap | −0.84 | −0.66 | −0.5 | −0.5 | −0.67 | −1.33 | −0.33 | −1.0 |
+
+Categories where a seat put Gates Local at or above every reference: Opus,
+color; Sol, spacing and out-of-box; Muse, none.
 
 ## Round 1 decision
 
@@ -83,7 +101,7 @@ seat checked it; round 3 seats all three.
 | F23 | The context meter is hidden on a new thread until the first turn | J1-05 | fixed (G2) |
 | F24 | Hover actions never reserve space in the turn flow and never collide with the next turn; one disclosure convention (chevron at the left, like "Thought for 4s"); no trailing check when the status text already says done | J1-09 J1-10 | fixed (G2) |
 | F25 | Review screenshots hide the design-drawer trigger (the `D` key still opens it); it is not product chrome | J1-13 | fixed (G2) |
-| F26 | Example data stays plausible: a model's need at 16k exceeds its size on disk; diff gutters number correctly; a loaded model's popover plots its measured size | J1-07 J1-15 | fixed (G2) |
+| F26 | Example data stays plausible: a model's need at 16k exceeds its size on disk; diff gutters number correctly; a loaded model's popover plots its measured size | J1-07 J1-15 | minor regression (C3): S-07 legend sums to 16.0 GB under a 15.9 GB header; S-09 shows 68% beside 1.0 of 1.5 GB; F43, F48 |
 
 ## Fix list (round 2)
 
@@ -93,19 +111,48 @@ Sol's seven new findings become F27-F33. Raw report:
 
 | Fix | What | Closes | Status |
 |---|---|---|---|
-| F02b | Install progress is neutral gray, not green; amber stays the pending/attention color | F02 (G2) | open |
-| F07b | Thinking shows plainly whether it is on or off (a switch or a checked state), the same convention as every other toggle | F07 (G2) | open |
-| F09b | One trust line that is true in every state: "Runs locally on your computer"; GPU or RAM is the fit chip's job | F09 (G2) | open |
-| F12b | User turns show Edit on hover; keyboard focus on a turn shows its actions; both get a review shot | F12 (G2) | open |
-| F16b | Every memory need says "estimated" (or "est.") until measured; every model size says "download" or "on disk" | F16 (G2) | open |
-| F17b | The fit details open as a panel docked beside the thread that narrows it, never over the last turn or the composer; the chip's first view stays a compact summary | F17 (G2) | open |
-| F27 | Settings → Models has "Download a model": a short recommended list with download size and fit; first-run "Choose another model" opens it directly | G2-01 | open |
-| F28 | Context gets one plain line: "How much conversation the model can keep in view. Larger windows use more memory." Visible in Settings, a tooltip in the picker and fit panel | G2-02 | open |
-| F29 | Runtime owner is a status value, not a segmented control; switching is an explicit action ("Use Gates Local's copy…") that states what happens | G2-03 | open |
-| F30 | The `+` menu has "Add to library…" with a line saying it stays for every chat; the library starter leads to setup when no source exists | G2-04 | open |
-| F31 | "Set up image generation…" in both the starter and the `+` menu while it is off; "Generate image" only after setup | G2-05 | open |
-| F32 | First-run model card leads with "Qwen 3.5 · Recommended" and "Runs on your GPU"; download size beside the button; parameters, context and memory math under "Model details" | G2-06 | open |
-| F33 | Settings has one selected row: the bottom Settings entry loses its fill (or hides) while Settings is open | G2-07 | open |
+| F02b | Install progress is neutral gray, not green; amber stays the pending/attention color | F02 (G2) | fixed (C3 G3 M3) |
+| F07b | Thinking shows plainly whether it is on or off (a switch or a checked state), the same convention as every other toggle | F07 (G2) | partly (M3; C3-15 two controls for one setting) |
+| F09b | One trust line that is true in every state: "Runs locally on your computer"; GPU or RAM is the fit chip's job | F09 (G2) | partly (C3: endings differ; S-37 contradicts itself) |
+| F12b | User turns show Edit on hover; keyboard focus on a turn shows its actions; both get a review shot | F12 (G2) | fixed (C3 G3 M3) |
+| F16b | Every memory need says "estimated" (or "est.") until measured; every model size says "download" or "on disk" | F16 (G2) | fixed (C3 G3 M3) |
+| F17b | The fit details open as a panel docked beside the thread that narrows it, never over the last turn or the composer; the chip's first view stays a compact summary | F17 (G2) | fixed (C3 G3 M3) |
+| F27 | Settings → Models has "Download a model": a short recommended list with download size and fit; first-run "Choose another model" opens it directly | G2-01 | fixed (C3 G3 M3); no download progress state, F46 |
+| F28 | Context gets one plain line: "How much conversation the model can keep in view. Larger windows use more memory." Visible in Settings, a tooltip in the picker and fit panel | G2-02 | partly (C3 G3 M3): picker and panel controls lack the visible line |
+| F29 | Runtime owner is a status value, not a segmented control; switching is an explicit action ("Use Gates Local's copy…") that states what happens | G2-03 | fixed (C3 G3 M3) |
+| F30 | The `+` menu has "Add to library…" with a line saying it stays for every chat; the library starter leads to setup when no source exists | G2-04 | fixed (C3 G3 M3) |
+| F31 | "Set up image generation…" in both the starter and the `+` menu while it is off; "Generate image" only after setup | G2-05 | fixed (C3 G3 M3) |
+| F32 | First-run model card leads with "Qwen 3.5 · Recommended" and "Runs on your GPU"; download size beside the button; parameters, context and memory math under "Model details" | G2-06 | fixed (C3 G3 M3) |
+| F33 | Settings has one selected row: the bottom Settings entry loses its fill (or hides) while Settings is open | G2-07 | fixed (C3 G3 M3) |
+
+## Fix list (round 3)
+
+The three partly fixed items fold into F36, F38 and F49. The four seats
+raised 52 findings; with duplicates merged they become F34-F52. Raw
+reports: `rounds/r3/council/{C,G,M,J}.md`. Consistency (−1.33) and polish
+(−1.0) are the widest gaps, so F34-F36 and F40 come first.
+
+| Fix | What | Closes | Status |
+|---|---|---|---|
+| F34 | One model name: "Qwen 3.5 9B" (friendly name with size) leads on the first-run card, composer chip, picker, Settings and download rows; the tag `qwen3.5:9b` is secondary, in mono | C3-02 G3-02 J3-04 M3-13 (naming) | open |
+| F35 | One fit vocabulary: the F15 labels "Runs on GPU", "Uses system memory · slower", "Not enough memory at 16k", always dot plus label in its color; "fits" only in the composer chip; "system memory" everywhere, never "RAM"; "est." in metadata, "Estimated" in sentences; picker group labels are real headers with equal spacing; a fixed 16 px check slot on every row | C3-03 C3-11 M3-03 G3-03 (label) | open |
+| F36 | One per-chat context control (GPU panel) plus the Settings default; the picker header loses its segmented control for a caption ("Fit shown at 16k"); the F28 line visible under each control with the selected choice's consequence; Settings segments lose their micro-labels | F28 C3-04 M3-08 (control) M3-11 (labels) | open |
+| F37 | The meter says what it measures: "Context 60%" with the token tooltip, in the chip cluster, away from send | M3-02 C3-16 | open |
+| F38 | Thinking is one control: the switch alone with its label (no pill border), or a pill alone that reads "Thinking off" when off; the `think` drawer switcher keeps these two, default switch; label and bulb dim when off | F07b C3-15 | open |
+| F39 | Light theme: secondary text one step darker; sidebar background distinct from the pane; a visible selected row; user bubble #e4e4e7 or a 1 px border | M3-06 C3-22 | open |
+| F40 | Turn rhythm: reply actions 8-10 px under the reply, the rest of the gap below them; equal gaps after every turn; 24 px hit targets with tooltips; the same hover and focus row on every finished reply; metrics in one slot | C3-12 M3-07 J3-02 | open |
+| F41 | Approval: the panel's "Reply to change the note…" becomes plain hint text, so the composer is the one input; "Waiting for approval" in sentence case with an amber dot; "Ctrl Enter" spelled the same everywhere | M3-04 C3-14 C3-19 | open |
+| F42 | The runtime-wrong action says what it does ("Look on port 11435 instead" or "Start Gates Local's copy on port 11435") | M3-05 | open |
+| F43 | Install: two steps with one ETA (Ollama 1.5 GB, then Qwen 3.5 9B 6.6 GB); the composer chip reads "downloads next"; placeholder "Type now; it sends when Ollama is ready"; every composer control dims equally; starter cards inert; the sidebar percentage computed from the shown bytes | C3-01 C3-07 C3-08 M3-09 J3-05 F26 (percent) | open |
+| F44 | First run: headline "Ready to chat", the Ollama version and model count on the status line; "Start chatting" in every state, with the helper "You can type now; replies start when setup finishes."; the secondary link always 16 px after the button; "Details" disclosure without the chip icon; no dotted underline on a label that is not interactive | G3-01 C3-17 C3-18 C3-21 M3-10 M3-13 (underlines) | open |
+| F45 | Runtime settings: one status row ("Running · Ollama 0.40.4", "Started by your system · port 11434. Gates Local won't stop it."); subtitle "Gates Local finds Ollama on its own."; switch row "Switch to Gates Local's copy" / "A private copy it starts and stops" / button "Switch…", hidden while its confirm is open; confirm list full width; paths break after slashes | G3-05 C3-05 C3-20 M3-12 | open |
+| F46 | Downloads: the row button becomes a neutral progress bar with percent and ×; the picker and sidebar footer show "Downloading · 34%"; Recommended holds only GPU-fit models, the system-memory one under "Also available · uses system memory"; the Settings card becomes a "+ Download another model…" footer row in the Default model card; review shots for each state | C3-06 G3-03 M3-11 (card) J3-03 | open |
+| F47 | Starter cards only for what works now; library and image setup become quieter links beneath | G3-04 | open |
+| F48 | GPU panel: legend tones at least 25% apart, Free as an outlined "Unused" segment; "of 12.0 GB available" in Settings and first run; no duplicate "runner holds" stat; legend sums equal the header; GPU name as a subtitle | C3-09 C3-10 M3-08 (tones) J3-06 F26 (legend) | open |
+| F49 | One trust line everywhere: "Runs locally on your computer. Nothing you type leaves it." | F09b J (F09) | open |
+| F50 | Streaming: a caret at the stream head until the turn ends; one working-dot color; "Writing…" counted from the turn start, or no counter | M3-01 C3-23 | open |
+| F51 | Settings has no "Settings" top bar above the section H1 or breadcrumb | J3-01 | open |
+| F52 | Polish batch: the expanded tool card symmetric with the column; sidebar footer "Ctrl ," legible or dropped; tool output order matches the answer | C3-13 M3-14 | open |
 
 ## Gemini flub
 
@@ -123,3 +170,16 @@ one is dismissed and one is not confirmed):
   B's turns have dead space (24 px of hover row reserved in flow).
 - Said B's picker search field is squeezed to about 180 px; the screenshot
   shows the full placeholder with room to spare.
+
+Round 3 (jester scored 8.5, kept out; 6 new findings, all confirmed and
+merged into F40, F43, F46, F48 and F51; its two regression claims checked):
+
+- Read the harness HTML source again, outside its brief, and cited
+  `.a-act`, opacity 0.42 and `.fpn-h gap 8px`.
+- Called F05 regressed; the gap it measured is F24's designed placement,
+  and Sol checked F05 one by one as still fixed. The real spacing issue is
+  C3-12 (F40).
+- Said S-32 shows the reply action row flush against the next user turn.
+  S-32 shows no reply action row; the row it measured against is the next
+  user turn's own hover row, invisible unless hovered.
+- Called F28 fixed; Opus, Sol and Muse all call it partly fixed.
