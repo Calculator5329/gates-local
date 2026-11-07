@@ -6,7 +6,7 @@ export interface LibraryEntry {
   snapshotPath?: string;
 }
 export interface ToolCall { name: string; input: Record<string, unknown>; }
-export interface ToolResult { output: string; summary: string; imagePath?: string; }
+export interface ToolResult { output: string; summary: string; }
 export interface ToolStep {
   callId: string;
   name: string;
@@ -26,6 +26,6 @@ export type ModelEvent =
   | { type: "complete"; content: string; calls: readonly unknown[]; stopReason: string; thinking?: string; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
 export type LoopEvent = Exclude<ModelEvent, { type: "complete" }>
   | { type: "tool"; step: ToolStep }
-  | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; images: string[]; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
+  | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
 /** `tools: false` is the final-answer request after a budget ran out: send no tool definitions. */
 export type ModelStream = (messages: readonly ModelMessage[], options?: { tools: boolean }) => AsyncIterable<ModelEvent>;

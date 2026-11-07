@@ -11,7 +11,7 @@ export function toolDefinitions(platform: NodeJS.Platform = process.platform, op
     platform === "win32"
       ? def("sql", "Read rows from a SQLite snapshot. No writes or PRAGMA statements.", { source: string, query: string, limit: number }, ["source", "query"])
       : def("shell", "Run a Linux shell command with no home, network or file locks. SQLite snapshots: sqlite3 /data/<source id>.db; files: /library/<source id>.", { command: string, timeoutMs: number }, ["command"]),
-    ...(options.image ? [def("image", "Generate an image from a text prompt.", { prompt: string }, ["prompt"])] : []),
+    ...(options.image ? [def("image", "Queue an image from a text prompt. It is made after your reply ends and appears in this chat on its own.", { prompt: string }, ["prompt"])] : []),
   ];
 }
 

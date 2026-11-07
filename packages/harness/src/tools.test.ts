@@ -30,19 +30,21 @@ describe("Library tools", () => {
     const tools = createTools({ platform: "win32", realpath, sources: [{ id: "docs", label: "Docs", path: stored, kind: "folder" }] });
     expect((await tools.execute({ name: "read", input: { path: "/library/docs/note.txt" } }, new AbortController().signal)).output).toBe("hello");
   });
-  it("offers and runs the image tool only when the turn asked for it and generation is wired", async () => {
-    const generateImage = vi.fn(async () => "images/cat.png");
+  it("offers the image tool only when the turn asked for it and generation is wired, and it queues rather than makes", async () => {
+    const queueImage = vi.fn(async () => ({ jobId: "job-7" }));
     const signal = new AbortController().signal;
-    const on = createTools({ sources: [], generateImage, image: true });
+    const on = createTools({ sources: [], queueImage, image: true });
     expect(on.definitions.map(t => t.function.name)).toContain("image");
-    expect(await on.execute({ name: "image", input: { prompt: "cat" } }, signal)).toMatchObject({ imagePath: "images/cat.png" });
-    expect(generateImage).toHaveBeenCalledWith("cat", signal);
-    generateImage.mockClear();
-    for (const off of [createTools({ sources: [], generateImage }), createTools({ sources: [], image: true })]) {
+    const result = await on.execute({ name: "image", input: { prompt: "cat" } }, signal);
+    // The model reads that the picture is not made yet, so it cannot claim it is.
+    expect(result).toEqual({ output: expect.stringMatching(/^Queued image job job-7\..*not made yet/), summary: "Queued an image" });
+    expect(queueImage).toHaveBeenCalledWith("cat", signal);
+    queueImage.mockClear();
+    for (const off of [createTools({ sources: [], queueImage }), createTools({ sources: [], image: true })]) {
       expect(off.definitions.map(t => t.function.name)).not.toContain("image");
       await expect(off.execute({ name: "image", input: { prompt: "cat" } }, signal)).rejects.toThrow(TypeError);
     }
-    expect(generateImage).not.toHaveBeenCalled();
+    expect(queueImage).not.toHaveBeenCalled();
   });
   it("stops a runaway query at its timer while the event loop keeps running", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-sql-slow-"));

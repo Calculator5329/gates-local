@@ -25,9 +25,12 @@ step's `detail` is cut to 2,000 characters for the UI.
 
 `read` is available on both platforms; Linux adds `shell`, Windows adds `sql`.
 `image` is defined and offered only when `chat.send` sets `image: true` and
-`generateImage` is wired. `note` is deliberately absent until the gated memory
-slice exists. Image generation is injected as
-`(prompt, signal) => Promise<relativePath>`.
+`queueImage` is wired. `note` is deliberately absent until the gated memory
+slice exists. The image tool is injected as
+`(prompt, signal) => Promise<{ jobId }>` and never waits for the picture: an
+image job holds the GPU alone, and the turn holds a shared GPU claim until it
+ends, so a tool that waited would wait forever. The job adds the picture to
+the thread as its own message after the reply; cancelling the turn cancels it.
 
 Sources are supplied per turn. SQLite paths point only to snapshots and are
 mounted at `/data/<id>.db`; files and folders appear at `/library/<id>`. The
@@ -77,7 +80,8 @@ No real Ollama, ComfyUI, GPU or whisper operation is in these checks. Native
 Windows execution and live Qwen/Gemma tool turns remain real-runtime checks.
 
 The settings lane should wire `createApp({ toolsEnabled: () => settings… })`.
-Explicit `chat.send.tools` overrides that default. The image lane can wire
-`generateImage`. Without those injections, the explicit per-turn tools flag
-works and image generation reports that it has not been set up. Context
+Explicit `chat.send.tools` overrides that default. `createApp({ image })`
+builds `queueImage` for each turn from the image module. Without those
+injections, the explicit per-turn tools flag works and the image tool is not
+offered. Context
 compaction remains the separate context-accounting roadmap item.

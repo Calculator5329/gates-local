@@ -48,7 +48,6 @@ export interface LoopInput {
 export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
   const messages = [...input.messages];
   const tools: ToolStep[] = [];
-  const images: string[] = [];
   // Every step's visible text, in order: the saved message is what the user saw.
   const visible: string[] = [];
   const answer = (fallback = "") => visible.join("\n\n") || fallback;
@@ -60,7 +59,7 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
   let final = false;
   let badCalls = 0;
   let thinking = "";
-  const finish = (content: string, stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content, stopReason, tools, images, ...(thinking ? { thinking } : {}) });
+  const finish = (content: string, stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content, stopReason, tools, ...(thinking ? { thinking } : {}) });
   const say = (text: string): LoopEvent => { visible.push(text); return { type: "delta", text }; };
   const observe = (name: string, output: string): ModelMessage => input.native ? { role: "tool", tool_name: name, content: output } : { role: "user", content: textToolResult(name, output) };
   for (let turn = 0; turn < (input.maxTurns ?? 24); turn++) {
@@ -134,7 +133,6 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
           input.signal.throwIfAborted();
           badCalls = 0;
           output = trimOutput(result.output);
-          if (result.imagePath) images.push(result.imagePath);
           step = { ...running, state: "done", summary: result.summary, detail: clipDetail(`${detail}\n${output}`), durationMs: Date.now() - started };
           toolOutput += output.length;
           if (toolOutput >= outputBudget) spent = "output";
@@ -175,7 +173,7 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
 
 function runningSummary(name: string): string {
   if (name === "read") return "Reading your library";
-  if (name === "image") return "Making an image";
+  if (name === "image") return "Queueing an image";
   if (name === "sql") return "Reading database rows";
   return "Searching your library";
 }

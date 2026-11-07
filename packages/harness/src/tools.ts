@@ -10,8 +10,13 @@ import type { LibraryEntry, ToolCall, ToolResult } from "./types.ts";
 export interface ToolsDeps {
   sources: readonly LibraryEntry[];
   platform?: NodeJS.Platform;
-  generateImage?: (prompt: string, signal: AbortSignal) => Promise<string>;
-  /** The turn asked for images (`chat.send` `image: true`). The image tool exists only with this and `generateImage`. */
+  /**
+   * Queues an image job and returns its id at once. The job needs the GPU alone
+   * and the turn holds a shared claim until it ends, so the tool never waits for
+   * the picture: it lands in the thread as its own message after the reply.
+   */
+  queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
+  /** The turn asked for images (`chat.send` `image: true`). The image tool exists only with this and `queueImage`. */
   image?: boolean;
   /** Tests inject a realpath; the app uses the native one from paths.ts. */
   realpath?: Realpath;
@@ -30,9 +35,9 @@ const integer = (input: Record<string, unknown>, key: string, fallback: number, 
 
 export function createTools(deps: ToolsDeps) {
   const platform = deps.platform ?? process.platform;
-  const generateImage = deps.image === true ? deps.generateImage : undefined;
+  const queueImage = deps.image === true ? deps.queueImage : undefined;
   return {
-    definitions: toolDefinitions(platform, { image: generateImage !== undefined }),
+    definitions: toolDefinitions(platform, { image: queueImage !== undefined }),
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
       signal.throwIfAborted();
       switch (call.name) {
@@ -47,11 +52,11 @@ export function createTools(deps: ToolsDeps) {
           return querySnapshot(deps.sources, call.input, signal, deps.sqlTimeoutMs);
         }
         case "image": {
-          if (!generateImage) throw new TypeError("The image tool is not on for this turn");
+          if (!queueImage) throw new TypeError("The image tool is not on for this turn");
           const prompt = text(call.input, "prompt");
-          const imagePath = await generateImage(prompt, signal);
+          const { jobId } = await queueImage(prompt, signal);
           signal.throwIfAborted();
-          return { output: imagePath, summary: "Made an image", imagePath };
+          return { output: `Queued image job ${jobId}. It starts after this reply ends and appears in this chat on its own; it is not made yet.`, summary: "Queued an image" };
         }
         default: throw new TypeError(`Unknown tool: ${call.name}`);
       }

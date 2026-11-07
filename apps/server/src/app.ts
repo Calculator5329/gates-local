@@ -77,7 +77,6 @@ export interface AppDeps {
   readonly think?: boolean;
   readonly sources?: Sources;
   readonly toolsEnabled?: () => boolean;
-  readonly generateImage?: (prompt: string, signal: AbortSignal) => Promise<string>;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
   /**
@@ -87,6 +86,7 @@ export interface AppDeps {
    * (admit), which pushes models.load around a turn whose model is not resident.
    */
   readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
+  /** Image jobs; a turn's image tool queues one here for its thread (chat.send image: true). */
   readonly image?: ImageModule;
   /**
    * The app's one GPU lease. A turn holds a shared chat claim from just after
@@ -154,6 +154,20 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
+  /**
+   * The turn's image tool. It queues the job and returns: the job claims the
+   * GPU alone, and this turn holds a shared claim until it ends, so waiting
+   * here for the picture would wait forever. The job adds the picture to the
+   * thread after the reply; a cancelled turn takes its jobs back.
+   */
+  const queueImageFor = (threadId: string, turnSignal: AbortSignal) => async (prompt: string): Promise<{ jobId: string }> => {
+    const job = await deps.image!.generate({ prompt, threadId });
+    const takeBack = () => deps.image?.cancel(job.jobId);
+    if (turnSignal.aborted) takeBack();
+    else turnSignal.addEventListener("abort", takeBack, { once: true });
+    return job;
+  };
+
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
     const { turnId, threadId, controller } = turn;
     const emit = (event: WireEvent) => {
@@ -165,7 +179,7 @@ export function createApp(deps: AppDeps): App {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
       const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
       // The image tool is offered only when this turn asked for it and image generation is wired.
-      const image = options.image === true && deps.generateImage !== undefined;
+      const image = options.image === true && deps.image !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       const think = options.think ?? deps.think;
       const input = {
@@ -177,7 +191,7 @@ export function createApp(deps: AppDeps): App {
         threadId,
         ...(think === undefined ? {} : { think }),
       };
-      const events = useTools ? streamToolTurn({ ...input, sources, generateImage: deps.generateImage, image }) : streamTurn(input);
+      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);
       for await (const event of events) {
         if (event.type !== "done") {
           emit(event);
