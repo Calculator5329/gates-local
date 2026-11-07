@@ -12,41 +12,70 @@ never shows a whisper stop, start or restart.
       changelog and `pnpm verify` (typecheck, lint, unit tests).
       *Accept:* `pnpm verify` exits 0 on a fresh clone and non-zero on a
       planted type error.
-- [ ] <!-- workspace:id=work:2b0bbe35-2dca-5b7c-96bd-2083d97a26f1 --> Contracts: one WebSocket, typed RPC and push channels, Effect Schema
+- [x] <!-- workspace:id=work:2b0bbe35-2dca-5b7c-96bd-2083d97a26f1 --> Contracts: one WebSocket, typed RPC and push channels, Effect Schema
       decode at both ends.
       *Accept:* a malformed message is refused at the boundary with a named
       error; round-trip tests cover every channel.
-- [ ] <!-- workspace:id=work:92903769-ac74-5c41-8bf8-51fcebae0efb --> Thread store: SQLite WAL, completed messages persisted, token deltas in
+      *Done 2026-11-07:* 7fddd5d and 8741597; named decode errors and the wire-mirrors test.
+- [x] <!-- workspace:id=work:92903769-ac74-5c41-8bf8-51fcebae0efb --> Thread store: SQLite WAL, completed messages persisted, token deltas in
       memory only.
       *Accept:* kill the server mid-stream; after restart the thread has every
       completed message and no partial one.
+      *Done 2026-11-07:* 5b475b9; the SIGKILL accept test is in the store suite.
 - [ ] <!-- workspace:id=work:d33c371c-75b7-5e3a-b211-091795aba823 --> Runtime discovery: reuse a healthy Ollama; start an app-owned one when
       none answers; never adopt or stop a service the app did not start.
       *Accept:* `pnpm verify:chat` covers existing, stopped, missing and
       wrong-service-on-port with fakes; one real run finds this machine's
       Ollama.
+      *Status 2026-11-07:* built in 4eb5af2 with fakes and one real read-only discovery; no `pnpm verify:chat` script exists yet, so the accept line is open.
 - [ ] <!-- workspace:id=work:a5c05b84-f413-5c13-ba03-88fa60c68c0d --> Own-folder Ollama (D1): get a pinned version into the app folder, check
       its hash, run it without root or a package manager.
       *Accept:* with Ollama off PATH, first launch installs and runs it; a bad
       hash refuses with a usable message and leaves nothing half-installed.
+      *Status 2026-11-07:* install path built and hash re-read in 4eb5af2; the off-PATH first-launch install has not run for real (1.5 GB download).
 - [ ] <!-- workspace:id=work:0bc2794e-815d-528b-b157-120dd656a6a4 --> Model list from the runtime, refreshed on focus; no settings step
       before the first chat.
       *Accept:* a model pulled in a terminal appears in the picker without a
       restart.
-- [ ] <!-- workspace:id=work:ae4ba4f7-b4a9-5325-b094-80cb7177ef91 --> Electron main supervises the server; a server crash shows a restart
+- [x] <!-- workspace:id=work:ae4ba4f7-b4a9-5325-b094-80cb7177ef91 --> Electron main supervises the server; a server crash shows a restart
       control, not a blank window.
       *Accept:* killing the server process shows the error state; restart
       brings the thread back.
+      *Done 2026-11-07:* 2290627; headless Electron 45 smoke, kill then Restart back at #thread=42.
 - [ ] <!-- workspace:id=work:70e50906-9d79-5021-b756-4fbd075cac6d --> First turn: streamed reply with explicit per-request `num_ctx` (16k
       floor) and a fit check against measured free VRAM with whisper running.
       *Accept:* a real streamed reply on this machine at 16k, whisper
       unchanged; when no model fits 16k, a refusal names the shortfall.
+      *Status 2026-11-07:* real 16k reply beside whisper through `streamTurn` (e54cafc); the same turn through the desktop app waits on `apps/web`.
 
-- [ ] <!-- workspace:id=work:d1a8d497-afe1-5133-a6c9-a6adb0a9a891 --> Visual direction: round 1 of twelve GPT-image directions, Ethan's
-      picks, round 2 of many screens per kept direction, then tokens in
-      `apps/web`.
+- [ ] <!-- workspace:id=work:d1a8d497-afe1-5133-a6c9-a6adb0a9a891 --> Visual direction: round 1 of twelve GPT-image directions (all
+      rejected), round 2 as T3 Code-shaped HTML harnesses in black and gray
+      with green, scored by the council hill climb in
+      `docs/design/council-rubric.md`, then tokens in `apps/web`.
       *Accept:* Ethan names the direction; a tokens file and the restyled
       shell land, checked against the picked mockups.
+
+- [ ] Packaged renderer Origin: measure what Origin the `file://` renderer's
+      WebSocket upgrade carries in a real packaged Electron run and allow it
+      in `apps/server/src/main.ts`.
+      *Accept:* the packaged app connects; a page from any other origin
+      still gets 403.
+- [ ] App-owned models store: `/var/lib/ollama` is read-only to this user,
+      so an app-owned Ollama cannot see or pull into the system models.
+      Pick `OLLAMA_MODELS` for the owned server and show it in settings.
+      *Accept:* with the system Ollama stopped, the owned server pulls a
+      model into the app folder and the picker lists it.
+- [ ] `AppErrorCode` (turn-active, runtime-not-ready, wont-fit, cancelled,
+      shutting-down) moves from `apps/server/src/app.ts` into
+      `packages/contracts` so the client switches on a typed code.
+- [ ] Fit with two loaded models: `/api/ps` reported 5.92 GB where the
+      runner held 6926 MiB (e54cafc). Measure the two-model case before the
+      fit check trusts `/api/ps` for more than one runner.
+- [ ] Fit gate when the GPU is unreadable: today a `gpu-unreadable` report
+      blocks the send. Decide block or warn from a measured failure mode,
+      and put the reason in the refusal text.
+- [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
+      when 11435 is busy with another service.
 
 ## Next: slices 2 to 4
 
