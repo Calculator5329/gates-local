@@ -41,6 +41,12 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     for (const l of listeners) l(s);
   };
   let off = inner.onChange(forward);
+  /**
+   * From a switch's first line until its ensure settles: baseUrl() is
+   * undefined, so nothing new is sent to the runtime being stopped (or to a
+   * new one that is not ready yet).
+   */
+  let switching = false;
   // ensure, discover, setMode and stopIfStartedHere run one after another, so
   // a switch waits for an outstanding startup to settle before it decides
   // whether the old runtime was started here (no orphaned app Ollama).
@@ -59,7 +65,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
 
   return {
     status: () => inner.status(),
-    baseUrl: () => inner.baseUrl(),
+    baseUrl: () => (switching ? undefined : inner.baseUrl()),
     ensure: () => serial(() => inner.ensure()),
     discover: () => serial(() => inner.discover()),
     startedByThisProcess: () => inner.startedByThisProcess(),
@@ -71,6 +77,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     setMode(next) {
       return serial(async () => {
         if (next === mode) return inner.status();
+        switching = true;
         try {
           await options.beforeSwitch?.();
           const old = inner;
@@ -84,6 +91,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
           forward(status);
           return status;
         } finally {
+          switching = false;
           options.afterSwitch?.();
         }
       });

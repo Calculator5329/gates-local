@@ -55,7 +55,11 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
         ...(deps.fit ? { fit: deps.fit } : {}),
         ...(deps.log ? { log: deps.log } : {}),
       }),
-    "models.pull": ({ name }) => deps.pulls.pull(name),
+    // Refused while no runtime is ready, a switch included: never queued against the old one.
+    "models.pull": ({ name }) => {
+      ready();
+      return deps.pulls.pull(name);
+    },
     "models.cancelPull": ({ name }) => ({ cancelled: deps.pulls.cancel(name) }),
     "models.remove": async ({ name }) => {
       const baseUrl = ready();
