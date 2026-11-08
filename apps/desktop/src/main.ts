@@ -6,7 +6,8 @@ import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMai
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
-import { CLIENT_ORIGIN, CLIENT_SCHEME, externalUrl, originOf, sameClient, servedFile } from "./client-protocol.ts";
+import { CLIENT_ORIGIN, CLIENT_SCHEME, originOf, sameClient, servedFile } from "./client-protocol.ts";
+import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 
@@ -46,16 +47,6 @@ function clientUrl(): string {
 
 function isClientUrl(url: string): boolean {
   return sameClient(clientUrl(), url);
-}
-
-/** Hand an http(s) link to the system browser; any other URL is dropped. */
-function openOutside(url: string): void {
-  const target = externalUrl(url);
-  if (target === null) {
-    console.error(`[desktop] blocked a link that is not an http(s) page: ${url.slice(0, 200)}`);
-    return;
-  }
-  shell.openExternal(target).catch((error: unknown) => console.error(`[desktop] could not open ${target}: ${(error as Error).message}`));
 }
 
 /** The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect. */
@@ -156,14 +147,10 @@ function run(): void {
     const contents = window.webContents;
     // The window never opens another window or leaves the client. A web
     // link (the Ollama library, a link in a reply) opens in the system browser.
-    contents.setWindowOpenHandler(({ url }) => {
-      openOutside(url);
-      return { action: "deny" };
-    });
-    contents.on("will-navigate", (event, url) => {
-      if (isClientUrl(url)) return;
-      event.preventDefault();
-      openOutside(url);
+    guardNavigation(contents, {
+      isClientUrl,
+      openExternal: (url) => shell.openExternal(url),
+      log: (line) => console.error(`[desktop] ${line}`),
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       // -3 is ERR_ABORTED: a newer navigation replaced this one.
