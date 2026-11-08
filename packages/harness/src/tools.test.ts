@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createTools } from "./tools.ts";
+import { createTools, type LibraryFs } from "./tools.ts";
 
 describe("Library tools", () => {
   it("reads and lists approved sources with caps, refusing traversal and symlinks", async () => {
@@ -19,6 +20,36 @@ describe("Library tools", () => {
     expect((await tools.execute({ name: "read", input: { path: "/library/docs/note.txt", limit: 20 } }, new AbortController().signal)).output.length).toBeLessThan(150);
     for (const file of ["/library/docs/escape", "/library/docs/../private.txt", path.join(root, "private.txt")]) await expect(tools.execute({ name: "read", input: { path: file } }, new AbortController().signal)).rejects.toThrow();
     await expect(tools.execute({ name: "note", input: {} }, new AbortController().signal)).rejects.toThrow(/Unknown tool/);
+  });
+  it("filesystem failures name the virtual path and never a host path (T2-02)", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "gl-fserr-"));
+    const docs = path.join(root, "docs"); mkdirSync(docs);
+    writeFileSync(path.join(docs, "note.txt"), "hello");
+    writeFileSync(path.join(docs, "locked.txt"), "secret"); chmodSync(path.join(docs, "locked.txt"), 0o000);
+    mkdirSync(path.join(docs, "shut")); writeFileSync(path.join(docs, "shut", "x"), "x"); chmodSync(path.join(docs, "shut"), 0o000);
+    writeFileSync(path.join(docs, "gone.txt"), "soon gone");
+    // Removed after stat resolved it and before open: the race made deterministic.
+    const raced: Partial<LibraryFs> = { open: (async (file: string, flags: number) => { if (file.endsWith("gone.txt")) rmSync(file); return open(file, flags); }) as LibraryFs["open"] };
+    const tools = createTools({ sources: [{ id: "f", label: "Docs", path: docs, kind: "folder" }], fs: raced });
+    const signal = new AbortController().signal;
+    try {
+      const cases: [string, string][] = [
+        ["/library/f/absent", "/library/f/absent: no such file"],
+        ["/library/f/note.txt/x", "/library/f/note.txt/x: not a folder"],
+        ["/library/f/locked.txt", "/library/f/locked.txt: permission denied"],
+        ["/library/f/shut/x", "/library/f/shut/x: permission denied"],
+        ["/library/f/gone.txt", "/library/f/gone.txt: no such file"],
+        [path.join(docs, "absent"), "/library/f/absent: no such file"],
+      ];
+      for (const [requested, message] of cases) {
+        const error = await tools.execute({ name: "read", input: { path: requested } }, signal).then(() => undefined, (e: unknown) => e as Error);
+        expect(error?.message, requested).toBe(message);
+        for (const host of [root, process.cwd()]) expect(error?.message).not.toContain(host);
+      }
+      // Argument and containment errors keep their own messages.
+      await expect(tools.execute({ name: "read", input: { path: "/library/f/../x" } }, signal)).rejects.toThrow("Path is outside your Library source");
+      await expect(tools.execute({ name: "read", input: { path: "/library/nope/x" } }, signal)).rejects.toThrow("Path is outside your Library; use /library/<source id>");
+    } finally { chmodSync(path.join(docs, "shut"), 0o700); chmodSync(path.join(docs, "locked.txt"), 0o600); }
   });
   it("accepts a source whose native realpath differs only in case (Windows)", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-case-"));
