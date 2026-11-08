@@ -15,6 +15,8 @@ export const CONTROL_PORT = 5289;
 export const WEB_ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
 export const FAKE_URL = `http://127.0.0.1:${FAKE_PORT}`;
 export const CONTROL_URL = `http://127.0.0.1:${CONTROL_PORT}`;
+/** The Tailscale-User-Login the phone listener admits in E2E (phone.spec.ts). */
+export const PHONE_USER = "e2e-owner@example.com";
 
 /**
  * This checkout's own folder under ~/.cache/gates-local-e2e, named from its path

@@ -3,14 +3,17 @@
 // control endpoint the specs call between journeys.
 //
 //   GET  /health            200 once the fake and the server are up
-//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, ...fakeOptions}
+//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, phone?, ...fakeOptions}
 //                           set the fake's scenario, then restart the server
 //                           on a fresh data dir (rediscovers Ollama). seed: N
 //                           writes one thread of N messages, seed: "design" the
 //                           design's sidebar (test/e2e/seed.ts), both pinned to
 //                           seedAt; runtimeMode ("system" | "app") writes saved
 //                           settings in that mode, else first run picks it; the
-//                           reply carries the open thread's id
+//                           reply carries the open thread's id; phone: true also
+//                           opens the phone listener (GATES_LOCAL_WEB_LISTEN) on a
+//                           free port outside 5286..5289, for PHONE_USER at
+//                           http://127.0.0.1:<port>, and the reply carries phonePort
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
 //
@@ -23,7 +26,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import path from "node:path";
-import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
+import { createServer as createNetServer } from "node:net";
+import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
 import { seedDesign, seedLong } from "./seed.ts";
@@ -65,10 +69,39 @@ function stopChild(child: ChildProcess | null): Promise<void> {
 const fake = await start("fake", ["test/fake-ollama/main.ts", "--port", String(FAKE_PORT), "--gpu-state", gpuState], process.env, /fake ollama on /);
 
 let server: ChildProcess | null = null;
+/** The phone listener's port while a reset asked for it, else null. */
+let phonePort: number | null = null;
+
+/** A free loopback port the kernel picks, never one of the stack's fixed 5286..5289. */
+async function freePort(): Promise<number> {
+  for (;;) {
+    const port = await new Promise<number>((resolve, reject) => {
+      const probe = createNetServer();
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        const p = typeof address === "object" && address !== null ? address.port : 0;
+        probe.close(() => resolve(p));
+      });
+    });
+    if (port > 0 && (port < SERVER_PORT || port > CONTROL_PORT)) return port;
+  }
+}
+
+function phoneEnv(): NodeJS.ProcessEnv {
+  if (phonePort === null) return {};
+  return {
+    GATES_LOCAL_WEB_LISTEN: `127.0.0.1:${phonePort}`,
+    GATES_LOCAL_WEB_ORIGIN: `http://127.0.0.1:${phonePort}`,
+    GATES_LOCAL_WEB_USER: PHONE_USER,
+    GATES_LOCAL_WEB_ROOT: path.join(ROOT, "apps/web/dist"),
+  };
+}
 
 function serverEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    ...phoneEnv(),
     GATES_LOCAL_OLLAMA_URL: FAKE_URL,
     GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
@@ -142,10 +175,11 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, runtimeMode, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, phone, ...fakeBody } = body;
         await fakeScenario({ scenario: "models", ...fakeBody });
+        phonePort = phone === true ? await freePort() : null;
         const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined);
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ dataDir, threadId }));
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ dataDir, threadId, phonePort }));
       } else if (route === "POST /restart") {
         const body = await readJson(req);
         await stopChild(server);
