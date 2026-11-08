@@ -65,12 +65,13 @@ export async function fetchTags(baseUrl: string): Promise<TagsResponse> {
   return decode(TagsResponse, "/api/tags", await request(baseUrl, "/api/tags", undefined));
 }
 
+/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
 export async function fetchShow(baseUrl: string, model: string, signal?: AbortSignal): Promise<ShowResponse> {
   const body = await request(baseUrl, "/api/show", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model }),
-    ...(signal ? { signal } : {}),
+    ...(signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) }),
   });
   return decode(ShowResponse, "/api/show", body);
 }

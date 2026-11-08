@@ -1,3 +1,4 @@
+// Header layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The app shell (shell.md F05, F22, F51): sidebar, one header, the stage
 // (new-thread draft or the timeline with the composer docked under it) or
 // Settings, the docked GPU panel, first run, popovers and the tooltip layer.

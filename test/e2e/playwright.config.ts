@@ -1,6 +1,7 @@
 // E2E for the web client against the real server and the fake Ollama.
 //   pnpm e2e        journeys and perf budgets (project "e2e")
 //   pnpm e2e:shots  the deterministic screenshot rig (project "shots")
+//   pnpm shots:readme  the README images in docs/screenshots (project "readme")
 // Browser: GATES_LOCAL_CHROMIUM, else /usr/bin/chromium when present, else
 // Playwright's own Chromium; Edge on Windows. One worker: every journey
 // shares the one server and resets it first.
@@ -36,8 +37,10 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "e2e", testIgnore: /shots\.spec\.ts/ },
-    { name: "shots", testMatch: /shots\.spec\.ts/ },
+    // Browser journeys are *.spec.ts; a *.test.ts here (seed.test.ts) is a vitest unit test.
+    { name: "e2e", testMatch: /\.spec\.ts$/, testIgnore: /shots\.spec\.ts/ },
+    { name: "shots", testMatch: /(^|[\\/])shots\.spec\.ts$/ },
+    { name: "readme", testMatch: /readme-shots\.spec\.ts$/ },
   ],
   webServer: [
     { command: "node test/e2e/stack.ts", cwd: ROOT, url: `${CONTROL_URL}/health`, reuseExistingServer: false, timeout: 30_000, stdout: "ignore", stderr: "pipe" },

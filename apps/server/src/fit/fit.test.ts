@@ -74,15 +74,15 @@ describe("nvidia-smi parsing", () => {
     expect(tenants).toHaveLength(13);
     const whisper = tenants.filter((t) => t.permanent);
     expect(whisper).toEqual([
-      expect.objectContaining({ pid: 428377, label: "whisper-server", role: "whisper", usedBytes: 2202 * MIB }),
+      expect.objectContaining({ pid: 5100, label: "whisper-server", role: "whisper", usedBytes: 2202 * MIB }),
     ]);
-    expect(tenants.find((t) => t.pid === 2303957)).toMatchObject({
+    expect(tenants.find((t) => t.pid === 5400)).toMatchObject({
       label: "media-vault vision runtime",
       role: "occupant",
       permanent: false,
       usedBytes: 1822 * MIB,
     });
-    expect(tenants.find((t) => t.pid === 4192851)?.label).toBe("chrome");
+    expect(tenants.find((t) => t.pid === 4400)?.label).toBe("browser");
   });
 
   it("survives commas in names, [N/A] memory, blank and junk lines", () => {
@@ -201,7 +201,7 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     const need = 6594474711 + 8 * 4 * 512 * 16384 * 2 + RUNTIME_OVERHEAD_BYTES;
     expect(check.estimate?.totalBytes).toBe(need);
     expect(check.report).toMatchObject({ verdict: "fits", needVramBytes: need, freeVramBytes: 9468 * MIB, spillRamBytes: 0, source: "estimate" });
-    expect(check.gpu?.tenants.find((t) => t.permanent)?.pid).toBe(428377);
+    expect(check.gpu?.tenants.find((t) => t.permanent)?.pid).toBe(5100);
   });
 
   it("gemma4 26b at 16k spills to RAM and shows how much", async () => {
@@ -277,7 +277,7 @@ describe("measuredFit", () => {
   it("counts the runner's nvidia-smi memory when /api/ps understates it (this machine, qwen3.5:9b at 16k)", async () => {
     // Recorded 2026-11-07: /api/ps size = size_vram = 5.92 GB; nvidia-smi showed the runner at 6926 MiB.
     const s = await fakeOllama({ models: [{ name: "qwen3.5:9b", size: 5_920_000_000, size_vram: 5_920_000_000, context_length: 16384 }] });
-    const loadedApps = `${MACHINE_APPS}3006409, /usr/lib/ollama/llama-server, 6926\n`;
+    const loadedApps = `${MACHINE_APPS}5800, /usr/lib/ollama/llama-server, 6926\n`;
     const check = await measuredFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: smi("16303, 13368, 2557\n", loadedApps) });
     expect(check.report).toMatchObject({ source: "measured", verdict: "fits", needVramBytes: 6926 * MIB, spillRamBytes: 0, freeVramBytes: 2557 * MIB });
     expect(check.report.message).toContain("runner holds 7.26 GB");

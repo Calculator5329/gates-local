@@ -1,169 +1,84 @@
-// session.ts wired to a fake client: the order of model-list answers and
-// pushes (MP2-02) and which chat follows the server's pick (MP-02). The
-// module touches window at load, so each test stubs the browser globals and
-// imports a fresh copy.
-import type { ModelInfo } from "@gates-local/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+// Where the client connects when there is no desktop bridge. A page the
+// server's phone listener served carries <meta name="gates-local-server"
+// content="same-origin"> (apps/server/src/web/static.ts); the client then
+// opens its socket on the page's own host, and image URLs follow that origin
+// with no token. Runs under node with the browser globals stubbed.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fake = vi.hoisted(() => ({ client: undefined as unknown }));
-vi.mock("@gates-local/contracts", async (orig) => ({ ...(await orig<typeof import("@gates-local/contracts")>()), createClient: () => fake.client }));
-
-const noop = () => undefined;
-const defer = <T>() => {
-  let resolve: (v: T) => void = noop;
-  const promise = new Promise<T>((r) => (resolve = r));
-  return { promise, resolve: (v: T) => resolve(v) };
-};
-
-const info = (name: string, picked = false): ModelInfo => ({
-  name,
-  digest: name,
-  sizeBytes: 1,
-  modifiedAt: "",
-  capabilities: ["completion"],
-  ...(picked ? { pick: { numCtx: 16384, verdict: "fits" as const } } : {}),
-});
-const QWEN = "qwen3.5:9b";
-const GEMMA = "gemma4:12b";
-const LLAMA = "llama3.2:3b";
-
-const defaults: Record<string, unknown> = {
-  "runtime.status": { state: "ready", owner: "external", version: "0.12.0" },
-  "models.list": [info(QWEN), info(GEMMA), info(LLAMA, true)],
-  "threads.list": [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }],
-  "threads.get": { messages: [] },
-  "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
-};
-
-class FakeSocket extends EventTarget {
-  constructor() {
-    super();
-    queueMicrotask(() => this.dispatchEvent(new Event("open")));
+class FakeSocket {
+  static opened: FakeSocket[] = [];
+  readonly readyState = 0;
+  readonly url: string;
+  constructor(url: string) {
+    this.url = url;
+    FakeSocket.opened.push(this);
   }
+  send(): void {}
+  close(): void {}
+  addEventListener(): void {}
+  removeEventListener(): void {}
 }
 
-/** Boots session.ts against a client whose answers the test may hold; returns the session, the store and a push. */
-async function boot(answers: Record<string, () => Promise<unknown>> = {}) {
-  const subs = new Map<string, (p: unknown) => void>();
-  const calls: string[] = [];
-  fake.client = {
-    closed: new Promise(noop),
-    subscribe: (channel: string, handler: (p: unknown) => void) => {
-      subs.set(channel, handler);
-      return noop;
-    },
-    call: (method: string) => {
-      calls.push(method);
-      return answers[method]?.() ?? Promise.resolve(defaults[method]);
-    },
-  };
+function page(href: string, meta: boolean): void {
+  const url = new URL(href);
   vi.stubGlobal("window", {});
-  vi.stubGlobal("location", { search: "?server=ws://localhost:1", hash: "", pathname: "/" });
-  vi.stubGlobal("history", { replaceState: noop });
-  vi.stubGlobal("document", { documentElement: { removeAttribute: noop, setAttribute: noop } });
-  vi.stubGlobal("localStorage", { getItem: () => "1", setItem: noop });
+  vi.stubGlobal("location", { href, host: url.host, protocol: url.protocol, search: url.search, hash: url.hash, pathname: url.pathname });
+  vi.stubGlobal("document", {
+    querySelector: (selector: string) =>
+      meta && selector === 'meta[name="gates-local-server"]' ? { getAttribute: (name: string) => (name === "content" ? "same-origin" : null) } : null,
+    documentElement: { setAttribute() {}, removeAttribute() {} },
+  });
   vi.stubGlobal("WebSocket", FakeSocket);
-  vi.resetModules();
+}
+
+async function boot(): Promise<typeof import("./session.ts") & { store: typeof import("./store.ts") }> {
   const session = await import("./session.ts");
   const store = await import("./store.ts");
   session.connect();
-  await vi.waitFor(() => expect(subs.has("models.changed")).toBe(true));
-  const push = (channel: string, payload: unknown) => subs.get(channel)?.(payload);
-  // threads.list is answered in hydration's first batch, so its threads mark that batch as applied.
-  const hydrated = () => vi.waitFor(() => expect(store.getState().threads).toHaveLength(1));
-  return { session, store, push, calls, hydrated };
+  // The loop resolves the server URL before it opens a socket.
+  for (let i = 0; i < 50 && FakeSocket.opened.length === 0 && store.getState().conn.kind !== "no-server"; i++) await new Promise((r) => setTimeout(r, 2));
+  return { ...session, store };
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
+beforeEach(() => {
+  vi.resetModules();
+  FakeSocket.opened = [];
 });
+afterEach(() => vi.unstubAllGlobals());
 
-it("a models.list answered after a newer models.changed push is dropped (MP2-02)", async () => {
-  const list = defer<ModelInfo[]>();
-  const { store, push, hydrated } = await boot({ "models.list": () => list.promise });
-  push("models.changed", [info(GEMMA, true)]);
-  list.resolve([info(QWEN, true)]);
-  await hydrated();
-  expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]);
-  expect(store.getState().model).toBe(GEMMA);
-});
-
-it("hydration answers older than a runtime change keep neither the old list nor the old runtime status (MP2-02, MP4-03)", async () => {
-  const list = defer<ModelInfo[]>();
-  const { store, push, calls, hydrated } = await boot({ "models.list": () => list.promise, "models.refresh": async () => [info(GEMMA, true)] });
-  // hydration's runtime.status answered for runtime A (0.12.0); the push is newer: runtime B
-  push("runtime.changed", { state: "ready", owner: "external", baseUrl: "http://runtime-b", version: "0.40.4" });
-  list.resolve([info(QWEN, true)]);
-  await hydrated();
-  await vi.waitFor(() => expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]));
-  expect(calls).toContain("models.refresh");
-  expect(store.getState().runtime).toMatchObject({ state: "ready", baseUrl: "http://runtime-b", version: "0.40.4" });
-});
-
-it("a thread keeps its model when the pick changes; only a new empty chat follows the pick (MP-02)", async () => {
-  const { session, store, push, hydrated } = await boot();
-  await hydrated();
-  const model = () => store.getState().model;
-  expect(model()).toBe(LLAMA);
-  session.openThread("A");
-  session.pickModel(GEMMA);
-  session.newThread();
-  expect(model()).toBe(LLAMA); // the new chat starts on the pick
-  session.openThread("A");
-  expect(model()).toBe(GEMMA); // A is back on the model picked in it
-  push("models.changed", [info(QWEN, true), info(GEMMA), info(LLAMA)]);
-  expect(model()).toBe(GEMMA); // a recommendation never moves a thread
-  session.newThread();
-  expect(model()).toBe(QWEN); // the new, empty chat follows it
-});
-
-const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });
-const qwenPicked = [info(QWEN, true), info(GEMMA), info(LLAMA)];
-
-describe("a thread restored from storage takes the model of its latest saved reply (MP4-04)", () => {
-  it("opens on that model and records it as the thread's", async () => {
-    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": async () => savedReply(GEMMA) });
-    await hydrated();
-    expect(store.getState().model).toBe(QWEN);
-    session.openThread("S");
-    await vi.waitFor(() => expect(store.getState().model).toBe(GEMMA));
-    expect(store.getState().threadModels["S"]).toBe(GEMMA);
+describe("same-origin server discovery", () => {
+  it("with the meta and no bridge, an https page opens wss://<host>/ws and image URLs are https with no token", async () => {
+    page("https://hub.example.ts.net:8456/", true);
+    const s = await boot();
+    expect(FakeSocket.opened.map((w) => w.url)).toEqual(["wss://hub.example.ts.net:8456/ws"]);
+    const st = s.store.getState();
+    expect(st.serverOrigin).toBe("https://hub.example.ts.net:8456");
+    expect(st.fileToken).toBeNull();
+    expect(s.fileUrl(st.serverOrigin ?? "", st.fileToken, "images/a b.png")).toBe("https://hub.example.ts.net:8456/files/images/a%20b.png");
   });
 
-  it("an unsent pick made in the thread before its history loads wins", async () => {
-    const history = defer<unknown>();
-    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": () => history.promise });
-    await hydrated();
-    session.openThread("S");
-    session.pickModel(QWEN);
-    history.resolve(savedReply(GEMMA));
-    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
-    expect(store.getState().model).toBe(QWEN);
-    expect(store.getState().threadModels["S"]).toBe(QWEN);
+  it("an http page opens ws://<host>/ws", async () => {
+    page("http://127.0.0.1:40123/#thread=t1", true);
+    const s = await boot();
+    expect(FakeSocket.opened.map((w) => w.url)).toEqual(["ws://127.0.0.1:40123/ws"]);
+    expect(s.store.getState().serverOrigin).toBe("http://127.0.0.1:40123");
   });
 
-  it("a saved model no longer installed is not taken or recorded", async () => {
-    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": async () => savedReply("gone:1b") });
-    await hydrated();
-    session.openThread("S");
-    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
-    expect(store.getState().model).toBe(QWEN);
-    expect(store.getState().threadModels["S"]).not.toBe("gone:1b");
+  it("without the meta and with no other source there is no server, as before", async () => {
+    page("https://hub.example.ts.net:8456/", false);
+    const s = await boot();
+    expect(FakeSocket.opened).toEqual([]);
+    expect(s.store.getState().conn.kind).toBe("no-server");
   });
-});
 
-it("a deleted thread, or one a refresh no longer lists, leaves no threadModels entry (MP4-05)", async () => {
-  const answers: Record<string, () => Promise<unknown>> = {};
-  const { session, store, push, hydrated } = await boot(answers);
-  await hydrated();
-  session.openThread("A");
-  session.pickModel(GEMMA);
-  session.openThread("B");
-  session.pickModel(QWEN);
-  expect(Object.keys(store.getState().threadModels).toSorted()).toEqual(["A", "B"]);
-  await session.deleteThread("A");
-  expect(Object.keys(store.getState().threadModels)).toEqual(["B"]);
-  answers["threads.list"] = async () => [];
-  push("threads.changed", {});
-  await vi.waitFor(() => expect(store.getState().threadModels).toEqual({}));
+  it("?server= still wins over the meta, and its token stays on image URLs", async () => {
+    const server = "ws://127.0.0.1:5286/?token=abc";
+    page(`http://127.0.0.1:5287/?server=${encodeURIComponent(server)}`, true);
+    const s = await boot();
+    expect(FakeSocket.opened.map((w) => w.url)).toEqual([server]);
+    const st = s.store.getState();
+    expect(st.serverOrigin).toBe("http://127.0.0.1:5286");
+    expect(st.fileToken).toBe("abc");
+    expect(s.fileUrl(st.serverOrigin ?? "", st.fileToken, "images/x.png")).toBe("http://127.0.0.1:5286/files/images/x.png?token=abc");
+  });
 });

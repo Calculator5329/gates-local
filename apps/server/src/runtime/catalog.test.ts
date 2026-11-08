@@ -6,6 +6,7 @@ import type { NvidiaSmiRunner } from "../fit/types.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { buildCatalog, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
+import { CURATED_MODELS } from "./recommended.ts";
 
 const fitFixture = (name: string) => readFileSync(new URL(`../fit/fixtures/${name}`, import.meta.url), "utf8");
 const GPU = fitFixture("nvidia-smi-gpu.machine.txt"); // 16303 total, 9468 MiB free
@@ -73,9 +74,8 @@ describe("models.catalog", () => {
     expect(e.get("gpt-oss:20b")).toMatchObject({ installed: false, downloadBytes: 13_793_441_566 });
     expect(e.get("gpt-oss:20b")?.fit).toMatchObject({ source: "estimate" });
     expect(e.get("gpt-oss:20b")?.fit?.message).toMatch(/rough estimate before download/);
-    // Curated local-only builds appear only when installed.
-    expect(e.has("gemma4-abliterated:26b")).toBe(false);
-    expect(e.get("qwen3.8-abliterated:27b")?.installed).toBe(true);
+    // A local build outside the curated list shows only because it is installed, as the user's own.
+    expect(e.get("qwen3.8-abliterated:27b")).toMatchObject({ label: "qwen3.8-abliterated:27b", purpose: "Installed by you", installed: true });
     // The user's own model keeps its tag-derived name; embeddings stay out.
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")).toMatchObject({ label: "Tiny-Chat-GGUF:Q4_K_M", purpose: "Installed by you", installed: true });
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.fit).toBeUndefined();
@@ -119,7 +119,9 @@ describe("models.catalog", () => {
     const entries = await buildCatalog({ baseUrl: () => undefined, installed: async () => [], settings });
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((x) => !x.installed && x.fit === undefined && !x.recommended)).toBe(true);
-    expect(entries.map((x) => x.name)).not.toContain("gemma4-abliterated:26b");
+    // Every curated model can be downloaded, so all of them list.
+    expect(entries.map((x) => x.name)).toEqual(CURATED_MODELS.map((m) => m.name));
+    expect(CURATED_MODELS.every((m) => m.pullable)).toBe(true);
   });
 });
 

@@ -11,6 +11,8 @@
 //   wrong-service     the port answers, but not as Ollama
 //   embed-smallest    the three models plus nomic-embed-text, the smallest
 //   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
+// An "installed": [names] option replaces the scenario's installed set (names
+// from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -62,10 +64,13 @@ export interface FakeRequest {
   readonly body: unknown;
 }
 
+/** Scenario options: the timing knobs, plus the installed models when a test picks them. */
+export type ScenarioOptions = Partial<FakeOptions> & { installed?: readonly string[] };
+
 export interface FakeOllama {
   readonly url: string;
   readonly port: number;
-  setScenario(scenario: Scenario, options?: Partial<FakeOptions>): void;
+  setScenario(scenario: Scenario, options?: ScenarioOptions): void;
   state(): { scenario: Scenario; options: FakeOptions; installed: string[]; loaded: LoadedEntry[]; requests: FakeRequest[] };
   close(): Promise<void>;
 }
@@ -156,10 +161,11 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   };
   writeGpu();
 
-  const setScenario = (next: Scenario, opts: Partial<FakeOptions> = {}) => {
+  const setScenario = (next: Scenario, opts: ScenarioOptions = {}) => {
+    const { installed: names, ...timing } = opts;
     scenario = next;
-    options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...opts };
-    installed = new Set(installedFor(next));
+    options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...timing };
+    installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? installedFor(next)));
     loaded = [];
     writeGpu();
   };
@@ -284,7 +290,11 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         const next = str(body, "scenario");
         if (!next || !(SCENARIOS as readonly string[]).includes(next)) return json(res, 400, { error: `scenario must be one of ${SCENARIOS.join(", ")}` });
         const { scenario: _s, ...rest } = (body ?? {}) as Record<string, unknown>;
-        setScenario(next as Scenario, rest as Partial<FakeOptions>);
+        const names = rest["installed"];
+        if (names !== undefined && !(Array.isArray(names) && names.every((n) => typeof n === "string" && findFakeModel(n) !== undefined))) {
+          return json(res, 400, { error: `installed must list models the fake knows: ${FAKE_MODELS.map((m) => m.name).join(", ")}` });
+        }
+        setScenario(next as Scenario, rest as ScenarioOptions);
         return json(res, 200, { scenario });
       }
       if (route === "GET /__fake/state") return json(res, 200, api.state());

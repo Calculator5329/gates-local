@@ -15,6 +15,7 @@ const noComfy = () => ({ state: "stopped", owner: "none" });
 /** An image module over the app's real lease, shaped like image/module.ts: generate returns the id at once and the job claims the GPU alone. */
 const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) => {
   const jobs = new Map<string, AbortController>();
+  const ended = new Map<string, Promise<void>>();
   const ran: string[] = [];
   let n = 0;
   const generate = vi.fn(async ({ prompt, threadId }: { prompt: string; threadId?: string }) => {
@@ -22,18 +23,19 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
     const jobId = `job-${++n}`;
     const controller = new AbortController();
     jobs.set(jobId, controller);
-    void lease.run("image", controller.signal, async () => {
+    ended.set(jobId, lease.run("image", controller.signal, async () => {
       ran.push(jobId);
       if (threadId) store.appendMessage({ threadId, role: "assistant", content: prompt, images: [`images/${jobId}.png`] });
-    }).catch(() => {}).finally(() => jobs.delete(jobId));
+    }).catch(() => {}).finally(() => jobs.delete(jobId)));
     return { jobId };
   });
+  const wait = async (jobId: string) => { await ended.get(jobId); };
   const cancel = vi.fn((jobId: string) => {
     const job = jobs.get(jobId);
     job?.abort(new Error("cancelled"));
     return { cancelled: job !== undefined };
   });
-  return { image: { current: noComfy, generate, cancel } as unknown as ImageModule, generate, cancel, ran };
+  return { image: { current: noComfy, generate, cancel, wait } as unknown as ImageModule, generate, cancel, ran };
 };
 /** A tool turn whose first reply calls the image tool; `second` answers the request after the tool ran. */
 const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>) => {
@@ -58,7 +60,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   });
   vi.stubGlobal("fetch", fetcher);
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, lease,
-    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
@@ -110,7 +112,7 @@ describe("tool chat transport", () => {
     vi.stubGlobal("fetch", fetcher);
     const pushed: unknown[] = [];
     const app = createApp({ store, sources, toolsEnabled: () => true,
-      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
       catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
       push: (channel, payload) => pushed.push({ channel, payload }),
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
@@ -192,7 +194,7 @@ describe("tool chat transport", () => {
       });
       vi.stubGlobal("fetch", fetcher);
       const app = createApp({ store, sources, think: true, toolsEnabled: () => scenario !== "tools default off",
-        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
         catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
         push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
       });

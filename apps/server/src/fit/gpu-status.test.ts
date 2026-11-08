@@ -25,7 +25,7 @@ describe("gpu.status occupants", () => {
       linux({
         runNvidiaSmi: smi(MIXED),
         residentModels: async () => [{ name: "qwen3.5:9b", sizeVramBytes: 5_920_000_000 }],
-        listeningPids: async (port, pids) => new Set(port === 8188 ? pids.filter((p) => p === 733100) : []),
+        listeningPids: async (port, pids) => new Set(port === 8188 ? pids.filter((p) => p === 5700) : []),
         modelLabel: (tag) => (tag === "qwen3.5:9b" ? "Qwen 3.5 9B" : tag),
         appLoaded: () => ["qwen3.5:9b"],
       }),
@@ -38,9 +38,9 @@ describe("gpu.status occupants", () => {
     expect(byLabel["Qwen 3.5 9B"]).toEqual({ label: "Qwen 3.5 9B", bytes: 6926 * MIB, kind: "chat-model", protected: false });
     expect(byLabel["ComfyUI"]).toEqual({ label: "ComfyUI", bytes: 3110 * MIB, kind: "image", protected: false });
     expect(byLabel["Media Vault vision"]).toMatchObject({ kind: "other-app", protected: true, bytes: 1822 * MIB });
-    expect(byLabel["chrome"]).toMatchObject({ kind: "other-app", protected: true, bytes: 121 * MIB });
-    // Two falkon processes become one row.
-    expect(byLabel["falkon"]).toMatchObject({ kind: "other-app", bytes: 174 * MIB });
+    expect(byLabel["browser"]).toMatchObject({ kind: "other-app", protected: true, bytes: 121 * MIB });
+    // Two viewer processes become one row.
+    expect(byLabel["viewer"]).toMatchObject({ kind: "other-app", bytes: 174 * MIB });
     expect(byLabel["Not attributed to a process"]).toMatchObject({ kind: "unknown", bytes: (15600 - 14472) * MIB });
     // Largest first.
     expect(s.occupants.map((o) => o.bytes)).toEqual(s.occupants.map((o) => o.bytes).toSorted((a, b) => b - a));
@@ -75,7 +75,7 @@ describe("gpu.status occupants", () => {
   it("the machine fixture: whisper and Media Vault are protected, the desktop is named", async () => {
     const s = await readGpuStatus(linux({ runNvidiaSmi: smi(MACHINE, "NVIDIA GeForce RTX 5070 Ti, 16303, 6458, 9468") }));
     expect(s.occupants.filter((o) => o.protected).length).toBe(s.occupants.length);
-    expect(s.occupants.map((o) => o.label)).toEqual(expect.arrayContaining(["Whisper", "Media Vault vision", "Desktop (KWin)", "falkon", "claude-desktop", "t3code"]));
+    expect(s.occupants.map((o) => o.label)).toEqual(expect.arrayContaining(["Whisper", "Media Vault vision", "Desktop (KWin)", "viewer", "chat-app", "editor"]));
   });
 });
 
@@ -140,7 +140,7 @@ describe("readers", () => {
       calls.push([cmd, ...args].join(" "));
       return out;
     };
-    expect(await systemdMainPid("whisper-server.service", run("428377\n"))).toBe(428377);
+    expect(await systemdMainPid("whisper-server.service", run("5100\n"))).toBe(5100);
     expect(await systemdMainPid("whisper-server.service", run("0\n"))).toBeUndefined();
     expect(calls[0]).toBe("systemctl --user show -p MainPID --value whisper-server.service");
   });

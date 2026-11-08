@@ -138,6 +138,9 @@ export const FitReport = S.Struct({
 export type FitReport = typeof FitReport.Type;
 
 export const ChatEvent = S.Union([
+  // The turn began: its model and saved user message, so a client that did not send it
+  // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
+  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message }),
   S.Struct({ type: S.Literal("delta"), text: S.String }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
   // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
