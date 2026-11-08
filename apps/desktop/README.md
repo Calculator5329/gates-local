@@ -11,6 +11,7 @@ dies, and gives the web client a small typed bridge (`window.gatesLocal`).
 | `src/bridge.ts` | Bridge types, IPC channel names, `serverUrl()`, `toBridgeState()`. No Node imports (the sandboxed preload bundles it). |
 | `src/status-page.ts` | The plain starting / crashed / load-failed page, served as a `data:` URL. |
 | `src/main.ts` | Electron main: single-instance lock, window, IPC, routing between client and status page, quit path. |
+| `src/launch.ts` | Pure launch decisions: background mode, window at start, quit on last window, second-launch action, the server child's env. |
 | `src/preload.ts` | Sandboxed preload: `contextBridge.exposeInMainWorld("gatesLocal", …)`. |
 | `scripts/build.ts` | esbuild: `src/main.ts` -> `out/main.cjs`, `src/preload.ts` -> `out/preload.cjs`. |
 | `scripts/smoke.ts` | Headless real-Electron smoke of the crash/restart Accept line. |
@@ -87,7 +88,43 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
   view says when Restart opens again. Nothing restarts on its own.
 - Quit (`before-quit`, window closed, SIGINT/SIGTERM/SIGHUP to main) waits for
   `supervisor.stop()`: SIGTERM, SIGKILL after 3 s, then exit. A process
-  `exit` hook SIGKILLs the child synchronously as a last resort.
+  `exit` hook SIGKILLs the child synchronously as a last resort. In
+  background mode closing the last window does not quit; the rest holds.
+
+## Background mode
+
+`electron apps/desktop --background` (or `GATES_LOCAL_BACKGROUND=1`) starts
+the supervisor and server with no window, and closing the last window does
+not quit. Launching the app again reaches the running instance through the
+single-instance lock: it opens the window (or restores and focuses the one
+that is open) on the current supervisor state, so there is still one server
+per data dir. A second `--background` launch opens nothing. Quit and SIGTERM
+(systemd's stop) still stop the server. Without the flag nothing changes.
+
+## Phone access
+
+The server can open a second listener for a phone on the owner's tailnet.
+Off unless `GATES_LOCAL_WEB_LISTEN` is set; main passes these through to the
+server child:
+
+| Variable | Use |
+| --- | --- |
+| `GATES_LOCAL_WEB_LISTEN` | `127.0.0.1:<port>`: the phone listener. Loopback only; any other host stops the server at start. |
+| `GATES_LOCAL_WEB_ORIGIN` | The exact public origin, e.g. `https://hub.example.ts.net:8456`. |
+| `GATES_LOCAL_WEB_USER` | The one `Tailscale-User-Login` value admitted. |
+| `GATES_LOCAL_WEB_ROOT` | Set by main to the dist dir the window serves (`webRoot()`); not yours to set. |
+
+`tailscale serve --https=<n> http://127.0.0.1:<port>` makes the listener
+reachable for the owner's devices. The boundary: the loopback bind plus three
+header checks. Every request needs `Tailscale-User-Login` equal to the user
+and `Host` equal to the origin's host; the `/ws` upgrade also needs the
+exact `Origin`. There is no token on this listener (the phone has no way to
+receive one), so any local process that can reach the loopback port and
+forge the headers gets in, as with every hub app on this machine. A
+malformed or empty knob with `LISTEN` set stops the server at start (fail
+closed). The phone shares the server's handlers and pushes, so a reply
+streams to the desktop window and the phone alike. Run the app in
+background mode so the phone works with the window closed.
 
 ## Window and bridge
 

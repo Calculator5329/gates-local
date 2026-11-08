@@ -8,7 +8,12 @@
 //   4. its Restart button brings the client back at the same route (#thread=42)
 //      with a new token;
 //   5. SIGTERM to Electron stops every server it spawned;
-//   6. SIGKILL of Electron main takes the server down too (stdin EOF path).
+//   6. SIGKILL of Electron main takes the server down too (stdin EOF path);
+//   7. --background starts the server with no window, and the phone knobs
+//      plus the dist dir (GATES_LOCAL_WEB_ROOT) reach the server child;
+//   8. a second launch opens the window on the running instance, one server;
+//   9. closing that window keeps Electron and the server running;
+//  10. a second --background launch opens nothing; SIGTERM stops the server.
 // Run: pnpm --filter @gates-local/desktop smoke (builds first). Not part of
 // pnpm verify: it needs the downloaded Electron binary.
 
@@ -44,10 +49,16 @@ async function waitGone(pids: number[], ms: number): Promise<boolean> {
   return !pids.some(alive);
 }
 
-function launch(work: string, debugPort: number | null): { electron: ChildProcess; dataDir: string; exited: Promise<number | null> } {
+function launch(
+  work: string,
+  debugPort: number | null,
+  extraArgs: readonly string[] = [],
+  extraEnv: NodeJS.ProcessEnv = {},
+): { electron: ChildProcess; dataDir: string; exited: Promise<number | null> } {
   const dataDir = path.join(work, `data-${Date.now()}`);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...extraEnv,
     GATES_LOCAL_SERVER_ENTRY: path.join(root, "test", "fixtures", "fake-server.ts"),
     GATES_LOCAL_WEB_URL: pathToFileURL(path.join(root, "test", "fixtures", "client.html")).toString(),
     GATES_LOCAL_DATA_DIR: dataDir,
@@ -57,7 +68,7 @@ function launch(work: string, debugPort: number | null): { electron: ChildProces
   delete env["DISPLAY"];
   delete env["WAYLAND_DISPLAY"];
   delete env["ELECTRON_RUN_AS_NODE"];
-  const args = [root, "--ozone-platform=headless"];
+  const args = [root, "--ozone-platform=headless", ...extraArgs];
   if (debugPort !== null) args.push(`--remote-debugging-port=${debugPort}`);
   const electron = spawn(electronBin, args, { env, stdio: ["ignore", "ignore", "pipe"] });
   const stderr: string[] = [];
@@ -184,10 +195,71 @@ async function parentDeath(work: string): Promise<void> {
   }
 }
 
+async function pages(debugPort: number): Promise<number> {
+  const list = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()) as Array<{ type: string }>;
+  return list.filter((target) => target.type === "page").length;
+}
+
+async function untilTrue(probe: () => Promise<boolean> | boolean, label: string, ms = 15_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await Promise.resolve(probe()).catch(() => false)) return;
+    await sleep(100);
+  }
+  fail(`timed out waiting for ${label}`);
+}
+
+/** Background mode: no window at start, a second launch opens one, closing it keeps the one server, SIGTERM stops it. */
+async function background(work: string): Promise<void> {
+  const debugPort = await findFreePort();
+  const phone = { GATES_LOCAL_WEB_LISTEN: "127.0.0.1:1", GATES_LOCAL_WEB_ORIGIN: "https://hub.example.ts.net:8456", GATES_LOCAL_WEB_USER: "owner@example.com" };
+  const { electron, dataDir, exited } = launch(work, debugPort, ["--background"], phone);
+  try {
+    await untilTrue(() => serverPids(dataDir).length === 1 && serverPids(dataDir).every(alive), "the background server");
+    const [pid] = serverPids(dataDir);
+    await untilTrue(async () => (await pages(debugPort)) >= 0, "DevTools up");
+    await sleep(1000);
+    if ((await pages(debugPort)) !== 0) fail("a background launch opened a window");
+    const record = JSON.parse(readFileSync(path.join(dataDir, `launch-${String(pid)}.json`), "utf8")) as { webRoot?: string; phoneUser?: string };
+    if (record.webRoot !== path.resolve(root, "..", "web", "dist")) fail(`server child got GATES_LOCAL_WEB_ROOT=${String(record.webRoot)}`);
+    if (record.phoneUser !== phone.GATES_LOCAL_WEB_USER) fail("server child did not get GATES_LOCAL_WEB_USER");
+    log("7 --background: server up, no window, phone knobs and the dist dir passed to the server");
+
+    const again = launch(work, null);
+    const againCode = await Promise.race([again.exited, sleep(10_000).then(() => "hung" as const)]);
+    if (againCode === "hung") fail("a second launch did not hand off to the running instance");
+    const cdp = await Cdp.connect(debugPort);
+    await cdp.until(`location.protocol === "file:" && window.__serverUrl`, "client in the window the second launch opened");
+    if (serverPids(dataDir).length !== 1) fail(`a second launch started another server: ${serverPids(dataDir).join(" ")}`);
+    log(`8 second launch (exit ${String(againCode)}) opened the window on the running instance; still one server`);
+
+    await cdp.eval("window.close(), true").catch(() => undefined);
+    cdp.close();
+    await untilTrue(async () => (await pages(debugPort)) === 0, "the window to close", 5000);
+    await sleep(500);
+    if (electron.exitCode !== null || electron.signalCode !== null) fail("closing the last window quit a background instance");
+    if (pid === undefined || !alive(pid)) fail("closing the last window stopped the server");
+    log("9 closing the last window: Electron and the server keep running");
+
+    const quiet = launch(work, null, ["--background"]);
+    await Promise.race([quiet.exited, sleep(10_000)]);
+    await sleep(1000);
+    if ((await pages(debugPort)) !== 0) fail("a second background launch opened a window");
+
+    electron.kill("SIGTERM");
+    const code = await exited;
+    if (!(await waitGone(serverPids(dataDir), 4_000))) fail("the server outlived SIGTERM to a background instance");
+    log(`10 second --background launch opened nothing; SIGTERM: exit ${String(code)}, server ${String(pid)} gone`);
+  } finally {
+    if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
+  }
+}
+
 const work = mkdtempSync(path.join(tmpdir(), "gates-desktop-smoke-"));
 try {
   await lifecycle(work);
   await parentDeath(work);
+  await background(work);
   log("ok");
 } finally {
   rmSync(work, { recursive: true, force: true });

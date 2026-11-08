@@ -7,6 +7,7 @@ import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
 import { serverDataDir } from "./data-dir.ts";
+import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
@@ -49,15 +50,11 @@ function isClientUrl(url: string): boolean {
   return sameClient(clientUrl(), url);
 }
 
-/** The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect. */
-function serverEnv(): NodeJS.ProcessEnv {
-  const origin = originOf(clientUrl());
-  if (origin === null) return process.env;
-  const extra = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "").split(",").filter((o) => o.trim() !== "");
-  return { ...process.env, GATES_LOCAL_ALLOWED_ORIGINS: [...extra, origin].join(",") };
-}
+const mode = launchMode(process.argv, process.env);
 
-if (!app.requestSingleInstanceLock()) {
+// A second launch reaches this instance through the lock; it says whether it
+// was itself a background launch (systemd starting it again wants no window).
+if (!app.requestSingleInstanceLock({ background: mode.background })) {
   app.quit();
 } else {
   run();
@@ -65,7 +62,9 @@ if (!app.requestSingleInstanceLock()) {
 
 function run(): void {
   const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData") });
-  const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env: serverEnv() });
+  // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
+  const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot() });
+  const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
   let win: BrowserWindow | null = null;
   /** The client URL (with its route) to restore after a restart. */
   let lastClientUrl: string | null = null;
@@ -167,10 +166,28 @@ function run(): void {
     return window;
   }
 
-  app.on("second-instance", () => {
-    if (win === null) return;
-    if (win.isMinimized()) win.restore();
-    win.focus();
+  app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
+    const background = typeof additionalData === "object" && additionalData !== null && (additionalData as { background?: unknown }).background === true;
+    const live = win !== null && !win.isDestroyed() ? win : null;
+    switch (secondInstanceAction({ hasWindow: live !== null, minimized: live?.isMinimized() ?? false, background })) {
+      case "none":
+        return;
+      case "create":
+        // A launch can arrive before ready; the window waits for it.
+        void app.whenReady().then(() => {
+          if (win !== null && !win.isDestroyed()) return win.focus();
+          win = createWindow();
+          route(supervisor.state);
+        });
+        return;
+      case "restore":
+        live?.restore();
+        live?.focus();
+        return;
+      case "focus":
+        live?.focus();
+        return;
+    }
   });
 
   let quitting = false;
@@ -181,7 +198,10 @@ function run(): void {
     quitting = true;
     void supervisor.stop().finally(() => app.quit());
   });
-  app.on("window-all-closed", () => app.quit());
+  // Background mode keeps the server up with no window; quit (or SIGTERM) still stops it.
+  app.on("window-all-closed", () => {
+    if (quitOnAllClosed(mode)) app.quit();
+  });
   process.on("exit", () => supervisor.killNow());
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.on(signal, () => app.quit());
@@ -191,8 +211,10 @@ function run(): void {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     const root = webRoot();
     protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
-    win = createWindow();
-    route(supervisor.state);
+    if (windowAtStart(mode) && win === null) {
+      win = createWindow();
+      route(supervisor.state);
+    }
     void supervisor.start();
   });
 }
