@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // Runtime words (shell.md F01, F18, F22, F42): the sidebar footer row, the
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.

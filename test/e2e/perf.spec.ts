@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 // Performance budgets on the production build. Each budget sits a little
-// above the number measured on Ethan's machine (2026-11-07, Chromium,
+// above the number measured on the maintainer's Linux machine (2026-11-07, Chromium,
 // 1440x900, the fake Ollama at 12 ms a token); the measured value is in the
 // comment beside it. Every test also logs what it measured.
 import { readdirSync, readFileSync } from "node:fs";

@@ -9,10 +9,11 @@ ComfyUI setup when enabled. Built-in benchmarks choose model and profile
 defaults from real runs on this machine. Memory is gated: "remember" saves a
 note; model and dream changes wait as diffs.
 
-Origin and rulings: `~/projects/planning/incubator/local-ai-app/` (promoted
-2026-11-07). That folder is frozen; new decisions go in `docs/decisions.md`
-here. GatesAI (`ai/gatesai-chat`) stays a separate product; replacing it at
-full parity is a later decision.
+Origin and rulings: the maintainer's private planning folder for this
+project, not published (promoted 2026-11-07). That folder is frozen; new
+decisions go in `docs/decisions.md` here. GatesAI (the maintainer's separate
+chat app) stays a separate product; replacing it at full parity is a later
+decision.
 
 ## What it does not do
 

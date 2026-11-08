@@ -95,7 +95,7 @@ never shows a whisper stop, start or restart.
       Stop, and the turn ends cancelled with the image job untouched.
 - [ ] Windows process trees: `child.kill()` leaves Ollama's runner
       children alive on Windows. Kill the tree (`taskkill /T`) through the
-      runtime's spawn seam. *Accept:* on Geordi, stopping the app-owned
+      runtime's spawn seam. *Accept:* on the Windows test machine, stopping the app-owned
       Ollama leaves no `ollama*.exe` process.
 - [ ] Thinking pill follows the model: add `ModelInfo.capabilities` from
       `/api/show` and grey the pill out for a model without "thinking"
@@ -171,7 +171,7 @@ never shows a whisper stop, start or restart.
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).
       *Accept:* fixtures for NVIDIA 16 GB with whisper, NVIDIA 8 GB, no GPU
-      with 16 GB and no GPU with 8 GB; real runs on this machine and Geordi.
+      with 16 GB and no GPU with 8 GB; real runs on the maintainer's Linux machine and the Windows test machine.
 - [ ] `pnpm setup:plan`: the text model and context, the image model or
       none, the downloads and their sizes, each with a plain reason.
       *Accept:* each fixture gets its tier's picks; a plan never exceeds the
@@ -182,7 +182,7 @@ never shows a whisper stop, start or restart.
       *Accept:* with fakes, every step in order; a killed run resumes.
 - [ ] `setup/` folder: `AGENTS.md` (run, show, ask, apply, check, report),
       `CLAUDE.md` pointing to it, `README.md` for the manual path.
-      *Accept:* a fresh agent on Geordi told "look at this folder and set me
+      *Accept:* a fresh agent on the Windows test machine told "look at this folder and set me
       up" gets a working app with only the user's yes; transcript in
       `docs/evidence/`.
 - [ ] Settings shows the same plan with no agent, and a "Set up with an AI
