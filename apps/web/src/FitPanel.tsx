@@ -25,7 +25,7 @@ export function closeFit(focusChip: boolean): void {
 }
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
-const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : 32768);
+const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : c === 8192 ? 16384 : 32768);
 
 /** "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti". */
 export function shortGpu(name: string | undefined): string {
@@ -43,13 +43,19 @@ export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize 
   const other = otherCtx(numCtx);
   const cur = useStore((s) => s.fits[fitKey(model, numCtx)]);
   const alt = useStore((s) => s.fits[fitKey(model, other)]);
-  useEffect(() => ensureFit(model, other), [model, other, alt]);
-  const line = ctxLine(cur === "error" ? undefined : cur, alt === "error" ? undefined : alt, other);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const canOther = max === undefined || other <= max;
+  useEffect(() => {
+    if (canOther) ensureFit(model, other);
+  }, [model, other, alt, canOther]);
+  const line = ctxLine(cur === "error" ? undefined : cur, alt === "error" || !canOther ? undefined : alt, other);
   const [lbl, rest] = line.alt?.split("|") ?? [];
+  const clamped = max !== undefined && numCtx > max;
   // F76: the definition and the other size's result are separate lines; the scope is the row label above.
   return (
     <>
       <span className="ctx-def">{line.lead}</span>
+      {clamped ? <span className="ctx-alt">Runs at {k(max)}, the most this model takes.</span> : null}
       {lbl !== undefined ? (
         <span className="ctx-alt">
           <span className="ctx-k">{lbl}</span> {rest}
@@ -196,13 +202,6 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
 
 function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
   const ctx = k(r.numCtx);
-  if (v.k === "no" && v.limit !== undefined) {
-    return (
-      <div className="fp-n">
-        <span className="fp-who">{name}</span> keeps at most {k(v.limit)} of conversation in view, so it cannot run at {ctx}. Memory is not the limit.
-      </div>
-    );
-  }
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
     const who = gpu && gpu.vendor === "nvidia" ? holders(gpu.occupants) : null;
@@ -238,10 +237,12 @@ function Body({ model }: { model: string }) {
   const gpuRaw = useStore((s) => s.gpu);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const load = useStore((s) => s.loads[model]);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
   useEffect(() => ensureFit(model, numCtx), [model, numCtx, report]);
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const name = describeModel(model, catalog).name;
-  const loaded = load?.state === "ready" && load.numCtx === numCtx;
+  const loaded = load?.state === "ready" && load.numCtx === ctx;
   const pickCtx = (c: ContextSize) => {
     closeTip();
     setContext(c);
@@ -256,12 +257,12 @@ function Body({ model }: { model: string }) {
         {v.k === "no" ? (
           <span className="vl no">
             <span className="vd no" />
-            {v.limit !== undefined ? v.word : `Needs ${gb(v.amt)} more at ${k(numCtx)}`}
+            {`Needs ${gb(v.amt)} more at ${k(ctx)}`}
           </span>
         ) : (
           <>
             <VLabel v={v} />
-            <span style={{ color: "var(--muted-foreground)" }}>at {k(numCtx)}</span>
+            <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
           </>
         )}
       </div>
@@ -271,7 +272,7 @@ function Body({ model }: { model: string }) {
         <span className="k">{inSettings ? "Default context" : "Context for this chat"}</span>
         <span className="mini-seg">
           {CONTEXT_SIZES.map((c) => (
-            <button key={c} type="button" data-ctx={c} className={numCtx === c ? "on" : ""} onClick={() => pickCtx(c)}>
+            <button key={c} type="button" data-ctx={c} className={ctx === c ? "on" : ""} disabled={max !== undefined && c > max} data-tip={max !== undefined && c > max ? `This model takes at most ${k(max)}.` : undefined} onClick={() => pickCtx(c)}>
               {k(c)}
             </button>
           ))}
@@ -291,9 +292,9 @@ function Body({ model }: { model: string }) {
       ) : gpu.vendor === "unreadable" ? (
         <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
       ) : (
-        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={numCtx} />
+        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={ctx} />
       )}
-      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
+      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={ctx} loaded={loaded} />}
     </>
   );
 }

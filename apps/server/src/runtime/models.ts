@@ -3,6 +3,8 @@
 // (wiring adds the trigger) and emits only when the list actually changed.
 // Each model carries its /api/show capabilities (cached by digest) and the
 // one chat starts on carries the pick (runtime/pick.ts).
+import { UNREPORTED_MAX_CONTEXT } from "../fit/constants.ts";
+import { reportedContextLength } from "../fit/estimate.ts";
 import { fetchShow } from "../fit/ollama.ts";
 import { httpGet } from "./http.ts";
 import type { ChatPick } from "./pick.ts";
@@ -28,8 +30,11 @@ async function getDecoded<T>(baseUrl: string, route: string, timeoutMs: number, 
   return d.value;
 }
 
-/** Capabilities by digest. A digest names exact weights, so its capabilities never change. */
-export type CapabilityCache = Map<string, readonly string[]>;
+/** What /api/show says about a model: what it can do and the most context it takes. */
+type Described = { capabilities: readonly string[]; maxContext?: number };
+
+/** By digest. A digest names exact weights, so what they can do never changes. */
+export type CapabilityCache = Map<string, Described>;
 
 /**
  * The capability list of a model /api/show could not describe (it failed, or
@@ -42,16 +47,18 @@ export const UNKNOWN_CAPABILITIES: readonly string[] = ["unknown"];
 export const UNREPORTED_CAPABILITIES: readonly string[] = ["unknown", "unreported"];
 export const capabilitiesUnknown = (m: { readonly capabilities: readonly string[] }): boolean => m.capabilities.includes("unknown");
 
-async function capabilitiesOf(baseUrl: string, m: ModelInfo, timeoutMs: number, cache: CapabilityCache | undefined): Promise<readonly string[]> {
+async function describe(baseUrl: string, m: ModelInfo, timeoutMs: number, cache: CapabilityCache | undefined): Promise<Described> {
   const known = cache?.get(m.digest);
   if (known) return known;
   try {
     const show = await fetchShow(baseUrl, m.name, AbortSignal.timeout(timeoutMs));
-    if (show.capabilities === undefined) return UNREPORTED_CAPABILITIES;
-    cache?.set(m.digest, show.capabilities);
-    return show.capabilities;
+    const maxContext = reportedContextLength(show.model_info) ?? UNREPORTED_MAX_CONTEXT;
+    if (show.capabilities === undefined) return { capabilities: UNREPORTED_CAPABILITIES, maxContext };
+    const described = { capabilities: show.capabilities, maxContext };
+    cache?.set(m.digest, described);
+    return described;
   } catch {
-    return UNKNOWN_CAPABILITIES;
+    return { capabilities: UNKNOWN_CAPABILITIES };
   }
 }
 
@@ -69,8 +76,8 @@ export async function listModels(baseUrl: string, timeoutMs = 5000, cache?: Capa
     .toSorted((a, b) => a.name.localeCompare(b.name));
   if (stopped?.() === true) return models;
   // One /api/show per digest not seen before, all at once.
-  const caps = await Promise.all(models.map((m) => capabilitiesOf(baseUrl, m, timeoutMs, cache)));
-  return models.map((m, i) => ({ ...m, capabilities: caps[i] ?? [] }));
+  const described = await Promise.all(models.map((m) => describe(baseUrl, m, timeoutMs, cache)));
+  return models.map((m, i) => ({ ...m, capabilities: described[i]?.capabilities ?? [], ...(described[i]?.maxContext === undefined ? {} : { maxContext: described[i].maxContext }) }));
 }
 
 /** /api/ps; `signal` ends the read early (shutdown, a runtime switch). */

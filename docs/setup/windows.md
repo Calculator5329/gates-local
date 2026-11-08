@@ -260,10 +260,11 @@ Each model shows one of three labels for the chosen context:
 - **Runs on GPU:** the model fits in free GPU memory (NVIDIA only).
 - **Uses system memory · slower:** all or part of it runs in system memory.
   Without an NVIDIA GPU every model that fits gets this label.
-- **Not enough memory at 16k:** it does not fit even with system memory. The
+- **Not enough memory at 16k** (or the size you chose): it does not fit even
+  with system memory. The
   label says how much more is needed.
 
-Choose a smaller model or a smaller context (16k is the smallest), or close
+Choose a smaller model or a smaller context (down to 8k), or close
 other programs. The app measures free memory at the moment it checks.
 
 ### The port is in use

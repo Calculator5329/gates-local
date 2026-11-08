@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { GIB, MIB, NUM_CTX_FLOOR, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
-import { checkNumCtx, estimateKvCache, parseArchInfo } from "./estimate.ts";
+import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
+import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { blockingModels, checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
 import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable } from "./gpu.ts";
@@ -65,6 +65,62 @@ async function fakeOllama(ps: unknown = { models: [] }): Promise<FakeServer> {
   });
   return server;
 }
+
+/** /api/show for a small chat model; with no `contextLength` it reports no maximum. */
+const tinyShow = (contextLength?: number) => ({
+  model_info: {
+    "general.architecture": "tiny",
+    "tiny.block_count": 4,
+    "tiny.attention.head_count": 4,
+    "tiny.attention.head_count_kv": 4,
+    "tiny.attention.key_length": 64,
+    "tiny.attention.value_length": 64,
+    ...(contextLength === undefined ? {} : { "tiny.context_length": contextLength }),
+  },
+  capabilities: ["completion"],
+});
+
+async function oneModel(show: unknown, ps: unknown = { models: [] }): Promise<FakeServer> {
+  server = await startFakeServer({
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "tiny:2k", size: 500 * MIB, digest: "t" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, ps),
+    "POST /api/show": (_b, res) => json(res, 200, show),
+  });
+  return server;
+}
+
+const fitOf = async (s: FakeServer, model: string, numCtx: number) =>
+  (await checkFit({ baseUrl: s.baseUrl, model, numCtx, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO })).report;
+
+describe("a model's own context window", () => {
+  it("runs a model that takes at most 2048 at 2048 when more is asked for: memory decides, nothing refuses", async () => {
+    const report = await fitOf(await oneModel(tinyShow(2048)), "tiny:2k", 16384);
+    expect(report).toMatchObject({ verdict: "fits", numCtx: 2048, source: "estimate" });
+    expect(report.message).not.toMatch(/refused|context_length/);
+  });
+
+  it("never goes past the reported maximum, and never jumps up to it", async () => {
+    const s = await fakeOllama();
+    expect((await fitOf(s, "qwen3.5:9b", 524288)).numCtx).toBe(262144);
+    expect(await fitOf(s, "qwen3.5:9b", 16384)).toMatchObject({ verdict: "fits", numCtx: 16384 });
+  });
+
+  it("falls back to 4096 when the model reports no maximum, and keeps a smaller ask", async () => {
+    const s = await oneModel(tinyShow());
+    expect(await fitOf(s, "tiny:2k", 16384)).toMatchObject({ verdict: "fits", numCtx: 4096 });
+    expect((await fitOf(s, "tiny:2k", 2048)).numCtx).toBe(2048);
+  });
+
+  it("still gives a verdict for a model that reports no geometry at all", async () => {
+    const report = await fitOf(await oneModel({ model_info: {}, capabilities: ["completion"] }), "tiny:2k", 16384);
+    expect(report).toMatchObject({ verdict: "fits", numCtx: 4096, source: "estimate" });
+  });
+
+  it("counts a copy resident at the smaller size as measured", async () => {
+    const ps = { models: [{ name: "tiny:2k", size: GIB, size_vram: GIB, context_length: 2048 }] };
+    expect(await fitOf(await oneModel(tinyShow(2048), ps), "tiny:2k", 16384)).toMatchObject({ source: "measured", numCtx: 2048 });
+  });
+});
 
 describe("nvidia-smi parsing", () => {
   it("reads this machine's totals in bytes", () => {
@@ -162,15 +218,9 @@ describe("need estimate", () => {
 
   it("refuses incomplete model_info by code", () => {
     expect(() => parseArchInfo("x", {})).toThrow(expect.objectContaining({ code: "model-info-incomplete" }));
-    expect(() => parseArchInfo("x", { "general.architecture": "a", "a.block_count": 2 })).toThrow(/context_length/);
+    expect(() => parseArchInfo("x", { "general.architecture": "a", "a.context_length": 2 })).toThrow(/block_count/);
   });
 
-  it("refuses num_ctx below 16384 and above the model's context_length", () => {
-    expect(checkNumCtx("m", 16384, 32768)).toEqual({ ok: true });
-    expect(checkNumCtx("m", 16383)).toMatchObject({ ok: false, message: expect.stringContaining("below the 16384 floor") });
-    expect(checkNumCtx("m", 8192.5).ok).toBe(false);
-    expect(checkNumCtx("m", 65536, 32768)).toMatchObject({ ok: false, message: expect.stringContaining("context_length 32768") });
-  });
 });
 
 describe("decideFit", () => {
@@ -286,27 +336,6 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
       await settle();
       expect(unhandled).toEqual([]);
     });
-  });
-
-  it("refuses below the floor before any request or nvidia-smi run", async () => {
-    const s = await fakeOllama();
-    const run = smi(MACHINE_GPU, MACHINE_APPS);
-    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 8192, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
-    expect(check.report).toMatchObject({ verdict: "refuse", numCtx: 8192 });
-    expect(check.report.message).toContain("below the 16384 floor");
-    // The floor is the product's limit, not the model's: no contextLimit.
-    expect(check.report.contextLimit).toBeUndefined();
-    expect(s.requests).toEqual([]);
-    expect(run.calls).toEqual([]);
-  });
-
-  it("refuses num_ctx above the model's context_length", async () => {
-    const s = await fakeOllama();
-    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 524288, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO });
-    expect(check.report.verdict).toBe("refuse");
-    expect(check.report.message).toContain("context_length 262144");
-    // The client words this "Supports up to 256k context" from the number, not the message.
-    expect(check.report.contextLimit).toBe(262144);
   });
 
   it("a model missing from /api/tags is an error by code, not a verdict", async () => {
@@ -432,7 +461,7 @@ describe("checkModels", () => {
     // A crowded card: 13303 MiB used, 3000 MiB free; 4 GB RAM available.
     const lowGpu = "16303, 13303, 3000\n";
     const lowMem = `MemAvailable:    ${4_000_000} kB\n`;
-    const result = await checkModels({ baseUrl: s.baseUrl, numCtx: NUM_CTX_FLOOR, runNvidiaSmi: smi(lowGpu, MACHINE_APPS), readMeminfo: async () => lowMem });
+    const result = await checkModels({ baseUrl: s.baseUrl, numCtx: 16384, runNvidiaSmi: smi(lowGpu, MACHINE_APPS), readMeminfo: async () => lowMem });
     expect(result.runnable).toEqual([]);
     expect(result.checks.every((c) => c.report.verdict === "refuse")).toBe(true);
 

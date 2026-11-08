@@ -297,7 +297,7 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {end?.kind === "error" ? (
           <div className="err-line" data-tip={esc(end.message)}>
             <Icon id="alert" cls="s14" />
-            <span>{end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
+            <span>{end.code === "context-too-small" ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
             <button type="button" className="qa" onClick={retry}>
               Retry
             </button>

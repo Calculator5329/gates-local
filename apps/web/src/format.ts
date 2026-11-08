@@ -2,7 +2,7 @@
 // decimal for GB, three verdict labels, the friendly model name first.
 import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress, Source } from "@gates-local/contracts";
 
-export const CONTEXT_SIZES: readonly ContextSize[] = [16384, 32768, 65536];
+export const CONTEXT_SIZES: readonly ContextSize[] = [8192, 16384, 32768, 65536];
 
 const GIB = 1024 ** 3;
 
@@ -29,9 +29,15 @@ export function sourceDetail(src: Source): string {
   return parts.join(" · ") || "Read-only";
 }
 
-/** 16384 → "16k". */
+/** 16384 → "16k", 512 → "512". */
 export function k(numCtx: number): string {
-  return `${Math.round(numCtx / 1024)}k`;
+  return numCtx < 1024 ? String(numCtx) : `${Math.round(numCtx / 1024)}k`;
+}
+
+/** The context `tag` runs at: the size asked for, never past the most it takes. */
+export function ctxFor(numCtx: number, models: readonly { readonly name: string; readonly maxContext?: number }[] | undefined, tag: string | undefined): number {
+  const max = models?.find((m) => m.name === tag)?.maxContext;
+  return max === undefined ? numCtx : Math.min(numCtx, max);
 }
 
 /**
@@ -73,8 +79,6 @@ export interface Verdict {
   readonly need: number;
   readonly avail: number;
   readonly measured: boolean;
-  /** Set when the refusal is the model's own context ceiling, not memory. */
-  readonly limit?: number;
 }
 
 export function verdictOf(r: FitReport): Verdict {
@@ -83,27 +87,19 @@ export function verdictOf(r: FitReport): Verdict {
   if (r.verdict === "spills") {
     return { ...base, k: "spill", chip: "system memory", word: "Uses system memory · slower", detail: `${gb(r.spillRamBytes)} in system memory`, amt: r.spillRamBytes };
   }
-  if (r.contextLimit !== undefined) {
-    const word = `Supports up to ${k(r.contextLimit)} context`;
-    return { ...base, k: "no", chip: `up to ${k(r.contextLimit)} context`, word, detail: `${k(r.numCtx)} is past its limit`, amt: 0, limit: r.contextLimit };
-  }
   const short = r.shortfallBytes ?? Math.max(0, r.needVramBytes - r.freeVramBytes);
   return { ...base, k: "no", chip: "not enough memory", word: `Not enough memory at ${k(r.numCtx)}`, detail: `needs ${gb(short)} more`, amt: short };
 }
 
 /**
  * What the context size not chosen would do, for the line under a context
- * control (F36b): "still runs on GPU; uses 2.5 GB more". A refusal past the
- * model's context limit says so, never "not enough memory" (MP-06).
+ * control (F36b): "still runs on GPU; uses 2.5 GB more".
  */
 export function otherCtxWords(cur: FitReport, other: FitReport): string {
   const ov = verdictOf(other);
   const cv = verdictOf(cur);
-  // "still" only when both are the same verdict for the same reason.
-  const same = ov.k === cv.k && (ov.limit === undefined) === (cv.limit === undefined);
-  if (ov.limit !== undefined) return `${same ? "still " : ""}past its context limit; it supports up to ${k(ov.limit)}`;
   let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
-  if (same) says = `still ${says}`;
+  if (ov.k === cv.k) says = `still ${says}`;
   const d = other.needVramBytes - cur.needVramBytes;
   const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
   return `${says}; ${tail}`;

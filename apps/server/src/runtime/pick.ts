@@ -64,15 +64,15 @@ export async function pickChatModel(input: PickInput): Promise<ChatPick | undefi
   const ranked = rankChatModels(input.models);
   const first = ranked[0];
   if (first === undefined) return undefined;
-  const at = (name: string, verdict: FitVerdict | undefined, complete: boolean): ChatPick => ({
-    name,
-    pick: { numCtx: input.numCtx, ...(verdict === undefined ? {} : { verdict }) },
-    complete,
-  });
-
   const chosen = input.defaultModel === undefined ? undefined : ranked.find((m) => canonicalTag(m.name) === canonicalTag(input.defaultModel ?? ""));
   // All at once against the one reading: the walk is latency on the first models.list.
   const reports = await Promise.all(ranked.map((m) => input.fit(m.name)));
+  const at = (name: string, verdict: FitVerdict | undefined, complete: boolean): ChatPick => ({
+    name,
+    // The size this model runs at, which can be under the default for a small-window model.
+    pick: { numCtx: reports[ranked.findIndex((m) => m.name === name)]?.numCtx ?? input.numCtx, ...(verdict === undefined ? {} : { verdict }) },
+    complete,
+  });
   const verdictOf = (m: ModelInfo) => reports[ranked.indexOf(m)]?.verdict;
   /** Whether every model ranked above `index` (or all, without one) has a verdict. */
   const checkedBefore = (index = ranked.length) => reports.slice(0, index).every((r) => r !== undefined);

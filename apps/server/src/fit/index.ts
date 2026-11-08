@@ -11,7 +11,7 @@ export {
   readGpu,
   readMemAvailable,
 } from "./gpu.ts";
-export { checkNumCtx, estimateKvCache, estimateNeed, parseArchInfo, type ArchInfo } from "./estimate.ts";
+export { effectiveNumCtx, estimateKvCache, estimateNeed, parseArchInfo, reportedContextLength, type ArchInfo } from "./estimate.ts";
 export { fetchPs, fetchShow, fetchTags, findLoaded, sameModel, type PsEntry } from "./ollama.ts";
 export {
   checkFit,

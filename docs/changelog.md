@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-08: no context minimum
+
+- The 16k floor is gone. A model runs at the size chosen, or at the most
+  it reports when that is less (`effectiveNumCtx`, set once in the fit
+  check and carried on `FitReport.numCtx` to chat, preloads and the pick).
+  A model that reports no maximum runs at 4k, Ollama's own default.
+- 8k joins 16k, 32k and 64k. A large model still defaults to 16k. The
+  context control disables sizes a model cannot take and says
+  "Runs at 2k, the most this model takes."
+- A window too small for the chat drops the oldest turns; a message too
+  long on its own gets a plain sentence and no request; tools that would
+  take over half the window mean a plain reply with a note saying why
+  (`chat/window.ts`). A small-window model is never a recommendation, so
+  it cannot displace one in the download list.
+
 ## 2026-11-07: source updates
 
 - `pnpm run app-update` (`scripts/update.ts`, `apps/server/src/update/`):

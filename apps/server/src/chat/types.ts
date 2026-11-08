@@ -34,7 +34,8 @@ export interface TurnMessage {
 }
 
 export type ChatErrorCode =
-  | "num-ctx-below-floor"
+  | "num-ctx-invalid"
+  | "context-too-small"
   | "cancelled"
   | "connection-failed"
   | "http-error"

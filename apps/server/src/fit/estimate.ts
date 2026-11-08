@@ -9,13 +9,14 @@
 // Sliding-window layers keep min(num_ctx, window + one batch) tokens with
 // their *_swa key/value lengths. Recurrent state of hybrid models (a few
 // MiB) sits inside the overhead.
-import { KV_BYTES_PER_ELEMENT, NUM_CTX_FLOOR, RUNTIME_OVERHEAD_BYTES, SWA_BATCH_TOKENS } from "./constants.ts";
+import { KV_BYTES_PER_ELEMENT, RUNTIME_OVERHEAD_BYTES, SWA_BATCH_TOKENS, UNREPORTED_MAX_CONTEXT } from "./constants.ts";
 import { FitError, type NeedEstimate } from "./types.ts";
 
 export interface ArchInfo {
   architecture: string;
   blockCount: number;
-  contextLength: number;
+  /** The most the model takes; absent when /api/show does not say. */
+  contextLength?: number;
   /** One entry per layer. */
   headCountKv: number[];
   keyLength: number;
@@ -49,8 +50,8 @@ export function parseArchInfo(model: string, modelInfo: Readonly<Record<string, 
   const contextLength = num(get("context_length"));
   const headCount = num(get("attention.head_count")) ?? numArray(get("attention.head_count"))?.[0];
   const embedding = num(get("embedding_length"));
-  if (blockCount === undefined || contextLength === undefined) {
-    throw new FitError("model-info-incomplete", `${model}: /api/show lacks ${arch}.block_count or ${arch}.context_length`);
+  if (blockCount === undefined) {
+    throw new FitError("model-info-incomplete", `${model}: /api/show lacks ${arch}.block_count`);
   }
 
   const kvRaw = get("attention.head_count_kv");
@@ -85,7 +86,7 @@ export function parseArchInfo(model: string, modelInfo: Readonly<Record<string, 
   return {
     architecture: arch,
     blockCount,
-    contextLength,
+    ...(contextLength === undefined ? {} : { contextLength }),
     headCountKv,
     keyLength,
     valueLength,
@@ -117,20 +118,20 @@ export function estimateKvCache(arch: ArchInfo, numCtx: number, bytesPerElement 
   return { bytes, layers };
 }
 
-export type CtxCheck = { ok: true } | { ok: false; message: string };
+/** The most this model takes, from /api/show's model_info; undefined when it does not say. */
+export function reportedContextLength(modelInfo: Readonly<Record<string, unknown>> | undefined): number | undefined {
+  const arch = modelInfo?.["general.architecture"];
+  if (typeof arch !== "string" || arch === "") return undefined;
+  const length = modelInfo?.[`${arch}.context_length`];
+  return typeof length === "number" && Number.isInteger(length) && length > 0 ? length : undefined;
+}
 
-/** The 16k floor and the model's own ceiling. */
-export function checkNumCtx(model: string, numCtx: number, contextLength?: number): CtxCheck {
-  if (!Number.isInteger(numCtx) || numCtx < NUM_CTX_FLOOR) {
-    return { ok: false, message: `${model}: num_ctx ${numCtx} is below the ${NUM_CTX_FLOOR} floor; refused.` };
-  }
-  if (contextLength !== undefined && numCtx > contextLength) {
-    return {
-      ok: false,
-      message: `${model}: num_ctx ${numCtx} is above the model's context_length ${contextLength}; refused.`,
-    };
-  }
-  return { ok: true };
+/**
+ * The context a model actually runs at: what was asked for, never past what
+ * it takes. A model that does not say gets the safe fallback.
+ */
+export function effectiveNumCtx(requested: number, contextLength: number | undefined): number {
+  return Math.min(requested, contextLength ?? UNREPORTED_MAX_CONTEXT);
 }
 
 export interface EstimateOptions {
@@ -154,7 +155,7 @@ export function estimateNeed(
     kvCacheBytes: kv.bytes,
     overheadBytes,
     totalBytes: weightsBytes + kv.bytes + overheadBytes,
-    contextLength: arch.contextLength,
+    ...(arch.contextLength === undefined ? {} : { contextLength: arch.contextLength }),
     kvLayers: kv.layers,
   };
 }

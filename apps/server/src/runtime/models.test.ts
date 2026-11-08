@@ -189,6 +189,25 @@ describe("capabilities and the chat pick", () => {
       },
     });
 
+  it("carries each model's maximum context, and the fallback when /api/show reports none", async () => {
+    tags = [qwen];
+    const s = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      "POST /api/show": (_b, res) => json(res, 200, { capabilities: ["completion"], model_info: { "general.architecture": "tiny", "tiny.context_length": 2048 } }),
+    });
+    const none = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      "POST /api/show": (_b, res) => json(res, 200, { capabilities: ["completion"] }),
+    });
+    try {
+      expect((await listModels(s.baseUrl))[0]?.maxContext).toBe(2048);
+      expect((await listModels(none.baseUrl))[0]?.maxContext).toBe(4096);
+    } finally {
+      await s.close();
+      await none.close();
+    }
+  });
+
   it("reads capabilities from /api/show once per digest, and again for a re-pulled model", async () => {
     tags = [qwen, embedTag];
     const s = await server();

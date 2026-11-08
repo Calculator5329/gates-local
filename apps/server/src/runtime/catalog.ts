@@ -70,14 +70,18 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
     entries.push(withFit({ name: m.name, label: modelLabel(m.name), purpose: OWN_MODEL_PURPOSE, downloadBytes: m.sizeBytes, installed: true }, survey?.reports.get(m.name)));
   }
 
-  return markRecommended(entries);
+  return markRecommended(entries, numCtx);
 }
 
-/** "fits" models are recommended; when none fits, the lightest one that spills. */
-export function markRecommended(entries: readonly CatalogEntry[]): CatalogEntry[] {
-  const fits = entries.filter((e) => e.fit?.verdict === "fits");
-  if (fits.length > 0) return entries.map((e) => ({ ...e, recommended: e.fit?.verdict === "fits" }));
-  const lightest = entries
+/**
+ * "fits" models are recommended; when none fits, the lightest one that spills. A model that
+ * cannot hold the default context is usable but no recommendation, so it never displaces one.
+ */
+export function markRecommended(entries: readonly CatalogEntry[], numCtx: number): CatalogEntry[] {
+  const offered = entries.filter((e) => e.fit !== undefined && e.fit.numCtx >= numCtx);
+  const fits = offered.filter((e) => e.fit?.verdict === "fits");
+  if (fits.length > 0) return entries.map((e) => ({ ...e, recommended: fits.includes(e) }));
+  const lightest = offered
     .filter((e) => e.fit?.verdict === "spills")
     .toSorted((a, b) => (a.fit?.needVramBytes ?? 0) - (b.fit?.needVramBytes ?? 0))[0];
   return entries.map((e) => ({ ...e, recommended: e === lightest }));

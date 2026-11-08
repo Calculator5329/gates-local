@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, ctxFor, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
@@ -269,7 +269,7 @@ function Models() {
               </span>
               {v ? (
                 <span className="d">
-                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
+                  {describeModel(model, catalog).name} at {k(ctxFor(numCtx, models, model))}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
                 </span>
               ) : null}
               <Fail err={ctxErr} />

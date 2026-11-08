@@ -8,13 +8,13 @@
 // A download size alone never proves a fit: the estimate adds KV cache and
 // overhead, and a measured /api/ps report replaces it after a real load.
 import {
-  NUM_CTX_FLOOR,
+  KV_REFERENCE_CONTEXT,
   PREDOWNLOAD_KV_FRACTION_PER_16K,
   RAM_SAFETY_MARGIN_BYTES,
   RUNTIME_OVERHEAD_BYTES,
   VRAM_SAFETY_MARGIN_BYTES,
 } from "./constants.ts";
-import { checkNumCtx, estimateNeed, parseArchInfo, type EstimateOptions } from "./estimate.ts";
+import { effectiveNumCtx, estimateNeed, parseArchInfo, reportedContextLength, type EstimateOptions } from "./estimate.ts";
 import { formatBytes, formatGb } from "./format.ts";
 import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemAvailable, untilAborted } from "./gpu.ts";
 import { fetchPs, fetchShow, fetchTags, findLoaded, sameModel, type PsEntry, type PsResponse, type TagsResponse } from "./ollama.ts";
@@ -86,21 +86,6 @@ export function decideFit(input: DecideInput): FitReport {
     spillRamBytes: 0,
     shortfallBytes: shortfall,
     message: `${head}; ${ramNote}: refused, short by ${formatBytes(shortfall)}.`,
-  };
-}
-
-function ctxRefusal(model: string, numCtx: number, message: string, gpu: GpuSnapshot | undefined, now: number, contextLimit?: number): FitReport {
-  return {
-    ...(contextLimit === undefined ? {} : { contextLimit }),
-    model,
-    numCtx,
-    freeVramBytes: gpu?.freeBytes ?? 0,
-    needVramBytes: 0,
-    spillRamBytes: 0,
-    verdict: "refuse",
-    source: "estimate",
-    measuredAt: gpu?.measuredAt ?? now,
-    message,
   };
 }
 
@@ -186,26 +171,20 @@ async function takeReadings(deps: FitDeps): Promise<Readings> {
 }
 
 /** `comfyBytes`: the app-owned ComfyUI's GPU memory, counted as reclaimable when the plan stops it. */
-async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: Readings, comfyBytes = 0): Promise<FitCheck> {
-  const now = deps.now ?? Date.now;
+async function fitWithReadings(deps: FitDeps, model: string, requested: number, r: Readings, comfyBytes = 0): Promise<FitCheck> {
   const loaded = findLoaded(r.ps, model);
+  const measured = (numCtx: number): FitCheck => ({ report: measuredReport(loaded as PsEntry, numCtx, r.gpu, r.ps.models.length), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes });
   // Measured only when /api/ps proves the resident copy runs at this num_ctx. An Ollama that
   // leaves context_length out may hold it at a smaller one, so that copy is estimated like a cold one.
-  if (loaded && loaded.context_length === numCtx) {
-    return { report: measuredReport(loaded, numCtx, r.gpu, r.ps.models.length), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
-  }
+  if (loaded && loaded.context_length === requested) return measured(requested);
 
   const tag = r.tags.models.find((m) => sameModel(m.name, model));
   if (!tag) throw new FitError("model-not-found", `${model} is not in /api/tags`);
   const show = await untilAborted(fetchShow(deps.baseUrl, model, deps.signal), deps.signal);
-  const arch = parseArchInfo(model, show.model_info);
-  const ctx = checkNumCtx(model, numCtx, arch.contextLength);
-  if (!ctx.ok) {
-    // Past the model's own ceiling (not below the floor): say the most it supports.
-    const limit = arch.contextLength !== undefined && numCtx > arch.contextLength ? arch.contextLength : undefined;
-    return { report: ctxRefusal(model, numCtx, ctx.message, r.gpu, now(), limit), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
-  }
-  const estimate = estimateNeed(model, numCtx, tag.size, arch, deps.estimate);
+  // The one place the size a model runs at is decided; the report carries it to every caller.
+  const numCtx = effectiveNumCtx(requested, reportedContextLength(show.model_info));
+  if (numCtx !== requested && loaded?.context_length === numCtx) return measured(numCtx);
+  const estimate = needAt(model, numCtx, tag.size, show.model_info, deps.estimate);
 
   // A copy loaded at another num_ctx is replaced by Ollama on the next
   // request, so the VRAM it holds counts as free for this plan. At an unknown
@@ -220,24 +199,41 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
     ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, which Ollama unloads to make room`] : []),
     ...(comfyBytes > 0 ? [`free VRAM counts ${formatGb(comfyBytes)} held by the app's idle ComfyUI, which the app stops to make room`] : []),
   ];
+  if (estimate.rough !== undefined) notes.push(estimate.rough);
   const report = decideFit({
     model,
     numCtx,
-    needBytes: estimate.totalBytes,
+    needBytes: estimate.need.totalBytes,
     freeVramBytes: r.gpu.freeBytes + reclaim + freed + comfyBytes,
     memAvailableBytes: r.memAvailableBytes,
     ...(deps.margins ? { margins: deps.margins } : {}),
     measuredAt: r.gpu.measuredAt,
     ...(notes.length > 0 ? { note: notes.join("; ") } : {}),
   });
-  return { report, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate };
+  return { report, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate: estimate.need };
 }
 
-/** Fit check for one model at one num_ctx. Refuses below the floor before touching anything. */
+/**
+ * What a model needs at `numCtx`. A model whose /api/show gives no geometry is sized the way a
+ * download is, and `rough` says so: a missing field is no reason to keep it from chatting.
+ */
+function needAt(model: string, numCtx: number, weightsBytes: number, modelInfo: Readonly<Record<string, unknown>> | undefined, options: EstimateOptions | undefined): { need: NeedEstimate; rough?: string } {
+  try {
+    return { need: estimateNeed(model, numCtx, weightsBytes, parseArchInfo(model, modelInfo), options) };
+  } catch (e) {
+    if (!(e instanceof FitError) || e.code !== "model-info-incomplete") throw e;
+    const kvCacheBytes = roughKvBytes(weightsBytes, numCtx);
+    return {
+      need: { model, numCtx, weightsBytes, kvCacheBytes, overheadBytes: RUNTIME_OVERHEAD_BYTES, totalBytes: weightsBytes + kvCacheBytes + RUNTIME_OVERHEAD_BYTES, kvLayers: 0 },
+      rough: `rough estimate, /api/show gave no layer sizes (KV cache ${formatGb(kvCacheBytes)})`,
+    };
+  }
+}
+
+const roughKvBytes = (weightsBytes: number, numCtx: number) => Math.round(weightsBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (numCtx / KV_REFERENCE_CONTEXT));
+
+/** Fit check for one model at one num_ctx; `report.numCtx` is the size it would run at. */
 export async function checkFit(deps: FitDeps & { model: string; numCtx: number }): Promise<FitCheck> {
-  const now = deps.now ?? Date.now;
-  const floor = checkNumCtx(deps.model, deps.numCtx);
-  if (!floor.ok) return { report: ctxRefusal(deps.model, deps.numCtx, floor.message, undefined, now()) };
   return fitWithReadings(deps, deps.model, deps.numCtx, await takeReadings(deps));
 }
 
@@ -269,8 +265,6 @@ export interface LoadPlan {
  * or only spills. The same model in `busy` never counts. Reads only; never loads or stops anything.
  */
 export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; comfyPid?: number }): Promise<LoadPlan> {
-  const floor = checkNumCtx(deps.model, deps.numCtx);
-  if (!floor.ok) return { report: ctxRefusal(deps.model, deps.numCtx, floor.message, undefined, (deps.now ?? Date.now)()), stop: [], comfy: false };
   const r = await takeReadings(deps);
   const others = r.ps.models.filter((m) => !sameModel(m.name, deps.model));
   const busy = deps.busy.filter((b) => !sameModel(b, deps.model));
@@ -339,11 +333,6 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
       const show = await untilAborted(fetchShow(deps.baseUrl, name, deps.signal), deps.signal);
       if (show.capabilities && !show.capabilities.includes("completion")) continue;
     }
-    const floor = checkNumCtx(name, deps.numCtx);
-    if (!floor.ok) {
-      checks.push({ report: ctxRefusal(name, deps.numCtx, floor.message, readings.gpu, readings.gpu.measuredAt) });
-      continue;
-    }
     checks.push(await fitWithReadings(deps, name, deps.numCtx, readings));
   }
   const runnable = checks
@@ -361,11 +350,8 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
  * whose check fails gives undefined; the reading itself failing throws.
  */
 export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(model: string) => Promise<FitReport | undefined>> {
-  const now = deps.now ?? Date.now;
   const readings = await takeReadings(deps);
   return async (model) => {
-    const floor = checkNumCtx(model, deps.numCtx);
-    if (!floor.ok) return ctxRefusal(model, deps.numCtx, floor.message, readings.gpu, now());
     try {
       return (await fitWithReadings(deps, model, deps.numCtx, readings)).report;
     } catch {
@@ -410,7 +396,7 @@ export function estimateBeforeDownload(input: {
   measuredAt: number;
   margins?: Margins;
 }): FitReport {
-  const kv = Math.round(input.downloadBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (input.numCtx / NUM_CTX_FLOOR));
+  const kv = roughKvBytes(input.downloadBytes, input.numCtx);
   return decideFit({
     model: input.model,
     numCtx: input.numCtx,
@@ -429,7 +415,7 @@ export function noModelFits(reports: readonly FitReport[], numCtx: number): stri
     .toSorted((a, b) => a.shortfallBytes - b.shortfallBytes);
   const closest = short[0];
   if (!closest) {
-    return `No installed model runs at num_ctx ${numCtx} (floor ${NUM_CTX_FLOOR}): ${reports.map((r) => r.message).join(" ") || "no chat models installed."}`;
+    return `No installed model runs at num_ctx ${numCtx}: ${reports.map((r) => r.message).join(" ") || "no chat models installed."}`;
   }
   return (
     `No installed model fits num_ctx ${numCtx}, even with RAM spill. The closest, ${closest.model}, ` +

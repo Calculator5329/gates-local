@@ -2,8 +2,8 @@
 
 A Linux desktop app for running AI on your own machine, built for one power
 user with a 16 GB GPU first. Electron supervises a local Node server that
-finds and starts Ollama, lists models and manages context with a 16k minimum
-and 32k/64k where measured fit allows. Local tools read the docs library and
+finds and starts Ollama, lists models and manages context up to 64k
+where measured fit allows, never past what a model takes. Local tools read the docs library and
 the databases the owner explicitly adds. Image generation uses the local
 ComfyUI setup when enabled. Built-in benchmarks choose model and profile
 defaults from real runs on this machine. Memory is gated: "remember" saves a

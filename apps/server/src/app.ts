@@ -529,7 +529,7 @@ export function createApp(deps: AppDeps): App {
             const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
             const victims = stopOthers === true ? plan.stop : [];
             if (victims.length === 0) return plan;
-            for (const t of victims) t.halt(preemptedBy(model, numCtx, t.model));
+            for (const t of victims) t.halt(preemptedBy(model, plan.report.numCtx, t.model));
             await untilAborted(Promise.all(victims.map((t) => t.ended)), signal);
           }
         };
@@ -606,7 +606,7 @@ export function createApp(deps: AppDeps): App {
         turn.started = true;
         // Before the answer, so every client (also one that did not send this) knows the turn first.
         push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
-        void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) {

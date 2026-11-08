@@ -67,6 +67,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
   const report = useStore((s) => s.fits[fitKey(tag, numCtx)]);
   const cpu = useStore((s) => noGpu(s.gpu));
+  const ctx = info?.maxContext === undefined ? numCtx : Math.min(numCtx, info.maxContext);
   if (have) ensureFit(tag, numCtx);
   const fit = entry?.fit ?? (report === undefined || report === "error" ? undefined : report);
   const v = fit ? verdictOf(fit) : undefined;
@@ -122,7 +123,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
                   Context
                 </span>
               </td>
-              <td>{k(numCtx)}</td>
+              <td>{k(ctx)}</td>
             </tr>
             {v ? (
               <tr>

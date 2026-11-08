@@ -15,8 +15,6 @@ export interface FitReport {
   source: "measured" | "estimate";
   measuredAt: number;
   message?: string;
-  /** Set when the refusal is the model's own context ceiling: the most it supports. */
-  contextLimit?: number;
 }
 
 /** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */
@@ -53,7 +51,7 @@ export interface NeedEstimate {
   kvCacheBytes: number;
   overheadBytes: number;
   totalBytes: number;
-  contextLength: number;
+  contextLength?: number;
   /** Layers that carry a KV cache (hybrid and sliding-window models have fewer). */
   kvLayers: number;
 }

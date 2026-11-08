@@ -6,7 +6,7 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import type { ModelInfo } from "@gates-local/contracts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { closeFit, openFit } from "./FitPanel.tsx";
-import { type Verdict, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
+import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -105,7 +105,8 @@ export function Composer() {
         ? `${tagTip(name, info, shownTag)}<br>Loading into GPU memory…`
         : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
 
-  const pct = Math.min(1, used / numCtx);
+  const ctx = ctxFor(numCtx, models, model);
+  const pct = Math.min(1, used / ctx);
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
   const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
@@ -114,8 +115,7 @@ export function Composer() {
   if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
   else if (noModel) sendTip = why ?? "Download a model to start chatting";
-  else if (v?.k === "no" && v.limit !== undefined) sendTip = `${esc(name)} supports up to ${k(v.limit)} of context. Pick another model.`;
-  else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(numCtx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.`;
+  else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.`;
   else if (!text) sendTip = "Type a message to send";
   const sendDisabled = (blocked && !queueable) || (!blocked && v?.k === "no") || noModel || !text;
 
@@ -189,7 +189,7 @@ export function Composer() {
                   ? "GPU memory is checked once Ollama is ready."
                   : v === undefined
                     ? "Checking GPU memory…"
-                    : `<b>${esc(name)}</b> at ${k(numCtx)}: ${v.word.replace(/ at \d+k$/, "")}. Click for GPU memory.`
+                    : `<b>${esc(name)}</b> at ${k(ctx)}: ${v.word.replace(/ at \d+k$/, "")}. Click for GPU memory.`
               }
               onClick={() => {
                 const s = getState();
@@ -200,7 +200,7 @@ export function Composer() {
             >
               <span className={`vd ${blocked || v === undefined ? "off" : v.k}`} />
               <span className="tab">
-                {k(numCtx)}
+                {k(ctx)}
                 {!blocked && v !== undefined ? (
                   <>
                     {" · "}
@@ -256,7 +256,7 @@ export function Composer() {
                 type="button"
                 className={`meter${pct > 0.85 ? " hi" : ""}`}
                 aria-label="Context used"
-                data-tip={`Context used: ${(used / 1000).toFixed(1)}k of ${k(numCtx)} tokens`}
+                data-tip={`Context used: ${(used / 1000).toFixed(1)}k of ${k(ctx)} tokens`}
               >
                 <span>Context {Math.round(pct * 100)}% used</span>
               </button>
@@ -409,8 +409,7 @@ function rowTip(r: Row, sysBytes: number | undefined): string {
   let tip = tagTip(r.name, r.info, r.tag);
   if (r.v) {
     tip += "<br>";
-    if (r.v.k === "no" && r.v.limit !== undefined) tip += `${esc(r.name)} supports up to ${k(r.v.limit)} of context.`;
-    else if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available to this model: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
+    if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available to this model: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
     else if (r.v.k === "spill") tip += `An estimated ${gb(r.v.amt)} runs from system memory, so replies are slower.`;
     else tip += `Estimated need ${gb(r.v.need)} of ${gb(r.v.avail)} available to this model.`;
   }
@@ -523,7 +522,8 @@ export function Picker() {
       // Headings are visual only: a listbox owns options, and each option's sub line already says its fit.
       head && g !== "unknown" ? <VLabel key={`g-${g}`} v={head} cls="pk-g" hidden /> : null,
       ...rows.map((r) => {
-        const loaded = loads[r.tag]?.state === "ready" && loads[r.tag]?.numCtx === numCtx;
+        const ctx = ctxFor(numCtx, models, r.tag);
+        const loaded = loads[r.tag]?.state === "ready" && loads[r.tag]?.numCtx === ctx;
         if (r.downloading !== undefined) {
           return (
             <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>You can pick it when the download finishes.`}>
@@ -536,7 +536,7 @@ export function Picker() {
           );
         }
         const tip = rowTip(r, sys);
-        const sub = rowSub(r, numCtx, loaded);
+        const sub = rowSub(r, ctx, loaded);
         if (r.v?.k === "no") {
           return (
             <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-m={r.tag} data-tip={tip}>

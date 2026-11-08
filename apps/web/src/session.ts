@@ -17,7 +17,7 @@ import {
   WireError,
   createClient,
 } from "@gates-local/contracts";
-import { describeModel, titleFrom } from "./format.ts";
+import { ctxFor, describeModel, k, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
@@ -738,7 +738,7 @@ function refusal(code: string, model: string): string {
   const name = describeModel(model, catalogOf(getState())).name;
   switch (code) {
     case "wont-fit":
-      return `${name} doesn't fit in memory at ${Math.round(getState().numCtx / 1024)}k. Pick a smaller model or context.`;
+      return `${name} doesn't fit in memory at ${k(ctxFor(getState().numCtx, getState().models, model))}. Pick a smaller model or context.`;
     case "turn-active":
       return "A reply is still being written in this thread. Stop it or wait.";
     case "runtime-not-ready":
