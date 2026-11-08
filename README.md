@@ -18,12 +18,14 @@ Ollama, for people who want local models without guessing whether they fit.
   Threads are saved in a local SQLite file and survive a server restart.
 - Downloads models from a short list inside the app, with progress and
   cancel.
-- Library: add folders, files or SQLite databases. The app copies each
-  one into a private, read-only snapshot, and the model's tools read the
-  snapshot, never the original. On Linux the shell tool runs in a
-  bubblewrap sandbox with no network.
-- Optional image generation through a local ComfyUI. It is off until you
-  turn it on.
+- Library: connect folders, files or SQLite databases for the model's
+  tools to read. The app never writes to them. A database is read from a
+  private copy taken when you connect it, and again when you press
+  Refresh. A file or folder is read as it is now, so later changes are
+  visible. On Linux the shell tool runs in a bubblewrap sandbox with no
+  network.
+- Optional image generation through ComfyUI. It is off until you turn it
+  on.
 - Dark and light themes. It follows your system setting until you pick one.
 
 <table>
@@ -47,7 +49,8 @@ Ollama, for people who want local models without guessing whether they fit.
 
 ## Requirements
 
-- **OS:** Linux on x64. This is the only platform tested so far.
+- **OS:** Linux on x64, in a graphical desktop session (X11 or Wayland).
+  This is the only platform tested so far.
 - **Node.js** 24 or newer.
 - **pnpm** 11.10.0. Corepack picks this version from `package.json`.
 - **Ollama.** Install it from <https://ollama.com/download>. If Ollama is
@@ -64,11 +67,13 @@ Ollama, for people who want local models without guessing whether they fit.
     still use the GPU when it loads the model.
   - *No GPU:* the app plans the whole model in system memory and labels it
     "Uses system memory · slower". Replies will be slow on larger models.
-- **Shell tool (optional):** bubblewrap at `/usr/bin/bwrap` and a user
-  systemd session. Without them the shell tool is off and the other tools
-  still work.
-- **ComfyUI (optional):** only for image generation, which also needs an
-  NVIDIA GPU with about 9 GB free. See
+- **Shell tool (optional):** an x86_64 or aarch64 CPU, bubblewrap at
+  `/usr/bin/bwrap`, working unprivileged user namespaces, and a systemd
+  user session that can start scopes with memory and task limits. Without
+  them the shell tool is off and the read tool still works. On Linux,
+  queries on a connected database go through this tool and also need
+  `sqlite3` at `/usr/bin/sqlite3`.
+- **ComfyUI (optional):** only for image generation. See
   [docs/setup/linux.md](docs/setup/linux.md#4-optional-image-generation-with-comfyui).
 
 ## Quick start on Linux
@@ -85,8 +90,10 @@ pnpm start
 
 `pnpm start` builds the app and opens its window. On first run it finds
 Ollama and lists your models. With no models installed, it offers some to
-download. The full guide, with updating, uninstalling and fixes for common
-problems, is [docs/setup/linux.md](docs/setup/linux.md).
+download. On Ubuntu 23.10 and later, Electron may stop with "No usable
+sandbox!" until you add an AppArmor profile; the guide shows how. The full
+guide, with updating, uninstalling and fixes for common problems, is
+[docs/setup/linux.md](docs/setup/linux.md).
 
 ## Windows
 
@@ -94,7 +101,7 @@ Not supported yet. Linux is the tested platform today.
 
 ## Privacy
 
-Your threads, settings, library snapshots and images stay in the app's data
+Your threads, settings, database copies and images stay in the app's data
 folder (`~/.local/share/gates-local` by default). The app sends no
 telemetry and has no accounts. Its window loads only its own built files.
 
@@ -111,8 +118,9 @@ These are all the network calls the code makes:
   SHA-256 before installing it.
 - **ComfyUI.** Only when image generation is on: HTTP and WebSocket calls to
   the ComfyUI address in Settings (`http://127.0.0.1:8188` by default). The
-  app checks that the address is on this machine, which may need one DNS
-  lookup if you enter a host name.
+  image prompt goes to that address, and the address can be another
+  machine. A host name there costs one DNS lookup, which the app uses to
+  tell whether ComfyUI runs on this machine.
 - **Inside the app.** The window talks to the app's own server over a
   WebSocket on `127.0.0.1`, with a token that changes on every launch.
 - **Links.** A link you click opens in your web browser. The app never
@@ -122,9 +130,8 @@ Installing is separate: `pnpm install` downloads packages from the npm
 registry, and the first `pnpm start` downloads the Electron binary from
 GitHub.
 
-One thing has not been checked yet: Electron's spellchecker, which the app
-leaves on, may download dictionary files from Google the first time it
-runs.
+Spellcheck is off. Electron's spellchecker is on by default, and on Linux
+it downloads dictionary files from Google when one is missing.
 
 The app also runs local commands: `nvidia-smi` to read GPU memory,
 `systemctl --user` to start and stop a `comfyui.service` unit if you have
@@ -140,9 +147,25 @@ pnpm shots:readme  # regenerate the images in docs/screenshots
 ```
 
 `pnpm e2e` and `pnpm shots:readme` run the real server against a fake
-Ollama and a fake `nvidia-smi`, so they need no GPU and no models. The
-screenshots use demo threads and a pinned clock, so a rerun gives the same
-images. [AGENTS.md](AGENTS.md) describes the layout, the rules for changes
+Ollama and a fake `nvidia-smi`, so they need no GPU and no models. They
+need a Chromium. They use the one named in `GATES_LOCAL_CHROMIUM`, else
+`/usr/bin/chromium` if it exists, else Playwright's own, which you install
+once:
+
+```sh
+pnpm exec playwright install --with-deps chromium
+```
+
+`--with-deps` also installs the system libraries Chromium needs, with
+sudo, on Debian and Ubuntu. On other distributions, leave it out and
+install them from your package manager.
+
+The screenshots use demo threads and a pinned clock and time zone, so a
+rerun gives the same images.
+
+Not yet covered by browser tests: a chat that reads a Library file through
+a tool, a tool step that finishes with its output, and an image made from
+a chat. [AGENTS.md](AGENTS.md) describes the layout, the rules for changes
 and what each part owns.
 
 ## Status
