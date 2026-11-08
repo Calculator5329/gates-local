@@ -3,7 +3,7 @@
 // from fit.check plus gpu.status when the server has it.
 import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type Verdict, decodeSpeed, describeModel, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, decodeSpeed, describeModel, gb, k, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
@@ -36,13 +36,7 @@ export function shortGpu(name: string | undefined): string {
 export function ctxLine(cur: FitReport | undefined, other: FitReport | undefined, otherNumCtx: number): { lead: string; alt: string | null } {
   const lead = "How much conversation the model can keep in view.";
   if (!cur || !other) return { lead, alt: null };
-  const ov = verdictOf(other);
-  const cv = verdictOf(cur);
-  let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
-  if (ov.k === cv.k) says = `still ${says}`;
-  const d = other.needVramBytes - cur.needVramBytes;
-  const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
-  return { lead, alt: `At ${k(otherNumCtx)}:|${says}; ${tail}.` };
+  return { lead, alt: `At ${k(otherNumCtx)}:|${otherCtxWords(cur, other)}.` };
 }
 
 export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize }) {
