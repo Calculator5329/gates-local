@@ -2,16 +2,16 @@
 // thread store, runtime and catalog against a fake Ollama on port 0. The fit
 // check reads fake nvidia-smi and meminfo text; nothing touches the GPU or a
 // real Ollama, and the runtime only ever runs discover() (never ensure()).
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { type Channel, type Client, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { type App, createApp } from "../src/app.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
-import type { ImageModule } from "../src/image/module.ts";
+import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
@@ -523,6 +523,94 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("wont-fit");
     expect(comfy.stops()).toBe(0);
+  });
+});
+
+/**
+ * The real image module against a fake remote ComfyUI (injected fetch and
+ * socket): a remote host skips the VRAM fit, a custom URL never touches the
+ * systemd unit, and no request leaves the process.
+ */
+const refuseUnit = async (): Promise<never> => { throw new Error("a custom ComfyUI URL must not touch the unit"); };
+
+function fakeComfyImage() {
+  const imageEvents: ImageEvent[] = [];
+  const comfyCalls: string[] = [];
+  let module: ImageModule | undefined;
+  let dataDir = "";
+  const build = (lease: GpuLease, store: ThreadStore, dir: string) => {
+    dataDir = path.join(dir, "image-data");
+    let socket: EventTarget | undefined;
+    module = createImageModule({
+      dataDir, lease, store,
+      settings: () => ({ imageGen: true, comfyUrl: "http://remote-comfy:8188" }),
+      lookupHost: async () => ["10.0.0.5"], localAddresses: () => [],
+      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      service: { inspect: refuseUnit, start: refuseUnit, stop: refuseUnit },
+      socket: () => {
+        socket = Object.assign(new EventTarget(), { close() {} });
+        Object.defineProperty(socket, "readyState", { value: 1 });
+        return socket as unknown as globalThis.WebSocket; // the image client's DOM socket, not the ws import above
+      },
+      fetch: async (input) => {
+        const { pathname } = new URL(String(input));
+        comfyCalls.push(pathname);
+        if (pathname === "/system_stats") return Response.json({ system: {}, devices: [] });
+        if (pathname === "/object_info") return Response.json({
+          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
+          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
+        });
+        if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
+        if (pathname === "/prompt") {
+          queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })));
+          return Response.json({ prompt_id: "p1" });
+        }
+        if (pathname === "/history/p1") return Response.json({ p1: { outputs: { "8": { images: [{ filename: "out.png" }] } } } });
+        if (pathname === "/view") return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        throw new Error(`unexpected ComfyUI request ${pathname}`);
+      },
+      push: (channel, payload) => { if (channel === "image.event") imageEvents.push(payload as ImageEvent); },
+    });
+    return module;
+  };
+  return { build, events: imageEvents, comfyCalls, module: () => module!, png: (jobId: string) => path.join(dataDir, "images", `${jobId}.png`) };
+}
+
+describe("threads.delete and the image jobs its turns queued", () => {
+  it("cancels a queued tool image whose turn already ended, before the thread goes", async () => {
+    const comfy = fakeComfyImage();
+    const r = await rig({ image: comfy.build, show: caps(["completion", "tools"]) });
+    cleanups.push(() => comfy.module().close());
+    let releaseTalk!: () => void;
+    const talkGate = new Promise<void>((resolve) => (releaseTalk = resolve));
+    r.setChat(async (res, body) => {
+      const last = (body as { messages: Array<{ role: string; content: string }> }).messages.at(-1)!;
+      if (last.role === "tool") return stream(res, [piece("Queued it."), doneLine]);
+      if (last.content === "draw") {
+        return stream(res, [line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a tree" } } }] }, done: true, done_reason: "stop" })]);
+      }
+      await talkGate;
+      return stream(res, [piece("still here"), doneLine]);
+    });
+    const drawing = await r.client.call("threads.create", {});
+    const talking = await r.client.call("threads.create", {});
+    // Another thread's turn streams the whole time and holds its shared chat claim.
+    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const draw = await r.client.call("chat.send", { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    await r.waitFor("chat.event", (p) => p.turnId === draw.turnId && p.event.type === "done");
+    const jobId = comfy.events.find((e) => e.threadId === drawing.id && e.state === "queued")?.jobId;
+    if (jobId === undefined) throw new Error(`the drawing turn queued no image; saw ${JSON.stringify(comfy.events)}`);
+    expect(r.lease?.status().waiting).toEqual(["image"]);
+
+    // The drawing turn is over; deleting its thread still takes its image back.
+    expect(await r.client.call("threads.delete", { threadId: drawing.id })).toEqual({ threadId: drawing.id });
+    releaseTalk();
+    await r.waitFor("chat.event", (p) => p.turnId === talk.turnId && p.event.type === "done");
+    await comfy.module().wait(jobId);
+    expect(comfy.events.filter((e) => e.jobId === jobId).map((e) => e.state)).toEqual(["queued", "cancelled"]);
+    expect(comfy.comfyCalls).not.toContain("/prompt");
+    expect(existsSync(comfy.png(jobId))).toBe(false);
+    expect((await rejection(r.client.call("threads.get", { threadId: drawing.id }))).code).toBe("thread-not-found");
   });
 });
 

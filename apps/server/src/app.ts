@@ -173,14 +173,26 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
+  /** Image jobs a turn's tool queued, per thread, until each job's wait settles: threads.delete takes them back. */
+  const imageJobs = new Map<string, Set<string>>();
+
   /**
    * The turn's image tool. It queues the job and returns: the job claims the
    * GPU alone, and this turn holds a shared claim until it ends, so waiting
    * here for the picture would wait forever. The job adds the picture to the
-   * thread after the reply; a cancelled turn takes its jobs back.
+   * thread after the reply; a cancelled turn takes its jobs back, and so does
+   * deleting the thread after the turn ended.
    */
   const queueImageFor = (threadId: string, turnSignal: AbortSignal) => async (prompt: string): Promise<{ jobId: string }> => {
-    const job = await deps.image!.generate({ prompt, threadId });
+    const image = deps.image!;
+    const job = await image.generate({ prompt, threadId });
+    const jobs = imageJobs.get(threadId) ?? new Set<string>();
+    imageJobs.set(threadId, jobs);
+    jobs.add(job.jobId);
+    void image.wait(job.jobId).catch(() => undefined).finally(() => {
+      jobs.delete(job.jobId);
+      if (jobs.size === 0 && imageJobs.get(threadId) === jobs) imageJobs.delete(threadId);
+    });
     const takeBack = () => deps.image?.cancel(job.jobId);
     if (turnSignal.aborted) takeBack();
     else turnSignal.addEventListener("abort", takeBack, { once: true });
@@ -250,6 +262,15 @@ export function createApp(deps: AppDeps): App {
     await turn.ended;
   };
 
+  /** Cancels every image job this thread's turns queued that has not settled, and waits for each to end. */
+  const cancelThreadImages = async (threadId: string) => {
+    const image = deps.image;
+    const ids = [...(imageJobs.get(threadId) ?? [])];
+    if (image === undefined || ids.length === 0) return;
+    for (const id of ids) image.cancel(id);
+    await Promise.all(ids.map((id) => image.wait(id).catch(() => undefined)));
+  };
+
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
@@ -268,6 +289,8 @@ export function createApp(deps: AppDeps): App {
     },
     "threads.delete": async ({ threadId }) => {
       await cancelThreadTurn(threadId);
+      // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
+      await cancelThreadImages(threadId);
       store.deleteThread(threadId);
       push("threads.changed", { threadId });
       return { threadId };
