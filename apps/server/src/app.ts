@@ -14,7 +14,8 @@ import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
 import { fetchShow } from "./fit/ollama.ts";
-import type { FitReport } from "./fit/types.ts";
+import { FitError, type FitReport } from "./fit/types.ts";
+import { estimateOffered } from "./runtime/catalog.ts";
 import { AdmitCancelled, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
@@ -333,7 +334,14 @@ export function createApp(deps: AppDeps): App {
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw notReady();
-      return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+      try {
+        return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+      } catch (e) {
+        // not installed yet: a model offered for download gets the catalog's pre-download estimate at this size
+        const offered = e instanceof FitError && e.code === "model-not-found" ? await estimateOffered({ baseUrl, ...(deps.fit ? { fit: deps.fit } : {}) }, model, numCtx) : undefined;
+        if (offered === undefined) throw e;
+        return offered;
+      }
     },
 
     "chat.send": async ({ threadId, content, model, numCtx, tools, think, image }) => {

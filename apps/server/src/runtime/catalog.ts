@@ -7,7 +7,7 @@
 import type { CatalogEntry, FitReport } from "@gates-local/contracts";
 import { estimateBeforeDownload, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
 import type { SettingsReader } from "../settings/store.ts";
-import { canonicalTag, CURATED_MODELS, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
+import { canonicalTag, CURATED_MODELS, type CuratedModel, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
 import { canChat } from "./pick.ts";
 import type { ModelInfo } from "./types.ts";
 
@@ -26,6 +26,29 @@ const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitRepor
   recommended: false,
   ...(fit === undefined ? {} : { fit }),
 });
+
+const preDownload = (c: CuratedModel, numCtx: number, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
+  estimateBeforeDownload({
+    model: c.name,
+    numCtx,
+    downloadBytes: c.downloadBytes,
+    freeVramBytes: survey.gpu.freeBytes,
+    memAvailableBytes: survey.memAvailableBytes,
+    measuredAt: survey.gpu.measuredAt,
+    ...(fit?.margins ? { margins: fit.margins } : {}),
+  });
+
+/**
+ * The catalog's pre-download estimate for one model offered for download, at any
+ * context: the fit check's answer for a model not installed yet, so a download row
+ * states its fit at the size the picker shows. Undefined for a model not offered.
+ */
+export async function estimateOffered(deps: { baseUrl: string; fit?: CatalogDeps["fit"] }, model: string, numCtx: number): Promise<FitReport | undefined> {
+  const c = curated(model);
+  if (c === undefined || !c.pullable) return undefined;
+  const survey = await surveyFit({ ...deps.fit, baseUrl: deps.baseUrl, numCtx, models: [] });
+  return preDownload(c, numCtx, survey, deps.fit);
+}
 
 export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
   const numCtx = deps.settings.get().defaultNumCtx;
@@ -48,17 +71,7 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
     if (own) {
       entries.push(withFit({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true }, survey?.reports.get(own.name)));
     } else if (c.pullable) {
-      const fit = survey
-        ? estimateBeforeDownload({
-            model: c.name,
-            numCtx,
-            downloadBytes: c.downloadBytes,
-            freeVramBytes: survey.gpu.freeBytes,
-            memAvailableBytes: survey.memAvailableBytes,
-            measuredAt: survey.gpu.measuredAt,
-            ...(deps.fit?.margins ? { margins: deps.fit.margins } : {}),
-          })
-        : undefined;
+      const fit = survey ? preDownload(c, numCtx, survey, deps.fit) : undefined;
       entries.push(withFit({ name: c.name, label: c.label, purpose: c.purpose, downloadBytes: c.downloadBytes, installed: false }, fit));
     }
   }

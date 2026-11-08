@@ -4,7 +4,7 @@
 // and a download row's fit follows the picker's context.
 import { readFile } from "node:fs/promises";
 import type { Download, Page, WebSocketRoute } from "@playwright/test";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 /**
  * Sits between the page and the server on the app's WebSocket: counts requests
@@ -114,6 +114,51 @@ test.describe("a failed fit check", () => {
     t.push("models.load", { model: "gemma4:12b", numCtx: 65536, state: "error", message: "test: the load failed" });
     await expect.poll(() => t.calls.get("fit.check") ?? 0).toBeGreaterThan(before);
     await expect(page.getByRole("button", { name: "Send message" })).toHaveAttribute("data-tip", /not enough memory at 64k/);
+  });
+});
+
+const ctx = (page: Page, size: string) => page.locator("#picker").getByRole("radiogroup", { name: "Context" }).getByRole("radio", { name: size });
+
+test.describe("picker download rows at the picker's context", () => {
+  test("changing Context from 16k to 64k, a download row's fit, Recommended and tooltip follow", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await page.locator("#modelBtn").click();
+    await page.locator("#pkSearch").fill("qwen 3 14b");
+    const dl = page.locator('#picker .pk-dr[data-dl="qwen3:14b"]');
+    await expect(ctx(page, "16k")).toHaveAttribute("aria-checked", "true");
+    await expect(dl.locator(".pk-v")).toHaveText("Fits");
+    await expect(dl.locator(".pk-rec")).toHaveAttribute("data-tip", /room for 16k/);
+
+    await ctx(page, "64k").click();
+    await expect(ctx(page, "64k")).toHaveAttribute("aria-checked", "true");
+    await expect(dl.locator(".pk-v")).toHaveText("Slower");
+    // it no longer runs on the GPU at 64k, so nothing promises it does
+    await expect(dl.locator(".pk-rec")).toHaveCount(0);
+    await expect(dl).toHaveAttribute("data-tip", /at 64k spills/);
+
+    await ctx(page, "16k").click();
+    await expect(dl.locator(".pk-v")).toHaveText("Fits");
+    await expect(dl).toHaveAttribute("data-tip", /at 16k fits on the GPU/);
+  });
+
+  test("a downloading row states its fit at the picker's context", async ({ page, open }) => {
+    await stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 64 * 1024 * 1024 });
+    await open();
+    await waitReady(page);
+    await page.locator("#modelBtn").click();
+    await page.locator("#pkSearch").fill("qwen 3.5 4b");
+    await page.locator('#picker .pk-dr[data-dl="qwen3.5:4b"]').getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
+    const downloading = page.locator("#picker .pk-r.dis", { hasText: "Qwen 3.5 4B" });
+    await expect(downloading).toContainText("Downloading");
+    await expect(downloading).toHaveAttribute("data-tip", /at 16k fits on the GPU/);
+    const need = async () => /est\. ([\d.]+ GB)/.exec((await downloading.getAttribute("data-tip")) ?? "")?.[1];
+    const at16 = await need();
+    expect(at16).toBeDefined();
+    await ctx(page, "64k").click();
+    await expect(downloading).toHaveAttribute("data-tip", /at 64k fits on the GPU/);
+    // the estimate itself is the one at 64k: a bigger KV cache, so a bigger need
+    await expect.poll(need).not.toBe(at16);
   });
 });
 

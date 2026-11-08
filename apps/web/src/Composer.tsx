@@ -389,8 +389,8 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
     if ((s.models ?? []).some((m) => m.name === p.name)) continue;
     const d = describeModel(p.name, catalog);
     if (!hit(p.name, d.name, d.purpose)) continue;
-    const c = catalog?.find((e) => e.name === p.name);
-    const v = c?.fit ? verdictOf(c.fit) : undefined;
+    // at the picker's context, as installed rows are (the catalog's own fit is at the saved default)
+    const v = verdictFor(s, p.name);
     groups[v?.k ?? "unknown"].push({ tag: p.name, name: d.name, purpose: d.purpose, v, downloading: pctOf(p.completedBytes, p.totalBytes), info: undefined });
   }
   return groups;
@@ -562,12 +562,15 @@ export function Picker() {
     const t = setTimeout(() => input.current?.focus(), 0);
     return () => clearTimeout(t);
   }, [open, pop?.kb]);
-  useEffect(() => {
-    if (open) for (const m of chatModels(getState().models ?? [])) ensureFit(m.name, numCtx);
-  }, [open, numCtx, fits]);
-
   const catalogRaw = useStore((st) => st.catalog);
   const catalog = catalogRaw === NA ? undefined : catalogRaw;
+  useEffect(() => {
+    if (!open) return;
+    const installed = chatModels(getState().models ?? []);
+    for (const m of installed) ensureFit(m.name, numCtx);
+    // download and downloading rows too: the fit check gives a model not installed yet the pre-download estimate
+    for (const c of catalog ?? []) if (!c.installed && !installed.some((m) => m.name === c.name)) ensureFit(c.name, numCtx);
+  }, [open, numCtx, fits, catalog]);
   const query = q.trim().toLowerCase();
   const all = pickerRows({ models, pulls, fits, numCtx, catalog: catalogRaw }, query);
   const inFam = (name: string) => fam === null || familyOf(name) === fam;
@@ -625,7 +628,7 @@ export function Picker() {
       const size = r.info ? gb(r.info.sizeBytes) : "";
       if (r.downloading !== undefined) {
         return (
-          <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>You can pick it when the download finishes.`}>
+          <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>${ctxTip(r.name, numCtx, r.v)}<br>You can pick it when the download finishes.`}>
             <span className="pk-c" />
             <Mark name={r.name} />
             <div className="pk-m">
@@ -688,15 +691,23 @@ export function Picker() {
     }),
   );
   const dlRows = downloads.map((c) => {
-    const v = c.fit ? verdictOf(c.fit) : undefined;
+    // the fit at the picker's context, not the catalog's at the saved default
+    const v = verdictFor({ fits, numCtx }, c.name);
+    // Recommended is "runs on the GPU" at this context; with no GPU, the catalog's lightest pick while it still runs
+    const recTip =
+      v?.k === "gpu"
+        ? `Runs on your GPU with room for ${k(numCtx)} of context.`
+        : c.recommended && c.fit?.verdict === "spills" && v?.k === "spill"
+          ? `The lightest choice: at ${k(numCtx)} it runs partly in system memory, so replies are slower.`
+          : undefined;
     return (
-      <div key={c.name} className="pk-dr" data-dl={c.name}>
+      <div key={c.name} className="pk-dr" data-dl={c.name} data-tip={`${ctxTip(c.label, numCtx, v)}<br>Estimated before download.`}>
         <Mark name={c.label} />
         <div className="pk-m">
           <div className="pk-n">
             <span className="pk-nm">{c.label}</span>
             <small>{gb(c.downloadBytes)}</small>
-            {c.recommended ? <span className="pk-rec" data-tip={`Runs on your GPU with room for ${k(numCtx)} of context.`}>Recommended</span> : null}
+            {recTip !== undefined ? <span className="pk-rec" data-tip={recTip}>Recommended</span> : null}
           </div>
         </div>
         <span className={`pk-v ${v?.k ?? ""}`}>{fitWord(v)}</span>
