@@ -1,14 +1,14 @@
 // Settings (shell.md F20, F27, F36, F45, F46, F59, F62-F66): six sections
 // wired to settings.get/update and the v2 methods. A section whose method the
 // server answers "not-implemented" says so in one calm line; nothing crashes.
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
 import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
-import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
+import { type ActionResult, addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
@@ -32,12 +32,36 @@ function Grp({ title, children }: { title?: string; children: ReactNode }) {
   );
 }
 
-function Row({ label, desc, children }: { label: ReactNode; desc?: ReactNode; children?: ReactNode }) {
+/**
+ * The failure of the last action a control ran (W-07): null until one fails,
+ * cleared when the next try starts. run resolves true on success.
+ */
+function useAct(): [string | null, (action: Promise<ActionResult>) => Promise<boolean>] {
+  const [err, setErr] = useState<string | null>(null);
+  const run = useCallback(async (action: Promise<ActionResult>) => {
+    setErr(null);
+    const r = await action;
+    setErr(r);
+    return r === null;
+  }, []);
+  return [err, run];
+}
+
+/** One calm sentence beside the control that failed. */
+const Fail = ({ err, line = false }: { err: string | null; line?: boolean }) =>
+  err === null ? null : (
+    <span className={line ? "act-err line" : "act-err"} role="alert">
+      {err}
+    </span>
+  );
+
+function Row({ label, desc, err = null, children }: { label: ReactNode; desc?: ReactNode; err?: string | null; children?: ReactNode }) {
   return (
     <div className="srow">
       <div className="sl">
         <b>{label}</b>
         {desc !== undefined ? <span className="d">{desc}</span> : null}
+        <Fail err={err} />
       </div>
       <div className="sv">{children}</div>
     </div>
@@ -78,11 +102,12 @@ function General() {
   const settings = useStore((s) => s.settings);
   const unavailable = useStore((s) => s.unavailable["settings.update"] === true);
   const theme = settings === NA ? undefined : settings?.theme;
+  const [err, run] = useAct();
   return (
     <>
       <Head title="General">The defaults work out of the box. Nothing here is needed to start chatting.</Head>
       <Grp title="Appearance">
-        <Row label="Theme" desc="Dark by default. System follows your desktop.">
+        <Row label="Theme" desc="Dark by default. System follows your desktop." err={err}>
           {settings === NA || unavailable ? (
             <Na>Follows your desktop. Changing it is not available in this build.</Na>
           ) : (
@@ -94,7 +119,7 @@ function General() {
                 ["dark", "Dark"],
                 ["light", "Light"],
               ]}
-              onPick={(t) => void updateSettings({ theme: t })}
+              onPick={(t) => void run(updateSettings({ theme: t }))}
             />
           )}
         </Row>
@@ -135,6 +160,7 @@ function etaText(p: PullProgress): string {
 /** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
 export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
+  const [err, run] = useAct();
   return (
     <>
       <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
@@ -148,13 +174,14 @@ export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: st
             className="qa"
             onClick={() => {
               closeTip();
-              void cancelPull(p.name);
+              void run(cancelPull(p.name));
             }}
           >
             Cancel download
           </button>
         ) : null}
       </div>
+      <Fail err={err} />
     </>
   );
 }
@@ -174,6 +201,7 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
   const v = useFit(tag, numCtx);
   const d = describeModel(tag, catalog);
+  const [err, run] = useAct();
   const tip = `<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span>${info?.quantization ? ` · ${esc(info.quantization)}` : ""}<br>${info ? `${gb(info.sizeBytes)} on disk` : ""}${v ? ` · est. ${gb(v.need)} at ${k(numCtx)}` : ""}`;
   const inner = (
     <>
@@ -192,7 +220,7 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
       aria-label={`Remove ${d.name}`}
       onClick={(e) => {
         e.stopPropagation();
-        void removeModel(tag);
+        void run(removeModel(tag));
       }}
     >
       Remove
@@ -200,21 +228,25 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   ) : null;
   if (v?.k === "no") {
     return (
-      <div className="mrow dis" data-tip={tip}>
-        {inner}
-        <button type="button" className="qa" data-memdet={tag} onClick={() => openFit(tag)}>
-          Memory details
-        </button>
-        {remove}
-      </div>
+      <>
+        <div className="mrow dis" data-tip={tip}>
+          {inner}
+          <button type="button" className="qa" data-memdet={tag} onClick={() => openFit(tag)}>
+            Memory details
+          </button>
+          {remove}
+        </div>
+        <Fail err={err} line />
+      </>
     );
   }
   return (
     <div style={{ display: "contents" }}>
-      <button type="button" className={`mrow${on ? " on" : ""}`} data-dm={tag} data-tip={tip} aria-pressed={on} onClick={() => void updateSettings({ defaultModel: tag })}>
+      <button type="button" className={`mrow${on ? " on" : ""}`} data-dm={tag} data-tip={tip} aria-pressed={on} onClick={() => void run(updateSettings({ defaultModel: tag }))}>
         {inner}
       </button>
       {remove}
+      <Fail err={err} line />
     </div>
   );
 }
@@ -228,6 +260,7 @@ function Models() {
   const numCtx = useStore((s) => s.numCtx);
   const model = useStore((s) => s.model);
   const v = useFit(model ?? "", numCtx);
+  const [ctxErr, runCtx] = useAct();
   const def = settings?.defaultModel ?? model;
   const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
   return (
@@ -274,6 +307,7 @@ function Models() {
                   {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available
                 </span>
               ) : null}
+              <Fail err={ctxErr} />
             </div>
             <div className="sv">
               <Seg2<ContextSize>
@@ -282,7 +316,7 @@ function Models() {
                 options={CONTEXT_SIZES.map((c) => [c, k(c)] as const)}
                 onPick={(c) => {
                   setContext(c);
-                  if (!settingsNA) void updateSettings({ defaultNumCtx: c });
+                  if (!settingsNA) void runCtx(updateSettings({ defaultNumCtx: c }));
                 }}
               />
             </div>
@@ -298,14 +332,15 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
   const v = c.fit ? verdictOf(c.fit) : undefined;
   const dling = p !== undefined && isActive(p) && !installed;
+  const [err, run] = useAct();
   const action = installed ? (
     <span className="badge">Installed</span>
   ) : dling ? (
-    <button type="button" className="qa" onClick={() => void cancelPull(c.name)}>
+    <button type="button" className="qa" onClick={() => void run(cancelPull(c.name))}>
       Cancel download
     </button>
   ) : (
-    <button type="button" className="btn outline" disabled={v?.k === "no"} onClick={() => void pull(c.name)}>
+    <button type="button" className="btn outline" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
       Download
     </button>
   );
@@ -323,6 +358,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
             {c.purpose} · {gb(c.downloadBytes)} download
           </span>
         )}
+        <Fail err={err} />
       </div>
       {v ? (
         <div className="dl-v" data-tip={`Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
@@ -341,8 +377,10 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
 
 function CustomPull() {
   const [name, setName] = useState("");
+  const [err, run] = useAct();
   return (
     <Row
+      err={err}
       label="Any model from the Ollama library"
       desc={
         <>
@@ -361,8 +399,8 @@ function CustomPull() {
         className="btn outline"
         disabled={name.trim() === ""}
         onClick={() => {
-          void pull(name);
-          setName("");
+          // the typed name stays until the download starts (W-07)
+          void run(pull(name)).then((ok) => ok && setName(""));
         }}
       >
         Download
@@ -442,6 +480,7 @@ function Runtime() {
               ? `Something other than Ollama answers on port ${port}.`
               : (runtime?.detail ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
+  const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   return (
     <>
@@ -458,7 +497,7 @@ function Runtime() {
         />
         {rt === "ready" ? (
           <>
-            <Row label={app ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={app ? "The one your system starts" : "A private copy it starts and stops"}>
+            <Row label={app ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={app ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
               {canSwitch ? (
                 <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
                   Switch…
@@ -507,7 +546,7 @@ function Runtime() {
                     className="btn primary"
                     onClick={() => {
                       setState({ ownerConfirm: false });
-                      void updateSettings({ runtimeMode: app ? "system" : "app" });
+                      void run(updateSettings({ runtimeMode: app ? "system" : "app" }));
                     }}
                   >
                     {app ? "Switch" : "Install and switch"}
@@ -565,13 +604,15 @@ function Images() {
   const settings = useStore((s) => s.settings);
   const status = useStore((s) => s.imageStatus);
   const [url, setUrl] = useState<string | null>(null);
+  const [genErr, runGen] = useAct();
+  const [urlErr, runUrl] = useAct();
   const on = settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   return (
     <>
       <Head title="Image generation">Off by default. When on, the model can queue image jobs in ComfyUI on this GPU.</Head>
       <Grp title="ComfyUI">
-        <Row label="Generate images" desc={settings === NA ? NOT_HERE : on ? "On. The Image toggle in the message box turns it on for a chat." : "Off. The model can't queue image jobs."}>
+        <Row label="Generate images" desc={settings === NA ? NOT_HERE : on ? "On. The Image toggle in the message box turns it on for a chat." : "Off. The model can't queue image jobs."} err={genErr}>
           {settings === NA ? null : (
             <button
               type="button"
@@ -579,7 +620,7 @@ function Images() {
               role="switch"
               aria-checked={on}
               aria-label="Generate images"
-              onClick={() => void updateSettings({ imageGen: !on })}
+              onClick={() => void runGen(updateSettings({ imageGen: !on }))}
             />
           )}
         </Row>
@@ -587,7 +628,7 @@ function Images() {
           {status !== NA && status?.baseUrl ? <span className="path">{status.baseUrl}</span> : null}
         </Row>
         {settings !== NA && settings !== undefined ? (
-          <Row label="ComfyUI address" desc="Where Gates Local finds ComfyUI.">
+          <Row label="ComfyUI address" desc="Where Gates Local finds ComfyUI." err={urlErr}>
             <input
               className="inp"
               aria-label="ComfyUI address"
@@ -596,8 +637,8 @@ function Images() {
               onChange={(e) => setUrl(e.target.value)}
               onBlur={() => {
                 if (url === null) return;
-                void updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() });
-                setUrl(null);
+                // the typed address stays until the server saved it (W-07)
+                void runUrl(updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() })).then((ok) => ok && setUrl(null));
               }}
             />
           </Row>
@@ -617,13 +658,14 @@ function fresh(src: Source): string {
 }
 
 function SourceRow({ src }: { src: Source }) {
+  const [err, run] = useAct();
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`}>
+    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`} err={err}>
       <span className="badge">read-only</span>
-      <button type="button" className="qa" onClick={() => void refreshSource(src.id)}>
+      <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
         Refresh
       </button>
-      <button type="button" className="qa" onClick={() => void removeSource(src.id)}>
+      <button type="button" className="qa" onClick={() => void run(removeSource(src.id))}>
         Remove
       </button>
     </Row>
@@ -634,8 +676,9 @@ function SourceRow({ src }: { src: Source }) {
 function AddSource({ kind, label, desc, button, icon }: { kind: "folder" | "file" | "sqlite"; label: string; desc: string; button: string; icon: "folder" | "file" | "db" }) {
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState("");
+  const [err, run] = useAct();
   return (
-    <Row label={label} desc={desc}>
+    <Row label={label} desc={desc} err={err}>
       {open ? (
         <>
           <input
@@ -656,9 +699,12 @@ function AddSource({ kind, label, desc, button, icon }: { kind: "folder" | "file
             className="btn outline"
             disabled={path.trim() === ""}
             onClick={() => {
-              void addSource(kind, path);
-              setPath("");
-              setOpen(false);
+              // the form keeps the typed path until the server added it (W-07)
+              void run(addSource(kind, path)).then((ok) => {
+                if (!ok) return;
+                setPath("");
+                setOpen(false);
+              });
             }}
           >
             Add

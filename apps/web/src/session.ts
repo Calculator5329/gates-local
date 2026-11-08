@@ -6,6 +6,7 @@ import {
   type Channel,
   type Client,
   type ContextSize,
+  type Message,
   type MethodName,
   type Params,
   type Payload,
@@ -17,7 +18,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
-import { NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
+import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
 // The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
@@ -34,12 +35,16 @@ interface DesktopBridge {
 declare global {
   interface Window {
     gatesLocal?: DesktopBridge;
-    /** Counters the performance spec reads. */
-    glPerf?: { deltas: number; flushes: number };
+    /**
+     * Counters the performance spec reads. terminalFlush is that spec's
+     * negative control (test/e2e/perf.spec.ts): the done event makes one
+     * extra store publish of the live turn before the saved row replaces it.
+     */
+    glPerf?: { deltas: number; flushes: number; terminalFlush?: boolean };
   }
 }
 
-const perf = { deltas: 0, flushes: 0 };
+const perf: NonNullable<Window["glPerf"]> = { deltas: 0, flushes: 0 };
 window.glPerf = perf;
 
 /** Where the server is: the desktop bridge, else ?server= or VITE_GATES_LOCAL_SERVER. */
@@ -67,15 +72,22 @@ function nextChance(ms: number): Promise<void> {
 }
 
 let client: Client | null = null;
+let stopped = false;
 
-/** Start the connection loop. Called once at boot. */
-export function connect(): void {
+/** Start the connection loop. Called once at boot; the returned function ends it (the session tests use it). */
+export function connect(): () => void {
+  stopped = false;
   void loop();
+  return () => {
+    stopped = true;
+    client?.close();
+  };
 }
 
 async function loop(): Promise<void> {
   let delay = 250;
   for (;;) {
+    if (stopped) return;
     const url = await serverUrl().catch(() => null);
     if (url === null) {
       if (!window.gatesLocal) return setState({ conn: { kind: "no-server" } });
@@ -90,6 +102,10 @@ async function loop(): Promise<void> {
       ws.addEventListener("open", () => resolve(true));
       ws.addEventListener("close", () => resolve(false));
     });
+    if (opened && stopped) {
+      c.close();
+      return;
+    }
     if (opened) {
       client = c;
       delay = 250;
@@ -123,20 +139,76 @@ async function probe<M extends MethodName>(method: M, params: Params<M>): Promis
   }
 }
 
-/** Run an action method; NA marks it unavailable for the rest of the session. */
-async function act<M extends MethodName>(method: M, params: Params<M>): Promise<ResultOf<M> | undefined> {
+/**
+ * What an action hands back to the control that ran it: null when it worked,
+ * else one calm sentence saying what failed and what to do, shown beside it.
+ */
+export type ActionResult = string | null;
+
+type Acted<M extends MethodName> = { readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string };
+
+/** Run an action method; NA marks it unavailable for the rest of the session. `what` completes "Couldn't …". */
+async function act<M extends MethodName>(method: M, params: Params<M>, what: string, todo = "try again"): Promise<Acted<M>> {
   try {
-    return await call(method, params);
+    return { ok: true, value: await call(method, params) };
   } catch (e) {
     if (isNA(e)) setState((s) => ({ unavailable: { ...s.unavailable, [method]: true } }));
-    return undefined;
+    return { ok: false, message: failure(what, e, todo) };
   }
+}
+
+/** "Couldn't <what> because <reason>; <todo>." in plain words, never the raw stack. */
+export function failure(what: string, e: unknown, todo = "try again"): string {
+  const code = codeOf(e);
+  if (code === "closed") return `Couldn't ${what} because Gates Local isn't connected; try again once it reconnects.`;
+  if (code === "timeout") return `Couldn't ${what} because Gates Local didn't answer in time; ${todo}.`;
+  if (code === "not-implemented") return `Couldn't ${what} because this build can't do that yet.`;
+  return `Couldn't ${what} because ${reasonOf(e instanceof Error ? e.message : String(e))}; ${todo}.`;
+}
+
+function reasonOf(message: string): string {
+  if (/\bENOENT\b|no such file/i.test(message)) return "nothing is at that path";
+  if (/\bEACCES\b|\bEPERM\b|permission denied/i.test(message)) return "Gates Local isn't allowed to read it";
+  const kind = /must be a (folder|file)/i.exec(message)?.[1];
+  if (kind) return `that path is not a ${kind}`;
+  if (/own data directory/i.test(message)) return "it holds Gates Local's own data";
+  const short = message.replace(/^\w*Error:\s*/, "").replace(/[.\s]+$/, "");
+  return `Gates Local refused it (${short.length > 120 ? `${short.slice(0, 117)}…` : short})`;
 }
 
 // ---------------------------------------------------------------- hydrate and pushes
 
+/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status). */
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status"]);
+
 async function hydrate(c: Client): Promise<void> {
-  const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) => c.subscribe(channel, handler);
+  // A push is newer than any snapshot whose request started before it. While
+  // a batch is in flight, its channels' pushes wait here and replay in order
+  // right after its snapshots land, so a snapshot never undoes a push (W-03).
+  // The first batch holds every channel: a ready push then publishes in the
+  // same update as the model the snapshot chose.
+  let held: ReadonlySet<Channel> | "all" | "none" = "all";
+  const waiting: Array<() => void> = [];
+  const release = (next: ReadonlySet<Channel> | "none") => {
+    held = next;
+    for (const run of waiting.splice(0)) run();
+  };
+  const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
+    c.subscribe(channel, (p) => {
+      if (held === "all" || (held !== "none" && held.has(channel))) waiting.push(() => handler(p));
+      else handler(p);
+    });
+  try {
+    await hydrateWith(on, release);
+  } finally {
+    release("none");
+  }
+}
+
+async function hydrateWith(
+  on: <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) => void,
+  release: (next: ReadonlySet<Channel> | "none") => void,
+): Promise<void> {
   on("chat.event", onChatEvent);
   on("runtime.changed", (runtime) => {
     setState({ runtime });
@@ -185,6 +257,8 @@ async function hydrate(c: Client): Promise<void> {
     return { ...next, ...(model === undefined ? {} : { model }) };
   });
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
+  // the pushes that came during the first batch, in order, in this same task
+  release(SECOND_BATCH);
 
   const [gpu, catalog, sources, imageStatus] = await Promise.all([
     probe("gpu.status", {}),
@@ -193,9 +267,13 @@ async function hydrate(c: Client): Promise<void> {
     probe("image.status", {}),
   ]);
   setState({ gpu, catalog, sources, imageStatus });
+  release("none");
 
   const s = getState();
   if (s.view === "new" && threads.length === 0 && !firstRunDone()) setState({ view: "firstrun" });
+  // Anything cached from before this connection may be out of date: other
+  // threads reload on their next visit, the open one now (W-04).
+  for (const id of Object.keys(s.messages)) if (id !== s.threadId) stale.add(id);
   if (s.threadId !== null) await loadThread(s.threadId, true);
   flushQueued();
 }
@@ -292,32 +370,80 @@ function setHash(threadId: string | null): void {
   if (location.hash !== next.trim()) history.replaceState(null, "", threadId === null ? location.pathname + location.search : next);
 }
 
+/** Threads cached before the last reconnect: the next visit reloads them. */
+const stale = new Set<string>();
+
+/**
+ * Thread loads in flight, each with the messages that reached its thread
+ * after it was sent: they are newer than its snapshot and replay over it by
+ * id, so a reply saved meanwhile is not lost (WF-02).
+ */
+const loads = new Set<{ readonly threadId: string; readonly since: Message[] }>();
+
+/** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
+let navGen = 0;
+
+/** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
+function noteMessage(threadId: string, msg: Message): void {
+  for (const l of loads) if (l.threadId === threadId) l.since.push(msg);
+}
+
+function upsertMessage(list: readonly Message[], msg: Message): readonly Message[] {
+  const i = list.findIndex((m) => m.id === msg.id);
+  return i < 0 ? [...list, msg] : list.map((m, j) => (j === i ? msg : m));
+}
+
+/** The cache with msg added to its thread, or put in place of the copy with its id. */
+function withMessage(s: State, threadId: string, msg: Message): State["messages"] {
+  return { ...s.messages, [threadId]: upsertMessage(s.messages[threadId] ?? [], msg) };
+}
+
 async function loadThread(threadId: string, force = false): Promise<void> {
-  if (!force && getState().messages[threadId] !== undefined) return;
+  if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
+  const nav = navGen;
+  const req = { threadId, since: [] as Message[] };
+  loads.add(req);
   try {
-    const { messages } = await call("threads.get", { threadId });
-    setState((s) => ({ messages: { ...s.messages, [threadId]: messages } }));
+    const { messages: snapshot } = await call("threads.get", { threadId });
+    stale.delete(threadId);
+    const messages = req.since.reduce(upsertMessage, snapshot);
+    setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}) }));
   } catch (e) {
-    if (codeOf(e) !== "closed") setState({ view: "new", threadId: null });
+    // only while this load's thread is still on screen and nobody navigated since (Settings over it counts)
+    const s = getState();
+    if (codeOf(e) !== "closed" && nav === navGen && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
+  } finally {
+    loads.delete(req);
   }
 }
 
+/** An ended live turn whose reply the server saved after all (it finished while the socket was down): showing both would duplicate it. */
+function savedReplyFor(live: LiveTurn | null, threadId: string, messages: readonly Message[]): boolean {
+  if (live === null || live.threadId !== threadId || live.end === undefined || live.userMessageId === undefined) return false;
+  const i = messages.findIndex((m) => m.id === live.userMessageId);
+  return i >= 0 && messages.slice(i + 1).some((m) => m.role === "assistant");
+}
+
 export function openThread(threadId: string): void {
+  navGen++;
   setState({ view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false });
   setHash(threadId);
   void loadThread(threadId);
 }
 
 export function newThread(): void {
+  navGen++;
   setState({ view: "new", threadId: null, notice: null });
   setHash(null);
 }
 
 export function openSettings(section?: Section, addPage = false): void {
+  navGen++;
   setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false }));
 }
 
 export function leaveSettings(): void {
+  navGen++;
   const s = getState();
   setState({ view: s.threadId !== null ? "thread" : "new" });
 }
@@ -367,7 +493,26 @@ export function firstPull(s: State): string | undefined {
   return Object.values(s.pulls).find((p) => p.state === "downloading" || p.state === "queued" || p.state === "verifying")?.name;
 }
 
-let stopWanted = false;
+/** Turns started this session; each live turn carries its number (LiveTurn.gen). */
+let turnGen = 0;
+/**
+ * Turn ids the client stopped or replaced. Until their terminal event, their
+ * events reach only the live turn that still carries their id, never a newer
+ * turn that is waiting for its own id (W-02).
+ */
+const oldTurns = new Set<string>();
+
+/**
+ * Before a live turn is replaced: its id, when known, is retired, so its late
+ * events (after a reconnect its server turn may still run) never reach the
+ * turn that replaces it (WF-01).
+ */
+function retire(live: LiveTurn | null): void {
+  if (live !== null && live.turnId !== null) oldTurns.add(live.turnId);
+}
+
+/** Events that came while the live turn waited for chat.send to give its id; the answer replays them (WF-01). */
+let early: Array<Payload<"chat.event">> = [];
 
 export async function send(text: string, opts: { reuseThread?: boolean } = {}): Promise<void> {
   const content = text.trim();
@@ -379,6 +524,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   if (model === undefined && wait === null) return;
 
   let threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
+  retire(s.live);
   setState({ draft: "", notice: null, live: null });
   if (threadId === null) {
     try {
@@ -401,8 +547,9 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
 
 async function startTurn(threadId: string, content: string, model: string): Promise<void> {
   const s = getState();
-  stopWanted = false;
-  setState({ live: { threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content } });
+  retire(s.live);
+  const gen = ++turnGen;
+  setState({ live: { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content } });
   try {
     const r = await call("chat.send", {
       threadId,
@@ -412,14 +559,43 @@ async function startTurn(threadId: string, content: string, model: string): Prom
       think: s.think,
       ...(s.image ? { image: true } : {}),
     });
+    const now = getState().live;
+    const mine = now !== null && now.gen === gen;
+    noteMessage(threadId, r.userMessage);
     setState((st) => ({
-      messages: { ...st.messages, [threadId]: [...(st.messages[threadId] ?? []), r.userMessage] },
-      live: st.live && st.live.threadId === threadId ? { ...st.live, turnId: r.turnId, pendingUser: null } : st.live,
+      messages: withMessage(st, threadId, r.userMessage),
+      ...(st.live !== null && st.live.gen === gen ? { live: { ...st.live, turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null } } : {}),
     }));
-    if (stopWanted) void call("chat.cancel", { turnId: r.turnId }).catch(() => undefined);
+    // stopped before its id was known, or replaced by a newer turn: end it on the server too
+    if (!mine || now.end !== undefined) {
+      oldTurns.add(r.turnId);
+      void call("chat.cancel", { turnId: r.turnId }).catch(() => undefined);
+    }
+    if (mine) {
+      // this turn's own early events land now; any other turn's go where they would have
+      replayEarly();
+    } else {
+      const theirs = early.filter((p) => p.turnId === r.turnId);
+      early = early.filter((p) => p.turnId !== r.turnId);
+      for (const p of theirs) if (p.event.type === "done") untrackedDone(p.threadId, p.event.message);
+    }
   } catch (e) {
-    setState({ live: null, draft: content, notice: refusal(codeOf(e), model) });
+    const mine = getState().live?.gen === gen;
+    setState((st) => {
+      if (st.live === null || st.live.gen !== gen) return {};
+      // a stopped turn that never started has nothing left to wait for
+      if (st.live.end !== undefined) return { live: { ...st.live, pendingUser: null, ending: undefined } };
+      return { live: null, draft: content, notice: refusal(codeOf(e), model) };
+    });
+    // a turn another client started meanwhile (turn-active) now streams here
+    if (mine) replayEarly();
   }
+}
+
+function replayEarly(): void {
+  const all = early;
+  early = [];
+  for (const p of all) onChatEvent(p);
 }
 
 /** Plain words for a refused send. */
@@ -444,17 +620,28 @@ export function stop(): void {
   const live = getState().live;
   if (live === null || live.end !== undefined) return;
   flushDeltas();
-  setState({ live: { ...live, end: { kind: "stopped", secs: Math.round((Date.now() - live.startedAt) / 1000) } } });
-  if (live.turnId === null) stopWanted = true;
-  else void call("chat.cancel", { turnId: live.turnId }).catch(() => undefined);
+  // after the flush, on the state it left: the words that were waiting for a frame stay (W-05)
+  const secs = Math.round((Date.now() - live.startedAt) / 1000);
+  setState((s) => (s.live !== null && s.live.gen === live.gen && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs }, ending: true } } : {}));
+  // without an id yet, startTurn cancels it once chat.send answers
+  if (live.turnId !== null) {
+    oldTurns.add(live.turnId);
+    void call("chat.cancel", { turnId: live.turnId }).catch(() => undefined);
+  }
+}
+
+/** Retry stays off while a stopped turn has not ended on the server: the server refuses a second turn in a thread, and the old turn's events must not land on the new one. */
+export function canRetry(s: State): boolean {
+  return s.threadId !== null && !streaming(s) && s.live?.ending !== true;
 }
 
 /** Retry or Regenerate: send the thread's last user message again. The server keeps both copies (no regenerate method yet). */
 export function retry(): void {
   const s = getState();
-  if (s.threadId === null || streaming(s)) return;
+  if (s.threadId === null || !canRetry(s)) return;
   const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "user");
   if (!last) return;
+  retire(s.live);
   setState({ live: null });
   void startTurn(s.threadId, last.content, s.model ?? last.model ?? "");
 }
@@ -462,10 +649,15 @@ export function retry(): void {
 /** A dropped connection loses the live turn's stream; the server may still save it. */
 function lostTurn(): void {
   flushDeltas();
+  // the old socket's terminal events will not come; a stopped turn stops waiting for them
   setState((s) =>
-    s.live && s.live.end === undefined
-      ? { live: { ...s.live, end: { kind: "error", code: "closed", message: "The connection dropped while this reply was being written." } } }
-      : {},
+    s.live === null
+      ? {}
+      : s.live.end === undefined
+        ? { live: { ...s.live, end: { kind: "error", code: "closed", message: "The connection dropped while this reply was being written." } } }
+        : s.live.ending
+          ? { live: { ...s.live, ending: undefined } }
+          : {},
   );
 }
 
@@ -499,6 +691,13 @@ function flushDeltas(): void {
   });
 }
 
+function dropDeltas(): void {
+  if (raf !== 0) cancelAnimationFrame(raf);
+  raf = 0;
+  pendText = "";
+  pendThinking = "";
+}
+
 function queueDelta(kind: "text" | "thinking", t: string): void {
   perf.deltas++;
   if (kind === "text") pendText += t;
@@ -506,13 +705,25 @@ function queueDelta(kind: "text" | "thinking", t: string): void {
   if (raf === 0) raf = requestAnimationFrame(flushDeltas);
 }
 
-function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
+function onChatEvent(p: Payload<"chat.event">): void {
+  const { turnId, threadId, event } = p;
   const live = getState().live;
-  if (live === null || live.threadId !== threadId || (live.turnId !== null && live.turnId !== turnId)) {
-    if (event.type === "done") void loadThread(threadId, true);
+  // a live turn still waiting for chat.send's answer (pendingUser goes when it comes, or when the send
+  // fails): events in its thread, except a retired turn's, wait for that answer
+  if (live !== null && live.threadId === threadId && live.turnId === null && live.pendingUser !== null && !oldTurns.has(turnId)) {
+    early.push(p);
     return;
   }
+  const terminal = event.type === "done" || event.type === "error";
+  const ours = live !== null && live.threadId === threadId && live.turnId === turnId;
+  if (terminal) oldTurns.delete(turnId);
+  if (!ours) return otherTurn(p);
+  // the stopped turn has ended on the server: Retry may send again
+  if (terminal && live.ending) setState((s) => (s.live?.gen === live.gen ? { live: { ...s.live, ending: undefined } } : {}));
   switch (event.type) {
+    case "start":
+      noteMessage(threadId, event.userMessage);
+      return setState((s) => ({ messages: withMessage(s, threadId, event.userMessage) }));
     case "delta":
       return queueDelta("text", event.text);
     case "thinking":
@@ -521,13 +732,22 @@ function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
       flushDeltas();
       return setState((s) => (s.live ? { live: { ...s.live, tools: upsertStep(s.live.tools, event.step) } } : {}));
     case "done": {
-      flushDeltas();
+      // the saved message has every word: drop the waiting ones instead of
+      // publishing them a moment before the row that replaces them (W-09)
+      if (window.glPerf?.terminalFlush === true) {
+        perf.flushes++;
+        setState((s) => ({ live: s.live === null ? null : { ...s.live } }));
+      }
+      const firstWordsWaiting = pendText !== "";
+      dropDeltas();
       const msg = event.message;
+      noteMessage(threadId, msg);
       setState((s) => {
         const l = s.live;
-        const ft = l?.firstTokenAt !== undefined ? { [msg.id]: l.firstTokenAt - l.startedAt } : {};
+        const firstAt = l?.firstTokenAt ?? (firstWordsWaiting ? Date.now() : undefined);
+        const ft = l !== null && firstAt !== undefined ? { [msg.id]: firstAt - l.startedAt } : {};
         return {
-          messages: { ...s.messages, [threadId]: [...(s.messages[threadId] ?? []), msg] },
+          messages: withMessage(s, threadId, msg),
           firstToken: { ...s.firstToken, ...ft },
           live: null,
         };
@@ -545,6 +765,43 @@ function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
       }
       return setState((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: event.message } } } : {}));
   }
+}
+
+/**
+ * An event of a turn this client is not showing. A turn begun in the open
+ * thread by another client (the same thread open on the phone and the
+ * desktop) becomes the live turn here too and streams (PH-02); a client that
+ * opened the thread after the start sees the reply when it is saved.
+ */
+function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
+  if (event.type === "done") return untrackedDone(threadId, event.message);
+  if (event.type !== "start") return;
+  noteMessage(threadId, event.userMessage);
+  const s = getState();
+  const adopt = s.threadId === threadId && !oldTurns.has(turnId) && (s.live === null || (s.live.end !== undefined && s.live.ending !== true));
+  const gen = adopt ? ++turnGen : 0;
+  if (adopt) {
+    retire(s.live);
+    dropDeltas();
+  }
+  const start = Date.now();
+  setState((st) => ({
+    ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
+    ...(adopt
+      ? { live: { gen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: start, thinking: "", text: "", tools: [], pendingUser: null } }
+      : {}),
+  }));
+}
+
+/**
+ * A reply saved by a turn this client does not track: loads in flight for its
+ * thread replay it over their older snapshots (WF-02), then the thread reloads.
+ * A stopped or failed turn saves nothing on the server, so only done has a
+ * message to keep.
+ */
+function untrackedDone(threadId: string, message: Message): void {
+  noteMessage(threadId, message);
+  void loadThread(threadId, true);
 }
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
@@ -576,60 +833,96 @@ export function unqueue(id: string): void {
 export function pickModel(model: string): void {
   setState({ model });
   const s = getState();
-  if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx });
+  if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx }, `load ${model}`);
 }
 
 export function setContext(numCtx: ContextSize): void {
   setState({ numCtx });
 }
 
-export async function updateSettings(patch: SettingsPatch): Promise<void> {
-  const r = await act("settings.update", patch);
-  if (r !== undefined) applySettings(r);
-}
+const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
+  defaultModel: "save the default model",
+  defaultNumCtx: "save the default context window",
+  thinking: "save the thinking setting",
+  theme: "save the theme",
+  runtimeMode: "save the Ollama choice",
+  tools: "save the tools setting",
+  imageGen: "save image generation",
+  comfyUrl: "save the ComfyUI address",
+};
 
-export async function pull(name: string): Promise<void> {
-  const tag = name.trim();
-  if (tag === "") return;
-  setState((s) => ({ pulls: { ...s.pulls, [tag]: { name: tag, state: "queued", completedBytes: 0 } } }));
-  const r = await act("models.pull", { name: tag });
-  if (r === undefined) {
-    setState((s) => {
-      const { [tag]: _gone, ...pulls } = s.pulls;
-      return { pulls };
+/** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
+export async function updateSettings(patch: SettingsPatch): Promise<ActionResult> {
+  const keys = Object.keys(patch) as Array<keyof SettingsPatch>;
+  const what = keys.length === 1 && keys[0] !== undefined ? SETTING_WORDS[keys[0]] : "save these settings";
+  const r = await act("settings.update", patch, what);
+  if (!r.ok) return r.message;
+  applySettings(r.value);
+  // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
+  if ("imageGen" in patch || "comfyUrl" in patch) {
+    void probe("image.status", {}).then((imageStatus) => {
+      if (imageStatus !== undefined) setState({ imageStatus });
     });
   }
+  return null;
 }
 
-export async function cancelPull(name: string): Promise<void> {
-  await act("models.cancelPull", { name });
+export async function pull(name: string): Promise<ActionResult> {
+  const tag = name.trim();
+  if (tag === "") return null;
+  setState((s) => ({ pulls: { ...s.pulls, [tag]: { name: tag, state: "queued", completedBytes: 0 } } }));
+  const r = await act("models.pull", { name: tag }, `start downloading ${tag}`);
+  if (r.ok) return null;
+  setState((s) => {
+    const { [tag]: _gone, ...pulls } = s.pulls;
+    return { pulls };
+  });
+  return r.message;
+}
+
+export async function cancelPull(name: string): Promise<ActionResult> {
+  const r = await act("models.cancelPull", { name }, `cancel the download of ${name}`);
+  // a cancel the server never heard leaves the download running, and its row stays
+  if (!r.ok) return r.message;
   setState((s) => {
     const { [name]: _gone, ...pulls } = s.pulls;
     return { pulls };
   });
+  return null;
 }
 
-export async function removeModel(name: string): Promise<void> {
-  const r = await act("models.remove", { name });
-  if (r !== undefined) await refreshModels();
+export async function removeModel(name: string): Promise<ActionResult> {
+  const r = await act("models.remove", { name }, `remove ${name}`);
+  if (!r.ok) return r.message;
+  await refreshModels();
+  return null;
 }
 
-export async function addSource(kind: "folder" | "file" | "sqlite", path: string): Promise<void> {
-  if (path.trim() === "") return;
-  await act("sources.add", { kind, path: path.trim() });
+const SOURCE_WORDS = { folder: "folder", file: "file", sqlite: "database" } as const;
+
+export async function addSource(kind: "folder" | "file" | "sqlite", path: string): Promise<ActionResult> {
+  if (path.trim() === "") return null;
+  const r = await act("sources.add", { kind, path: path.trim() }, `add this ${SOURCE_WORDS[kind]}`, "check it and try again");
+  return r.ok ? null : r.message;
 }
 
-export async function removeSource(id: string): Promise<void> {
-  await act("sources.remove", { id });
+export async function removeSource(id: string): Promise<ActionResult> {
+  const r = await act("sources.remove", { id }, "remove this source");
+  return r.ok ? null : r.message;
 }
 
-export async function refreshSource(id: string): Promise<void> {
-  await act("sources.refresh", { id });
+export async function refreshSource(id: string): Promise<ActionResult> {
+  const r = await act("sources.refresh", { id }, "refresh this source");
+  return r.ok ? null : r.message;
 }
 
-/** Retry from a runtime banner: ask for the status and the model list again. */
+/**
+ * Retry from a runtime banner: the server looks for Ollama again (and starts
+ * the app's own copy where it may), then the model list reloads. A server
+ * without runtime.retry answers its cached status instead.
+ */
 export async function recheckRuntime(): Promise<void> {
-  const runtime = await call("runtime.status", {}).catch(() => undefined);
+  const runtime = await call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e))).catch(() => undefined);
   if (runtime !== undefined) setState({ runtime });
   await refreshModels();
 }

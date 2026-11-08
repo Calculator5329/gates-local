@@ -140,6 +140,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
   "runtime.status": { params: {}, result: runtime },
+  "runtime.retry": { params: {}, result: runtime },
   "fit.check": {
     params: { model: "qwen3:14b", numCtx: 32768 },
     result: {
@@ -202,6 +203,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
 /** One sample per channel; chat.event gets one per ChatEvent variant. */
 export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "chat.event": [
+    { turnId: "turn-1", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } },
     { turnId: "turn-1", threadId: "t1", event: { type: "thinking", text: "greet" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
     { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },

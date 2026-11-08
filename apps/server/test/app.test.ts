@@ -251,7 +251,8 @@ describe("chat.send", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "2+2?", model: MODEL, numCtx: 16384 });
     expect(sent.userMessage).toMatchObject({ threadId: t.id, role: "user", content: "2+2?" });
-    expect(events(r, sent.turnId)).toEqual([]); // returned before any reply byte
+    // returned before any reply byte; the start push came first, for every client (PH-02)
+    expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
     expect(r.app.activeTurns()).toBe(1);
 
     // The store already has the user message; the turn is streaming.
@@ -261,7 +262,7 @@ describe("chat.send", () => {
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
 
-    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["delta", "delta", "done"]);
+    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
     if (done.event.type !== "done") throw new Error("unreachable");
     expect(done.event.stopReason).toBe("stop");
     expect(done.event.message).toMatchObject({
@@ -926,6 +927,30 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("shutting-down");
+  });
+});
+
+describe("runtime.retry (W-06)", () => {
+  it("looks for Ollama again instead of answering the cached status", async () => {
+    const store = openThreadStore(path.join(cacheTmp(), "threads.sqlite"));
+    cleanups.push(() => store.close());
+    let ensured = 0;
+    const app = createApp({
+      store,
+      // a stub: the real runtime's ensure() may start Ollama, which these tests never do
+      runtime: {
+        status: () => ({ state: "wrong-service", owner: "none", baseUrl: "http://127.0.0.1:1", detail: "nginx" }),
+        baseUrl: () => undefined,
+        onChange: () => () => undefined,
+        ensure: async () => (ensured++, { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:1" }),
+      },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined },
+      push: () => undefined,
+    });
+    cleanups.push(() => app.shutdown());
+    expect((await app.handlers["runtime.status"]({}, { clientId: 1 })).state).toBe("wrong-service");
+    expect(await app.handlers["runtime.retry"]?.({}, { clientId: 1 })).toMatchObject({ state: "ready" });
+    expect(ensured).toBe(1);
   });
 });
 
