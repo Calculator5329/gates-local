@@ -183,15 +183,31 @@ test("cold load: first paint and time to a ready composer", async ({ page, open 
  * the client's counters plus the most store flushes seen in one animation
  * frame. window.glPerf is the client's own counter object
  * (apps/web/src/session.ts); each write to flushes is stamped with the frame
- * it happened in.
+ * it happened in, and counted when it ran outside an animation-frame
+ * callback (a flush from a socket event, such as the terminal one).
  */
-async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>) {
+async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>, terminalFlush = false) {
   await open();
   await waitReady(page);
   await stack.scenario("models", { tokenDelayMs: 4 });
-  await page.evaluate(() => {
-    const w = window as unknown as { glPerf: { deltas: number; flushes: number }; glFrames: number; glFlushFrames: number[] };
+  await page.evaluate((flag) => {
+    const w = window as unknown as FlushProbe;
+    // the control's regression (apps/web/src/session.ts): one extra publish at the done event
+    w.glPerf.terminalFlush = flag;
     w.glFlushFrames = [];
+    w.glOutsideFrame = 0;
+    // the app looks requestAnimationFrame up on each call; observe() kept the real one for its frame count
+    const raf = window.requestAnimationFrame.bind(window);
+    let inFrame = false;
+    window.requestAnimationFrame = (cb) =>
+      raf((t) => {
+        inFrame = true;
+        try {
+          cb(t);
+        } finally {
+          inFrame = false;
+        }
+      });
     let n = 0;
     Object.defineProperty(w.glPerf, "flushes", {
       configurable: true,
@@ -199,28 +215,45 @@ async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>)
       set: (v: number) => {
         n = v;
         w.glFlushFrames.push(w.glFrames);
+        if (!inFrame) w.glOutsideFrame++;
       },
     });
     w.glPerf.deltas = 0;
     w.glFrames = 0;
-  });
+  }, terminalFlush);
   await sendMessage(page, "Stream something");
-  await expect(page.locator(".turn.a .md").last()).toContainText("so streaming takes a", { timeout: 10_000 });
+  // read once the reply has finished: a flush at the terminal event counts too (WF-05)
+  await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.locator(".caret")).toHaveCount(0);
+  await expect(page.locator(".turn.a.done .md")).toContainText("so streaming takes a");
   const r = await page.evaluate(() => {
-    const w = window as unknown as { glPerf: { deltas: number; flushes: number }; glFrames: number; glFlushFrames: number[] };
+    const w = window as unknown as FlushProbe;
     const per = new Map<number, number>();
     for (const f of w.glFlushFrames) per.set(f, (per.get(f) ?? 0) + 1);
-    return { deltas: w.glPerf.deltas, flushes: w.glPerf.flushes, frames: w.glFrames, maxPerFrame: Math.max(0, ...per.values()) };
+    return { deltas: w.glPerf.deltas, flushes: w.glPerf.flushes, frames: w.glFrames, maxPerFrame: Math.max(0, ...per.values()), outsideFrame: w.glOutsideFrame };
   });
   report("deltas", r.deltas, "tokens");
   report("flushes", r.flushes, "renders");
   report("frames", r.frames, "frames");
   report("most flushes in one frame", r.maxPerFrame, "flushes");
+  report("flushes outside a frame callback", r.outsideFrame, "flushes");
   return r;
 }
 
-/** The W-09 flush gate: a real stream of many tokens, never two flushes in one frame. */
-const oneFlushPerFrame = (r: { deltas: number; flushes: number; maxPerFrame: number }) => r.deltas > 50 && r.flushes > 0 && r.maxPerFrame <= 1;
+interface FlushProbe {
+  glPerf: { deltas: number; flushes: number; terminalFlush?: boolean };
+  glFrames: number;
+  glFlushFrames: number[];
+  glOutsideFrame: number;
+}
+
+/**
+ * The W-09 flush gate: a real stream of many tokens, never two flushes in one
+ * frame, and every flush from a frame callback: the done event drops the
+ * waiting words, it does not publish them.
+ */
+const oneFlushPerFrame = (r: { deltas: number; flushes: number; maxPerFrame: number; outsideFrame: number }) =>
+  r.deltas > 50 && r.flushes > 0 && r.maxPerFrame <= 1 && r.outsideFrame === 0;
 
 test("streaming flushes at most once in any frame", async ({ page, open }) => {
   const r = await streamFlushes(page, open);
@@ -235,6 +268,11 @@ test("negative control: a flush per task instead of per frame fails the flush ga
     window.cancelAnimationFrame = (id) => window.clearTimeout(id);
   });
   const r = await streamFlushes(page, open);
+  expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(false);
+});
+
+test("negative control: one extra flush at the terminal event fails the flush gate", async ({ page, open }) => {
+  const r = await streamFlushes(page, open, true);
   expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(false);
 });
 
