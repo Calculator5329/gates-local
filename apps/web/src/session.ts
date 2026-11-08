@@ -431,6 +431,8 @@ async function loadThread(threadId: string, force = false): Promise<void> {
     setLoadError(threadId, null);
   } catch (e) {
     if (older()) return;
+    // a failure lands too: an older answer that comes after it must not clear or replace its error
+    landed.set(threadId, req.seq);
     // a cached thread keeps its content; either way the open thread says why and offers Retry
     setLoadError(threadId, failure("load this conversation", e));
     // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts)

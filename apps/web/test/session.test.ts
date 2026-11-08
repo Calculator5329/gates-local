@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { type Browser, installBrowser, tick, until } from "./harness.ts";
+import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -450,6 +450,39 @@ describe("an image saved into a thread outside chat events (WF3-01)", () => {
     older.respond(plain());
     await tick();
     expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+/** t1 cached, then two reloads held in order: the newer one fails first. */
+async function newerFailed(): Promise<Held<"threads.get">> {
+  await boot();
+  b.server.answer("threads.get", plain);
+  session.openThread("t1");
+  await until(() => store.getState().messages["t1"] !== undefined);
+  const olderHeld = b.server.hold("threads.get");
+  session.reloadThread("t1");
+  const older = await olderHeld;
+  const newerHeld = b.server.hold("threads.get");
+  session.reloadThread("t1");
+  (await newerHeld).fail("internal", "newer load failed");
+  await tick();
+  expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
+  return older;
+}
+
+describe("an older load that answers after a newer load failed (WF4-01)", () => {
+  it("an older snapshot does not clear the newer failure and its Retry", async () => {
+    const older = await newerFailed();
+    older.respond(plain());
+    await tick();
+    expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
+  });
+
+  it("an older failure does not replace the newer failure's reason", async () => {
+    const older = await newerFailed();
+    older.fail("internal", "older load failed");
+    await tick();
+    expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
   });
 });
 
