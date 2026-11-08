@@ -5,6 +5,9 @@
 
 const GIB = 1024 ** 3;
 
+/** The long-name scenario's extra model: a tag long enough to crowd the composer. */
+export const LONG_NAME = "gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_M";
+
 export interface FakeModel {
   readonly name: string;
   readonly family: string;
@@ -102,6 +105,23 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 64,
     contextLength: 2048,
   }),
+  // The long-name scenario: a real Hugging Face GGUF tag of this length.
+  // Sized like the 12B so it can be picked; the test is about the name's
+  // length, not the fit.
+  model({
+    name: LONG_NAME,
+    family: "gemma4",
+    parameterSize: "25.8B",
+    parameterCount: 25_800_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(7.9 * GIB),
+    capabilities: ["completion", "tools"],
+    blockCount: 40,
+    headCount: 32,
+    headCountKv: 8,
+    keyLength: 128,
+    contextLength: 131_072,
+  }),
   // Not installed by default: the README shots install it as a model too big for the fixture GPU at 16k.
   model({
     name: "mistral-small3.2:24b",
@@ -156,6 +176,9 @@ export const EMBED_SMALLEST_INSTALLED = [...DEFAULT_INSTALLED, "nomic-embed-text
 
 /** The embed-only scenario: an embedding model and nothing that can chat (MP-04). */
 export const EMBED_ONLY_INSTALLED = ["nomic-embed-text:latest"] as const;
+
+/** The long-name scenario: the defaults plus a long Hugging Face tag. */
+export const LONG_NAME_INSTALLED = [...DEFAULT_INSTALLED, LONG_NAME] as const;
 
 export function findFakeModel(name: string): FakeModel | undefined {
   const full = name.includes(":") ? name : `${name}:latest`;

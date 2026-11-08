@@ -10,7 +10,7 @@ test("after a server restart the app reconnects, keeps the thread and chats agai
   await waitReady(page);
   await sendMessage(page, "First question");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: First question", { timeout: 10_000 });
-  await expect(page.locator(".caret")).toHaveCount(0);
+  await expect(page.locator(".writing")).toHaveCount(0);
   const url = page.url();
 
   const restart = stack.restart(2000);

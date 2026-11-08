@@ -366,14 +366,13 @@ retry."
 
 ### A model is too big for memory
 
-Each model shows one of three labels for the chosen context:
+In the model picker each model shows one of three words for the chosen
+context:
 
-- **Runs on GPU:** the model fits in free GPU memory.
-- **Uses system memory · slower:** part of it runs in system memory.
-  Replies are slower.
-- **Not enough memory at 16k** (or the size you chose): it does not fit even
-  with system memory.
-  The label says how much more is needed.
+- **Fits:** the model fits in free GPU memory.
+- **Slower:** part of it runs in system memory. Replies are slower.
+- **Not enough memory:** it does not fit even with system memory. Its
+  tooltip says how much more is needed.
 
 To fix it, choose a smaller model or a smaller context (down to 8k), or
 close other programs that use the GPU. The app measures free

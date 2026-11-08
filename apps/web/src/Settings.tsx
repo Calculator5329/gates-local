@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
-import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
+import { CtxLine, GpuMemory, openFit, shortGpu } from "./FitPanel.tsx";
 import { CONTEXT_SIZES, type Verdict, count, ctxFor, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
@@ -716,6 +716,20 @@ function Library() {
   );
 }
 
+// ---------------------------------------------------------------- Advanced
+
+function Advanced() {
+  const cpu = useStore((s) => noGpu(s.gpu));
+  return (
+    <>
+      <Head title="Advanced">The numbers behind the model picker. Nothing here is needed to chat.</Head>
+      <Grp title={cpu ? "Memory" : "GPU memory"}>
+        <GpuMemory />
+      </Grp>
+    </>
+  );
+}
+
 export function SettingsView() {
   const section = useStore((s) => s.section);
   const addPage = useStore((s) => s.addPage);
@@ -734,5 +748,7 @@ export function SettingsView() {
       return <Images />;
     case "library":
       return <Library />;
+    case "advanced":
+      return <Advanced />;
   }
 }

@@ -21,12 +21,12 @@ const section = async (page: Page, label: string) => {
 /**
  * The one reply of a new thread ended by itself: its row is a finished turn
  * (.done), nothing is live, no error line, Send is back. Right after Send the
- * live row does not exist yet, so "no caret" alone would pass at once.
+ * live row does not exist yet, so "no Writing line" alone would pass at once.
  */
 async function replyEnded(page: Page, timeout = 15_000): Promise<void> {
   await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout });
   await expect(page.locator(".turn.a:not(.done)")).toHaveCount(0);
-  await expect(page.locator(".caret")).toHaveCount(0);
+  await expect(page.locator(".writing")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".err-line")).toHaveCount(0);

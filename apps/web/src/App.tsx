@@ -4,17 +4,17 @@
 // Settings, the docked GPU panel, first run, popovers and the tooltip layer.
 // Global keys follow the design's Escape order: popover, GPU panel, the
 // runtime confirm, the download page, then Settings itself.
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, rtOf } from "./Banner.tsx";
 import { Composer, Picker, PlusMenu } from "./Composer.tsx";
+import { GpuPanel, closeGpuPanel, openGpuPanel } from "./FitPanel.tsx";
 import { FirstRun, NoServer } from "./FirstRun.tsx";
-import { FitPanel, closeFit } from "./FitPanel.tsx";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { SettingsView } from "./Settings.tsx";
 import { Sidebar, focusComposer, goNew, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
-import { deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
+import { call, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { POP_ANCHOR, Tip, closePop, place, togglePop } from "./ui.tsx";
 
@@ -102,7 +102,7 @@ function Header({ isNew }: { isNew: boolean }) {
   const threadId = useStore((s) => s.threadId);
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
-  const moreOpen = useStore((s) => s.pop?.id === "more");
+  const moreOpen = useStore((s) => s.pop?.id === "more" && s.pop.thread === undefined);
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     if (renaming) input.current?.select();
@@ -152,29 +152,89 @@ function exportThread(threadId: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** A thread-menu item's click: close the menu, then act on the open thread. */
+/** A thread-menu item's click: close the menu, then act on its thread (the sidebar row it opened from, or the open thread). */
 const act = (fn: (threadId: string) => void) => () => {
-  const id = getState().threadId;
+  const s = getState();
+  const id = s.pop?.thread ?? s.threadId;
   closePop();
   if (id !== null) fn(id);
 };
 
+/** Rename edits the header title, so a thread from the sidebar opens first. */
+function renameFromMenu(id: string): void {
+  const s = getState();
+  if (s.view !== "thread" || s.threadId !== id) openThread(id);
+  setState({ renaming: true });
+}
+
+/** How long Export as Markdown waits for its thread to load before it gives up. */
+const EXPORT_WAIT_MS = 8000;
+
+/**
+ * Export loads the thread it was asked for (cached or not) and makes a file only from a
+ * successful load of it; a failed or slow load, or a thread deleted meanwhile, says so instead.
+ */
+async function exportFromMenu(id: string): Promise<void> {
+  const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((done) => {
+    timer = setTimeout(() => done("late"), EXPORT_WAIT_MS);
+  });
+  const got = await Promise.race([call("threads.get", { threadId: id }), late])
+    .catch(() => "failed" as const)
+    .finally(() => clearTimeout(timer));
+  const fail = (why: string) => setState({ notice: `Couldn't export “${title}”: ${why}` });
+  if (!getState().threads.some((t) => t.id === id)) return fail("it was deleted.");
+  if (got === "late") return fail("it took too long to load. Try again.");
+  if (got === "failed") return fail("it didn't load. Try again.");
+  if (getState().messages[id] === undefined) setState((s) => ({ messages: { ...s.messages, [id]: got.messages } }));
+  exportThread(id);
+}
+
+/** Opened at a point (a right-click or a row's menu key): below it, or above when it would leave the window. */
+function placeAt(pop: HTMLElement, at: { x: number; y: number }): void {
+  const pw = pop.offsetWidth;
+  const ph = pop.offsetHeight;
+  const top = at.y + ph + 8 <= window.innerHeight ? at.y : Math.max(8, at.y - ph);
+  pop.style.top = `${top}px`;
+  pop.style.left = `${Math.max(8, Math.min(at.x, window.innerWidth - pw - 8))}px`;
+}
+
+/** Up, Down, Home and End move between the menu's items. */
+function menuKeys(e: ReactKeyboardEvent<HTMLDivElement>): void {
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const to = e.key === "ArrowDown" ? at + 1 : e.key === "ArrowUp" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
+  if (to === null || items.length === 0) return;
+  e.preventDefault();
+  items[(to + items.length) % items.length]?.focus();
+}
+
 function MoreMenu() {
-  const open = useStore((s) => s.pop?.id === "more");
+  const pop = useStore((s) => (s.pop?.id === "more" ? s.pop : null));
+  const open = pop !== null;
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || pop === null) return;
     const anchor = document.getElementById("moreBtn");
-    if (open && ref.current && anchor) place(ref.current, anchor, "end", "below");
-  }, [open]);
+    if (pop.at) placeAt(el, pop.at);
+    else if (anchor) place(el, anchor, "end", "below");
+    if (pop.kb) el.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [pop]);
   return (
-    <div className={`pop menu${open ? " open" : ""}`} id="moreMenu" role="menu" ref={ref}>
-      <button type="button" className="mi" role="menuitem" onClick={act(() => setState({ renaming: true }))}>
+    <div className={`pop menu${open ? " open" : ""}`} id="moreMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
+      <button type="button" className="mi" role="menuitem" onClick={act(renameFromMenu)}>
         <Icon id="pencil" />
         <b>Rename</b>
       </button>
-      <button type="button" className="mi" role="menuitem" onClick={act(exportThread)}>
+      <button type="button" className="mi" role="menuitem" onClick={act((id) => void exportFromMenu(id))}>
         <Icon id="download" />
         <b>Export as Markdown</b>
+      </button>
+      <button type="button" className="mi" role="menuitem" onClick={act(openGpuPanel)}>
+        <Icon id="cpu" />
+        <b>GPU memory</b>
       </button>
       <div className="msep" />
       <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
@@ -192,9 +252,9 @@ function onKey(e: KeyboardEvent): void {
       e.preventDefault();
       return closePop(true);
     }
-    if (s.fitPanel.open) {
+    if (s.fitPanel.open && s.view !== "settings") {
       e.preventDefault();
-      return closeFit(true);
+      return closeGpuPanel(true);
     }
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
     if (s.view === "settings" && s.addPage) return setState({ addPage: false });
@@ -289,7 +349,7 @@ export function App() {
                 )}
               </div>
             )}
-            <FitPanel />
+            <GpuPanel />
           </div>
         </main>
         {noServer ? (

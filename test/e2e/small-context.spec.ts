@@ -15,8 +15,6 @@ test.describe("a model with a 2,048 context window", () => {
   test("chats at 2k with no refusal, and offers no size it cannot take", async ({ page, open }) => {
     await open();
     await waitReady(page);
-    const chip = page.locator("#fitBtn");
-    await expect(chip).toContainText("2k");
     await expect(page.locator("body")).not.toContainText("Supports up to");
 
     await sendMessage(page, "Say hello");
@@ -24,10 +22,9 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
     expect(await loadedCtx("tiny-chat:2k")).toBe(2048);
 
-    await chip.click();
-    await expect(page.locator(".fp-v")).toContainText("at 2k");
-    for (const size of [8192, 16384, 32768, 65536]) await expect(page.locator(`.mini-seg [data-ctx="${size}"]`)).toBeDisabled();
-    await expect(page.locator(".ctx-line")).toContainText("the most this model takes");
+    await page.locator("#modelBtn").click();
+    for (const size of [8192, 16384, 32768, 65536]) await expect(page.locator(`#picker [data-ctx="${size}"]`)).toBeDisabled();
+    await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 2k, the most this model takes.");
   });
 
   test("says in plain words when a message is too long for it", async ({ page, open }) => {
@@ -44,10 +41,11 @@ test.describe("a model that reports no maximum", () => {
   test("chats at the safe fallback", async ({ page, open }) => {
     await open();
     await waitReady(page);
-    await expect(page.locator("#fitBtn")).toContainText("4k");
     await sendMessage(page, "Say hello");
     await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Say hello");
     await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
     expect(await loadedCtx("no-limit-chat:1b")).toBe(4096);
+    await page.locator("#modelBtn").click();
+    await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 4k, the most this model takes.");
   });
 });

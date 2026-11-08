@@ -262,7 +262,8 @@ async function hydrateWith(
   });
   on("models.load", (l) => {
     setState((s) => ({ loads: { ...s.loads, [l.model]: l } }));
-    if (l.state === "ready" || l.state === "unloaded") invalidateFits();
+    // a failed load may have freed what it took, so it changes memory too
+    if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits();
   });
   on("sources.changed", (sources) => setState({ sources }));
   on("image.status", (imageStatus) => setState({ imageStatus }));
@@ -414,10 +415,25 @@ export function ensureFit(model: string | undefined, numCtx: number): void {
   const key = fitKey(model, numCtx);
   const s = getState();
   if (s.fits[key] !== undefined || inflight.has(key) || !chatReady(s)) return;
+  checkFit(model, numCtx, key, 0);
+}
+
+/** A failed check is asked again after this, doubling to FIT_RETRY_MAX_MS, until it answers or memory changes. */
+const FIT_RETRY_MS = 2000;
+const FIT_RETRY_MAX_MS = 30_000;
+
+function checkFit(model: string, numCtx: number, key: string, failures: number): void {
   inflight.add(key);
   call("fit.check", { model, numCtx })
     .then((r) => setState((st) => ({ fits: { ...st.fits, [key]: r } })))
-    .catch(() => setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } })))
+    .catch(() => {
+      setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } }));
+      // "error" is shown, not kept: an invalidation clears it, and otherwise the check is retried
+      setTimeout(() => {
+        const s = getState();
+        if (s.fits[key] === "error" && !inflight.has(key) && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
+      }, Math.min(FIT_RETRY_MAX_MS, FIT_RETRY_MS * 2 ** failures));
+    })
     .finally(() => inflight.delete(key));
 }
 

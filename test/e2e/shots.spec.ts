@@ -9,8 +9,9 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
+import { LONG_NAME } from "../fake-ollama/models.ts";
 import { SHOTS_DIR } from "./env.ts";
-import { type RuntimeMode, type Scenario, expect, test, waitReady } from "./fixtures.ts";
+import { type RuntimeMode, type Scenario, expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -24,6 +25,8 @@ interface Shot {
   readonly runtimeMode?: RuntimeMode;
   /** Open on the seeded thread (default), a new thread, or first run. */
   readonly start?: "thread" | "new" | "firstrun";
+  /** Seed other than the design's threads (a number seeds one long thread, test/e2e/seed.ts). */
+  readonly seed?: number;
   /** What to do once the page is ready. */
   readonly act?: (page: Page) => Promise<void>;
 }
@@ -37,13 +40,13 @@ const SHOTS: readonly Shot[] = [
   { name: "S-01-thread", light: "S-26-light-thread" },
   { name: "S-04-new", start: "new" },
   { name: "S-05-picker", light: "S-62-light-picker", act: (p) => p.locator("#modelBtn").click() },
+  // chat-feel: the docked fit panel (the design's S-07-fit) moved to Settings › Advanced
   {
-    name: "S-07-fit",
-    light: "S-42-light-fit-panel",
-    // click once the verdict settles: the chip widens then, and an early click left the pointer over Thinking (its tooltip)
+    name: "S-133-settings-advanced",
     act: async (p) => {
-      await expect(p.locator("#fitBtn")).toContainText("on GPU");
-      await p.locator("#fitBtn").click();
+      await settings("Advanced")(p);
+      await expect(p.locator("#gpuMemory .fp-v")).toContainText("Runs on GPU");
+      await p.mouse.move(1400, 880);
     },
   },
   // the design's state: the user chose the system Ollama and a wrong service holds its port
@@ -59,6 +62,64 @@ const SHOTS: readonly Shot[] = [
   { name: "S-23-thread-hover-actions", act: (p) => p.locator(".turn.a").last().locator(".md").hover() },
   { name: "S-24-tool-expanded", act: (p) => p.locator(".wr").first().click() },
   { name: "S-25-plus-menu", act: (p) => p.locator("#plusBtn").click() },
+  // chat-feel: a reply held mid code block (the fake waits after 46 tokens), a code block hovered, the thinking row hovered
+  {
+    name: "S-130-stream-held",
+    start: "new",
+    act: async (p) => {
+      await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+      await sendMessage(p, "How do I check disk space before a download?");
+      await expect(p.locator(".turn.a").last().getByRole("heading", { name: "Steps" })).toBeVisible();
+      await p.waitForTimeout(600);
+      await p.mouse.move(720, 120);
+    },
+  },
+  { name: "S-131-code-hover", seed: 2, act: (p) => p.locator(".turn.a .md pre").last().hover() },
+  { name: "S-132-think-hover", act: (p) => p.locator(".turn.a .think").last().hover() },
+  // chat-feel part 2: a long model tag truncated in the composer (its tooltip has the whole tag)
+  {
+    name: "S-134-composer-long-name",
+    scenario: "long-name",
+    act: async (p) => {
+      await p.locator("#modelBtn").click();
+      await p.locator("#pkSearch").fill("heretic");
+      await p.locator(`#picker .pk-r[data-m="${LONG_NAME}"]`).click();
+      await expect(p.locator("#picker")).toBeHidden();
+      await p.locator("#modelBtn").hover();
+      await expect(p.locator("#tip")).toContainText(LONG_NAME);
+    },
+  },
+  {
+    name: "S-135-picker-context-8k",
+    act: async (p) => {
+      await p.locator("#modelBtn").click();
+      await p.locator("#picker").getByRole("radiogroup", { name: "Context" }).getByRole("radio", { name: "8k" }).click();
+      await p.mouse.move(1400, 880);
+    },
+  },
+  {
+    name: "S-136-sidebar-thread-menu",
+    act: async (p) => {
+      await p.locator(".sb-row", { hasText: "Fix the backup cron" }).click({ button: "right", position: { x: 60, y: 14 } });
+      await expect(p.locator("#moreMenu")).toBeVisible();
+    },
+  },
+  {
+    name: "S-137-more-menu-gpu",
+    act: async (p) => {
+      await p.locator("#moreBtn").click();
+      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).hover();
+    },
+  },
+  {
+    name: "S-138-gpu-panel",
+    act: async (p) => {
+      await p.locator("#moreBtn").click();
+      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
+      await expect(p.locator("#fitPanel .fp-v")).toContainText("Runs on GPU");
+      await p.mouse.move(700, 720);
+    },
+  },
 ];
 
 const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-");
@@ -76,14 +137,14 @@ for (const shot of SHOTS) {
         scenario: shot.scenario ?? "models",
         skipFirstRun: shot.start !== "firstrun",
         colorScheme: theme,
-        ...(shot.start === "firstrun" ? { seed: 0 } : {}),
+        ...(shot.start === "firstrun" ? { seed: 0 } : shot.seed === undefined ? {} : { seed: shot.seed }),
         ...(shot.runtimeMode === undefined ? {} : { runtimeMode: shot.runtimeMode }),
       });
       test("shot", async ({ page, open, seededThread }) => {
         await page.clock.setFixedTime(NOW);
         await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
         if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
-        else if (shot.scenario === undefined) await waitReady(page);
+        else if (shot.scenario === undefined || shot.scenario === "long-name") await waitReady(page);
         else await expect(page.locator(".banner")).toBeVisible();
         await shot.act?.(page);
         // let fit checks, popovers and fonts settle; animations are frozen below

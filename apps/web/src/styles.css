@@ -158,7 +158,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-group{padding:16px 10px 4px;font-size:13px;font-weight:500;color:var(--muted-foreground)}   /* one section-label style: 13 px, 500, muted (sweep) */
 .sb-group:first-child{padding-top:8px}
 .sb-row{width:100%;height:var(--row-h);display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:var(--r-ctl);font-size:13.5px;color:color-mix(in srgb,var(--foreground) 78%,transparent);text-align:left;transition:background-color .12s,color .12s}
-.sb-row:hover{background:var(--hover);color:var(--foreground)}
+.sb-row:hover,.sb-row[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
 .sb-row.on{background:var(--sb-selected);color:var(--foreground);font-weight:500}
 .sb-row .t{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .sb-row .ago{font-size:12px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none}
@@ -192,13 +192,17 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ibtn.xs{width:24px;height:24px;border-radius:var(--r-sm)}   /* 24 px hit targets (F40) */
 .work{flex:1;min-height:0;display:flex}
 .stage{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-direction:column}
-/* fit details docked beside the thread: it narrows the thread, never covers it (F17b) */
+/* GPU memory in Settings › Advanced: the docked panel's content inside a settings box */
+.fp-set{padding:16px}
+/* GPU memory docked beside the chat, from the thread menu */
 .fpanel{width:360px;flex:none;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--background);animation:fadein .15s ease-out}
 .fpn-h{height:var(--header-h);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;border-bottom:1px solid var(--border)}
 .fpn-h .fp-h{flex:1;min-width:0}
 .fpn-h .fp-gpu{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
 .fpn-h .fp-t{line-height:1.3}
 .fpn-b{flex:1;min-height:0;overflow-y:auto;padding:16px}
+.fp-set>.fp-h{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-bottom:12px}
+.fp-set>.fp-h .qa{margin-left:auto}
 .tl{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges;padding:0 24px;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px);mask-image:linear-gradient(to bottom,transparent 0,#000 20px)}
 .col{max-width:var(--col);margin:0 auto;padding:32px 0 24px}
@@ -245,6 +249,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
 .think-body{display:none;margin:0 0 4px 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground)}
 .think[aria-expanded="true"]+.think-body{display:block}
+/* a reply's finished thinking row is its bulb, muted; hover or keyboard focus shows the label in place (it already holds its room, so nothing moves) */
+.turn .think .th-l,.turn .think .th-x{visibility:hidden;opacity:0;transition:opacity .12s,visibility .12s}
+.turn .think:is(:hover,:focus-visible,[aria-expanded="true"]) :is(.th-l,.th-x){visibility:visible;opacity:1}
+.turn .think:not(:hover,:focus-visible,[aria-expanded="true"]) .th-i{color:var(--faint)}
+/* while the model reasons, the status row carries the same bulb with "Thinking · 3 s" */
+.working.thinking>.ic{width:15px;height:15px;margin:0 2px 0 4px;animation:pulse 2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.working.thinking>.ic{animation:none}}
 
 /* tool step row: status at left, plain summary, meta beside it (F10) */
 /* F52: the row and its expanded card sit exactly on the prose column, no overhang either side */
@@ -286,9 +297,12 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .u-q{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
 .u-qs{display:inline-flex;align-items:center;gap:6px}
 .turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
-/* F50: a text caret at the stream head until the turn ends */
-.caret{display:inline-block;width:2px;height:1.05em;margin-left:2px;vertical-align:-.17em;background:var(--foreground);border-radius:1px;animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
+/* a streaming reply shows whole blocks (reveal.ts): each fades in as it finishes, opacity only,
+   and a quiet "Writing" sits under the last block until the turn ends */
+.md.live>:not(ul):not(ol),.md.live li{animation:fadein .12s ease-out}
+.working.writing{margin-top:2px}
+.working.writing .ph{color:var(--muted-foreground);animation:pulse 2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.md.live>:not(ul):not(ol),.md.live li,.working.writing .ph{animation:none}}
 
 /* markdown */
 .md{font-size:15px;line-height:1.65;color:var(--prose);overflow-wrap:anywhere;margin-top:var(--s1)}
@@ -335,20 +349,23 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .chipf .ic{color:var(--muted-foreground)}
 .chipf small{font-size:12px;color:var(--muted-foreground)}
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
-.cf-l{display:flex;align-items:center;gap:2px;min-width:0}
+.cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto}
+.cf-l>*{flex:none}
+/* only the model trigger gives way: its name truncates at a fixed width, the full tag is its tooltip */
+.cf-l>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px}
+#modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#modelBtn>.chev{flex:none}
 .cf-r{display:flex;align-items:center;gap:8px;flex:none}
 .ctl{height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--muted-foreground);white-space:nowrap;transition:background-color .12s,color .12s,opacity .15s}
 .ctl:hover,.ctl[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
 .ctl.sq{width:30px;padding:0;justify-content:center}
 .ctl .chev{width:14px;height:14px;margin:0 -2px;opacity:.8}
-.ctl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vd.gpu{background:var(--green)}.vd.spill{background:var(--amber)}.vd.no{background:var(--red)}.vd.off{background:var(--faint)}
 /* F35: the one verdict label: a dot plus the label in its color; detail after it is muted */
 .vl{display:inline-flex;align-items:center;gap:8px;color:var(--green-fg);white-space:nowrap}
 .vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
 .vdet{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
-.ctl .vtxt.spill{color:var(--amber-fg)}.ctl .vtxt.no{color:var(--red-fg)}
 /* Ethan's pick, 2026-11-07 (replaces F38/F38b's two treatments): Thinking and Image are pills.
    On: a filled pill, label at foreground. Off: the same pill greyed out, with the same label (never
    "Thinking off"); its outline stays, so it still reads as a button. The tooltip says on or off. */
@@ -373,7 +390,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* send: gray disabled disc, solid green with a black arrow when ready, neutral stop (F02) */
 .send{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:var(--on-green);transition:transform .15s,background-color .15s,color .15s}
 .send:hover{transform:scale(1.05)}
-.send:disabled{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
+.send:disabled,.send[aria-disabled="true"]{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
 .send.stop{background:var(--stop-bg);color:var(--stop-fg)}
 .send .sqr{width:10px;height:10px;border-radius:2px;background:currentColor;display:block}
 
@@ -456,14 +473,34 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mi .on{margin-left:auto;font-size:12px;color:var(--foreground);align-self:center}
 .msep{height:1px;background:var(--border);margin:4px -4px}
 /* model picker (F15) */
-#picker{width:472px}
+#picker{width:min(560px,calc(100vw - 16px))}
+/* chat-feel: a family rail on the left (All first), the list, and the context control at the foot */
+.mmark{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font:600 11px/1 var(--font-mono);font-style:normal;color:var(--foreground)}
+.ctl .mmark{width:18px;height:18px;font-size:10.5px;margin-left:-2px}
+.mmark .ic{width:12px;height:12px;color:var(--muted-foreground)}
+.pk-body{display:flex;min-height:0}
+.pk-rail{flex:none;width:64px;display:flex;flex-direction:column;gap:2px;padding:6px 4px;border-right:1px solid var(--border);max-height:min(440px,calc(100vh - 180px));overflow-y:auto;scrollbar-width:none}
+.pk-fam{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;border-radius:var(--r-md);font-size:11px;line-height:1.2;color:var(--muted-foreground);transition:background-color .1s,color .1s}
+.pk-fam span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-fam .mmark{width:28px;height:28px;font-size:12px}
+.pk-fam:first-child .mmark{font-size:10px}
+.pk-fam:hover{background:var(--hover);color:var(--foreground)}
+.pk-fam.on{background:var(--selected);color:var(--foreground)}
+.pk-rec{margin-left:8px;font-size:12px;font-weight:500;color:var(--green-fg)}
+.pk-gt{margin-top:4px;padding:12px 8px 6px;border-top:1px solid var(--border);font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+.pk-dr{display:flex;align-items:center;gap:12px;padding:6px 8px 6px 36px}
+.pk-dr .qa{flex:none}
+.pk-foot{border-top:1px solid var(--border);padding:8px 12px 10px}
+.pk-ctx{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pk-ft{font-size:13px;font-weight:500}
+.pk-help{margin:6px 0 0;font-size:12.5px;color:var(--muted-foreground)}
+.pk-foot .mini-seg button{display:inline-flex;align-items:center;gap:6px}
+.pk-foot .vd{width:6px;height:6px;border-radius:50%;flex:none}
 .pk-h{padding:8px 8px 0}
 .pk-hin{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:0 4px 8px}
 .pk-hin .ic{color:var(--muted-foreground)}
 .pk-hin input{flex:1;min-width:0;height:30px;border:0;outline:0;background:transparent;font-size:14px}
 .pk-hin input::placeholder{color:var(--placeholder)}
-/* F36: the picker shows which context the fit is for; the control lives in the GPU panel and Settings */
-.pk-cap{font-size:13px;color:var(--muted-foreground);white-space:nowrap;font-variant-numeric:tabular-nums}
 .mini-seg{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;flex:none;box-shadow:inset 0 0 0 1px var(--border)}
 /* sweep: the panel's context control has the same size as Settings' (seg2): 28 px buttons, 13.5 px text */
 .mini-seg button{height:28px;padding:0 12px;border-radius:var(--r-sm);font-size:13.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;transition:color .12s,background-color .12s}
@@ -472,19 +509,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* F55: the first view always ends between rows (sizePkList trims max-height to the last whole row),
    the list keeps 8 px under its last row, and the thumb shows whenever the list overflows */
 /* the thumb is drawn by the page (.pk-sb), so it shows even where the platform hides scrollbars */
-.pk-wrap{position:relative}
+.pk-wrap{position:relative;flex:1;min-width:0}
 .pk-list{position:relative;max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px 4px 8px;scrollbar-width:none}
 .pk-wrap:has(.pk-sb.on) .pk-list{padding-right:12px}
 .pk-list::-webkit-scrollbar{display:none}
 .pk-sb{position:absolute;top:4px;right:3px;bottom:4px;width:4px;pointer-events:none;display:none}
 .pk-sb.on{display:block}
 .pk-sb i{position:absolute;left:0;right:0;border-radius:2px;background:var(--scroll-thumb-hover)}
-/* F35: group labels are section headers: a rule above, equal space above and below the label, dot + label in its color */
-.pk-g{display:flex;align-items:center;gap:8px;padding:10px 8px;font-size:13px;font-weight:500;color:var(--green-fg)}
-.pk-g+.pk-r,.pk-g:first-child{margin-top:0}
-.pk-r+.pk-g{margin-top:4px;border-top:1px solid var(--border)}
-.pk-g .vd{width:7px;height:7px;border-radius:50%;flex:none}
-.pk-g.spill{color:var(--amber-fg)}.pk-g.no{color:var(--red-fg)}
 .pk-r{width:100%;display:flex;align-items:center;gap:12px;padding:8px;border-radius:var(--r-md);text-align:left;transition:background-color .1s}
 .pk-r:hover,.pk-r.hl{background:var(--hover)}
 .pk-r.sel{background:var(--selected)}
@@ -494,9 +525,11 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .pk-k{display:none;width:20px;height:20px;border-radius:5px;box-shadow:inset 0 0 0 1px var(--border-strong);font-size:12px;color:var(--muted-foreground);align-items:center;justify-content:center;flex:none;font-variant-numeric:tabular-nums}
 #picker.kb .pk-k{display:inline-flex}
 .pk-m{flex:1;min-width:0}
-.pk-n{font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pk-n small{font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums}
-.pk-s{font-size:12.5px;line-height:1.4;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
+.pk-n{display:flex;align-items:baseline;min-width:0;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap}
+/* a long tag truncates; its size and tag stay whole, the tooltip has the full name */
+.pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pk-n small{flex:none;font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums}
+.pk-n .pk-rec{flex:none}
 .pk-v{font-size:13px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted-foreground)}
 /* every row reserves the 16 px check slot so the selected row never shifts (F35) */
 .pk-c{width:16px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
@@ -703,6 +736,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .img-miss{display:flex;align-items:center;gap:8px;height:120px;justify-content:center;border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);color:var(--muted-foreground);font-size:13px}
 .md pre{background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:var(--r-md);padding:10px 12px;overflow-x:auto}
 .md pre code{background:none;box-shadow:none;padding:0;font-size:13px}
+/* a fenced block: language at the top left, its own copy button at the top right on hover or focus (always on touch) */
+.md .cb{margin:10px 0;background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:var(--r-md)}
+.md .cb pre{margin:0;background:none;box-shadow:none;border-radius:0;padding:0 12px 10px}
+.md .cb-h{display:flex;align-items:center;height:30px;padding:0 4px 0 12px}
+.md .cb-lang{font-family:var(--font-mono);font-size:11px;line-height:16px;color:var(--muted-foreground)}
+.cb-copy{margin-left:auto;display:inline-flex;align-items:center;gap:4px;height:24px;min-width:24px;padding:0 5px;border-radius:var(--r-sm);font-size:12px;color:var(--muted-foreground);opacity:0;transition:opacity .12s,background-color .12s,color .12s}
+.cb-copy .ic{width:14px;height:14px}
+.cb-copy:hover{background:var(--hover);color:var(--foreground)}
+.md .cb:hover .cb-copy,.md .cb:focus-within .cb-copy,.cb-copy.on{opacity:1}
+@media (hover:none){.cb-copy{opacity:1}}
 .md h1,.md h2,.md h3,.md h4{color:var(--foreground);font-weight:600;line-height:1.35;margin:18px 0 8px}
 .md h1{font-size:20px}.md h2{font-size:18px}.md h3{font-size:16px}.md h4{font-size:15px}
 .md a{color:var(--foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}

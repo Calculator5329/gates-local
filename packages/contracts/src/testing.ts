@@ -48,7 +48,6 @@ const models: ModelInfo[] = [
     quantization: "Q4_K_M",
     modifiedAt: "2026-11-01T10:00:00Z",
     capabilities: ["completion", "tools", "thinking"],
-    pick: { numCtx: 16384, verdict: "fits" },
   },
   {
     name: "gemma3:4b",
@@ -56,6 +55,7 @@ const models: ModelInfo[] = [
     sizeBytes: 3_300_000_000,
     modifiedAt: "2026-10-01T10:00:00Z",
     capabilities: ["completion", "vision"],
+    pick: { numCtx: 16384, verdict: "fits" },
   },
   {
     name: "nomic-embed-text:latest",

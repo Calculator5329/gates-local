@@ -6,6 +6,7 @@ import type { Message, ToolStep } from "@gates-local/contracts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
+import { reveal } from "./reveal.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { fileUrl, reloadThread, retry, unqueue } from "./session.ts";
 import { NA, type Queued, type State, setState, useStore } from "./store.ts";
@@ -144,7 +145,7 @@ function ThinkLine({ secs, text }: { secs: number | undefined; text: string }) {
         <span className="th-i">
           <Icon id="bulb" />
         </span>
-        <span>{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
+        <span className="th-l">{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
         <span className="th-x">
           <Icon id="down" />
         </span>
@@ -252,14 +253,14 @@ const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
   return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
 });
 
-/** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. */
-function Working({ startedAt, loading }: { startedAt: number; loading: boolean }) {
+/** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. While the model reasons, its icon is the thinking row's bulb. */
+function Working({ startedAt, loading, thinking }: { startedAt: number; loading: boolean; thinking: boolean }) {
   const now = useTicker(250, true);
   const cpu = useStore((s) => noGpu(s.gpu));
   const secs = Math.floor((now - startedAt) / 1000);
   return (
-    <div className="working">
-      <Icon id="spin" cls="spin" />
+    <div className={thinking ? "working thinking" : "working"}>
+      {thinking ? <Icon id="bulb" /> : <Icon id="spin" cls="spin" />}
       <span className="ph">{loading ? (cpu ? "Loading into memory…" : "Loading into GPU memory…") : "Thinking"}</span>
       <span className="el">{secs >= 1 ? `· ${secs} s` : ""}</span>
     </div>
@@ -275,6 +276,8 @@ function LiveTurnView({ threadId }: { threadId: string }) {
   const name = describeModel(live.model, catalog).name;
   const running = live.tools.some((t) => t.state === "running");
   const showThink = live.thinking !== "" && (live.text !== "" || live.tools.length > 0 || end !== undefined);
+  // whole blocks while it streams; everything once it ends for any reason
+  const shown = reveal(live.text, end === undefined);
   return (
     <>
       {live.pendingUser !== null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
@@ -283,8 +286,13 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {live.tools.map((t) => (
           <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
         ))}
-        {live.text !== "" ? <Markdown text={live.text} caret={end === undefined} /> : null}
-        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} /> : null}
+        {shown !== "" ? <Markdown text={shown} live /> : null}
+        {end === undefined && live.text !== "" ? (
+          <div className="working writing" role="status">
+            <span className="ph">Writing</span>
+          </div>
+        ) : null}
+        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={live.thinking !== ""} /> : null}
         {end?.kind === "stopped" ? (
           <div className="stopped">
             <span>Stopped after {end.secs} s</span>
