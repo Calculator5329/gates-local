@@ -9,14 +9,19 @@
 //   slow-first-token  the first token waits firstTokenDelayMs (default 2500)
 //   mid-stream-error  the stream breaks with an error after a few tokens
 //   wrong-service     the port answers, but not as Ollama
+//   embed-smallest    the three models plus nomic-embed-text, the smallest
+//   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service"] as const;
+const installedFor = (s: string): readonly string[] =>
+  s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : s === "embed-only" ? EMBED_ONLY_INSTALLED : DEFAULT_INSTALLED;
+
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -31,6 +36,8 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
+  /** Delay before /api/show answers: holds the server's fit survey (and so its chat pick). */
+  showDelayMs: number;
 }
 
 const DEFAULTS: FakeOptions = {
@@ -40,6 +47,7 @@ const DEFAULTS: FakeOptions = {
   pullTickMs: 100,
   replyWords: 60,
   errorAfterTokens: 8,
+  showDelayMs: 0,
 };
 
 export const FAKE_VERSION = "0.40.4";
@@ -143,7 +151,7 @@ const tagEntry = (m: FakeModel) => ({
 export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOllama> {
   let scenario: Scenario = start.scenario ?? "models";
   let options: FakeOptions = { ...DEFAULTS, ...start.options };
-  let installed = new Set<string>(scenario === "no-models" ? [] : DEFAULT_INSTALLED);
+  let installed = new Set<string>(installedFor(scenario));
   let loaded: LoadedEntry[] = [];
   const requests: FakeRequest[] = [];
 
@@ -157,7 +165,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const { installed: names, ...timing } = opts;
     scenario = next;
     options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...timing };
-    installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? DEFAULT_INSTALLED));
+    installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? installedFor(next)));
     loaded = [];
     writeGpu();
   };
@@ -178,12 +186,15 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const name = str(body, "model") ?? "";
     const m = isInstalled(name);
     if (!m) return json(res, 404, { error: `model '${name}' not found` });
+    // Ollama answers both of these with 400 and {"error": "%q does not support ..."} (server/routes.go).
+    if (!m.capabilities.includes("completion")) return json(res, 400, { error: `"${name}" does not support chat` });
+    const think = field(body, "think");
+    if (think === true && !m.capabilities.includes("thinking")) return json(res, 400, { error: `"${name}" does not support thinking` });
     const numCtx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
     load(m, numCtx);
     const messages = field(body, "messages");
     const last = Array.isArray(messages) ? messages.findLast((x) => field(x, "role") === "user") : undefined;
     const prompt = str(last, "content") ?? "";
-    const think = field(body, "think");
     const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
     const tools = field(body, "tools");
 
@@ -195,6 +206,8 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const started = Date.now();
 
     await sleep(options.firstTokenDelayMs, abort.signal);
+    // Everything before the first token is load and prompt time; decode starts here.
+    const decodeFrom = Date.now();
     let sent = 0;
     if (thinks) {
       for (const t of tokens(THINKING)) {
@@ -222,12 +235,18 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       await sleep(options.tokenDelayMs, abort.signal);
     }
     if (abort.signal.aborted) return;
+    // One end time for both durations, so total is exactly prompt plus decode (MP3-03).
+    const ended = Date.now();
+    const promptMs = Math.max(1, decodeFrom - started);
+    const evalMs = Math.max(1, ended - decodeFrom);
     line({
       ...base(),
       message: { role: "assistant", content: "" },
       done: true,
       done_reason: "stop",
-      total_duration: (Date.now() - started) * 1e6,
+      total_duration: (promptMs + evalMs) * 1e6,
+      prompt_eval_duration: promptMs * 1e6,
+      eval_duration: evalMs * 1e6,
       prompt_eval_count: 24 + prompt.length,
       eval_count: sent,
     });
@@ -305,6 +324,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
             })),
           });
         case "POST /api/show": {
+          if (options.showDelayMs > 0) await new Promise((r) => setTimeout(r, options.showDelayMs));
           const m = isInstalled(str(body, "model") ?? str(body, "name") ?? "");
           return m ? json(res, 200, showBody(m)) : json(res, 404, { error: "model not found" });
         }

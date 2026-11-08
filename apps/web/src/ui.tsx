@@ -31,9 +31,9 @@ export function esc(s: string): string {
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** The verdict label: a dot and the words in the verdict color (F35). */
-export function VLabel({ v, cls = "vl" }: { v: Verdict; cls?: string }) {
+export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hidden?: boolean }) {
   return (
-    <span className={`${cls} ${v.k}`}>
+    <span className={`${cls} ${v.k}`} aria-hidden={hidden ? true : undefined}>
       <span className={`vd ${v.k}`} />
       {v.word}
     </span>
@@ -81,10 +81,18 @@ export function Tip() {
       const h = el.offsetHeight;
       let top = r.top - h - 6;
       let left = r.left + r.width / 2 - w / 2;
-      if (t.closest("#picker") || (t.closest(".sb") && t.classList.contains("sb-row"))) {
+      const picker = t.closest("#picker");
+      if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
+        // Beside its own row (F72), so it never covers another row's name or a group heading.
         top = r.top + r.height / 2 - h / 2;
         left = r.right + 8;
         if (left + w > window.innerWidth - 6) left = r.left - w - 8;
+        if (picker && left < 6) {
+          // No room on either side (a narrow window): outside the picker, above it or else below.
+          const p = picker.getBoundingClientRect();
+          left = p.left;
+          top = p.top - h - 6 >= 6 ? p.top - h - 6 : p.bottom + 6;
+        }
       }
       if (top < 6) top = r.bottom + 6;
       el.style.top = `${top}px`;

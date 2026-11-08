@@ -89,8 +89,9 @@ export function decideFit(input: DecideInput): FitReport {
   };
 }
 
-function ctxRefusal(model: string, numCtx: number, message: string, gpu: GpuSnapshot | undefined, now: number): FitReport {
+function ctxRefusal(model: string, numCtx: number, message: string, gpu: GpuSnapshot | undefined, now: number, contextLimit?: number): FitReport {
   return {
+    ...(contextLimit === undefined ? {} : { contextLimit }),
     model,
     numCtx,
     freeVramBytes: gpu?.freeBytes ?? 0,
@@ -184,7 +185,9 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const arch = parseArchInfo(model, show.model_info);
   const ctx = checkNumCtx(model, numCtx, arch.contextLength);
   if (!ctx.ok) {
-    return { report: ctxRefusal(model, numCtx, ctx.message, r.gpu, now()), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
+    // Past the model's own ceiling (not below the floor): say the most it supports.
+    const limit = arch.contextLength !== undefined && numCtx > arch.contextLength ? arch.contextLength : undefined;
+    return { report: ctxRefusal(model, numCtx, ctx.message, r.gpu, now(), limit), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
   }
   const estimate = estimateNeed(model, numCtx, tag.size, arch, deps.estimate);
 
@@ -262,6 +265,25 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   const result: ModelsFit = { checks, runnable, gpu: readings.gpu };
   if (runnable.length === 0) result.refusal = noModelFits(checks.map((c) => c.report), deps.numCtx);
   return result;
+}
+
+/**
+ * One GPU and RAM reading, then a fit function that checks models one at a
+ * time against it, for callers that stop early (the chat pick). A model
+ * whose check fails gives undefined; the reading itself failing throws.
+ */
+export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(model: string) => Promise<FitReport | undefined>> {
+  const now = deps.now ?? Date.now;
+  const readings = await takeReadings(deps);
+  return async (model) => {
+    const floor = checkNumCtx(model, deps.numCtx);
+    if (!floor.ok) return ctxRefusal(model, deps.numCtx, floor.message, readings.gpu, now());
+    try {
+      return (await fitWithReadings(deps, model, deps.numCtx, readings)).report;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 export interface FitSurvey {
