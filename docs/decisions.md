@@ -77,11 +77,12 @@ the shell design (`docs/design/shell.html`, `shell.md`): the React client in
 `apps/web`, end-to-end tests, performance budgets, seamless Ollama (find,
 load, download, switch models) and GPU management, seamless ComfyUI,
 approachable Settings, and personal databases and tool calls through the
-Library. Linux on this machine first. Then Windows on Geordi, by a delegate
-working on that machine. This lifts "Linux only in v1" in `AGENTS.md`; macOS
-stays out.
-**What Windows changes (agent calls, with a veto):** Geordi has no NVIDIA GPU
-(Intel UHD 630, 16 GB RAM), so models run on the CPU there; the GPU status
+Library. Linux on the maintainer's Linux machine first. Then Windows on a
+Windows test machine with no NVIDIA GPU (Intel UHD 630, 16 GB), by a
+delegate working on that machine. This lifts "Linux only in v1" in
+`AGENTS.md`; macOS stays out.
+**What Windows changes (agent calls, with a veto):** the Windows test
+machine has no NVIDIA GPU, so models run on the CPU there; the GPU status
 reports `vendor: "none"`, the fit check reads system memory, and the GPU
 panel says so in plain words. Whisper does not run there. bwrap does not
 exist on Windows, so the `shell` tool is off on Windows and `read` and `sql`
@@ -129,10 +130,11 @@ researched now and refreshed per release. An agent may suggest a newer
 model it finds, and installs it only on the user's yes.
 **Agent rules in the folder:** official sources and published checksums
 only; sizes shown before any download; nothing system-wide without asking;
-never stop a process the app did not start; on Ethan's machine the GPU rules
-in `AGENTS.md` apply (whisper is never touched).
-**Proof:** the Windows lane on Geordi (no GPU) is the first real test: a
-fresh agent there is pointed at the folder and sets the app up.
+never stop a process the app did not start; on the maintainer's Linux
+machine the GPU rules in `AGENTS.md` apply (whisper is never touched).
+**Proof:** the Windows lane on the Windows test machine (no GPU) is the
+first real test: a fresh agent there is pointed at the folder and sets the
+app up.
 **Owner text (voice-to-text, in chat):** “Also it'd be nice if in the setup
 it had setup instructions in a way that like I could download it, install
 it, and then like tell Claude code "hey look at this folder" and it could get

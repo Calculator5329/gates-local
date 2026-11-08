@@ -18,7 +18,7 @@ export const CONTROL_URL = `http://127.0.0.1:${CONTROL_PORT}`;
 
 /**
  * This checkout's own folder under ~/.cache/gates-local-e2e, named from its path
- * (~/projects/ai/gates-local gives "projects-ai-gates-local-<hash>"), so two
+ * (~/src/gates-local gives "src-gates-local-<hash>"), so two
  * checkouts never share E2E data or results. The readable part folds
  * separators together; the hash of the whole path keeps ~/a/b-wt and ~/a-b/wt apart.
  */
