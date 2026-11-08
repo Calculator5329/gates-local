@@ -327,6 +327,8 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
+        // Before the answer, so every client (also one that did not send this) knows the turn first.
+        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
         void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {

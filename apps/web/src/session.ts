@@ -35,12 +35,16 @@ interface DesktopBridge {
 declare global {
   interface Window {
     gatesLocal?: DesktopBridge;
-    /** Counters the performance spec reads. */
-    glPerf?: { deltas: number; flushes: number };
+    /**
+     * Counters the performance spec reads. terminalFlush is that spec's
+     * negative control (test/e2e/perf.spec.ts): the done event makes one
+     * extra store publish of the live turn before the saved row replaces it.
+     */
+    glPerf?: { deltas: number; flushes: number; terminalFlush?: boolean };
   }
 }
 
-const perf = { deltas: 0, flushes: 0 };
+const perf: NonNullable<Window["glPerf"]> = { deltas: 0, flushes: 0 };
 window.glPerf = perf;
 
 /** Where the server is: the desktop bridge, else ?server= or VITE_GATES_LOCAL_SERVER. */
@@ -369,14 +373,45 @@ function setHash(threadId: string | null): void {
 /** Threads cached before the last reconnect: the next visit reloads them. */
 const stale = new Set<string>();
 
+/**
+ * Thread loads in flight, each with the messages that reached its thread
+ * after it was sent: they are newer than its snapshot and replay over it by
+ * id, so a reply saved meanwhile is not lost (WF-02).
+ */
+const loads = new Set<{ readonly threadId: string; readonly since: Message[] }>();
+
+/** Bumped by each navigation: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
+let navGen = 0;
+
+/** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
+function noteMessage(threadId: string, msg: Message): void {
+  for (const l of loads) if (l.threadId === threadId) l.since.push(msg);
+}
+
+function upsertMessage(list: readonly Message[], msg: Message): readonly Message[] {
+  const i = list.findIndex((m) => m.id === msg.id);
+  return i < 0 ? [...list, msg] : list.map((m, j) => (j === i ? msg : m));
+}
+
+/** The cache with msg added to its thread, or put in place of the copy with its id. */
+function withMessage(s: State, threadId: string, msg: Message): State["messages"] {
+  return { ...s.messages, [threadId]: upsertMessage(s.messages[threadId] ?? [], msg) };
+}
+
 async function loadThread(threadId: string, force = false): Promise<void> {
   if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
+  const nav = navGen;
+  const req = { threadId, since: [] as Message[] };
+  loads.add(req);
   try {
-    const { messages } = await call("threads.get", { threadId });
+    const { messages: snapshot } = await call("threads.get", { threadId });
     stale.delete(threadId);
+    const messages = req.since.reduce(upsertMessage, snapshot);
     setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}) }));
   } catch (e) {
-    if (codeOf(e) !== "closed") setState({ view: "new", threadId: null });
+    if (codeOf(e) !== "closed" && nav === navGen && getState().threadId === threadId) setState({ view: "new", threadId: null });
+  } finally {
+    loads.delete(req);
   }
 }
 
@@ -388,17 +423,20 @@ function savedReplyFor(live: LiveTurn | null, threadId: string, messages: readon
 }
 
 export function openThread(threadId: string): void {
+  navGen++;
   setState({ view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false });
   setHash(threadId);
   void loadThread(threadId);
 }
 
 export function newThread(): void {
+  navGen++;
   setState({ view: "new", threadId: null, notice: null });
   setHash(null);
 }
 
 export function openSettings(section?: Section, addPage = false): void {
+  navGen++;
   setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false }));
 }
 
@@ -461,6 +499,18 @@ let turnGen = 0;
  */
 const oldTurns = new Set<string>();
 
+/**
+ * Before a live turn is replaced: its id, when known, is retired, so its late
+ * events (after a reconnect its server turn may still run) never reach the
+ * turn that replaces it (WF-01).
+ */
+function retire(live: LiveTurn | null): void {
+  if (live !== null && live.turnId !== null) oldTurns.add(live.turnId);
+}
+
+/** Events that came while the live turn waited for chat.send to give its id; the answer replays them (WF-01). */
+let early: Array<Payload<"chat.event">> = [];
+
 export async function send(text: string, opts: { reuseThread?: boolean } = {}): Promise<void> {
   const content = text.trim();
   const s = getState();
@@ -471,6 +521,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   if (model === undefined && wait === null) return;
 
   let threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
+  retire(s.live);
   setState({ draft: "", notice: null, live: null });
   if (threadId === null) {
     try {
@@ -493,6 +544,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
 
 async function startTurn(threadId: string, content: string, model: string): Promise<void> {
   const s = getState();
+  retire(s.live);
   const gen = ++turnGen;
   setState({ live: { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content } });
   try {
@@ -506,8 +558,9 @@ async function startTurn(threadId: string, content: string, model: string): Prom
     });
     const now = getState().live;
     const mine = now !== null && now.gen === gen;
+    noteMessage(threadId, r.userMessage);
     setState((st) => ({
-      messages: { ...st.messages, [threadId]: [...(st.messages[threadId] ?? []), r.userMessage] },
+      messages: withMessage(st, threadId, r.userMessage),
       ...(st.live !== null && st.live.gen === gen ? { live: { ...st.live, turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null } } : {}),
     }));
     // stopped before its id was known, or replaced by a newer turn: end it on the server too
@@ -515,14 +568,31 @@ async function startTurn(threadId: string, content: string, model: string): Prom
       oldTurns.add(r.turnId);
       void call("chat.cancel", { turnId: r.turnId }).catch(() => undefined);
     }
+    if (mine) {
+      // this turn's own early events land now; any other turn's go where they would have
+      replayEarly();
+    } else {
+      const theirs = early.filter((p) => p.turnId === r.turnId);
+      early = early.filter((p) => p.turnId !== r.turnId);
+      for (const p of theirs) if (p.event.type === "done") void loadThread(p.threadId, true);
+    }
   } catch (e) {
+    const mine = getState().live?.gen === gen;
     setState((st) => {
       if (st.live === null || st.live.gen !== gen) return {};
       // a stopped turn that never started has nothing left to wait for
       if (st.live.end !== undefined) return { live: { ...st.live, pendingUser: null, ending: undefined } };
       return { live: null, draft: content, notice: refusal(codeOf(e), model) };
     });
+    // a turn another client started meanwhile (turn-active) now streams here
+    if (mine) replayEarly();
   }
+}
+
+function replayEarly(): void {
+  const all = early;
+  early = [];
+  for (const p of all) onChatEvent(p);
 }
 
 /** Plain words for a refused send. */
@@ -568,6 +638,7 @@ export function retry(): void {
   if (s.threadId === null || !canRetry(s)) return;
   const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "user");
   if (!last) return;
+  retire(s.live);
   setState({ live: null });
   void startTurn(s.threadId, last.content, s.model ?? last.model ?? "");
 }
@@ -631,19 +702,25 @@ function queueDelta(kind: "text" | "thinking", t: string): void {
   if (raf === 0) raf = requestAnimationFrame(flushDeltas);
 }
 
-function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
+function onChatEvent(p: Payload<"chat.event">): void {
+  const { turnId, threadId, event } = p;
   const live = getState().live;
-  const terminal = event.type === "done" || event.type === "error";
-  // a live turn still waiting for its id takes events of any turn in its thread except the old ones
-  const ours = live !== null && live.threadId === threadId && (live.turnId === null ? !oldTurns.has(turnId) : live.turnId === turnId);
-  if (terminal) oldTurns.delete(turnId);
-  if (!ours) {
-    if (event.type === "done") void loadThread(threadId, true);
+  // a live turn still waiting for chat.send's answer (pendingUser goes when it comes, or when the send
+  // fails): events in its thread, except a retired turn's, wait for that answer
+  if (live !== null && live.threadId === threadId && live.turnId === null && live.pendingUser !== null && !oldTurns.has(turnId)) {
+    early.push(p);
     return;
   }
+  const terminal = event.type === "done" || event.type === "error";
+  const ours = live !== null && live.threadId === threadId && live.turnId === turnId;
+  if (terminal) oldTurns.delete(turnId);
+  if (!ours) return otherTurn(p);
   // the stopped turn has ended on the server: Retry may send again
   if (terminal && live.ending) setState((s) => (s.live?.gen === live.gen ? { live: { ...s.live, ending: undefined } } : {}));
   switch (event.type) {
+    case "start":
+      noteMessage(threadId, event.userMessage);
+      return setState((s) => ({ messages: withMessage(s, threadId, event.userMessage) }));
     case "delta":
       return queueDelta("text", event.text);
     case "thinking":
@@ -654,15 +731,20 @@ function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
     case "done": {
       // the saved message has every word: drop the waiting ones instead of
       // publishing them a moment before the row that replaces them (W-09)
+      if (window.glPerf?.terminalFlush === true) {
+        perf.flushes++;
+        setState((s) => ({ live: s.live === null ? null : { ...s.live } }));
+      }
       const firstWordsWaiting = pendText !== "";
       dropDeltas();
       const msg = event.message;
+      noteMessage(threadId, msg);
       setState((s) => {
         const l = s.live;
         const firstAt = l?.firstTokenAt ?? (firstWordsWaiting ? Date.now() : undefined);
         const ft = l !== null && firstAt !== undefined ? { [msg.id]: firstAt - l.startedAt } : {};
         return {
-          messages: { ...s.messages, [threadId]: [...(s.messages[threadId] ?? []), msg] },
+          messages: withMessage(s, threadId, msg),
           firstToken: { ...s.firstToken, ...ft },
           live: null,
         };
@@ -680,6 +762,32 @@ function onChatEvent({ turnId, threadId, event }: Payload<"chat.event">): void {
       }
       return setState((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: event.message } } } : {}));
   }
+}
+
+/**
+ * An event of a turn this client is not showing. A turn begun in the open
+ * thread by another client (the same thread open on the phone and the
+ * desktop) becomes the live turn here too and streams (PH-02); a client that
+ * opened the thread after the start sees the reply when it is saved.
+ */
+function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
+  if (event.type === "done") return void loadThread(threadId, true);
+  if (event.type !== "start") return;
+  noteMessage(threadId, event.userMessage);
+  const s = getState();
+  const adopt = s.threadId === threadId && !oldTurns.has(turnId) && (s.live === null || (s.live.end !== undefined && s.live.ending !== true));
+  const gen = adopt ? ++turnGen : 0;
+  if (adopt) {
+    retire(s.live);
+    dropDeltas();
+  }
+  const start = Date.now();
+  setState((st) => ({
+    ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
+    ...(adopt
+      ? { live: { gen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: start, thinking: "", text: "", tools: [], pendingUser: null } }
+      : {}),
+  }));
 }
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {

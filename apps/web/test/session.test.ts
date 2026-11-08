@@ -236,6 +236,193 @@ describe("reconnect reconciles cached threads (W-04)", () => {
   });
 });
 
+const snapshot = (messages: Message[]) => ({ thread: methodSamples["threads.create"].result, messages });
+
+/** Drop the socket; the reconnect's reload of the open thread waits until the test answers it. */
+async function reconnectHeld() {
+  const held = b.server.hold("threads.get");
+  const before = b.server.sockets.length;
+  store.setState({ imageStatus: undefined });
+  b.server.socket.close();
+  await until(() => b.server.sockets.length > before, 3000, "a new socket");
+  const h = await held;
+  await until(hydrated, 3000, "hydration after reconnect");
+  return h;
+}
+
+describe("Retry after a reconnect (WF-01)", () => {
+  it("the pre-drop turn's late events never reach the Retry, which keeps its server turn and renders", async () => {
+    await boot();
+    await startFirstTurn();
+    (await reconnectHeld()).respond(snapshot([userMsg("m1", "t1", "hi")]));
+    await tick();
+    expect(store.getState().live?.end).toMatchObject({ kind: "error", code: "closed" });
+
+    const send = b.server.hold("chat.send");
+    session.retry();
+    const pending = await send;
+    const gen = store.getState().live?.gen;
+    // turn-1 kept running on the server; turn-2's first words beat its chat.send answer
+    chat("turn-1", { type: "delta", text: "stale " });
+    chat("turn-2", { type: "delta", text: "Fresh " });
+    chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "the old reply"), stopReason: "stop" });
+    await tick();
+    expect(store.getState().live?.gen).toBe(gen);
+    pending.respond({ turnId: "turn-2", userMessage: userMsg("m3", "t1", "hi") });
+    await tick();
+    expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([]);
+    b.frame();
+    expect(store.getState().live).toMatchObject({ turnId: "turn-2", text: "Fresh " });
+    chat("turn-2", { type: "delta", text: "and whole" });
+    await tick();
+    b.frame();
+    expect(store.getState().live?.text).toBe("Fresh and whole");
+    chat("turn-2", { type: "done", message: asstMsg("m4", "t1", "Fresh and whole"), stopReason: "stop" });
+    await tick();
+    expect(store.getState().live).toBeNull();
+    expect(store.getState().messages["t1"]?.at(-1)).toMatchObject({ id: "m4", content: "Fresh and whole" });
+  });
+});
+
+describe("events while a send waits for its id (WF-01)", () => {
+  it("a turn this client never saw cannot end the send; the refusal comes back and that turn's reply loads", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const send = b.server.hold("chat.send");
+    void session.send("mine");
+    const pending = await send;
+    const gen = store.getState().live?.gen;
+    // another client's turn in this thread finishes before the server refuses this send
+    chat("turn-9", { type: "delta", text: "theirs" });
+    chat("turn-9", { type: "done", message: asstMsg("m9", "t1", "theirs"), stopReason: "stop" });
+    await tick();
+    expect(store.getState().live?.gen).toBe(gen);
+    expect(store.getState().live?.text).toBe("");
+    const loads = b.server.calls("threads.get").length;
+    pending.fail("turn-active", "thread t1 already has turn turn-9 streaming");
+    await tick();
+    expect(store.getState()).toMatchObject({ live: null, draft: "mine", notice: "A reply is still being written in this thread. Stop it or wait." });
+    expect(b.server.calls("threads.get").length).toBe(loads + 1);
+  });
+});
+
+describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () => {
+  it("a reply that finishes while the reconnect's thread load waits survives the older snapshot", async () => {
+    await boot();
+    await startFirstTurn();
+    const held = await reconnectHeld();
+    chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "Finished"), stopReason: "stop" });
+    await tick();
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+    held.respond(snapshot([userMsg("m1", "t1", "hi")]));
+    await tick();
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(store.getState().live).toBeNull();
+  });
+
+  it("a thread load that fails after the user moved to another thread leaves them there", async () => {
+    await boot();
+    const holdA = b.server.hold("threads.get");
+    session.openThread("a");
+    const a = await holdA;
+    session.openThread("b");
+    await tick();
+    a.fail("thread-not-found");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "b" });
+  });
+
+  it("a load that fails for the thread still open goes to a new thread", async () => {
+    await boot();
+    b.server.answer("threads.get", refuse("thread-not-found", "no thread a"));
+    session.openThread("a");
+    await until(() => store.getState().view === "new", 1000, "the new-thread screen");
+    expect(store.getState().threadId).toBeNull();
+  });
+});
+
+const others: Array<() => void> = [];
+afterEach(() => {
+  for (const stop of others.splice(0)) stop();
+});
+
+/** A second client (its own session and store modules) on the same fake server, hydrated. */
+async function secondClient(): Promise<{ session: Session; store: Store }> {
+  vi.resetModules();
+  const s2 = await import("../src/session.ts");
+  const st2 = await import("../src/store.ts");
+  others.push(s2.connect());
+  await until(() => st2.getState().imageStatus !== undefined && st2.getState().conn.kind === "open", 2000, "the second client");
+  await tick();
+  return { session: s2, store: st2 };
+}
+
+describe("the same thread open in two clients (PH-02)", () => {
+  it("a reply started in one streams in both before it finishes", async () => {
+    await boot();
+    session.openThread("t1");
+    const other = await secondClient();
+    other.session.openThread("t1");
+    await until(() => other.store.getState().messages["t1"] !== undefined, 1000, "t1 in the second client");
+    const saved = other.store.getState().messages["t1"]?.length ?? 0;
+
+    const send = b.server.hold("chat.send");
+    void session.send("hello");
+    const pending = await send;
+    const userMessage = { ...userMsg("m5", "t1", "hello"), createdAt: 5 };
+    // the real server pushes start before chat.send answers (apps/server/src/app.ts runTurn)
+    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "gemma3:4b", userMessage } });
+    pending.respond({ turnId: "turn-7", userMessage });
+    await tick();
+    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "delta", text: "Half a" } });
+    await tick();
+    b.frame();
+    for (const st of [store, other.store]) {
+      expect(st.getState().live, st === store ? "the sender" : "the other client").toMatchObject({ turnId: "turn-7", text: "Half a", model: "gemma3:4b" });
+      expect(st.getState().live?.end).toBeUndefined();
+      expect(st.getState().messages["t1"]?.filter((m) => m.id === "m5")).toHaveLength(1);
+    }
+    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "done", message: asstMsg("m6", "t1", "Half a reply"), stopReason: "stop" } });
+    await tick();
+    for (const st of [store, other.store]) {
+      expect(st.getState().live).toBeNull();
+      expect(st.getState().messages["t1"]?.at(-1)?.id).toBe("m6");
+    }
+    expect(other.store.getState().messages["t1"]).toHaveLength(saved + 2);
+  });
+
+  it("a send stopped before its answer, then refused, holds no later turn's events", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const send = b.server.hold("chat.send");
+    void session.send("mine");
+    const pending = await send;
+    session.stop();
+    pending.fail("cancelled", "the turn was cancelled before it started");
+    await tick();
+    expect(store.getState().live).toMatchObject({ turnId: null, end: { kind: "stopped" } });
+    // later, the other client's turn in this thread streams here
+    chat("turn-8", { type: "start", model: "gemma3:4b", userMessage: userMsg("m8", "t1", "theirs") });
+    chat("turn-8", { type: "delta", text: "Theirs" });
+    await tick();
+    b.frame();
+    expect(store.getState().live).toMatchObject({ turnId: "turn-8", text: "Theirs" });
+  });
+
+  it("a turn in a thread the client does not have open starts nothing there", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    b.server.push("chat.event", { turnId: "turn-8", threadId: "t2", event: { type: "start", model: "gemma3:4b", userMessage: userMsg("x1", "t2") } });
+    b.server.push("chat.event", { turnId: "turn-8", threadId: "t2", event: { type: "delta", text: "elsewhere" } });
+    await tick();
+    b.frame();
+    expect(store.getState().live).toBeNull();
+  });
+});
+
 describe("Stop keeps buffered words (W-05)", () => {
   it("keeps the words still waiting for a frame", async () => {
     await boot();

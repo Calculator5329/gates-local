@@ -246,7 +246,8 @@ describe("chat.send", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "2+2?", model: MODEL, numCtx: 16384 });
     expect(sent.userMessage).toMatchObject({ threadId: t.id, role: "user", content: "2+2?" });
-    expect(events(r, sent.turnId)).toEqual([]); // returned before any reply byte
+    // returned before any reply byte; the start push came first, for every client (PH-02)
+    expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
     expect(r.app.activeTurns()).toBe(1);
 
     // The store already has the user message; the turn is streaming.
@@ -256,7 +257,7 @@ describe("chat.send", () => {
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
 
-    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["delta", "delta", "done"]);
+    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
     if (done.event.type !== "done") throw new Error("unreachable");
     expect(done.event.stopReason).toBe("stop");
     expect(done.event.message).toMatchObject({

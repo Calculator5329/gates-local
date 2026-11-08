@@ -127,6 +127,11 @@ export class FakeServer {
   push<C extends Channel>(channel: C, payload: Payload<C>): void {
     this.socket.frame({ type: "push", channel, payload });
   }
+
+  /** A push to every open socket, as the real server sends it to each connected client. */
+  broadcast<C extends Channel>(channel: C, payload: Payload<C>): void {
+    for (const s of this.sockets) s.frame({ type: "push", channel, payload });
+  }
 }
 
 export interface Browser {
