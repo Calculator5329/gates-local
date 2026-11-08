@@ -65,6 +65,7 @@ export class AppError extends Error {
 }
 
 const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);
+const cancelledBeforeStart = () => new AppError("cancelled", "the turn was cancelled before it started");
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
@@ -356,7 +357,25 @@ export function createApp(deps: AppDeps): App {
         load = deps.models?.loader?.reserve(model);
         const baseUrl = runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
-        const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+        // The fit check takes no signal: the turn stops waiting on a cancel (its claim goes with end()),
+        // and a fit error that lands after the cancel is the cancel.
+        const signal = turn.controller.signal;
+        const fit = async () => {
+          if (signal.aborted) throw cancelledBeforeStart();
+          let onAbort: (() => void) | undefined;
+          const aborted = new Promise<never>((_, reject) => {
+            onAbort = () => reject(cancelledBeforeStart());
+            signal.addEventListener("abort", onAbort, { once: true });
+          });
+          try {
+            return (await Promise.race([checkFit({ ...deps.fit, baseUrl, model, numCtx }), aborted])).report;
+          } catch (e) {
+            if (signal.aborted) throw cancelledBeforeStart();
+            throw e;
+          } finally {
+            if (onAbort) signal.removeEventListener("abort", onAbort);
+          }
+        };
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         const claim = async () => {
           try {

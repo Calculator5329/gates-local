@@ -727,6 +727,46 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     expect(r.store.getThread(t.id).messages).toEqual([]);
   });
+
+  it("shutdown during the fit check after ComfyUI stops ends the turn as cancelled and lets the claim go (A2-01)", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({
+      onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
+      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+    });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    // The first fit check (beside ComfyUI) answers; the one after the stop never does until released.
+    const stalled = gate();
+    let shows = 0;
+    r.setShow(async (res) => {
+      shows += 1;
+      if (shows >= 2) {
+        await stalled.shut;
+        return json(res, 503, { error: "late" });
+      }
+      json(res, 200, SHOW);
+    });
+    const t = await r.client.call("threads.create", {});
+    const sending = rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    await until(() => shows === 2);
+    expect(comfy.unit).toEqual(["start", "stop"]);
+    expect(r.lease!.status().holder).toBe("chat");
+
+    await within(1000, r.app.shutdown(), "shutdown");
+    expect((await within(1000, sending, "chat.send")).code).toBe("cancelled");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    // The late answer changes nothing: the turn already ended as cancelled.
+    stalled.open();
+    await sleep(50);
+    expect(r.store.getThread(t.id).messages).toEqual([]);
+  });
 });
 
 describe("threads.delete marks the thread before it waits", () => {
