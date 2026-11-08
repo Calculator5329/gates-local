@@ -28,12 +28,24 @@ const token = process.env["GATES_LOCAL_SERVER_TOKEN"] ?? "";
 
 writeFileSync(
   join(dataDir, `launch-${process.pid}.json`),
-  JSON.stringify({ pid: process.pid, port, token, argv: process.argv.slice(2), electronRunAsNode: process.env["ELECTRON_RUN_AS_NODE"] }),
+  JSON.stringify({
+    pid: process.pid,
+    port,
+    token,
+    argv: process.argv.slice(2),
+    electronRunAsNode: process.env["ELECTRON_RUN_AS_NODE"],
+    webRoot: process.env["GATES_LOCAL_WEB_ROOT"],
+    phoneUser: process.env["GATES_LOCAL_WEB_USER"],
+  }),
 );
 
-// Parent-death path from the contract: exit when stdin reaches EOF.
+// Parent-death path from the contract: exit when stdin reaches EOF. The
+// eof-<pid> marker tells a test this exit was the server's own.
 if (mode !== "ignore-term") {
-  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("end", () => {
+    writeFileSync(join(dataDir, `eof-${process.pid}`), "");
+    process.exit(0);
+  });
   process.stdin.resume();
 }
 

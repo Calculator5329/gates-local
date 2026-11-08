@@ -9,6 +9,9 @@ export interface MessageStats {
   completionTokens?: number;
   durationMs?: number;
   numCtx?: number;
+  /** Decode time only (Ollama's eval_duration); speed is completionTokens over this. */
+  evalDurationMs?: number;
+  promptEvalDurationMs?: number;
 }
 
 export interface Message {

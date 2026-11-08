@@ -6,6 +6,7 @@ import type { NvidiaSmiRunner } from "../fit/types.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { buildCatalog, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
+import { CURATED_MODELS } from "./recommended.ts";
 
 const fitFixture = (name: string) => readFileSync(new URL(`../fit/fixtures/${name}`, import.meta.url), "utf8");
 const GPU = fitFixture("nvidia-smi-gpu.machine.txt"); // 16303 total, 9468 MiB free
@@ -14,6 +15,8 @@ const MEMINFO = fitFixture("meminfo.machine.txt");
 const SHOW: Record<string, unknown> = {
   "qwen3.5:9b": JSON.parse(fitFixture("show-qwen3-5-9b.json")),
   "qwen3.8-abliterated:27b": JSON.parse(fitFixture("show-qwen3-8-abliterated-27b.json")),
+  "hf.co/someone/Tiny-Chat-GGUF:Q4_K_M": { capabilities: ["completion"] },
+  "nomic-embed-text:latest": { capabilities: ["embedding"] },
 };
 const TAGS = {
   models: [
@@ -21,6 +24,8 @@ const TAGS = {
     { name: "qwen3.8-abliterated:27b", size: 13210122027, digest: "c", modified_at: "2026-11-01T00:00:00Z" },
     { name: "hf.co/someone/Tiny-Chat-GGUF:Q4_K_M", size: 900000000, digest: "e", modified_at: "2026-11-01T00:00:00Z" },
     { name: "nomic-embed-text:latest", size: 274302450, digest: "d", modified_at: "2026-11-01T00:00:00Z", details: { family: "nomic-bert" } },
+    // /api/show fails for this one (404 below): its capabilities are unknown (MP-01).
+    { name: "search:latest", size: 600000000, digest: "f", modified_at: "2026-11-01T00:00:00Z", details: { family: "qwen3" } },
   ],
 };
 
@@ -69,13 +74,14 @@ describe("models.catalog", () => {
     expect(e.get("gpt-oss:20b")).toMatchObject({ installed: false, downloadBytes: 13_793_441_566 });
     expect(e.get("gpt-oss:20b")?.fit).toMatchObject({ source: "estimate" });
     expect(e.get("gpt-oss:20b")?.fit?.message).toMatch(/rough estimate before download/);
-    // Curated local-only builds appear only when installed.
-    expect(e.has("gemma4-abliterated:26b")).toBe(false);
-    expect(e.get("qwen3.8-abliterated:27b")?.installed).toBe(true);
+    // A local build outside the curated list shows only because it is installed, as the user's own.
+    expect(e.get("qwen3.8-abliterated:27b")).toMatchObject({ label: "qwen3.8-abliterated:27b", purpose: "Installed by you", installed: true });
     // The user's own model keeps its tag-derived name; embeddings stay out.
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")).toMatchObject({ label: "Tiny-Chat-GGUF:Q4_K_M", purpose: "Installed by you", installed: true });
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.fit).toBeUndefined();
     expect(e.has("nomic-embed-text:latest")).toBe(false);
+    // A model whose capabilities are unknown is neither listed nor recommended until discovery succeeds.
+    expect(e.has("search:latest")).toBe(false);
 
     for (const entry of entries) expect(entry.purpose.split(" ").length).toBeLessThanOrEqual(4);
     expect(entries.filter((x) => x.recommended).map((x) => x.name)).toEqual(entries.filter((x) => x.fit?.verdict === "fits").map((x) => x.name));
@@ -95,11 +101,27 @@ describe("models.catalog", () => {
     expect(recommended.map((x) => x.name)).toEqual(["qwen3.5:4b"]);
   });
 
+  it("MP-01: an installed curated model whose capabilities are unknown is neither a chat choice nor a download", async () => {
+    const s = await fakeOllama();
+    const unknownQwen = (await listModels(s.baseUrl)).map((m) => (m.name === "qwen3.5:9b" ? { ...m, capabilities: ["unknown"] } : m));
+    const entries = await buildCatalog({
+      baseUrl: () => s.baseUrl,
+      installed: async () => unknownQwen,
+      settings,
+      fit: { runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: () => 1 },
+    });
+    expect(entries.map((x) => x.name)).not.toContain("qwen3.5:9b");
+    // Curated models that are not installed are still offered.
+    expect(byName(entries).get("gpt-oss:20b")?.installed).toBe(false);
+  });
+
   it("while the runtime is down, lists only what can be downloaded, without a fit", async () => {
     const entries = await buildCatalog({ baseUrl: () => undefined, installed: async () => [], settings });
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((x) => !x.installed && x.fit === undefined && !x.recommended)).toBe(true);
-    expect(entries.map((x) => x.name)).not.toContain("gemma4-abliterated:26b");
+    // Every curated model can be downloaded, so all of them list.
+    expect(entries.map((x) => x.name)).toEqual(CURATED_MODELS.map((m) => m.name));
+    expect(CURATED_MODELS.every((m) => m.pullable)).toBe(true);
   });
 });
 

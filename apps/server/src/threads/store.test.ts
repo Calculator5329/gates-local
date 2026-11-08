@@ -204,7 +204,7 @@ describe("messages", () => {
       thinking: "hmm",
       model: "qwen3:8b",
       createdAt: 7_000,
-      stats: { promptTokens: 12, completionTokens: 34, durationMs: 1234.5, numCtx: 16384 },
+      stats: { promptTokens: 12, completionTokens: 34, durationMs: 1234.5, numCtx: 16384, evalDurationMs: 410.25, promptEvalDurationMs: 88 },
     });
     // Written out of time order: still read back by createdAt.
     const m0 = s.appendMessage({ threadId: t.id, role: "user", content: "earliest", createdAt: 4_000 });
@@ -220,7 +220,7 @@ describe("messages", () => {
       thinking: "hmm",
       model: "qwen3:8b",
       createdAt: 7_000,
-      stats: { promptTokens: 12, completionTokens: 34, durationMs: 1234.5, numCtx: 16384 },
+      stats: { promptTokens: 12, completionTokens: 34, durationMs: 1234.5, numCtx: 16384, evalDurationMs: 410.25, promptEvalDurationMs: 88 },
     });
     // Absent optional fields come back absent, not null.
     expect(Object.keys(messages[1]!).toSorted()).toEqual(["content", "createdAt", "id", "role", "threadId"]);
@@ -265,6 +265,7 @@ describe("messages", () => {
       ["createdAt", () => s.appendMessage({ threadId: t.id, role: "user", content: "x", createdAt: 1.5 })],
       ["stats.promptTokens", () => s.appendMessage({ threadId: t.id, role: "user", content: "x", stats: { promptTokens: 1.5 } })],
       ["stats.durationMs", () => s.appendMessage({ threadId: t.id, role: "user", content: "x", stats: { durationMs: -1 } })],
+      ["stats.evalDurationMs", () => s.appendMessage({ threadId: t.id, role: "user", content: "x", stats: { evalDurationMs: -1 } })],
       ["thinking", () => s.appendMessage({ threadId: t.id, role: "user", content: "x", thinking: 7 as unknown as string })],
       ["message", () => s.appendMessage(null as never)],
     ];

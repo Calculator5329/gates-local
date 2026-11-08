@@ -256,6 +256,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         const running: ToolStep = { callId, name: item.name, state: "running", summary: runningSummary(item.name), detail: clipDetail(detail) };
         yield { type: "tool", step: running };
         // The call gets the turn's cancel and the tool-phase deadline; past either it is stopped.
+        // The deadline's timer, not the clock, spends the time budget: it can fire a millisecond before Date.now() reaches it.
         const signal = AbortSignal.any([input.signal, phase]);
         try {
           const result = await race(input.execute(item.call, signal), signal);

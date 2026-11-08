@@ -1,4 +1,8 @@
-// Origin: ai/local-ai-lab/workflows/sdxl-lightning.json at c092f4d2bba88c4c76b37e34c31f9c2e28643c9c.
+// Origin: ai/local-ai-lab/workflows/sdxl-lightning.json at c092f4d2bba88c4c76b37e34c31f9c2e28643c9c
+// (the file was written in d2e58f5 there). local-ai-lab is Ethan Gates's own repository, so this
+// port is his work and is covered by this repository's MIT license (LICENSE).
+// The checkpoint and LoRA named below are not part of this repository: their weights are
+// downloaded separately and come under their own licenses.
 // API graph preserved, with runtime values in place of template tokens.
 // The default 9 GiB budget is a conservative estimate above the lab's 7.86 GiB
 // warm measurement at 768x512, NOT a measured peak or a hard GPU reservation.

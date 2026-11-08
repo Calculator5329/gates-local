@@ -15,6 +15,7 @@ const noComfy = () => ({ state: "stopped", owner: "none" });
 /** An image module over the app's real lease, shaped like image/module.ts: generate returns the id at once and the job claims the GPU alone. */
 const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) => {
   const jobs = new Map<string, AbortController>();
+  const ended = new Map<string, Promise<void>>();
   const ran: string[] = [];
   let n = 0;
   const generate = vi.fn(async ({ prompt, threadId }: { prompt: string; threadId?: string }) => {
@@ -22,18 +23,19 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
     const jobId = `job-${++n}`;
     const controller = new AbortController();
     jobs.set(jobId, controller);
-    void lease.run("image", controller.signal, async () => {
+    ended.set(jobId, lease.run("image", controller.signal, async () => {
       ran.push(jobId);
       if (threadId) store.appendMessage({ threadId, role: "assistant", content: prompt, images: [`images/${jobId}.png`] });
-    }).catch(() => {}).finally(() => jobs.delete(jobId));
+    }).catch(() => {}).finally(() => jobs.delete(jobId)));
     return { jobId };
   });
+  const wait = async (jobId: string) => { await ended.get(jobId); };
   const cancel = vi.fn((jobId: string) => {
     const job = jobs.get(jobId);
     job?.abort(new Error("cancelled"));
     return { cancelled: job !== undefined };
   });
-  return { image: { current: noComfy, generate, cancel } as unknown as ImageModule, generate, cancel, ran };
+  return { image: { current: noComfy, generate, cancel, wait } as unknown as ImageModule, generate, cancel, ran };
 };
 /** A tool turn whose first reply calls the image tool; `second` answers the request after the tool ran. */
 const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>) => {
@@ -58,26 +60,40 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   });
   vi.stubGlobal("fetch", fetcher);
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, lease,
-    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
-    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
+    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+    catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   return { app, store, lease, fake, chatBodies, atSecond: () => atSecond, close: async () => { await app.shutdown(); store.close(); vi.unstubAllGlobals(); } };
 };
 /** An Ollama reply that never comes; it rejects when the turn aborts the request. */
 const hang = (signal: AbortSignal | undefined) => new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+/** The system prompt a tool turn sends for one SQLite and one folder source on this platform. */
+const system = async (platform: NodeJS.Platform) => {
+  const bodies: { messages: { role: string; content: string }[] }[] = [];
+  const fetcher = vi.fn(async (url, init) => {
+    if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+    bodies.push(JSON.parse(String(init?.body)));
+    return ndjson([{ message: { content: "ok" }, done: true }]);
+  });
+  const sources = [{ id: "books", label: "books.db", path: "live", snapshotPath: "snap", kind: "sqlite" as const }, { id: "notes", label: "Notes", path: "folder", kind: "folder" as const }];
+  for await (const _ of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [], numCtx: 16384, sources, platform, fetch: fetcher, execute: async () => ({ output: "", summary: "" }) })) { /* drain */ }
+  return bodies[0]!.messages[0]!.content;
+};
 describe("tool chat transport", () => {
   it("chooses native tool_calls from /api/show and carries think and num_ctx", async () => {
     const requests: Record<string, unknown>[] = [];
     const fetcher = vi.fn(async (url, init) => {
       if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion", "tools"] });
       requests.push(JSON.parse(String(init?.body)));
-      return requests.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true, done_reason: "stop" }]) : ndjson([{ message: { content: "All done" }, done: true }]);
+      return requests.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true, done_reason: "stop" }]) : ndjson([{ message: { content: "All done" }, done: true, total_duration: 2_000_000_000, eval_duration: 250_000_000, prompt_eval_duration: 40_000_000, eval_count: 5 }]);
     });
     const events = [];
     for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "read" }], numCtx: 16384, think: false, sources: [], fetch: fetcher, execute: async () => ({ output: "text", summary: "Read your file" }) })) events.push(e);
     expect(requests[0]).toMatchObject({ tools: expect.any(Array), think: false, options: { num_ctx: 16384 } });
     expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "All done", tools: [{ state: "done" }] } });
+    // Decode time rides through the tool loop separately from the wall time.
+    expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
   });
   it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
@@ -98,6 +114,13 @@ describe("tool chat transport", () => {
       expect(chatSignal?.aborted).toBe(true);
       expect((await run).at(-1)).toMatchObject({ type: "error", code: "stream-error", message: "The model stopped sending for 120 s; the reply was stopped." });
     } finally { vi.useRealTimers(); }
+  });
+  it("names a SQLite source the way the offered tool takes it: a source id for sql on Windows, a /data path for the shell on Linux", async () => {
+    const windows = await system("win32");
+    expect(windows).not.toContain("/data/");
+    expect(windows).toContain('books: books.db (sqlite): use sql with source "books"');
+    expect(windows).toContain("notes: Notes (folder) at /library/notes");
+    expect(await system("linux")).toContain("books: books.db (sqlite) at /data/books.db");
   });
   it("uses text calls for gemma and refuses truncated native calls", async () => {
     for (const native of [true, false]) {
@@ -127,8 +150,8 @@ describe("tool chat transport", () => {
     vi.stubGlobal("fetch", fetcher);
     const pushed: unknown[] = [];
     const app = createApp({ store, sources, toolsEnabled: () => true,
-      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
-      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
       push: (channel, payload) => pushed.push({ channel, payload }),
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     });
@@ -209,8 +232,8 @@ describe("tool chat transport", () => {
       });
       vi.stubGlobal("fetch", fetcher);
       const app = createApp({ store, sources, think: true, toolsEnabled: () => scenario !== "tools default off",
-        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
-        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
+        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
+        catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
         push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
       });
       try {

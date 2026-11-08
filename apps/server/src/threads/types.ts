@@ -17,6 +17,9 @@ export interface MessageStats {
   completionTokens?: number;
   durationMs?: number;
   numCtx?: number;
+  /** Decode time only (Ollama's eval_duration); speed is completionTokens over this. */
+  evalDurationMs?: number;
+  promptEvalDurationMs?: number;
 }
 
 /** One tool call the assistant made in a turn; mirrors ToolStep in packages/contracts. */

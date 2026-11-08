@@ -2,12 +2,13 @@
 // non-Ollama service, a fake `ollama` binary and a fake release server.
 // Nothing here touches the real Ollama or port 11434.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
+import { windowsTar } from "./install.ts";
 
 export type FakeTag = { name: string; digest: string; size: number; modified_at: string; details?: Record<string, string> };
 export type FakePs = { name: string; size: number; size_vram: number; expires_at?: string };
@@ -79,10 +80,10 @@ export async function startFakeOllama(opts: { version?: string; tags?: FakeTag[]
 }
 
 /** An HTTP service that is not Ollama (a dev server, say) holding a port. */
-export async function startWrongService(port = 0): Promise<{ baseUrl: string; port: number; close(): Promise<void> }> {
+export async function startWrongService(port = 0, body = "<!doctype html><title>Some dev server</title>"): Promise<{ baseUrl: string; port: number; close(): Promise<void> }> {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/html" });
-    res.end("<!doctype html><title>Some dev server</title>");
+    res.end(body);
   });
   const p = await listen(server, port);
   return { baseUrl: `http://127.0.0.1:${p}`, port: p, close: () => close(server) };
@@ -156,11 +157,32 @@ process.on("SIGTERM", () => { console.log("got SIGTERM"); server.close(); proces
 `;
 }
 
+/**
+ * POSIX: the script itself, run through its #! line. Windows runs only real
+ * executables, so there `<dir>/ollama.exe` is Node itself (a hard link, or a
+ * copy across volumes) and the script is `<dir>/serve`: the app starts
+ * `ollama.exe serve` in the binary's folder (runtime.ts), and Node runs the
+ * file named by its first argument. The script then sees argv ["serve"] as
+ * on POSIX. Returns the path to run: `file`, with `.exe` on Windows.
+ */
 export function writeFakeBinary(file: string, script = fakeOllamaScript()): string {
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, script);
-  chmodSync(file, 0o755);
-  return file;
+  if (process.platform !== "win32") {
+    writeFileSync(file, script);
+    chmodSync(file, 0o755);
+    return file;
+  }
+  const exe = file.toLowerCase().endsWith(".exe") ? file : `${file}.exe`;
+  rmSync(exe, { force: true });
+  try {
+    linkSync(process.execPath, exe);
+  } catch {
+    copyFileSync(process.execPath, exe);
+  }
+  const nl = script.indexOf("\n");
+  const [shebang, body] = script.startsWith("#!") ? [script.slice(0, nl + 1), script.slice(nl + 1)] : ["", script];
+  writeFileSync(path.join(path.dirname(exe), "serve"), `${shebang}process.argv.splice(2, 0, "serve");\n${body}`);
+  return exe;
 }
 
 /** A small release tarball (tar.zst) laid out like Ollama's: bin/ollama, lib/ollama/. */
@@ -171,6 +193,30 @@ export function buildFakeTarball(workDir: string): Buffer {
   writeFileSync(path.join(src, "lib", "ollama", "libfake.so"), "not really a library\n");
   const tar = execFileSync("tar", ["-cf", "-", "-C", src, "bin", "lib"]);
   return zlib.zstdCompressSync(tar);
+}
+
+/** The archive format of this host's Ollama release: what buildFakeRelease makes. */
+export const FAKE_RELEASE_FORMAT: "tar.zst" | "zip" = process.platform === "win32" ? "zip" : "tar.zst";
+
+/** A file under lib/ollama/ in the fake release, relative to the install dir. */
+export const FAKE_RELEASE_LIB = path.join("lib", "ollama", process.platform === "win32" ? "fake.dll" : "libfake.so");
+
+/**
+ * This host's release, laid out like Ollama's: on Linux the tar.zst above;
+ * on Windows a ZIP with ollama.exe at the top and lib\ollama\ beside it, as
+ * in ollama-windows-amd64.zip. Its ollama.exe runs as the fake server
+ * (writeFakeBinary). Stored, not deflated: Node is large and compressing
+ * it would only slow the tests.
+ */
+export function buildFakeRelease(workDir: string): Buffer {
+  if (process.platform !== "win32") return buildFakeTarball(workDir);
+  const src = path.join(workDir, "release-src");
+  writeFakeBinary(path.join(src, "ollama.exe"));
+  mkdirSync(path.join(src, "lib", "ollama"), { recursive: true });
+  writeFileSync(path.join(src, FAKE_RELEASE_LIB), "not really a library\n");
+  const out = path.join(workDir, "release.zip");
+  execFileSync(windowsTar(), ["-a", "-c", "-f", out, "--options", "zip:compression=store", "-C", src, "ollama.exe", "serve", "lib"], { windowsHide: true });
+  return readFileSync(out);
 }
 
 export type ReleaseServer = {

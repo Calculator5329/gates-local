@@ -10,14 +10,20 @@ export type GetResult =
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
-export function httpGet(url: string, timeoutMs: number): Promise<GetResult> {
+/** `signal` ends the request early with an ABORT_ERR error result. */
+export function httpGet(url: string, timeoutMs: number, signal?: AbortSignal): Promise<GetResult> {
   return new Promise((resolve) => {
     let settled = false;
     const done = (r: GetResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       resolve(r);
+    };
+    const onAbort = () => {
+      req.destroy();
+      done({ kind: "error", code: "ABORT_ERR", message: `GET ${url} was aborted` });
     };
     const req = http.get(url, { headers: { accept: "application/json" } }, (res) => {
       const chunks: Buffer[] = [];
@@ -49,5 +55,7 @@ export function httpGet(url: string, timeoutMs: number): Promise<GetResult> {
       if (e.code === "ECONNREFUSED") done({ kind: "refused" });
       else done({ kind: "error", code: e.code ?? "EUNKNOWN", message: e.message });
     });
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

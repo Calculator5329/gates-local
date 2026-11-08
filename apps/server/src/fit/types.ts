@@ -15,6 +15,8 @@ export interface FitReport {
   source: "measured" | "estimate";
   measuredAt: number;
   message?: string;
+  /** Set when the refusal is the model's own context ceiling: the most it supports. */
+  contextLimit?: number;
 }
 
 /** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */
@@ -74,7 +76,10 @@ export class FitError extends Error {
   }
 }
 
-/** Runs nvidia-smi with the given args and resolves its stdout. */
-export type NvidiaSmiRunner = (args: readonly string[]) => Promise<string>;
-/** Resolves the text of /proc/meminfo. */
-export type MeminfoReader = () => Promise<string>;
+/**
+ * Runs nvidia-smi with the given args and resolves its stdout. `signal`
+ * (when given) kills the child: a fit that is called off never waits on it.
+ */
+export type NvidiaSmiRunner = (args: readonly string[], signal?: AbortSignal) => Promise<string>;
+/** Resolves the text of /proc/meminfo; `signal` ends the read early. */
+export type MeminfoReader = (signal?: AbortSignal) => Promise<string>;

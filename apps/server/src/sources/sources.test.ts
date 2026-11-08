@@ -15,6 +15,9 @@ const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8
 const writerUnavailable = writerProbe.error && ["EPERM", "EACCES"].includes((writerProbe.error as NodeJS.ErrnoException).code ?? "");
 if (writerProbe.error && !writerUnavailable) throw writerProbe.error;
 afterEach(() => { for (const child of children.splice(0)) child.kill(); });
+// Mode bits, links swapped mid-call and /proc handles are POSIX. On Windows the path fallback
+// runs (its test injects the platform) and the profile ACL on the data folder keeps it private.
+const windows = process.platform === "win32";
 /** Every name under `dir` with its mode and, for files, its bytes; and the folder's own mode. */
 const tree = (dir: string) => [statSync(dir).mode, ...(readdirSync(dir, { recursive: true }) as string[]).toSorted().map(name => {
   const file = path.join(dir, name);
@@ -68,9 +71,12 @@ describe("Library registry", () => {
     const snapshots = path.join(dataDir, "snapshots");
     const source = await sources.add({ kind: "sqlite", path: file });
     for (let i = 0; i < 3; i++) await sources.refresh(source.id);
-    expect(statSync(snapshots).mode & 0o777).toBe(0o700);
+    // POSIX modes. Windows has none (Node reports 0o666/0o777); there the
+    // data folder's place in %LOCALAPPDATA% under the user's profile ACL keeps it private.
+    const posix = process.platform !== "win32";
+    if (posix) expect(statSync(snapshots).mode & 0o777).toBe(0o700);
     expect(readdirSync(snapshots, { recursive: true })).toEqual([`${source.id}.db`]);
-    expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
+    if (posix) expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
     sources.remove(source.id);
     expect(readdirSync(snapshots, { recursive: true })).toEqual([]);
   });
@@ -98,7 +104,7 @@ describe("Library registry", () => {
     expect(existsSync(archive)).toBe(false);
     const kept = new DatabaseSync(copies[0]!, { readOnly: true });
     try { expect(kept.prepare("SELECT n FROM t").get()?.n).toBe(2); } finally { kept.close(); }
-    expect(statSync(copies[0]!).mode & 0o777).toBe(0o600);
+    if (!windows) expect(statSync(copies[0]!).mode & 0o777).toBe(0o600);
   });
   for (const registry of ["corrupt", "missing"] as const) {
     it(`a ${registry} sources.json leaves an archive-only database copy untouched, set aside as _archive-unclaimed-* (T2-01)`, () => {
@@ -121,15 +127,15 @@ describe("Library registry", () => {
       const unclaimed = path.join(snapshots, "_archive-unclaimed-1234");
       expect(existsSync(archive)).toBe(false);
       expect(readFileSync(path.join(unclaimed, path.basename(copy)))).toEqual(bytes);
-      expect(statSync(unclaimed).mode & 0o777).toBe(0o700);
-      expect(statSync(path.join(unclaimed, path.basename(copy))).mode & 0o777).toBe(0o600);
+      if (!windows) expect(statSync(unclaimed).mode & 0o777).toBe(0o700);
+      if (!windows) expect(statSync(path.join(unclaimed, path.basename(copy))).mode & 0o777).toBe(0o600);
       expect(existsSync(path.join(dataDir, "sources.json.bad-1234"))).toBe(registry === "corrupt");
       expect(readFileSync(stray, "utf8")).toBe("stray snapshot");
       expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`_archive-unclaimed-1234.*${registry === "corrupt" ? "could not be read" : "missing"}`)));
     });
   }
   for (const registry of ["missing", "decoded"] as const) {
-    it(`a ${registry} registry: an _archive that is a symlink is refused and left in place; its target is never read, changed or moved (T3-01)`, async () => {
+    it.skipIf(windows)(`a ${registry} registry: an _archive that is a symlink is refused and left in place; its target is never read, changed or moved (T3-01)`, async () => {
       const { root, dataDir, sources } = setup();
       const snapshots = path.join(dataDir, "snapshots");
       let id: string = randomUUID();
@@ -156,7 +162,7 @@ describe("Library registry", () => {
       expect(log).toHaveBeenCalledWith(expect.stringMatching(/refused snapshots\/_archive: it is a link.*left in place/));
     });
   }
-  it("a missing registry: making a real _archive private never chmods through a link inside it (T3-01)", () => {
+  it.skipIf(windows)("a missing registry: making a real _archive private never chmods through a link inside it (T3-01)", () => {
     const { root, dataDir } = setup();
     const archive = path.join(dataDir, "snapshots", "_archive"); mkdirSync(archive);
     writeFileSync(path.join(archive, `${randomUUID()}.${randomUUID()}.db`), "copy");
@@ -172,7 +178,7 @@ describe("Library registry", () => {
     expect(readlinkSync(path.join(unclaimed, "folder-link"))).toBe(external);
     expect(statSync(unclaimed).mode & 0o777).toBe(0o700);
   });
-  it("a decoded registry: a symlinked copy inside a real _archive is never chmodded, moved or made the snapshot; the folder is set aside (T3-01)", async () => {
+  it.skipIf(windows)("a decoded registry: a symlinked copy inside a real _archive is never chmodded, moved or made the snapshot; the folder is set aside (T3-01)", async () => {
     const { root, dataDir, sources } = setup();
     const snapshots = path.join(dataDir, "snapshots");
     const file = path.join(root, "live.db");
@@ -369,7 +375,7 @@ const outside = (root: string, names: string[]) => {
   for (const name of names) { writeFileSync(path.join(dir, name), "outside"); chmodSync(path.join(dir, name), 0o644); }
   return dir;
 };
-describe("a link swapped in mid-operation is never followed out of the data dir (T3-01)", () => {
+describe.skipIf(windows)("a link swapped in mid-operation is never followed out of the data dir (T3-01)", () => {
   it("remove: _archive swapped for a link after its copies are listed deletes nothing outside, and the link stays", async () => {
     const { root, dataDir, id, snapshots } = await withDatabase();
     const archive = path.join(snapshots, "_archive");

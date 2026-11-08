@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -21,7 +21,8 @@ describe("Library tools", () => {
     for (const file of ["/library/docs/escape", "/library/docs/../private.txt", path.join(root, "private.txt")]) await expect(tools.execute({ name: "read", input: { path: file } }, new AbortController().signal)).rejects.toThrow();
     await expect(tools.execute({ name: "note", input: {} }, new AbortController().signal)).rejects.toThrow(/Unknown tool/);
   });
-  it("filesystem failures name the virtual path and never a host path (T2-02)", async () => {
+  // chmod 0o000 does not make a file unreadable on Windows.
+  it.skipIf(process.platform === "win32")("filesystem failures name the virtual path and never a host path (T2-02)", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-fserr-"));
     const docs = path.join(root, "docs"); mkdirSync(docs);
     writeFileSync(path.join(docs, "note.txt"), "hello");
@@ -102,9 +103,15 @@ describe("Library tools", () => {
     const parent = spawn(process.execPath, ["--input-type=module", "-e",
       `import { runSnapshotQuery } from ${JSON.stringify(sql)}; runSnapshotQuery({ file: ${JSON.stringify(snapshotPath)}, query: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c", limit: 1, signal: new AbortController().signal, timeoutMs: ${timeoutMs} }).catch(() => {}); setTimeout(() => process.exit(0), 400);`], { stdio: "ignore" });
     await once(parent, "exit");
-    const children = () => readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
-      try { const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8"); return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}`); } catch { return false; }
-    });
+    // Linux: /proc. Windows has none: one CIM query for the same command line.
+    // (On Windows libuv's kill-on-close job for spawned children also ends it.)
+    const children = () => process.platform === "win32"
+      ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*node:sqlite*' -and $_.CommandLine -like '* ${timeoutMs}' } | ForEach-Object { $_.ProcessId }`],
+      { encoding: "utf8", windowsHide: true }).split(/\r?\n/).filter(Boolean)
+      : readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
+        try { const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8"); return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}`); } catch { return false; }
+      });
     await vi.waitFor(() => expect(children()).toEqual([]), { timeout: 1500, interval: 100 });
   });
   it("says 10 s by default", async () => {
@@ -126,5 +133,21 @@ describe("Library tools", () => {
       await expect(tools.execute({ name: "sql", input: { source: "finances", query } }, signal)).rejects.toThrow();
     expect(existsSync(copy)).toBe(false);
     await expect(tools.execute({ name: "shell", input: { command: "whoami" } }, signal)).rejects.toThrow(/Windows/);
+  });
+  it("takes the SQLite source by id, file name or /data path on Windows, and says which ids exist when it is wrong", async () => {
+    // A Windows model first tried source "books.db" and read /library/books ten times (Windows test, 2026-11-07).
+    const root = mkdtempSync(path.join(tmpdir(), "gl-sql-names-"));
+    const snapshotPath = path.join(root, "books.db");
+    const db = new DatabaseSync(snapshotPath); db.exec("CREATE TABLE pages (n); INSERT INTO pages VALUES (691)"); db.close();
+    const tools = createTools({ platform: "win32", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath, label: "books.db" }] });
+    const signal = new AbortController().signal;
+    for (const source of ["books", "books.db", "/data/books.db"])
+      expect(await tools.execute({ name: "sql", input: { source, query: "SELECT n FROM pages" } }, signal)).toMatchObject({ output: expect.stringContaining("691") });
+    await expect(tools.execute({ name: "sql", input: { source: "other", query: "SELECT 1" } }, signal)).rejects.toThrow('SQLite snapshot was not found in your Library; use source "books"');
+    await expect(tools.execute({ name: "read", input: { path: "/library/books" } }, signal)).rejects.toThrow('books is a SQLite source; use sql with source "books"');
+  });
+  it("points a read of a SQLite source at sqlite3 on Linux", async () => {
+    const tools = createTools({ platform: "linux", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath: "snap", label: "books.db" }] });
+    await expect(tools.execute({ name: "read", input: { path: "/library/books" } }, new AbortController().signal)).rejects.toThrow("books is a SQLite source; use shell with sqlite3 /data/books.db");
   });
 });

@@ -75,6 +75,8 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
   let candidate: string;
   if (virtual) {
     source = sources.find(s => s.id === virtual[1] && s.kind !== "sqlite");
+    if (!source && sources.some(s => s.id === virtual[1] && s.kind === "sqlite"))
+      throw new Error(`${virtual[1]} is a SQLite source; ${platform === "win32" ? `use sql with source "${virtual[1]}"` : `use shell with sqlite3 /data/${virtual[1]}.db`}`);
     if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
     const relative = virtual[2] ?? "";
     if (relative.split(/[\\/]/).includes("..") || (source.kind === "file" && relative !== "")) throw new Error("Path is outside your Library source");
@@ -137,9 +139,11 @@ function libraryFsError(shown: string, error: unknown): Error {
 }
 
 async function querySnapshot(sources: readonly LibraryEntry[], input: Record<string, unknown>, signal: AbortSignal, timeoutMs?: number): Promise<ToolResult> {
-  const id = text(input, "source");
-  const source = sources.find(s => s.id === id && s.kind === "sqlite");
-  if (!source?.snapshotPath) throw new Error("SQLite snapshot was not found in your Library");
+  // Models also pass the file name or the Linux shell path ("books.db", "/data/books.db").
+  const id = text(input, "source").replace(/^\/?data\//, "").replace(/\.db$/i, "");
+  const sqlite = sources.filter(s => s.kind === "sqlite");
+  const source = sqlite.find(s => s.id === id);
+  if (!source?.snapshotPath) throw new Error(`SQLite snapshot was not found in your Library; ${sqlite.length ? `use source ${sqlite.map(s => `"${s.id}"`).join(" or ")}` : "no SQLite source is connected"}`);
   const query = text(input, "query");
   // The read-only handle and PRAGMA query_only (sql.ts) stop changes to the snapshot, but
   // neither stops VACUUM INTO from creating its destination file: with both set it still

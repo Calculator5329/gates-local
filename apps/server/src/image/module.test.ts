@@ -22,7 +22,8 @@ const NAMES: Record<string, readonly string[]> = {
   "elsewhere": ["10.0.0.9"], "split-name": ["10.0.0.7", "192.168.1.20"],
 };
 const fakeLookup = async (name: string) => {
-  const found = NAMES[name];
+  // An absolute name ("mybox.") resolves as its table entry, with no search suffix.
+  const found = NAMES[name] ?? NAMES[name.replace(/\.$/, "")];
   if (!found) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${name}`), { code: "ENOTFOUND" });
   return found;
 };
@@ -367,6 +368,30 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     for (const h of remote) expect(await isLocalHost(configHostname(h), own, fakeLookup), h).toBe(false);
   });
 
+  it("resolves an absolute name with its trailing dot, as the HTTP request will", async () => {
+    // ndots:5 with a search suffix: the absolute name is this machine, the relative one is a remote host.
+    const asked: string[] = [];
+    const resolver = async (name: string) => {
+      asked.push(name);
+      return name === "comfy.home.arpa." ? ["127.0.0.1"] : ["10.0.0.5"];
+    };
+    expect(await isLocalHost(configHostname("comfy.home.arpa."), ["192.168.1.20"], resolver)).toBe(true);
+    expect(asked).toEqual(["comfy.home.arpa."]);
+  });
+
+  it.each(["cancel", "timeout"])("a DNS lookup that never answers ends on %s and frees the GPU lease", async (end) => {
+    const f = await fixture({ lookupHost: () => new Promise<never>(() => {}), ...end === "timeout" ? { jobTimeoutMs: 10 } : {} });
+    f.configure({ comfyUrl: "http://slow-dns:8188" });
+    const { jobId } = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.lease.status().holder).toBe("image"));
+    if (end === "cancel") f.module.cancel(jobId);
+    const outcome = await Promise.race([f.module.wait(jobId).then(() => "ended"), new Promise((r) => setTimeout(r, 300, "stuck"))]);
+    expect(outcome).toBe("ended");
+    expect(f.events.at(-1)).toMatchObject(end === "cancel" ? { state: "cancelled" } : { state: "error", message: expect.stringContaining("run timeout") });
+    expect(f.lease.status().holder).toBeNull();
+    expect(f.measurements()).toBe(0);
+  });
+
   it.each(["done", "error"])("leaves no job timer behind after a %s job on an external Comfy", async (end) => {
     const f = await fixture(); vi.useFakeTimers();
     if (end === "error") f.configure({ missingModel: true });
@@ -400,6 +425,35 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.module.current().detail).toMatch(/may still be running/);
     await f.module.stopIdle();
     expect(f.calls).toContain("stop");
+  });
+
+  it("a reclaim cancelled after its first inspection never starts the idle read and gives the image claim back at once (R5-05)", async () => {
+    let up = false;
+    let cancel: AbortController | undefined;
+    const unit = () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: 42 });
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ service: {
+      // When armed, the abort lands after this inspection has resolved and before stopIdle's next statement runs.
+      inspect: () => {
+        const read = Promise.resolve(unit());
+        const c = cancel; cancel = undefined;
+        if (c) queueMicrotask(() => void read.then(() => c.abort(new Error("reclaim cancelled"))));
+        return read;
+      },
+      start: async () => { up = true; f.configure({ answering: true }); },
+      stop: async () => { f.calls.push("stop"); up = false; f.configure({ answering: false }); },
+    } });
+    f.configure({ answering: false });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.module.current().owner).toBe("app");
+    const before = f.calls.length;
+    cancel = new AbortController();
+    const signal = cancel.signal;
+    await expect(f.module.stopIdle(signal)).rejects.toThrow("reclaim cancelled");
+    expect(signal.aborted).toBe(true);
+    expect(f.calls.slice(before)).toEqual([]);
+    expect(f.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    expect(f.module.current().owner).toBe("app");
   });
 
   it("clears and unrefs the job timer once the image bytes are fetched, before the PNG is written", async () => {

@@ -43,7 +43,9 @@ const outcome = (input: Parameters<typeof runSandbox>[0]) => runSandbox(input).t
 const noHostPath = (message: string, hostPaths: readonly string[]) => { for (const host of hostPaths) expect(message, host).not.toContain(host); };
 
 const probe = await probeSandbox();
-const bwrapAbsent = !probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason);
+// Off by design anywhere but Linux (the shell tool is Linux only); on Linux
+// only a missing bwrap skips, so a broken setup there still fails loudly.
+const bwrapAbsent = process.platform !== "linux" || (!probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason));
 describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [${bwrapAbsent ? "SKIP" : "OFF"}: ${probe.reason}]`}`, () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-bwrap-"));
   const snapshotPath = path.join(root, "test.db");

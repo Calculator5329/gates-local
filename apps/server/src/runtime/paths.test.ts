@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultAppDataDir, detectModelsDir, findModelsDirs, findOnPath } from "./paths.ts";
@@ -13,9 +13,9 @@ afterEach(() => removeDir(work));
 
 describe("defaultAppDataDir", () => {
   it("uses XDG_DATA_HOME when absolute, else ~/.local/share", () => {
-    expect(defaultAppDataDir({ XDG_DATA_HOME: "/x/data" }, "/home/u")).toBe("/x/data/gates-local");
-    expect(defaultAppDataDir({ XDG_DATA_HOME: "relative" }, "/home/u")).toBe("/home/u/.local/share/gates-local");
-    expect(defaultAppDataDir({}, "/home/u")).toBe("/home/u/.local/share/gates-local");
+    expect(defaultAppDataDir({ XDG_DATA_HOME: "/x/data" }, "/home/u", "linux")).toBe("/x/data/gates-local");
+    expect(defaultAppDataDir({ XDG_DATA_HOME: "relative" }, "/home/u", "linux")).toBe("/home/u/.local/share/gates-local");
+    expect(defaultAppDataDir({}, "/home/u", "linux")).toBe("/home/u/.local/share/gates-local");
   });
 });
 
@@ -38,7 +38,9 @@ describe("detectModelsDir", () => {
     expect(detectModelsDir({}, home, [system])).toEqual({ path: system, writable: true, hasModels: true, source: "system" });
   });
 
-  it("never hands over a store this user cannot write, but still reports it", () => {
+  // POSIX mode bits: a folder's read-only flag on Windows does not stop
+  // writes into it, and the system-service stores this guards are Linux's.
+  it.skipIf(process.platform === "win32")("never hands over a store this user cannot write, but still reports it", () => {
     const home = path.join(work, "home");
     mkdirSync(path.join(home, ".ollama", "models", "blobs"), { recursive: true });
     const system = path.join(work, "readonly-store");
@@ -58,8 +60,10 @@ describe("findOnPath", () => {
     const a = path.join(work, "a");
     const b = path.join(work, "b");
     mkdirSync(a, { recursive: true });
-    writeFakeBinary(path.join(b, "ollama"));
-    expect(findOnPath({ PATH: `${a}:${b}` })).toBe(path.join(b, "ollama"));
+    // This host's rules: `ollama` and `:` on Linux, `ollama.exe` and `;` on Windows.
+    const exe = writeFakeBinary(path.join(b, "ollama"));
+    writeFileSync(path.join(a, "ollama.cmd"), "@echo off\n");
+    expect(findOnPath({ PATH: [a, b].join(path.delimiter) })).toBe(exe);
     expect(findOnPath({ PATH: a })).toBeUndefined();
   });
 

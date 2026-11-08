@@ -1,11 +1,17 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { FitReport, ModelLoad } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
+import { checkFit } from "../fit/fit.ts";
+import { createGpuLease } from "../gpu/lease.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
-import { ModelActionError, createModelLoader, type ModelLoaderDeps } from "./load.ts";
+import { ModelActionError, createModelLoader, type ModelLoader, type ModelLoaderDeps } from "./load.ts";
 import { createModelCatalog, listLoaded } from "./models.ts";
 import { createPullManager } from "./pull.ts";
+import { ownedIdleComfy } from "./test-image.ts";
 
 const servers: FakeServer[] = [];
 afterEach(async () => {
@@ -34,10 +40,13 @@ const report = (verdict: FitReport["verdict"]): FitReport => ({
   ...(verdict === "refuse" ? { message: "needs 30 GB, 12 GB free" } : {}),
 });
 
-/** A fake Ollama whose /api/ps is `ps`; /api/generate makes the model resident. `over` replaces routes. */
+/**
+ * A fake Ollama whose /api/ps is `ps`, each loaded at num_ctx 16384 (the context every test turn uses);
+ * /api/generate makes the model resident. `over` replaces routes.
+ */
 async function fakeOllama(ps: string[], tags: string[] = [], over: Record<string, Route> = {}): Promise<FakeServer> {
   const server = await startFakeServer({
-    "GET /api/ps": (_b, res) => json(res, 200, { models: ps.map((name) => ({ name, size: 1, size_vram: 1 })) }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: ps.map((name) => ({ name, size: 1, size_vram: 1, context_length: 16384 })) }),
     "GET /api/tags": (_b, res) => json(res, 200, { models: tags.map((name) => ({ name, size: 1, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
     "POST /api/generate": (body, res) => {
       const model = (body as { model: string }).model;
@@ -173,6 +182,7 @@ describe("runtime generation", () => {
 
     loader.runtimeChanged();
     url = b.baseUrl;
+    loader.runtimeSettled();
     const before = pushes.length;
     // The GPU poll reads B's /api/ps, which lists m (someone else's there).
     loader.prune(["m:latest"]);
@@ -206,7 +216,8 @@ describe("runtime generation", () => {
     hold.release();
     const r = await pending;
     expect(r.state).toBe("error");
-    expect(r.message).toMatch(/runtime changed while m was loading/);
+    expect(r.message).toBe(CHANGED);
+    expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
     expect(loader.appLoadedModels()).toEqual([]);
   });
 });
@@ -335,12 +346,330 @@ describe("chat turn reservation", () => {
   });
 });
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** "pending" when `p` has not settled within `ms`, else its value or rejection. */
+const settledWithin = <T>(p: Promise<T>, ms: number): Promise<unknown> =>
+  Promise.race([p.then((v) => ({ resolved: v }), (e: unknown) => e), sleep(ms).then(() => "pending")]);
+const thrown = (fn: () => unknown): unknown => {
+  try {
+    fn();
+    return undefined;
+  } catch (e) {
+    return e;
+  }
+};
+const psWith = (models: { name: string; context_length?: number }[]): Route => (_b, res) =>
+  json(res, 200, { models: models.map((m) => ({ size: 1, size_vram: 1, ...m })) });
+const UNREADABLE = "Could not read which models Ollama has loaded, so the app did not load this one. Try again.";
+const SWITCHING = "The runtime is changing. Try again in a moment.";
+const CHANGED = "The runtime changed while this model was loading.";
+
+describe("S-01: unknown residency fails closed", () => {
+  it("a preload with an unreadable /api/ps refuses: no generate, nothing owned, and a later reading does not repair it", async () => {
+    let failing = true;
+    // m is someone else's, resident all along; only the first reading fails.
+    const s = await fakeOllama([], [], {
+      "GET /api/ps": (b, res, req) => (failing ? json(res, 500, { error: "transient" }) : psWith([{ name: "m:latest" }])(b, res, req)),
+    });
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const r = await loader.load("m", 16384);
+    expect(r).toEqual({ model: "m", numCtx: 16384, state: "error", message: UNREADABLE });
+    expect(generates(s)).toBe(0);
+    failing = false;
+    loader.prune(["m:latest"]);
+    expect(loader.appLoadedModels()).toEqual([]);
+  });
+
+  it("a turn with an unreadable /api/ps runs, claims nothing, and holds the gate until its first token", async () => {
+    const s = await fakeOllama([], [], { "GET /api/ps": (_b, res) => json(res, 500, { error: "transient" }) });
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const a = loader.reserve("a:7b");
+    expect((await a.admit(16384)).verdict).toBe("fits");
+    const started: string[] = [];
+    const b = loader.reserve("b:7b");
+    const admittedB = b.admit(16384, { fit: async () => (started.push("b"), report("fits")) });
+    await sleep(50);
+    expect(started).toEqual([]);
+    a.firstToken();
+    await admittedB;
+    expect(started).toEqual(["b"]);
+    b.firstToken();
+    a.end();
+    b.end();
+    await tick();
+    expect(loader.appLoadedModels()).toEqual([]);
+    expect(pushes).toEqual([]);
+  });
+});
+
+describe("S-02: one runtime identity per load", () => {
+  it("a load or a reservation started while the switch runs refuses; nothing reaches the old runtime", async () => {
+    const a = await fakeOllama([]);
+    const loader = loaderFor(a, []);
+    // The switch began: the old runtime is still stopping and baseUrl() still answers A.
+    loader.runtimeChanged();
+    const r = await loader.load("m", 16384).catch((e: unknown) => e);
+    expect(r).toBeInstanceOf(ModelActionError);
+    expect(r).toMatchObject({ code: "runtime-switching", message: SWITCHING });
+    expect(thrown(() => loader.reserve("m"))).toMatchObject({ code: "runtime-switching", message: SWITCHING });
+    expect(a.requests).toEqual([]);
+    expect(loader.appLoadedModels()).toEqual([]);
+    // Once the new runtime's ensure settles, work starts again.
+    loader.runtimeSettled();
+    expect((await loader.load("m", 16384)).state).toBe("ready");
+  });
+
+  it("a preload suspended in its residency read, or in its fit, sends nothing after the switch", async () => {
+    for (const where of ["residency", "fit"] as const) {
+      const hold = deferred();
+      const a = await fakeOllama([], [], {
+        "GET /api/ps": async (b, res, req) => {
+          if (where === "residency") await hold.promise;
+          psWith([])(b, res, req);
+        },
+      });
+      const pushes: ModelLoad[] = [];
+      let fits = 0;
+      const loader = loaderFor(a, pushes, "fits", {
+        fit: async () => {
+          fits++;
+          if (where === "fit") await hold.promise;
+          return report("fits");
+        },
+      });
+      const pending = loader.load("m", 16384);
+      await until(() => (where === "residency" ? a.requests.some((r) => r.path === "/api/ps") : fits === 1));
+      loader.runtimeChanged();
+      hold.release();
+      const r = await pending;
+      expect(r.state).toBe("error");
+      expect(generates(a)).toBe(0);
+      expect(fits).toBe(where === "fit" ? 1 : 0);
+      expect(loader.appLoadedModels()).toEqual([]);
+    }
+  });
+
+  it("an old turn's admit after the switch rejects, and a pending one rejects at the switch", async () => {
+    const s = await fakeOllama([]);
+    const loader = loaderFor(s, []);
+    const old = loader.reserve("m");
+    const holder = loader.reserve("a:7b");
+    await holder.admit(16384); // cold: holds the gate until its first token
+    const waiting = loader.reserve("b:7b");
+    const pending = waiting.admit(16384);
+    loader.runtimeChanged();
+    expect(await settledWithin(pending, 200)).toMatchObject({ code: "runtime-switching" });
+    loader.runtimeSettled();
+    expect(await settledWithin(old.admit(16384), 200)).toMatchObject({ code: "runtime-switching" });
+    expect(loader.inUse("m")).toBe(false);
+    expect(loader.inUse("b:7b")).toBe(false);
+    holder.end();
+  });
+});
+
+describe("S-03: the gate stays held unless residency and context are proven", () => {
+  it("two turns on a resident model at a different num_ctx run their fits one after the other", async () => {
+    const s = await fakeOllama([], [], { "GET /api/ps": psWith([{ name: "m:latest", context_length: 4096 }]) });
+    const loader = loaderFor(s, []);
+    const started: string[] = [];
+    const fit = (name: string) => async () => (started.push(name), report("fits"));
+    const a = loader.reserve("m");
+    const b = loader.reserve("m");
+    await a.admit(16384, { fit: fit("a") });
+    const admittedB = b.admit(16384, { fit: fit("b") });
+    await sleep(50);
+    // a may reload m at 16384: b measures only after a answered.
+    expect(started).toEqual(["a"]);
+    a.firstToken();
+    await admittedB;
+    expect(started).toEqual(["a", "b"]);
+    b.firstToken();
+    a.end();
+    b.end();
+  });
+
+  it("a resident model whose /api/ps context matches releases the gate after its fit", async () => {
+    const s = await fakeOllama([], [], { "GET /api/ps": psWith([{ name: "m:latest", context_length: 16384 }]) });
+    const loader = loaderFor(s, []);
+    const a = loader.reserve("m");
+    await a.admit(16384);
+    const started: string[] = [];
+    const b = loader.reserve("m");
+    await b.admit(16384, { fit: async () => (started.push("b"), report("fits")) });
+    expect(started).toEqual(["b"]);
+    a.end();
+    b.end();
+  });
+});
+
+describe("R2-01: a resident model's measured memory counts only at its proven context", () => {
+  const SHOW_9B = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8")) as unknown;
+  /** The real loader and the real fit check over a fake Ollama, a full GPU and no free RAM. */
+  async function fullMachine(contextLength: number | undefined) {
+    const entry = { name: "qwen3.5:9b", size: GB, size_vram: GB, ...(contextLength === undefined ? {} : { context_length: contextLength }) };
+    const s = await startFakeServer({
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [entry] }),
+      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 6594474711, digest: "a", modified_at: "2026-11-01T00:00:00Z" }] }),
+      "POST /api/show": (_b, res) => json(res, 200, SHOW_9B),
+      "POST /api/generate": (b, res) => json(res, 200, { model: (b as { model: string }).model, response: "", done: true }),
+    });
+    servers.push(s);
+    const machine = {
+      runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 16303, 0\n" : ""),
+      readMeminfo: async () => "MemAvailable: 0 kB\n",
+    };
+    const loader = loaderFor(s, [], "fits", { fit: async (model, numCtx, baseUrl) => (await checkFit({ ...machine, baseUrl, model, numCtx })).report });
+    return { s, loader };
+  }
+
+  it("an /api/ps without context_length (older Ollama) is estimated at the requested num_ctx, so 64k refuses", async () => {
+    const { loader } = await fullMachine(undefined);
+    const turn = loader.reserve("qwen3.5:9b");
+    const r = await turn.admit(65536);
+    expect(r).toMatchObject({ verdict: "refuse", source: "estimate", numCtx: 65536 });
+    expect(loader.inUse("qwen3.5:9b")).toBe(false);
+  });
+
+  it("a resident model at another context is estimated too; the same context keeps its measured fit", async () => {
+    const other = await fullMachine(4096);
+    expect(await other.loader.reserve("qwen3.5:9b").admit(65536)).toMatchObject({ verdict: "refuse", source: "estimate" });
+    const same = await fullMachine(65536);
+    const turn = same.loader.reserve("qwen3.5:9b");
+    expect(await turn.admit(65536)).toMatchObject({ verdict: "fits", source: "measured" });
+    turn.end();
+  });
+});
+
+describe("S-05: preloads reserve their model", () => {
+  it("while a preload waits in its fit, models.remove refuses", async () => {
+    const hold = deferred();
+    const s = await fakeOllama([]);
+    const loader = loaderFor(s, [], "fits", {
+      fit: async () => {
+        await hold.promise;
+        return report("fits");
+      },
+    });
+    const loading = loader.load("m", 16384);
+    await sleep(30);
+    expect(loader.inUse("m")).toBe(true);
+    expect(thrown(() => loader.beginRemove("m"))).toMatchObject({ code: "model-in-use" });
+    hold.release();
+    expect((await loading).state).toBe("ready");
+    expect(loader.inUse("m")).toBe(false);
+  });
+
+  it("a preload queued behind the gate keeps its model reserved, so no removal runs beneath it", async () => {
+    const s = await fakeOllama([]);
+    const loader = loaderFor(s, []);
+    const holder = loader.reserve("a:7b");
+    await holder.admit(16384); // cold: holds the gate
+    const loading = loader.load("m", 16384);
+    expect(thrown(() => loader.beginRemove("m"))).toMatchObject({ code: "model-in-use" });
+    holder.end();
+    expect((await loading).state).toBe("ready");
+  });
+});
+
+describe("S-06: every loading notice ends exactly once", () => {
+  it("a cold turn's loading ends with an error when a switch invalidates it; first token and end push nothing more", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const turn = loader.reserve("m");
+    await turn.admit(16384);
+    loader.runtimeChanged();
+    turn.firstToken();
+    turn.end();
+    await sleep(30);
+    expect(pushes).toEqual([
+      { model: "m", numCtx: 16384, state: "loading" },
+      { model: "m", numCtx: 16384, state: "error", message: CHANGED },
+    ]);
+  });
+
+  it("a preload's loading ends once when the switch lands during /api/generate", async () => {
+    const hold = deferred();
+    const s = await fakeOllama([], [], {
+      "POST /api/generate": async (b, res) => {
+        await hold.promise;
+        json(res, 200, { model: (b as { model: string }).model, response: "", done: true });
+      },
+    });
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const pending = loader.load("m", 16384);
+    await until(() => generates(s) === 1);
+    loader.runtimeChanged();
+    hold.release();
+    expect(await pending).toMatchObject({ state: "error", message: CHANGED });
+    expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
+  });
+});
+
+describe("I-04: loads drain before the image module closes", () => {
+  it("shutdown aborts a slow preload in its generate stage, so the real image close stops ComfyUI once and leaves the lease empty", async () => {
+    let aborted = false;
+    const s = await fakeOllama([], [], {
+      // Ten minutes of cold load, cut short only by the client going away.
+      "POST /api/generate": (_b, res) => new Promise<void>((r) => res.on("close", () => ((aborted = true), r()))),
+    });
+    const lease = createGpuLease();
+    // The real image module, owning an idle ComfyUI it started (injected service and HTTP fakes).
+    const dir = mkdtempSync(path.join(os.tmpdir(), "gates-local-i04-"));
+    const comfy = await ownedIdleComfy(lease, dir);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes, "fits", { lease });
+    const loading = loader.load("m", 16384);
+    await until(() => generates(s) === 1);
+    expect(lease.status()).toMatchObject({ holder: "chat", holders: 1 });
+    // main.ts: cancel turns, drain model loads, close image module (image.close()'s stopIdle claims the GPU alone).
+    const shutdown = async () => {
+      await (loader as Partial<Pick<ModelLoader, "close">>).close?.();
+      await comfy.image.close();
+    };
+    try {
+      expect(await settledWithin(shutdown(), 1000)).toEqual({ resolved: undefined });
+      expect(comfy.stops()).toBe(1);
+      expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    } finally {
+      comfy.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+    await until(() => aborted);
+    expect((await loading).state).toBe("error");
+    expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
+    // Closed: no new load or turn.
+    expect(await loader.load("n", 16384).catch((e: unknown) => e)).toMatchObject({ code: "shutting-down" });
+    expect(thrown(() => loader.reserve("n"))).toMatchObject({ code: "shutting-down" });
+  });
+
+  it("a preload still waiting for its GPU claim is aborted by close() too", async () => {
+    const s = await fakeOllama([]);
+    const lease = createGpuLease();
+    const releaseImage = await lease.acquire("image");
+    const loader = loaderFor(s, [], "fits", { lease });
+    const queued = loader.load("m", 16384);
+    await sleep(20);
+    const drained = (async () => {
+      await (loader as Partial<Pick<ModelLoader, "close">>).close?.();
+      return queued;
+    })();
+    expect(await settledWithin(drained, 500)).toMatchObject({ resolved: { state: "error" } });
+    expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: [] });
+    expect(s.requests).toEqual([]);
+    releaseImage();
+  });
+});
+
 describe("models.remove", () => {
   it("refuses while a turn holds the model, otherwise deletes and refreshes the list", async () => {
     const tags = ["qwen3.5:9b", "gemma4:12b"];
     const s = await fakeOllama([], tags);
     const loader = loaderFor(s, []);
-    const catalog = createModelCatalog(() => s.baseUrl, { minIntervalMs: 60_000 });
+    const catalog = createModelCatalog(() => s.baseUrl, { minIntervalMs: 60_000, retryMs: 0 }); // not about retries (MP2-04)
     await catalog.refresh();
     const h = createRuntimeHandlers({
       baseUrl: () => s.baseUrl,

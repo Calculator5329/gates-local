@@ -28,18 +28,24 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(fitBtn).toContainText("32k · system memory");
   await expect(panel).toContainText("Uses system memory");
 
-  // the per-app breakdown needs gpu.status, which this build does not answer
-  await expect(panel).toContainText("A breakdown by app is not available in this build.");
+  // the per-app breakdown reads gpu.status (the fake nvidia-smi)
+  await expect(panel).toContainText("Where the memory goes");
+  await expect(panel).not.toContainText("not available in this build");
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
 });
 
-test.fixme("the panel's memory bar names whisper and the other resident app (needs gpu.status)", async ({ page, open }) => {
+test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await page.locator("#fitBtn").click();
   const panel = page.locator("#fitPanel");
   await expect(panel).toContainText("Where the memory goes");
   await expect(panel.locator(".sw-whisper")).toHaveCount(2);
-  await expect(panel).toContainText("never stops it");
+  const whisper = panel.locator(".lg-r").filter({ hasText: "Whisper" });
+  await expect(whisper).toContainText("speech-to-text");
+  await expect(panel.locator(".lg-r").filter({ hasText: "other app" })).toContainText("Media Vault vision");
+  // the reassurance is the legend row's tooltip; the panel's own sentence says it only when the model does not fit
+  await whisper.hover();
+  await expect(page.locator("#tip")).toContainText("never stops it");
 });

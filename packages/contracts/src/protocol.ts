@@ -3,6 +3,7 @@
 // that does not decode comes back as a WireError with a named code.
 import { Result, Schema as S } from "effect";
 import {
+  BlockingTurn,
   CatalogEntry,
   ChatEvent,
   FitReport,
@@ -22,6 +23,8 @@ import {
   Source,
   SourceKind,
   Thread,
+  UpdateCheck,
+  UpdateStatus,
 } from "./shapes.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -82,6 +85,8 @@ export const methods = {
   "models.list": { params: NoParams, result: S.Array(ModelInfo) },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo) },
   "runtime.status": { params: NoParams, result: RuntimeStatus },
+  /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
+  "runtime.retry": { params: NoParams, result: RuntimeStatus },
   "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport },
   "chat.send": {
     params: S.Struct({
@@ -95,8 +100,22 @@ export const methods = {
       tools: S.optional(S.Boolean),
       /** The model may make an image this turn (needs image generation set up). */
       image: S.optional(S.Boolean),
+      /**
+       * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
+       * end those turns first: each saves its partial reply and ends with error code "preempted"
+       * (neededBy: this model). Omitted or false: this turn waits for them, as before.
+       */
+      stopOthers: S.optional(S.Boolean),
     }),
     result: S.Struct({ turnId: S.String, userMessage: Message }),
+  },
+  /**
+   * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
+   * it; empty when none (same model, or it fits beside them). Reads only; never loads.
+   */
+  "turns.blocking": {
+    params: S.Struct({ model: S.String, numCtx: NumCtx }),
+    result: S.Array(BlockingTurn),
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
@@ -122,6 +141,10 @@ export const methods = {
   // ---- setup (2026-11-07): read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
+  // ---- updates (2026-11-07): status is local only; check fetches, and only runs on a click
+  "update.status": { params: NoParams, result: UpdateStatus },
+  "update.check": { params: NoParams, result: UpdateCheck },
+  "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }) },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */

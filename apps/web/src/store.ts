@@ -17,6 +17,7 @@ import type {
   Source,
   Thread,
   ToolStep,
+  UpdateStatus,
 } from "@gates-local/contracts";
 
 /** A v2 surface the server answers "not-implemented" for: the client hides it or says so. */
@@ -34,8 +35,12 @@ export type Section = "general" | "models" | "runtime" | "memory" | "images" | "
 
 /** The reply being written now, or the last one that stopped before it finished. */
 export interface LiveTurn {
+  /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
+  readonly gen: number;
   readonly threadId: string;
   readonly turnId: string | null;
+  /** The saved user message, once chat.send answered: reconnect drops this turn when the server saved its reply. */
+  readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
   readonly firstTokenAt?: number;
@@ -47,6 +52,8 @@ export interface LiveTurn {
   readonly pendingUser: string | null;
   /** Set once the turn ended without a saved message. */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
+  /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
+  readonly ending?: true;
 }
 
 /** A message typed during setup or the first download; it sends once chat is ready. */
@@ -87,6 +94,10 @@ export interface State {
   readonly search: string;
 
   readonly model: string | undefined;
+  /** The model the user picked in this chat; `model` returns to it when the list has it again (pick.ts). */
+  readonly chosen: string | undefined;
+  /** The model each thread opened this session was last on; the composer's model is one value, so leaving a thread would lose it. */
+  readonly threadModels: Readonly<Record<string, string>>;
   readonly numCtx: ContextSize;
   readonly think: boolean;
   readonly image: boolean;
@@ -99,10 +110,16 @@ export interface State {
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
+  /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
+  readonly update: Maybe<UpdateStatus>;
+  /** A "Check for updates" click waiting for its answer. */
+  readonly updateChecking: boolean;
   /** Action methods that answered not-implemented once (models.load, models.pull, …). */
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
   readonly notice: string | null;
+  /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
+  readonly loadErrors: Readonly<Record<string, string>>;
 }
 
 export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
@@ -130,6 +147,8 @@ const initial: State = {
   searchOpen: false,
   search: "",
   model: undefined,
+  chosen: undefined,
+  threadModels: {},
   numCtx: 16384,
   think: true,
   image: false,
@@ -141,8 +160,11 @@ const initial: State = {
   pulls: {},
   sources: undefined,
   imageStatus: undefined,
+  update: undefined,
+  updateChecking: false,
   unavailable: {},
   notice: null,
+  loadErrors: {},
 };
 
 let state: State = initial;
@@ -159,7 +181,8 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   for (const l of listeners) l();
 }
 
-function subscribe(listener: () => void): () => void {
+/** Called after every setState; the session tests use it to see each published state. */
+export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

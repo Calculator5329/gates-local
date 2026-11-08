@@ -19,7 +19,8 @@ export const FENCE = "```";
 export const CALL_FENCE_LANGUAGES = ["json", "tool_code"] as const;
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const CALL_BLOCK = new RegExp(`${literal(CALL_OPEN)}([\\s\\S]*?)(?:${literal(CALL_CLOSE)}|$)`, "gi");
-const CALL_FENCE_HEADER = `${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\n`;
+// \r\n too: a model may answer with Windows line endings.
+const CALL_FENCE_HEADER = `${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\r?\\n`;
 const CALL_FENCE = new RegExp(`${CALL_FENCE_HEADER}([\\s\\S]*?)${literal(FENCE)}`, "gi");
 const CALL_FENCE_OPEN = new RegExp(CALL_FENCE_HEADER, "i");
 
@@ -49,7 +50,7 @@ function unfinishedCallFence(visible: string): number | undefined {
   const at = rest.lastIndexOf(FENCE);
   if (at < 0) return undefined;
   const header = rest.slice(at + FENCE.length).toLowerCase();
-  const cutInHeader = CALL_FENCE_LANGUAGES.some(language => header.startsWith(language) ? /^[ \t]*$/.test(header.slice(language.length)) : language.startsWith(header));
+  const cutInHeader = CALL_FENCE_LANGUAGES.some(language => header.startsWith(language) ? /^[ \t]*\r?$/.test(header.slice(language.length)) : language.startsWith(header));
   return cutInHeader ? from + at : undefined;
 }
 

@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ImageEvent, ImageStatus, Params } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
-import { readGpu } from "../fit/gpu.ts";
+import { readGpu, untilAborted } from "../fit/gpu.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
@@ -43,7 +43,13 @@ export interface ImageModule {
   cancel(jobId: string): { cancelled: boolean };
   /** Test/CLI completion seam; errors are reported on image.event. */
   wait(jobId: string): Promise<void>;
-  stopIdle(): Promise<void>;
+  /**
+   * `signal` (a turn's reclaim) ends the wait for the GPU claim and every read under it, so the
+   * claim goes back at once; a cancelled call never starts a stop. A stop already begun runs to its end.
+   */
+  stopIdle(signal?: AbortSignal): Promise<void>;
+  /** The MainPID of the ComfyUI this app started while no image job runs (what stopIdle would stop), else undefined. */
+  reclaimable(): number | undefined;
   close(): Promise<void>;
 }
 
@@ -90,22 +96,29 @@ const isLocalAddress = (address: string, own: readonly string[]) => {
  * loopback, the wildcard address ComfyUI prints when started with --listen,
  * or one of this machine's interface addresses. A name is local when any
  * address it resolves to is local; `localhost` and `*.localhost` always are.
- * One trailing dot is ignored. When the name cannot be resolved the answer
- * is true: an unknown host gets the fit, never a skipped one.
+ * One trailing dot is ignored for those checks, but DNS gets the name as
+ * the HTTP request will send it: with search suffixes, `comfy.lan.` and
+ * `comfy.lan` can resolve to different hosts. When the name cannot be
+ * resolved the answer is true: an unknown host gets the fit, never a
+ * skipped one. An aborted signal ends a pending lookup with its reason.
  */
 export async function isLocalHost(hostname: string, own: readonly string[] = localAddresses(),
-  lookup: (name: string) => Promise<readonly string[]> = lookupHost): Promise<boolean> {
-  const h = hostname.toLowerCase().replace(/\.$/, "");
+  lookup: (name: string) => Promise<readonly string[]> = lookupHost, signal?: AbortSignal): Promise<boolean> {
+  const name = hostname.toLowerCase();
+  const h = name.replace(/\.$/, "");
   if (h === "localhost" || h.endsWith(".localhost")) return true;
   const literal = h.replace(/^\[(.*)\]$/, "$1");
   if (net.isIP(literal)) return isLocalAddress(literal, own);
+  signal?.throwIfAborted();
   try {
-    const addresses = await lookup(h);
+    const addresses = await untilAborted(lookup(name), signal);
     return addresses.length === 0 || addresses.some((address) => isLocalAddress(address, own));
   } catch {
+    if (signal?.aborted) throw signal.reason;
     return true;
   }
 }
+
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
@@ -178,7 +191,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: gpu.tenants.map((t) => `${t.label} (${t.usedBytes === undefined ? "unknown" : gib(t.usedBytes)})`).join(", ") || "unlisted GPU occupants" };
   });
   const fit = async (cfg: ReturnType<typeof config>, signal: AbortSignal) => {
-    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost)) return;
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return;
     signal.throwIfAborted();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
@@ -336,28 +349,37 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       job.controller.abort(new Error("Image cancelled.")); return { cancelled: true };
     },
     async wait(jobId) { await jobs.get(jobId)?.ended; },
-    async stopIdle() {
+    async stopIdle(signal) {
       clearIdle();
       if (!owned || jobs.size > 0) return;
-      await deps.lease.run("image", undefined, async () => {
+      await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
-        const unit = await service.inspect();
+        // The reads end at the signal, so a cancel gives the claim back at once; the stop does not.
+        const unit = await untilAborted(service.inspect(), signal);
         // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
         // the next job at this address or a stop clears it.
         const mine = stuck.get(owned.baseUrl);
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
         // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
-        if (!await client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined)) { armIdle(); return; }
-        const latest = await service.inspect();
+        signal?.throwIfAborted();
+        if (!await untilAborted(client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined), signal)) { armIdle(); return; }
+        signal?.throwIfAborted();
+        const latest = await untilAborted(service.inspect(), signal);
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
+        signal?.throwIfAborted();
         await service.stop();
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         update({ state: "stopped", owner: "none", baseUrl });
+      }).catch((error: unknown) => {
+        // A cancelled reclaim leaves ComfyUI to its idle timer.
+        if (signal?.aborted) armIdle();
+        throw error;
       });
     },
+    reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
     async close() {
       closed = true; clearIdle();
       const pending = [...jobs.values()];

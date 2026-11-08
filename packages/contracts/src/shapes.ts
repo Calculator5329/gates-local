@@ -20,8 +20,13 @@ export type Role = typeof Role.Type;
 export const MessageStats = S.Struct({
   promptTokens: S.optional(Count),
   completionTokens: S.optional(Count),
+  /** Wall time for the whole call, load and prompt included. */
   durationMs: S.optional(S.Finite),
   numCtx: S.optional(PositiveInt),
+  /** Ollama's eval_duration: decode time only. Speed is completionTokens over this. */
+  evalDurationMs: S.optional(S.Finite),
+  /** Ollama's prompt_eval_duration: time spent reading the prompt. */
+  promptEvalDurationMs: S.optional(S.Finite),
 });
 export type MessageStats = typeof MessageStats.Type;
 
@@ -55,6 +60,25 @@ export const Message = S.Struct({
 });
 export type Message = typeof Message.Type;
 
+export const FitVerdict = S.Literals(["fits", "spills", "refuse"]);
+export type FitVerdict = typeof FitVerdict.Type;
+
+/** Ollama's capability words from /api/show: completion, embedding, tools, thinking, vision, insert. */
+export const ModelCapability = S.String;
+
+/**
+ * The model chat starts on, chosen by the server's pick rule
+ * (apps/server/src/runtime/pick.ts). It rides on models.list and
+ * models.changed so the first render already knows it.
+ */
+export const ModelPick = S.Struct({
+  /** The context size the pick was fitted at: the settings default. */
+  numCtx: PositiveInt,
+  /** "refuse" means no chat model fits at numCtx; this is the best-ranked one anyway. Absent when the fit check could not run. */
+  verdict: S.optional(FitVerdict),
+});
+export type ModelPick = typeof ModelPick.Type;
+
 export const ModelInfo = S.Struct({
   name: S.String,
   digest: S.String,
@@ -63,6 +87,10 @@ export const ModelInfo = S.Struct({
   parameterSize: S.optional(S.String),
   quantization: S.optional(S.String),
   modifiedAt: S.String,
+  /** From /api/show, cached by digest. A model without "completion" cannot chat. */
+  capabilities: S.Array(ModelCapability),
+  /** Set on exactly one model, the one chat starts on, when any installed model can chat. */
+  pick: S.optional(ModelPick),
 });
 export type ModelInfo = typeof ModelInfo.Type;
 
@@ -85,12 +113,12 @@ export const RuntimeStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.String,
   version: S.optional(S.String),
+  /** Words for people. It can quote another service's reply, so no client parses it. */
   detail: S.optional(S.String),
+  /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
+  busyPorts: S.optional(S.Array(S.String)),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
-
-export const FitVerdict = S.Literals(["fits", "spills", "refuse"]);
-export type FitVerdict = typeof FitVerdict.Type;
 
 export const FitReport = S.Struct({
   model: S.String,
@@ -104,19 +132,39 @@ export const FitReport = S.Struct({
   measuredAt: Millis,
   /** One sentence that names the numbers behind the verdict. */
   message: S.optional(S.String),
+  /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
+  contextLimit: S.optional(PositiveInt),
 });
 export type FitReport = typeof FitReport.Type;
 
 export const ChatEvent = S.Union([
+  // The turn began: its model and saved user message, so a client that did not send it
+  // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
+  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message }),
   S.Struct({ type: S.Literal("delta"), text: S.String }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
   // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
   S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
-  S.Struct({ type: S.Literal("error"), code: S.String, message: S.String }),
+  S.Struct({
+    type: S.Literal("error"),
+    code: S.String,
+    message: S.String,
+    /**
+     * code "runtime-changed" or "preempted": the reply streamed so far (exactly the delta and
+     * thinking text sent), saved to the thread as a stopped reply. Absent when nothing was sent.
+     */
+    partial: S.optional(Message),
+    /** code "preempted": the model whose load needed the GPU this turn's model held. */
+    neededBy: S.optional(S.String),
+  }),
   // A tool call started, finished or failed; the same callId updates one step row.
   S.Struct({ type: S.Literal("tool"), step: ToolStep }),
 ]);
 export type ChatEvent = typeof ChatEvent.Type;
+
+/** A running turn a load would have to stop (turns.blocking). */
+export const BlockingTurn = S.Struct({ threadId: S.String, title: S.String, model: S.String });
+export type BlockingTurn = typeof BlockingTurn.Type;
 
 export const NumCtx = PositiveInt;
 
@@ -137,7 +185,7 @@ export const RuntimeMode = S.Literals(["system", "app"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
 export const Settings = S.Struct({
-  /** Unset means the server picks the fastest installed model that runs on the GPU. */
+  /** Unset means the server picks: the best installed chat model that fits at defaultNumCtx (apps/server/src/runtime/pick.ts). */
   defaultModel: S.optional(S.String),
   defaultNumCtx: ContextSize,
   thinking: S.Boolean,
@@ -149,6 +197,8 @@ export const Settings = S.Struct({
   imageGen: S.Boolean,
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
+  /** Updates take every change on the main branch, not only releases. Unset means off. */
+  updateEveryChange: S.optional(S.Boolean),
 });
 export type Settings = typeof Settings.Type;
 
@@ -161,6 +211,7 @@ export const SettingsPatch = S.Struct({
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
   comfyUrl: S.optional(S.NullOr(S.String)),
+  updateEveryChange: S.optional(S.Boolean),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
 
@@ -322,3 +373,65 @@ export const SetupPlan = S.Struct({
   totalBytes: Count,
 });
 export type SetupPlan = typeof SetupPlan.Type;
+
+// ---------------------------------------------------------------- updates (2026-11-07)
+
+/** The version this copy runs, read from the clone's .git folder (no git process, no network). */
+export const UpdateVersion = S.Union([
+  // date: the commit's date, when the .git folder could be read for it.
+  S.Struct({ kind: S.Literal("release"), tag: S.String, commit: S.String, date: S.optional(Millis) }),
+  S.Struct({ kind: S.Literal("commit"), commit: S.String, date: S.optional(Millis) }),
+  S.Struct({ kind: S.Literal("not-a-clone") }),
+  S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
+]);
+export type UpdateVersion = typeof UpdateVersion.Type;
+
+/** main: every change on the branch. release: the newest v1.2.3 tag. */
+export const UpdateChannel = S.Literals(["main", "release"]);
+export type UpdateChannel = typeof UpdateChannel.Type;
+
+/** Why a check could not say whether there is an update. */
+export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "error"]);
+export type UpdateBlocked = typeof UpdateBlocked.Type;
+
+/** One click of "Check for updates": fetches from the clone's remote, changes nothing. */
+export const UpdateCheck = S.Union([
+  S.Struct({ state: S.Literal("up-to-date"), checkedAt: Millis, channel: UpdateChannel, current: S.String }),
+  S.Struct({
+    state: S.Literal("available"),
+    checkedAt: Millis,
+    channel: UpdateChannel,
+    current: S.String,
+    target: S.String,
+    /** Every commit between current and target. */
+    total: Count,
+    /** Commit subjects, newest first, at most 20. */
+    changes: S.Array(S.String),
+    /** A release's tag message, shown instead of the subjects when there is one. */
+    notes: S.optional(S.String),
+  }),
+  /** lines: what happened, then what to do, in plain words. */
+  S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String) }),
+]);
+export type UpdateCheck = typeof UpdateCheck.Type;
+
+/** The last update run, shown once on the next start. */
+export const UpdateResult = S.Struct({
+  at: Millis,
+  outcome: S.Literals(["updated", "stopped", "rollback-failed", "refused"]),
+  /** "Updated to v0.2.0, 12 changes." or the stopped-at line. */
+  line: S.String,
+  logPath: S.optional(S.String),
+  /** rollback-failed: the commands that finish going back, run in the clone. */
+  commands: S.optional(S.Array(S.String)),
+});
+export type UpdateResult = typeof UpdateResult.Type;
+
+export const UpdateStatus = S.Struct({
+  version: UpdateVersion,
+  /** Present until update.dismissResult. */
+  result: S.NullOr(UpdateResult),
+  /** The last check since the server started; null until someone clicks Check. */
+  lastCheck: S.NullOr(UpdateCheck),
+});
+export type UpdateStatus = typeof UpdateStatus.Type;

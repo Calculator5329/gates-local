@@ -1,48 +1,19 @@
 // Settings (shell.md F20, F27, F36, F45, F46, F59, F62-F66): six sections
 // wired to settings.get/update and the v2 methods. A section whose method the
 // server answers "not-implemented" says so in one calm line; nothing crashes.
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
+import { canChat, notForChat } from "./pick.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
-
-const NOT_HERE = "Not available in this build.";
-
-function Head({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="set-h">
-      <h1>{title}</h1>
-      <p>{children}</p>
-    </div>
-  );
-}
-
-function Grp({ title, children }: { title?: string; children: ReactNode }) {
-  return (
-    <div className="grp">
-      {title ? <div className="grp-t">{title}</div> : null}
-      <div className="box">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, desc, children }: { label: ReactNode; desc?: ReactNode; children?: ReactNode }) {
-  return (
-    <div className="srow">
-      <div className="sl">
-        <b>{label}</b>
-        {desc !== undefined ? <span className="d">{desc}</span> : null}
-      </div>
-      <div className="sv">{children}</div>
-    </div>
-  );
-}
+import { Fail, Grp, Head, NOT_HERE, Na, Row, useAct } from "./settings-ui.tsx";
+import { Updates } from "./Updates.tsx";
 
 function Seg2<T extends string | number>({ value, options, onPick, label }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string }) {
   return (
@@ -55,8 +26,6 @@ function Seg2<T extends string | number>({ value, options, onPick, label }: { va
     </span>
   );
 }
-
-const Na = ({ children = NOT_HERE }: { children?: ReactNode }) => <span className="na">{children}</span>;
 
 const settingsOf = (s: State): Settings | undefined => (s.settings === NA ? undefined : s.settings);
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
@@ -78,11 +47,12 @@ function General() {
   const settings = useStore((s) => s.settings);
   const unavailable = useStore((s) => s.unavailable["settings.update"] === true);
   const theme = settings === NA ? undefined : settings?.theme;
+  const [err, run] = useAct();
   return (
     <>
       <Head title="General">The defaults work out of the box. Nothing here is needed to start chatting.</Head>
       <Grp title="Appearance">
-        <Row label="Theme" desc="Dark by default. System follows your desktop.">
+        <Row label="Theme" desc="Dark by default. System follows your desktop." err={err}>
           {settings === NA || unavailable ? (
             <Na>Follows your desktop. Changing it is not available in this build.</Na>
           ) : (
@@ -94,7 +64,7 @@ function General() {
                 ["dark", "Dark"],
                 ["light", "Light"],
               ]}
-              onPick={(t) => void updateSettings({ theme: t })}
+              onPick={(t) => void run(updateSettings({ theme: t }))}
             />
           )}
         </Row>
@@ -115,26 +85,17 @@ function General() {
           </tbody>
         </table>
       </Grp>
+      <Updates />
     </>
   );
 }
 
 // ---------------------------------------------------------------- Models
 
-function etaText(p: PullProgress): string {
-  const total = p.totalBytes;
-  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : "Starting"];
-  if (p.bytesPerSecond) {
-    parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
-    if (total) parts.push(`about ${Math.max(1, Math.ceil((total - p.completedBytes) / p.bytesPerSecond / 60))} min left`);
-  }
-  if (p.state === "verifying") return "Verifying the download";
-  return parts.join(" · ");
-}
-
 /** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
 export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
+  const [err, run] = useAct();
   return (
     <>
       <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
@@ -148,13 +109,14 @@ export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: st
             className="qa"
             onClick={() => {
               closeTip();
-              void cancelPull(p.name);
+              void run(cancelPull(p.name));
             }}
           >
             Cancel download
           </button>
         ) : null}
       </div>
+      <Fail err={err} />
     </>
   );
 }
@@ -174,6 +136,7 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
   const v = useFit(tag, numCtx);
   const d = describeModel(tag, catalog);
+  const [err, run] = useAct();
   const tip = `<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span>${info?.quantization ? ` · ${esc(info.quantization)}` : ""}<br>${info ? `${gb(info.sizeBytes)} on disk` : ""}${v ? ` · est. ${gb(v.need)} at ${k(numCtx)}` : ""}`;
   const inner = (
     <>
@@ -192,7 +155,7 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
       aria-label={`Remove ${d.name}`}
       onClick={(e) => {
         e.stopPropagation();
-        void removeModel(tag);
+        void run(removeModel(tag));
       }}
     >
       Remove
@@ -200,21 +163,50 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   ) : null;
   if (v?.k === "no") {
     return (
-      <div className="mrow dis" data-tip={tip}>
-        {inner}
-        <button type="button" className="qa" data-memdet={tag} onClick={() => openFit(tag)}>
-          Memory details
-        </button>
-        {remove}
-      </div>
+      <>
+        <div className="mrow dis" data-tip={tip}>
+          {inner}
+          <button type="button" className="qa" data-memdet={tag} onClick={() => openFit(tag)}>
+            Memory details
+          </button>
+          {remove}
+        </div>
+        <Fail err={err} line />
+      </>
     );
   }
   return (
     <div style={{ display: "contents" }}>
-      <button type="button" className={`mrow${on ? " on" : ""}`} data-dm={tag} data-tip={tip} aria-pressed={on} onClick={() => void updateSettings({ defaultModel: tag })}>
+      <button type="button" className={`mrow${on ? " on" : ""}`} data-dm={tag} data-tip={tip} aria-pressed={on} onClick={() => void run(updateSettings({ defaultModel: tag }))}>
         {inner}
       </button>
       {remove}
+      <Fail err={err} line />
+    </div>
+  );
+}
+
+/** An installed embedding model: listed so it can be removed, never a default (it cannot chat). */
+function EmbedRow({ tag }: { tag: string }) {
+  const catalog = useStore(catalogOf);
+  const info = useStore((s) => s.models?.find((m) => m.name === tag));
+  const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
+  const d = describeModel(tag, catalog);
+  const why = notForChat(info);
+  return (
+    <div
+      className="mrow dis emb"
+      data-em={tag}
+      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>${why.tip}${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
+    >
+      <span className="rd" />
+      <span className="mn">{d.name}</span>
+      <span className="mv na">{why.label}</span>
+      {canRemove ? (
+        <button type="button" className="qa" aria-label={`Remove ${d.name}`} onClick={() => void removeModel(tag)}>
+          Remove
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -228,17 +220,23 @@ function Models() {
   const numCtx = useStore((s) => s.numCtx);
   const model = useStore((s) => s.model);
   const v = useFit(model ?? "", numCtx);
+  const [ctxErr, runCtx] = useAct();
   const def = settings?.defaultModel ?? model;
   const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
+  const cpu = useStore((s) => noGpu(s.gpu));
   return (
     <>
-      <Head title="Models">Gates Local picks the fastest model that runs on your GPU. Change it here; any chat can still switch.</Head>
+      <Head title="Models">
+        {cpu
+          ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${k(numCtx)}, otherwise on your best model that fits. Change it here; any chat can still switch.`
+          : `New chats start on your default model if it runs at ${k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.`}
+      </Head>
       <div className="grp">
         <div className="grp-t">Default model</div>
         <div className="box">
-          {(models ?? []).map((m) => (
-            <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} />
-          ))}
+          {(models ?? []).map((m) =>
+            canChat(m) ? <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} /> : <EmbedRow key={m.name} tag={m.name} />,
+          )}
           {downloading.map((p) => {
             const d = describeModel(p.name, catalog);
             return (
@@ -271,9 +269,10 @@ function Models() {
               </span>
               {v ? (
                 <span className="d">
-                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available
+                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
                 </span>
               ) : null}
+              <Fail err={ctxErr} />
             </div>
             <div className="sv">
               <Seg2<ContextSize>
@@ -282,7 +281,7 @@ function Models() {
                 options={CONTEXT_SIZES.map((c) => [c, k(c)] as const)}
                 onPick={(c) => {
                   setContext(c);
-                  if (!settingsNA) void updateSettings({ defaultNumCtx: c });
+                  if (!settingsNA) void runCtx(updateSettings({ defaultNumCtx: c }));
                 }}
               />
             </div>
@@ -297,15 +296,17 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
   const v = c.fit ? verdictOf(c.fit) : undefined;
+  const cpu = useStore((s) => noGpu(s.gpu));
   const dling = p !== undefined && isActive(p) && !installed;
+  const [err, run] = useAct();
   const action = installed ? (
     <span className="badge">Installed</span>
   ) : dling ? (
-    <button type="button" className="qa" onClick={() => void cancelPull(c.name)}>
+    <button type="button" className="qa" onClick={() => void run(cancelPull(c.name))}>
       Cancel download
     </button>
   ) : (
-    <button type="button" className="btn outline" disabled={v?.k === "no"} onClick={() => void pull(c.name)}>
+    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
       Download
     </button>
   );
@@ -323,9 +324,10 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
             {c.purpose} · {gb(c.downloadBytes)} download
           </span>
         )}
+        <Fail err={err} />
       </div>
       {v ? (
-        <div className="dl-v" data-tip={`Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
+        <div className="dl-v" data-tip={cpu ? `Estimated ${gb(v.need)} at ${k(numCtx)}, all in system memory (no supported GPU). Measured after the first load.` : `Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
           <VLabel v={v} />
           <small>
             est. {gb(v.need)} at {k(numCtx)}
@@ -341,8 +343,10 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
 
 function CustomPull() {
   const [name, setName] = useState("");
+  const [err, run] = useAct();
   return (
     <Row
+      err={err}
       label="Any model from the Ollama library"
       desc={
         <>
@@ -358,11 +362,11 @@ function CustomPull() {
       <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
       <button
         type="button"
-        className="btn outline"
+        className="qa"
         disabled={name.trim() === ""}
         onClick={() => {
-          void pull(name);
-          setName("");
+          // the typed name stays until the download starts (W-07)
+          void run(pull(name)).then((ok) => ok && setName(""));
         }}
       >
         Download
@@ -421,7 +425,7 @@ function Runtime() {
   const settings = useStore((s) => s.settings);
   const models = useStore((s) => s.models);
   const rt = rtOf({ conn, runtime });
-  const info = rtInfo({ conn, runtime });
+  const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
   const v = runtime?.version ? ` · Ollama ${runtime.version}` : "";
@@ -442,7 +446,9 @@ function Runtime() {
               ? `Something other than Ollama answers on port ${port}.`
               : (runtime?.detail ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
+  const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
+  const folders = folderWords();
   return (
     <>
       <Head title="Runtime">Gates Local finds Ollama on its own.</Head>
@@ -458,7 +464,7 @@ function Runtime() {
         />
         {rt === "ready" ? (
           <>
-            <Row label={app ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={app ? "The one your system starts" : "A private copy it starts and stops"}>
+            <Row label={app ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={app ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
               {canSwitch ? (
                 <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
                   Switch…
@@ -475,10 +481,10 @@ function Runtime() {
                     <ul>
                       <li>Gates Local stops its copy and connects to the system one on port 11434.</li>
                       <li>
-                        Both read the same models folder, <span className="mono">~/.ollama/models</span>, so nothing downloads again.
+                        The system one reads its own models folder, <span className="mono">{folders.models}</span>. Models downloaded into Gates Local's copy stay in <span className="mono">{folders.appModels}</span>.
                       </li>
                       <li>
-                        Its copy stays in <span className="mono">~/.local/share/gates-local/ollama</span> until you remove it.
+                        Its copy stays in <span className="mono">{folders.appCopy}</span> until you remove it.
                       </li>
                       <li>Chats pause for a few seconds while it reconnects.</li>
                     </ul>
@@ -488,10 +494,11 @@ function Runtime() {
                     <b>Switch to Gates Local's own copy of Ollama?</b>
                     <ul>
                       <li>
-                        Downloads Ollama into <span className="mono">~/.local/share/gates-local/ollama</span>.
+                        Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
                       <li>
-                        It reads the same models folder, <span className="mono">~/.ollama/models</span>, so your {models?.length ?? 0} models don't download again.
+                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
+                        <span className="mono">{folders.models}</span> stay where they are.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
                       <li>Chats pause for about a minute while it installs and starts.</li>
@@ -507,7 +514,7 @@ function Runtime() {
                     className="btn primary"
                     onClick={() => {
                       setState({ ownerConfirm: false });
-                      void updateSettings({ runtimeMode: app ? "system" : "app" });
+                      void run(updateSettings({ runtimeMode: app ? "system" : "app" }));
                     }}
                   >
                     {app ? "Switch" : "Install and switch"}
@@ -522,8 +529,8 @@ function Runtime() {
         </Row>
       </Grp>
       <Grp title="Storage">
-        <Row label="Models folder" desc={models ? `${models.length} models · ${gb(total)} on disk` : undefined}>
-          <span className="path">~/.ollama/models</span>
+        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
+          <span className="path">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>
@@ -565,13 +572,15 @@ function Images() {
   const settings = useStore((s) => s.settings);
   const status = useStore((s) => s.imageStatus);
   const [url, setUrl] = useState<string | null>(null);
+  const [genErr, runGen] = useAct();
+  const [urlErr, runUrl] = useAct();
   const on = settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
   return (
     <>
       <Head title="Image generation">Off by default. When on, the model can queue image jobs in ComfyUI on this GPU.</Head>
       <Grp title="ComfyUI">
-        <Row label="Generate images" desc={settings === NA ? NOT_HERE : on ? "On. The Image toggle in the message box turns it on for a chat." : "Off. The model can't queue image jobs."}>
+        <Row label="Generate images" desc={settings === NA ? NOT_HERE : on ? "On. The Image toggle in the message box turns it on for a chat." : "Off. The model can't queue image jobs."} err={genErr}>
           {settings === NA ? null : (
             <button
               type="button"
@@ -579,7 +588,7 @@ function Images() {
               role="switch"
               aria-checked={on}
               aria-label="Generate images"
-              onClick={() => void updateSettings({ imageGen: !on })}
+              onClick={() => void runGen(updateSettings({ imageGen: !on }))}
             />
           )}
         </Row>
@@ -587,7 +596,7 @@ function Images() {
           {status !== NA && status?.baseUrl ? <span className="path">{status.baseUrl}</span> : null}
         </Row>
         {settings !== NA && settings !== undefined ? (
-          <Row label="ComfyUI address" desc="Where Gates Local finds ComfyUI.">
+          <Row label="ComfyUI address" desc="Where Gates Local finds ComfyUI." err={urlErr}>
             <input
               className="inp"
               aria-label="ComfyUI address"
@@ -596,8 +605,8 @@ function Images() {
               onChange={(e) => setUrl(e.target.value)}
               onBlur={() => {
                 if (url === null) return;
-                void updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() });
-                setUrl(null);
+                // the typed address stays until the server saved it (W-07)
+                void runUrl(updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() })).then((ok) => ok && setUrl(null));
               }}
             />
           </Row>
@@ -607,23 +616,15 @@ function Images() {
   );
 }
 
-function fresh(src: Source): string {
-  if (src.state === "refreshing") return "Refreshing…";
-  if (src.state === "error") return src.detail ?? "Couldn't read it.";
-  const parts: string[] = [];
-  if (src.sizeBytes !== undefined) parts.push(src.sizeBytes > 1024 ** 3 ? gb(src.sizeBytes) : `${Math.max(1, Math.round(src.sizeBytes / 1024 ** 2))} MB`);
-  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Read-only";
-}
-
 function SourceRow({ src }: { src: Source }) {
+  const [err, run] = useAct();
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`}>
+    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${sourceDetail(src)}`} err={err}>
       <span className="badge">read-only</span>
-      <button type="button" className="qa" onClick={() => void refreshSource(src.id)}>
+      <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
         Refresh
       </button>
-      <button type="button" className="qa" onClick={() => void removeSource(src.id)}>
+      <button type="button" className="qa" onClick={() => void run(removeSource(src.id))}>
         Remove
       </button>
     </Row>
@@ -634,8 +635,9 @@ function SourceRow({ src }: { src: Source }) {
 function AddSource({ kind, label, desc, button, icon }: { kind: "folder" | "file" | "sqlite"; label: string; desc: string; button: string; icon: "folder" | "file" | "db" }) {
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState("");
+  const [err, run] = useAct();
   return (
-    <Row label={label} desc={desc}>
+    <Row label={label} desc={desc} err={err}>
       {open ? (
         <>
           <input
@@ -656,9 +658,12 @@ function AddSource({ kind, label, desc, button, icon }: { kind: "folder" | "file
             className="btn outline"
             disabled={path.trim() === ""}
             onClick={() => {
-              void addSource(kind, path);
-              setPath("");
-              setOpen(false);
+              // the form keeps the typed path until the server added it (W-07)
+              void run(addSource(kind, path)).then((ok) => {
+                if (!ok) return;
+                setPath("");
+                setOpen(false);
+              });
             }}
           >
             Add
