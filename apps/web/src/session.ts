@@ -239,6 +239,9 @@ async function hydrateWith(
   });
   on("sources.changed", (sources) => setState({ sources }));
   on("image.status", (imageStatus) => setState({ imageStatus }));
+  on("image.event", (e) => {
+    if (e.state === "done" && e.threadId !== undefined) imageSaved(e.threadId);
+  });
 
   // settings.get is a local store read and the model choice needs only it and
   // the model list, so the runtime dot and a chosen model land in one render:
@@ -836,6 +839,17 @@ function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
 function untrackedDone(threadId: string, message: Message): void {
   noteMessage(threadId, message);
   void loadThread(threadId, true);
+}
+
+/**
+ * The image module saved its message into a thread outside chat events, and
+ * image.event done names the thread but not the message. A thread this client
+ * has, shows or is loading reloads; the load tickets keep an older snapshot
+ * in flight from replacing the one with the image (WF3-01).
+ */
+function imageSaved(threadId: string): void {
+  const s = getState();
+  if (s.messages[threadId] !== undefined || s.threadId === threadId || loading(threadId)) void loadThread(threadId, true);
 }
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {

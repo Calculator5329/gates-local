@@ -414,6 +414,45 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
   });
 });
 
+const plain = () => snapshot([userMsg("m1", "t1", "hi")]);
+const withImage = () => snapshot([userMsg("m1", "t1", "hi"), { ...asstMsg("m2", "t1", "a fox"), images: ["images/j1.png"] }]);
+/** What the image module sends after it saved a job's message into t1. */
+function imageDone(): void {
+  b.server.push("threads.changed", { threadId: "t1" });
+  b.server.push("image.event", { jobId: "j1", threadId: "t1", state: "done", progress: 1, imagePath: "images/j1.png" });
+}
+
+describe("an image saved into a thread outside chat events (WF3-01)", () => {
+  it("a cached conversation reloads and shows it, also after switching away and back", async () => {
+    await boot();
+    b.server.answer("threads.get", plain);
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    b.server.answer("threads.get", withImage);
+    imageDone();
+    await until(() => store.getState().messages["t1"]?.length === 2, 1000, "the reload after the image");
+    session.openThread("b");
+    await tick();
+    session.openThread("t1");
+    await tick();
+    expect(store.getState().messages["t1"]?.at(-1)?.images).toEqual(["images/j1.png"]);
+  });
+
+  it("an older load still in flight never overwrites the snapshot with the image", async () => {
+    await boot();
+    b.server.answer("threads.get", plain);
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const older = await reconnectHeld();
+    b.server.answer("threads.get", withImage);
+    imageDone();
+    await until(() => store.getState().messages["t1"]?.length === 2, 1000, "the reload after the image");
+    older.respond(plain());
+    await tick();
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+});
+
 const others: Array<() => void> = [];
 afterEach(() => {
   for (const stop of others.splice(0)) stop();
