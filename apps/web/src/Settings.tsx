@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { type ActionResult, addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
@@ -671,19 +671,10 @@ function Images() {
   );
 }
 
-function fresh(src: Source): string {
-  if (src.state === "refreshing") return "Refreshing…";
-  if (src.state === "error") return src.detail ?? "Couldn't read it.";
-  const parts: string[] = [];
-  if (src.sizeBytes !== undefined) parts.push(src.sizeBytes > 1024 ** 3 ? gb(src.sizeBytes) : `${Math.max(1, Math.round(src.sizeBytes / 1024 ** 2))} MB`);
-  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Read-only";
-}
-
 function SourceRow({ src }: { src: Source }) {
   const [err, run] = useAct();
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`} err={err}>
+    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${sourceDetail(src)}`} err={err}>
       <span className="badge">read-only</span>
       <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
         Refresh

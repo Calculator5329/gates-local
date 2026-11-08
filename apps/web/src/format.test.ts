@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { decodeSpeed, otherCtxWords, replyMeta, verdictOf } from "./format.ts";
+import { decodeSpeed, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
+
+const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
+describe("a Library source's size", () => {
+  it("says a small file's real size, never rounds it up to 1 MB", () => {
+    // A 223-byte text file showed as "1 MB" in the Library (Windows test, 2026-11-07).
+    expect(size(223)).toBe("223 bytes");
+    expect(size(1)).toBe("1 byte");
+    expect(size(40_000)).toBe("39 KB");
+    expect(size(5 * 1024 ** 2)).toBe("5 MB");
+    expect(size(3 * 1024 ** 3)).toBe("3.0 GB");
+  });
+});
 
 const GIB = 1024 ** 3;
 const base: FitReport = {
