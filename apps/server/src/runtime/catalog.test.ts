@@ -101,6 +101,20 @@ describe("models.catalog", () => {
     expect(recommended.map((x) => x.name)).toEqual(["qwen3.5:4b"]);
   });
 
+  it("MP-01: an installed curated model whose capabilities are unknown is neither a chat choice nor a download", async () => {
+    const s = await fakeOllama();
+    const unknownQwen = (await listModels(s.baseUrl)).map((m) => (m.name === "qwen3.5:9b" ? { ...m, capabilities: ["unknown"] } : m));
+    const entries = await buildCatalog({
+      baseUrl: () => s.baseUrl,
+      installed: async () => unknownQwen,
+      settings,
+      fit: { runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: () => 1 },
+    });
+    expect(entries.map((x) => x.name)).not.toContain("qwen3.5:9b");
+    // Curated models that are not installed are still offered.
+    expect(byName(entries).get("gpt-oss:20b")?.installed).toBe(false);
+  });
+
   it("while the runtime is down, lists only what can be downloaded, without a fit", async () => {
     const entries = await buildCatalog({ baseUrl: () => undefined, installed: async () => [], settings });
     expect(entries.length).toBeGreaterThan(0);
