@@ -20,8 +20,9 @@ export const FIT_LABELS = {
 export type FitSet = keyof typeof FIT_LABELS;
 export const FIT_SET: FitSet = "b";
 
-/** The word for a verdict in the chosen set. */
-export function fitLabel(verdict: FitVerdict, set: FitSet = FIT_SET): string {
+/** The word for a verdict in the chosen set. With no supported GPU, whatever loads runs in system memory. */
+export function fitLabel(verdict: FitVerdict, set: FitSet = FIT_SET, cpu = false): string {
+  if (cpu && verdict !== "refuse") return "Runs in system memory";
   return FIT_LABELS[set][verdict];
 }
 
@@ -46,9 +47,10 @@ export const about = (bytes: number) => {
 export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1024 ** 2)} MB` : about(bytes));
 
 /** The reason behind a verdict, outcome first, one number per resource. */
-export function fitReason(r: FitReport): string {
+export function fitReason(r: FitReport, cpu = false): string {
   if (r.verdict === "refuse" && r.contextLimit !== undefined) return `Supports up to ${k(r.contextLimit)} of context; new chats use ${k(r.numCtx)}.`;
   const head = `Needs about ${about(r.needVramBytes)}.`;
+  if (cpu) return `${head} This computer has no supported GPU, ${r.verdict === "refuse" ? "and system memory can't hold it, so it can't load." : "so it runs in slower system memory."}`;
   const gpu = `Your GPU has ${about(r.freeVramBytes)} free`;
   if (r.verdict === "fits") return `${head} ${gpu}, so it runs entirely on the GPU.`;
   if (r.verdict === "spills") return `${head} ${gpu}, so the rest runs in slower system memory.`;

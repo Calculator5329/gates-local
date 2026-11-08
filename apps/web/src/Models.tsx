@@ -7,7 +7,7 @@
 // models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { FitReport, ModelInfo } from "@gates-local/contracts";
-import { k } from "./format.ts";
+import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault } from "./models-actions.ts";
@@ -68,13 +68,14 @@ function FitGlyph({ verdict }: { verdict: FitReport["verdict"] }) {
 
 /** "Runs well" stays quiet; the exceptions carry colour, a symbol, and their reason on hover or focus. */
 function Fit({ report }: { report: FitReport | "error" | undefined }) {
+  const cpu = useStore((s) => noGpu(s.gpu));
   if (report === undefined) return <span className="mp-fit none">Checking…</span>;
   if (report === "error") return <span className="mp-fit none">Couldn't check</span>;
   const exception = report.verdict !== "fits";
   return (
-    <span className={`mp-fit ${report.verdict}${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report)) : undefined}>
+    <span className={`mp-fit ${report.verdict}${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report, cpu)) : undefined}>
       <FitGlyph verdict={report.verdict} />
-      <span className="mp-w">{fitLabel(report.verdict)}</span>
+      <span className="mp-w">{fitLabel(report.verdict, undefined, cpu)}</span>
     </span>
   );
 }
@@ -474,6 +475,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const numCtx = useStore((s) => s.numCtx);
+  const cpu = useStore((s) => noGpu(s.gpu));
   const chat = rows.filter((r) => r.chat);
   const runs = chat.filter((r) => r.verdict !== "refuse");
   const wont = chat.filter((r) => r.verdict === "refuse");
@@ -517,7 +519,11 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
     <div className="mp-defrow" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=option]", close)}>
       <div className="mp-dl-l">
         <b>Default for new chats</b>
-        <span>If it can't run at {k(numCtx)}, new chats start on your best model that fits the GPU. Any chat can switch from its model menu.</span>
+        <span>
+          {cpu
+            ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${k(numCtx)}, otherwise on your best model that fits. Change it here; any chat can still switch.`
+            : `If it can't run at ${k(numCtx)}, new chats start on your best model that fits the GPU. Any chat can switch from its model menu.`}
+        </span>
         <Fail err={err} />
       </div>
       <button
@@ -554,6 +560,7 @@ function NoModels() {
   const catalog = useStore(catalogOf);
   const downloading = useStore((s) => Object.values(s.pulls).some(isActive));
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
+  const cpu = useStore((s) => noGpu(s.gpu));
   const [err, run] = useAct();
   if (downloading) {
     return (
@@ -564,7 +571,8 @@ function NoModels() {
       </div>
     );
   }
-  const pick = catalog?.find((c) => c.recommended && c.fit?.verdict === "fits");
+  // with no supported GPU the best a model can do is load into system memory
+  const pick = catalog?.find((c) => c.recommended && c.fit?.verdict === (cpu ? "spills" : "fits"));
   return (
     <div className="mp-empty">
       <Icon id="box" cls="mp-big" />
@@ -574,7 +582,7 @@ function NoModels() {
         {pick ? (
           <>
             {" "}
-            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, runs well on this computer.
+            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {cpu ? "runs in system memory" : "runs well"} on this computer.
           </>
         ) : null}
       </p>
