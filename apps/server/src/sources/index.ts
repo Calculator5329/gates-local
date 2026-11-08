@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { accessSync, chmodSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { Schema as S } from "effect";
@@ -59,33 +59,50 @@ export function createSources(deps: { dataDir: string; now?: () => number; log?:
   const log = deps.log ?? (() => undefined);
   const snapshotPath = (id: string) => path.join(snapshots, `${id}.db`);
 
-  const load = (): Source[] => {
-    if (!existsSync(registryPath)) return [];
+  type Loaded = { sources: Source[]; registry: "decoded" | "missing" | "corrupt" };
+  const load = (): Loaded => {
+    if (!existsSync(registryPath)) return { sources: [], registry: "missing" };
     try {
       const loaded = [...decodeRegistry(JSON.parse(readFileSync(registryPath, "utf8")))];
       // IDs form snapshot filenames; reject corrupted registry data before it can form a path.
       for (const source of loaded) if (!/^[a-zA-Z0-9_-]+$/.test(source.id)) throw new Error(`invalid source id ${JSON.stringify(source.id)}`);
       // A refresh never persists "refreshing"; an older file may still hold it. The last
       // snapshot (or the file itself) is still the last good state.
-      return loaded.map(s => s.state !== "refreshing" ? s
+      return { registry: "decoded", sources: loaded.map(s => s.state !== "refreshing" ? s
         : s.kind !== "sqlite" || existsSync(snapshotPath(s.id)) ? { ...s, state: "ready" }
-        : { ...s, state: "error", detail: "The last refresh did not finish; refresh this source again." });
+        : { ...s, state: "error", detail: "The last refresh did not finish; refresh this source again." }) };
     } catch (e) {
       const aside = `${registryPath}.bad-${now()}`;
       renameSync(registryPath, aside);
       log(`sources.json could not be read (${(e as Error).message}); kept it as ${path.basename(aside)} and started with no sources`);
-      return [];
+      return { sources: [], registry: "corrupt" };
     }
   };
-  let sources = load();
+  const loaded = load();
+  let sources = loaded.sources;
   // The first build moved every replaced snapshot to _archive/<id>.<uuid>.db and kept it for good,
   // removed sources included. Fold that layout into the one-copy-per-source policy: a registered
   // database keeps its newest copy as <id>.db (the current snapshot when there is one), and every
-  // other archived copy goes.
+  // other archived copy goes. That deletion needs the registry: when it is missing or corrupt, no
+  // copy's owner is known, so the whole folder is set aside for the owner and never read again.
   const archive = path.join(snapshots, "_archive");
   const archivedCopies = (id?: string) => !existsSync(archive) ? [] : readdirSync(archive)
     .filter(name => id === undefined || name.startsWith(`${id}.`)).map(name => path.join(archive, name));
-  if (existsSync(archive)) {
+  if (existsSync(archive) && loaded.registry !== "decoded") {
+    let unclaimed = path.join(snapshots, `_archive-unclaimed-${now()}`);
+    if (existsSync(unclaimed)) unclaimed = `${unclaimed}-${randomUUID()}`;
+    // A failed rename stops the start: left in place, the folder would meet a decoded registry later.
+    renameSync(archive, unclaimed);
+    try {
+      chmodSync(unclaimed, 0o700);
+      for (const name of readdirSync(unclaimed, { recursive: true }) as string[]) {
+        const file = path.join(unclaimed, name);
+        const stat = lstatSync(file);
+        if (!stat.isSymbolicLink()) chmodSync(file, stat.isDirectory() ? 0o700 : 0o600);
+      }
+    } catch (e) { log(`snapshots/${path.basename(unclaimed)} could not be made private (${(e as Error).message})`); }
+    log(`snapshots/_archive was kept as snapshots/${path.basename(unclaimed)} because sources.json was ${loaded.registry === "missing" ? "missing" : "could not be read"}; nothing in it was deleted`);
+  } else if (existsSync(archive)) {
     try {
       for (const source of sources) {
         if (source.kind !== "sqlite" || existsSync(snapshotPath(source.id))) continue;

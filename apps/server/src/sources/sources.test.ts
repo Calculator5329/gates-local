@@ -94,6 +94,52 @@ describe("Library registry", () => {
     try { expect(kept.prepare("SELECT n FROM t").get()?.n).toBe(2); } finally { kept.close(); }
     expect(statSync(copies[0]!).mode & 0o777).toBe(0o600);
   });
+  for (const registry of ["corrupt", "missing"] as const) {
+    it(`a ${registry} sources.json leaves an archive-only database copy untouched, set aside as _archive-unclaimed-* (T2-01)`, () => {
+      const { dataDir } = setup();
+      const snapshots = path.join(dataDir, "snapshots");
+      const archive = path.join(snapshots, "_archive"); mkdirSync(archive, { recursive: true });
+      // The live database and its current snapshot are gone; this is the last copy.
+      const copy = path.join(archive, `${randomUUID()}.${randomUUID()}.db`);
+      const db = new DatabaseSync(copy); db.exec("CREATE TABLE t(n); INSERT INTO t VALUES(7)"); db.close();
+      chmodSync(copy, 0o644);
+      const bytes = readFileSync(copy);
+      // A current snapshot the registry can no longer claim stays too.
+      const stray = path.join(snapshots, `${randomUUID()}.db`); writeFileSync(stray, "stray snapshot");
+      if (registry === "corrupt") writeFileSync(path.join(dataDir, "sources.json"), "{not json");
+      const log = vi.fn();
+      const sources = createSources({ dataDir, now: () => 1234, log });
+      expect(sources.list()).toEqual([]);
+      const survivors = (readdirSync(dataDir, { recursive: true }) as string[]).filter(name => statSync(path.join(dataDir, name)).isFile() && readFileSync(path.join(dataDir, name)).equals(bytes));
+      expect(survivors).toEqual([path.join("snapshots", "_archive-unclaimed-1234", path.basename(copy))]);
+      const unclaimed = path.join(snapshots, "_archive-unclaimed-1234");
+      expect(existsSync(archive)).toBe(false);
+      expect(readFileSync(path.join(unclaimed, path.basename(copy)))).toEqual(bytes);
+      expect(statSync(unclaimed).mode & 0o777).toBe(0o700);
+      expect(statSync(path.join(unclaimed, path.basename(copy))).mode & 0o777).toBe(0o600);
+      expect(existsSync(path.join(dataDir, "sources.json.bad-1234"))).toBe(registry === "corrupt");
+      expect(readFileSync(stray, "utf8")).toBe("stray snapshot");
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`_archive-unclaimed-1234.*${registry === "corrupt" ? "could not be read" : "missing"}`)));
+    });
+  }
+  it("later starts, adds and removes never touch an _archive-unclaimed-* folder (T2-01)", async () => {
+    const { root, dataDir } = setup();
+    const unclaimed = path.join(dataDir, "snapshots", "_archive-unclaimed-1234"); mkdirSync(unclaimed, { recursive: true });
+    const copy = path.join(unclaimed, `${randomUUID()}.${randomUUID()}.db`);
+    const db = new DatabaseSync(copy); db.exec("CREATE TABLE t(n)"); db.close();
+    const bytes = readFileSync(copy);
+    const file = path.join(root, "live.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n)"); live.close();
+    for (const registry of ["missing", "[]", "{not json"]) {
+      if (registry !== "missing") writeFileSync(path.join(dataDir, "sources.json"), registry);
+      const sources = createSources({ dataDir });
+      const source = await sources.add({ kind: "sqlite", path: file });
+      await sources.refresh(source.id);
+      sources.remove(source.id);
+      rmSync(path.join(dataDir, "sources.json"), { force: true });
+    }
+    expect(readFileSync(copy)).toEqual(bytes);
+  });
   it("a database removed between source capture and the tool call is named in the observation, with no host path (T-05)", async () => {
     const { root, dataDir, sources } = setup();
     const file = path.join(root, "ledger.db");
