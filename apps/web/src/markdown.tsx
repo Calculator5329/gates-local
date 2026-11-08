@@ -3,13 +3,14 @@
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
 // as whole blocks (reveal.ts); half-written input still renders as far as it goes.
-import { type ReactNode, memo } from "react";
+import { type ReactNode, memo, useEffect, useState } from "react";
+import { Icon } from "./icons.tsx";
 
 type Block =
   | { t: "p"; text: string }
   | { t: "h"; level: 1 | 2 | 3 | 4; text: string }
   | { t: "ul" | "ol"; items: string[] }
-  | { t: "code"; text: string }
+  | { t: "code"; lang: string; text: string }
   | { t: "quote"; text: string }
   | { t: "table"; head: string[]; rows: string[][]; num: boolean[] };
 
@@ -34,11 +35,12 @@ function parse(src: string): Block[] {
       continue;
     }
     if (/^\s*```/.test(line)) {
+      const lang = /^\s*```\s*([\w+#.-]*)/.exec(line)?.[1] ?? "";
       const body: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i] ?? "")) body.push(lines[i++] ?? "");
       i++;
-      out.push({ t: "code", text: body.join("\n") });
+      out.push({ t: "code", lang, text: body.join("\n") });
       continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
@@ -117,6 +119,39 @@ export function inline(text: string): ReactNode[] {
   return out;
 }
 
+/** A fenced code block: the fence's language at the top left, its own copy button at the top right (shown on hover or focus). */
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <div className="cb">
+      <div className="cb-h">
+        {lang !== "" ? <span className="cb-lang">{lang}</span> : null}
+        <button
+          type="button"
+          className={copied ? "cb-copy on" : "cb-copy"}
+          aria-label="Copy code"
+          data-tip={copied ? undefined : "Copy code"}
+          onClick={() => {
+            navigator.clipboard?.writeText(code).catch(() => undefined);
+            setCopied(true);
+          }}
+        >
+          <Icon id={copied ? "check" : "copy"} />
+          {copied ? <span aria-live="polite">Copied</span> : null}
+        </button>
+      </div>
+      <pre>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function renderBlock(b: Block, key: number): ReactNode {
   switch (b.t) {
     case "p":
@@ -137,11 +172,7 @@ function renderBlock(b: Block, key: number): ReactNode {
       );
     }
     case "code":
-      return (
-        <pre key={key}>
-          <code>{b.text}</code>
-        </pre>
-      );
+      return <CodeBlock key={key} lang={b.lang} code={b.text} />;
     case "quote":
       return <blockquote key={key}>{inline(b.text)}</blockquote>;
     case "table":
