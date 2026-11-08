@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { randomUUID } from "node:crypto";
 import { createSources, SQLITE_FILE_REFUSED } from "./index.ts";
+const isSqliteFile = (file: string) => statSync(file).isFile() && readFileSync(file).subarray(0, 16).equals(Buffer.from("SQLite format 3\0", "latin1"));
 const children: ChildProcess[] = [];
 // One prerequisite probe; do not mistake an unsupported nested process for a snapshot failure.
 const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8", timeout: 2000 });
@@ -64,6 +66,32 @@ describe("Library registry", () => {
     expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
     sources.remove(source.id);
     expect(readdirSync(snapshots, { recursive: true })).toEqual([]);
+  });
+  it("migrates the old snapshots/_archive/ layout: after refresh and remove no copy of the database is left (T-04)", async () => {
+    const { root, dataDir, sources } = setup();
+    const file = path.join(root, "private.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n); INSERT INTO t VALUES(1)"); live.close();
+    const source = await sources.add({ kind: "sqlite", path: file });
+    const keep = await sources.add({ kind: "sqlite", path: file });
+    const snapshots = path.join(dataDir, "snapshots");
+    // What the first build left: every refresh moved the previous copy to _archive/<id>.<uuid>.db,
+    // and remove() left a removed source's copies behind.
+    const archive = path.join(snapshots, "_archive"); mkdirSync(archive);
+    for (const id of [source.id, source.id, keep.id, "0f9b6c1e-removed-earlier"]) copyFileSync(path.join(snapshots, `${source.id}.db`), path.join(archive, `${id}.${randomUUID()}.db`));
+    // A registered source with no current snapshot keeps its newest archived copy.
+    const newer = path.join(archive, `${keep.id}.${randomUUID()}.db`);
+    const db = new DatabaseSync(newer); db.exec("CREATE TABLE t(n); INSERT INTO t VALUES(2)"); db.close();
+    utimesSync(newer, new Date(), new Date(Date.now() + 60000));
+    rmSync(path.join(snapshots, `${keep.id}.db`));
+    const reopened = createSources({ dataDir });
+    await reopened.refresh(source.id);
+    reopened.remove(source.id);
+    const copies = (readdirSync(dataDir, { recursive: true }) as string[]).map(name => path.join(dataDir, name)).filter(isSqliteFile);
+    expect(copies).toEqual([path.join(snapshots, `${keep.id}.db`)]);
+    expect(existsSync(archive)).toBe(false);
+    const kept = new DatabaseSync(copies[0]!, { readOnly: true });
+    try { expect(kept.prepare("SELECT n FROM t").get()?.n).toBe(2); } finally { kept.close(); }
+    expect(statSync(copies[0]!).mode & 0o777).toBe(0o600);
   });
   it("a failed snapshot leaves no pending file and records the error", async () => {
     const { root, dataDir, sources } = setup();

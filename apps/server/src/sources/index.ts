@@ -78,6 +78,23 @@ export function createSources(deps: { dataDir: string; now?: () => number; log?:
     }
   };
   let sources = load();
+  // The first build moved every replaced snapshot to _archive/<id>.<uuid>.db and kept it for good,
+  // removed sources included. Fold that layout into the one-copy-per-source policy: a registered
+  // database keeps its newest copy as <id>.db (the current snapshot when there is one), and every
+  // other archived copy goes.
+  const archive = path.join(snapshots, "_archive");
+  const archivedCopies = (id?: string) => !existsSync(archive) ? [] : readdirSync(archive)
+    .filter(name => id === undefined || name.startsWith(`${id}.`)).map(name => path.join(archive, name));
+  if (existsSync(archive)) {
+    try {
+      for (const source of sources) {
+        if (source.kind !== "sqlite" || existsSync(snapshotPath(source.id))) continue;
+        const newest = archivedCopies(source.id).filter(file => statSync(file).isFile()).toSorted((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+        if (newest) { chmodSync(newest, 0o600); renameSync(newest, snapshotPath(source.id)); }
+      }
+      rmSync(archive, { recursive: true, force: true });
+    } catch (e) { log(`snapshots/_archive could not be cleaned up (${(e as Error).message}); it is retried at the next start`); }
+  }
   /** What is on disk: never a "refreshing" state, so a crash mid-refresh loads back as the last good one. */
   const lastGood = new Map(sources.map(s => [s.id, s]));
   const listeners = new Set<(sources: Source[]) => void>();
@@ -101,6 +118,8 @@ export function createSources(deps: { dataDir: string; now?: () => number; log?:
   };
   const removeSnapshots = (id: string) => {
     for (const name of readdirSync(snapshots)) if (name === `${id}.db` || (name.startsWith(`${id}.`) && name.endsWith(".pending.db"))) rmSync(path.join(snapshots, name), { force: true });
+    // Copies the old layout still holds when its cleanup at start could not finish.
+    for (const file of archivedCopies(id)) rmSync(file, { force: true });
   };
   const materialize = async (source: Source): Promise<Source> => {
     const canonical = checkPath(source);
