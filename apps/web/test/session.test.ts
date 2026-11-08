@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { type Browser, installBrowser, tick, until } from "./harness.ts";
+import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -387,6 +387,102 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
     session.openThread("a");
     await until(() => store.getState().view === "new", 1000, "the new-thread screen");
     expect(store.getState().threadId).toBeNull();
+  });
+
+  it("a thread with nothing on screen whose load failed says why, and leaving Settings or Retry loads it again", async () => {
+    await boot();
+    const first = b.server.hold("threads.get");
+    session.openThread("t1");
+    await first;
+    session.openSettings();
+    const held = await reconnectHeld();
+    session.leaveSettings();
+    held.fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1", loadErrors: { t1: expect.stringMatching(/^Couldn't load this conversation because/) } });
+    expect(store.getState().messages["t1"]).toBeUndefined();
+    const again = b.server.hold("threads.get");
+    session.openSettings();
+    session.leaveSettings();
+    (await again).fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1", loadErrors: { t1: expect.stringMatching(/^Couldn't load/) } });
+    b.server.answer("threads.get", () => snapshot([userMsg("m1", "t1", "hi")]));
+    session.reloadThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined, 1000, "the retried load");
+    expect(store.getState().loadErrors["t1"]).toBeUndefined();
+  });
+});
+
+const plain = () => snapshot([userMsg("m1", "t1", "hi")]);
+const withImage = () => snapshot([userMsg("m1", "t1", "hi"), { ...asstMsg("m2", "t1", "a fox"), images: ["images/j1.png"] }]);
+/** What the image module sends after it saved a job's message into t1. */
+function imageDone(): void {
+  b.server.push("threads.changed", { threadId: "t1" });
+  b.server.push("image.event", { jobId: "j1", threadId: "t1", state: "done", progress: 1, imagePath: "images/j1.png" });
+}
+
+describe("an image saved into a thread outside chat events (WF3-01)", () => {
+  it("a cached conversation reloads and shows it, also after switching away and back", async () => {
+    await boot();
+    b.server.answer("threads.get", plain);
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    b.server.answer("threads.get", withImage);
+    imageDone();
+    await until(() => store.getState().messages["t1"]?.length === 2, 1000, "the reload after the image");
+    session.openThread("b");
+    await tick();
+    session.openThread("t1");
+    await tick();
+    expect(store.getState().messages["t1"]?.at(-1)?.images).toEqual(["images/j1.png"]);
+  });
+
+  it("an older load still in flight never overwrites the snapshot with the image", async () => {
+    await boot();
+    b.server.answer("threads.get", plain);
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const older = await reconnectHeld();
+    b.server.answer("threads.get", withImage);
+    imageDone();
+    await until(() => store.getState().messages["t1"]?.length === 2, 1000, "the reload after the image");
+    older.respond(plain());
+    await tick();
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+/** t1 cached, then two reloads held in order: the newer one fails first. */
+async function newerFailed(): Promise<Held<"threads.get">> {
+  await boot();
+  b.server.answer("threads.get", plain);
+  session.openThread("t1");
+  await until(() => store.getState().messages["t1"] !== undefined);
+  const olderHeld = b.server.hold("threads.get");
+  session.reloadThread("t1");
+  const older = await olderHeld;
+  const newerHeld = b.server.hold("threads.get");
+  session.reloadThread("t1");
+  (await newerHeld).fail("internal", "newer load failed");
+  await tick();
+  expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
+  return older;
+}
+
+describe("an older load that answers after a newer load failed (WF4-01)", () => {
+  it("an older snapshot does not clear the newer failure and its Retry", async () => {
+    const older = await newerFailed();
+    older.respond(plain());
+    await tick();
+    expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
+  });
+
+  it("an older failure does not replace the newer failure's reason", async () => {
+    const older = await newerFailed();
+    older.fail("internal", "older load failed");
+    await tick();
+    expect(store.getState().loadErrors["t1"]).toContain("newer load failed");
   });
 });
 

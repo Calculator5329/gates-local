@@ -7,7 +7,7 @@ import { describeModel, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { focusComposer } from "./Sidebar.tsx";
-import { fileUrl, retry, unqueue } from "./session.ts";
+import { fileUrl, reloadThread, retry, unqueue } from "./session.ts";
 import { NA, type Queued, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -316,6 +316,7 @@ const LONG_THREAD = 50;
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
+  const loadError = useStore((s) => s.loadErrors[threadId]);
   const queuedAll = useStore((s) => (s.queued.length === 0 ? QUEUED_NONE : s.queued));
   const queued = queuedAll.filter((q) => q.threadId === threadId);
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
@@ -361,6 +362,15 @@ export function Timeline({ threadId }: { threadId: string }) {
         {queued.map((q) => (
           <UserBubble key={q.id} text={q.text} time={turnTime(q.at)} queued={q} />
         ))}
+        {loadError !== undefined ? (
+          <div className="err-line" role="status" data-load-error>
+            <Icon id="alert" cls="s14" />
+            <span>{loadError}</span>
+            <button type="button" className="qa" onClick={() => reloadThread(threadId)}>
+              Retry
+            </button>
+          </div>
+        ) : null}
         <LiveTurnView threadId={threadId} />
       </div>
     </div>
