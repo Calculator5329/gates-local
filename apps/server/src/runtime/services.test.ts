@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "../app.ts";
+import { createApp, type AppDeps } from "../app.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import type { ImageModule } from "../image/module.ts";
 import { openThreadStore } from "../threads/store.ts";
@@ -176,48 +176,60 @@ const expectRuntimeChangedEnd = (events: { type: string; code?: string; message?
   expect(last?.message).toMatch(/send (the|your) message again/i);
 };
 
-describe("R2-03: a runtime switch ends every turn reserved against the old runtime", () => {
-  const MODEL = "qwen3.5:9b";
+const MODEL = "qwen3.5:9b";
 
-  /** A system Ollama with MODEL resident at 16k (the fit is measured, no /api/show), the services and the app around it. */
-  async function rig(routes: Record<string, Route>, image?: ImageModule) {
-    const old = await startFakeServer({
-      "GET /": (_b, res) => {
-        res.writeHead(200, { "content-type": "text/plain" });
-        res.end("Ollama is running");
-      },
-      "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
-      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
-      "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
-      "POST /api/show": (_b, res) => json(res, 200, SHOW),
-      ...routes,
-    });
-    servers.push(old);
-    const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl });
-    expect(s.runtime.mode()).toBe("system");
-    expect((await s.runtime.ensure()).state).toBe("ready");
-    const store = openThreadStore(path.join(work, "threads.sqlite"));
-    const events: { type: string; code?: string; message?: string }[] = [];
-    const app = createApp({
-      store,
-      runtime: s.runtime,
-      catalog: s.catalog,
-      push: (channel, payload) => {
-        if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
-      },
-      models: { handlers: s.handlers, loader: s.loader },
-      fit,
-      ...(image ? { image } : {}),
-      log: () => undefined,
-    });
-    const thread = store.createThread({});
-    const chats = () => old.requests.filter((r) => r.method === "POST" && r.path === "/api/chat").length;
-    const done = async () => {
-      await app.shutdown();
-      store.close();
-    };
-    return { old, s, app, store, thread, events, chats, done };
-  }
+interface RigOptions {
+  readonly image?: ImageModule;
+  readonly lease?: GpuLease;
+  /** The fit readings the app's turns use (default: plenty of free VRAM). */
+  readonly fit?: AppDeps["fit"];
+}
+
+/**
+ * A system Ollama with MODEL resident at 16k (the fit is measured, no /api/show) unless the
+ * routes say otherwise, the services and the app around it, sharing one lease when given.
+ */
+async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
+  const old = await startFakeServer({
+    "GET /": (_b, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("Ollama is running");
+    },
+    "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
+    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+    ...routes,
+  });
+  servers.push(old);
+  const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease);
+  expect(s.runtime.mode()).toBe("system");
+  expect((await s.runtime.ensure()).state).toBe("ready");
+  const store = openThreadStore(path.join(work, "threads.sqlite"));
+  const events: { type: string; code?: string; message?: string; partial?: { id: string; content: string; thinking?: string } }[] = [];
+  const app = createApp({
+    store,
+    runtime: s.runtime,
+    catalog: s.catalog,
+    push: (channel, payload) => {
+      if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
+    },
+    models: { handlers: s.handlers, loader: s.loader },
+    fit: options.fit ?? fit,
+    ...(options.image ? { image: options.image } : {}),
+    ...(options.lease ? { lease: options.lease } : {}),
+    log: () => undefined,
+  });
+  const thread = store.createThread({});
+  const chats = () => old.requests.filter((r) => r.method === "POST" && r.path === "/api/chat").length;
+  const done = async () => {
+    await app.shutdown();
+    store.close();
+  };
+  return { old, s, app, store, thread, events, chats, done };
+}
+
+describe("R2-03: a runtime switch ends every turn reserved against the old runtime", () => {
 
   it("held capability lookup: switch, release it, and no /api/chat reaches the old runtime", async () => {
     const show = signalled();
@@ -268,7 +280,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
           res.end(line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true, done_reason: "stop" }));
         },
       },
-      image,
+      { image },
     );
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
     expect(await settledWithin(queuedOnce.promise, 1000)).toEqual({ resolved: undefined });
@@ -284,5 +296,57 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expectRuntimeChangedEnd(r.events);
     expect(r.store.getThread(r.thread.id).messages.map((m) => m.role)).toEqual(["user"]);
     await r.done();
+  });
+
+});
+
+describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
+  /** Little free VRAM, so a cold MODEL spills and chat.send reclaims an idle app-owned ComfyUI first. */
+  const tight = { ...fit, runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 15303, 1000\n" : "") };
+  const cold: Record<string, Route> = { "GET /api/ps": (_b, res) => json(res, 200, { models: [] }) };
+
+  it("the reclaim's fit: an /api/show that never answers ends at shutdown", async () => {
+    const asked = signalled();
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const r = await rig(
+      {
+        ...cold,
+        "POST /api/show": () => {
+          asked.resolve();
+          return new Promise<void>(() => undefined);
+        },
+      },
+      { image: comfy.image, lease, fit: tight },
+    );
+    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    expect(await settledWithin(asked.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settledWithin(r.app.shutdown(), 1000)).toEqual({ resolved: undefined });
+    expect(await send).toMatchObject({ code: "cancelled" });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(comfy.stops()).toBe(0);
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    await r.done();
+    comfy.close();
+  });
+
+  it("the reclaim's GPU claim: waiting behind another chat claim ends at shutdown, and the cancelled reclaim never stops ComfyUI", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const r = await rig(cold, { image: comfy.image, lease, fit: tight });
+    const other = await lease.acquire("chat");
+    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    for (let i = 0; i < 200 && lease.status().waiting.length === 0; i++) await sleep(5);
+    expect(lease.status().waiting).toEqual(["image"]);
+    expect(await settledWithin(r.app.shutdown(), 1000)).toEqual({ resolved: undefined });
+    expect(await send).toMatchObject({ code: "cancelled" });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(lease.status()).toMatchObject({ holders: 1, waiting: [] });
+    other();
+    await sleep(50);
+    expect(comfy.stops()).toBe(0);
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    await r.done();
+    comfy.close();
   });
 });

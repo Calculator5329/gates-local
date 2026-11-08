@@ -13,6 +13,7 @@ import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { checkFit, type FitDeps } from "./fit/fit.ts";
+import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow } from "./fit/ollama.ts";
 import type { FitReport } from "./fit/types.ts";
 import { AdmitCancelled, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
@@ -320,10 +321,21 @@ export function createApp(deps: AppDeps): App {
         // The runtime the reservation captured: fit, admit and chat all talk to it.
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
-        const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
+        // admit passes its own signal (the turn's and the runtime's); every other caller passes the turn's.
+        const fit = async (signal: AbortSignal) => (await checkFit({ ...deps.fit, baseUrl, model, numCtx, signal })).report;
         // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the
         // GPU alone, so it runs before this turn's own claim: a nested claim would wait on itself.
-        if (deps.image?.current().owner === "app" && (await fit()).verdict !== "fits") await deps.image.stopIdle();
+        // A cancel, switch or shutdown ends the reclaim at once; a cancelled stopIdle never stops ComfyUI.
+        if (deps.image?.current().owner === "app") {
+          const comfy = deps.image;
+          const signal = turn.controller.signal;
+          try {
+            if ((await fit(signal)).verdict !== "fits") await untilAborted(comfy.stopIdle(signal), signal);
+          } catch (e) {
+            if (signal.aborted) throw stoppedEarly();
+            throw e;
+          }
+        }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         try {
           releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
@@ -332,7 +344,7 @@ export function createApp(deps: AppDeps): App {
         }
         let report: FitReport;
         try {
-          report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit();
+          report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit(turn.controller.signal);
         } catch (e) {
           if (e instanceof AdmitCancelled || endedByRuntime(turn.controller.signal)) throw stoppedEarly();
           throw e;

@@ -43,7 +43,8 @@ export interface ImageModule {
   cancel(jobId: string): { cancelled: boolean };
   /** Test/CLI completion seam; errors are reported on image.event. */
   wait(jobId: string): Promise<void>;
-  stopIdle(): Promise<void>;
+  /** `signal` (a turn's reclaim) cancels the wait for the GPU claim; a cancelled call never stops ComfyUI. */
+  stopIdle(signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -355,10 +356,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       job.controller.abort(new Error("Image cancelled.")); return { cancelled: true };
     },
     async wait(jobId) { await jobs.get(jobId)?.ended; },
-    async stopIdle() {
+    async stopIdle(signal) {
       clearIdle();
       if (!owned || jobs.size > 0) return;
-      await deps.lease.run("image", undefined, async () => {
+      await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
         const unit = await service.inspect();
         // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
@@ -371,10 +372,15 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const latest = await service.inspect();
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
+        signal?.throwIfAborted();
         await service.stop();
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         update({ state: "stopped", owner: "none", baseUrl });
+      }).catch((error: unknown) => {
+        // A cancelled reclaim leaves ComfyUI to its idle timer.
+        if (signal?.aborted) armIdle();
+        throw error;
       });
     },
     async close() {
