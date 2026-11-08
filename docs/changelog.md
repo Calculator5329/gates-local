@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-08: Dark by default
+
+- A new install starts dark, as the design always said (`docs/design/shell.md`),
+  whatever the OS uses. Settings › General still offers Light and System. A
+  theme already saved stays as it is.
+
 ## 2026-11-08: Switch runtimes while Ollama is down
 
 - Settings › Runtime offers the switch whenever Ollama is not usable, not

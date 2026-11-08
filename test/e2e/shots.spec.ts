@@ -146,6 +146,8 @@ for (const shot of SHOTS) {
         if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
         else if (shot.scenario === undefined || shot.scenario === "long-name") await waitReady(page);
         else await expect(page.locator(".banner")).toBeVisible();
+        // the app is dark by default; a light shot asks for the light tokens
+        if (theme === "light") await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
         await shot.act?.(page);
         // let fit checks, popovers and fonts settle; animations are frozen below
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
