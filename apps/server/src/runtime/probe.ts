@@ -1,4 +1,5 @@
 // Classify whatever listens at a base URL: Ollama, something else, or nothing.
+import { busyPortPlace } from "@gates-local/contracts";
 import { httpGet } from "./http.ts";
 import { VersionResponse, decode, parseJson } from "./schemas.ts";
 
@@ -20,7 +21,7 @@ export function portOf(baseUrl: string): string {
  */
 export async function probe(baseUrl: string, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS): Promise<ProbeResult> {
   const port = portOf(baseUrl);
-  const where = `port ${port} (${baseUrl})`;
+  const where = busyPortPlace(port, baseUrl);
   const v = await httpGet(new URL("/api/version", baseUrl).href, timeoutMs);
   if (v.kind === "refused") return { kind: "none" };
   if (v.kind === "timeout") {

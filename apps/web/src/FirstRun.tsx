@@ -3,7 +3,7 @@
 // calm status with Retry. No models: download the recommended one, with
 // progress and Cancel; the chat can open to draft while it downloads.
 import { type ReactNode, useState } from "react";
-import type { CatalogEntry } from "@gates-local/contracts";
+import { type CatalogEntry, busyPorts } from "@gates-local/contracts";
 import { portOf, rtOf } from "./Banner.tsx";
 import { DlDetail } from "./Settings.tsx";
 import { describeModel, gb, k, verdictOf } from "./format.ts";
@@ -248,15 +248,24 @@ function NoOllama() {
   const rt = useStore(rtOfState);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
+  const own = useStore((s) => s.settings !== NA && s.settings?.runtimeMode === "app");
   const port = portOf(baseUrl);
+  // In its own-copy mode the server routes around a taken port and says so in its detail.
+  const busy = rt === "wrong" ? [] : busyPorts(detail).filter((p) => p !== port);
+  const around =
+    busy.length > 0
+      ? `Something other than Ollama answers on ${busy.length === 1 ? "port" : "ports"} ${busy.join(" and ")}, so Gates Local uses its own Ollama on port ${port}. `
+      : own
+        ? `Gates Local uses its own Ollama on port ${port}. `
+        : "";
   const [title, st, sub] =
     rt === "wrong"
       ? ["Ollama isn't answering", `Port ${port} is busy`, `Something other than Ollama answers on port ${port}.`]
       : rt === "stopped"
-        ? ["Ollama is stopped", "Ollama is installed but not running", "Start Ollama, then press Retry."]
+        ? ["Ollama is stopped", "Ollama is installed but not running", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
           ? ["Ollama didn't start", "Ollama reported a problem", (detail ?? "Ollama stopped with an error.")]
-          : ["Ollama isn't installed", "No Ollama found on this computer", "Gates Local needs Ollama to chat. Install it from ollama.com, then press Retry."];
+          : ["Ollama isn't installed", "No Ollama found on this computer", `${around}Gates Local needs Ollama to chat. Install it from ollama.com, then press Retry.`];
   return (
     <Shell
       st={

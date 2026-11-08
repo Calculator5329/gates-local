@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { busyPorts } from "@gates-local/contracts";
 import { httpGet } from "./http.ts";
+import { probe } from "./probe.ts";
 import { readProc, readRecord } from "./ownership.ts";
 import { installedBinary, ownedStateFile } from "./paths.ts";
 import { type OllamaRuntime, type RuntimeOptions, createOllamaRuntime } from "./runtime.ts";
@@ -234,6 +236,17 @@ describe("wrong service on the port", () => {
     expect(s.baseUrl).not.toBe(other.baseUrl);
     expect(s.detail).toContain(`port ${other.port}`);
     expect(s.detail).toContain("is not Ollama");
+    // the client reads the busy port back from the detail (contracts busyPorts), and only that one
+    expect(busyPorts(s.detail)).toEqual([String(other.port)]);
+  });
+
+  it("every wrong-service sentence names its port so busyPorts finds it, and an Ollama port is not busy", async () => {
+    const other = await startWrongService();
+    cleanups.push(() => other.close());
+    const wrong = await probe(other.baseUrl);
+    expect(wrong.kind).toBe("wrong-service");
+    expect(busyPorts(wrong.kind === "wrong-service" ? wrong.detail : "")).toEqual([String(other.port)]);
+    expect(busyPorts(`Another Ollama, not started by this app, is on port 11434; the app uses port 11435. Ollama at /usr/bin/ollama is installed but not running.`)).toEqual([]);
   });
 });
 
