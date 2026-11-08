@@ -24,6 +24,18 @@ test.describe("with the system Ollama chosen", () => {
   });
 });
 
+test("with the app's own copy chosen, the banner says which port is taken instead of asking to start Ollama", async ({ page, open }) => {
+  // fresh settings (first run already done): the app picks its own copy and routes around 5288
+  await open();
+  const banner = page.locator(".banner");
+  await expect(banner).toContainText(/Something other than Ollama answers on ports? 5288\b/);
+  await expect(banner).toContainText("Gates Local uses its own Ollama on port 5290.");
+  await expect(banner).not.toContainText("system-wide");
+  await expect(banner).not.toContainText("Start Ollama");
+  // the sidebar footer's tooltip tells the same story
+  await expect(page.locator(".sb-foot .rt")).toHaveAttribute("data-tip", /Something other than Ollama answers on ports? 5288\b.*own Ollama on port 5290/);
+});
+
 test.describe("on first launch", () => {
   test.use({ skipFirstRun: false });
   test("first run says the port is taken and that the app uses its own Ollama", async ({ page, open }) => {

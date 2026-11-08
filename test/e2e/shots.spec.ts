@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { SHOTS_DIR } from "./env.ts";
-import { type Scenario, expect, test, waitReady } from "./fixtures.ts";
+import { type RuntimeMode, type Scenario, expect, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -20,6 +20,8 @@ interface Shot {
   /** The design's light shot of the same state, when it has one. */
   readonly light?: string;
   readonly scenario?: Scenario;
+  /** Saved settings' runtime mode; undefined is fresh settings. */
+  readonly runtimeMode?: RuntimeMode;
   /** Open on the seeded thread (default), a new thread, or first run. */
   readonly start?: "thread" | "new" | "firstrun";
   /** What to do once the page is ready. */
@@ -44,7 +46,8 @@ const SHOTS: readonly Shot[] = [
       await p.locator("#fitBtn").click();
     },
   },
-  { name: "S-12-runtime-wrong", scenario: "wrong-service" },
+  // the design's state: the user chose the system Ollama and a wrong service holds its port
+  { name: "S-12-runtime-wrong", scenario: "wrong-service", runtimeMode: "system" },
   { name: "S-14-firstrun-found", light: "S-66-light-firstrun-found", start: "firstrun" },
   { name: "S-16-firstrun-nomodels", light: "S-76-light-firstrun-nomodels-before", scenario: "no-models", start: "firstrun" },
   { name: "S-17-settings-general", act: settings("General") },
@@ -69,7 +72,13 @@ for (const shot of SHOTS) {
     const file = theme === "dark" ? shot.name : lightName(shot);
     test.describe(file, () => {
       // first run shows only on an empty store, so its shots seed nothing
-      test.use({ scenario: shot.scenario ?? "models", skipFirstRun: shot.start !== "firstrun", colorScheme: theme, ...(shot.start === "firstrun" ? { seed: 0 } : {}) });
+      test.use({
+        scenario: shot.scenario ?? "models",
+        skipFirstRun: shot.start !== "firstrun",
+        colorScheme: theme,
+        ...(shot.start === "firstrun" ? { seed: 0 } : {}),
+        ...(shot.runtimeMode === undefined ? {} : { runtimeMode: shot.runtimeMode }),
+      });
       test("shot", async ({ page, open, seededThread }) => {
         await page.clock.setFixedTime(NOW);
         await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
