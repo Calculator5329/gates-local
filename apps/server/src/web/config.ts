@@ -1,14 +1,15 @@
 // The phone listener's knobs, read once at start. Off unless
 // GATES_LOCAL_WEB_LISTEN is set; once it is, every other knob must be right
-// or the server refuses to start (fail closed). Messages never repeat the
-// user value.
+// or the server refuses to start (fail closed). LISTEN takes only
+// unix:<absolute path>: a TCP port, even on loopback, is open to every local
+// user, and this listener trusts Serve's headers instead of a token. Messages
+// never repeat the user value.
 import path from "node:path";
-import { isLoopbackHost } from "../ws/server.ts";
 import { exactOrigin, validUser } from "./phone.ts";
 
 export interface PhoneConfig {
-  readonly host: string;
-  readonly port: number;
+  /** The owner-only Unix socket Tailscale Serve proxies to. */
+  readonly socketPath: string;
   readonly origin: string;
   readonly user: string;
   readonly webRoot: string;
@@ -19,14 +20,18 @@ export type PhoneConfigResult = { readonly ok: true; readonly value: PhoneConfig
 export function phoneConfig(env: NodeJS.ProcessEnv): PhoneConfigResult {
   const listen = env["GATES_LOCAL_WEB_LISTEN"] ?? "";
   if (listen === "") return { ok: true, value: null };
-  const m = /^(\[::1\]|\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(listen);
-  const host = m?.[1]?.replace(/^\[(.*)\]$/, "$1");
-  const port = Number(m?.[2]);
-  if (host === undefined || !isLoopbackHost(host)) {
-    return { ok: false, message: `GATES_LOCAL_WEB_LISTEN must be a loopback address and port (127.0.0.1:<port> or [::1]:<port>), got "${listen}"` };
+  if (!listen.startsWith("unix:")) {
+    const tcp = /(^|:)\d{1,5}$/.test(listen);
+    return {
+      ok: false,
+      message: tcp
+        ? `GATES_LOCAL_WEB_LISTEN must be unix:<absolute path>; TCP is refused (any local user could reach it), got "${listen}"`
+        : `GATES_LOCAL_WEB_LISTEN must be unix:<absolute path>, got "${listen}"`,
+    };
   }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    return { ok: false, message: `GATES_LOCAL_WEB_LISTEN needs a port 1-65535, got "${listen}"` };
+  const socketPath = listen.slice("unix:".length);
+  if (!path.isAbsolute(socketPath)) {
+    return { ok: false, message: `GATES_LOCAL_WEB_LISTEN needs an absolute socket path after unix:, got "${listen}"` };
   }
   const origin = env["GATES_LOCAL_WEB_ORIGIN"] ?? "";
   if (exactOrigin(origin) === null) {
@@ -38,5 +43,5 @@ export function phoneConfig(env: NodeJS.ProcessEnv): PhoneConfigResult {
   }
   const webRoot = env["GATES_LOCAL_WEB_ROOT"] ?? "";
   if (webRoot === "") return { ok: false, message: "GATES_LOCAL_WEB_ROOT must name the built web client (apps/web/dist) when GATES_LOCAL_WEB_LISTEN is set" };
-  return { ok: true, value: { host, port, origin, user, webRoot: path.resolve(webRoot) } };
+  return { ok: true, value: { socketPath: path.normalize(socketPath), origin, user, webRoot: path.resolve(webRoot) } };
 }

@@ -52,7 +52,7 @@ describe("a second launch", () => {
 
 describe("server child environment", () => {
   const phone = {
-    GATES_LOCAL_WEB_LISTEN: "127.0.0.1:5320",
+    GATES_LOCAL_WEB_LISTEN: "unix:/run/user/1000/gates-local/phone.sock",
     GATES_LOCAL_WEB_ORIGIN: "https://hub.example.ts.net:8456",
     GATES_LOCAL_WEB_USER: "owner@example.com",
   };

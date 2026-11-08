@@ -20,8 +20,11 @@
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
-//   GATES_LOCAL_WEB_LISTEN       127.0.0.1:<port> (loopback only) for a second listener Tailscale
-//                                Serve proxies to; same handlers and pushes, no token
+//   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
+//                                to (`tailscale serve --bg --https=8456 unix:<path>`); same handlers
+//                                and pushes, no token. The socket is 0600 in a 0700 directory of
+//                                this user's (made if missing), so only this user and root's
+//                                tailscaled can open it; TCP values are refused
 //   GATES_LOCAL_WEB_ORIGIN       the exact public origin, e.g. https://hub.example.ts.net:8456
 //   GATES_LOCAL_WEB_USER         the one Tailscale-User-Login value admitted
 //   GATES_LOCAL_WEB_ROOT         the built web client to serve (apps/web/dist)
@@ -222,13 +225,13 @@ async function main(): Promise<void> {
     });
   } catch (e) {
     store.close();
-    const where = phone === null ? `127.0.0.1:${port}` : `127.0.0.1:${port} and ${phone.host}:${phone.port}`;
+    const where = phone === null ? `127.0.0.1:${port}` : `127.0.0.1:${port} and unix:${phone.socketPath}`;
     die(`cannot listen on ${where}: ${(e as Error).message}`, 1);
   }
   if (stopping) return;
   process.stdout.write(`${JSON.stringify({ ready: true, port: server.port })}\n`);
   log(`listening on 127.0.0.1:${server.port}; data in ${dataDir}; runtime ${discoverOnly ? "discover-only" : "managed"}`);
-  if (phone !== null) log(`phone listener on ${phone.host}:${String(server.phonePort)} for ${phone.origin}, serving ${phone.webRoot}`);
+  if (phone !== null) log(`phone listener on unix:${String(server.phoneSocket)} for ${phone.origin}, serving ${phone.webRoot}`);
 
   // In the background: a failure lands in runtime status, never kills the server.
   const bring = discoverOnly ? runtime.discover() : runtime.ensure();

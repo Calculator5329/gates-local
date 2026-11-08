@@ -2,9 +2,10 @@
 // per-launch token and an absent or allowed Origin, so another local web
 // page cannot drive the app. Every inbound frame is decoded against the
 // contracts tables; a bad one gets a named error and the socket stays up.
-// With `phone` set a second loopback listener serves the web client and the
-// same socket on /ws, admitted by Tailscale Serve's headers instead of the
-// token (src/web/phone.ts); both listeners share handlers and pushes.
+// With `phone` set a second listener, on an owner-only Unix socket
+// (src/web/socket.ts), serves the web client and the same socket on /ws,
+// admitted by Tailscale Serve's headers instead of the token
+// (src/web/phone.ts); both listeners share handlers and pushes.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
@@ -24,6 +25,7 @@ import {
 import { type WebSocket, WebSocketServer } from "ws";
 import { serveImage } from "../image/files.ts";
 import { SECURITY_HEADERS, phoneGate } from "../web/phone.ts";
+import { listenOwnerSocket } from "../web/socket.ts";
 import { serveClient } from "../web/static.ts";
 
 export interface HandlerContext {
@@ -58,10 +60,8 @@ export interface WsServerOptions {
 }
 
 export interface PhoneListenerOptions {
-  /** Loopback only, like the token listener. */
-  readonly host: string;
-  /** 0 picks a free port. */
-  readonly port: number;
+  /** Absolute path of the owner-only Unix socket Tailscale Serve proxies to; its parent must be 0700 and ours, or missing. */
+  readonly socketPath: string;
   /** The exact public origin the phone loads the client from. */
   readonly origin: string;
   /** The one Tailscale-User-Login value admitted. */
@@ -72,8 +72,8 @@ export interface PhoneListenerOptions {
 
 export interface WsServer {
   readonly port: number;
-  /** The phone listener's port, when it is on. */
-  readonly phonePort?: number;
+  /** The phone listener's socket path, when it is on. */
+  readonly phoneSocket?: string;
   push<C extends Channel>(channel: C, payload: Payload<C>): void;
   close(): Promise<void>;
 }
@@ -130,7 +130,6 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   if (!isLoopbackHost(host)) throw new WireError("bad-params", `refusing to bind ${host}: loopback only`);
   if (options.token === "") throw new WireError("bad-params", "token must not be empty");
   const phone = options.phone;
-  if (phone !== undefined && !isLoopbackHost(phone.host)) throw new WireError("bad-params", `refusing to bind the phone listener on ${phone.host}: loopback only`);
   const phoneAdmits = phone === undefined ? null : phoneGate(phone);
   const log = options.log ?? ((line: string) => console.warn(`[ws] ${line}`));
   const tokenDigest = digest(options.token);
@@ -242,10 +241,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   });
 
   const port = await listen(http, options.port, host);
-  let phonePort: number | undefined;
   if (phoneHttp !== null && phone !== undefined) {
     try {
-      phonePort = await listen(phoneHttp, phone.port, phone.host);
+      await listenOwnerSocket(phoneHttp, phone.socketPath);
     } catch (e) {
       await closeHttp(http).catch(() => undefined);
       throw e;
@@ -254,7 +252,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
 
   return {
     port,
-    ...(phonePort === undefined ? {} : { phonePort }),
+    ...(phone === undefined ? {} : { phoneSocket: phone.socketPath }),
     push(channel, payload) {
       const frame = encodePush(channel, payload);
       if (!frame.ok) throw frame.error;
