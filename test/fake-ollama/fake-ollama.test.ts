@@ -82,13 +82,33 @@ describe("fake ollama", () => {
     expect(lines.filter((l) => typeof l["completed"] === "number").length).toBeGreaterThan(2);
     expect(lines.at(-1)).toEqual({ status: "success" });
     expect(fake.state().installed).toEqual(["qwen3.5:4b"]);
+  });
 
-    await post(fake, "/__fake/scenario", { scenario: "no-models", pullTickMs: 50, pullChunkBytes: 1024 ** 2 });
+  it("a pull aborted after its first progress line never installs, even past its completion time (W-11)", async () => {
+    // ten ticks of 20 ms: an uncancelled pull of this model finishes in about 200 ms
+    const options = { scenario: "no-models", pullTickMs: 20, pullChunkBytes: Math.ceil(6594474711 / 10) };
+    await post(fake, "/__fake/scenario", options);
+    const started = Date.now();
+    expect((await ndjson(await post(fake, "/api/pull", { model: "qwen3.5:9b" }))).at(-1)).toEqual({ status: "success" });
+    const deadline = Date.now() - started;
+    expect(fake.state().installed).toEqual(["qwen3.5:9b"]);
+
+    await post(fake, "/__fake/scenario", options);
+    expect(fake.state().installed).toEqual([]);
     const abort = new AbortController();
     const res = await fetch(`${fake.url}/api/pull`, { method: "POST", body: JSON.stringify({ model: "qwen3.5:9b" }), signal: abort.signal });
-    expect(res.ok).toBe(true);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    while (!seen.includes('"completed"')) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the pull ended before any progress");
+      seen += decoder.decode(value, { stream: true });
+    }
     abort.abort();
-    await new Promise((r) => setTimeout(r, 120));
+    await reader.cancel().catch(() => undefined);
+    // three times what the whole pull took uncancelled
+    await new Promise((r) => setTimeout(r, Math.max(600, 3 * deadline)));
     expect(fake.state().installed).toEqual([]);
   });
 
