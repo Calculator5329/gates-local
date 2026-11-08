@@ -73,12 +73,12 @@ export interface InspectOptions {
   readonly log?: (chunk: string) => void;
 }
 
-export type Git = (args: readonly string[], timeoutMs?: number) => Promise<RunResult>;
+export type Git = (args: readonly string[], timeoutMs?: number, onStart?: (pid: number) => void) => Promise<RunResult>;
 
 export function gitIn(root: string, runner: Runner, log?: (chunk: string) => void): Git {
-  return (args, timeoutMs = LOCAL_MS) => {
+  return (args, timeoutMs = LOCAL_MS, onStart) => {
     log?.(`$ git ${args.join(" ")}\n`);
-    return runner("git", args, { cwd: root, timeoutMs, ...(log ? { onOutput: log } : {}) });
+    return runner("git", args, { cwd: root, timeoutMs, ...(log ? { onOutput: log } : {}), ...(onStart ? { onStart } : {}) });
   };
 }
 

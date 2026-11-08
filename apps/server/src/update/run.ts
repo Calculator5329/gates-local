@@ -27,6 +27,8 @@ export interface RunOptions {
   readonly timeoutMs?: number;
   /** Each chunk of stdout and stderr as it arrives (the update log). */
   readonly onOutput?: (chunk: string) => void;
+  /** The started process's id, as soon as it is known. */
+  readonly onStart?: (pid: number) => void;
   /** Run through the shell. Needed for pnpm.cmd on Windows; the arguments must be plain words. */
   readonly shell?: boolean;
   readonly env?: NodeJS.ProcessEnv;
@@ -54,7 +56,7 @@ const POLL_MS = 25;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** A process group: `pid` led it, and it lasts as long as any member does, the leader or not. */
-function groupExists(pid: number): boolean {
+export function groupExists(pid: number): boolean {
   try {
     process.kill(-pid, 0);
     return true;
@@ -182,6 +184,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       }
       const group = ownGroup ? child.pid : undefined;
       if (group !== undefined) trackGroup(group);
+      if (child.pid !== undefined) options.onStart?.(child.pid);
       let settled = false;
       const finish = (code: number | null, treeStillRunning = false) => {
         if (settled) return;

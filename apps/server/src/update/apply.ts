@@ -6,14 +6,19 @@
 //
 // Nothing here merges, rebases or resets over someone's work: a copy with
 // tracked changes or commits of its own is refused before anything changes,
-// and the one reset (going back) is `git reset --keep` on a tree this run
-// found clean.
+// and the one reset (going back) is `git reset --keep`, run only after this
+// run has checked again that the copy is exactly as it left it.
 //
 // The whole of it holds the checkout's lock (lock.ts). Before the checkout
 // moves, what is about to happen is saved (transaction.ts), so a run cut off
-// at any point is finished or undone by the next one.
+// at any point is finished or undone by the next one. Each command that
+// changes the checkout is saved there too while it runs, so a later run waits
+// for one that outlived the updater or could not be stopped.
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { type Blocked, type Channel, type ChannelChoice, type Commit, type Git, type Inspection, changedFiles, gitIn, inspect, isBlocked } from "./check.ts";
-import { acquireLock, lockHolder } from "./lock.ts";
+import { processRecord, treeGone } from "./identity.ts";
+import { acquireLock, lockHolder, stateDir } from "./lock.ts";
 import { lastLines, type RunResult, type Runner } from "./run.ts";
 import { type Transaction, clearTransaction, readTransaction, saveTransaction } from "./transaction.ts";
 
@@ -47,9 +52,15 @@ export type Refusal =
   | { readonly reason: "app-running"; readonly pid: number; readonly file: string }
   | { readonly reason: "no-pnpm" }
   /** Another update holds this checkout. */
-  | { readonly reason: "busy"; readonly pid: number | null }
-  /** This run was paused past the lock's limit and another took over; it changed nothing after that. */
-  | { readonly reason: "lost-lock" };
+  | { readonly reason: "busy"; readonly pid: number | null; readonly file: string }
+  /** Its lock was replaced while this run was held up; it changed nothing after that. */
+  | { readonly reason: "lost-lock" }
+  /** A command of an update could not be confirmed ended. Nothing starts until it has. */
+  | { readonly reason: "still-running"; readonly pid: number | null; readonly target: string }
+  /** Files, the index or git's own markers say a merge or reset was cut off. */
+  | { readonly reason: "partial-checkout"; readonly target: string; readonly files: readonly string[]; readonly gitLock: string | null }
+  /** The copy changed while the update ran, so it did not go back on its own. */
+  | { readonly reason: "changed-during-update"; readonly target: string; readonly step: Step; readonly stepReason: string; readonly changed: "branch" | "commit" | "files"; readonly files: readonly string[] };
 
 export type UpdateRun =
   | { readonly outcome: "refused"; readonly refusal: Refusal }
@@ -85,7 +96,6 @@ export interface UpdateOptions {
 const ok = (r: RunResult) => r.code === 0;
 
 function reasonOf(r: RunResult, what: string): string {
-  if (r.treeStillRunning === true) return `${what} took too long and could not be stopped; end it or restart the computer first`;
   if (r.failure === "not-found") return `${what} was not found`;
   if (r.failure === "timeout") return `${what} took too long and was stopped`;
   return lastLines(r) || `${what} exited with code ${String(r.code)}`;
@@ -121,19 +131,60 @@ function switchFailure(merge: RunResult): string {
 interface Context {
   readonly o: UpdateOptions;
   readonly git: Git;
-  readonly pnpm: (args: readonly string[], ms: number) => Promise<RunResult>;
+  readonly pnpm: (args: readonly string[], ms: number, onStart?: (pid: number) => void) => Promise<RunResult>;
   /** False once another run has taken the checkout: nothing more may change. */
   readonly ours: () => boolean;
 }
+
+/**
+ * Runs a command that changes the checkout, with its process in the saved
+ * state while it runs. A command that ended is taken out again; one that may
+ * not have ended stays, and holds off every later run.
+ */
+async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>): Promise<RunResult> {
+  const save = (saved: Transaction) => {
+    if (!c.ours()) return;
+    try {
+      saveTransaction(c.o.root, saved);
+    } catch (e) {
+      c.o.log(`Could not save the update's state: ${(e as Error).message}\n`);
+    }
+  };
+  const result = await run((pid) => save({ ...t, running: processRecord(pid) }));
+  if (result.treeStillRunning !== true) save(t);
+  return result;
+}
+
+function stillRunning(c: Context, to: Commit): UpdateRun {
+  return refused({ reason: "still-running", pid: readTransaction(c.o.root)?.running?.pid ?? null, target: to.label });
+}
+
+interface LeftBehind {
+  readonly gitLock: string | null;
+  readonly merging: boolean;
+  readonly files: readonly string[];
+}
+
+/** What git and the files say about the checkout now. */
+async function leftBehind(c: Context): Promise<LeftBehind | Blocked> {
+  const dir = stateDir(c.o.root);
+  const marker = (name: string) => (dir !== null && existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
+  const files = await changedFiles(c.git);
+  if (isBlocked(files)) return files;
+  return { gitLock: marker("index.lock"), merging: marker("MERGE_HEAD") !== null, files };
+}
+
+const partial = (to: Commit, l: LeftBehind): UpdateRun => refused({ reason: "partial-checkout", target: to.label, files: l.files, gitLock: l.gitLock });
+const anythingLeft = (l: LeftBehind) => l.gitLock !== null || l.merging || l.files.length > 0;
 
 /** Nothing else may look at or change this checkout until it returns. A --check reads, so it only asks. */
 export async function runUpdate(o: UpdateOptions): Promise<UpdateRun> {
   if (o.checkOnly) {
     const holder = lockHolder(o.root);
-    return holder === null ? transact(o, () => true) : refused({ reason: "busy", pid: holder.pid });
+    return holder === null ? transact(o, () => true) : refused({ reason: "busy", pid: holder.pid, file: holder.file });
   }
   const got = acquireLock(o.root);
-  if (!got.ok) return refused({ reason: "busy", pid: got.pid });
+  if (!got.ok) return refused({ reason: "busy", pid: got.pid, file: got.file });
   try {
     return await transact(o, () => got.lock.stillOurs());
   } finally {
@@ -143,9 +194,9 @@ export async function runUpdate(o: UpdateOptions): Promise<UpdateRun> {
 
 async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRun> {
   const git = gitIn(o.root, o.runner, o.log);
-  const pnpm = (args: readonly string[], timeoutMs: number) => {
+  const pnpm = (args: readonly string[], timeoutMs: number, onStart?: (pid: number) => void) => {
     o.log(`$ ${pnpmLine(args)}\n`);
-    return o.runner(o.pnpm.command, [...o.pnpm.prefix, ...args], { cwd: o.root, shell: o.pnpm.shell, timeoutMs, onOutput: o.log });
+    return o.runner(o.pnpm.command, [...o.pnpm.prefix, ...args], { cwd: o.root, shell: o.pnpm.shell, timeoutMs, onOutput: o.log, ...(onStart ? { onStart } : {}) });
   };
   const c: Context = { o, git, pnpm, ours };
 
@@ -171,19 +222,24 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   const branch = await git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
   const move: Move = { channel, branch: branch.stdout.trim(), from, to, changes: total };
   if (!ours()) return lostLock();
+  const forward: Transaction = { ...move, phase: "forward" };
   // Saved before anything moves: every way back starts here, and a failure to save stops the update.
-  saveTransaction(o.root, { ...move, phase: "forward" });
+  saveTransaction(o.root, forward);
   // Never over a file of the person's: by default git writes over ignored ones.
-  const switched = await git(["merge", "--ff-only", "--no-overwrite-ignore", "--quiet", to.commit]);
+  const switched = await changing(c, forward, (onStart) => git(["merge", "--ff-only", "--no-overwrite-ignore", "--quiet", to.commit], undefined, onStart));
   if (!ok(switched)) {
+    if (switched.treeStillRunning === true) return stillRunning(c, to);
     const now = await git(["rev-parse", "HEAD"]);
-    // merge --ff-only changes nothing when it fails; if HEAD moved anyway, or the merge may still be running, it is not over.
-    if (ok(now) && now.stdout.trim() === from.commit && switched.treeStillRunning !== true) {
+    if (ok(now) && now.stdout.trim() === from.commit) {
+      // The old commit alone proves nothing: a merge cut off can have written files without moving it.
+      const left = await leftBehind(c);
+      if (isBlocked(left)) return refused(left);
+      if (anythingLeft(left)) return partial(to, left);
       if (!ours()) return lostLock();
       settle(c);
       return { outcome: "stopped", channel, from, to, step: "switch", reason: switchFailure(switched) };
     }
-    return goBack(c, { ...move, step: "switch", reason: reasonOf(switched, "git merge"), stuck: switched.treeStillRunning === true });
+    return goBack(c, { ...move, step: "switch", reason: reasonOf(switched, "git merge") });
   }
   o.say(`Switched to ${to.label}.`);
   return installAndBuild(c, move);
@@ -193,32 +249,43 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
  * Takes up what a cut-off run left. Null means nothing is left to do and the
  * update goes on as usual.
  *
- * What the checkout is on says how far it got. On the new commit: the install
- * and builds may not have finished, so they run (and go back if they fail).
- * On the old commit after a start back: going back runs again. On the old
- * commit otherwise: it never moved. Anywhere else, or on another branch, the
- * person has moved it themselves (the manual `git pull` path), and that stands.
+ * First, a command that may still be running holds everything off. Then what
+ * the checkout is on says how far it got. On the new commit: the install and
+ * builds may not have finished, so they run (and go back if they fail). On
+ * the old commit after a start back: going back runs again. On the old commit
+ * otherwise: it did not move, and the saved state goes only once the files
+ * and git agree nothing was left half done. Anywhere else, or on another
+ * branch, the person has moved it themselves (the manual `git pull` path),
+ * and that stands.
  */
 async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   const { o, git } = c;
+  if (t.running !== undefined && !treeGone(t.running)) return refused({ reason: "still-running", pid: t.running.pid, target: t.to.label });
   const now = await git(["rev-parse", "HEAD"]);
   const branch = await git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
   // git is not usable: inspect says why, and refuses while the file is there.
   if (!ok(now)) return null;
   const head = now.stdout.trim();
   const onNew = head === t.to.commit;
-  const goingBack = head === t.from.commit && t.phase === "back" ? t : null;
-  if (branch.stdout.trim() !== t.branch || (!onNew && goingBack === null)) {
+  const onOld = head === t.from.commit;
+  if (branch.stdout.trim() !== t.branch || (!onNew && !onOld)) {
     if (!c.ours()) return lostLock();
     settle(c);
     return null;
   }
-  const files = await changedFiles(git);
-  if (isBlocked(files)) return refused(files);
-  if (files.length > 0) return refused({ reason: "local-changes", files });
+  const left = await leftBehind(c);
+  if (isBlocked(left)) return refused(left);
+  // A merge moves the commit last, so on the new commit going forward the files are all there and any difference is the person's.
+  const mergeFinished = onNew && t.phase === "forward";
+  if (left.gitLock !== null || left.merging || (left.files.length > 0 && !mergeFinished)) return partial(t.to, left);
+  if (left.files.length > 0) return refused({ reason: "local-changes", files: left.files });
   if (!c.ours()) return lostLock();
+  if (onOld && t.phase === "forward") {
+    settle(c);
+    return null;
+  }
   const move: Move = { channel: t.channel, branch: t.branch, from: t.from, to: t.to, changes: t.changes };
-  if (goingBack !== null) return goBack(c, { ...move, step: goingBack.step, reason: goingBack.reason });
+  if (onOld && t.phase === "back") return goBack(c, { ...move, step: t.step, reason: t.reason });
   o.say(`The update to ${t.to.label} did not finish. Finishing it…`);
   return installAndBuild(c, move);
 }
@@ -248,11 +315,13 @@ async function installAndBuild(c: Context, m: Move): Promise<UpdateRun> {
     ["build-web", BUILD_WEB_ARGS, BUILD_MS],
     ["build-desktop", BUILD_DESKTOP_ARGS, BUILD_MS],
   ];
+  const forward: Transaction = { ...m, phase: "forward" };
   for (const [step, args, ms] of steps) {
     if (!c.ours()) return lostLock();
     c.o.say(`${capital(STEP_WORDS[step])}…${step === "install" ? " (this can take a few minutes)" : ""}`);
-    const r = await c.pnpm(args, ms);
-    if (!ok(r)) return goBack(c, { ...m, step, reason: reasonOf(r, "pnpm"), stuck: r.treeStillRunning === true });
+    const r = await changing(c, forward, (onStart) => c.pnpm(args, ms, onStart));
+    if (r.treeStillRunning === true) return stillRunning(c, m.to);
+    if (!ok(r)) return goBack(c, { ...m, step, reason: reasonOf(r, "pnpm") });
   }
   if (!c.ours()) return lostLock();
   settle(c);
@@ -262,8 +331,24 @@ async function installAndBuild(c: Context, m: Move): Promise<UpdateRun> {
 interface Failed extends Move {
   readonly step: Step;
   readonly reason: string;
-  /** The failed step's processes may still be running: going back now would race them. */
-  readonly stuck?: boolean;
+}
+
+/**
+ * Why an automatic reset must not run: the copy is not what this run left.
+ * `git reset --keep` keeps a changed working copy but can drop a staged
+ * version, so any tracked change at all rules it out. Null when it may go on.
+ */
+async function changedByHand(c: Context, f: Failed): Promise<Refusal | "unknown" | null> {
+  const now = await c.git(["rev-parse", "HEAD"]);
+  const branch = await c.git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (!ok(now)) return "unknown";
+  const by = { reason: "changed-during-update", target: f.to.label, step: f.step, stepReason: f.reason } as const;
+  if (branch.stdout.trim() !== f.branch) return { ...by, changed: "branch", files: [] };
+  const head = now.stdout.trim();
+  if (head !== f.to.commit && head !== f.from.commit) return { ...by, changed: "commit", files: [] };
+  const files = await changedFiles(c.git);
+  if (isBlocked(files)) return "unknown";
+  return files.length > 0 ? { ...by, changed: "files", files } : null;
 }
 
 async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
@@ -277,20 +362,28 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
   ];
   // The saved state stays, so the next run takes this up again.
   const failedBack = (): UpdateRun => ({ outcome: "rollback-failed", ...result, commands });
-  if (f.stuck === true) return failedBack();
+  if (!c.ours()) return lostLock();
+  const changed = await changedByHand(c, f);
+  if (changed === "unknown") return failedBack();
+  if (changed !== null) return refused(changed);
   if (!c.ours()) return lostLock();
   o.say(`The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
+  const back: Transaction = { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason };
   try {
-    saveTransaction(o.root, { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason });
+    saveTransaction(o.root, back);
   } catch (e) {
     // Going back matters more than remembering it.
     o.log(`Could not save that the update is going back: ${(e as Error).message}\n`);
   }
-  // --keep is safe: the tree was clean when this run started, and it refuses to drop a change.
-  if (!ok(await git(["reset", "--keep", f.from.commit]))) return failedBack();
+  // --keep is safe here: the copy was just found to be exactly as this run left it.
+  const reset = await changing(c, back, (onStart) => git(["reset", "--keep", f.from.commit], undefined, onStart));
+  if (reset.treeStillRunning === true) return stillRunning(c, f.to);
+  if (!ok(reset)) return failedBack();
   for (const [args, ms] of [[INSTALL_ARGS, INSTALL_MS], [BUILD_WEB_ARGS, BUILD_MS], [BUILD_DESKTOP_ARGS, BUILD_MS]] as const) {
     if (!c.ours()) return lostLock();
-    if (!ok(await pnpm(args, ms))) return failedBack();
+    const r = await changing(c, back, (onStart) => pnpm(args, ms, onStart));
+    if (r.treeStillRunning === true) return stillRunning(c, f.to);
+    if (!ok(r)) return failedBack();
   }
   if (!c.ours()) return lostLock();
   settle(c);

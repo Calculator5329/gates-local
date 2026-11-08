@@ -146,7 +146,10 @@ never shows a whisper stop, start or restart.
       *Done 2026-11-07:* lane/update; checked on Linux, Windows by reading
       only (changelog). *Hardened 2026-11-08* after review: ignored files
       are never overwritten, one update per clone, a cut-off update is
-      finished by the next, a timeout ends the whole process tree.
+      finished by the next, a timeout ends the whole process tree. A second
+      review round: a live owner is never taken over, a process that could
+      not be stopped holds later runs off, a going-back never resets over
+      work done during the update, and a part-way checkout is named.
 
 ## Next: slices 2 to 4
 

@@ -240,8 +240,24 @@ If an update is cut off (a crash, a power cut, Ctrl+C), run
 finishes going back, before it looks for anything newer. Until then
 `--check` and "Check for updates" say the last update did not finish.
 
+Three states stop the next run until you step in, and each says what to do:
+
+- A step ran past its limit and could not be stopped. Nothing else runs
+  until that process has ended, so end it or restart the computer.
+- The copy is part way between two versions, because a merge or a reset was
+  cut off while it was writing files. The updater will not clean that up,
+  since your own edits could be among those files. Copy anything you want
+  to keep, then run `git reset --hard` and the update again.
+- You changed tracked files, the branch or the commit while the update
+  ran, and a step then failed. It does not go back, so your work stays put.
+  Save it with `git stash` or a commit and run the update again.
+
+An update that is still running is never taken over, however quiet it has
+been: wait for it, or end the process it names.
+
 The manual way still works, and is what to use if the command itself
-cannot run:
+cannot run. Close the app first. From a copy left part way between two
+versions, run `git reset --hard` before the pull.
 
 ```sh
 git pull --ff-only

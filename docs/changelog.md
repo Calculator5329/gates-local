@@ -55,21 +55,55 @@
   tracking stops the update with a sentence naming it, and nothing moves.
 - One update per clone at a time, from the first look to the last rollback
   step. The lock is a file in the clone's git folder (`update/lock.ts`). A
-  crash leaves it behind, and it is cleared when its process is gone or
-  its heartbeat stopped; a run that lost it stops before its next change.
+  crash leaves it behind. Only an owner that has ended can be replaced: its
+  process is gone, or that number now belongs to a process with a different
+  start time. A live owner is never taken over, however quiet it has been,
+  and the refusal names the process and what to do. Replacing a dead owner's
+  lock takes a claim named after that exact lock, so a third run cannot
+  walk in, and a claim whose holder died does not block the next run.
 - A cut-off update is finished by the next one. What is about to happen is
   saved before the checkout moves (`update/transaction.ts`), so "already
   on the newest commit" is not taken as done while that file is there.
   Going by where HEAD is, the next run finishes the install and builds,
   finishes going back, or, if the clone was moved by hand, leaves it.
 - A timeout ends the whole process tree: SIGTERM to the process group,
-  SIGKILL after 5 s, `taskkill /T /F` on Windows. Going back waits for
-  that to be confirmed, and does not start if it cannot be.
+  SIGKILL after 5 s, `taskkill /T /F` on Windows. Each command that changes
+  the checkout is saved with its process while it runs. If it could not be
+  confirmed ended, or the updater itself was killed, later runs refuse
+  until it has ended, nothing goes back beside it, and the app is not
+  reopened while it may still be writing.
+- Going back checks first. If the branch, the commit or any tracked or
+  staged file changed while the update ran, there is no automatic reset:
+  `git reset --keep` can drop a staged version. The refusal gives the steps.
+- The old commit no longer counts as an untouched checkout. A merge or
+  reset cut off part way (files that differ, git's `index.lock`,
+  `MERGE_HEAD`) keeps the saved update and says how to get back, and the
+  saved update goes only once git and the files show nothing is left.
+- Every state the updater can leave has a way out in its refusal, and the
+  manual path (close the app, `git pull`, `pnpm install`, `pnpm start`)
+  was run from each of them in the tests.
 - Electron arguments such as `--disable-gpu` reach the relaunch, and a
   background start now comes back with a window.
 - Two "Update and restart" calls at once start one updater.
-- Windows was checked by reading only: `taskkill` was tested through a
-  stand-in that records its arguments, and has not run for real.
+- Known limits:
+  - Windows was checked by reading only: `taskkill` and the start-time
+    query were tested through stand-ins, and neither has run for real.
+    macOS's `ps` query was tested the same way.
+  - Windows can only confirm the root process has ended, so a child that
+    outlived it does not hold later runs off.
+  - Where a start time cannot be read, a live process number counts as
+    the owner. If that number has gone to an unrelated program, the refusal
+    names the lock file to delete.
+  - A change made in the moment between the check and `git reset --keep`
+    is not seen. `git reset --keep` also has no way to refuse writing over
+    an ignored file, as the merge does.
+  - An updater killed in the moment between starting a command and saving
+    its process leaves nothing to wait for, so the next run does not know
+    about that command.
+  - A lock file that cannot be read as an owner counts as ended after 60 s.
+  - A merge cut off after writing only brand-new files leaves nothing
+    git calls changed. The retry then names those files as in the way, so
+    they have to be moved or deleted by hand.
 
 ## 2026-11-08: A new default model takes effect while another is loaded
 
