@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { FitReport, ModelLoad } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
@@ -9,6 +11,7 @@ import { createRuntimeHandlers } from "./handlers.ts";
 import { ModelActionError, createModelLoader, type ModelLoader, type ModelLoaderDeps } from "./load.ts";
 import { createModelCatalog, listLoaded } from "./models.ts";
 import { createPullManager } from "./pull.ts";
+import { ownedIdleComfy } from "./test-image.ts";
 
 const servers: FakeServer[] = [];
 afterEach(async () => {
@@ -607,28 +610,34 @@ describe("S-06: every loading notice ends exactly once", () => {
 });
 
 describe("I-04: loads drain before the image module closes", () => {
-  it("shutdown aborts a slow preload holding its shared claim, so the image close runs at once", async () => {
+  it("shutdown aborts a slow preload in its generate stage, so the real image close stops ComfyUI once and leaves the lease empty", async () => {
     let aborted = false;
     const s = await fakeOllama([], [], {
       // Ten minutes of cold load, cut short only by the client going away.
       "POST /api/generate": (_b, res) => new Promise<void>((r) => res.on("close", () => ((aborted = true), r()))),
     });
     const lease = createGpuLease();
+    // The real image module, owning an idle ComfyUI it started (injected service and HTTP fakes).
+    const dir = mkdtempSync(path.join(os.tmpdir(), "gates-local-i04-"));
+    const comfy = await ownedIdleComfy(lease, dir);
     const pushes: ModelLoad[] = [];
     const loader = loaderFor(s, pushes, "fits", { lease });
     const loading = loader.load("m", 16384);
     await until(() => generates(s) === 1);
     expect(lease.status()).toMatchObject({ holder: "chat", holders: 1 });
-    let imageClosed = false;
     // main.ts: cancel turns, drain model loads, close image module (image.close()'s stopIdle claims the GPU alone).
     const shutdown = async () => {
       await (loader as Partial<Pick<ModelLoader, "close">>).close?.();
-      await lease.run("image", undefined, async () => {
-        imageClosed = true;
-      });
+      await comfy.image.close();
     };
-    expect(await settledWithin(shutdown(), 1000)).toEqual({ resolved: undefined });
-    expect(imageClosed).toBe(true);
+    try {
+      expect(await settledWithin(shutdown(), 1000)).toEqual({ resolved: undefined });
+      expect(comfy.stops()).toBe(1);
+      expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    } finally {
+      comfy.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
     await until(() => aborted);
     expect((await loading).state).toBe("error");
     expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
