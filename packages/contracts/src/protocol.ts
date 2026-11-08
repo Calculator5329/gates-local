@@ -46,9 +46,12 @@ export type WireErrorCode =
 export class WireError extends Error {
   override readonly name = "WireError";
   readonly code: WireErrorCode | (string & {});
-  constructor(code: WireErrorCode | (string & {}), message: string) {
+  /** For chat.send's "would-stop": the running turns in the way. */
+  readonly blocking?: readonly BlockingTurn[];
+  constructor(code: WireErrorCode | (string & {}), message: string, blocking?: readonly BlockingTurn[]) {
     super(message);
     this.code = code;
+    if (blocking !== undefined) this.blocking = blocking;
   }
 }
 
@@ -106,6 +109,12 @@ export const methods = {
        * (neededBy: this model). Omitted or false: this turn waits for them, as before.
        */
       stopOthers: S.optional(S.Boolean),
+      /**
+       * A person is waiting on this send: when such turns are in the way, refuse with code
+       * "would-stop" and the turns in the error's `blocking`, instead of waiting behind them.
+       * The client warns and sends again with stopOthers. Ignored with stopOthers.
+       */
+      askFirst: S.optional(S.Boolean),
     }),
     result: S.Struct({ turnId: S.String, userMessage: Message }),
   },
@@ -192,7 +201,7 @@ export const RequestEnvelope = S.Struct({
   params: S.Unknown,
 });
 
-export const ErrorBody = S.Struct({ code: S.String, message: S.String });
+export const ErrorBody = S.Struct({ code: S.String, message: S.String, blocking: S.optional(S.Array(BlockingTurn)) });
 
 export const ResponseOkEnvelope = S.Struct({
   type: S.Literal("response"),
@@ -264,8 +273,8 @@ export function encodeResult<M extends MethodName>(id: string, method: M, result
   return { ok: true, value: JSON.stringify({ type: "response", id, ok: true, result: r.value }) };
 }
 
-export function encodeErrorResponse(id: string, code: string, message: string): string {
-  return JSON.stringify({ type: "response", id, ok: false, error: { code, message } });
+export function encodeErrorResponse(id: string, code: string, message: string, blocking?: readonly BlockingTurn[]): string {
+  return JSON.stringify({ type: "response", id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
 }
 
 export function encodePush<C extends Channel>(channel: C, payload: Payload<C>): Decoded<string> {
@@ -277,7 +286,7 @@ export function encodePush<C extends Channel>(channel: C, payload: Payload<C>): 
 
 export type ServerMessage =
   | { readonly type: "response"; readonly id: string; readonly ok: true; readonly result: unknown }
-  | { readonly type: "response"; readonly id: string; readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+  | { readonly type: "response"; readonly id: string; readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly blocking?: readonly BlockingTurn[] | undefined } }
   | { readonly type: "push"; readonly channel: string; readonly payload: unknown };
 
 /** Client side: decode the envelope of one inbound frame. Results and payloads decode later, by method or channel. */

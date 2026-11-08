@@ -163,6 +163,24 @@ describe("refused at the boundary, connection stays usable", () => {
     expect(logs.filter((l) => l.startsWith("dropped frame"))).toHaveLength(3);
   });
 
+  it("carries a handler's blocking list to the client, and only a well-formed one", async () => {
+    const blocking = [{ threadId: "t1", title: "First", model: "qwen3.5:9b" }];
+    const server = await start({
+      "chat.send": () => {
+        throw Object.assign(new Error("in the way"), { code: "would-stop", blocking });
+      },
+      "threads.get": () => {
+        throw Object.assign(new Error("odd"), { code: "odd", blocking: "not a list" });
+      },
+    });
+    const { client: c } = await client(server);
+    const params = { threadId: "t1", content: "hi", model: "m", numCtx: 8192 } as const;
+    await expect(c.call("chat.send", params)).rejects.toMatchObject({ code: "would-stop", message: "in the way", blocking });
+    const odd: unknown = await c.call("threads.get", { threadId: "t1" }).catch((e: unknown) => e);
+    expect(odd).toMatchObject({ code: "odd" });
+    expect((odd as { blocking?: unknown }).blocking).toBeUndefined();
+  });
+
   it("turns handler failures into ok:false responses with a code", async () => {
     const logs: string[] = [];
     const server = await start(

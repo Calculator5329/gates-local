@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-08: Messages that wait
+
+- A message you typed is never lost and never sent after you removed it. A
+  send the server refuses goes back to its place in its own chat's queue,
+  on hold, or to an empty message box, and leaves other words in the box
+  alone. Removing a queued message cancels its warning, finishing an edit
+  lets the queue move, and a stopped reply's words stay when another chat
+  takes over. A reply in the way that the first check missed now brings up
+  the same warning (`chat.send` `askFirst`, error code `would-stop` with
+  `blocking`).
+
 ## 2026-11-08: A Models page that is only models
 
 - Settings › Models holds what is installed, the default for new chats, and
