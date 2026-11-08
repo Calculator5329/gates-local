@@ -102,4 +102,20 @@ describe("Library tools", () => {
     expect(existsSync(copy)).toBe(false);
     await expect(tools.execute({ name: "shell", input: { command: "whoami" } }, signal)).rejects.toThrow(/Windows/);
   });
+  it("takes the SQLite source by id, file name or /data path on Windows, and says which ids exist when it is wrong", async () => {
+    // A Windows model first tried source "books.db" and read /library/books ten times (Windows test, 2026-11-07).
+    const root = mkdtempSync(path.join(tmpdir(), "gl-sql-names-"));
+    const snapshotPath = path.join(root, "books.db");
+    const db = new DatabaseSync(snapshotPath); db.exec("CREATE TABLE pages (n); INSERT INTO pages VALUES (691)"); db.close();
+    const tools = createTools({ platform: "win32", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath, label: "books.db" }] });
+    const signal = new AbortController().signal;
+    for (const source of ["books", "books.db", "/data/books.db"])
+      expect(await tools.execute({ name: "sql", input: { source, query: "SELECT n FROM pages" } }, signal)).toMatchObject({ output: expect.stringContaining("691") });
+    await expect(tools.execute({ name: "sql", input: { source: "other", query: "SELECT 1" } }, signal)).rejects.toThrow('SQLite snapshot was not found in your Library; use source "books"');
+    await expect(tools.execute({ name: "read", input: { path: "/library/books" } }, signal)).rejects.toThrow('books is a SQLite source; use sql with source "books"');
+  });
+  it("points a read of a SQLite source at sqlite3 on Linux", async () => {
+    const tools = createTools({ platform: "linux", sources: [{ id: "books", kind: "sqlite", path: "live", snapshotPath: "snap", label: "books.db" }] });
+    await expect(tools.execute({ name: "read", input: { path: "/library/books" } }, new AbortController().signal)).rejects.toThrow("books is a SQLite source; use shell with sqlite3 /data/books.db");
+  });
 });
