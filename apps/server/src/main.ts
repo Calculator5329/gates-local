@@ -18,6 +18,23 @@
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+//
+// The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
+//   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
+//                                to (`tailscale serve --bg --https=8456 unix:<path>`); same handlers
+//                                and pushes, no token. The socket is 0600 in a 0700 directory of
+//                                this user's (made if missing), so only this user and root's
+//                                tailscaled can open it; TCP values are refused
+//   GATES_LOCAL_WEB_ORIGIN       the exact public origin, e.g. https://hub.example.ts.net:8456
+//   GATES_LOCAL_WEB_USER         the one Tailscale-User-Login value admitted
+//   GATES_LOCAL_WEB_ROOT         the built web client to serve (apps/web/dist)
+//   GATES_LOCAL_WEB_PEERS        optional comma list of the phones' Tailscale addresses; when set,
+//                                only those sources (Serve's X-Forwarded-For) are admitted
+// Serve stamps the owner's login on any dial from this machine to its own
+// Tailscale address, so a source that is one of this machine's addresses is
+// always refused. PEERS also covers what that check cannot see, such as a
+// userspace-networking tailscaled where no interface carries the address.
+// With LISTEN set, a missing or malformed other knob stops the start (exit 2).
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -30,6 +47,7 @@ import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
+import { phoneConfig } from "./web/config.ts";
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -70,6 +88,9 @@ async function main(): Promise<void> {
   const { port, dataDir } = parseFlags();
   const token = process.env[TOKEN_ENV] ?? "";
   if (token === "") die(`${TOKEN_ENV} is not set; refusing to start without a per-launch token`);
+  const phoneResult = phoneConfig(process.env);
+  if (!phoneResult.ok) die(phoneResult.message);
+  const phone = phoneResult.value;
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
@@ -209,14 +230,17 @@ async function main(): Promise<void> {
       onClientCount: (n) => services.gpu.clientsChanged(n),
       dataDir,
       log: (line) => log(`ws ${line}`),
+      ...(phone === null ? {} : { phone }),
     });
   } catch (e) {
     store.close();
-    die(`cannot listen on 127.0.0.1:${port}: ${(e as Error).message}`, 1);
+    const where = phone === null ? `127.0.0.1:${port}` : `127.0.0.1:${port} and unix:${phone.socketPath}`;
+    die(`cannot listen on ${where}: ${(e as Error).message}`, 1);
   }
   if (stopping) return;
   process.stdout.write(`${JSON.stringify({ ready: true, port: server.port })}\n`);
   log(`listening on 127.0.0.1:${server.port}; data in ${dataDir}; runtime ${discoverOnly ? "discover-only" : "managed"}`);
+  if (phone !== null) log(`phone listener on unix:${String(server.phoneSocket)} for ${phone.origin}, serving ${phone.webRoot}`);
 
   // In the background: a failure lands in runtime status, never kills the server.
   const bring = discoverOnly ? runtime.discover() : runtime.ensure();

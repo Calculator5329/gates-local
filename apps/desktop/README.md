@@ -11,6 +11,7 @@ dies, and gives the web client a small typed bridge (`window.gatesLocal`).
 | `src/bridge.ts` | Bridge types, IPC channel names, `serverUrl()`, `toBridgeState()`. No Node imports (the sandboxed preload bundles it). |
 | `src/status-page.ts` | The plain starting / crashed / load-failed page, served as a `data:` URL. |
 | `src/main.ts` | Electron main: single-instance lock, window, IPC, routing between client and status page, quit path. |
+| `src/launch.ts` | Pure launch decisions: background mode, window at start, quit on last window, second-launch action, the server child's env. |
 | `src/preload.ts` | Sandboxed preload: `contextBridge.exposeInMainWorld("gatesLocal", …)`. |
 | `src/window.ts` | The window's options: the gate-mark icon (`assets/icon.png`) and the sandboxed, isolated renderer. |
 | `src/keys.ts` | No menu on Linux and Windows, so the window keys live here: Ctrl+R / Ctrl+Shift+R reload, Ctrl+W close, Ctrl+Q quit (Linux), F11 full screen, Ctrl+Shift+I dev tools (unpackaged), Ctrl +/-/0 zoom. |
@@ -91,7 +92,72 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
   view says when Restart opens again. Nothing restarts on its own.
 - Quit (`before-quit`, window closed, SIGINT/SIGTERM/SIGHUP to main) waits for
   `supervisor.stop()`: SIGTERM, SIGKILL after 3 s, then exit. A process
-  `exit` hook SIGKILLs the child synchronously as a last resort.
+  `exit` hook SIGKILLs the child synchronously as a last resort. In
+  background mode closing the last window does not quit; the rest holds.
+
+## Background mode
+
+`electron apps/desktop --background` (or `GATES_LOCAL_BACKGROUND=1`) starts
+the supervisor and server with no window, and closing the last window does
+not quit. Launching the app again reaches the running instance through the
+single-instance lock: it opens the window (or restores and focuses the one
+that is open) on the current supervisor state, so there is still one server
+per data dir. A second `--background` launch opens nothing. Quit and SIGTERM
+(systemd's stop) still stop the server. Without the flag nothing changes.
+
+## Phone access
+
+The server can open a second listener for a phone on the owner's tailnet.
+Off unless `GATES_LOCAL_WEB_LISTEN` is set; main passes these through to the
+server child:
+
+| Variable | Use |
+| --- | --- |
+| `GATES_LOCAL_WEB_LISTEN` | `unix:<absolute path>`: the phone listener's Unix socket, e.g. `unix:/run/user/1000/gates-local/phone.sock`. A TCP value (`127.0.0.1:<port>` included) stops the server at start. |
+| `GATES_LOCAL_WEB_ORIGIN` | The exact public origin, e.g. `https://hub.example.ts.net:8456`. |
+| `GATES_LOCAL_WEB_USER` | The one `Tailscale-User-Login` value admitted. |
+| `GATES_LOCAL_WEB_PEERS` | Optional comma list of the phones' Tailscale addresses, e.g. `100.101.102.103,fd7a:115c:a1e0::1234`. When set, only those sources are admitted; a value that is not a list of addresses stops the server at start. |
+| `GATES_LOCAL_WEB_ROOT` | Set by main to the dist dir the window serves (`webRoot()`); not yours to set. |
+
+Deploy: `tailscale serve --bg --https=8456 unix:<path>`, with the same path
+as `LISTEN` and `https://<machine>.<tailnet>.ts.net:8456` as `ORIGIN`.
+
+The boundary is the socket's permissions. There is no token on this
+listener (the phone has no way to receive one), so the listener takes
+Serve's headers as identity, and only the owner and root's tailscaled may
+open the socket:
+
+- The parent directory must be a real directory (not a link) owned by this
+  user with no group or other access; a missing one is made `0700`, anything
+  else stops the server at start.
+- The socket is bound under umask `0177`, so it is created `0600`, never
+  wider; a different mode after listen closes it and stops the start.
+- A file already at the path is removed only when it is this user's socket
+  and nothing answers a connect (a dead server's leftover). A live socket,
+  another user's, a link or a regular file stops the start untouched.
+
+Admission matches what Serve sends a Unix backend (tailscale v1.104.4,
+`ipn/ipnlocal/serve.go`): `Host: localhost`, the browser's host in
+`X-Forwarded-Host`, and a `Tailscale-User-Login` Serve sets itself after
+deleting any the client sent. Every request needs that login to equal the
+user, `Host` to be `localhost` and `X-Forwarded-Host` to be the origin's
+host. The `/ws` upgrade and any request that is not GET or HEAD also need
+the exact `Origin`.
+
+Serve names the owner for any connection from this machine to its own
+Tailscale address, so another local account could reach the listener
+through Serve. Each request therefore needs Serve's `X-Forwarded-For` (the
+connection's source, set by Serve after deleting the client's) and that
+source must not be one of this machine's interface addresses. That check
+cannot see a userspace-networking tailscaled, where no interface carries
+the address; set `GATES_LOCAL_WEB_PEERS` to admit only the phones.
+
+A malformed or empty knob with `LISTEN` set stops the
+server at start (fail closed). The phone shares the server's handlers and
+pushes, so a reply streams to the desktop window and the phone alike. Run
+the app in background mode so the phone works with the window closed.
+Tested on Linux only. On Windows `process.getuid` is missing and the server
+refuses to start with `LISTEN` set.
 
 ## Window and bridge
 

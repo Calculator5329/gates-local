@@ -15,6 +15,10 @@ export const CONTROL_PORT = 5289;
 export const WEB_ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
 export const FAKE_URL = `http://127.0.0.1:${FAKE_PORT}`;
 export const CONTROL_URL = `http://127.0.0.1:${CONTROL_PORT}`;
+/** The Tailscale-User-Login the phone listener admits in E2E (phone.spec.ts). */
+export const PHONE_USER = "e2e-owner@example.com";
+/** The phone's tailnet address the Serve stand-in puts in X-Forwarded-For (TEST-NET-1, on no interface here). */
+export const PHONE_ADDR = "192.0.2.10";
 
 /**
  * This checkout's own folder under ~/.cache/gates-local-e2e, named from its path
