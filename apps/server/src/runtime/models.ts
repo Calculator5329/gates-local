@@ -32,23 +32,24 @@ async function getDecoded<T>(baseUrl: string, route: string, timeoutMs: number, 
 export type CapabilityCache = Map<string, readonly string[]>;
 
 /**
- * A guess for when /api/show fails or is too old to list capabilities: the
- * same name-and-family heuristic the catalog used before capabilities were
- * read. Not cached, so the next refresh asks /api/show again.
+ * The capability list of a model /api/show could not describe (it failed, or
+ * listed no capabilities). Never "completion": an embedding model under a
+ * chat-looking alias must not become a chat choice (MP-01). Not cached; the
+ * catalog asks /api/show again until it answers.
  */
-export const guessCapabilities = (m: { name: string; family?: string }): readonly string[] =>
-  /embed/i.test(m.name) || /bert/i.test(m.family ?? "") ? ["embedding"] : ["completion"];
+export const UNKNOWN_CAPABILITIES: readonly string[] = ["unknown"];
+export const capabilitiesUnknown = (m: { readonly capabilities: readonly string[] }): boolean => m.capabilities.includes("unknown");
 
 async function capabilitiesOf(baseUrl: string, m: ModelInfo, timeoutMs: number, cache: CapabilityCache | undefined): Promise<readonly string[]> {
   const known = cache?.get(m.digest);
   if (known) return known;
   try {
     const show = await fetchShow(baseUrl, m.name, AbortSignal.timeout(timeoutMs));
-    if (show.capabilities === undefined) return guessCapabilities(m);
+    if (show.capabilities === undefined) return UNKNOWN_CAPABILITIES;
     cache?.set(m.digest, show.capabilities);
     return show.capabilities;
   } catch {
-    return guessCapabilities(m);
+    return UNKNOWN_CAPABILITIES;
   }
 }
 
@@ -92,6 +93,8 @@ export type ModelCatalog = {
    */
   refresh(options?: { force?: boolean }): Promise<Refreshed>;
   onChange(listener: Listener<readonly ModelInfo[]>): () => void;
+  /** Cancel a pending retry; no more retries start. */
+  stop(): void;
 };
 
 export type ModelCatalogOptions = {
@@ -100,15 +103,24 @@ export type ModelCatalogOptions = {
   now?: () => number;
   /**
    * The chat pick (runtime/pick.ts with the fit check and settings bound).
-   * Runs when the installed list or pickKey() changes; a pick with a
-   * verdict is reused until then, so the starting model stays put while the
-   * GPU's free memory moves. Without it no model carries a pick.
+   * Runs when the installed list or pickKey() changes; a complete pick is
+   * reused until then, so the starting model stays put while the GPU's free
+   * memory moves. An incomplete one (a fit that did not run) is never
+   * reused. Without it no model carries a pick.
    */
   pick?: (models: readonly ModelInfo[], baseUrl: string) => Promise<ChatPick | undefined>;
   /** The settings the pick depends on, as a string; a change re-runs the pick on the next refresh. */
   pickKey?: () => string;
+  /**
+   * While a model's capabilities are unknown or the pick is incomplete, a
+   * forced refresh runs after this delay, doubling up to 5 minutes, until
+   * both settle. 0 turns it off. Default 5000.
+   */
+  retryMs?: number;
   log?: (line: string) => void;
 };
+
+const RETRY_MAX_MS = 5 * 60_000;
 
 /** `baseUrl` is read on each refresh so the catalog follows runtime changes. */
 export function createModelCatalog(baseUrl: () => string | undefined, options: number | ModelCatalogOptions = {}): ModelCatalog {
@@ -122,39 +134,67 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
   /** Bumped per fetch started; only the latest one, still for the current base URL, may set `models`. */
   let latest = 0;
   const capabilities: CapabilityCache = new Map();
-  let lastPick: { key: string; pick: ChatPick | undefined } | undefined;
+  let lastPick: { key: string; pick: ChatPick } | undefined;
+  const retryBaseMs = opts.retryMs ?? 5000;
+  let retryMs = retryBaseMs;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
 
-  const withPick = async (listed: ModelInfo[], url: string): Promise<ModelInfo[]> => {
-    if (opts.pick === undefined) return listed;
+  /** The list with the pick stamped, and whether that pick is a decision (not a guess to redo). */
+  const withPick = async (listed: ModelInfo[], url: string): Promise<{ models: ModelInfo[]; settled: boolean }> => {
+    if (opts.pick === undefined) return { models: listed, settled: true };
     const pickKey = `${key(listed)}|${url}|${opts.pickKey?.() ?? ""}`;
     let pick = lastPick?.key === pickKey ? lastPick.pick : undefined;
+    let failed = false;
     if (lastPick?.key !== pickKey) {
       try {
         pick = await opts.pick(listed, url);
       } catch (e) {
         opts.log?.(`chat pick failed: ${(e as Error).message}`);
         pick = undefined;
+        failed = true;
       }
-      // A pick without a verdict (no GPU reading) is retried on the next refresh.
-      lastPick = pick?.pick.verdict === undefined ? undefined : { key: pickKey, pick };
+      // An incomplete pick (a fit that did not run) is picked again on the next refresh (MP-02).
+      lastPick = pick?.complete === true ? { key: pickKey, pick } : undefined;
     }
     const chosen = pick;
-    return chosen === undefined ? listed : listed.map((m) => (m.name === chosen.name ? { ...m, pick: chosen.pick } : m));
+    const stamped = chosen === undefined ? listed : listed.map((m) => (m.name === chosen.name ? { ...m, pick: chosen.pick } : m));
+    return { models: stamped, settled: !failed && (chosen === undefined || chosen.complete) };
+  };
+
+  const scheduleRetry = (settled: boolean) => {
+    if (settled) retryMs = retryBaseMs;
+    if (settled || stopped || retryBaseMs <= 0 || retry !== undefined) return;
+    retry = setTimeout(() => {
+      retry = undefined;
+      catalog.refresh({ force: true }).catch((e: unknown) => opts.log?.(`model discovery retry failed: ${(e as Error).message}`));
+    }, retryMs);
+    retry.unref?.();
+    retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
   };
 
   const fetchNow = async (url: string | undefined): Promise<Refreshed> => {
     const seq = ++latest;
-    const next = url ? await withPick(await listModels(url, timeoutMs, capabilities), url) : [];
+    const listed = url ? await listModels(url, timeoutMs, capabilities) : [];
+    const picked = url ? await withPick(listed, url) : { models: listed, settled: true };
+    const next = picked.models;
     // An older fetch (or one from the runtime before a switch) answers its own caller and changes nothing.
     if (seq !== latest || baseUrl() !== url) return { models: next, changed: false };
     const changed = models === undefined || key(models) !== key(next);
     models = next;
+    // Unknown capabilities (MP-01) and an incomplete pick (MP-02) are asked again without waiting for a focus.
+    scheduleRetry(picked.settled && !next.some(capabilitiesUnknown));
     if (changed) for (const l of listeners) l(next);
     return { models: next, changed };
   };
 
-  return {
+  const catalog: ModelCatalog = {
     current: () => models,
+    stop() {
+      stopped = true;
+      if (retry !== undefined) clearTimeout(retry);
+      retry = undefined;
+    },
     refresh(how) {
       const url = baseUrl();
       if (how?.force !== true && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
@@ -171,4 +211,5 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
       return () => listeners.delete(listener);
     },
   };
+  return catalog;
 }

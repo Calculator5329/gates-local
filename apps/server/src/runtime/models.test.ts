@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { json, startFakeServer } from "../fit/fake-http.ts";
 import { RuntimeResponseError, createModelCatalog, listLoaded, listModels } from "./models.ts";
+import { pickChatModel } from "./pick.ts";
 import { type FakeOllama, type FakeTag, startFakeOllama } from "./test-fakes.ts";
 import type { ModelInfo } from "./types.ts";
 
@@ -25,8 +26,8 @@ describe("listModels", () => {
   it("maps /api/tags to ModelInfo, sorted by name", async () => {
     fake.tags.push(gemma);
     expect(await listModels(fake.baseUrl)).toEqual([
-      // This fake has no /api/show, so capabilities are the name heuristic's guess.
-      { name: "gemma3:4b", digest: "sha-gemma", sizeBytes: 3_300_000_000, modifiedAt: "2026-10-01T10:00:00Z", capabilities: ["completion"] },
+      // This fake has no /api/show, so capabilities are unknown (MP-01: never a guessed "completion").
+      { name: "gemma3:4b", digest: "sha-gemma", sizeBytes: 3_300_000_000, modifiedAt: "2026-10-01T10:00:00Z", capabilities: ["unknown"] },
       {
         name: "qwen3:8b",
         digest: "sha-qwen",
@@ -35,7 +36,7 @@ describe("listModels", () => {
         family: "qwen3",
         parameterSize: "8.2B",
         quantization: "Q4_K_M",
-        capabilities: ["completion"],
+        capabilities: ["unknown"],
       },
     ]);
   });
@@ -175,19 +176,103 @@ describe("capabilities and the chat pick", () => {
     }
   });
 
-  it("guesses from the name when /api/show fails, and asks again next time", async () => {
-    tags = [{ ...embedTag, name: "mxbai-embed-large:latest", digest: "sha-mx" }, gemma];
-    const s = await server();
+  it("MP-01: a failed /api/show is unknown, never completion, so an embedding alias is never picked; asks again next time", async () => {
+    // An embedding model under a chat-looking alias: the name and family say nothing.
+    const search: FakeTag = { name: "search:latest", digest: "sha-search", size: 600_000_000, modified_at: "2026-10-03T10:00:00Z", details: { family: "qwen3" } };
+    tags = [search, { ...qwen, name: "qwen3:8b" }];
+    const s = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      "POST /api/show": (b, res) =>
+        (b as { model: string }).model === "search:latest" ? json(res, 503, { error: "busy" }) : json(res, 200, { capabilities: ["completion"] }),
+    });
     try {
-      const catalog = createModelCatalog(() => s.baseUrl);
+      const catalog = createModelCatalog(() => s.baseUrl, {
+        retryMs: 0,
+        pick: (models) => pickChatModel({ models, defaultModel: "search:latest", numCtx: 16384, fit: async () => undefined }),
+      });
       const r = await catalog.refresh();
-      expect(r.models.map((m) => [m.name, m.capabilities])).toEqual([
-        ["gemma3:4b", ["completion"]],
-        ["mxbai-embed-large:latest", ["embedding"]],
+      expect(r.models.map((m) => [m.name, m.capabilities, m.pick !== undefined])).toEqual([
+        ["qwen3:8b", ["completion"], true],
+        ["search:latest", ["unknown"], false],
       ]);
       await catalog.refresh({ force: true });
-      expect(show(s)).toHaveLength(4);
+      expect(show(s).filter((n) => n === "search:latest")).toHaveLength(2);
     } finally {
+      await s.close();
+    }
+  });
+
+  it("MP-01: discovery retries on its own until the unknown model's capabilities are read", async () => {
+    tags = [{ ...embedTag, name: "search:latest", digest: "sha-search" }];
+    let failures = 2;
+    const s = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      "POST /api/show": (_b, res) => (failures-- > 0 ? json(res, 503, { error: "busy" }) : json(res, 200, { capabilities: ["embedding"] })),
+    });
+    const catalog = createModelCatalog(() => s.baseUrl, { retryMs: 10 });
+    try {
+      const seen: string[][] = [];
+      const known = new Promise<void>((resolve) =>
+        catalog.onChange((models) => {
+          seen.push(models.flatMap((m) => m.capabilities));
+          if (models.every((m) => !m.capabilities.includes("unknown"))) resolve();
+        }),
+      );
+      await catalog.refresh();
+      await known;
+      expect(seen).toEqual([["unknown"], ["embedding"]]);
+      expect(show(s)).toHaveLength(3);
+    } finally {
+      catalog.stop();
+      await s.close();
+    }
+  });
+
+  it("MP-02: an incomplete pick is not cached: the next refresh picks again; a complete one is kept", async () => {
+    tags = [qwen];
+    const s = await server();
+    let complete = false;
+    let calls = 0;
+    try {
+      const catalog = createModelCatalog(() => s.baseUrl, {
+        retryMs: 0,
+        pick: async () => {
+          calls++;
+          return { name: "qwen3:8b", pick: { numCtx: 16384, verdict: "fits" }, complete };
+        },
+      });
+      await catalog.refresh();
+      await catalog.refresh({ force: true });
+      expect(calls).toBe(2);
+      complete = true;
+      await catalog.refresh({ force: true });
+      await catalog.refresh({ force: true });
+      expect(calls).toBe(3);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("MP-02: an incomplete pick is retried on its own", async () => {
+    tags = [qwen];
+    const s = await server();
+    let calls = 0;
+    const catalog = createModelCatalog(() => s.baseUrl, {
+      retryMs: 10,
+      pick: async () => {
+        calls++;
+        return calls < 3
+          ? { name: "qwen3:8b", pick: { numCtx: 16384 }, complete: false }
+          : { name: "qwen3:8b", pick: { numCtx: 16384, verdict: "fits" }, complete: true };
+      },
+    });
+    try {
+      const settled = new Promise<void>((resolve) => catalog.onChange((models) => models[0]?.pick?.verdict === "fits" && resolve()));
+      await catalog.refresh();
+      await settled;
+      expect(calls).toBe(3);
+    } finally {
+      catalog.stop();
       await s.close();
     }
   });
@@ -201,7 +286,7 @@ describe("capabilities and the chat pick", () => {
       const catalog = createModelCatalog(() => s.baseUrl, {
         pick: async (models) => {
           calls.push(models.map((m) => m.name));
-          return { name: "qwen3:8b", pick: { numCtx: 16384, verdict: "fits" } };
+          return { name: "qwen3:8b", pick: { numCtx: 16384, verdict: "fits" }, complete: true };
         },
         pickKey: () => key,
       });

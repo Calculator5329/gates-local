@@ -48,7 +48,7 @@ describe("pickChatModel", () => {
   it("skips an embedding model even when it is the smallest installed", async () => {
     const { fit } = fitTable();
     const pick = await pickChatModel({ models: [embed, qwen4, qwen9], numCtx: 16384, fit });
-    expect(pick).toEqual({ name: "qwen3.5:9b", pick: { numCtx: 16384, verdict: "fits" } });
+    expect(pick).toEqual({ name: "qwen3.5:9b", pick: { numCtx: 16384, verdict: "fits" }, complete: true });
   });
 
   it("returns nothing when no installed model can chat", async () => {
@@ -72,7 +72,7 @@ describe("pickChatModel", () => {
   it("keeps a default that spills: the user chose it", async () => {
     const { fit } = fitTable({ "qwen3.8-abliterated:27b": "spills" });
     const pick = await pickChatModel({ models: [qwen9, big27], defaultModel: "qwen3.8-abliterated:27b", numCtx: 16384, fit });
-    expect(pick).toEqual({ name: "qwen3.8-abliterated:27b", pick: { numCtx: 16384, verdict: "spills" } });
+    expect(pick).toEqual({ name: "qwen3.8-abliterated:27b", pick: { numCtx: 16384, verdict: "spills" }, complete: true });
   });
 
   it("picks the best curated model that fits over the smallest one", async () => {
@@ -85,6 +85,7 @@ describe("pickChatModel", () => {
     expect(await pickChatModel({ models: [qwen9, gemma12], numCtx: 16384, fit })).toEqual({
       name: "gemma4:12b",
       pick: { numCtx: 16384, verdict: "fits" },
+      complete: true,
     });
   });
 
@@ -93,6 +94,7 @@ describe("pickChatModel", () => {
     expect(await pickChatModel({ models: [big27, gemma12, qwen9], numCtx: 32768, fit })).toEqual({
       name: "qwen3.5:9b",
       pick: { numCtx: 32768, verdict: "spills" },
+      complete: true,
     });
   });
 
@@ -101,6 +103,7 @@ describe("pickChatModel", () => {
     expect(await pickChatModel({ models: [qwen4, qwen9, embed], numCtx: 65536, fit })).toEqual({
       name: "qwen3.5:9b",
       pick: { numCtx: 65536, verdict: "refuse" },
+      complete: true,
     });
   });
 
@@ -112,7 +115,42 @@ describe("pickChatModel", () => {
 
   it("ranks by curated order, then larger parameter count, without a verdict when the fit cannot run", async () => {
     const { fit } = fitTable({ "llama3.2:3b": "fail", "llama3.1:8b": "fail" });
-    expect(await pickChatModel({ models: [own3, own7], numCtx: 16384, fit })).toEqual({ name: "llama3.1:8b", pick: { numCtx: 16384 } });
+    expect(await pickChatModel({ models: [own3, own7], numCtx: 16384, fit })).toEqual({ name: "llama3.1:8b", pick: { numCtx: 16384 }, complete: false });
+  });
+
+  it("MP-02: one failed fit and one refused is not 'nothing runs': the unchecked model, no verdict, incomplete", async () => {
+    const { fit } = fitTable({ "qwen3.5:9b": "fail", "qwen3.5:4b": "refuse" });
+    expect(await pickChatModel({ models: [qwen4, qwen9], numCtx: 65536, fit })).toEqual({ name: "qwen3.5:9b", pick: { numCtx: 65536 }, complete: false });
+  });
+
+  it("MP-02: a fallback below an unchecked better-ranked model is incomplete", async () => {
+    const { fit } = fitTable({ "qwen3.5:9b": "fail" });
+    expect(await pickChatModel({ models: [qwen9, gemma12], numCtx: 16384, fit })).toEqual({
+      name: "gemma4:12b",
+      pick: { numCtx: 16384, verdict: "fits" },
+      complete: false,
+    });
+  });
+
+  it("MP-02: a spill with any unchecked model is incomplete (that one may fit)", async () => {
+    const { fit } = fitTable({ "qwen3.5:9b": "spills", "gemma4:12b": "fail" });
+    expect((await pickChatModel({ models: [qwen9, gemma12], numCtx: 16384, fit }))?.complete).toBe(false);
+  });
+
+  it("MP-02: a default whose fit failed is kept without a verdict and is incomplete", async () => {
+    const { fit } = fitTable({ "qwen3.5:4b": "fail" });
+    expect(await pickChatModel({ models: [qwen4, qwen9], defaultModel: "qwen3.5:4b", numCtx: 16384, fit })).toEqual({
+      name: "qwen3.5:4b",
+      pick: { numCtx: 16384 },
+      complete: false,
+    });
+  });
+
+  it("MP-01: a model whose capabilities are unknown is never fitted or picked", async () => {
+    const { fit, asked } = fitTable();
+    const search = model("search:latest", 0.6, ["unknown"], "600M");
+    expect((await pickChatModel({ models: [search, qwen4], defaultModel: "search:latest", numCtx: 16384, fit }))?.name).toBe("qwen3.5:4b");
+    expect(asked).toEqual(["qwen3.5:4b"]);
   });
 });
 

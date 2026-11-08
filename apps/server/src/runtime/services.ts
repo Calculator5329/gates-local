@@ -173,6 +173,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     async close({ stopRuntime }) {
       pulls?.stop();
       gpu.stop();
+      catalog.stop();
       if (stopRuntime) await runtime.stopIfStartedHere();
     },
   };
