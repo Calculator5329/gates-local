@@ -13,7 +13,7 @@ import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
 import { clearRunning, writeRunning } from "./running.ts";
-import { cannotUpdate, updaterLaunch, type UpdaterLaunch } from "./update-launch.ts";
+import { cannotUpdate, onceUntilFailed, updaterLaunch, type UpdaterLaunch } from "./update-launch.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 import { iconFile, windowOptions } from "./window.ts";
@@ -156,20 +156,20 @@ function run(): void {
     if (!fromOurWindow(event)) throw new Error("refused");
     if (supervisor.state.status === "ready") showClient();
   });
-  let updating = false;
-  ipcMain.handle(IPC.updateAndRestart, async (event): Promise<UpdateAndRestartResult> => {
-    if (!fromOurWindow(event)) throw new Error("refused");
-    if (updating) return { ok: true };
+  const startUpdate = onceUntilFailed(async (): Promise<UpdateAndRestartResult> => {
     const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });
     if (refused !== null) return { ok: false, message: refused };
     const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync });
     const started = await startDetached(plan);
     if (!started.ok) return started;
-    updating = true;
     console.error(`[desktop] updater started; quitting so it can update ${repoRoot}`);
     // Let the reply reach the renderer before the window goes.
     setTimeout(() => app.quit(), 200);
     return started;
+  });
+  ipcMain.handle(IPC.updateAndRestart, (event): Promise<UpdateAndRestartResult> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    return startUpdate();
   });
 
   supervisor.subscribe(route);

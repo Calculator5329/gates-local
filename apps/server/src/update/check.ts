@@ -13,6 +13,7 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { lastLines, type RunResult, type Runner } from "./run.ts";
 import { newestRelease } from "./semver.ts";
+import { readTransaction } from "./transaction.ts";
 
 export type Channel = "main" | "release";
 /** What the person chose: auto follows releases once there are any; main pins every change. */
@@ -44,7 +45,9 @@ export type Blocked =
   /** --channel release with no release tag on the remote yet. */
   | { readonly reason: "no-releases" }
   /** The target is not ahead of this copy on the same line (a release tag off the branch). */
-  | { readonly reason: "diverged"; readonly target: string };
+  | { readonly reason: "diverged"; readonly target: string }
+  /** The last update was cut off, so the commit here proves nothing about the install and builds. */
+  | { readonly reason: "unfinished"; readonly target: string };
 
 export type Inspection =
   | { readonly state: "blocked"; readonly blocked: Blocked }
@@ -163,7 +166,7 @@ async function remoteReleases(git: Git, remote: string): Promise<Map<string, str
   return tags;
 }
 
-const isBlocked = (v: unknown): v is Blocked => typeof v === "object" && v !== null && "reason" in v;
+export const isBlocked = (v: unknown): v is Blocked => typeof v === "object" && v !== null && "reason" in v;
 
 /**
  * Everything short of changing the copy: preconditions, then git fetch and
@@ -177,6 +180,9 @@ export async function inspect(o: InspectOptions): Promise<Inspection> {
   const git = gitIn(o.root, o.runner, o.log);
   if (!(await hasGit(git))) return blocked({ reason: "no-git" });
   if (!(await isClone(o.root, git))) return blocked({ reason: "not-a-clone" });
+  // Before "up to date" can be said: an update the last run left half done is finished by the update, not a check.
+  const unfinished = readTransaction(o.root);
+  if (unfinished !== null) return blocked({ reason: "unfinished", target: unfinished.to.label });
   const upstream = await upstreamOf(git);
   if (isBlocked(upstream)) return blocked(upstream);
   const files = await changedFiles(git);

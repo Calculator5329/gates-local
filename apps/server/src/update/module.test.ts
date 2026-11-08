@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUpdateHandlers, createUpdateModule } from "./module.ts";
 import { RECORD_FILE, writeRecord } from "./record.ts";
 import type { Runner } from "./run.ts";
-import { type Repos, commit, fakePnpm, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
+import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
+import { saveTransaction } from "./transaction.ts";
 
 let r: Repos;
 
@@ -101,6 +102,15 @@ describe("update.check", () => {
     writeFileSync(path.join(r.clone, "app.txt"), "edited\n");
     const check = await update.check();
     expect(check).toMatchObject({ state: "cannot-check", reason: "local-changes" });
+    encodes("update.check", check);
+  });
+
+  it("says an update was cut off, rather than up to date, and the answer encodes", async () => {
+    saveTransaction(r.clone, { channel: "main", branch: "main", from: { commit: "a".repeat(40), label: "aaaaaaa" }, to: { commit: head(r.clone), label: "v0.2.0" }, changes: 1, phase: "forward" });
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false, now: () => 1 });
+    const check = await update.check();
+    expect(check).toMatchObject({ state: "cannot-check", reason: "unfinished" });
+    expect(check.state === "cannot-check" && check.lines[0]).toContain("The last update, to v0.2.0, did not finish");
     encodes("update.check", check);
   });
 

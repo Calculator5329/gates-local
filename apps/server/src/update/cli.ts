@@ -133,6 +133,12 @@ export function refusalLines(r: Refusal): string[] {
       ];
     case "no-pnpm":
       return ["pnpm was not found. Run `corepack enable pnpm`, open a new terminal and try again."];
+    case "unfinished":
+      return [`The last update, to ${r.target}, did not finish, so this copy may not run yet.`, "Close Gates Local and run `pnpm run app-update` to finish it."];
+    case "busy":
+      return [`Another update of this copy is already running${r.pid === null ? "" : ` (process ${r.pid})`}.`, "Nothing was changed. Wait for it to finish, then try again."];
+    case "lost-lock":
+      return ["Another update took over this copy while this one was held up, so this one stopped.", "Run `pnpm run app-update` once that one has finished, to see where the copy stands."];
   }
 }
 
@@ -258,7 +264,8 @@ export async function runCli(deps: CliDeps): Promise<number> {
         const lines = refusalLines(run.refusal);
         for (const line of lines) say(line);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
-        reopen();
+        // Not while another update is replacing what the app runs from.
+        if (run.refusal.reason !== "busy" && run.refusal.reason !== "lost-lock") reopen();
         return 1;
       }
       case "up-to-date":
