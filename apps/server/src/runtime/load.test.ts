@@ -340,7 +340,7 @@ describe("models.remove", () => {
     const tags = ["qwen3.5:9b", "gemma4:12b"];
     const s = await fakeOllama([], tags);
     const loader = loaderFor(s, []);
-    const catalog = createModelCatalog(() => s.baseUrl, { minIntervalMs: 60_000 });
+    const catalog = createModelCatalog(() => s.baseUrl, { minIntervalMs: 60_000, retryMs: 0 }); // not about retries (MP2-04)
     await catalog.refresh();
     const h = createRuntimeHandlers({
       baseUrl: () => s.baseUrl,

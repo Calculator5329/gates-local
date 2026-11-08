@@ -34,6 +34,8 @@ const ChatChunk = S.Struct({
   done: S.optional(S.Boolean),
   done_reason: S.optional(S.String),
   total_duration: S.optional(S.Number),
+  prompt_eval_duration: S.optional(S.Number),
+  eval_duration: S.optional(S.Number),
   prompt_eval_count: S.optional(S.Number),
   eval_count: S.optional(S.Number),
   error: S.optional(S.String),
@@ -175,6 +177,9 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
               ...(parsed.prompt_eval_count === undefined ? {} : { promptTokens: parsed.prompt_eval_count }),
               ...(parsed.eval_count === undefined ? {} : { completionTokens: parsed.eval_count }),
               ...(parsed.total_duration === undefined ? {} : { durationMs: parsed.total_duration / 1e6 }),
+              // Decode time alone: speed is eval_count over this, never over total_duration (load and prompt included).
+              ...(parsed.eval_duration === undefined ? {} : { evalDurationMs: parsed.eval_duration / 1e6 }),
+              ...(parsed.prompt_eval_duration === undefined ? {} : { promptEvalDurationMs: parsed.prompt_eval_duration / 1e6 }),
               numCtx: input.numCtx,
             },
           };

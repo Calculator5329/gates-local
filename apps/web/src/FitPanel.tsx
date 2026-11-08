@@ -3,7 +3,7 @@
 // from fit.check plus gpu.status when the server has it.
 import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, decodeSpeed, describeModel, gb, k, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
@@ -36,13 +36,7 @@ export function shortGpu(name: string | undefined): string {
 export function ctxLine(cur: FitReport | undefined, other: FitReport | undefined, otherNumCtx: number): { lead: string; alt: string | null } {
   const lead = "How much conversation the model can keep in view.";
   if (!cur || !other) return { lead, alt: null };
-  const ov = verdictOf(other);
-  const cv = verdictOf(cur);
-  let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
-  if (ov.k === cv.k) says = `still ${says}`;
-  const d = other.needVramBytes - cur.needVramBytes;
-  const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
-  return { lead, alt: `At ${k(otherNumCtx)}:|${says}; ${tail}.` };
+  return { lead, alt: `At ${k(otherNumCtx)}:|${otherCtxWords(cur, other)}.` };
 }
 
 export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize }) {
@@ -52,14 +46,14 @@ export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize 
   useEffect(() => ensureFit(model, other), [model, other, alt]);
   const line = ctxLine(cur === "error" ? undefined : cur, alt === "error" ? undefined : alt, other);
   const [lbl, rest] = line.alt?.split("|") ?? [];
+  // F76: the definition and the other size's result are separate lines; the scope is the row label above.
   return (
     <>
-      {line.lead}
+      <span className="ctx-def">{line.lead}</span>
       {lbl !== undefined ? (
-        <>
-          {" "}
+        <span className="ctx-alt">
           <span className="ctx-k">{lbl}</span> {rest}
-        </>
+        </span>
       ) : null}
     </>
   );
@@ -144,7 +138,10 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
         {un > 0 ? (
           <div className="lg-r">
             <span className="chip sw-free" />
-            <span className="nm">Unused</span>
+            <span className="nm">
+              {loaded ? "Currently free" : "Free after loading"}
+              {loaded ? null : <small>est.</small>}
+            </span>
             <span className="v">{un.toFixed(1)} GB</span>
           </div>
         ) : null}
@@ -161,10 +158,8 @@ function speedOf(s: State, model: string): { ttft: number; tps: number | null } 
       if (m?.role !== "assistant" || m.model !== model) continue;
       const ft = s.firstToken[m.id];
       if (ft === undefined) continue;
-      const ms = m.stats?.durationMs ?? 0;
-      const out = m.stats?.completionTokens;
-      const tps = ms > 0 && out !== undefined ? Math.round(out / (ms / 1000)) : null;
-      return { ttft: ft, tps };
+      // Decode time only: the total includes loading the model and reading the prompt.
+      return { ttft: ft, tps: decodeSpeed(m.stats) ?? null };
     }
   }
   return null;
@@ -201,13 +196,20 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
 
 function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
   const ctx = k(r.numCtx);
+  if (v.k === "no" && v.limit !== undefined) {
+    return (
+      <div className="fp-n">
+        <span className="fp-who">{name}</span> keeps at most {k(v.limit)} of conversation in view, so it cannot run at {ctx}. Memory is not the limit.
+      </div>
+    );
+  }
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
     const who = gpu && gpu.vendor === "nvidia" ? holders(gpu.occupants) : null;
     return (
       <>
         <div className="fp-n">
-          <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. A chat model can use the {gb(r.freeVramBytes)} unused below{sys}.
+          <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. {gb(r.freeVramBytes)} of GPU memory is available to this model{sys}.
         </div>
         {who ? <div className="fp-n">{who}</div> : null}
       </>
@@ -216,7 +218,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   if (v.k === "spill") {
     return (
       <div className="fp-n">
-        Estimated {gb(r.needVramBytes)}; the GPU has {gb(r.freeVramBytes)} available · {r.source === "measured" ? "measured" : `not measured at ${ctx} yet`}
+        Estimated {gb(r.needVramBytes)}; {gb(r.freeVramBytes)} of GPU memory is available to this model · {r.source === "measured" ? "measured" : `not measured at ${ctx} yet`}
         <br />
         An estimated {gb(v.amt)} runs from system memory, so replies are slower.
       </div>
@@ -224,7 +226,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   }
   return (
     <div className="fp-n">
-      Estimated {gb(r.needVramBytes)} of {gb(r.freeVramBytes)} available · {loaded && r.source === "measured" ? `measured ${gb(r.needVramBytes)} on last load` : `not measured at ${ctx} yet`}
+      Estimated {gb(r.needVramBytes)} of {gb(r.freeVramBytes)} available to this model · {loaded && r.source === "measured" ? `measured ${gb(r.needVramBytes)} on last load` : `not measured at ${ctx} yet`}
     </div>
   );
 }
@@ -254,7 +256,7 @@ function Body({ model }: { model: string }) {
         {v.k === "no" ? (
           <span className="vl no">
             <span className="vd no" />
-            Needs {gb(v.amt)} more at {k(numCtx)}
+            {v.limit !== undefined ? v.word : `Needs ${gb(v.amt)} more at ${k(numCtx)}`}
           </span>
         ) : (
           <>

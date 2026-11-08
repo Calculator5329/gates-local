@@ -127,6 +127,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     probeTimeoutMs: 500,
   });
   const catalog = createModelCatalog(() => runtime.baseUrl());
+  cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
   const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000 };
   const storedAtDonePush: number[] = [];
 
@@ -447,6 +448,8 @@ function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
  */
 async function stalledThinkTurn() {
   const r = await rig({ image: idleComfy("external", () => undefined).build });
+  // The catalog's first refresh asks /api/show for capabilities; let it land before counting the turn's shows.
+  await r.client.call("models.list", {});
   let shows = 0;
   r.setShow((res) => {
     shows += 1;
@@ -944,7 +947,7 @@ describe("runtime.retry (W-06)", () => {
         onChange: () => () => undefined,
         ensure: async () => (ensured++, { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:1" }),
       },
-      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined, stop: () => undefined },
       push: () => undefined,
     });
     cleanups.push(() => app.shutdown());

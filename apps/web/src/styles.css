@@ -279,6 +279,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* F56: quiet text actions inside a status line: muted, underline on hover and focus */
 .qa{font-size:13px;padding:0 4px;margin:0 -4px;color:var(--muted-foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px;border-radius:var(--r-sm);white-space:nowrap;transition:color .12s,text-decoration-color .12s}
 .qa:hover,.qa:focus-visible{color:var(--foreground);text-decoration-color:currentColor}
+.qa:disabled,.qa:disabled:hover{opacity:.4;cursor:not-allowed;color:var(--muted-foreground);text-decoration-color:var(--border-strong)}
 .prog-l .qa{margin-left:auto}
 /* F43b: a message waiting for setup: a muted clock line under the bubble, right-aligned.
    F61: the line carries its own quiet "Cancel send", 12 px after the status like Retry on a stopped reply */
@@ -363,6 +364,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .composer.blocked .gate,.composer.blocked .gate:hover{color:var(--faint);background:transparent}
 .composer.blocked .gate .lead,.composer.blocked .gate .plbl{opacity:1}
 .composer.blocked .pill.gate{box-shadow:inset 0 0 0 1px var(--border)}
+/* A pill the model cannot use (no thinking capability, or no chat model yet): same label at 40%, the tooltip says why */
+.pill.unavail,.pill.unavail:hover{opacity:.4;cursor:not-allowed;background:transparent;color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
 /* F37b: the context meter is a chip in the chip cluster: "Context 60% used", tokens in the tooltip; hidden below half and on a new thread */
 .meter{height:30px;padding:0 10px;margin-left:2px;border-radius:var(--r-ctl);display:inline-flex;align-items:center;gap:5px;font-size:14px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap;transition:background-color .12s,color .12s}
 .meter:hover{background:var(--hover);color:var(--foreground)}
@@ -536,6 +539,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* F36: the visible line under every context control: what context is, and what the choice costs */
 .ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
 .ctx-k{font-weight:500;color:var(--foreground)}
+.ctx-def,.ctx-alt{display:block}
 .meas div{display:flex;flex-direction:column}
 .meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
 .meas span{font-size:12.5px;color:var(--muted-foreground)}
@@ -659,7 +663,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fr-m{gap:8px}
 .fr-m .rec{font-size:15px;color:var(--muted-foreground)}
 .fr-m .v{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--green-fg)}
-.fr-m .v .vd{width:7px;height:7px;border-radius:50%;background:var(--green)}
+/* the dot takes its colour from .vd.<verdict>, so a refusal is red here too */
+.fr-m .v .vd{width:7px;height:7px;border-radius:50%}
 .fr-card .think{margin-top:8px}
 .fr-card .think-body{margin-top:4px}
 .kv{border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}

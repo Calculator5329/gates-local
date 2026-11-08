@@ -82,13 +82,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
                              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-                             tools_json, images_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
   } satisfies Record<string, StatementSync>;
@@ -189,6 +189,8 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           s?.numCtx ?? null,
           msg.tools === undefined ? null : JSON.stringify(msg.tools),
           msg.images === undefined ? null : JSON.stringify(msg.images),
+          s?.evalDurationMs ?? null,
+          s?.promptEvalDurationMs ?? null,
         );
         stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
@@ -242,6 +244,8 @@ function checkStats(value: unknown): MessageStats | undefined {
     completionTokens: checkCount("stats.completionTokens", v["completionTokens"], true),
     durationMs: checkCount("stats.durationMs", v["durationMs"], false),
     numCtx: checkCount("stats.numCtx", v["numCtx"], true),
+    evalDurationMs: checkCount("stats.evalDurationMs", v["evalDurationMs"], false),
+    promptEvalDurationMs: checkCount("stats.promptEvalDurationMs", v["promptEvalDurationMs"], false),
   });
 }
 
@@ -343,6 +347,8 @@ function compactStats(s: MessageStats): MessageStats | undefined {
   if (s.completionTokens !== undefined) out.completionTokens = s.completionTokens;
   if (s.durationMs !== undefined) out.durationMs = s.durationMs;
   if (s.numCtx !== undefined) out.numCtx = s.numCtx;
+  if (s.evalDurationMs !== undefined) out.evalDurationMs = s.evalDurationMs;
+  if (s.promptEvalDurationMs !== undefined) out.promptEvalDurationMs = s.promptEvalDurationMs;
   return Object.keys(out).length === 0 ? undefined : out;
 }
 
@@ -365,6 +371,8 @@ function messageFromRow(row: Row): Message {
     completionTokens: optNum(row, "completion_tokens"),
     durationMs: optNum(row, "duration_ms"),
     numCtx: optNum(row, "num_ctx"),
+    evalDurationMs: optNum(row, "eval_duration_ms"),
+    promptEvalDurationMs: optNum(row, "prompt_eval_duration_ms"),
   });
   if (stats !== undefined) msg.stats = stats;
   const tools = optStr(row, "tools_json");

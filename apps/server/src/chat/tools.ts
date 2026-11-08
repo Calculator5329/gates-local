@@ -18,6 +18,7 @@ const decodeChunk = S.decodeUnknownSync(S.Struct({
   message: S.optional(S.Struct({ content: S.optional(S.String), thinking: S.optional(S.String), tool_calls: S.optional(S.Array(S.Unknown)) })),
   done: S.optional(S.Boolean), done_reason: S.optional(S.String), error: S.optional(S.String),
   prompt_eval_count: S.optional(S.Finite), eval_count: S.optional(S.Finite), total_duration: S.optional(S.Finite),
+  eval_duration: S.optional(S.Finite), prompt_eval_duration: S.optional(S.Finite),
 }));
 
 /** Tools use the same chat endpoint and explicit context/think settings as the plain stream. */
@@ -85,6 +86,8 @@ async function* ollamaStep(deps: { input: ToolTurnInput; fetcher: typeof fetch; 
             ...(value.prompt_eval_count === undefined ? {} : { promptTokens: value.prompt_eval_count }),
             ...(value.eval_count === undefined ? {} : { completionTokens: value.eval_count }),
             ...(value.total_duration === undefined ? {} : { durationMs: value.total_duration / 1e6 }),
+            ...(value.eval_duration === undefined ? {} : { evalDurationMs: value.eval_duration / 1e6 }),
+            ...(value.prompt_eval_duration === undefined ? {} : { promptEvalDurationMs: value.prompt_eval_duration / 1e6 }),
           } }; return;
         }
       }

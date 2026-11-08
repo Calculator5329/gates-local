@@ -15,6 +15,8 @@ const MEMINFO = fitFixture("meminfo.machine.txt");
 const SHOW: Record<string, unknown> = {
   "qwen3.5:9b": JSON.parse(fitFixture("show-qwen3-5-9b.json")),
   "qwen3.8-abliterated:27b": JSON.parse(fitFixture("show-qwen3-8-abliterated-27b.json")),
+  "hf.co/someone/Tiny-Chat-GGUF:Q4_K_M": { capabilities: ["completion"] },
+  "nomic-embed-text:latest": { capabilities: ["embedding"] },
 };
 const TAGS = {
   models: [
@@ -22,6 +24,8 @@ const TAGS = {
     { name: "qwen3.8-abliterated:27b", size: 13210122027, digest: "c", modified_at: "2026-11-01T00:00:00Z" },
     { name: "hf.co/someone/Tiny-Chat-GGUF:Q4_K_M", size: 900000000, digest: "e", modified_at: "2026-11-01T00:00:00Z" },
     { name: "nomic-embed-text:latest", size: 274302450, digest: "d", modified_at: "2026-11-01T00:00:00Z", details: { family: "nomic-bert" } },
+    // /api/show fails for this one (404 below): its capabilities are unknown (MP-01).
+    { name: "search:latest", size: 600000000, digest: "f", modified_at: "2026-11-01T00:00:00Z", details: { family: "qwen3" } },
   ],
 };
 
@@ -76,6 +80,8 @@ describe("models.catalog", () => {
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")).toMatchObject({ label: "Tiny-Chat-GGUF:Q4_K_M", purpose: "Installed by you", installed: true });
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.fit).toBeUndefined();
     expect(e.has("nomic-embed-text:latest")).toBe(false);
+    // A model whose capabilities are unknown is neither listed nor recommended until discovery succeeds.
+    expect(e.has("search:latest")).toBe(false);
 
     for (const entry of entries) expect(entry.purpose.split(" ").length).toBeLessThanOrEqual(4);
     expect(entries.filter((x) => x.recommended).map((x) => x.name)).toEqual(entries.filter((x) => x.fit?.verdict === "fits").map((x) => x.name));
@@ -93,6 +99,20 @@ describe("models.catalog", () => {
     expect(entries.some((x) => x.fit?.verdict === "fits")).toBe(false);
     const recommended = entries.filter((x) => x.recommended);
     expect(recommended.map((x) => x.name)).toEqual(["qwen3.5:4b"]);
+  });
+
+  it("MP-01: an installed curated model whose capabilities are unknown is neither a chat choice nor a download", async () => {
+    const s = await fakeOllama();
+    const unknownQwen = (await listModels(s.baseUrl)).map((m) => (m.name === "qwen3.5:9b" ? { ...m, capabilities: ["unknown"] } : m));
+    const entries = await buildCatalog({
+      baseUrl: () => s.baseUrl,
+      installed: async () => unknownQwen,
+      settings,
+      fit: { runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: () => 1 },
+    });
+    expect(entries.map((x) => x.name)).not.toContain("qwen3.5:9b");
+    // Curated models that are not installed are still offered.
+    expect(byName(entries).get("gpt-oss:20b")?.installed).toBe(false);
   });
 
   it("while the runtime is down, lists only what can be downloaded, without a fit", async () => {
