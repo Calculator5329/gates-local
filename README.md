@@ -182,6 +182,9 @@ pnpm exec playwright install --with-deps chromium
 sudo, on Debian and Ubuntu. On other distributions, leave it out and
 install them from your package manager.
 
+On Windows the browser suite uses Microsoft Edge, which Windows already
+has, unless `GATES_LOCAL_CHROMIUM` names another browser.
+
 The screenshots use demo threads and a pinned clock and time zone, so a
 rerun gives the same images.
 
