@@ -6,9 +6,11 @@
 //
 // Knobs (environment):
 //   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins (the desktop app sets it)
-//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
-//                                discover-only (never install, start or stop one), and never
-//                                probe another port
+//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama, and
+//                                its port as the first of the app's own ports; discover-only
+//                                (never install, start or stop one). Settings › Runtime still
+//                                applies: "app" looks for the app's copy on that port and the
+//                                nine after it, as it does on 11435..11444 without a pin
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
@@ -68,10 +70,10 @@ async function main(): Promise<void> {
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
-  // A pinned Ollama URL is the only Ollama: its port doubles as the app port,
-  // so a wrong service there never sends the probe to the real 11435. It is
-  // also discover-only: the app never installs, starts or stops an Ollama
-  // when the URL names the one to use.
+  // A pinned Ollama URL stands in for the system Ollama, and its port is the
+  // first app port, so no probe reaches the real 11434 or 11435. It is also
+  // discover-only: the app never installs, starts or stops an Ollama when the
+  // URL names the one to use.
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
   let pinned: URL | undefined;
   if (ollamaUrl) {
