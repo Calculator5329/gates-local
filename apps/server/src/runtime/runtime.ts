@@ -30,6 +30,7 @@
 // left running ("adopted").
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { RuntimeMode } from "@gates-local/contracts";
 import { PINNED_OLLAMA } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
@@ -372,7 +373,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const readOnly =
       mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
     let exited: string | undefined;
-    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv });
+    // Windows: start in the binary's own folder. A process holds its working
+    // folder open there, and an adopted copy can outlive the app, so
+    // inheriting the server's (the clone) would block deleting the clone.
+    const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
+    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
     child.on("error", (e) => {
       exited = e.message;

@@ -291,11 +291,17 @@ describe("Windows (platform injected)", () => {
     expect(r).toMatchObject({ stopped: true });
     expect(await isUp(s.baseUrl)).toBe(false);
     const log = readFileSync(serveLogFile(appDataDir), "utf8");
-    const term = log.indexOf("got SIGTERM");
-    expect(term).toBeGreaterThan(0);
     expect(log.indexOf("unloaded m:latest")).toBeGreaterThan(0);
-    expect(log.indexOf("unloaded m:latest")).toBeLessThan(term);
-    expect(log.indexOf("unloaded n:7b")).toBeLessThan(term);
+    expect(log.indexOf("unloaded n:7b")).toBeGreaterThan(0);
+    // On a POSIX host the handle kill arrives as SIGTERM, which the fake logs
+    // after the unloads. On real Windows it is TerminateProcess, which runs no
+    // handler: there the unloads logged before the server went down are the evidence.
+    if (process.platform !== "win32") {
+      const term = log.indexOf("got SIGTERM");
+      expect(term).toBeGreaterThan(0);
+      expect(log.indexOf("unloaded m:latest")).toBeLessThan(term);
+      expect(log.indexOf("unloaded n:7b")).toBeLessThan(term);
+    }
     expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
     expect(calls.every((c) => c === "powershell.exe")).toBe(true);
   });

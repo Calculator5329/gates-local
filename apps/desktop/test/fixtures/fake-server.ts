@@ -31,9 +31,13 @@ writeFileSync(
   JSON.stringify({ pid: process.pid, port, token, argv: process.argv.slice(2), electronRunAsNode: process.env["ELECTRON_RUN_AS_NODE"] }),
 );
 
-// Parent-death path from the contract: exit when stdin reaches EOF.
+// Parent-death path from the contract: exit when stdin reaches EOF. The
+// eof-<pid> marker tells a test this exit was the server's own.
 if (mode !== "ignore-term") {
-  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("end", () => {
+    writeFileSync(join(dataDir, `eof-${process.pid}`), "");
+    process.exit(0);
+  });
   process.stdin.resume();
 }
 

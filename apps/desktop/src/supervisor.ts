@@ -37,6 +37,8 @@ export interface SupervisorOptions {
   readonly restartLimit?: { readonly max: number; readonly windowMs: number };
   readonly log?: (line: string) => void;
   readonly now?: () => number;
+  /** How a stop asks the server to exit; defaults to process.platform (tests inject). */
+  readonly platform?: NodeJS.Platform;
 }
 
 const DEFAULTS = {
@@ -302,11 +304,16 @@ export class Supervisor {
   async #terminate(launch: Launch): Promise<void> {
     const { child } = launch;
     if (!isRunning(child)) return await launch.exited;
-    child.kill("SIGTERM");
+    // Windows has no SIGTERM: kill("SIGTERM") there is TerminateProcess, so
+    // the server's shutdown (which stops the app's own Ollama) would never
+    // run. The polite request there is the contract's other one: stdin EOF.
+    const win = (this.#opts.platform ?? process.platform) === "win32";
+    if (win) child.stdin?.end();
+    else child.kill("SIGTERM");
     const graceMs = this.#opts.stopTimeoutMs ?? DEFAULTS.stopTimeoutMs;
     const timer = setTimeout(() => {
       if (!isRunning(child)) return;
-      this.#log(`[supervisor] pid ${String(child.pid)} ignored SIGTERM for ${graceMs} ms; sending SIGKILL`);
+      this.#log(`[supervisor] pid ${String(child.pid)} ${win ? "kept running after its stdin closed" : "ignored SIGTERM"} for ${graceMs} ms; sending SIGKILL`);
       child.kill("SIGKILL");
     }, graceMs);
     await launch.exited;

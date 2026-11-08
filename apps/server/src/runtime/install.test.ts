@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InstallError, installPinned } from "./install.ts";
 import { installDir, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
-import { type ReleaseServer, buildFakeTarball, removeDir, startReleaseServer, tmpDir } from "./test-fakes.ts";
+import { FAKE_RELEASE_FORMAT, FAKE_RELEASE_LIB, type ReleaseServer, buildFakeRelease, removeDir, startReleaseServer, tmpDir } from "./test-fakes.ts";
 import type { InstallProgress } from "./types.ts";
 
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
@@ -21,7 +21,7 @@ function manifest(over: Partial<InstallManifest> = {}): InstallManifest {
     url: server.url,
     sha256: sha256(tarball),
     sizeBytes: tarball.length,
-    format: "tar.zst",
+    format: FAKE_RELEASE_FORMAT,
     verified: true,
     source: "test",
     ...over,
@@ -48,7 +48,8 @@ async function expectInstallError(p: Promise<unknown>, code: string): Promise<In
 beforeEach(async () => {
   work = tmpDir("install");
   appDataDir = path.join(work, "data", "gates-local");
-  tarball = buildFakeTarball(work);
+  // This host's release: tar.zst with bin/ollama on Linux, a ZIP with ollama.exe on Windows.
+  tarball = buildFakeRelease(work);
   server = await startReleaseServer(tarball);
 });
 
@@ -64,7 +65,7 @@ describe("installPinned", () => {
     expect(r.alreadyInstalled).toBe(false);
     expect(r.binary).toBe(installedBinary(appDataDir, "9.9.9-test"));
     accessSync(r.binary, constants.X_OK);
-    expect(existsSync(path.join(r.dir, "lib", "ollama", "libfake.so"))).toBe(true);
+    expect(existsSync(path.join(r.dir, FAKE_RELEASE_LIB))).toBe(true);
     const phases = [...new Set(events.map((e) => e.phase))];
     expect(phases).toEqual(["download", "verify", "extract", "done"]);
     expect(events.filter((e) => e.phase === "download").at(-1)?.receivedBytes).toBe(tarball.length);
