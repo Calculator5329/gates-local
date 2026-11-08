@@ -82,7 +82,11 @@ interface Rig {
   runtime: OllamaRuntime;
   ollama: FakeServer;
   gpu: Gpu;
+  /** The app's GPU lease; present only when the rig was built with an image module. */
+  lease: GpuLease | undefined;
   setChat(route: ChatRoute): void;
+  /** Replaces the /api/show answer (every caller: the fit check, the think probe, the tool turn). */
+  setShow(route: ChatRoute): void;
   pushes: Array<{ channel: Channel; payload: unknown }>;
   /** Stored message count of the thread at the moment each done event left app.ts (in process, before the socket). */
   storedAtDonePush: number[];
@@ -90,9 +94,10 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => ImageModule; show?: unknown } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
+  let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
   const ollama = await startFakeServer({
     "GET /": (_b, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
@@ -101,7 +106,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => Imag
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, TAGS),
     "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
-    "POST /api/show": (_b, res) => json(res, 200, opts.show ?? SHOW),
+    "POST /api/show": (body, res) => show(res, body),
     "POST /api/chat": (body, res) => chat(res, body),
   });
   cleanups.push(() => ollama.close());
@@ -131,7 +136,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => Imag
     store,
     runtime,
     catalog,
-    ...(lease && opts.image ? { lease, image: opts.image(lease) } : {}),
+    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { threadId, event } = p as Payload<"chat.event">;
@@ -188,7 +193,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => Imag
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, setChat: (r) => (chat = r), pushes, storedAtDonePush, waitFor };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, waitFor };
 }
 
 const events = (r: Rig, turnId: string) =>
@@ -397,7 +402,62 @@ describe("chat.send and the think flag", () => {
   it("keeps think as asked when Ollama lists no capabilities", async () => {
     expect(await sendWith(caps(undefined), true)).toMatchObject({ think: true });
   });
+
+  it("cancel ends a turn whose think probe stalls at once and releases its GPU claim", async () => {
+    const { r, sent } = await stalledThinkTurn();
+    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error", 1000);
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease?.status().holders).toBe(0);
+    expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
+  });
+
+  it("thread delete and shutdown do not wait on a stalled think probe", async () => {
+    const a = await stalledThinkTurn();
+    expect(await within(1000, a.r.client.call("threads.delete", { threadId: a.t.id }), "threads.delete")).toEqual({ threadId: a.t.id });
+    expect(a.r.app.activeTurns()).toBe(0);
+    const b = await stalledThinkTurn();
+    await within(1000, b.r.app.shutdown(), "shutdown");
+    expect(b.r.app.activeTurns()).toBe(0);
+    expect(b.r.lease?.status().holders).toBe(0);
+  });
 });
+
+/** Polls until `ok` holds; throws after `timeoutMs`. */
+async function until(ok: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ok()) {
+    if (Date.now() > deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
+    await sleep(10);
+  }
+}
+
+/** `p`, or a rejection naming `what` once `ms` pass first. */
+function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} still pending after ${ms} ms`)), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * A started turn whose think probe never answers: the fit check's /api/show
+ * answers, every later one hangs. The rig has a lease, so the turn holds a claim.
+ */
+async function stalledThinkTurn() {
+  const r = await rig({ image: idleComfy("external", () => undefined).build });
+  let shows = 0;
+  r.setShow((res) => {
+    shows += 1;
+    if (shows === 1) json(res, 200, SHOW);
+  });
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think: true });
+  await until(() => shows === 2);
+  expect(r.app.activeTurns()).toBe(1);
+  expect(r.lease?.status().holders).toBe(1);
+  return { r, t, sent };
+}
 
 /** A fake image module: an idle ComfyUI with this owner; stopIdle claims the GPU alone, as image/module.ts does. */
 function idleComfy(owner: "app" | "external", onStop: () => void) {

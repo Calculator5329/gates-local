@@ -116,12 +116,14 @@ interface Turn {
  * The think flag a turn sends: none when /api/show lists the model's
  * capabilities without "thinking". An Ollama that lists none, or a show that
  * fails, keeps the request as asked; the chat request reports a real error.
+ * The turn's signal ends the probe: a cancel never waits on a stalled show
+ * (the aborted turn then ends as cancelled before any chat request).
  */
-async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined): Promise<boolean | undefined> {
+async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined, signal: AbortSignal): Promise<boolean | undefined> {
   if (requested === undefined) return undefined;
   let capabilities: readonly string[] | undefined;
   try {
-    ({ capabilities } = await fetchShow(baseUrl, model));
+    ({ capabilities } = await fetchShow(baseUrl, model, signal));
   } catch {
     return requested;
   }
@@ -199,7 +201,7 @@ export function createApp(deps: AppDeps): App {
       const image = options.image === true && deps.image !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
-      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think);
+      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal);
       const input = {
         baseUrl,
         model,
