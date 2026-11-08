@@ -1,27 +1,20 @@
-// The docked GPU memory panel (shell.md F16, F17b, F36, F48, F63): the verdict
-// for a model at a context, the context control, and where the memory goes,
-// from fit.check plus gpu.status when the server has it.
+// GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
+// verdict for a model at a context, the context control, and where the memory
+// goes, from fit.check plus gpu.status when the server has it.
 import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type Verdict, decodeSpeed, describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { ensureFit, setContext, updateSettings } from "./session.ts";
+import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
-/** Open the panel for a model (null: the chat's own model). It needs a ready runtime. */
+/** Open GPU memory in Settings › Advanced for a model (none: the chat's own model). */
 export function openFit(model?: string): void {
   const s = getState();
   closeTip();
-  if (!chatReady(s)) return;
-  setState({ pop: null, fitPanel: { open: true, model: model !== undefined && model !== s.model ? model : null } });
-}
-
-export function closeFit(focusChip: boolean): void {
-  if (!getState().fitPanel.open) return;
-  closeTip();
-  setState({ fitPanel: { open: false, model: null } });
-  if (focusChip && getState().view !== "settings") document.getElementById("fitBtn")?.focus();
+  setState({ pop: null, fitPanel: { open: false, model: model !== undefined && model !== s.model ? model : null } });
+  openSettings("advanced");
 }
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
@@ -304,31 +297,28 @@ function Body({ model }: { model: string }) {
   );
 }
 
-export function FitPanel() {
-  const open = useStore((s) => s.fitPanel.open && s.view !== "firstrun");
+/** GPU memory, the first group of Settings › Advanced: the same content the docked panel had, live from the store. */
+export function GpuMemory() {
   const ready = useStore(chatReady);
-  const model = useStore((s) => s.fitPanel.model ?? s.model);
+  const chat = useStore((s) => s.model);
+  const shown = useStore((s) => s.fitPanel.model);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const gpuRaw = useStore((s) => s.gpu);
-  useEffect(() => {
-    if (open && !ready) closeFit(false);
-  }, [open, ready]);
-  if (!open || !ready || model === undefined) return null;
+  const model = shown ?? chat;
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const head = gpu === undefined ? "" : gpu.vendor === "none" ? "No GPU found" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
   return (
-    <aside className="fpanel" id="fitPanel" role="complementary" aria-label="GPU memory">
-      <div className="fpn-h">
-        <div className="fp-h">
-          <span className="fp-t">GPU memory</span>
-          <span className="fp-gpu">{head}</span>
-        </div>
-        <button type="button" className="ibtn xs" aria-label="Close" data-tip="Close (Esc)" onClick={() => closeFit(true)}>
-          <Icon id="x" cls="s14" />
-        </button>
+    <div className="fp-set" id="gpuMemory">
+      <div className="fp-h">
+        <span className="fp-t">{model === undefined ? "No model yet" : describeModel(model, catalog).name}</span>
+        <span className="fp-gpu">{head}</span>
+        {shown !== null && chat !== undefined ? (
+          <button type="button" className="qa" onClick={() => setState({ fitPanel: { open: false, model: null } })}>
+            Show {describeModel(chat, catalog).name}
+          </button>
+        ) : null}
       </div>
-      <div className="fpn-b">
-        <Body model={model} />
-      </div>
-    </aside>
+      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
+    </div>
   );
 }

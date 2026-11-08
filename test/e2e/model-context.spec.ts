@@ -1,6 +1,6 @@
-// Journey: switch model in the picker and the context size in the GPU panel;
-// the verdict follows each change.
-import { expect, test, waitReady } from "./fixtures.ts";
+// Journey: switch model in the picker and the context size in GPU memory
+// (Settings › Advanced); the verdict follows each change.
+import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
 test("switching model and context updates the fit verdict and the panel", async ({ page, open }) => {
   await open();
@@ -20,12 +20,10 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(picker).toBeHidden();
   await expect(modelBtn).toContainText("Gemma 4 12B");
 
-  // the panel opens from the chip and changes context; 32k spills for the 12B
-  await fitBtn.click();
-  const panel = page.locator("#fitPanel");
-  await expect(panel).toBeVisible();
+  // GPU memory lives in Settings › Advanced and changes context; 32k spills for the 12B
+  const panel = await openGpuMemory(page);
+  await expect(panel).toContainText("Gemma 4 12B");
   await panel.getByRole("button", { name: "32k" }).click();
-  await expect(fitBtn).toContainText("32k · system memory");
   await expect(panel).toContainText("Uses system memory");
 
   // the per-app breakdown reads gpu.status (the fake nvidia-smi)
@@ -33,13 +31,13 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(panel).not.toContainText("not available in this build");
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
+  await expect(fitBtn).toContainText("32k · system memory");
 });
 
 test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await page.locator("#fitBtn").click();
-  const panel = page.locator("#fitPanel");
+  const panel = await openGpuMemory(page);
   await expect(panel).toContainText("Where the memory goes");
   await expect(panel.locator(".sw-whisper")).toHaveCount(2);
   const whisper = panel.locator(".lg-r").filter({ hasText: "Whisper" });

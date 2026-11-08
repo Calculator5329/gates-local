@@ -4,7 +4,7 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
-import { closeFit, openFit } from "./FitPanel.tsx";
+import { openFit } from "./FitPanel.tsx";
 import { type Verdict, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatModels } from "./pick.ts";
@@ -67,7 +67,6 @@ export function Composer() {
   const loadState = useStore((s) => (s.model === undefined ? undefined : s.loads[s.model]?.state));
   const used = useStore(usedTokens);
   const pop = useStore((s) => s.pop?.id ?? null);
-  const fitOpen = useStore((s) => s.fitPanel.open);
   const view = useStore((s) => s.view);
   const ta = useRef<HTMLTextAreaElement>(null);
 
@@ -113,9 +112,11 @@ export function Composer() {
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
   else if (noModel) sendTip = "Download a model to start chatting";
   else if (v?.k === "no" && v.limit !== undefined) sendTip = `${esc(name)} supports up to ${k(v.limit)} of context. Pick another model.`;
-  else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(numCtx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.`;
+  else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(numCtx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
   else if (!text) sendTip = "Type a message to send";
   const sendDisabled = (blocked && !queueable) || (!blocked && v?.k === "no") || noModel || !text;
+  // Refused for memory: the button stays focusable and clickable, and the click opens the why.
+  const memRefused = !blocked && !queueable && !noModel && v?.k === "no" && v.limit === undefined;
 
   const submit = () => {
     if (isStreaming) return stop();
@@ -180,8 +181,6 @@ export function Composer() {
               type="button"
               className="ctl gate"
               id="fitBtn"
-              aria-haspopup="dialog"
-              aria-expanded={fitOpen}
               data-tip={
                 blocked
                   ? "GPU memory is checked once Ollama is ready."
@@ -189,12 +188,7 @@ export function Composer() {
                     ? "Checking GPU memory…"
                     : `<b>${esc(name)}</b> at ${k(numCtx)}: ${v.word.replace(/ at \d+k$/, "")}. Click for GPU memory.`
               }
-              onClick={() => {
-                const s = getState();
-                if (s.fitPanel.open && s.fitPanel.model !== null) openFit();
-                else if (s.fitPanel.open) closeFit(false);
-                else openFit();
-              }}
+              onClick={() => openFit()}
             >
               <span className={`vd ${blocked || v === undefined ? "off" : v.k}`} />
               <span className="tab">
@@ -266,7 +260,19 @@ export function Composer() {
                 <span className="sqr" />
               </button>
             ) : (
-              <button type="submit" className="send" aria-label="Send message" data-tip={sendTip} disabled={sendDisabled}>
+              <button
+                type="submit"
+                className="send"
+                aria-label="Send message"
+                data-tip={sendTip}
+                disabled={sendDisabled && !memRefused}
+                aria-disabled={memRefused ? true : undefined}
+                onClick={(e) => {
+                  if (!memRefused) return;
+                  e.preventDefault();
+                  openFit();
+                }}
+              >
                 <SendArrow />
               </button>
             )}

@@ -39,13 +39,13 @@ const SHOTS: readonly Shot[] = [
   { name: "S-01-thread", light: "S-26-light-thread" },
   { name: "S-04-new", start: "new" },
   { name: "S-05-picker", light: "S-62-light-picker", act: (p) => p.locator("#modelBtn").click() },
+  // chat-feel: the docked fit panel (the design's S-07-fit) moved to Settings › Advanced
   {
-    name: "S-07-fit",
-    light: "S-42-light-fit-panel",
-    // click once the verdict settles: the chip widens then, and an early click left the pointer over Thinking (its tooltip)
+    name: "S-133-settings-advanced",
     act: async (p) => {
-      await expect(p.locator("#fitBtn")).toContainText("on GPU");
-      await p.locator("#fitBtn").click();
+      await settings("Advanced")(p);
+      await expect(p.locator("#gpuMemory .fp-v")).toContainText("Runs on GPU");
+      await p.mouse.move(1400, 880);
     },
   },
   // the design's state: the user chose the system Ollama and a wrong service holds its port

@@ -191,13 +191,10 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ibtn.xs{width:24px;height:24px;border-radius:var(--r-sm)}   /* 24 px hit targets (F40) */
 .work{flex:1;min-height:0;display:flex}
 .stage{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-direction:column}
-/* fit details docked beside the thread: it narrows the thread, never covers it (F17b) */
-.fpanel{width:360px;flex:none;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--background);animation:fadein .15s ease-out}
-.fpn-h{height:var(--header-h);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;border-bottom:1px solid var(--border)}
-.fpn-h .fp-h{flex:1;min-width:0}
-.fpn-h .fp-gpu{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
-.fpn-h .fp-t{line-height:1.3}
-.fpn-b{flex:1;min-height:0;overflow-y:auto;padding:16px}
+/* GPU memory in Settings › Advanced: the docked panel's content inside a settings box */
+.fp-set{padding:16px}
+.fp-set>.fp-h{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin-bottom:12px}
+.fp-set>.fp-h .qa{margin-left:auto}
 .tl{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges;padding:0 24px;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px);mask-image:linear-gradient(to bottom,transparent 0,#000 20px)}
 .col{max-width:var(--col);margin:0 auto;padding:32px 0 24px}
@@ -382,7 +379,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* send: gray disabled disc, solid green with a black arrow when ready, neutral stop (F02) */
 .send{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:var(--on-green);transition:transform .15s,background-color .15s,color .15s}
 .send:hover{transform:scale(1.05)}
-.send:disabled{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
+.send:disabled,.send[aria-disabled="true"]{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
 .send.stop{background:var(--stop-bg);color:var(--stop-fg)}
 .send .sqr{width:10px;height:10px;border-radius:2px;background:currentColor;display:block}
 

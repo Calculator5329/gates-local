@@ -30,7 +30,7 @@ export type Conn =
   | { readonly kind: "no-server" };
 
 export type View = "thread" | "new" | "settings" | "firstrun";
-export type Section = "general" | "models" | "runtime" | "memory" | "images" | "library";
+export type Section = "general" | "models" | "runtime" | "memory" | "images" | "library" | "advanced";
 
 /** The reply being written now, or the last one that stopped before it finished. */
 export interface LiveTurn {

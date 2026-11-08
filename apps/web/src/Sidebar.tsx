@@ -15,6 +15,7 @@ export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["memory", "Memory", "note"],
   ["images", "Image generation", "image"],
   ["library", "Library", "db"],
+  ["advanced", "Advanced", "gear"],
 ];
 
 /** Re-render every interval so "5m" ages without a store change. */

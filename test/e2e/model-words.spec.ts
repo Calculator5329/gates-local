@@ -3,7 +3,7 @@
 // apart (G7-01) and puts its context lines apart (F76), a refused verdict's
 // dot is red in the first-run card (item 4), and tok/s counts decode time only.
 import type { Page } from "@playwright/test";
-import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
 
 type Box = { top: number; bottom: number; left: number; right: number };
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -49,9 +49,7 @@ for (const width of [1440, 760]) {
 test("the fit panel names what this model can use apart from what is free, on separate context lines", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await page.locator("#fitBtn").click();
-  const panel = page.locator("#fitPanel");
-  await expect(panel).toBeVisible();
+  const panel = await openGpuMemory(page);
   await expect(panel.locator(".fp-n").first()).toHaveText(/^Estimated [\d.]+ GB of [\d.]+ GB available to this model · /);
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
@@ -69,7 +67,7 @@ test("the fit panel names what this model can use apart from what is free, on se
   // once a reply has loaded the model, the leftover segment is what is free right now
   await sendMessage(page, "Load it");
   await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
-  await page.locator("#fitBtn").click();
+  await openGpuMemory(page);
   await expect(panel.locator(".legend")).toContainText("Currently free");
 });
 
@@ -100,8 +98,8 @@ test.describe("decode speed", () => {
     const meta = await page.locator(".turn.a").last().locator(".meta").textContent();
     const replyTps = Number(/(\d+) tok\/s/.exec(meta ?? "")?.[1]);
     expect(replyTps).toBeGreaterThanOrEqual(40);
-    await page.locator("#fitBtn").click();
-    const panelTps = Number(/(\d+) tok\/s/.exec((await page.locator("#fitPanel .meas").textContent()) ?? "")?.[1]);
+    const panel = await openGpuMemory(page);
+    const panelTps = Number(/(\d+) tok\/s/.exec((await panel.locator(".meas").textContent()) ?? "")?.[1]);
     expect(panelTps).toBe(replyTps);
   });
 });

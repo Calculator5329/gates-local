@@ -7,7 +7,6 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, rtOf } from "./Banner.tsx";
 import { Composer, Picker, PlusMenu } from "./Composer.tsx";
 import { FirstRun, NoServer } from "./FirstRun.tsx";
-import { FitPanel, closeFit } from "./FitPanel.tsx";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { SettingsView } from "./Settings.tsx";
 import { Sidebar, focusComposer, goNew, openSearch } from "./Sidebar.tsx";
@@ -189,10 +188,6 @@ function onKey(e: KeyboardEvent): void {
       e.preventDefault();
       return closePop(true);
     }
-    if (s.fitPanel.open) {
-      e.preventDefault();
-      return closeFit(true);
-    }
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
     if (s.view === "settings" && s.addPage) return setState({ addPage: false });
     if (s.view === "settings") return leaveSettings();
@@ -285,7 +280,6 @@ export function App() {
                 )}
               </div>
             )}
-            <FitPanel />
           </div>
         </main>
         {noServer ? (
