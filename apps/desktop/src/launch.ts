@@ -55,7 +55,7 @@ export interface ServerEnvInput {
 
 /**
  * The server child's environment. The phone knobs (GATES_LOCAL_WEB_LISTEN,
- * _ORIGIN, _USER) pass through as set; with LISTEN set, GATES_LOCAL_WEB_ROOT
+ * _ORIGIN, _USER, _PEERS) pass through as set; with LISTEN set, GATES_LOCAL_WEB_ROOT
  * is the dist dir the window serves, so the phone gets the same client.
  */
 export function serverEnv({ env, clientOrigin, webRoot }: ServerEnvInput): NodeJS.ProcessEnv {

@@ -6,6 +6,7 @@
 // never repeat the user value.
 import path from "node:path";
 import { exactOrigin, validUser } from "./phone.ts";
+import { parsePeers } from "./source.ts";
 
 export interface PhoneConfig {
   /** The owner-only Unix socket Tailscale Serve proxies to. */
@@ -13,6 +14,8 @@ export interface PhoneConfig {
   readonly origin: string;
   readonly user: string;
   readonly webRoot: string;
+  /** GATES_LOCAL_WEB_PEERS, normalised: when set, the only source addresses admitted. */
+  readonly peers?: readonly string[];
 }
 
 export type PhoneConfigResult = { readonly ok: true; readonly value: PhoneConfig | null } | { readonly ok: false; readonly message: string };
@@ -43,5 +46,11 @@ export function phoneConfig(env: NodeJS.ProcessEnv): PhoneConfigResult {
   }
   const webRoot = env["GATES_LOCAL_WEB_ROOT"] ?? "";
   if (webRoot === "") return { ok: false, message: "GATES_LOCAL_WEB_ROOT must name the built web client (apps/web/dist) when GATES_LOCAL_WEB_LISTEN is set" };
-  return { ok: true, value: { socketPath: path.normalize(socketPath), origin, user, webRoot: path.resolve(webRoot) } };
+  const peersText = env["GATES_LOCAL_WEB_PEERS"] ?? "";
+  const peers = peersText === "" ? undefined : parsePeers(peersText);
+  if (peers === null) {
+    return { ok: false, message: `GATES_LOCAL_WEB_PEERS must be comma-separated IP addresses (the phones' Tailscale addresses, no ports), got "${peersText}"` };
+  }
+  const value = { socketPath: path.normalize(socketPath), origin, user, webRoot: path.resolve(webRoot) };
+  return { ok: true, value: peers === undefined ? value : { ...value, peers } };
 }

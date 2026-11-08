@@ -66,6 +66,8 @@ export interface PhoneListenerOptions {
   readonly origin: string;
   /** The one Tailscale-User-Login value admitted. */
   readonly user: string;
+  /** When set, the only source addresses (Serve's X-Forwarded-For) admitted. */
+  readonly peers?: readonly string[];
   /** The built web client served on GET. */
   readonly webRoot: string;
 }

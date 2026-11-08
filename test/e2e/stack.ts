@@ -14,8 +14,10 @@
 //                           opens the phone listener (GATES_LOCAL_WEB_LISTEN) on a
 //                           Unix socket in a short 0700 dir under ~/.cache and a
 //                           Serve stand-in (serve-standin.ts) in front of it on a
-//                           free port outside 5286..5289, for PHONE_USER at
-//                           http://127.0.0.1:<port>; the reply carries phonePort
+//                           free port outside 5286..5289, for PHONE_USER from
+//                           PHONE_ADDR at http://127.0.0.1:<port> (no
+//                           GATES_LOCAL_WEB_PEERS, so the self-source check is
+//                           the one tested); the reply carries phonePort
 //                           (the stand-in's) and phoneSocket
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
@@ -32,7 +34,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createServer as createNetServer } from "node:net";
-import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
+import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_ADDR, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
 import { seedDesign, seedLong } from "./seed.ts";
@@ -193,7 +195,7 @@ const control = createServer((req, res) => {
         standIn = null;
         phonePort = phone === true ? await freePort() : null;
         const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined);
-        if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER);
+        if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER, PHONE_ADDR);
         const reply = phonePort === null ? { dataDir, threadId, phonePort } : { dataDir, threadId, phonePort, phoneSocket };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));
       } else if (route === "POST /restart") {

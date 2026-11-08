@@ -28,6 +28,12 @@
 //   GATES_LOCAL_WEB_ORIGIN       the exact public origin, e.g. https://hub.example.ts.net:8456
 //   GATES_LOCAL_WEB_USER         the one Tailscale-User-Login value admitted
 //   GATES_LOCAL_WEB_ROOT         the built web client to serve (apps/web/dist)
+//   GATES_LOCAL_WEB_PEERS        optional comma list of the phones' Tailscale addresses; when set,
+//                                only those sources (Serve's X-Forwarded-For) are admitted
+// Serve stamps the owner's login on any dial from this machine to its own
+// Tailscale address, so a source that is one of this machine's addresses is
+// always refused. PEERS also covers what that check cannot see, such as a
+// userspace-networking tailscaled where no interface carries the address.
 // With LISTEN set, a missing or malformed other knob stops the start (exit 2).
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";

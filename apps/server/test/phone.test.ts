@@ -65,7 +65,7 @@ function handlers(): Partial<Handlers> {
   return { "threads.list": () => methodSamples["threads.list"].result } as Partial<Handlers>;
 }
 
-function startRaw(fx: Fixture, logs: string[] = [], socketPath = fx.socketPath): Promise<WsServer> {
+function startRaw(fx: Fixture, logs: string[] = [], socketPath = fx.socketPath, peers?: readonly string[]): Promise<WsServer> {
   return startWsServer({
     port: 0,
     token: TOKEN,
@@ -73,12 +73,12 @@ function startRaw(fx: Fixture, logs: string[] = [], socketPath = fx.socketPath):
     handlers: handlers(),
     dataDir: fx.dataDir,
     log: (line) => logs.push(line),
-    phone: { socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot },
+    phone: { socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot, ...(peers === undefined ? {} : { peers }) },
   });
 }
 
-async function start(fx: Fixture, logs: string[] = []): Promise<WsServer & { phoneSocket: string }> {
-  const server = await startRaw(fx, logs);
+async function start(fx: Fixture, logs: string[] = [], peers?: readonly string[]): Promise<WsServer & { phoneSocket: string }> {
+  const server = await startRaw(fx, logs, fx.socketPath, peers);
   cleanups.push(() => server.close());
   expect(server.phoneSocket, "the phone listener's socket").toBe(fx.socketPath);
   return server as WsServer & { phoneSocket: string };
@@ -90,11 +90,14 @@ interface Reply {
   readonly body: string;
 }
 
-/** What Serve sends a Unix backend for the owner's request. */
-const SERVE = { host: "localhost", "x-forwarded-host": PUBLIC_HOST, "tailscale-user-login": USER };
+/** The phone's tailnet address in these tests: TEST-NET-1, never one of this machine's. */
+const PHONE_ADDR = "192.0.2.10";
+
+/** What Serve sends a Unix backend for the owner's request from the phone. */
+const SERVE = { host: "localhost", "x-forwarded-host": PUBLIC_HOST, "x-forwarded-for": PHONE_ADDR, "tailscale-user-login": USER };
 
 /** A raw request over the socket: node does not normalise the path, so traversal reaches the server as written. */
-function req(socketPath: string, rawPath: string, headers: Record<string, string> = SERVE, method = "GET"): Promise<Reply> {
+function req(socketPath: string, rawPath: string, headers: Record<string, string | string[]> = SERVE, method = "GET"): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const r = request({ socketPath, path: rawPath, method, headers }, (res) => {
       const chunks: Buffer[] = [];
@@ -139,10 +142,10 @@ function expectSecurityHeaders(r: Reply): void {
 
 /** Every request shape that is not Serve's for the owner. */
 const NOT_SERVE: ReadonlyArray<readonly [string, Record<string, string>]> = [
-  ["no login", { host: "localhost", "x-forwarded-host": PUBLIC_HOST }],
+  ["no login", { host: "localhost", "x-forwarded-host": PUBLIC_HOST, "x-forwarded-for": PHONE_ADDR }],
   ["a wrong user", { ...SERVE, "tailscale-user-login": "intruder@example.com" }],
   ["the public Host (a TCP-backend shape)", { ...SERVE, host: PUBLIC_HOST }],
-  ["no X-Forwarded-Host", { host: "localhost", "tailscale-user-login": USER }],
+  ["no X-Forwarded-Host", { host: "localhost", "x-forwarded-for": PHONE_ADDR, "tailscale-user-login": USER }],
   ["a wrong X-Forwarded-Host", { ...SERVE, "x-forwarded-host": "evil.example:8456" }],
 ];
 
@@ -227,6 +230,85 @@ describe("phone listener admission (Serve's Unix-backend header shape)", () => {
     await phoneClient.call("threads.list", {});
     expect(got.desk).toEqual([payload]);
     expect(got.phone).toEqual([payload]);
+  });
+});
+
+/** This machine's own addresses as os.networkInterfaces() gives them, link-local ones with their zone id as a socket would show it. */
+function ownAddresses(): string[] {
+  const out: string[] = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const a of list ?? []) out.push(a.family === "IPv6" && a.address.startsWith("fe80:") ? `${a.address}%${name}` : a.address);
+  }
+  return out;
+}
+
+/** Spellings of a self source Serve or a hand-made request could carry: mapped, expanded and upper-case forms. */
+const SELF_SPELLINGS = ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "::FFFF:127.0.0.1", "::ffff:7f00:1"];
+
+// Serve stamps the owner's login on a connection from this machine too (WhoIs
+// finds the self node by its Tailscale address), so the source address is
+// checked apart from the login: every case here carries the right login.
+describe("phone listener source address (Serve's X-Forwarded-For)", () => {
+  it("refuses a request and an upgrade from any of this machine's own addresses, in every spelling", async () => {
+    const fx = fixture();
+    const logs: string[] = [];
+    const s = await start(fx, logs);
+    const selves = [...SELF_SPELLINGS, ...ownAddresses(), ...ownAddresses().filter((a) => a.includes(":")).map((a) => a.toUpperCase())];
+    for (const self of selves) {
+      expect((await req(s.phoneSocket, "/", { ...SERVE, "x-forwarded-for": self })).status, self).toBe(403);
+      expect(await upgrade(s.phoneSocket, { ...SERVE, "x-forwarded-for": self }, ORIGIN), self).toBe(403);
+    }
+    expect(logs.filter((l) => l.includes("this machine")).length).toBe(selves.length * 2);
+    for (const l of logs) expect(l).not.toContain("127.0.0.1");
+  });
+
+  it("refuses a missing, multi-valued or malformed X-Forwarded-For", async () => {
+    const fx = fixture();
+    const s = await start(fx);
+    const { "x-forwarded-for": _, ...noSource } = SERVE;
+    const bad: ReadonlyArray<readonly [string, Record<string, string | string[]>]> = [
+      ["missing", noSource],
+      ["empty", { ...SERVE, "x-forwarded-for": "" }],
+      ["a list", { ...SERVE, "x-forwarded-for": `${PHONE_ADDR}, 192.0.2.11` }],
+      ["a list without a space", { ...SERVE, "x-forwarded-for": `${PHONE_ADDR},192.0.2.11` }],
+      ["two header lines", { ...SERVE, "x-forwarded-for": [PHONE_ADDR, "192.0.2.11"] }],
+      ["an address with a port", { ...SERVE, "x-forwarded-for": `${PHONE_ADDR}:443` }],
+      ["a host name", { ...SERVE, "x-forwarded-for": "phone.example.ts.net" }],
+      ["a trailing comma", { ...SERVE, "x-forwarded-for": `${PHONE_ADDR},` }],
+      ["a zone on IPv4", { ...SERVE, "x-forwarded-for": `${PHONE_ADDR}%eth0` }],
+      ["bracketed IPv6", { ...SERVE, "x-forwarded-for": "[2001:db8::7]" }],
+    ];
+    for (const [what, headers] of bad) {
+      expect((await req(s.phoneSocket, "/", headers)).status, what).toBe(403);
+      expect(await upgrade(s.phoneSocket, headers as Record<string, string>, ORIGIN), what).toBe(403);
+    }
+  });
+
+  it("with GATES_LOCAL_WEB_PEERS set admits only the listed phones, in any spelling, and still needs the login", async () => {
+    const fx = fixture();
+    const s = await start(fx, [], [PHONE_ADDR, "2001:db8::7"]);
+    for (const outside of ["192.0.2.11", "2001:db8::8", "100.64.0.9"]) {
+      expect((await req(s.phoneSocket, "/", { ...SERVE, "x-forwarded-for": outside })).status, outside).toBe(403);
+      expect(await upgrade(s.phoneSocket, { ...SERVE, "x-forwarded-for": outside }, ORIGIN), outside).toBe(403);
+    }
+    for (const listed of [PHONE_ADDR, `::ffff:${PHONE_ADDR}`, "2001:db8::7", "2001:DB8:0:0:0:0:0:7"]) {
+      expect((await req(s.phoneSocket, "/", { ...SERVE, "x-forwarded-for": listed })).status, listed).toBe(200);
+      expect(await upgrade(s.phoneSocket, { ...SERVE, "x-forwarded-for": listed }, ORIGIN), listed).toBe("open");
+    }
+    expect((await req(s.phoneSocket, "/", { ...SERVE, "tailscale-user-login": "intruder@example.com" })).status).toBe(403);
+  });
+
+  it("an allowlist naming this machine still refuses this machine", async () => {
+    const fx = fixture();
+    const s = await start(fx, [], ["127.0.0.1", PHONE_ADDR]);
+    expect((await req(s.phoneSocket, "/", { ...SERVE, "x-forwarded-for": "127.0.0.1" })).status).toBe(403);
+    expect((await req(s.phoneSocket, "/")).status).toBe(200);
+  });
+
+  it("refuses a malformed allowlist at start", async () => {
+    const fx = fixture();
+    await expect(startRaw(fx, [], fx.socketPath, ["192.0.2.10", "phone"])).rejects.toThrow(/peer/);
+    expect(existsSync(fx.socketPath)).toBe(false);
   });
 });
 

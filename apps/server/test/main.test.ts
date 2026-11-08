@@ -305,6 +305,9 @@ describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
     ["an empty user", { GATES_LOCAL_WEB_USER: "" }, "GATES_LOCAL_WEB_USER"],
     ["a user with spaces", { GATES_LOCAL_WEB_USER: " owner@example.com" }, "GATES_LOCAL_WEB_USER"],
     ["no web root", { GATES_LOCAL_WEB_ROOT: "" }, "GATES_LOCAL_WEB_ROOT"],
+    ["a peer that is a host name", { GATES_LOCAL_WEB_PEERS: "192.0.2.10,phone" }, "GATES_LOCAL_WEB_PEERS"],
+    ["an empty peer item", { GATES_LOCAL_WEB_PEERS: "192.0.2.10," }, "GATES_LOCAL_WEB_PEERS"],
+    ["a peer with a port", { GATES_LOCAL_WEB_PEERS: "192.0.2.10:443" }, "GATES_LOCAL_WEB_PEERS"],
   ])("refuses to start with %s: exit 2, no ready line, nothing listening", async (_what, override, named) => {
     const tmp = cacheTmp();
     const port = await freePort();
@@ -367,18 +370,23 @@ describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
         GATES_LOCAL_WEB_ORIGIN: ORIGIN,
         GATES_LOCAL_WEB_USER: USER,
         GATES_LOCAL_WEB_ROOT: webRoot(tmp),
+        GATES_LOCAL_WEB_PEERS: " 192.0.2.10 , 2001:DB8::7",
       },
       path.join(tmp, "data"),
     );
     const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
     expect((lstatSync(socketPath).mode & 0o777).toString(8)).toBe("600");
     expect((lstatSync(path.join(tmp, "run")).mode & 0o777).toString(8)).toBe("700");
-    // Serve's Unix-backend shape: Host localhost, the public host forwarded, its login.
-    const serve = { host: "localhost", "x-forwarded-host": "hub.example.ts.net:8456", "tailscale-user-login": USER };
+    // Serve's Unix-backend shape: Host localhost, the public host forwarded,
+    // the phone's tailnet address as the source, its login.
+    const serve = { host: "localhost", "x-forwarded-host": "hub.example.ts.net:8456", "x-forwarded-for": "192.0.2.10", "tailscale-user-login": USER };
     const ok = await getRoot(socketPath, serve);
     expect(ok.status).toBe(200);
     expect(ok.body).toContain('<meta name="gates-local-server" content="same-origin">');
-    expect((await getRoot(socketPath, { host: "localhost", "x-forwarded-host": "hub.example.ts.net:8456" })).status).toBe(403);
+    expect((await getRoot(socketPath, { ...serve, "x-forwarded-for": "2001:db8::7" })).status, "the second listed peer").toBe(200);
+    expect((await getRoot(socketPath, { ...serve, "x-forwarded-for": "192.0.2.11" })).status, "an unlisted peer").toBe(403);
+    expect((await getRoot(socketPath, { ...serve, "x-forwarded-for": "127.0.0.1" })).status, "this machine").toBe(403);
+    expect((await getRoot(socketPath, { host: "localhost", "x-forwarded-host": "hub.example.ts.net:8456", "x-forwarded-for": "192.0.2.10" })).status).toBe(403);
     expect((await getRoot(socketPath, { ...serve, host: "hub.example.ts.net:8456" })).status).toBe(403);
     expect(await upgrade(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`)).toBe("open");
   });

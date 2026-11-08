@@ -13,6 +13,8 @@
 //   - Tailscale-User-Login: addTailscaleIdentityHeaders deletes any the client
 //     sent, then sets the source node's login (none for tagged nodes or
 //     Funnel).
+//   - X-Forwarded-For: the connection's source address, Set (one value);
+//     httputil.ReverseProxy deletes the client's before Rewrite runs.
 //   - Origin: passed through unchanged.
 // So a request is admitted when the login is exactly the one user, Host is
 // localhost (a TCP-backend or hand-made shape is not Serve's to this socket),
@@ -20,13 +22,20 @@
 // that name, not another one that resolves to the tailnet address). The
 // WebSocket upgrade and any request that is not GET or HEAD also need the
 // exact Origin, so another site the phone visits cannot drive the app.
+//
+// Serve also names the owner for a connection from this machine itself, so
+// the source in X-Forwarded-For must not be one of this machine's addresses,
+// and, with GATES_LOCAL_WEB_PEERS set, must be a listed phone (src/web/source.ts).
 import type { IncomingMessage } from "node:http";
+import { normalAddress, ownAddresses } from "./source.ts";
 
 export interface PhoneGateOptions {
   /** The exact public origin, e.g. https://hub.example.ts.net:8456. */
   readonly origin: string;
   /** The one Tailscale-User-Login value admitted. */
   readonly user: string;
+  /** GATES_LOCAL_WEB_PEERS: when set, only these source addresses (the phones' Tailscale addresses) are admitted. */
+  readonly peers?: readonly string[];
 }
 
 export type Admission = { readonly ok: true } | { readonly ok: false; readonly reason: string };
@@ -66,11 +75,24 @@ export function phoneGate(options: PhoneGateOptions): (req: IncomingMessage, kin
   const host = origin.host;
   const exact = origin.origin;
   const user = options.user;
+  let peers: ReadonlySet<string> | null = null;
+  if (options.peers !== undefined) {
+    const listed = options.peers.map(normalAddress);
+    if (listed.length === 0 || listed.some((p) => p === null)) throw new Error("phone peers must be IP addresses");
+    peers = new Set(listed as string[]);
+  }
   return (req, kind) => {
     const login = req.headers["tailscale-user-login"];
     if (login === undefined) return { ok: false, reason: "no Tailscale-User-Login" };
     if (login !== user) return { ok: false, reason: "wrong user" };
     if ((req.headers.host ?? "").toLowerCase() !== "localhost") return { ok: false, reason: "Host is not localhost (not Serve's Unix-backend shape)" };
+    const forwardedFor = req.headers["x-forwarded-for"];
+    if (forwardedFor === undefined) return { ok: false, reason: "no X-Forwarded-For" };
+    const source = typeof forwardedFor === "string" ? normalAddress(forwardedFor) : null;
+    if (source === null) return { ok: false, reason: "X-Forwarded-For is not one address" };
+    // Read per request: interfaces come and go (tailscale0 among them).
+    if (ownAddresses().has(source)) return { ok: false, reason: "source is this machine (Serve names its own owner for local dials)" };
+    if (peers !== null && !peers.has(source)) return { ok: false, reason: "source is not in GATES_LOCAL_WEB_PEERS" };
     const forwarded = req.headers["x-forwarded-host"];
     if (forwarded === undefined) return { ok: false, reason: "no X-Forwarded-Host" };
     if (typeof forwarded !== "string" || forwarded.toLowerCase() !== host) return { ok: false, reason: "wrong X-Forwarded-Host" };

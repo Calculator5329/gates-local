@@ -112,6 +112,7 @@ server child:
 | `GATES_LOCAL_WEB_LISTEN` | `unix:<absolute path>`: the phone listener's Unix socket, e.g. `unix:/run/user/1000/gates-local/phone.sock`. A TCP value (`127.0.0.1:<port>` included) stops the server at start. |
 | `GATES_LOCAL_WEB_ORIGIN` | The exact public origin, e.g. `https://hub.example.ts.net:8456`. |
 | `GATES_LOCAL_WEB_USER` | The one `Tailscale-User-Login` value admitted. |
+| `GATES_LOCAL_WEB_PEERS` | Optional comma list of the phones' Tailscale addresses, e.g. `100.101.102.103,fd7a:115c:a1e0::1234`. When set, only those sources are admitted; a value that is not a list of addresses stops the server at start. |
 | `GATES_LOCAL_WEB_ROOT` | Set by main to the dist dir the window serves (`webRoot()`); not yours to set. |
 
 Deploy: `tailscale serve --bg --https=8456 unix:<path>`, with the same path
@@ -137,7 +138,17 @@ Admission matches what Serve sends a Unix backend (tailscale v1.104.4,
 deleting any the client sent. Every request needs that login to equal the
 user, `Host` to be `localhost` and `X-Forwarded-Host` to be the origin's
 host. The `/ws` upgrade and any request that is not GET or HEAD also need
-the exact `Origin`. A malformed or empty knob with `LISTEN` set stops the
+the exact `Origin`.
+
+Serve names the owner for any connection from this machine to its own
+Tailscale address, so another local account could reach the listener
+through Serve. Each request therefore needs Serve's `X-Forwarded-For` (the
+connection's source, set by Serve after deleting the client's) and that
+source must not be one of this machine's interface addresses. That check
+cannot see a userspace-networking tailscaled, where no interface carries
+the address; set `GATES_LOCAL_WEB_PEERS` to admit only the phones.
+
+A malformed or empty knob with `LISTEN` set stops the
 server at start (fail closed). The phone shares the server's handlers and
 pushes, so a reply streams to the desktop window and the phone alike. Run
 the app in background mode so the phone works with the window closed.

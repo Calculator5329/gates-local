@@ -4,11 +4,14 @@
 // socket; a browser cannot open one, so the stack puts a Tailscale Serve
 // stand-in (serve-standin.ts) in front of it on a loopback port, rewriting
 // headers as Serve does for a unix: backend (Host localhost, X-Forwarded-Host,
-// its own Tailscale-User-Login). The page loads through it at a phone
-// viewport, finds the server on its own origin (the same-origin meta) and
-// streams a reply. The upgrade needs Serve's shape and the exact Origin, so
-// an open socket proves both reached it.
+// the source in X-Forwarded-For, its own Tailscale-User-Login). The page
+// loads through it at a phone viewport, finds the server on its own origin
+// (the same-origin meta) and streams a reply. The upgrade needs Serve's shape
+// and the exact Origin, so an open socket proves both reached it. A request
+// Serve would stamp with the owner's login but that came from this machine
+// (a local dial to its own Tailscale address) is refused.
 import { request } from "node:http";
+import { networkInterfaces } from "node:os";
 import { CONTROL_URL } from "./env.ts";
 import { expect, sendMessage, test } from "./fixtures.ts";
 
@@ -41,6 +44,17 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
 
   // Without Serve's headers the socket refuses even the page.
   expect(await direct(socket, {})).toBe(403);
+
+  // Serve's full shape with this machine as the source: loopback, and an
+  // interface address (tailscale0's when it is up) as a local dial to the
+  // desktop's own Serve URL would carry.
+  const own = Object.values(networkInterfaces()).flatMap((list) => (list ?? []).filter((a) => !a.internal).map((a) => a.address));
+  const selves = ["127.0.0.1", "::1", ...own.filter((a) => a.startsWith("100.")).slice(0, 1), ...own.slice(0, 1)];
+  for (const self of selves) {
+    const r = await fetch(`${origin}/`, { headers: { "x-standin-source": self } });
+    expect(r.status, `source ${self}`).toBe(403);
+  }
+  expect((await fetch(`${origin}/`)).status, "the phone's own source").toBe(200);
 
   const errors: string[] = [];
   page.on("console", (m) => {
