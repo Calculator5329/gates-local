@@ -46,6 +46,11 @@ function startsWithSqliteHeader(file: string): boolean {
   } finally { closeSync(fd); }
 }
 
+/** lstat, or undefined when nothing is there: a link is reported as itself, never followed. */
+function lstatIfAny(file: string) {
+  try { return lstatSync(file); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw e; }
+}
+
 /** Only explicit additions enter this registry; database readers see VACUUM snapshots. */
 export function createSources(deps: { dataDir: string; now?: () => number; log?: (line: string) => void }): Sources {
   mkdirSync(deps.dataDir, { recursive: true });
@@ -85,31 +90,52 @@ export function createSources(deps: { dataDir: string; now?: () => number; log?:
   // database keeps its newest copy as <id>.db (the current snapshot when there is one), and every
   // other archived copy goes. That deletion needs the registry: when it is missing or corrupt, no
   // copy's owner is known, so the whole folder is set aside for the owner and never read again.
+  // Nothing here follows a link: the archive root and every entry are looked at with lstat,
+  // only regular files count as copies, and a link is renamed as itself, never chmodded or read.
   const archive = path.join(snapshots, "_archive");
-  const archivedCopies = (id?: string) => !existsSync(archive) ? [] : readdirSync(archive)
-    .filter(name => id === undefined || name.startsWith(`${id}.`)).map(name => path.join(archive, name));
-  if (existsSync(archive) && loaded.registry !== "decoded") {
+  /** One source's archived copies that are regular files; nothing when `_archive` is not a real folder. */
+  const archivedCopies = (id: string) => !lstatIfAny(archive)?.isDirectory() ? [] : readdirSync(archive)
+    .filter(name => name.startsWith(`${id}.`)).map(name => path.join(archive, name)).filter(file => lstatSync(file).isFile());
+  /** Renames `_archive` itself (a link stays a link) to a name the app never reads or deletes. */
+  const setAside = () => {
     let unclaimed = path.join(snapshots, `_archive-unclaimed-${now()}`);
-    if (existsSync(unclaimed)) unclaimed = `${unclaimed}-${randomUUID()}`;
-    // A failed rename stops the start: left in place, the folder would meet a decoded registry later.
+    if (lstatIfAny(unclaimed)) unclaimed = `${unclaimed}-${randomUUID()}`;
     renameSync(archive, unclaimed);
-    try {
-      chmodSync(unclaimed, 0o700);
-      for (const name of readdirSync(unclaimed, { recursive: true }) as string[]) {
-        const file = path.join(unclaimed, name);
-        const stat = lstatSync(file);
-        if (!stat.isSymbolicLink()) chmodSync(file, stat.isDirectory() ? 0o700 : 0o600);
-      }
-    } catch (e) { log(`snapshots/${path.basename(unclaimed)} could not be made private (${(e as Error).message})`); }
+    return unclaimed;
+  };
+  /** Folders 0700 and files 0600 below `dir`, never descending into or changing a link. */
+  const makePrivate = (dir: string) => {
+    chmodSync(dir, 0o700);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) makePrivate(file);
+      else if (entry.isFile()) chmodSync(file, 0o600);
+    }
+  };
+  const archiveStat = lstatIfAny(archive);
+  if (archiveStat && !archiveStat.isDirectory()) {
+    // A failed rename stops the start, as below; nothing is read or changed through the link meanwhile.
+    const unclaimed = setAside();
+    log(`snapshots/_archive was ${archiveStat.isSymbolicLink() ? "a link" : "not a folder"}; it was renamed to snapshots/${path.basename(unclaimed)} and left as it is (nothing was read, changed or moved through it)`);
+  } else if (archiveStat && loaded.registry !== "decoded") {
+    // A failed rename stops the start: left in place, the folder would meet a decoded registry later.
+    const unclaimed = setAside();
+    try { if (lstatSync(unclaimed).isDirectory()) makePrivate(unclaimed); }
+    catch (e) { log(`snapshots/${path.basename(unclaimed)} could not be made private (${(e as Error).message})`); }
     log(`snapshots/_archive was kept as snapshots/${path.basename(unclaimed)} because sources.json was ${loaded.registry === "missing" ? "missing" : "could not be read"}; nothing in it was deleted`);
-  } else if (existsSync(archive)) {
+  } else if (archiveStat) {
     try {
       for (const source of sources) {
-        if (source.kind !== "sqlite" || existsSync(snapshotPath(source.id))) continue;
-        const newest = archivedCopies(source.id).filter(file => statSync(file).isFile()).toSorted((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+        if (source.kind !== "sqlite" || lstatIfAny(snapshotPath(source.id))) continue;
+        const newest = archivedCopies(source.id).toSorted((a, b) => lstatSync(b).mtimeMs - lstatSync(a).mtimeMs)[0];
         if (newest) { chmodSync(newest, 0o600); renameSync(newest, snapshotPath(source.id)); }
       }
-      rmSync(archive, { recursive: true, force: true });
+      // Only regular copies are the old layout's to delete; anything else is the owner's.
+      if (readdirSync(archive).every(name => lstatSync(path.join(archive, name)).isFile())) rmSync(archive, { recursive: true, force: true });
+      else {
+        const unclaimed = setAside();
+        log(`snapshots/_archive held links or folders, not only snapshot copies; it was renamed to snapshots/${path.basename(unclaimed)} and left as it is (nothing was read, changed or moved through it)`);
+      }
     } catch (e) { log(`snapshots/_archive could not be cleaned up (${(e as Error).message}); it is retried at the next start`); }
   }
   /** What is on disk: never a "refreshing" state, so a crash mid-refresh loads back as the last good one. */

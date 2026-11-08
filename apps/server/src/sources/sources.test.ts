@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -15,6 +15,12 @@ const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8
 const writerUnavailable = writerProbe.error && ["EPERM", "EACCES"].includes((writerProbe.error as NodeJS.ErrnoException).code ?? "");
 if (writerProbe.error && !writerUnavailable) throw writerProbe.error;
 afterEach(() => { for (const child of children.splice(0)) child.kill(); });
+/** Every name under `dir` with its mode and, for files, its bytes; and the folder's own mode. */
+const tree = (dir: string) => [statSync(dir).mode, ...(readdirSync(dir, { recursive: true }) as string[]).toSorted().map(name => {
+  const file = path.join(dir, name);
+  const info = lstatSync(file);
+  return [name, info.mode, info.isFile() ? readFileSync(file, "utf8") : null];
+})];
 const setup = () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-sources-"));
   const dataDir = path.join(root, "app");
@@ -122,6 +128,81 @@ describe("Library registry", () => {
       expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`_archive-unclaimed-1234.*${registry === "corrupt" ? "could not be read" : "missing"}`)));
     });
   }
+  for (const registry of ["missing", "decoded"] as const) {
+    it(`a ${registry} registry: an _archive that is a symlink is set aside as the link itself; its target is never read, changed or moved (T3-01)`, async () => {
+      const { root, dataDir, sources } = setup();
+      const snapshots = path.join(dataDir, "snapshots");
+      let id: string = randomUUID();
+      if (registry === "decoded") {
+        const file = path.join(root, "live.db");
+        const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n)"); live.close();
+        id = (await sources.add({ kind: "sqlite", path: file })).id;
+        // No current snapshot: the old migration would take this source's newest archived copy.
+        rmSync(path.join(snapshots, `${id}.db`));
+      }
+      const external = path.join(root, "external"); mkdirSync(external); chmodSync(external, 0o755);
+      const copy = path.join(external, `${id}.${randomUUID()}.db`); writeFileSync(copy, "not the app's"); chmodSync(copy, 0o644);
+      const nested = path.join(external, "nested"); mkdirSync(nested); chmodSync(nested, 0o755);
+      writeFileSync(path.join(nested, "note.txt"), "nested"); chmodSync(path.join(nested, "note.txt"), 0o644);
+      symlinkSync(external, path.join(snapshots, "_archive"));
+      const before = tree(external);
+      const log = vi.fn();
+      createSources({ dataDir, now: () => 1234, log });
+      expect(tree(external)).toEqual(before);
+      const unclaimed = path.join(snapshots, "_archive-unclaimed-1234");
+      expect(lstatSync(unclaimed).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(unclaimed)).toBe(external);
+      expect(readdirSync(snapshots)).not.toContain("_archive");
+      expect(existsSync(path.join(snapshots, `${id}.db`))).toBe(false);
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/_archive was a link.*_archive-unclaimed-1234.*left as it is/));
+    });
+  }
+  it("a missing registry: making a real _archive private never chmods through a link inside it (T3-01)", () => {
+    const { root, dataDir } = setup();
+    const archive = path.join(dataDir, "snapshots", "_archive"); mkdirSync(archive);
+    writeFileSync(path.join(archive, `${randomUUID()}.${randomUUID()}.db`), "copy");
+    const external = path.join(root, "external"); mkdirSync(external); chmodSync(external, 0o755);
+    writeFileSync(path.join(external, "note.txt"), "outside"); chmodSync(path.join(external, "note.txt"), 0o644);
+    const target = path.join(root, "target.txt"); writeFileSync(target, "outside"); chmodSync(target, 0o644);
+    symlinkSync(external, path.join(archive, "folder-link"));
+    symlinkSync(target, path.join(archive, "file-link"));
+    const before = [tree(external), statSync(target).mode];
+    createSources({ dataDir, now: () => 1234 });
+    expect([tree(external), statSync(target).mode]).toEqual(before);
+    const unclaimed = path.join(dataDir, "snapshots", "_archive-unclaimed-1234");
+    expect(readlinkSync(path.join(unclaimed, "folder-link"))).toBe(external);
+    expect(statSync(unclaimed).mode & 0o777).toBe(0o700);
+  });
+  it("a decoded registry: a symlinked copy inside a real _archive is never chmodded, moved or made the snapshot; the folder is set aside (T3-01)", async () => {
+    const { root, dataDir, sources } = setup();
+    const snapshots = path.join(dataDir, "snapshots");
+    const file = path.join(root, "live.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n)"); live.close();
+    const { id } = await sources.add({ kind: "sqlite", path: file });
+    rmSync(path.join(snapshots, `${id}.db`));
+    const archive = path.join(snapshots, "_archive"); mkdirSync(archive);
+    // An older regular copy, and a newer-looking link to a file outside the data dir.
+    const older = path.join(archive, `${id}.${randomUUID()}.db`);
+    const db = new DatabaseSync(older); db.exec("CREATE TABLE t(n); INSERT INTO t VALUES(3)"); db.close();
+    utimesSync(older, new Date(), new Date(Date.now() - 60000));
+    const target = path.join(root, "target.db"); writeFileSync(target, "outside"); chmodSync(target, 0o644);
+    utimesSync(target, new Date(), new Date(Date.now() + 60000));
+    const link = `${id}.${randomUUID()}.db`;
+    symlinkSync(target, path.join(archive, link));
+    const log = vi.fn();
+    createSources({ dataDir, now: () => 1234, log });
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readFileSync(target, "utf8")).toBe("outside");
+    const snapshot = path.join(snapshots, `${id}.db`);
+    expect(lstatSync(snapshot).isFile()).toBe(true);
+    const kept = new DatabaseSync(snapshot, { readOnly: true });
+    try { expect(kept.prepare("SELECT n FROM t").get()?.n).toBe(3); } finally { kept.close(); }
+    const unclaimed = path.join(snapshots, "_archive-unclaimed-1234");
+    expect(readdirSync(snapshots)).not.toContain("_archive");
+    expect(lstatSync(unclaimed).isDirectory()).toBe(true);
+    expect(readlinkSync(path.join(unclaimed, link))).toBe(target);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/_archive-unclaimed-1234.*left as it is/));
+  });
   it("later starts, adds and removes never touch an _archive-unclaimed-* folder (T2-01)", async () => {
     const { root, dataDir } = setup();
     const unclaimed = path.join(dataDir, "snapshots", "_archive-unclaimed-1234"); mkdirSync(unclaimed, { recursive: true });
