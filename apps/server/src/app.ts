@@ -411,7 +411,7 @@ export function createApp(deps: AppDeps): App {
   /** Turns as the client names them in its warning. */
   const blockingTurns = (stop: readonly Turn[]): BlockingTurn[] => {
     const titles = new Map(store.listThreads().map((t) => [t.id, t.title]));
-    return stop.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model }));
+    return stop.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model, turnId: t.turnId }));
   };
 
   const cancelThreadTurn = async (threadId: string) => {
@@ -493,7 +493,7 @@ export function createApp(deps: AppDeps): App {
       return blockingTurns((await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop);
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers, askFirst }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       // The thread is going: its delete has already listed what it takes back.
       if (deleting.has(threadId)) throw threadGoing(threadId);
@@ -543,7 +543,9 @@ export function createApp(deps: AppDeps): App {
         const fit = async (signal: AbortSignal, comfyPid?: number): Promise<{ report: FitReport; stop: Turn[]; comfy: boolean }> => {
           for (;;) {
             const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
-            if (askFirst === true && stopOthers !== true && plan.stop.length > 0) {
+            // Asked about every turn the plan needs, not only the new ones, so the next yes covers them all.
+            const unagreed = stopOthers === true ? plan.stop.filter((t) => stopTurns !== undefined && !stopTurns.includes(t.turnId)) : askFirst === true ? plan.stop : [];
+            if (unagreed.length > 0) {
               throw new AppError("would-stop", `${model} at num_ctx ${numCtx} needs the GPU memory of a running reply.`, undefined, undefined, blockingTurns(plan.stop));
             }
             const victims = stopOthers === true ? plan.stop : [];

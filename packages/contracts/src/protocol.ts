@@ -110,6 +110,13 @@ export const methods = {
        */
       stopOthers: S.optional(S.Boolean),
       /**
+       * With stopOthers: the turns the person agreed to stop (BlockingTurn.turnId). Only these
+       * stop; if the load needs any other, the send is refused with code "would-stop" and every
+       * turn it would need in `blocking`, so the next yes covers them all. Omitted: standing
+       * consent, any turn in the way stops.
+       */
+      stopTurns: S.optional(S.Array(S.String)),
+      /**
        * A person is waiting on this send: when such turns are in the way, refuse with code
        * "would-stop" and the turns in the error's `blocking`, instead of waiting behind them.
        * The client warns and sends again with stopOthers. Ignored with stopOthers.

@@ -164,7 +164,7 @@ describe("refused at the boundary, connection stays usable", () => {
   });
 
   it("carries a handler's blocking list to the client, and only a well-formed one", async () => {
-    const blocking = [{ threadId: "t1", title: "First", model: "qwen3.5:9b" }];
+    const blocking = [{ threadId: "t1", title: "First", model: "qwen3.5:9b", turnId: "turn-1" }];
     const server = await start({
       "chat.send": () => {
         throw Object.assign(new Error("in the way"), { code: "would-stop", blocking });
