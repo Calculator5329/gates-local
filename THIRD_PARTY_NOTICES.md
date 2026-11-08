@@ -24,9 +24,22 @@ The root license does not relicense anything listed here.
 - **Files:** `docs/design/round-2-instrument.html`,
   `docs/design/round-2-t3-faithful.html`, `docs/design/shell.html`,
   `apps/web/src/styles.css`, `apps/web/src/icons.tsx`,
-  `apps/web/src/Sidebar.tsx`, `apps/web/src/Thread.tsx`,
-  `apps/web/src/Composer.tsx`, `apps/web/src/Banner.tsx`. Each carries a
-  one-line header pointing at the notice file.
+  `apps/web/src/App.tsx` (the header), `apps/web/src/Sidebar.tsx`,
+  `apps/web/src/Thread.tsx`, `apps/web/src/Composer.tsx`,
+  `apps/web/src/Banner.tsx`. Each carries a one-line header pointing at the
+  notice file.
+
+## Lucide icons
+
+- **License:** ISC, Copyright (c) Lucide Contributors 2026, with portions
+  MIT, Copyright (c) 2013-2026 Cole Bemis, as part of Feather. Full text in
+  `LICENSES/Lucide-ISC.txt`, copied from `lucide-react` 0.564.0.
+- **What was used:** the icon sprite's line icons are Lucide icons, some
+  copied path for path and some redrawn with rounded coordinates. The gate
+  mark (`i-mark`) is this project's own. No Lucide package is a dependency.
+- **Files:** `apps/web/src/icons.tsx`, `docs/design/shell.html`,
+  `docs/design/round-2-t3-faithful.html`. Each carries a one-line header
+  pointing at the notice file.
 
 ## Image workflow
 

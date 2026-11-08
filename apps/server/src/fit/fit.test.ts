@@ -273,7 +273,7 @@ describe("measuredFit", () => {
   it("counts the runner's nvidia-smi memory when /api/ps understates it (this machine, qwen3.5:9b at 16k)", async () => {
     // Recorded 2026-11-07: /api/ps size = size_vram = 5.92 GB; nvidia-smi showed the runner at 6926 MiB.
     const s = await fakeOllama({ models: [{ name: "qwen3.5:9b", size: 5_920_000_000, size_vram: 5_920_000_000, context_length: 16384 }] });
-    const loadedApps = `${MACHINE_APPS}3006409, /usr/lib/ollama/llama-server, 6926\n`;
+    const loadedApps = `${MACHINE_APPS}5800, /usr/lib/ollama/llama-server, 6926\n`;
     const check = await measuredFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: smi("16303, 13368, 2557\n", loadedApps) });
     expect(check.report).toMatchObject({ source: "measured", verdict: "fits", needVramBytes: 6926 * MIB, spillRamBytes: 0, freeVramBytes: 2557 * MIB });
     expect(check.report.message).toContain("runner holds 7.26 GB");
