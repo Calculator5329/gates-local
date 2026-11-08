@@ -23,7 +23,10 @@ const doneLine = (reason = "stop") =>
     message: { role: "assistant", content: "" },
     done: true,
     done_reason: reason,
+    // Load and prompt time dwarf decode here, the way a cold first turn does.
     total_duration: 1_234_000_000,
+    prompt_eval_duration: 84_000_000,
+    eval_duration: 150_000_000,
     prompt_eval_count: 21,
     eval_count: 9,
   });
@@ -82,7 +85,7 @@ describe("streamTurn against a fake Ollama", () => {
         content: "Two plus two is four.",
         model: "m",
         createdAt: 42,
-        stats: { promptTokens: 21, completionTokens: 9, durationMs: 1234, numCtx: 16384 },
+        stats: { promptTokens: 21, completionTokens: 9, durationMs: 1234, evalDurationMs: 150, promptEvalDurationMs: 84, numCtx: 16384 },
       },
     });
     expect(events.filter((e) => e.type === "done")).toHaveLength(1);

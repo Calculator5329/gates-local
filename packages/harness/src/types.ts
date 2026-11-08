@@ -21,11 +21,14 @@ export interface ModelMessage {
   tool_name?: string;
   tool_calls?: readonly { function: { name: string; arguments: Record<string, unknown> } }[];
 }
+/** Ollama's counts and times for the last model call; evalDurationMs is decode only. */
+export type TurnStats = { promptTokens?: number; completionTokens?: number; durationMs?: number; evalDurationMs?: number; promptEvalDurationMs?: number };
+
 export type ModelEvent =
   | { type: "delta" | "thinking"; text: string }
-  | { type: "complete"; content: string; calls: readonly unknown[]; stopReason: string; thinking?: string; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
+  | { type: "complete"; content: string; calls: readonly unknown[]; stopReason: string; thinking?: string; stats?: TurnStats };
 export type LoopEvent = Exclude<ModelEvent, { type: "complete" }>
   | { type: "tool"; step: ToolStep }
-  | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; stats?: { promptTokens?: number; completionTokens?: number; durationMs?: number } };
+  | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; stats?: TurnStats };
 /** `tools: false` is the final-answer request after a budget ran out: send no tool definitions. */
 export type ModelStream = (messages: readonly ModelMessage[], options?: { tools: boolean }) => AsyncIterable<ModelEvent>;

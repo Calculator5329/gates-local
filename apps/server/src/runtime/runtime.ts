@@ -30,8 +30,9 @@
 // left running ("adopted").
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { RuntimeMode } from "@gates-local/contracts";
-import { PINNED_OLLAMA } from "./manifest.ts";
+import { PINNED_OLLAMA, pinnedOllamaFor } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
 import { checkOwnership, clearRecord, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
@@ -80,8 +81,8 @@ export type RuntimeOptions = {
   systemModelsDirs?: readonly string[];
   manifest?: InstallManifest;
   /**
-   * Install the pinned version when no binary is found. Default true on
-   * Linux x64 only: the pinned asset is the Linux amd64 build.
+   * Install the pinned version when no binary is found. Default true where
+   * a release is pinned (manifest.ts): Linux x64 and Windows x64.
    */
   allowInstall?: boolean;
   /**
@@ -100,6 +101,8 @@ export type RuntimeOptions = {
   arch?: string;
   /** Runs Windows' process queries (tests inject a fake). */
   procRun?: SyncRunner;
+  /** Whether a file is a runnable binary, for the system Ollama lookup (tests inject a fake). */
+  isExecutable?: (file: string) => boolean;
 };
 
 export type OllamaRuntime = {
@@ -191,9 +194,10 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   };
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
-  const manifest = options.manifest ?? PINNED_OLLAMA;
+  const pinned = pinnedOllamaFor(platform, options.arch ?? process.arch);
+  const manifest = options.manifest ?? pinned ?? PINNED_OLLAMA;
   const allowStart = options.allowStart ?? true;
-  const allowInstall = allowStart && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
+  const allowInstall = allowStart && (options.allowInstall ?? pinned !== undefined);
   const stateFile = ownedStateFile(stateDir);
   /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;
@@ -218,8 +222,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
-    const onPath = findSystemOllama(env, options.home, platform);
+    const onPath = findSystemOllama(env, options.home, platform, options.isExecutable);
     return onPath ? { path: onPath, origin: "path" } : undefined;
+  }
+
+  /**
+   * Windows, "system" mode, nothing answering: the official installer's
+   * ollama.exe, if present. Then Ollama is installed but quit (from its tray
+   * icon, or not started yet), and the words say so instead of "install it".
+   */
+  function quitWindowsOllama(): string | undefined {
+    if (platform !== "win32" || options.searchBinary === false) return undefined;
+    return findSystemOllama(env, options.home, platform, options.isExecutable);
   }
 
   /**
@@ -274,6 +288,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (mode === "system") {
       if (ext.kind === "wrong-service") {
         return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
+      }
+      const quit = quitWindowsOllama();
+      if (quit !== undefined) {
+        return {
+          kind: "blocked",
+          status: {
+            state: "stopped",
+            owner: "none",
+            baseUrl: externalBaseUrl,
+            detail: `Ollama is installed (${quit}) but nothing answers at ${externalBaseUrl}. Start Ollama from the Start menu, or choose the app's own copy in Settings › Runtime.`,
+          },
+        };
       }
       return {
         kind: "blocked",
@@ -348,7 +374,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const readOnly =
       mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
     let exited: string | undefined;
-    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv });
+    // Windows: start in the binary's own folder. A process holds its working
+    // folder open there, and an adopted copy can outlive the app, so
+    // inheriting the server's (the clone) would block deleting the clone.
+    const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
+    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
     child.on("error", (e) => {
       exited = e.message;

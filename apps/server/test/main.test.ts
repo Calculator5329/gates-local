@@ -167,7 +167,8 @@ describe("server CLI", () => {
     expect(exit).toEqual({ code: 0, signal: null });
     expect(Date.now() - t0).toBeLessThan(3000);
     // Nothing on the fake but reads: discover-only never starts or installs.
-    expect(fake.requests.every((r) => r.startsWith("GET "))).toBe(true);
+    // POST /api/show is a read (capabilities for models.list).
+    expect(fake.requests.filter((r) => !r.startsWith("GET ") && !r.startsWith("POST /api/show"))).toEqual([]);
   });
 
   it("a pinned URL alone is discover-only: an ollama on PATH is never run", async () => {
@@ -185,7 +186,9 @@ describe("server CLI", () => {
     expect(s.stderr.some((l) => l.includes("runtime discover-only"))).toBe(true);
   });
 
-  it("exits on SIGTERM within 3 s", async () => {
+  // Windows cannot deliver SIGTERM (kill() there is TerminateProcess); the
+  // desktop app stops the server through stdin EOF, tested above.
+  it.skipIf(process.platform === "win32")("exits on SIGTERM within 3 s", async () => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
     const s = launch(

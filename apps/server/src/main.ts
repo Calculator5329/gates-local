@@ -16,7 +16,8 @@
 //   GATES_LOCAL_OLLAMA_BINARY    "none": never look for an Ollama binary (app install, PATH), as on
 //                                a machine with none, so tests do not depend on the host
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
-//                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
+//                                test/fake-ollama/nvidia-smi.ts; on Windows a .ts/.js script
+//                                runs through this Node or Electron); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
@@ -135,12 +136,15 @@ async function main(): Promise<void> {
 
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
+  // Windows runs no #! line: a script there (the tests' fake) goes through this runtime.
+  const [smiFile, smiPre] =
+    smiCommand !== undefined && process.platform === "win32" && /\.[cm]?[jt]s$/.test(smiCommand) ? [process.execPath, [smiCommand]] : [smiCommand, []];
   const fit = {
-    ...(smiCommand
+    ...(smiFile
       ? {
           runNvidiaSmi: (args: readonly string[]) =>
             new Promise<string>((resolve, reject) =>
-              execFile(smiCommand, [...args], { timeout: 10_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+              execFile(smiFile, [...smiPre, ...args], { timeout: 10_000, windowsHide: true }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
             ),
         }
       : {}),

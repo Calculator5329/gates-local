@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
+import { canChat, notForChat } from "./pick.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 import { Fail, Grp, Head, NOT_HERE, Na, Row, useAct } from "./settings-ui.tsx";
 import { Updates } from "./Updates.tsx";
@@ -90,17 +91,6 @@ function General() {
 }
 
 // ---------------------------------------------------------------- Models
-
-function etaText(p: PullProgress): string {
-  const total = p.totalBytes;
-  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : "Starting"];
-  if (p.bytesPerSecond) {
-    parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
-    if (total) parts.push(`about ${Math.max(1, Math.ceil((total - p.completedBytes) / p.bytesPerSecond / 60))} min left`);
-  }
-  if (p.state === "verifying") return "Verifying the download";
-  return parts.join(" · ");
-}
 
 /** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
 export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
@@ -196,6 +186,31 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   );
 }
 
+/** An installed embedding model: listed so it can be removed, never a default (it cannot chat). */
+function EmbedRow({ tag }: { tag: string }) {
+  const catalog = useStore(catalogOf);
+  const info = useStore((s) => s.models?.find((m) => m.name === tag));
+  const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
+  const d = describeModel(tag, catalog);
+  const why = notForChat(info);
+  return (
+    <div
+      className="mrow dis emb"
+      data-em={tag}
+      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>${why.tip}${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
+    >
+      <span className="rd" />
+      <span className="mn">{d.name}</span>
+      <span className="mv na">{why.label}</span>
+      {canRemove ? (
+        <button type="button" className="qa" aria-label={`Remove ${d.name}`} onClick={() => void removeModel(tag)}>
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function Models() {
   const settings = useStore(settingsOf);
   const settingsNA = useStore((s) => s.settings === NA);
@@ -208,15 +223,20 @@ function Models() {
   const [ctxErr, runCtx] = useAct();
   const def = settings?.defaultModel ?? model;
   const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
+  const cpu = useStore((s) => noGpu(s.gpu));
   return (
     <>
-      <Head title="Models">Gates Local picks the fastest model that runs on your GPU. Change it here; any chat can still switch.</Head>
+      <Head title="Models">
+        {cpu
+          ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${k(numCtx)}, otherwise on your best model that fits. Change it here; any chat can still switch.`
+          : `New chats start on your default model if it runs at ${k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.`}
+      </Head>
       <div className="grp">
         <div className="grp-t">Default model</div>
         <div className="box">
-          {(models ?? []).map((m) => (
-            <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} />
-          ))}
+          {(models ?? []).map((m) =>
+            canChat(m) ? <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} /> : <EmbedRow key={m.name} tag={m.name} />,
+          )}
           {downloading.map((p) => {
             const d = describeModel(p.name, catalog);
             return (
@@ -249,7 +269,7 @@ function Models() {
               </span>
               {v ? (
                 <span className="d">
-                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available
+                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
                 </span>
               ) : null}
               <Fail err={ctxErr} />
@@ -276,6 +296,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
   const v = c.fit ? verdictOf(c.fit) : undefined;
+  const cpu = useStore((s) => noGpu(s.gpu));
   const dling = p !== undefined && isActive(p) && !installed;
   const [err, run] = useAct();
   const action = installed ? (
@@ -285,7 +306,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
       Cancel download
     </button>
   ) : (
-    <button type="button" className="btn outline" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
+    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
       Download
     </button>
   );
@@ -306,7 +327,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
         <Fail err={err} />
       </div>
       {v ? (
-        <div className="dl-v" data-tip={`Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
+        <div className="dl-v" data-tip={cpu ? `Estimated ${gb(v.need)} at ${k(numCtx)}, all in system memory (no supported GPU). Measured after the first load.` : `Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
           <VLabel v={v} />
           <small>
             est. {gb(v.need)} at {k(numCtx)}
@@ -341,7 +362,7 @@ function CustomPull() {
       <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
       <button
         type="button"
-        className="btn outline"
+        className="qa"
         disabled={name.trim() === ""}
         onClick={() => {
           // the typed name stays until the download starts (W-07)
@@ -427,6 +448,7 @@ function Runtime() {
   const canSwitch = settings !== NA && settings !== undefined;
   const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
+  const folders = folderWords();
   return (
     <>
       <Head title="Runtime">Gates Local finds Ollama on its own.</Head>
@@ -459,10 +481,10 @@ function Runtime() {
                     <ul>
                       <li>Gates Local stops its copy and connects to the system one on port 11434.</li>
                       <li>
-                        Both read the same models folder, <span className="mono">~/.ollama/models</span>, so nothing downloads again.
+                        The system one reads its own models folder, <span className="mono">{folders.models}</span>. Models downloaded into Gates Local's copy stay in <span className="mono">{folders.appModels}</span>.
                       </li>
                       <li>
-                        Its copy stays in <span className="mono">~/.local/share/gates-local/ollama</span> until you remove it.
+                        Its copy stays in <span className="mono">{folders.appCopy}</span> until you remove it.
                       </li>
                       <li>Chats pause for a few seconds while it reconnects.</li>
                     </ul>
@@ -472,10 +494,11 @@ function Runtime() {
                     <b>Switch to Gates Local's own copy of Ollama?</b>
                     <ul>
                       <li>
-                        Downloads Ollama into <span className="mono">~/.local/share/gates-local/ollama</span>.
+                        Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
                       <li>
-                        It reads the same models folder, <span className="mono">~/.ollama/models</span>, so your {models?.length ?? 0} models don't download again.
+                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
+                        <span className="mono">{folders.models}</span> stay where they are.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
                       <li>Chats pause for about a minute while it installs and starts.</li>
@@ -506,8 +529,8 @@ function Runtime() {
         </Row>
       </Grp>
       <Grp title="Storage">
-        <Row label="Models folder" desc={models ? `${models.length} models · ${gb(total)} on disk` : undefined}>
-          <span className="path">~/.ollama/models</span>
+        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
+          <span className="path">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>
@@ -593,19 +616,10 @@ function Images() {
   );
 }
 
-function fresh(src: Source): string {
-  if (src.state === "refreshing") return "Refreshing…";
-  if (src.state === "error") return src.detail ?? "Couldn't read it.";
-  const parts: string[] = [];
-  if (src.sizeBytes !== undefined) parts.push(src.sizeBytes > 1024 ** 3 ? gb(src.sizeBytes) : `${Math.max(1, Math.round(src.sizeBytes / 1024 ** 2))} MB`);
-  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Read-only";
-}
-
 function SourceRow({ src }: { src: Source }) {
   const [err, run] = useAct();
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`} err={err}>
+    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${sourceDetail(src)}`} err={err}>
       <span className="badge">read-only</span>
       <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
         Refresh

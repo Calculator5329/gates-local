@@ -49,7 +49,8 @@ function recordFor(pid: number, over: { startTime?: string; command?: string } =
 describe("readProc", () => {
   it("reads this process's start time and command line", () => {
     const me = readProc(process.pid);
-    expect(me?.startTime).toMatch(/^\d+$/);
+    // Linux: clock ticks from /proc/<pid>/stat. Windows: CIM's CreationDate, an opaque string with the time in it.
+    expect(me?.startTime).toMatch(process.platform === "win32" ? /\d{6,}/ : /^\d+$/);
     expect(me?.command).toContain("node");
   });
 
@@ -59,7 +60,18 @@ describe("readProc", () => {
 });
 
 describe("stopOwned", () => {
-  it("stops a process whose PID, start time and command all match the record", async () => {
+  // Windows never stops a process by PID number (R-12): runtime.ts stops its own child through the handle.
+  it.runIf(process.platform === "win32")("on Windows adopts a matching live record and leaves the process running", async () => {
+    const c = sleeper();
+    await waitFor(() => alive(c.pid!));
+    recordFor(c.pid!);
+    expect(checkOwnership(file).kind).toBe("ours");
+    expect(await stopOwned(file, 500)).toEqual({ stopped: false, reason: "adopted" });
+    expect(alive(c.pid!)).toBe(true);
+    expect(c.exitCode).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("stops a process whose PID, start time and command all match the record", async () => {
     const c = sleeper();
     await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);

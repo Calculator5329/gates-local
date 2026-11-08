@@ -18,6 +18,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
+import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -228,17 +229,26 @@ async function hydrateWith(
 ): Promise<void> {
   on("chat.event", onChatEvent);
   on("runtime.changed", (runtime) => {
+    // A list asked before the change describes the runtime before it (MP2-02); ask again.
+    modelsOrder.next();
+    runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
     setState({ runtime });
     if (runtime.state === "ready") {
       invalidateFits();
       flushQueued();
+      void refreshModels();
     }
   });
   on("models.changed", (models) => {
+    modelsOrder.next();
     setState({ models });
+    restoreSaved();
     chooseModel();
     invalidateFits();
     flushQueued();
+    // The catalog's Installed marks follow the list: a removal or a runtime
+    // switch (the app's own copy has its own models) must not leave them stale.
+    void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
   on("settings.changed", applySettings);
@@ -263,23 +273,31 @@ async function hydrateWith(
   // settings.get is a local store read and the model choice needs only it and
   // the model list, so the runtime dot and a chosen model land in one render:
   // a message typed the moment the dot turns ready sends. gpu.status and the
-  // catalog can take a few hundred ms and follow.
-  const [runtime, models, threads, settings] = await Promise.all([
+  // catalog can take a few hundred ms and follow. The list takes a ticket like
+  // any other answer, so one that lands after a newer push is dropped (MP2-02).
+  const ticket = modelsOrder.next();
+  const statusTicket = runtimeOrder.next();
+  const listTicket = threadsOrder.next();
+  const [status, listed, threads, settings] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
     probe("settings.get", {}),
   ]);
+  const models = modelsOrder.current(ticket) ? listed : undefined;
+  const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
-    const next: State = { ...s, runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
-    const model = modelChoice(next);
-    return { ...next, ...(model === undefined ? {} : { model }) };
+    const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, threads: ordered, fits: {}, ...withSettings };
+    return { ...next, ...decided(modelChoice(next)) };
   });
+  restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   // the pushes that came during the first batch, in order, in this same task
   release(SECOND_BATCH);
 
+  const catalogTicket = catalogOrder.next();
   // update.status reads the .git folder and a local file; the check that
   // fetches runs only from the Check for updates button (checkForUpdates).
   const [gpu, catalog, sources, imageStatus, update] = await Promise.all([
@@ -289,7 +307,7 @@ async function hydrateWith(
     probe("image.status", {}),
     probe("update.status", {}),
   ]);
-  setState({ gpu, catalog, sources, imageStatus, update });
+  setState({ gpu, sources, imageStatus, update, ...(catalogOrder.current(catalogTicket) ? { catalog } : {}) });
   release("none");
 
   const s = getState();
@@ -306,27 +324,45 @@ function sortThreads<T extends { updatedAt: number }>(threads: readonly T[]): T[
 }
 
 async function refreshThreads(): Promise<void> {
+  const ticket = threadsOrder.next();
   const threads = await call("threads.list", {}).catch(() => undefined);
-  if (threads === undefined) return;
+  if (threads === undefined || !threadsOrder.current(ticket)) return;
   setState((s) => {
     const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
-    return { threads: sortThreads(threads), ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
+    const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
+    return { threads: sortThreads(threads), threadModels, ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
   });
 }
 
+const modelsOrder = newestOnly();
+const runtimeOrder = newestOnly();
+// A catalog asked before a later models.changed describes the list before it: only the newest lands.
+const catalogOrder = newestOnly();
+// A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
+const threadsOrder = newestOnly();
+
+async function refreshCatalog(): Promise<void> {
+  if (getState().catalog === NA) return;
+  const ticket = catalogOrder.next();
+  const catalog = await probe("models.catalog", {});
+  if (catalog !== undefined && catalogOrder.current(ticket)) setState({ catalog });
+}
+
 export async function refreshModels(): Promise<void> {
+  const ticket = modelsOrder.next();
   const models = await call("models.refresh", {}).catch(() => undefined);
-  if (models === undefined) return;
+  if (models === undefined || !modelsOrder.current(ticket)) return;
   setState({ models });
+  restoreSaved();
   chooseModel();
   invalidateFits();
 }
 
-function settingsPatch(s: State, settings: Settings, first: boolean): Partial<State> {
+// The default model is not applied here: the server's pick (pick.ts) already honours it when it can chat.
+function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
   return {
     settings,
     ...(first ? { numCtx: settings.defaultNumCtx, think: settings.thinking } : {}),
-    ...(first && settings.defaultModel !== undefined && s.model === undefined ? { model: settings.defaultModel } : {}),
     ...(!settings.imageGen ? { image: false } : {}),
   };
 }
@@ -345,18 +381,19 @@ function applyTheme(theme: Settings["theme"]): void {
 
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */
 function chooseModel(): void {
-  const model = modelChoice(getState());
-  if (model !== undefined) setState({ model });
+  setState(decided(modelChoice(getState())));
 }
 
-/** The model chooseModel would switch to, or undefined when the current one stays (or none is installed). */
-function modelChoice(s: State): string | undefined {
-  const models = s.models ?? [];
-  if (models.length === 0) return undefined;
-  if (s.model !== undefined && models.some((m) => m.name === s.model)) return undefined;
-  const def = s.settings !== NA ? s.settings?.defaultModel : undefined;
-  return (models.find((m) => m.name === def) ?? models.toSorted((a, b) => a.sizeBytes - b.sizeBytes)[0])?.name;
+/**
+ * Keep, switch to the server's pick (pick.ts), or clear when no model can chat.
+ * An open thread's model counts as chosen, so a recommendation never moves it;
+ * only a new chat the user has not picked for follows the pick (MP-02).
+ */
+function modelChoice(s: State): ModelDecision {
+  return pickChoice(s.models, s.model, s.threadId === null ? s.chosen : (s.threadModels[s.threadId] ?? s.model));
 }
+
+const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
 // ---------------------------------------------------------------- fit checks
 
@@ -447,7 +484,12 @@ async function loadThread(threadId: string, force = false): Promise<void> {
     landed.set(threadId, req.seq);
     stale.delete(threadId);
     const messages = req.since.reduce(upsertMessage, snapshot);
-    setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}) }));
+    setState((s) => ({
+      messages: { ...s.messages, [threadId]: messages },
+      ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
+      ...savedModel(s, threadId, messages),
+    }));
+    if (getState().models === undefined) unrestored.add(threadId);
     setLoadError(threadId, null);
   } catch (e) {
     if (older()) return;
@@ -461,6 +503,30 @@ async function loadThread(threadId: string, force = false): Promise<void> {
   } finally {
     loads.delete(req);
   }
+}
+
+/**
+ * A thread restored from storage takes the model of its latest saved reply (MP4-04), unless a
+ * pick made in it this session is already recorded. A saved model that is not installed, or is
+ * known not to chat (MP5-03), is not taken, and nothing is recorded: the composer keeps the
+ * app's choice, which the person never made. With no model list yet, unrestored decides later.
+ */
+function savedModel(s: State, threadId: string, messages: State["messages"][string]): Partial<State> {
+  if (s.threadModels[threadId] !== undefined || s.models === undefined) return {};
+  const saved = messages.findLast((m) => m.role === "assistant" && m.model !== undefined)?.model;
+  const m = s.models.find((x) => x.name === saved);
+  if (m === undefined || !choosable(m)) return {};
+  return { threadModels: { ...s.threadModels, [threadId]: m.name }, ...(s.threadId === threadId ? { model: m.name } : {}) };
+}
+
+/** Threads whose history landed before any model list: their saved model is decided when one lands (MP5-02). */
+const unrestored = new Set<string>();
+
+function restoreSaved(): void {
+  if (unrestored.size === 0 || getState().models === undefined) return;
+  const ids = [...unrestored];
+  unrestored.clear();
+  setState((s) => ids.reduce<Partial<State>>((acc, id) => ({ ...acc, ...savedModel({ ...s, ...acc }, id, s.messages[id] ?? []) }), {}));
 }
 
 /** Retry beside a failed load: fetch the thread again. */
@@ -477,14 +543,20 @@ function savedReplyFor(live: LiveTurn | null, threadId: string, messages: readon
 
 export function openThread(threadId: string): void {
   navGen++;
-  setState({ view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false });
+  setState((s) => {
+    // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
+    const model = s.threadModels[threadId] ?? s.model;
+    return { view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false, ...(model === undefined ? {} : { model }) };
+  });
+  chooseModel();
   setHash(threadId);
   void loadThread(threadId);
 }
 
 export function newThread(): void {
   navGen++;
-  setState({ view: "new", threadId: null, notice: null });
+  // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
+  setState((s) => ({ view: "new", threadId: null, notice: null, chosen: undefined, ...decided(pickChoice(s.models, s.model, undefined)) }));
   setHash(null);
 }
 
@@ -514,10 +586,12 @@ export async function renameThread(threadId: string, title: string): Promise<voi
 
 export async function deleteThread(threadId: string): Promise<void> {
   await call("threads.delete", { threadId }).catch(() => undefined);
+  threadsOrder.next();
   setState((s) => {
     const { [threadId]: _gone, ...messages } = s.messages;
+    const { [threadId]: _model, ...threadModels } = s.threadModels;
     const { [threadId]: _error, ...loadErrors } = s.loadErrors;
-    return { messages, loadErrors, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
+    return { messages, threadModels, loadErrors, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
   });
   if (getState().threadId === threadId) newThread();
 }
@@ -546,10 +620,9 @@ export function queueReason(s: State): Queued["waitFor"] | null {
   return null;
 }
 
-/** The download that will become the first model, while none is installed. */
+/** The download that will become the first chat model, while none is installed (an embedding model does not count). */
 export function firstPull(s: State): string | undefined {
-  if ((s.models?.length ?? 0) > 0) return undefined;
-  return Object.values(s.pulls).find((p) => p.state === "downloading" || p.state === "queued" || p.state === "verifying")?.name;
+  return firstChatPull(s.models, s.pulls);
 }
 
 /** Turns started this session; each live turn carries its number (LiveTurn.gen). */
@@ -579,7 +652,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   if (content === "" || streaming(s)) return;
   const wait = queueReason(s);
   if (!chatReady(s) && wait === null) return;
-  const model = s.model;
+  const model = sendableModel(s.models, s.model);
   if (model === undefined && wait === null) return;
 
   let threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
@@ -589,7 +662,10 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
     try {
       const t = await call("threads.create", { title: titleFrom(content) });
       threadId = t.id;
-      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] } }));
+      // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
+      const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
+      threadsOrder.next();
+      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
       openThread(t.id);
     } catch {
       setState({ draft: content, notice: "The message didn't send. Gates Local isn't answering; try again in a moment." });
@@ -901,7 +977,7 @@ export function unqueue(id: string): void {
 // ---------------------------------------------------------------- composer and models
 
 export function pickModel(model: string): void {
-  setState({ model });
+  setState((st) => ({ model, chosen: model, ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }) }));
   const s = getState();
   if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx }, `load ${model}`);
 }

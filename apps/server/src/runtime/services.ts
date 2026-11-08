@@ -4,7 +4,8 @@
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
 import type { Channel, Payload, RuntimeMode } from "@gates-local/contracts";
-import { checkFit, type FitDeps } from "../fit/fit.ts";
+import { checkFit, fitEach, type FitDeps } from "../fit/fit.ts";
+import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
@@ -15,6 +16,7 @@ import type { Handlers } from "../ws/server.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
 import { createModelLoader, type ModelLoader } from "./load.ts";
 import { createModelCatalog, listLoaded, type ModelCatalog } from "./models.ts";
+import { canChat, pickChatModel } from "./pick.ts";
 import { probe } from "./probe.ts";
 import { createPullManager, type PullManager } from "./pull.ts";
 import { canonicalTag, modelLabel } from "./recommended.ts";
@@ -22,6 +24,9 @@ import { createOllamaRuntime, DEFAULT_EXTERNAL_BASE_URL, type RuntimeOptions } f
 import { createRuntimeSwitch, type RuntimeSwitch } from "./switch.ts";
 
 /** models.refresh makes at most one real /api/tags call per this interval. */
+
+/** The pick without a GPU reading: every model has no verdict. */
+const noFit = async (_model: string): Promise<FitReport | undefined> => undefined;
 export const MODELS_REFRESH_MIN_MS = 2000;
 /** whisper-server's MainPID changes only on a restart; re-read it this often. */
 const WHISPER_PID_TTL_MS = 60_000;
@@ -78,7 +83,24 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     },
     log,
   });
-  const catalog = createModelCatalog(() => runtime.baseUrl(), { minIntervalMs: MODELS_REFRESH_MIN_MS });
+  const catalog = createModelCatalog(() => runtime.baseUrl(), {
+    minIntervalMs: MODELS_REFRESH_MIN_MS,
+    // The chat pick (runtime/pick.ts): one GPU reading, every chat model fitted against it.
+    pick: async (models, baseUrl) => {
+      // Nothing to pick from (an Ollama too old to say, only embedding models): skip the GPU and memory reads each retry would take.
+      if (!models.some(canChat)) return undefined;
+      const { defaultModel, defaultNumCtx } = settings.get();
+      let fit: (model: string) => Promise<FitReport | undefined> = noFit;
+      try {
+        fit = await fitEach({ ...options.fit, baseUrl, numCtx: defaultNumCtx });
+      } catch (e) {
+        log(`chat pick has no fit reading: ${(e as Error).message}`);
+      }
+      return pickChatModel({ models, numCtx: defaultNumCtx, fit, ...(defaultModel === undefined ? {} : { defaultModel }) });
+    },
+    pickKey: () => `${settings.get().defaultModel ?? ""}|${settings.get().defaultNumCtx}`,
+    log,
+  });
 
   const whisperPid = cached(() => systemdMainPid("whisper-server.service"), WHISPER_PID_TTL_MS);
   const gpu = createGpuWatcher({
@@ -124,6 +146,10 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   settings.onChange((next, previous) => {
+    // The pick depends on the default model and context; models.changed carries the new one.
+    if (next.defaultModel !== previous.defaultModel || next.defaultNumCtx !== previous.defaultNumCtx) {
+      catalog.refresh({ force: true }).catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
+    }
     if (next.runtimeMode === previous.runtimeMode) return;
     runtime.setMode(next.runtimeMode).then(
       (s) => log(`runtime mode ${next.runtimeMode}: ${s.state} (${s.owner}) at ${s.baseUrl}`),
@@ -149,6 +175,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     async close({ stopRuntime }) {
       pulls?.stop();
       gpu.stop();
+      catalog.stop();
       if (stopRuntime) await runtime.stopIfStartedHere();
     },
   };

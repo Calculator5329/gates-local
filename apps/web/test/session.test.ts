@@ -162,7 +162,8 @@ describe("hydration order (W-03, E-01)", () => {
     await until(hydrated, 2000, "hydration");
     await tick();
     expect(store.getState().runtime?.state).toBe("ready");
-    expect(store.getState().model).toBe("gemma3:4b");
+    // the composer starts on the server's pick (ModelInfo.pick), which the samples put on qwen3:14b
+    expect(store.getState().model).toBe(MODELS.find((m) => m.pick !== undefined)?.name);
     expect(readyWithoutModel()).toEqual([]);
   });
 
@@ -196,6 +197,21 @@ describe("hydration order (W-03, E-01)", () => {
     await until(hydrated, 2000, "hydration");
     await tick();
     expect(store.getState().gpu).toEqual(pushed);
+  });
+});
+
+describe("the catalog follows the model list", () => {
+  it("a models.changed push (a removal, a runtime switch) reloads the catalog, so no stale Installed mark stays", async () => {
+    const sample = methodSamples["models.catalog"].result;
+    b.server.answer("models.catalog", () => sample.map((c) => ({ ...c, installed: true })));
+    await boot();
+    expect(store.getState().catalog).toEqual(sample.map((c) => ({ ...c, installed: true })));
+    b.server.answer("models.catalog", () => sample.map((c) => ({ ...c, installed: false })));
+    b.server.push("models.changed", []);
+    await until(() => {
+      const c = store.getState().catalog;
+      return Array.isArray(c) && c.every((e) => !e.installed);
+    }, 2000, "a refreshed catalog");
   });
 });
 
@@ -515,15 +531,15 @@ describe("the same thread open in two clients (PH-02)", () => {
     void session.send("hello");
     const pending = await send;
     const userMessage = { ...userMsg("m5", "t1", "hello"), createdAt: 5 };
-    // the real server pushes start before chat.send answers (apps/server/src/app.ts runTurn)
-    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "gemma3:4b", userMessage } });
+    // the real server pushes start before chat.send answers (apps/server/src/app.ts runTurn), naming the model sent: the server's pick
+    b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } });
     pending.respond({ turnId: "turn-7", userMessage });
     await tick();
     b.server.broadcast("chat.event", { turnId: "turn-7", threadId: "t1", event: { type: "delta", text: "Half a" } });
     await tick();
     b.frame();
     for (const st of [store, other.store]) {
-      expect(st.getState().live, st === store ? "the sender" : "the other client").toMatchObject({ turnId: "turn-7", text: "Half a", model: "gemma3:4b" });
+      expect(st.getState().live, st === store ? "the sender" : "the other client").toMatchObject({ turnId: "turn-7", text: "Half a", model: "qwen3:14b" });
       expect(st.getState().live?.end).toBeUndefined();
       expect(st.getState().messages["t1"]?.filter((m) => m.id === "m5")).toHaveLength(1);
     }
