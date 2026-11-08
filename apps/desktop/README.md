@@ -136,7 +136,7 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
 | Variable | Default | Use |
 | --- | --- | --- |
 | `GATES_LOCAL_SERVER_ENTRY` | `apps/server/src/main.ts` (packaged: `<resources>/server/main.ts`, provisional) | Server entry passed to the child. |
-| `GATES_LOCAL_DATA_DIR` | `<userData>/server-data` | `--data-dir`. |
+| `GATES_LOCAL_DATA_DIR` | `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local` (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on macOS or when `GATES_LOCAL_USER_DATA` is set | `--data-dir`: threads, settings, and the app's own Ollama and models (large, so never the roaming profile or `~/.config`). |
 | `GATES_LOCAL_USER_DATA` | `~/.config/gates-local` | Electron userData (smoke runs use a temp dir). |
 | `GATES_LOCAL_WEB` | built client on `gates-local://app` | `dev` loads Vite on 5187 (run `pnpm --filter @gates-local/web dev`). |
 | `GATES_LOCAL_WEB_URL` | none | Exact client URL; wins over `GATES_LOCAL_WEB`. |

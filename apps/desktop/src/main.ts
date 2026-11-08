@@ -7,6 +7,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, originOf, sameClient, servedFile } from "./client-protocol.ts";
+import { serverDataDir } from "./data-dir.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
@@ -64,7 +65,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function run(): void {
-  const dataDir = process.env["GATES_LOCAL_DATA_DIR"] ?? path.join(app.getPath("userData"), "server-data");
+  const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData") });
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env: serverEnv() });
   let win: BrowserWindow | null = null;
   /** The client URL (with its route) to restore after a restart. */
