@@ -57,6 +57,8 @@ export type Refusal =
   | { readonly reason: "lost-lock" }
   /** A command of an update could not be confirmed ended. Nothing starts until it has. */
   | { readonly reason: "still-running"; readonly pid: number | null; readonly target: string }
+  /** The saved state could not be written, so the next command did not go on. `pid`: one that was started and could not be confirmed ended. */
+  | { readonly reason: "cannot-save"; readonly target: string; readonly detail: string; readonly pid: number | null }
   /** Files, the index or git's own markers say a merge or reset was cut off. */
   | { readonly reason: "partial-checkout"; readonly target: string; readonly files: readonly string[]; readonly gitLock: string | null }
   /** The copy changed while the update ran, so it did not go back on its own. */
@@ -128,6 +130,16 @@ function switchFailure(merge: RunResult): string {
   return files.length > 0 ? inTheWaySentence(files) : reasonOf(merge, "git merge");
 }
 
+/** The saved state could not be written. Caught once, in runUpdate. */
+class CannotSave extends Error {
+  readonly refusal: Refusal;
+
+  constructor(refusal: Refusal) {
+    super("The update's state could not be saved");
+    this.refusal = refusal;
+  }
+}
+
 interface Context {
   readonly o: UpdateOptions;
   readonly git: Git;
@@ -140,18 +152,41 @@ interface Context {
  * Runs a command that changes the checkout, with its process in the saved
  * state while it runs. A command that ended is taken out again; one that may
  * not have ended stays, and holds off every later run.
+ *
+ * No command runs that a later run could not account for. A process's number
+ * only exists once it has started, so the write is proved first, and a
+ * command whose number then cannot be saved is ended at once. Either way this
+ * throws CannotSave, which ends the run with a refusal.
  */
 async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>): Promise<RunResult> {
-  const save = (saved: Transaction) => {
+  const { root } = c.o;
+  const cannotSave = (e: unknown, pid: number | null) => new CannotSave({ reason: "cannot-save", target: t.to.label, detail: (e as Error).message, pid });
+  if (c.ours()) {
+    try {
+      saveTransaction(root, t);
+    } catch (e) {
+      throw cannotSave(e, null);
+    }
+  }
+  let unsaved: { readonly error: unknown; readonly pid: number } | undefined;
+  const result = await run((pid) => {
     if (!c.ours()) return;
     try {
-      saveTransaction(c.o.root, saved);
+      saveTransaction(root, { ...t, running: processRecord(pid) });
+    } catch (error) {
+      unsaved = { error, pid };
+      throw error;
+    }
+  });
+  if (unsaved !== undefined) throw cannotSave(unsaved.error, result.treeStillRunning === true ? unsaved.pid : null);
+  if (result.treeStillRunning !== true && c.ours()) {
+    try {
+      saveTransaction(root, t);
     } catch (e) {
+      // The command has ended, so a stale process in the file only costs the next run a look at it.
       c.o.log(`Could not save the update's state: ${(e as Error).message}\n`);
     }
-  };
-  const result = await run((pid) => save({ ...t, running: processRecord(pid) }));
-  if (result.treeStillRunning !== true) save(t);
+  }
   return result;
 }
 
@@ -187,6 +222,9 @@ export async function runUpdate(o: UpdateOptions): Promise<UpdateRun> {
   if (!got.ok) return refused({ reason: "busy", pid: got.pid, file: got.file });
   try {
     return await transact(o, () => got.lock.stillOurs());
+  } catch (e) {
+    if (e instanceof CannotSave) return refused(e.refusal);
+    throw e;
   } finally {
     got.lock.release();
   }
@@ -223,8 +261,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   const move: Move = { channel, branch: branch.stdout.trim(), from, to, changes: total };
   if (!ours()) return lostLock();
   const forward: Transaction = { ...move, phase: "forward" };
-  // Saved before anything moves: every way back starts here, and a failure to save stops the update.
-  saveTransaction(o.root, forward);
+  // Saved by `changing` before anything moves: every way back starts there, and a failure to save stops the update.
   // Never over a file of the person's: by default git writes over ignored ones.
   const switched = await changing(c, forward, (onStart) => git(["merge", "--ff-only", "--no-overwrite-ignore", "--quiet", to.commit], undefined, onStart));
   if (!ok(switched)) {
@@ -369,12 +406,6 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
   if (!c.ours()) return lostLock();
   o.say(`The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
   const back: Transaction = { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason };
-  try {
-    saveTransaction(o.root, back);
-  } catch (e) {
-    // Going back matters more than remembering it.
-    o.log(`Could not save that the update is going back: ${(e as Error).message}\n`);
-  }
   // --keep is safe here: the copy was just found to be exactly as this run left it.
   const reset = await changing(c, back, (onStart) => git(["reset", "--keep", f.from.commit], undefined, onStart));
   if (reset.treeStillRunning === true) return stillRunning(c, f.to);

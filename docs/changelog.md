@@ -90,6 +90,13 @@
   reset cut off part way (files that differ, git's `index.lock`,
   `MERGE_HEAD`) keeps the saved update and says how to get back, and the
   saved update goes only once git and the files show nothing is left.
+- No command runs that a later run could not account for. If the update's
+  state cannot be saved (a full disk, say), the next command does not start
+  and the refusal names the cause; a command whose process number then
+  cannot be saved is ended at once. `--check` names a step that is still
+  running before it offers the manual path, and after a change made during
+  the update the advice is `pnpm install`, then `pnpm start`: running the
+  updater again could say "up to date" without building.
 - Every state the updater can leave has a way out in its refusal, and the
   manual path (close the app, `git pull`, `pnpm install`, `pnpm start`)
   was run from each of them in the tests.
@@ -112,6 +119,9 @@
     its process leaves nothing to wait for, so the next run does not know
     about that command.
   - A lock file that cannot be read as an owner counts as ended after 60 s.
+  - A command whose process number could not be saved and that also could
+    not be confirmed stopped is named in the refusal, but is not on disk for
+    a later run to wait for.
   - A merge cut off after writing only brand-new files leaves nothing
     git calls changed. The retry then names those files as in the way, so
     they have to be moved or deleted by hand.

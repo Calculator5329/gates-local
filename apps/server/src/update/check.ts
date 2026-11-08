@@ -11,6 +11,7 @@
 //   until then. Settings can pin main.
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { treeGone } from "./identity.ts";
 import { lastLines, type RunResult, type Runner } from "./run.ts";
 import { newestRelease } from "./semver.ts";
 import { readTransaction } from "./transaction.ts";
@@ -47,7 +48,7 @@ export type Blocked =
   /** The target is not ahead of this copy on the same line (a release tag off the branch). */
   | { readonly reason: "diverged"; readonly target: string }
   /** The last update was cut off, so the commit here proves nothing about the install and builds. */
-  | { readonly reason: "unfinished"; readonly target: string };
+  | { readonly reason: "unfinished"; readonly target: string; readonly runningPid: number | null };
 
 export type Inspection =
   | { readonly state: "blocked"; readonly blocked: Blocked }
@@ -182,7 +183,11 @@ export async function inspect(o: InspectOptions): Promise<Inspection> {
   if (!(await isClone(o.root, git))) return blocked({ reason: "not-a-clone" });
   // Before "up to date" can be said: an update the last run left half done is finished by the update, not a check.
   const unfinished = readTransaction(o.root);
-  if (unfinished !== null) return blocked({ reason: "unfinished", target: unfinished.to.label });
+  if (unfinished !== null) {
+    // Only asks whether the command is there; any advice has to start with it if it is.
+    const { running } = unfinished;
+    return blocked({ reason: "unfinished", target: unfinished.to.label, runningPid: running !== undefined && !treeGone(running) ? running.pid : null });
+  }
   const upstream = await upstreamOf(git);
   if (isBlocked(upstream)) return blocked(upstream);
   const files = await changedFiles(git);

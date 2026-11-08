@@ -250,7 +250,7 @@ describe("the saved transaction", () => {
     // A folder where the temporary file would go: the save fails the way a full disk does.
     mkdirSync(`${path.join(r.clone, ".git", TRANSACTION_FILE)}.${process.pid}.tmp`);
     const fake = fakePnpm();
-    await expect(update(fake)).rejects.toThrow();
+    expect(await update(fake)).toMatchObject({ outcome: "refused", refusal: { reason: "cannot-save", pid: null } });
     expect(head(r.clone)).toBe(old);
     expect(fake.commands.filter((c) => c.startsWith("git merge --ff-only"))).toEqual([]);
   });

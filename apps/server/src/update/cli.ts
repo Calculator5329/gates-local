@@ -145,6 +145,14 @@ export function refusalLines(r: Refusal): string[] {
     case "no-pnpm":
       return ["pnpm was not found. Run `corepack enable pnpm`, open a new terminal and try again."];
     case "unfinished":
+      if (r.runningPid !== null) {
+        return [
+          `The last update, to ${r.target}, did not finish, and a step of it is still running (process ${r.runningPid}).`,
+          "End that process or restart the computer first, and keep Gates Local closed until then: that step may still be replacing its files.",
+          "Then run `pnpm run app-update`: it finishes the update or says what is in the way.",
+          `Or by hand, once it has ended: ${BY_HAND}`,
+        ];
+      }
       return [`The last update, to ${r.target}, did not finish, so this copy may not run yet.`, "Close Gates Local and run `pnpm run app-update`: it finishes the update or says what is in the way.", `Or by hand: ${BY_HAND}`];
     case "busy":
       return [
@@ -161,6 +169,15 @@ export function refusalLines(r: Refusal): string[] {
         "Keep Gates Local closed until then: that step may still be replacing its files.",
         `Or by hand, once it has ended: ${BY_HAND}`,
       ];
+    case "cannot-save":
+      return [
+        `The update to ${r.target} stopped before its next step, because it could not save what it was doing: ${r.detail}.`,
+        r.pid === null
+          ? "Nothing of it is left running, and it changed nothing more."
+          : `A process it had just started (process ${r.pid}) could not be confirmed ended. End it or restart the computer before anything else, and keep Gates Local closed until then.`,
+        "Fix the cause (a full disk is the usual one), then run `pnpm run app-update`.",
+        `Or by hand${r.pid === null ? "" : ", once it has ended"}: ${BY_HAND}`,
+      ];
     case "partial-checkout":
       return [
         `The last update, to ${r.target}, was cut off while it was changing files, so this copy is part way between two versions.`,
@@ -175,8 +192,8 @@ export function refusalLines(r: Refusal): string[] {
         `The update to ${r.target} stopped at ${STEP_WORDS[r.step]}: ${r.stepReason}.`,
         ...changedLines(r),
         "It did not go back on its own, so your work is exactly as you left it.",
-        "To finish: save your work with `git stash` or a commit, then run `pnpm run app-update`.",
-        `Or by hand: ${BY_HAND}`,
+        "To finish, with your work left as it is: close Gates Local, then run `pnpm install`, then `pnpm start`.",
+        "The same works after `git pull`, if you want the newest version first.",
       ];
   }
 }
@@ -304,7 +321,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
         for (const line of lines) say(line);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
         // Not while something may still be replacing what the app runs from.
-        if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason)) reopen();
+        if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason) && !(run.refusal.reason === "cannot-save" && run.refusal.pid !== null)) reopen();
         return 1;
       }
       case "up-to-date":
