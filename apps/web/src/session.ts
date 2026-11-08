@@ -589,8 +589,14 @@ function savedReplyFor(live: LiveTurn | null, threadId: string, messages: readon
   return i >= 0 && messages.slice(i + 1).some((m) => m.role === "assistant");
 }
 
+/** Leaving a chat ends an edit, which frees its message. After this task: flushQueued itself opens threads, and its own send starts first. */
+function wakeAfterEdit(): void {
+  if (getState().editingQueued !== null) queueMicrotask(flushQueued);
+}
+
 export function openThread(threadId: string): void {
   navGen++;
+  wakeAfterEdit();
   setState((s) => {
     // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
     const model = s.threadModels[threadId] ?? s.model;
@@ -604,6 +610,7 @@ export function openThread(threadId: string): void {
 
 export function newThread(): void {
   navGen++;
+  wakeAfterEdit();
   // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
   setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...decided(pickChoice(s.models, s.model, undefined)) }));
   setHash(null);
@@ -693,8 +700,10 @@ const oldTurns = new Set<string>();
  * events (after a reconnect its server turn may still run) never reach the
  * turn that replaces it (WF-01).
  */
-function retire(live: LiveTurn | null): void {
-  if (live !== null && live.turnId !== null) oldTurns.add(live.turnId);
+function retire(live: LiveTurn | null, keepWords = true): void {
+  if (live === null) return;
+  if (live.turnId !== null) oldTurns.add(live.turnId);
+  if (keepWords) keepStoppedWords(live);
 }
 
 /** Events that came while the live turn waited for chat.send to give its id; the answer replays them (WF-01). */
@@ -709,6 +718,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   if (s.editingQueued !== null) {
     const id = s.editingQueued;
     setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content } : q)), editingQueued: null, draft: "", notice: null }));
+    flushQueued();
     return;
   }
   const wait = queueReason(s) ?? (streamingHere(s) ? "reply" : null);
@@ -725,11 +735,15 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   setState((st) => ({ queued: [...st.queued, q] }));
 }
 
-/** The live slot, cleared of a turn that has ended; a reply still being written keeps it until another turn needs it. */
-function settled(): Partial<State> {
+/**
+ * The live slot, cleared of a turn that has ended; a reply still being written
+ * keeps it until another turn needs it. A stopped reply's words stay in its
+ * chat, unless this is a Retry in that chat, which is asking to replace them.
+ */
+function settled(regenerating?: string): Partial<State> {
   const s = getState();
   if (streaming(s)) return {};
-  retire(s.live);
+  retire(s.live, s.live?.threadId !== regenerating);
   return { live: null };
 }
 
@@ -775,6 +789,7 @@ async function admit(out: Outgoing): Promise<void> {
   asking = true;
   const blocking = await blockingFor(out.model, getState().numCtx);
   asking = false;
+  if (gone(out)) return;
   if (blocking.length > 0 && !stopOthersOk()) {
     setState({ stopAsk: { ...out, blocking }, notice: null });
     return;
@@ -782,17 +797,43 @@ async function admit(out: Outgoing): Promise<void> {
   await launch(out, blocking.length > 0);
 }
 
+/** A Send now waits on the server and on the warning: meanwhile the person may have removed its message or opened it for editing. */
+function gone(out: Outgoing): boolean {
+  const s = getState();
+  return out.queuedId !== undefined && (s.editingQueued === out.queuedId || !s.queued.some((q) => q.id === out.queuedId));
+}
+
+/** A queued message on its way to the server, and the ones that were ahead of it: a refused send puts it back at its place. */
+interface Leaving {
+  readonly q: Queued;
+  readonly ahead: ReadonlySet<string>;
+}
+
+function leaving(queued: readonly Queued[], q: Queued): Leaving {
+  return { q, ahead: new Set(queued.slice(0, queued.indexOf(q)).map((x) => x.id)) };
+}
+
+function putBack(queued: readonly Queued[], { q, ahead }: Leaving): Queued[] {
+  const { now: _now, ...rest } = q;
+  const at = queued.findLastIndex((x) => ahead.has(x.id)) + 1;
+  return [...queued.slice(0, at), { ...rest, held: true as const }, ...queued.slice(at)];
+}
+
 async function launch(out: Outgoing, stopOthers: boolean): Promise<void> {
-  if (out.threadId !== null && out.regenerate !== true) keepStoppedWords(out.threadId);
+  if (gone(out)) return setState({ stopAsk: null });
+  const { queued } = getState();
+  const q = queued.find((x) => x.id === out.queuedId);
+  const from = q === undefined ? undefined : leaving(queued, q);
+  const slot = settled(out.regenerate === true ? (out.threadId ?? undefined) : undefined);
   setState((s) => ({
-    ...settled(),
+    ...slot,
     notice: null,
     stopAsk: null,
     ...(out.keepDraft ? {} : { draft: "" }),
-    ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((q) => q.id !== out.queuedId) }),
+    ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((x) => x.id !== out.queuedId) }),
   }));
   const threadId = out.threadId ?? (await createThread(out.content, out.model));
-  if (threadId !== null) await startTurn(threadId, out.content, out.model, { stopOthers });
+  if (threadId !== null) await startTurn(threadId, out.content, out.model, { stopOthers, from, out });
 }
 
 /** The warning's action. `dontShowAgain` is saved only here, so a Cancel with the box ticked changes nothing. */
@@ -845,18 +886,25 @@ function bringBack(threadId: string): void {
   setState({ live: back });
 }
 
-/** The server saves nothing for a reply the person stopped: its words live only in the live turn, and the next turn there would wipe them off the screen. */
-function keepStoppedWords(threadId: string): void {
-  const l = getState().live;
-  if (l === null || l.threadId !== threadId || l.end?.kind !== "stopped" || l.text === "") return;
+/** The server saves nothing for a reply the person stopped: its words live only in the live turn, so they move into its chat before anything takes the slot. */
+function keepStoppedWords(l: LiveTurn): void {
+  if (l.end?.kind !== "stopped" || l.text === "") return;
+  const { threadId } = l;
   const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), model: l.model, createdAt: Date.now() };
   const note = `Stopped after ${l.end.secs} s.`;
   setState((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
 }
 
-async function startTurn(threadId: string, content: string, model: string, opts: { stopOthers?: boolean; from?: Queued } = {}): Promise<void> {
+interface TurnOptions {
+  readonly stopOthers?: boolean;
+  /** It left the queue for this send. */
+  readonly from?: Leaving | undefined;
+  /** The person is waiting on it, so a reply in the way can still get the warning; queued messages that go on their own have none. */
+  readonly out?: Outgoing;
+}
+
+async function startTurn(threadId: string, content: string, model: string, opts: TurnOptions = {}): Promise<void> {
   setAside(threadId);
-  keepStoppedWords(threadId); // a Retry cleared the live turn before it got here
   const s = getState();
   const gen = ++turnGen;
   setState({ live: { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content } });
@@ -868,7 +916,7 @@ async function startTurn(threadId: string, content: string, model: string, opts:
       numCtx: s.numCtx,
       think: s.think,
       ...(s.image ? { image: true } : {}),
-      ...(opts.stopOthers ? { stopOthers: true } : {}),
+      ...(opts.stopOthers ? { stopOthers: true } : opts.out === undefined ? {} : { askFirst: true }),
     });
     const away = parked.findIndex((t) => t.gen === gen);
     if (away >= 0) {
@@ -904,21 +952,43 @@ async function startTurn(threadId: string, content: string, model: string, opts:
   } catch (e) {
     const mine = getState().live?.gen === gen;
     parked = parked.filter((t) => t.gen !== gen);
-    setState((st) => {
-      if (st.live === null || st.live.gen !== gen) return {};
-      // a stopped turn that never started has nothing left to wait for
-      if (st.live.end !== undefined) return { live: { ...st.live, pendingUser: null, ending: undefined } };
-      const { from } = opts;
-      // a queued message goes back where it was, on hold: what is in the box is something else
-      if (from !== undefined) {
-        const { now: _now, ...rest } = from;
-        return { live: null, queued: [{ ...rest, held: true }, ...st.queued], notice: refusal(codeOf(e), model) };
-      }
-      return { live: null, draft: content, notice: refusal(codeOf(e), model) };
-    });
+    notSent(e, gen, threadId, content, model, opts);
     // a turn another client started meanwhile (turn-active) now streams here
     if (mine) replayEarly();
+    flushQueued();
   }
+}
+
+/**
+ * chat.send was refused, so nothing was saved: the words go where the person
+ * will find them, whoever holds the live slot now. A queued message goes back
+ * to its place. Other words go back in the box if it is on screen and empty,
+ * else on hold in their own chat's queue. A Retry's are already in the chat.
+ * A reply in the way that the preflight missed gets the usual warning, when
+ * the person is still there to answer it.
+ */
+function notSent(e: unknown, gen: number, threadId: string, content: string, model: string, { from, out }: TurnOptions): void {
+  const st = getState();
+  const code = codeOf(e);
+  const owner = st.live?.gen === gen ? st.live : null;
+  const halted = owner?.end !== undefined;
+  const here = st.view === "thread" && st.threadId === threadId;
+  const where = out?.regenerate === true ? null : from === undefined && here && st.draft === "" ? "box" : "queue";
+  const blocking = e instanceof WireError ? e.blocking : undefined;
+  // halted: the person has already said no; a message that went to the queue instead of the box would warn about words not in view
+  const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && (from !== undefined || where !== "queue") ? { ...out, threadId, blocking } : null;
+  const typed: Queued = { id: `q${++queueSeq}`, threadId, text: content, at: Date.now(), waitFor: "reply", model, held: true };
+  const consented = ask !== null && stopOthersOk();
+  setState({
+    ...(owner === null ? {} : { live: halted ? { ...owner, pendingUser: null, ending: undefined } : null }),
+    ...(where === "box" ? { draft: content } : {}),
+    ...(where === "queue" ? { queued: from === undefined ? [...st.queued, typed] : putBack(st.queued, from) } : {}),
+    ...(ask === null || consented ? {} : { stopAsk: ask, notice: null }),
+    ...(ask === null && !halted ? { notice: where === "queue" && !here ? elsewhereNotice(st, threadId) : refusal(code, model, where) } : {}),
+  });
+  if (consented) void launch(ask, true);
+  // what waited behind it does not overtake it
+  else if (ask === null && from !== undefined) holdQueue(from.q.threadId);
 }
 
 function replayEarly(): void {
@@ -927,19 +997,27 @@ function replayEarly(): void {
   for (const p of all) onChatEvent(p);
 }
 
-/** Plain words for a refused send. */
-function refusal(code: string, model: string): string {
+function elsewhereNotice(s: State, threadId: string): string {
+  const title = s.threads.find((t) => t.id === threadId)?.title;
+  return `A message in ${title === undefined || title === "" ? "another chat" : `“${title}”`} didn't send. It's on hold in that chat.`;
+}
+
+/** Plain words for a refused send; `where` is where its words went (null: they were already in the chat). */
+function refusal(code: string, model: string, where: "box" | "queue" | null): string {
   const name = describeModel(model, catalogOf(getState())).name;
+  const back = where === null ? "" : ` Your message is back in the ${where}.`;
   switch (code) {
     case "wont-fit":
       return `${name} doesn't fit in memory at ${k(ctxFor(getState().numCtx, getState().models, model))}. Pick a smaller model or context.`;
     case "turn-active":
       return "A reply is still being written in this thread. Stop it or wait.";
+    case "would-stop":
+      return `Another chat's reply is using the memory ${name} needs.${back}`;
     case "runtime-not-ready":
-      return "Chat starts when Ollama is ready. Your message is back in the box.";
+      return `Chat starts when Ollama is ready.${back}`;
     case "closed":
     case "timeout":
-      return "Gates Local stopped answering. Your message is back in the box.";
+      return `Gates Local stopped answering.${back}`;
     default:
       return "The message didn't send. Try again.";
   }
@@ -1232,10 +1310,11 @@ function flushQueued(): void {
   const next = s.queued.find((q) => q.id !== s.editingQueued && (q.now === true || q.held !== true));
   const model = next?.model ?? s.model;
   if (next === undefined || model === undefined) return;
+  const from = leaving(s.queued, next);
   setState((st) => ({ queued: st.queued.filter((q) => q.id !== next.id) }));
   // setup and the first download are the whole app waiting; a queue behind a reply stays out of the way
   if (next.waitFor !== "reply" && getState().threadId !== next.threadId) openThread(next.threadId);
-  void startTurn(next.threadId, next.text, model, { from: next });
+  void startTurn(next.threadId, next.text, model, { from });
 }
 
 /**
@@ -1259,7 +1338,11 @@ export function sendQueuedNow(id: string): void {
 
 /** Remove: the message is gone. Edit is the way to get its words back. */
 export function removeQueued(id: string): void {
-  setState((s) => ({ queued: s.queued.filter((q) => q.id !== id), ...(s.editingQueued === id ? { editingQueued: null, draft: "" } : {}) }));
+  setState((s) => ({
+    queued: s.queued.filter((q) => q.id !== id),
+    ...(s.editingQueued === id ? { editingQueued: null, draft: "" } : {}),
+    ...(s.stopAsk?.queuedId === id ? { stopAsk: null } : {}),
+  }));
 }
 
 /** Edit: the words go in the composer and the message keeps its place until the next Send updates it. */
@@ -1270,6 +1353,7 @@ export function editQueued(id: string): void {
 
 export function cancelQueuedEdit(): void {
   setState({ editingQueued: null, draft: "" });
+  flushQueued();
 }
 
 // ---------------------------------------------------------------- composer and models

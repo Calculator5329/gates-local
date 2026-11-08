@@ -11,6 +11,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, write
 import path from "node:path";
 import type { Step } from "./apply.ts";
 import type { Channel, Commit } from "./check.ts";
+import type { ProcessRecord } from "./identity.ts";
 import { stateDir } from "./lock.ts";
 
 export const TRANSACTION_FILE = "gates-local-update.json";
@@ -23,6 +24,8 @@ interface Common {
   readonly to: Commit;
   /** Commits between from and to. */
   readonly changes: number;
+  /** The command changing the checkout. Still here later means it may still be at it: nothing may start until it has ended. */
+  readonly running?: ProcessRecord;
 }
 
 export type Transaction =
@@ -72,6 +75,12 @@ const STEPS: ReadonlySet<string> = new Set(["switch", "install", "build-web", "b
 const isString = (v: unknown): v is string => typeof v === "string" && v !== "";
 const isCommit = (v: unknown): v is Commit => typeof v === "object" && v !== null && isString((v as Commit).commit) && isString((v as Commit).label);
 
+function isProcess(v: unknown): v is ProcessRecord {
+  if (typeof v !== "object" || v === null) return false;
+  const { pid, start, uptime } = v as ProcessRecord;
+  return Number.isInteger(pid) && pid > 0 && (start === null || isString(start)) && typeof uptime === "number";
+}
+
 function parse(text: string): Transaction | null {
   let v: Record<string, unknown>;
   try {
@@ -79,10 +88,11 @@ function parse(text: string): Transaction | null {
   } catch {
     return null;
   }
-  const { version, channel, branch, from, to, changes, phase, step, reason } = v;
+  const { version, channel, branch, from, to, changes, phase, step, reason, running } = v;
   if (version !== 1 || (channel !== "main" && channel !== "release") || !isString(branch) || !isCommit(from) || !isCommit(to)) return null;
   if (typeof changes !== "number" || !Number.isInteger(changes) || changes < 0) return null;
-  const common: Common = { channel, branch, from, to, changes };
+  if (running !== undefined && !isProcess(running)) return null;
+  const common: Common = { channel, branch, from, to, changes, ...(running === undefined ? {} : { running }) };
   if (phase === "forward") return { ...common, phase };
   if (phase === "back" && isString(step) && STEPS.has(step) && typeof reason === "string") return { ...common, phase, step: step as Step, reason };
   return null;

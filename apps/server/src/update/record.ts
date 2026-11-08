@@ -11,7 +11,7 @@ export const RECORD_FILE = "update-result.json";
 
 export interface UpdateRecord {
   readonly at: number;
-  /** refused: a detached update that did not start (the app shows why). */
+  /** refused: a detached update that did not start, or stopped short of changing more (the app shows why). */
   readonly outcome: "updated" | "stopped" | "rollback-failed" | "refused";
   readonly channel?: Channel;
   readonly from?: Commit;

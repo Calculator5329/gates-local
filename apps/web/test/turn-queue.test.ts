@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockingTurn, FitReport, Message, Payload } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
-import { type Browser, installBrowser, tick, until } from "./harness.ts";
+import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -518,5 +518,407 @@ describe("messages typed while a reply is being written", () => {
     expect(st().editingQueued).toBeNull();
     expect(st().draft).toBe("");
     expect(st().queued.map((q) => q.text)).toEqual(["one"]);
+  });
+});
+
+const CANCELLED: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped" };
+const done = (id: string, threadId: string): Payload<"chat.event">["event"] => ({ type: "done", message: asstMsg(id, threadId), stopReason: "stop" });
+const texts = () => st().queued.map((q) => q.text);
+
+/** Chat A's reply was stopped with these messages waiting, all on hold; their ids in order. */
+async function onHold(...words: string[]): Promise<string[]> {
+  const turn = await answering("A");
+  for (const w of words) await session.send(w);
+  session.stop();
+  chat(turn, "A", CANCELLED);
+  await tick();
+  return st().queued.map((q) => q.id);
+}
+
+/** "next" waits behind chat A's reply; that reply ended and its send is held at admission. */
+async function admitting(): Promise<Held<"chat.send">> {
+  const turn = await answering("A");
+  await session.send("next");
+  const held = b.server.hold("chat.send");
+  chat(turn, "A", done("a1", "A"));
+  const h = await held;
+  expect(st().queued).toEqual([]);
+  return h;
+}
+
+/** "typed" is at admission in chat A, the first turn this session. */
+async function typed(): Promise<Held<"chat.send">> {
+  session.newThread();
+  const held = b.server.hold("chat.send");
+  void session.send("typed");
+  const h = await held;
+  expect(st().draft).toBe("");
+  return h;
+}
+
+/** "one" is open for editing and the reply it waited for has ended. */
+async function editedThroughDone(): Promise<void> {
+  const turn = await answering("A");
+  await session.send("one");
+  session.editQueued(st().queued[0]?.id ?? "");
+  chat(turn, "A", done("a1", "A"));
+  await until(() => st().live === null, 2000, "A done");
+  await tick();
+  expect(sends()).toHaveLength(1);
+}
+
+function stoppedWords(threadId = "A"): void {
+  const m = (st().messages[threadId] ?? []).find((x) => x.role === "assistant");
+  expect(m?.content).toBe("words so far");
+  expect(st().stopNotes[m?.id ?? ""]).toMatch(/^Stopped after \d+ s\.$/);
+}
+
+describe("a message the person typed is never lost", () => {
+  describe("a Send now that fails (CFS-01)", () => {
+    it("goes back at its own place, on hold, and the box keeps what is in it", async () => {
+      const ids = await onHold("one", "two", "three");
+      store.setState({ draft: "something else" });
+      const held = b.server.hold("chat.send");
+      session.sendQueuedNow(ids[1] ?? "");
+      const h = await held;
+      expect(texts()).toEqual(["one", "three"]);
+      h.fail("internal", "no");
+      await until(() => st().queued.length === 3, 2000, "the message back");
+      expect(texts()).toEqual(["one", "two", "three"]);
+      expect(st().queued[1]).toMatchObject({ id: ids[1], held: true });
+      expect(st().draft).toBe("something else");
+      expect(st().notice).not.toBeNull();
+    });
+
+    it("says the queue has it, not the box", async () => {
+      const ids = await onHold("one");
+      const held = b.server.hold("chat.send");
+      session.sendQueuedNow(ids[0] ?? "");
+      (await held).fail("closed", "gone");
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().notice).toMatch(/queue/);
+      expect(st().notice).not.toMatch(/box/);
+    });
+  });
+
+  it("a Regenerate that fails leaves the box alone: its words are already in the chat", async () => {
+    const turn = await answering("A");
+    chat(turn, "A", done("a1", "A"));
+    await until(() => st().live === null, 2000, "A done");
+    store.setState({ draft: "half a thought" });
+    const held = b.server.hold("chat.send");
+    session.retry();
+    (await held).fail("internal", "no");
+    await until(() => st().notice !== null, 2000, "the notice");
+    expect(st().draft).toBe("half a thought");
+    expect(st().queued).toEqual([]);
+  });
+
+  describe("a queued message whose send is refused", () => {
+    it("after Stop during admission is back in its own chat's queue (CFS-02)", async () => {
+      const h = await admitting();
+      session.stop();
+      h.fail("wont-fit", "no");
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
+      expect(st().live?.ending).toBeUndefined();
+      expect(st().live?.pendingUser).toBeNull();
+    });
+
+    it("while another chat owns the live slot is back in its own chat's queue, and the notice says where (CFS-03)", async () => {
+      const h = await admitting();
+      const other = await answering("B");
+      h.fail("wont-fit", "no");
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
+      expect(st().live?.turnId).toBe(other);
+      expect(st().notice).toMatch(/hello A/);
+    });
+
+    it("holds what was waiting behind it, so nothing overtakes it", async () => {
+      const turn = await answering("A");
+      await session.send("first");
+      await session.send("second");
+      const held = b.server.hold("chat.send");
+      chat(turn, "A", done("a1", "A"));
+      (await held).fail("wont-fit", "no");
+      await until(() => st().queued.length === 2, 2000, "the message back");
+      await tick();
+      expect(texts()).toEqual(["first", "second"]);
+      expect(st().queued.map((q) => q.held)).toEqual([true, true]);
+      expect(sends().map((s) => s.content)).toEqual(["hello A", "first"]);
+    });
+  });
+
+  it("a refused send wakes what another chat has waiting behind it", async () => {
+    const a = await answering("A");
+    await session.send("for A");
+    const c = await answering("B");
+    await session.send("for B");
+    chat(a, "A", done("a1", "A"));
+    await tick();
+    const held = b.server.hold("chat.send");
+    chat(c, "B", done("b1", "B"));
+    (await held).fail("wont-fit", "no");
+    await until(() => sends().some((s) => s.content === "for B"), 2000, "B's queued message");
+    expect(st().queued).toMatchObject([{ threadId: "A", text: "for A", held: true }]);
+  });
+
+  describe("a typed message whose send is refused after the person moved on", () => {
+    it("behind another chat, it waits in its own chat's queue", async () => {
+      const h = await typed();
+      await answering("B");
+      h.fail("wont-fit", "no");
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true, waitFor: "reply" }]);
+      expect(st().draft).toBe("");
+    });
+
+    it("with new words typed in the box, the box keeps them and the message waits in the queue", async () => {
+      const h = await typed();
+      store.setState({ draft: "the next thought" });
+      h.fail("wont-fit", "no");
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().draft).toBe("the next thought");
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true }]);
+    });
+
+    it("stopped during admission with an empty box, it is back in the box", async () => {
+      const h = await typed();
+      session.stop();
+      h.fail("wont-fit", "no");
+      await until(() => st().draft !== "", 2000, "the text back");
+      expect(st().draft).toBe("typed");
+      expect(st().queued).toEqual([]);
+    });
+  });
+
+  describe("Remove while a Send now is waiting on its warning (CFS-04)", () => {
+    it("takes the warning with it, and a confirm sends nothing", async () => {
+      const ids = await onHold("next");
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(ids[0] ?? "");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      session.removeQueued(ids[0] ?? "");
+      expect(st().stopAsk).toBeNull();
+      session.confirmStopAsk(false);
+      await tick();
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("a warning whose message left another way sends nothing on confirm", async () => {
+      const ids = await onHold("next");
+      b.server.answer("turns.blocking", () => BLOCKING);
+      session.sendQueuedNow(ids[0] ?? "");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      store.setState({ queued: [] });
+      session.confirmStopAsk(false);
+      await tick();
+      expect(sends()).toHaveLength(1);
+      expect(st().stopAsk).toBeNull();
+    });
+
+    it("removed while the server is being asked, it shows no warning and is not sent", async () => {
+      const ids = await onHold("next");
+      const held = b.server.hold("turns.blocking");
+      session.sendQueuedNow(ids[0] ?? "");
+      const h = await held;
+      session.removeQueued(ids[0] ?? "");
+      h.respond(BLOCKING);
+      await tick();
+      expect(st().stopAsk).toBeNull();
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("removed while the server is being asked with nothing in the way, it is not sent", async () => {
+      const ids = await onHold("next");
+      const held = b.server.hold("turns.blocking");
+      session.sendQueuedNow(ids[0] ?? "");
+      const h = await held;
+      session.removeQueued(ids[0] ?? "");
+      h.respond([]);
+      await tick();
+      expect(sends()).toHaveLength(1);
+    });
+  });
+
+  describe("the only queued message, edited while its reply finished (CFS-05)", () => {
+    it("goes when the edit is finished", async () => {
+      await editedThroughDone();
+      await session.send("one, better");
+      await until(() => sends().length === 2, 2000, "the queued send");
+      expect(sends()[1]?.content).toBe("one, better");
+    });
+
+    it("goes when the edit is cancelled", async () => {
+      await editedThroughDone();
+      session.cancelQueuedEdit();
+      await until(() => sends().length === 2, 2000, "the queued send");
+      expect(sends()[1]?.content).toBe("one");
+    });
+
+    it("goes when leaving the chat ends the edit", async () => {
+      await editedThroughDone();
+      session.newThread();
+      await until(() => sends().length === 2, 2000, "the queued send");
+      expect(sends()[1]?.content).toBe("one");
+    });
+
+    it("waits while a reply is still being written", async () => {
+      await answering("A");
+      await session.send("one");
+      session.editQueued(st().queued[0]?.id ?? "");
+      await session.send("one, better");
+      await tick();
+      expect(sends()).toHaveLength(1);
+      expect(texts()).toEqual(["one, better"]);
+    });
+  });
+
+  describe("a stopped reply's words when something else takes the slot (CFS-06)", () => {
+    it("stay when another chat sends", async () => {
+      await stopped("words so far");
+      await answering("B");
+      session.openThread("A");
+      stoppedWords();
+    });
+
+    it("stay when a reply running behind it comes back", async () => {
+      await answering("A");
+      const turn = await answering("B");
+      chat(turn, "B", { type: "delta", text: "words so far" });
+      await tick();
+      session.stop();
+      chat(turn, "B", CANCELLED);
+      await tick();
+      session.openThread("A");
+      expect(st().live?.threadId).toBe("A");
+      stoppedWords("B");
+    });
+
+    it("stay when another client starts a turn here", async () => {
+      await stopped("words so far");
+      chat("elsewhere", "A", { type: "start", model: MODEL, userMessage: userMsg("u-phone", "A", "from the phone") });
+      await tick();
+      expect(st().live?.turnId).toBe("elsewhere");
+      stoppedWords();
+    });
+
+    it("Retry in their own chat still replaces them", async () => {
+      await stopped("words so far");
+      session.retry();
+      await until(() => sends().length === 2, 2000, "the retry");
+      await tick();
+      expect(kept()).toBeUndefined();
+    });
+  });
+
+  describe("a blocker the preflight missed (CFS-07)", () => {
+    const WOULD_STOP = { code: "would-stop", message: "this would stop another reply", blocking: BLOCKING };
+
+    /** The next chat.send is refused for a blocker; the ones after it go through as usual. */
+    function refusedOnce(): void {
+      void b.server.hold("chat.send").then((h) => h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking));
+    }
+
+    it("a person's send asks the server to refuse rather than wait", async () => {
+      await answering("A");
+      expect(sends()[0]).toMatchObject({ askFirst: true });
+    });
+
+    it("a queued message that goes on its own does not", async () => {
+      const turn = await answering("A");
+      await session.send("next");
+      chat(turn, "A", done("a1", "A"));
+      await until(() => sends().length === 2, 2000, "the queued send");
+      expect(sends()[1]).not.toHaveProperty("askFirst");
+      expect(sends()[1]).not.toHaveProperty("stopOthers");
+    });
+
+    it("shows the warning with the text still in the box, and confirm retries with stopOthers in the same chat", async () => {
+      await answering("A");
+      session.newThread();
+      store.setState({ draft: "for B" });
+      refusedOnce();
+      await session.send("for B");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      expect(st().stopAsk?.blocking).toEqual(BLOCKING);
+      expect(st().draft).toBe("for B");
+      expect(st().notice).toBeNull();
+      expect(b.server.calls("chat.cancel")).toHaveLength(0);
+      expect(sends()).toHaveLength(2);
+      session.confirmStopAsk(false);
+      await until(() => sends().length === 3, 2000, "the retry");
+      expect(sends()[2]).toMatchObject({ threadId: "B", content: "for B", stopOthers: true });
+      expect(sends()[2]).not.toHaveProperty("askFirst");
+      expect(b.server.calls("threads.create")).toHaveLength(2);
+      expect(st().draft).toBe("");
+    });
+
+    it("cancelled, sends nothing more and keeps the text", async () => {
+      await answering("A");
+      session.newThread();
+      store.setState({ draft: "for B" });
+      refusedOnce();
+      await session.send("for B");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      session.cancelStopAsk();
+      await tick();
+      expect(sends()).toHaveLength(2);
+      expect(st().draft).toBe("for B");
+    });
+
+    it("with 'Don't show this again' saved, retries without asking", async () => {
+      localStorage.setItem("gates-local.stop-others-ok", "1");
+      await answering("A");
+      session.newThread();
+      refusedOnce();
+      await session.send("for B");
+      await until(() => sends().length === 3, 2000, "the retry");
+      expect(st().stopAsk).toBeNull();
+      expect(sends()[2]).toMatchObject({ content: "for B", stopOthers: true });
+    });
+
+    it("a Send now goes back at its place, and confirm sends it and takes it out", async () => {
+      const ids = await onHold("one", "two");
+      store.setState({ draft: "something else" });
+      refusedOnce();
+      session.sendQueuedNow(ids[0] ?? "");
+      await until(() => st().stopAsk !== null, 2000, "the warning");
+      expect(texts()).toEqual(["one", "two"]);
+      expect(st().draft).toBe("something else");
+      session.confirmStopAsk(false);
+      await until(() => sends().length === 3, 2000, "the retry");
+      expect(sends()[2]).toMatchObject({ content: "one", stopOthers: true });
+      expect(texts()).toEqual(["two"]);
+      expect(st().draft).toBe("something else");
+    });
+
+    it("with other words in the box, the message waits in the queue instead of taking the box", async () => {
+      await answering("A");
+      session.newThread();
+      const held = b.server.hold("chat.send");
+      void session.send("for B");
+      const h = await held;
+      store.setState({ draft: "newer words" });
+      h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking);
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().stopAsk).toBeNull();
+      expect(st().draft).toBe("newer words");
+      expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
+    });
+
+    it("after the person left the chat, no warning opens on the wrong screen: the message waits in its own queue", async () => {
+      await answering("A");
+      session.newThread();
+      const held = b.server.hold("chat.send");
+      void session.send("for B");
+      const h = await held;
+      session.openThread("A");
+      h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking);
+      await until(() => st().queued.length === 1, 2000, "the message back");
+      expect(st().stopAsk).toBeNull();
+      expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
+    });
   });
 });

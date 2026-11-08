@@ -320,27 +320,31 @@ function FitLine({ v, ctx }: { v: Verdict; ctx: number }) {
   );
 }
 
+/** What both bodies read about a model: its size limit, the size it runs at, and the GPU. */
+function useFitModel(model: string) {
+  const numCtx = useStore((s) => s.numCtx);
+  const gpuRaw = useStore((s) => s.gpu);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
+  const load = useStore((s) => s.loads[model]);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
+  const gpu = gpuRaw === NA ? undefined : gpuRaw;
+  return { numCtx, max, ctx, gpuRaw, gpu, name: describeModel(model, catalog).name, loaded: load?.state === "ready" && load.numCtx === ctx };
+}
+
 /**
  * The one default-context control (S1-06): a line for the size chosen, each
  * segment's fit in its tooltip, and the GB numbers one step away under Details.
  */
 function SettingsBody({ model }: { model: string }) {
-  const numCtx = useStore((s) => s.numCtx);
+  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
   const fits = useStore((s) => s.fits);
-  const gpuRaw = useStore((s) => s.gpu);
   const settingsNA = useStore((s) => s.settings === NA);
-  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
-  const load = useStore((s) => s.loads[model]);
-  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
   const [err, run] = useAct();
-  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
   useEffect(() => {
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
   }, [model, max, fits]);
-  const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const cpu = noGpu(gpu);
-  const name = describeModel(model, catalog).name;
-  const loaded = load?.state === "ready" && load.numCtx === ctx;
   const report = fits[fitKey(model, numCtx)];
   const pick = (c: ContextSize) => {
     closeTip();
@@ -400,17 +404,9 @@ function pickChatCtx(c: ContextSize): void {
 }
 
 function Body({ model }: { model: string }) {
-  const numCtx = useStore((s) => s.numCtx);
+  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
   const report = useStore((s) => s.fits[fitKey(model, numCtx)]);
-  const gpuRaw = useStore((s) => s.gpu);
-  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
-  const load = useStore((s) => s.loads[model]);
-  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
-  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
   useEffect(() => ensureFit(model, numCtx), [model, numCtx, report]);
-  const gpu = gpuRaw === NA ? undefined : gpuRaw;
-  const name = describeModel(model, catalog).name;
-  const loaded = load?.state === "ready" && load.numCtx === ctx;
   if (report === undefined) return <div className="fp-n">Checking GPU memory…</div>;
   if (report === "error") return <div className="fp-n">Gates Local couldn't check GPU memory for {name} right now.</div>;
   const v = verdictOf(report);

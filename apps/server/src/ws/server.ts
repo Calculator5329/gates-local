@@ -11,6 +11,7 @@ import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
 import type { Duplex } from "node:stream";
 import {
+  type BlockingTurn,
   type Channel,
   type MethodName,
   type Params,
@@ -116,12 +117,13 @@ function send(ws: WebSocket, frame: string): void {
 }
 
 /** Thrown values with a string `code` keep it; anything else is "internal". */
-function errorCode(e: unknown): { code: string; message: string } {
+function errorCode(e: unknown): { code: string; message: string; blocking?: readonly BlockingTurn[] } {
   if (typeof e === "object" && e !== null) {
-    const { code, message } = e as { code?: unknown; message?: unknown };
+    const { code, message, blocking } = e as { code?: unknown; message?: unknown; blocking?: unknown };
     return {
       code: typeof code === "string" && code !== "" ? code : "internal",
       message: typeof message === "string" ? message : String(e),
+      ...(Array.isArray(blocking) ? { blocking: blocking as BlockingTurn[] } : {}),
     };
   }
   return { code: "internal", message: String(e) };
@@ -215,9 +217,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     try {
       result = await handler(params, ctx);
     } catch (e) {
-      const { code, message } = errorCode(e);
+      const { code, message, blocking } = errorCode(e);
       if (code === "internal") log(`${method} handler threw: ${message}`);
-      return send(ws, encodeErrorResponse(id, code, message));
+      return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
     const frame = encodeResult(id, method, result as never);
     if (!frame.ok) {

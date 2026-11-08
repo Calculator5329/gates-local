@@ -70,6 +70,12 @@ describe("update.status", () => {
     expect(update.status().result?.line).toMatch(/^The update to v0\.2\.0 stopped at .+: ERR_PNPM_TEST\. Gates Local is still on v0\.1\.0\.$/);
     encodes("update.status", update.status());
   });
+
+  it("does not say an update never started when it was refused part way through", () => {
+    writeRecord(r.data, { at: 5, outcome: "refused", reason: "The update to v0.2.0 has a step that ran too long." });
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => false });
+    expect(update.status().result?.line).toBe("The update stopped: The update to v0.2.0 has a step that ran too long.");
+  });
 });
 
 describe("update.check", () => {
@@ -111,6 +117,9 @@ describe("update.check", () => {
     const check = await update.check();
     expect(check).toMatchObject({ state: "cannot-check", reason: "unfinished" });
     expect(check.state === "cannot-check" && check.lines[0]).toContain("The last update, to v0.2.0, did not finish");
+    const words = check.state === "cannot-check" ? check.lines.join(" ") : "";
+    expect(words).toContain("pnpm run app-update");
+    expect(words).toContain("git pull, pnpm install, pnpm start");
     encodes("update.check", check);
   });
 

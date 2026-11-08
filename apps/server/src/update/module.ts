@@ -49,7 +49,7 @@ export function resultLine(r: UpdateRecord): string {
     case "rollback-failed":
       return `The update to ${to} stopped at ${r.step === undefined ? "a step" : STEP_WORDS[r.step]}: ${r.reason ?? "no reason was given"}, and going back to ${from} did not finish. Run the commands below in the Gates Local folder.`;
     case "refused":
-      return `The update did not start: ${r.reason ?? "no reason was given"}`;
+      return `The update stopped: ${r.reason ?? "no reason was given"}`;
   }
 }
 
