@@ -34,19 +34,26 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   let mode = options.initialMode;
   let inner = options.make(mode);
   let lastSent: string | undefined;
-  const forward = (s: RuntimeStatus) => {
+  const send = (s: RuntimeStatus) => {
     const key = JSON.stringify(s);
     if (key === lastSent) return;
     lastSent = key;
     for (const l of listeners) l(s);
   };
-  let off = inner.onChange(forward);
   /**
    * From a switch's first line until its ensure settles: baseUrl() is
    * undefined, so nothing new is sent to the runtime being stopped (or to a
    * new one that is not ready yet).
    */
   let switching = false;
+  // A ready the new runtime announces mid-switch would reach listeners while baseUrl() still
+  // says undefined (app.ts refreshes the model list on it, and would empty it). It waits:
+  // setMode sends the settled status once baseUrl() is the new URL and the loader settled.
+  const forward = (s: RuntimeStatus) => {
+    if (switching && s.state === "ready") return;
+    send(s);
+  };
+  let off = inner.onChange(forward);
   // ensure, discover, setMode and stopIfStartedHere run one after another, so
   // a switch waits for an outstanding startup to settle before it decides
   // whether the old runtime was started here (no orphaned app Ollama).
@@ -86,13 +93,12 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
           mode = next;
           inner = options.make(next);
           off = inner.onChange(forward);
-          const status = await inner.ensure();
-          // A fresh runtime that lands on its initial status emits nothing itself.
-          forward(status);
-          return status;
+          return await inner.ensure();
         } finally {
           switching = false;
           options.afterSwitch?.();
+          // The settled status, ready included; a fresh runtime that lands on its initial status emits nothing itself.
+          send(inner.status());
         }
       });
     },

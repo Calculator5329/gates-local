@@ -154,6 +154,47 @@ it("R2-04: a pull submitted after beforeSwitch while the old runtime's stop is p
   await old.close();
 });
 
+it("R3-01: the new runtime's ready reaches listeners only once baseUrl() is its URL and the loader settled; the catalog it refreshes is full", async () => {
+  const next = await startFakeServer({
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 1, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
+  });
+  const events: string[] = [];
+  const make = (mode: RuntimeMode): OllamaRuntime => {
+    const rt = fakeRuntime(mode, Promise.resolve());
+    if (mode === "app") return rt;
+    // The system runtime at the fake server, announcing its ready from inside ensure, as runtime.ts does.
+    const listeners = new Set<(s: RuntimeStatus) => void>();
+    let status: RuntimeStatus = { state: "stopped", owner: "none", baseUrl: next.baseUrl };
+    rt.status = () => status;
+    rt.baseUrl = () => (status.state === "ready" ? status.baseUrl : undefined);
+    rt.onChange = (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    };
+    rt.ensure = async () => {
+      status = { state: "ready", owner: "external", baseUrl: next.baseUrl };
+      for (const l of listeners) l(status);
+      return status;
+    };
+    return rt;
+  };
+  const sw = createRuntimeSwitch({ initialMode: "app", make, afterSwitch: () => events.push("settled") });
+  const catalog = createModelCatalog(() => sw.baseUrl());
+  const refreshes: Promise<unknown>[] = [];
+  // app.ts: every runtime.changed refreshes the model list from baseUrl().
+  sw.onChange((s) => {
+    events.push(`${s.state} at ${sw.baseUrl() ?? "nothing"}`);
+    refreshes.push(catalog.refresh());
+  });
+  await sw.ensure();
+  expect(await sw.setMode("system")).toMatchObject({ state: "ready", baseUrl: next.baseUrl });
+  await Promise.all(refreshes);
+  expect(events.filter((e) => e.startsWith("ready"))).toEqual([`ready at ${next.baseUrl}`]);
+  expect(events.indexOf("settled")).toBeLessThan(events.indexOf(`ready at ${next.baseUrl}`));
+  expect(catalog.current()?.map((m) => m.name)).toEqual(["qwen3.5:9b"]);
+  await next.close();
+});
+
 it("R2-03: the old runtime stops only after beforeSwitch's turns have ended", async () => {
   const made: Fake[] = [];
   let turnsEnd!: () => void;
