@@ -60,6 +60,19 @@ never shows a whisper stop, start or restart.
       in `apps/server/src/main.ts`.
       *Accept:* the packaged app connects; a page from any other origin
       still gets 403.
+      *Status 2026-11-07:* measured `Origin: file://` (403) in a real
+      unpackaged dist run, so the client moved to its own scheme,
+      `gates-local://app` (`apps/desktop/src/client-protocol.ts`). In that run
+      the app's upgrade got 101 and `file://`, `null`, `http://evil.example`
+      and `gates-local://other` got 403. The packaged half waits on packaging.
+- [ ] First-run model pick on real models: `chooseModel()` takes the smallest
+      installed model, so on this machine the first run recommends
+      `nomic-embed-text` (an embedding model, `/api/show` capabilities
+      `["embedding"]`) as "the best model for your GPU", and `verdictOf`
+      labels its 2048-token context refusal "Not enough memory at 16k".
+      *Accept:* an embedding-only model is never picked or offered for chat;
+      the pick is the best installed chat model that fits; a context-limit
+      refusal names the limit; an E2E with an embedding model installed.
 - [ ] App-owned models store: `/var/lib/ollama` is read-only to this user,
       so an app-owned Ollama cannot see or pull into the system models.
       Pick `OLLAMA_MODELS` for the owned server and show it in settings.

@@ -5,9 +5,13 @@
 // log goes to stderr. Exits on stdin EOF (parent death), SIGTERM and SIGINT.
 //
 // Knobs (environment):
-//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins
-//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
-//                                never install or start one, and never probe another port
+//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins (the desktop app sets it)
+//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama, and
+//                                its port as the first of the app's own ports; discover-only
+//                                (never install, start or stop one). Settings › Runtime still
+//                                applies: "app" first tries the copy this data dir's ownership
+//                                record names, at its recorded port, then the pinned port and
+//                                the nine after it, as it does on 11435..11444 without a pin
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_OLLAMA_BINARY    "none": never look for an Ollama binary (app install, PATH), as on
 //                                a machine with none, so tests do not depend on the host
@@ -31,9 +35,9 @@ const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
 const HARD_EXIT_MS = 2500;
 
-// The Vite dev client. The packaged renderer loads file://, and what Origin
-// its WebSocket upgrade carries ("file://", "null" or none) is not measured
-// yet; add it here once a real packaged Electron run shows the header.
+// The Vite dev client. The desktop app serves the built client on
+// gates-local://app and adds that origin through GATES_LOCAL_ALLOWED_ORIGINS
+// (apps/desktop/src/main.ts), so a file:// page never gets in.
 const DEFAULT_ORIGINS = ["http://127.0.0.1:5187", "http://localhost:5187"];
 
 const log = (line: string) => process.stderr.write(`[server] ${line}\n`);
@@ -69,10 +73,25 @@ async function main(): Promise<void> {
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
-  const discoverOnly = mode === "discover-only";
   const binary = process.env["GATES_LOCAL_OLLAMA_BINARY"] ?? "";
   if (binary !== "" && binary !== "none") die(`GATES_LOCAL_OLLAMA_BINARY must be unset or "none", got "${binary}"`);
+  // A pinned Ollama URL stands in for the system Ollama, and its port is the
+  // first app port. "app" mode still tries the copy this data dir's ownership
+  // record names first, at whatever port it recorded, then scans the pinned
+  // port and the nine after it. So a pin keeps every probe off 11434..11444
+  // only with a fresh data dir and a pinned span clear of them, as the e2e
+  // runs have. It is also discover-only: the app never installs, starts or
+  // stops an Ollama when the URL names the one to use.
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
+  let pinned: URL | undefined;
+  if (ollamaUrl) {
+    try {
+      pinned = new URL(ollamaUrl);
+    } catch {
+      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
+    }
+  }
+  const discoverOnly = mode === "discover-only" || pinned !== undefined;
   const extraOrigins = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "")
     .split(",")
     .map((o) => o.trim())
@@ -86,16 +105,6 @@ async function main(): Promise<void> {
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 
-  // A pinned Ollama URL is the only Ollama: its port doubles as the app port,
-  // so a wrong service there never sends the probe to the real 11435.
-  let pinned: URL | undefined;
-  if (ollamaUrl) {
-    try {
-      pinned = new URL(ollamaUrl);
-    } catch {
-      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
-    }
-  }
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
   const fit = {
@@ -120,7 +129,7 @@ async function main(): Promise<void> {
       push: (channel, payload) => server?.push(channel, payload),
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
-        ...(discoverOnly || pinned ? { allowInstall: false } : {}),
+        ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),
         ...(binary === "none" ? { searchBinary: false } : {}),
       },
       // Tests point the GPU and memory reads at fakes; the GPU status and every fit use them.
