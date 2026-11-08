@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).

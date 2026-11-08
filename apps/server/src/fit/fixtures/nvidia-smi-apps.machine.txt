@@ -1,13 +1,13 @@
-2444, /usr/bin/kwin_wayland, 116
-41145, /usr/lib/claude-desktop/claude-desktop --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/rende, 64
-4192851, /app/extra/chrome --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --crashpad-hand, 121
-428377, /usr/bin/whisper-server, 2202
-1720577, falkon, 63
-1747976, /home/ethan/.cache/tmp/.mount_T3-CodNJgpjh/t3code --type=gpu-process --ozone-platform=wayland --render-node-override=/de, 410
-2303957, /home/ethan/.local/share/media-vault/vision-runtime/bin/python, 1822
-2947897, falkon, 88
-2948011, falkon, 86
-2950616, falkon, 103
-2952267, falkon, 81
-2976771, falkon, 94
-2976960, falkon, 169
+1200, /usr/bin/kwin_wayland, 116
+3300, /opt/chat-app/chat-app --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --crashpad-ha, 64
+4400, /opt/browser/browser --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --crashpad-hand, 121
+5100, /usr/bin/whisper-server, 2202
+5200, viewer, 63
+5300, /tmp/.mount_EditorQx7Lm2/editor --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --c, 410
+5400, /opt/media-vault/vision-runtime/bin/python, 1822
+6101, viewer, 88
+6102, viewer, 86
+6103, viewer, 103
+6104, viewer, 81
+6105, viewer, 94
+6106, viewer, 169

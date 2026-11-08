@@ -73,7 +73,7 @@ type WireEvent = Payload<"chat.event">["event"];
 
 export interface AppDeps {
   readonly store: ThreadStore;
-  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange">;
+  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure">;
   readonly catalog: ModelCatalog;
   /** Bound late: main creates the ws server after the handlers. */
   readonly push: Push;
@@ -330,6 +330,7 @@ export function createApp(deps: AppDeps): App {
     "models.refresh": async () => (await catalog.refresh()).models,
 
     "runtime.status": () => runtime.status(),
+    "runtime.retry": () => runtime.ensure(),
 
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();
@@ -423,6 +424,8 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
+        // Before the answer, so every client (also one that did not send this) knows the turn first.
+        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
         void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {

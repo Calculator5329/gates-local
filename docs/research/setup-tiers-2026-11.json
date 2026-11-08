@@ -1,6 +1,6 @@
 {
   "checked": "2026-11-07",
-  "report": "/home/ethan/.cache/gates-local-design/research/setup-tiers-2026-11.md",
+  "report": "docs/research/setup-tiers-2026-11.md",
   "picks": [
     {
       "modality": "text",
@@ -57,7 +57,7 @@
       "download_gb": 6.6,
       "quantization": "Q4_K_M",
       "memory_16k_gb": 7.26,
-      "memory_16k_kind": "measured (runner, Ethan's RTX 5070 Ti, num_ctx not recorded; computed 8.21)",
+      "memory_16k_kind": "measured (runner, the maintainer's RTX 5070 Ti, num_ctx not recorded; computed 8.21)",
       "tools": true,
       "thinking": true,
       "vision": true,
@@ -177,7 +177,7 @@
         "source": "https://computingforgeeks.com/ollama-models-cheat-sheet/"
       },
       "why": "Every 16 GB guide's pick; stays on GPU to 64K",
-      "notes": "On Ethan's card whisper+media-vault leave ~12 GB, so his chat tier is effectively 12 GB",
+      "notes": "On the maintainer's card other resident GPU apps (whisper, a vision runtime) leave ~12 GB, so that chat tier is effectively 12 GB",
       "source": [
         "https://ollama.com/library/gpt-oss/tags",
         "https://computingforgeeks.com/ollama-models-cheat-sheet/",
@@ -449,13 +449,13 @@
       ],
       "download_gb": 12.45,
       "memory_gb": 12.2,
-      "memory_kind": "measured peak, Ethan's RTX 5070 Ti",
+      "memory_kind": "measured peak, the maintainer's RTX 5070 Ti",
       "steps": 4,
       "time": {
         "seconds": 7.04,
         "size": "768x512",
-        "kind": "measured warm, Ethan's RTX 5070 Ti",
-        "source": "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+        "kind": "measured warm, the maintainer's RTX 5070 Ti",
+        "source": "local: the maintainer's lab notes (local-ai-lab docs/gen.md, docs/reports/sdxl-lightning-bench.md; not published)"
       },
       "license": "Apache-2.0",
       "license_flag": null,
@@ -464,7 +464,7 @@
       "source": [
         "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8",
         "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B",
-        "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+        "local: the maintainer's lab notes (local-ai-lab docs/gen.md, docs/reports/sdxl-lightning-bench.md; not published)"
       ],
       "checked": "2026-11-07"
     },
@@ -567,8 +567,8 @@
       "time": {
         "seconds": 0.587,
         "size": "768x512",
-        "kind": "measured warm, Ethan's RTX 5070 Ti",
-        "source": "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+        "kind": "measured warm, the maintainer's RTX 5070 Ti",
+        "source": "local: the maintainer's lab notes (local-ai-lab docs/gen.md, docs/reports/sdxl-lightning-bench.md; not published)"
       },
       "license": "openrail++",
       "license_flag": null,
@@ -576,7 +576,7 @@
       "notes": "512x512 output is noise; use >=768",
       "source": [
         "https://huggingface.co/ByteDance/SDXL-Lightning",
-        "local: ~/projects/ai/local-ai-lab/docs/gen.md, docs/reports/sdxl-lightning-bench.md"
+        "local: the maintainer's lab notes (local-ai-lab docs/gen.md, docs/reports/sdxl-lightning-bench.md; not published)"
       ],
       "checked": "2026-11-07"
     },

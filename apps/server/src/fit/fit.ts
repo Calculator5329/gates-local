@@ -193,24 +193,19 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const estimate = estimateNeed(model, numCtx, tag.size, arch, deps.estimate);
 
   // A copy loaded at another num_ctx is replaced by Ollama on the next
-  // request, and other loaded models are unloaded to make room, so the VRAM
-  // they hold counts as free for this plan.
+  // request, so the VRAM it holds counts as free for this plan.
   const reclaim = loaded ? loaded.size_vram : 0;
-  const others = r.ps.models.filter((m) => !sameModel(m.name, model));
-  const reclaimOthers = others.reduce((sum, m) => sum + m.size_vram, 0);
-  const notes = [
-    ...(loaded ? [`${formatGb(reclaim)} held by the copy loaded at num_ctx ${loaded.context_length}, which Ollama replaces`] : []),
-    ...(others.length > 0 ? [`${formatGb(reclaimOthers)} held by ${others.map((m) => m.name).join(", ")}, which Ollama unloads to make room`] : []),
-  ];
   const report = decideFit({
     model,
     numCtx,
     needBytes: estimate.totalBytes,
-    freeVramBytes: r.gpu.freeBytes + reclaim + reclaimOthers,
+    freeVramBytes: r.gpu.freeBytes + reclaim,
     memAvailableBytes: r.memAvailableBytes,
     ...(deps.margins ? { margins: deps.margins } : {}),
     measuredAt: r.gpu.measuredAt,
-    ...(notes.length > 0 ? { note: `free VRAM counts ${notes.join("; ")}` } : {}),
+    ...(loaded
+      ? { note: `free VRAM counts ${formatGb(reclaim)} held by the copy loaded at num_ctx ${loaded.context_length}, which Ollama replaces` }
+      : {}),
   });
   return { report, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate };
 }

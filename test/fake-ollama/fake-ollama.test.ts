@@ -116,13 +116,33 @@ describe("fake ollama", () => {
     expect(lines.filter((l) => typeof l["completed"] === "number").length).toBeGreaterThan(2);
     expect(lines.at(-1)).toEqual({ status: "success" });
     expect(fake.state().installed).toEqual(["qwen3.5:4b"]);
+  });
 
-    await post(fake, "/__fake/scenario", { scenario: "no-models", pullTickMs: 50, pullChunkBytes: 1024 ** 2 });
+  it("a pull aborted after its first progress line never installs, even past its completion time (W-11)", async () => {
+    // ten ticks of 20 ms: an uncancelled pull of this model finishes in about 200 ms
+    const options = { scenario: "no-models", pullTickMs: 20, pullChunkBytes: Math.ceil(6594474711 / 10) };
+    await post(fake, "/__fake/scenario", options);
+    const started = Date.now();
+    expect((await ndjson(await post(fake, "/api/pull", { model: "qwen3.5:9b" }))).at(-1)).toEqual({ status: "success" });
+    const deadline = Date.now() - started;
+    expect(fake.state().installed).toEqual(["qwen3.5:9b"]);
+
+    await post(fake, "/__fake/scenario", options);
+    expect(fake.state().installed).toEqual([]);
     const abort = new AbortController();
     const res = await fetch(`${fake.url}/api/pull`, { method: "POST", body: JSON.stringify({ model: "qwen3.5:9b" }), signal: abort.signal });
-    expect(res.ok).toBe(true);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    while (!seen.includes('"completed"')) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the pull ended before any progress");
+      seen += decoder.decode(value, { stream: true });
+    }
     abort.abort();
-    await new Promise((r) => setTimeout(r, 120));
+    await reader.cancel().catch(() => undefined);
+    // three times what the whole pull took uncancelled
+    await new Promise((r) => setTimeout(r, Math.max(600, 3 * deadline)));
     expect(fake.state().installed).toEqual([]);
   });
 
@@ -140,6 +160,16 @@ describe("fake ollama", () => {
     await post(fake, "/__fake/scenario", { scenario: "wrong-service" });
     expect(await (await fetch(`${fake.url}/`)).text()).not.toContain("Ollama is running");
     expect((await fetch(`${fake.url}/api/version`)).status).toBe(404);
+  });
+
+  it("installs the models a scenario names, and refuses a name it does not know", async () => {
+    const tags = async () => ((await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string }[] }).models.map((m) => m.name);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["gemma4:12b", "mistral-small3.2:24b"] })).status).toBe(200);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["nope:1b"] })).status).toBe(400);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    await post(fake, "/__fake/scenario", { scenario: "models" });
+    expect(await tags()).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b"]);
   });
 });
 

@@ -54,7 +54,9 @@ Where the accent appears (and nowhere else): streaming spinner and sidebar live 
 
 Known tension: amber accent and `--warn` sit close. Warn is kept yellower (hue 42–46 against 30–32) and always comes with a word ("spills"). If Ethan picks graphite + amber, consider moving warn toward yellow-green or adding a glyph.
 
-## Lifted from T3 Code (MIT, Copyright 2026 T3 Tools Inc., `t3-forge/apps/web/src/`)
+## Lifted from T3 Code (MIT, Copyright 2026 T3 Tools Inc., `apps/web/src/`)
+
+Full notice in `LICENSES/T3-Code-MIT.txt`; source commit in `THIRD_PARTY_NOTICES.md`.
 
 | T3 file | What was lifted |
 |---|---|

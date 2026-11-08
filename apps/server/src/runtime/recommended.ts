@@ -2,10 +2,12 @@
 // (the same phrase on every surface, docs/design/shell.md "Words used
 // everywhere" and F62) and the download size.
 //
-// downloadBytes for pullable models is the sum of layer and config sizes in
-// registry.ollama.ai's manifest, read 2026-11-07; for local-only models it is
-// the size /api/tags reported on the build machine that day. An installed
-// model's catalog entry uses its own /api/tags size instead.
+// The list holds only models anyone can download with `ollama pull`. A model
+// the user installed under any other name still shows, as their own.
+//
+// downloadBytes is the sum of layer and config sizes in registry.ollama.ai's
+// manifest, read 2026-11-07. An installed model's catalog entry uses its own
+// /api/tags size instead.
 //
 // Two departures from the design's example list, both because the design's
 // tags do not exist in the registry (404 on 2026-11-07): "Qwen 3.5 14B"
@@ -20,17 +22,14 @@ export interface CuratedModel {
   readonly label: string;
   readonly purpose: string;
   readonly downloadBytes: number;
-  /** False for local names (abliterated builds copied under a short tag) that `ollama pull` cannot fetch. */
+  /** False for a local name that `ollama pull` cannot fetch; such an entry lists only when installed. */
   readonly pullable: boolean;
 }
 
 export const CURATED_MODELS: readonly CuratedModel[] = [
   { name: "qwen3.5:9b", label: "Qwen 3.5 9B", purpose: "Fast everyday answers", downloadBytes: 6_550_825_550, pullable: true },
   { name: "gemma4:12b", label: "Gemma 4 12B", purpose: "Careful longer answers", downloadBytes: 8_021_618_941, pullable: true },
-  { name: "gemma3-abliterated:12b-q4", label: "Gemma 3 12B abliterated", purpose: "Fewer refusals", downloadBytes: 8_154_980_034, pullable: false },
   { name: "gpt-oss:20b", label: "gpt-oss 20B", purpose: "Step-by-step reasoning", downloadBytes: 13_793_441_566, pullable: true },
-  { name: "gemma4-abliterated:26b", label: "Gemma 4 26B abliterated", purpose: "Fewer refusals, stronger", downloadBytes: 17_990_843_601, pullable: false },
-  { name: "qwen3.8-abliterated:27b", label: "Qwen 3.8 27B abliterated", purpose: "Fewer refusals, strongest", downloadBytes: 13_210_122_027, pullable: false },
   { name: "qwen3:14b", label: "Qwen 3 14B", purpose: "Stronger answers on GPU", downloadBytes: 9_276_198_565, pullable: true },
   { name: "qwen3.5:4b", label: "Qwen 3.5 4B", purpose: "Fastest replies, lighter answers", downloadBytes: 3_324_173_934, pullable: true },
   { name: "qwen3-vl:8b", label: "Qwen 3 VL 8B", purpose: "Reads images you attach", downloadBytes: 6_190_971_699, pullable: true },

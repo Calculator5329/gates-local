@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
 // are memoised by message, so a streaming token re-renders only the live turn.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -7,12 +8,28 @@ import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { reveal } from "./reveal.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { retry, unqueue } from "./session.ts";
+import { fileUrl, reloadThread, retry, unqueue } from "./session.ts";
 import { NA, type Queued, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
+
+declare global {
+  interface Window {
+    /**
+     * Test flag for test/e2e/perf.spec.ts. Set, every finished-turn render
+     * counts under its message id; bustMemo hands each row a fresh message on
+     * every live token, the regression the row-render gate must catch.
+     */
+    glRows?: { renders: Record<string, number>; bustMemo?: boolean };
+  }
+}
+
+function countRender(id: string): void {
+  const rows = window.glRows;
+  if (rows !== undefined) rows.renders[id] = (rows.renders[id] ?? 0) + 1;
+}
 
 function useTicker(ms: number, on: boolean): number {
   const [now, setNow] = useState(Date.now);
@@ -207,11 +224,12 @@ function ImageOut({ path }: { path: string }) {
       </div>
     );
   }
-  const src = `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const src = fileUrl(origin, token, path);
   return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
 }
 
 const AsstTurn = memo(function AsstTurn({ msg, last }: { msg: Message; last: boolean }) {
+  countRender(msg.id);
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => s.firstToken[msg.id]);
   const name = describeModel(msg.model ?? "", catalog).name;
@@ -231,6 +249,7 @@ const AsstTurn = memo(function AsstTurn({ msg, last }: { msg: Message; last: boo
 });
 
 const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
+  countRender(msg.id);
   return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
 });
 
@@ -276,7 +295,8 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {end?.kind === "stopped" ? (
           <div className="stopped">
             <span>Stopped after {end.secs} s</span>
-            <button type="button" className="qa" data-regen onClick={retry}>
+            {/* off until the server has ended the stopped turn (W-02) */}
+            <button type="button" className="qa" data-regen disabled={live.ending === true} onClick={retry}>
               Retry
             </button>
           </div>
@@ -304,8 +324,12 @@ const LONG_THREAD = 50;
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
+  const loadError = useStore((s) => s.loadErrors[threadId]);
   const queuedAll = useStore((s) => (s.queued.length === 0 ? QUEUED_NONE : s.queued));
   const queued = queuedAll.filter((q) => q.threadId === threadId);
+  // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
+  const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.live?.text.length ?? 0) : 0));
+  const row = (m: Message) => (bust === 0 ? m : { ...m });
   const tl = useRef<HTMLDivElement>(null);
   const col = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -340,10 +364,21 @@ export function Timeline({ threadId }: { threadId: string }) {
   return (
     <div className="tl" ref={tl}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
-        {messages.map((m, i) => (m.role === "user" ? <UserTurn key={m.id} msg={m} /> : <AsstTurn key={m.id} msg={m} last={i === lastAsst && i === messages.length - 1} />))}
+        {messages.map((m, i) =>
+          m.role === "user" ? <UserTurn key={m.id} msg={row(m)} /> : <AsstTurn key={m.id} msg={row(m)} last={i === lastAsst && i === messages.length - 1} />,
+        )}
         {queued.map((q) => (
           <UserBubble key={q.id} text={q.text} time={turnTime(q.at)} queued={q} />
         ))}
+        {loadError !== undefined ? (
+          <div className="err-line" role="status" data-load-error>
+            <Icon id="alert" cls="s14" />
+            <span>{loadError}</span>
+            <button type="button" className="qa" onClick={() => reloadThread(threadId)}>
+              Retry
+            </button>
+          </div>
+        ) : null}
         <LiveTurnView threadId={threadId} />
       </div>
     </div>

@@ -34,8 +34,12 @@ export type Section = "general" | "models" | "runtime" | "memory" | "images" | "
 
 /** The reply being written now, or the last one that stopped before it finished. */
 export interface LiveTurn {
+  /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
+  readonly gen: number;
   readonly threadId: string;
   readonly turnId: string | null;
+  /** The saved user message, once chat.send answered: reconnect drops this turn when the server saved its reply. */
+  readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
   readonly firstTokenAt?: number;
@@ -47,6 +51,8 @@ export interface LiveTurn {
   readonly pendingUser: string | null;
   /** Set once the turn ended without a saved message. */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
+  /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
+  readonly ending?: true;
 }
 
 /** A message typed during setup or the first download; it sends once chat is ready. */
@@ -103,6 +109,8 @@ export interface State {
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
   readonly notice: string | null;
+  /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
+  readonly loadErrors: Readonly<Record<string, string>>;
 }
 
 export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
@@ -143,6 +151,7 @@ const initial: State = {
   imageStatus: undefined,
   unavailable: {},
   notice: null,
+  loadErrors: {},
 };
 
 let state: State = initial;
@@ -159,7 +168,8 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   for (const l of listeners) l();
 }
 
-function subscribe(listener: () => void): () => void {
+/** Called after every setState; the session tests use it to see each published state. */
+export function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

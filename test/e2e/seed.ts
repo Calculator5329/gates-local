@@ -4,6 +4,8 @@
 //   seedLong   one thread of N alternating messages (the perf spec)
 //   seedDesign the design's sidebar and its "Library: Effect Schema books"
 //              thread (the screenshot rig)
+//   seedReadme neutral demo threads for the README screenshots
+//              (test/e2e/readme-shots.spec.ts)
 import { openThreadStore } from "../../apps/server/src/threads/store.ts";
 import type { NewMessage } from "../../apps/server/src/threads/types.ts";
 
@@ -69,11 +71,9 @@ const START_REPLY =
 
 /** The design's sidebar (S-01): titles and ages relative to `now`; returns the open thread's id. */
 export function seedDesign(dbPath: string, now: number): string {
-  const { clock, store } = pinned(dbPath);
-  const day = new Date(now);
-  const at = (daysAgo: number, h: number, m: number) => new Date(day.getFullYear(), day.getMonth(), day.getDate() - daysAgo, h, m).getTime();
+  const at = dayClock(now);
   const older: [string, number][] = [
-    ["Draft the drive-sync README", new Date(day.getFullYear(), 9, 21, 11, 0).getTime()],
+    ["Draft the drive-sync README", zoned(wallClock(now).y, 9, 21, 11, 0)],
     ["Whisper latency check", at(5, 10, 30)],
     ["Ollama 0.40 release notes", at(3, 9, 15)],
     ["Benchmark: qwen vs gemma at 32k", at(1, 16, 12)],
@@ -95,14 +95,56 @@ export function seedDesign(dbPath: string, now: number): string {
     { role: "user", content: "Which one should I start with?", at: now - 2 * MIN - 3000 },
     { role: "assistant", content: START_REPLY, thinking: "Pick the most introductory one.", model, stats: { promptTokens: 2010, completionTokens: 58, durationMs: 1900 }, at: now - 2 * MIN },
   ];
+  return writeThreads(dbPath, now, older, "Library: Effect Schema books", turns);
+}
+
+/**
+ * The zone the seeded wall-clock times are in: the browser timezoneId of
+ * shots.spec.ts and readme-shots.spec.ts. Never the seeding process's own
+ * zone, so a host in any zone writes the same timestamps (seed.test.ts).
+ */
+const SEED_ZONE = "America/Chicago";
+const zoneParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: SEED_ZONE, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric",
+});
+
+/** SEED_ZONE's wall clock at instant `t`, as UTC fields: year, month (0-11), day, hour, minute, second. */
+function wallClock(t: number) {
+  const p = Object.fromEntries(zoneParts.formatToParts(t).map((x) => [x.type, Number(x.value)]));
+  return { y: p["year"]!, mo: p["month"]! - 1, d: p["day"]!, h: p["hour"]!, mi: p["minute"]!, s: p["second"]! };
+}
+
+/** How far SEED_ZONE's wall clock is ahead of UTC at instant `t`, in ms. */
+function offsetAt(t: number): number {
+  const w = wallClock(t);
+  return Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - t;
+}
+
+/** The instant SEED_ZONE shows as y-mo-d h:mi; days past the month's end roll over as in Date.UTC. */
+function zoned(y: number, mo: number, d: number, h: number, mi: number): number {
+  const asUtc = Date.UTC(y, mo, d, h, mi);
+  // The offset at the guess can differ across a DST change; one more pass settles it.
+  const first = asUtc - offsetAt(asUtc);
+  return asUtc - offsetAt(first);
+}
+
+/** Midnight-relative times for a sidebar: `daysAgo` days before `now`'s day at h:m, in SEED_ZONE. */
+function dayClock(now: number) {
+  const day = wallClock(now);
+  return (daysAgo: number, h: number, m: number) => zoned(day.y, day.mo, day.d - daysAgo, h, m);
+}
+
+/** One-message threads for the sidebar, then the open thread with its turns; returns the open thread's id. */
+function writeThreads(dbPath: string, now: number, older: readonly (readonly [string, number])[], title: string, turns: readonly Turn[]): string {
+  const { clock, store } = pinned(dbPath);
   try {
-    for (const [title, t] of older) {
+    for (const [name, t] of older) {
       clock.now = t;
-      const th = store.createThread({ title });
-      store.appendMessage({ threadId: th.id, role: "user", content: title, createdAt: t });
+      const th = store.createThread({ title: name });
+      store.appendMessage({ threadId: th.id, role: "user", content: name, createdAt: t });
     }
     clock.now = turns[0]?.at ?? now;
-    const main = store.createThread({ title: "Library: Effect Schema books" });
+    const main = store.createThread({ title });
     for (const { at: when, ...m } of turns) {
       clock.now = when;
       store.appendMessage({ ...m, threadId: main.id, createdAt: when });
@@ -111,4 +153,50 @@ export function seedDesign(dbPath: string, now: number): string {
   } finally {
     store.close();
   }
+}
+
+const DEBOUNCE_REPLY = [
+  "A debounce waits until typing pauses before it searches. Each keystroke restarts a short timer:",
+  "",
+  "```ts",
+  "function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number) {",
+  "  let timer: ReturnType<typeof setTimeout> | undefined;",
+  "  return (...args: A) => {",
+  "    clearTimeout(timer);",
+  "    timer = setTimeout(() => fn(...args), ms);",
+  "  };",
+  "}",
+  "",
+  "const search = debounce(loadResults, 300);",
+  "```",
+].join("\n");
+
+const CLEAR_REPLY = "Each call cancels the previous keystroke's timer, so only the last one runs the search.";
+
+/** Neutral demo threads for the README shots: ordinary titles, a code answer open. Returns the open thread's id. */
+export function seedReadme(dbPath: string, now: number): string {
+  const at = dayClock(now);
+  const older: [string, number][] = [
+    ["Summarize the CAP theorem", zoned(wallClock(now).y, 9, 21, 11, 0)],
+    ["Regex for ISO 8601 dates", at(5, 10, 30)],
+    ["Explain HTTP caching headers", at(3, 9, 15)],
+    ["What is a B-tree?", at(1, 16, 12)],
+    ["Weekly meal plan with leftovers", now - 5 * HOUR],
+    ["Convert a CSV to JSON in Python", now - 3 * HOUR],
+  ];
+  const model = "qwen3.5:9b";
+  const turns: Turn[] = [
+    { role: "user", content: "How do I debounce a search box in TypeScript?", at: now - 4 * MIN },
+    {
+      role: "assistant",
+      content: DEBOUNCE_REPLY,
+      thinking: "A small generic helper and one usage line.",
+      model,
+      stats: { promptTokens: 620, completionTokens: 142, durationMs: 3100 },
+      at: now - 4 * MIN + 6000,
+    },
+    { role: "user", content: "Why clear the timer before setting a new one?", at: now - 2 * MIN - 3000 },
+    { role: "assistant", content: CLEAR_REPLY, model, stats: { promptTokens: 790, completionTokens: 18, durationMs: 600 }, at: now - 2 * MIN },
+  ];
+  return writeThreads(dbPath, now, older, "Debounce a search box", turns);
 }

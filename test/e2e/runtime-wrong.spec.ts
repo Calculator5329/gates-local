@@ -2,7 +2,7 @@
 // chose the system Ollama, chat is blocked with a plain reason everywhere it
 // shows. On a first launch the app picks its own copy and routes around the
 // taken port, and the first run says so. Nothing crashes.
-import { expect, test } from "./fixtures.ts";
+import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "wrong-service" });
 
@@ -21,6 +21,16 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await expect(page.locator(".set")).toContainText(`Port ${port} busy`);
     await expect(page.locator(".set")).toContainText(`Something other than Ollama answers on port ${port}.`);
+  });
+
+  test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {
+    await open();
+    await expect(page.locator(".banner")).toContainText("5288");
+    // the stack control turns the fake into a healthy Ollama on the same port
+    await stack.scenario("models");
+    await page.locator(".banner").getByRole("button", { name: "Retry" }).click();
+    await waitReady(page);
+    await expect(page.locator(".banner")).toHaveCount(0);
   });
 });
 

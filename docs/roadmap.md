@@ -89,6 +89,36 @@ never shows a whisper stop, start or restart.
       and put the reason in the refusal text.
 - [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
       when 11435 is busy with another service.
+- [ ] Cancel a turn that waits for the GPU: a turn queued behind an image
+      job holds no claim yet, and Stop only aborts once the claim lands.
+      *Accept:* a test queues a turn behind a held image claim, presses
+      Stop, and the turn ends cancelled with the image job untouched.
+- [ ] Windows process trees: `child.kill()` leaves Ollama's runner
+      children alive on Windows. Kill the tree (`taskkill /T`) through the
+      runtime's spawn seam. *Accept:* on the Windows test machine, stopping the app-owned
+      Ollama leaves no `ollama*.exe` process.
+- [ ] Thinking pill follows the model: add `ModelInfo.capabilities` from
+      `/api/show` and grey the pill out for a model without "thinking"
+      (the server already drops `think` for those, 24877a4).
+      *Accept:* picking gemma3 greys the pill; picking qwen3.5 lights it.
+- [ ] Tools default reaches the turn (439a230): an E2E that sets Tools off
+      in Settings and sees a turn with no tool definitions in the request.
+- [x] `think` on a model without thinking: run 2026-11-07 on the real
+      runtime, HTTP 400 `"gemma3-abliterated:12b-q4" does not support
+      thinking` in 18 ms, nothing loaded (evidence log).
+- [ ] A shell over its cap must not look like a low-memory desktop: every
+      `gates-shell-*` scope that hits `MemoryMax=512M` ends with result
+      oom-kill. Plasma's kded `oom_notifier` then tells the user "the system
+      is low on memory" and names the scope. On 2026-11-07, `sandbox.test.ts`
+      (the 1 GiB allocation case) fired about 130 of them across the lanes,
+      and a real user would get one for each command over the cap. Candidate:
+      `OOMPolicy=continue` on the scope plus reading the scope's
+      `memory.events` `oom_kill` count before collect, so the model still
+      hears "went over its 512 MB cap" when `sh` swallows the 137. The hub
+      filters these out for now (workspace-tools `oom_notify.py`, 307359f).
+      *Accept:* the cap test passes, the scope's unit result is not oom-kill,
+      and a shell `python3 …; echo ok` that goes over the cap still reports the
+      cap to the model.
 
 ## Next: slices 2 to 4
 
@@ -141,7 +171,7 @@ never shows a whisper stop, start or restart.
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).
       *Accept:* fixtures for NVIDIA 16 GB with whisper, NVIDIA 8 GB, no GPU
-      with 16 GB and no GPU with 8 GB; real runs on this machine and Geordi.
+      with 16 GB and no GPU with 8 GB; real runs on the maintainer's Linux machine and the Windows test machine.
 - [ ] `pnpm setup:plan`: the text model and context, the image model or
       none, the downloads and their sizes, each with a plain reason.
       *Accept:* each fixture gets its tier's picks; a plan never exceeds the
@@ -152,7 +182,7 @@ never shows a whisper stop, start or restart.
       *Accept:* with fakes, every step in order; a killed run resumes.
 - [ ] `setup/` folder: `AGENTS.md` (run, show, ask, apply, check, report),
       `CLAUDE.md` pointing to it, `README.md` for the manual path.
-      *Accept:* a fresh agent on Geordi told "look at this folder and set me
+      *Accept:* a fresh agent on the Windows test machine told "look at this folder and set me
       up" gets a working app with only the user's yes; transcript in
       `docs/evidence/`.
 - [ ] Settings shows the same plan with no agent, and a "Set up with an AI
@@ -205,4 +235,6 @@ never shows a whisper stop, start or restart.
       Ethan. Packaging does not authorize a release or publication.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
+      Prepared on lane/readme: README, `docs/setup/linux.md` and the
+      `pnpm shots:readme` images; the license is still open.
 - [ ] <!-- workspace:id=work:fbd76a2b-2cb1-5aeb-8864-bfc67cb7bf45 --> Finetuning: scoped once benchmarks show a gap a finetune can close.

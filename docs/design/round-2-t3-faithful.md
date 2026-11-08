@@ -122,7 +122,7 @@ All color goes through custom properties on `:root`. Light is the base. Dark ove
 
 ## What was lifted from which T3 file
 
-All from `~/projects/ai/t3-forge/apps/web/src/` (MIT, Copyright 2026 T3 Tools Inc.). Layout and craft only; no T3 name, logo, provider icons or copy.
+All from T3 Code's `apps/web/src/` (MIT, Copyright 2026 T3 Tools Inc.; full notice in `LICENSES/T3-Code-MIT.txt`, source commit in `THIRD_PARTY_NOTICES.md`). Layout and craft only; no T3 name, logo, provider icons or copy.
 
 - **`index.css`:**
   - Font stacks (`--font-sans`, `--font-mono`) and the radius scale (`--radius: 0.625rem` with sm/md/lg/xl offsets).

@@ -104,9 +104,9 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 64,
     contextLength: 2048,
   }),
-  // The long-name scenario: a Hugging Face GGUF tag as Ethan had it
-  // installed (2026-11-07). Sized like the 12B so it can be picked; the
-  // test is about the name's length, not the fit.
+  // The long-name scenario: a real Hugging Face GGUF tag of this length.
+  // Sized like the 12B so it can be picked; the test is about the name's
+  // length, not the fit.
   model({
     name: LONG_NAME,
     family: "gemma4",
@@ -115,6 +115,21 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     quantization: "Q4_K_M",
     sizeBytes: Math.round(7.9 * GIB),
     capabilities: ["completion", "tools"],
+    blockCount: 40,
+    headCount: 32,
+    headCountKv: 8,
+    keyLength: 128,
+    contextLength: 131_072,
+  }),
+  // Not installed by default: the README shots install it as a model too big for the fixture GPU at 16k.
+  model({
+    name: "mistral-small3.2:24b",
+    family: "mistral3",
+    parameterSize: "24.0B",
+    parameterCount: 24_011_361_280,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(14.1 * GIB),
+    capabilities: ["completion", "tools", "vision"],
     blockCount: 40,
     headCount: 32,
     headCountKv: 8,

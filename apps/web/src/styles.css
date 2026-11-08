@@ -1,3 +1,4 @@
+/* Adapts T3 Code styles (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt. */
 /* ============================================================
    Gates Local client styles: a verbatim port of the token block and
    component CSS in docs/design/shell.html (decisions in shell.md).
@@ -647,6 +648,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mrow.add:hover{color:var(--foreground)}
 .sl .d+.d{margin-top:4px}
 .sl .d .link{font-size:inherit}
+/* W-07: a failed action says so in one line beside its control */
+.act-err{display:block;font-size:13px;color:var(--red-fg);margin-top:4px;text-wrap:pretty}
+.act-err.line{margin:0;padding:0 16px 12px}
 /* download a model (F27) */
 .crumb{display:inline-flex;align-items:center;gap:4px;font-size:13.5px;color:var(--muted-foreground);margin:0 0 12px -2px;padding:2px 6px 2px 2px;border-radius:var(--r-sm);transition:color .12s,background-color .12s}
 .crumb:hover{color:var(--foreground);background:var(--hover)}

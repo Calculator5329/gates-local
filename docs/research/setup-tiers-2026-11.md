@@ -18,8 +18,8 @@ absolute where the page gave them). Third-party guides are from 2025-12 to
 
 ## 0. What changes the plan (read first)
 
-1. **Qwen-Image-2.1 has a non-commercial licence.** Its model card and Ethan's
-   local `~/models/Qwen-Image-2.1/LICENSE` both say "Qwen Research License
+1. **Qwen-Image-2.1 has a non-commercial licence.** Its model card and the
+   `LICENSE` file shipped with the weights both say "Qwen Research License
    Agreement" (the Comfy-Org repack is tagged `qwen-research`). The app is
    public, so it cannot be a default pick in the tier table. At most it can be
    an opt-in that the user picks after reading the licence.
@@ -81,7 +81,7 @@ absolute where the page gave them). Third-party guides are from 2025-12 to
    5:1 for gemma3.
 7. **The estimator also overestimates qwen3.5:9b by about 1 GB.** Computed:
    8.21 GB at 16k. The comment at `apps/server/src/fit/fit.ts:103` records a
-   real load on Ethan's card: `size_vram` 5.92 GB, runner 6926 MiB = 7.26 GB
+   real load on the maintainer's card: `size_vram` 5.92 GB, runner 6926 MiB = 7.26 GB
    in nvidia-smi (num_ctx not recorded there). The measured load fits an
    8 GB card. The computed number does not.
 8. **Windows CPU caveats.**
@@ -147,7 +147,7 @@ How to read the table:
 |---|---|---|---|---|---|---|---|---|---|
 | **GPU 6 GB** | first | `qwen3.5:4b` | 3.3 GB | Q4_K_M | 4.84 GB computed (8 full-attn layers × 4 kv × 512, from [config](https://huggingface.co/Qwen/Qwen3.5-4B)) | yes / yes (+vision) | Apache-2.0 | none found | The newest official small Qwen with tools, thinking and vision. It leaves about 1 GB free on a 6 GB card at 16k. Picked over Gemma 4 E4B because E4B is 6.6 GB and does not fit. [tags](https://ollama.com/library/qwen3.5/tags) |
 | GPU 6 GB | alt | `bonsai-2:9b` | 3.2 GB | ternary `q2_0` | unverified: geometry not checked | yes / yes (+vision) | Apache-2.0 | none found | A 9B in ternary weights, at half the size of 4-bit. The vendor claims it is "close to full-precision quality", but no independent benchmark exists. It uses a new format, so check the Ollama version. [page](https://ollama.com/library/bonsai-2), [cfg cheat sheet, 2026-10-26](https://computingforgeeks.com/ollama-models-cheat-sheet/) |
-| **GPU 8 GB** | first | `qwen3.5:9b` | 6.6 GB | Q4_K_M | 8.21 GB computed; **7.26 GB measured** (runner, Ethan's card, `fit.ts:103`) | yes / yes (+vision) | Apache-2.0 | measured: 67.7 tok/s at 4K on an RTX 5060 Ti and 127.9 on an RTX 4090 ([cfg, 2026-10-26](https://computingforgeeks.com/ollama-models-cheat-sheet/)) | The most common 8 GB pick across the 2026-10/11 guides. It is the app's existing default. [cfg](https://computingforgeeks.com/ollama-models-cheat-sheet/) |
+| **GPU 8 GB** | first | `qwen3.5:9b` | 6.6 GB | Q4_K_M | 8.21 GB computed; **7.26 GB measured** (runner, the maintainer's card, `fit.ts:103`) | yes / yes (+vision) | Apache-2.0 | measured: 67.7 tok/s at 4K on an RTX 5060 Ti and 127.9 on an RTX 4090 ([cfg, 2026-10-26](https://computingforgeeks.com/ollama-models-cheat-sheet/)) | The most common 8 GB pick across the 2026-10/11 guides. It is the app's existing default. [cfg](https://computingforgeeks.com/ollama-models-cheat-sheet/) |
 | GPU 8 GB | alt | `mimo-v2.6:9b` | 6.6–8.7 GB (default tag size unverified) | not stated | ≈ qwen3.5:9b (same base) est. | yes / yes (+vision) | MIT | none found | A Xiaomi fine-tune of Qwen3.5-9B. On Xiaomi's own numbers it gains on agent and tool tasks: Toolathlon 25.9 → 35.2, AutomationBench 5.0 → 30.3. It is four days old and not independently checked. [page](https://ollama.com/library/mimo-v2.6) |
 | **GPU 12 GB** | first | `gemma4:12b` | 7.7–8.0 GB | Q4_K_M | 9.40 GB computed (9.67 at 32k) | yes / yes (+vision, audio) | Apache-2.0 | measured: 97.1 tok/s on an RTX 4090 (Sept) ([cfg](https://computingforgeeks.com/ollama-models-cheat-sheet/)) | The consensus 12 GB pick ([cfg](https://computingforgeeks.com/ollama-models-cheat-sheet/), [promptquorum, 2026-11-07](https://www.promptquorum.com/local-llms)). Ollama's page gives no 12B benchmark numbers; only E2B/E4B/26B/31B are listed. |
 | GPU 12 GB | alt | `bonsai-2:27b` | 8.3 GB | ternary `q2_0` | unverified | yes / yes (+vision) | Apache-2.0 | measured: 84.2 tok/s on an RTX 4090 and 44.2 on an RTX 5060 Ti ([cfg](https://computingforgeeks.com/ollama-models-cheat-sheet/)) | A 27B-class model in 12 GB. Its quality rests on the vendor's claim. |
@@ -180,12 +180,12 @@ Candidates I looked at and did not pick:
 
 ## 2. Image models (ComfyUI)
 
-Ethan's machine is the ground truth for 16 GB (RTX 5070 Ti; ComfyUI 0.27.0
-then; see `local-ai-lab/docs/gen.md`, `docs/reports/sdxl-lightning-bench.md`).
-The local files and sizes were read from
-`~/.local/share/local-ai-lab/comfyui/models`.
+The maintainer's Linux machine is the ground truth for 16 GB (RTX 5070 Ti;
+ComfyUI 0.27.0 then; the measurements come from the maintainer's lab notes,
+which are not published). The local files and sizes were read from that
+machine's ComfyUI models folder.
 
-### 2.1 Measured on Ethan's card
+### 2.1 Measured on the maintainer's card
 
 | Engine | Path | Measured | Peak VRAM |
 |---|---|---|---|
@@ -329,11 +329,11 @@ smaller. Exact numbers not checked (unverified).
    far. The app's measured report (`/api/ps` + nvidia-smi) should replace
    these after one load each.
 3. Klein 4B on 8 GB and 6 GB cards: no measurement found.
-4. Z-Image-Turbo on Ethan's card: never run. It would be a cheap measurement
+4. Z-Image-Turbo on the maintainer's card: never run. It would be a cheap measurement
    with the same ComfyUI unit.
 5. Any CPU image time through **ComfyUI** for SD-Turbo or SDXL-Lightning: the
-   only numbers are FastSD CPU's. Geordi (Windows, no GPU) can take this
-   measurement.
+   only numbers are FastSD CPU's. A Windows test machine with no NVIDIA GPU
+   (Intel UHD 630, 16 GB) can take this measurement.
 6. The licence of `ornith-1.5` and its maker.
 7. Whether `comfyui-openvino` works with ComfyUI 0.44, and whether OpenVINO
    2026 supports UHD 630.
@@ -348,11 +348,11 @@ smaller. Exact numbers not checked (unverified).
   `tiers.draft.json`: 24 picks, the excluded list, the design-name check and
   the install facts). `setup/tiers.json` is built from it.
 - The 16k computation (the app's estimator against local `/api/show`, run
-  with `node est16k.ts <model>...` from a scratch folder; kept here because
-  the scratch copy does not last):
+  with `node est16k.ts <model>...` from the repository root; kept here
+  because the scratch copy does not last):
 
 ```ts
-import { parseArchInfo, estimateNeed } from "/home/ethan/projects/ai/gates-local/apps/server/src/fit/estimate.ts";
+import { parseArchInfo, estimateNeed } from "./apps/server/src/fit/estimate.ts";
 const models = process.argv.slice(2);
 const tags = await (await fetch("http://127.0.0.1:11434/api/tags")).json();
 for (const m of models) {

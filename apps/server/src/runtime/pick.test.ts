@@ -121,8 +121,9 @@ describe("rankChatModels", () => {
     expect(rankChatModels([own3, embed, big27, own7, qwen4, gemma12, qwen9]).map((m) => m.name)).toEqual([
       "qwen3.5:9b",
       "gemma4:12b",
-      "qwen3.8-abliterated:27b",
       "qwen3.5:4b",
+      // a local-only build is not curated: it ranks with the user's own, largest first
+      "qwen3.8-abliterated:27b",
       "llama3.1:8b",
       "llama3.2:3b",
     ]);

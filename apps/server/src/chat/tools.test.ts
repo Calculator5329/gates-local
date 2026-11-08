@@ -60,7 +60,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   });
   vi.stubGlobal("fetch", fetcher);
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, lease,
-    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
     push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
@@ -129,7 +129,7 @@ describe("tool chat transport", () => {
     vi.stubGlobal("fetch", fetcher);
     const pushed: unknown[] = [];
     const app = createApp({ store, sources, toolsEnabled: () => true,
-      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+      runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
       catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
       push: (channel, payload) => pushed.push({ channel, payload }),
       fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
@@ -211,7 +211,7 @@ describe("tool chat transport", () => {
       });
       vi.stubGlobal("fetch", fetcher);
       const app = createApp({ store, sources, think: true, toolsEnabled: () => scenario !== "tools default off",
-        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {} },
+        runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
         catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {} },
         push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
       });
