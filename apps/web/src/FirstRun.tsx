@@ -4,7 +4,7 @@
 // progress and Cancel; the chat can open to draft while it downloads.
 import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
-import { portOf, rtOf } from "./Banner.tsx";
+import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
 import { DlDetail } from "./Settings.tsx";
 import { describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -248,15 +248,18 @@ function NoOllama() {
   const rt = useStore(rtOfState);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
+  const note = useStore(ownCopyNote);
+  const own = note !== "";
+  const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
   const [title, st, sub] =
     rt === "wrong"
       ? ["Ollama isn't answering", `Port ${port} is busy`, `Something other than Ollama answers on port ${port}.`]
       : rt === "stopped"
-        ? ["Ollama is stopped", "Ollama is installed but not running", "Start Ollama, then press Retry."]
+        ? ["Ollama is stopped", "Ollama is installed but not running", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
           ? ["Ollama didn't start", "Ollama reported a problem", (detail ?? "Ollama stopped with an error.")]
-          : ["Ollama isn't installed", "No Ollama found on this computer", "Gates Local needs Ollama to chat. Install it from ollama.com, then press Retry."];
+          : ["Ollama isn't installed", "No Ollama found on this computer", `${around}Gates Local needs Ollama to chat. Install it from ollama.com, then press Retry.`];
   return (
     <Shell
       st={

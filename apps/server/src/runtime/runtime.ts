@@ -84,6 +84,11 @@ export type RuntimeOptions = {
    * Linux x64 only: the pinned asset is the Linux amd64 build.
    */
   allowInstall?: boolean;
+  /**
+   * false: never look for an Ollama binary (the app's install, PATH), as on a
+   * machine with none, so tests do not depend on the host. Default true.
+   */
+  searchBinary?: boolean;
   /** Settings' runtimeMode; undefined uses the full discovery order. */
   mode?: RuntimeMode;
   platform?: NodeJS.Platform;
@@ -114,10 +119,20 @@ type Binary = { path: string; origin: "app-install" | "path" };
 type Classified =
   | { kind: "ready"; status: RuntimeStatus }
   | { kind: "blocked"; status: RuntimeStatus }
-  | { kind: "startable"; binary: Binary | undefined; note: string | undefined };
+  | { kind: "startable"; binary: Binary | undefined; note: Note | undefined };
+
+/** Words about the ports the app routed around, and which of them a non-Ollama holds. */
+type Note = { text: string; busy: readonly string[] };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const withNote = (detail: string, note: string | undefined) => (note ? `${note} ${detail}` : detail);
+
+/** The status with the note in front of its detail and the note's busy ports. */
+function noted(status: RuntimeStatus, note: Note | undefined): RuntimeStatus {
+  if (!note) return status;
+  return { ...status, detail: status.detail ? `${note.text} ${status.detail}` : note.text, ...withBusy(note.busy) };
+}
+
+const withBusy = (busy: readonly string[]): { busyPorts?: readonly string[] } => (busy.length > 0 ? { busyPorts: [...new Set(busy)] } : {});
 
 const urlFor = (port: number) => `http://127.0.0.1:${port}`;
 
@@ -193,6 +208,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   };
 
   async function locateBinary(): Promise<Binary | undefined> {
+    if (options.searchBinary === false) return undefined;
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
@@ -226,7 +242,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const notes = taken.map(({ port: n, result: r }) =>
         r.kind === "ollama" ? `Another Ollama, not started by this app, is on port ${n}; the app uses port ${port}.` : `${r.kind === "wrong-service" ? r.detail : ""} The app uses port ${port}.`,
       );
-      return { kind: "startable", binary: await locateBinary(), note: notes.length > 0 ? notes.join(" ") : undefined };
+      const busy = taken.flatMap(({ result: r }) => (r.kind === "wrong-service" ? [r.port] : []));
+      return { kind: "startable", binary: await locateBinary(), note: notes.length > 0 ? { text: notes.join(" "), busy } : undefined };
     }
     useAppPort(urlFor(firstAppPort));
     return {
@@ -236,6 +253,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         owner: "none",
         baseUrl: appBaseUrl,
         detail: `Ports ${firstAppPort} to ${last} are all in use by other programs, so the app cannot start its own Ollama.`,
+        ...withBusy(taken.flatMap(({ result: r }) => (r.kind === "wrong-service" ? [r.port] : []))),
       },
     };
   }
@@ -248,7 +266,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       return { kind: "ready", status: { state: "ready", owner: "external", baseUrl: externalBaseUrl, version: ext.version } };
     }
     if (mode === "system") {
-      if (ext.kind === "wrong-service") return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail } };
+      if (ext.kind === "wrong-service") {
+        return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
+      }
       return {
         kind: "blocked",
         status: {
@@ -259,9 +279,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         },
       };
     }
-    const note =
+    const note: Note | undefined =
       ext.kind === "wrong-service"
-        ? `${ext.detail} The app runs its own Ollama on port ${appPort} instead.`
+        ? { text: `${ext.detail} The app runs its own Ollama on port ${appPort} instead.`, busy: [ext.port] }
         : undefined;
     if (appBaseUrl !== externalBaseUrl) {
       const app = await probe(appBaseUrl, probeTimeoutMs);
@@ -283,10 +303,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       }
       if (app.kind === "wrong-service") {
         const both = ext.kind === "wrong-service" ? `${ext.detail} ${app.detail}` : app.detail;
-        return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: appBaseUrl, detail: both } };
+        const busy = ext.kind === "wrong-service" ? [ext.port, app.port] : [app.port];
+        return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: appBaseUrl, detail: both, ...withBusy(busy) } };
       }
     } else if (ext.kind === "wrong-service") {
-      return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail } };
+      return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
     }
     return { kind: "startable", binary: await locateBinary(), note };
   }
@@ -295,16 +316,16 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (c.kind !== "startable") return c.status;
     if (c.binary) {
       const detail = `Ollama at ${c.binary.path} is installed but not running.`;
-      return { state: "stopped", owner: "none", baseUrl: appBaseUrl, detail: withNote(detail, c.note) };
+      return noted({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
     }
     const detail = allowInstall
       ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
       : "No Ollama found on this machine.";
-    return { state: "missing", owner: "none", baseUrl: appBaseUrl, detail: withNote(detail, c.note) };
+    return noted({ state: "missing", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
   }
 
-  async function start(binary: Binary, note: string | undefined): Promise<RuntimeStatus> {
-    setStatus({ state: "starting", owner: "app", baseUrl: appBaseUrl, detail: withNote(`Starting ${binary.path} on port ${appPort}.`, note) });
+  async function start(binary: Binary, note: Note | undefined): Promise<RuntimeStatus> {
+    setStatus(noted({ state: "starting", owner: "app", baseUrl: appBaseUrl, detail: `Starting ${binary.path} on port ${appPort}.` }, note));
     mkdirSync(runtimeDir(stateDir), { recursive: true });
     const logFile = serveLogFile(stateDir);
     const log = openSync(logFile, "a");
@@ -381,13 +402,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const modelsNote =
       (models ? ` Models from ${models.path}.` : "") +
       (readOnly ? ` Models in ${readOnly.path} belong to another user and are not writable here, so they are not shared.` : "");
-    return setStatus({
-      state: "ready",
-      owner: "app",
-      baseUrl: appBaseUrl,
-      version,
-      detail: withNote(`App-owned Ollama (pid ${proc.pid}, ${binary.origin === "path" ? "from PATH" : "app install"}).${modelsNote}`, note),
-    });
+    return setStatus(
+      noted(
+        {
+          state: "ready",
+          owner: "app",
+          baseUrl: appBaseUrl,
+          version,
+          detail: `App-owned Ollama (pid ${proc.pid}, ${binary.origin === "path" ? "from PATH" : "app install"}).${modelsNote}`,
+        },
+        note,
+      ),
+    );
   }
 
   async function ensureOnce(): Promise<RuntimeStatus> {
@@ -396,7 +422,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     let binary = c.binary;
     if (!binary) {
       if (!allowInstall) return setStatus(statusFor(c));
-      setStatus({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: withNote(`Installing Ollama ${manifest.version}.`, c.note) });
+      setStatus(noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: `Installing Ollama ${manifest.version}.` }, c.note));
       try {
         const r = await installPinned({
           appDataDir,

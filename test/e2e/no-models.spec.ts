@@ -1,22 +1,20 @@
-// Journey: first launch with Ollama but no models. This build's server does
-// not answer models.catalog or models.pull yet, so first run says how to get
-// a model by hand; the fixme twin is the full download journey for when the
-// v2 model methods land.
+// Journey: first launch with Ollama but no models. First run recommends a
+// model from models.catalog and downloads it with models.pull (the fake
+// Ollama streams the pull), with Cancel, then the chat opens.
 import { expect, sendMessage, test } from "./fixtures.ts";
 
 test.use({ scenario: "no-models", skipFirstRun: false });
 
-test("no models: first run explains the download is not available here and offers Retry", async ({ page, open }) => {
+test("no models: first run recommends a model to download", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
   await expect(page.locator(".fr-st")).toContainText("no models yet");
-  await expect(page.locator(".fr")).toContainText("not available in this build");
-  await expect(page.locator(".fr")).toContainText("ollama pull qwen3.5:9b");
-  await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
+  await expect(page.locator(".fr")).toContainText("Qwen 3.5 9B");
+  await expect(page.getByRole("button", { name: "Download and start" })).toBeEnabled();
+  await expect(page.locator(".fr")).not.toContainText("not available in this build");
 });
 
-test.fixme("no models: download, cancel, download again, then chat (needs models.catalog and models.pull)", async ({ page, open }) => {
+test("no models: download, cancel, download again, then chat", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
   await page.getByRole("button", { name: "Download and start" }).click();

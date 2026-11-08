@@ -9,6 +9,8 @@
 //   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
 //                                never install or start one, and never probe another port
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
+//   GATES_LOCAL_OLLAMA_BINARY    "none": never look for an Ollama binary (app install, PATH), as on
+//                                a machine with none, so tests do not depend on the host
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
@@ -68,6 +70,8 @@ async function main(): Promise<void> {
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
   const discoverOnly = mode === "discover-only";
+  const binary = process.env["GATES_LOCAL_OLLAMA_BINARY"] ?? "";
+  if (binary !== "" && binary !== "none") die(`GATES_LOCAL_OLLAMA_BINARY must be unset or "none", got "${binary}"`);
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
   const extraOrigins = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "")
     .split(",")
@@ -117,6 +121,7 @@ async function main(): Promise<void> {
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
         ...(discoverOnly || pinned ? { allowInstall: false } : {}),
+        ...(binary === "none" ? { searchBinary: false } : {}),
       },
       // Tests point the GPU and memory reads at fakes; the GPU status and every fit use them.
       fit,

@@ -79,10 +79,10 @@ export async function startFakeOllama(opts: { version?: string; tags?: FakeTag[]
 }
 
 /** An HTTP service that is not Ollama (a dev server, say) holding a port. */
-export async function startWrongService(port = 0): Promise<{ baseUrl: string; port: number; close(): Promise<void> }> {
+export async function startWrongService(port = 0, body = "<!doctype html><title>Some dev server</title>"): Promise<{ baseUrl: string; port: number; close(): Promise<void> }> {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/html" });
-    res.end("<!doctype html><title>Some dev server</title>");
+    res.end(body);
   });
   const p = await listen(server, port);
   return { baseUrl: `http://127.0.0.1:${p}`, port: p, close: () => close(server) };

@@ -85,7 +85,10 @@ export const RuntimeStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.String,
   version: S.optional(S.String),
+  /** Words for people. It can quote another service's reply, so no client parses it. */
   detail: S.optional(S.String),
+  /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
+  busyPorts: S.optional(S.Array(S.String)),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 

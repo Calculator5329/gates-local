@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
-// Journey: the theme. This build's server does not answer settings.*, so the
-// app follows the OS and Settings › General says changing it is not
-// available; the fixme twin is the saved-theme journey for when it lands.
+// Journey: the theme. With nothing saved the app follows the OS; a theme
+// picked in Settings › General is saved on the server (settings.update) and
+// wins over the OS across a reload.
 import { expect, test, waitReady } from "./fixtures.ts";
 
 const bodyBg = () => getComputedStyle(document.body).backgroundColor;
@@ -23,10 +23,12 @@ test("with no saved theme the app follows the OS, across a reload", async ({ pag
 
   await page.keyboard.press("Control+,");
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-  await expect(page.locator(".set")).toContainText("Changing it is not available in this build.");
+  // with nothing saved the picker shows System (the server's default theme)
+  await expect(page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".set")).not.toContainText("not available in this build");
 });
 
-test.fixme("a theme picked in Settings persists across reload over the OS setting (needs settings.update)", async ({ page, open }) => {
+test("a theme picked in Settings persists across reload over the OS setting", async ({ page, open }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await open();
   await waitReady(page);

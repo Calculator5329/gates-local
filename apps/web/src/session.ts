@@ -168,27 +168,32 @@ async function hydrate(c: Client): Promise<void> {
   on("sources.changed", (sources) => setState({ sources }));
   on("image.status", (imageStatus) => setState({ imageStatus }));
 
-  const [runtime, models, threads] = await Promise.all([
+  // settings.get is a local store read and the model choice needs only it and
+  // the model list, so the runtime dot and a chosen model land in one render:
+  // a message typed the moment the dot turns ready sends. gpu.status and the
+  // catalog can take a few hundred ms and follow.
+  const [runtime, models, threads, settings] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
-  ]);
-  setState((s) => ({ runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {} }));
-
-  const [settings, gpu, catalog, sources, imageStatus] = await Promise.all([
     probe("settings.get", {}),
+  ]);
+  setState((s) => {
+    const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
+    const next: State = { ...s, runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
+    const model = modelChoice(next);
+    return { ...next, ...(model === undefined ? {} : { model }) };
+  });
+  applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
+
+  const [gpu, catalog, sources, imageStatus] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("image.status", {}),
   ]);
   setState({ gpu, catalog, sources, imageStatus });
-  if (settings === NA || settings === undefined) {
-    setState({ settings });
-    applyTheme("system");
-  } else applySettings(settings, true);
 
-  chooseModel();
   const s = getState();
   if (s.view === "new" && threads.length === 0 && !firstRunDone()) setState({ view: "firstrun" });
   if (s.threadId !== null) await loadThread(s.threadId, true);
@@ -216,13 +221,17 @@ export async function refreshModels(): Promise<void> {
   invalidateFits();
 }
 
-function applySettings(settings: Settings, first = false): void {
-  setState((s) => ({
+function settingsPatch(s: State, settings: Settings, first: boolean): Partial<State> {
+  return {
     settings,
     ...(first ? { numCtx: settings.defaultNumCtx, think: settings.thinking } : {}),
     ...(first && settings.defaultModel !== undefined && s.model === undefined ? { model: settings.defaultModel } : {}),
     ...(!settings.imageGen ? { image: false } : {}),
-  }));
+  };
+}
+
+function applySettings(settings: Settings, first = false): void {
+  setState((s) => settingsPatch(s, settings, first));
   applyTheme(settings.theme);
 }
 
@@ -235,13 +244,17 @@ function applyTheme(theme: Settings["theme"]): void {
 
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */
 function chooseModel(): void {
-  const s = getState();
+  const model = modelChoice(getState());
+  if (model !== undefined) setState({ model });
+}
+
+/** The model chooseModel would switch to, or undefined when the current one stays (or none is installed). */
+function modelChoice(s: State): string | undefined {
   const models = s.models ?? [];
-  if (models.length === 0) return;
-  if (s.model !== undefined && models.some((m) => m.name === s.model)) return;
+  if (models.length === 0) return undefined;
+  if (s.model !== undefined && models.some((m) => m.name === s.model)) return undefined;
   const def = s.settings !== NA ? s.settings?.defaultModel : undefined;
-  const pick = models.find((m) => m.name === def) ?? models.toSorted((a, b) => a.sizeBytes - b.sizeBytes)[0];
-  if (pick) setState({ model: pick.name });
+  return (models.find((m) => m.name === def) ?? models.toSorted((a, b) => a.sizeBytes - b.sizeBytes)[0])?.name;
 }
 
 // ---------------------------------------------------------------- fit checks
