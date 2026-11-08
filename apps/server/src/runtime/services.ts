@@ -69,8 +69,10 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   let loader: ModelLoader | undefined;
   const runtime = createRuntimeSwitch({
     initialMode: settings.get().runtimeMode,
-    // The ownership record and serve log follow --data-dir; the install and the models folder stay shared.
-    make: (mode: RuntimeMode) => createOllamaRuntime({ ...options.runtime, mode, stateDir: options.dataDir }),
+    // Everything follows --data-dir: the ownership record, the serve log, the
+    // install and the models folder, so two instances never share a mutable
+    // model store. An explicit runtime.appDataDir still wins.
+    make: (mode: RuntimeMode) => createOllamaRuntime({ appDataDir: options.dataDir, ...options.runtime, mode, stateDir: options.dataDir }),
     beforeSwitch: () => {
       pulls?.stop();
       // Before the new runtime's ensure: what the app owned in the old one is not its own any more.

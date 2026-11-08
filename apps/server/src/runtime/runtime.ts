@@ -18,10 +18,10 @@
 // Without a mode the full order above applies.
 //
 // Files: the ownership record and the serve log are per instance and live
-// under `stateDir` (the server's --data-dir), so two data dirs never share
-// a record. The installed Ollama and the app's models folder are large and
-// shared: they stay under `appDataDir` (default ~/.local/share/gates-local,
-// %LOCALAPPDATA%\GatesLocal on Windows), so a model is never downloaded twice.
+// under `stateDir`. The installed Ollama and the app's models folder live
+// under `appDataDir` (default ~/.local/share/gates-local,
+// %LOCALAPPDATA%\GatesLocal on Windows). services.ts sets both to the
+// server's --data-dir, so two data dirs never share a mutable model store.
 //
 // Stopping: Linux and macOS signal the recorded process group after the
 // PID, start time and command still match. Windows never kills by PID
