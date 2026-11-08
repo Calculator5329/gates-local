@@ -37,6 +37,7 @@ describe("removing a model and moving the default (MR-02)", () => {
     session.removeModel.mockReset().mockResolvedValue(null);
     session.updateSettings.mockReset().mockResolvedValue(null);
     store.set.mockReset();
+    store.state = { threadId: "t1", model: "alpha" };
   });
 
   it("reports a failed save apart from the removal, which is done", async () => {
@@ -54,5 +55,32 @@ describe("removing a model and moving the default (MR-02)", () => {
   it("moves the open chat too once the save worked", async () => {
     expect(await removeModelAndMoveDefault("alpha", "beta")).toEqual({ removeErr: null, defaultErr: null });
     expect(store.set).toHaveBeenCalledWith({ model: "beta" });
+  });
+
+  it("moves the chat even after the refresh chose a stand-in for the removed model", async () => {
+    session.removeModel.mockImplementation(() => {
+      store.state = { threadId: "t1", model: "stand-in" };
+      return Promise.resolve(null);
+    });
+    await removeModelAndMoveDefault("alpha", "beta");
+    expect(store.set).toHaveBeenCalledWith({ model: "beta" });
+  });
+
+  it("leaves a chat opened while the save was pending on its own model (MRR-03)", async () => {
+    session.updateSettings.mockImplementation(() => {
+      store.state = { threadId: "t2", model: "gamma" };
+      return Promise.resolve(null);
+    });
+    await removeModelAndMoveDefault("alpha", "beta");
+    expect(store.set).not.toHaveBeenCalled();
+  });
+
+  it("keeps a model picked in the same chat while the save was pending (MRR-03)", async () => {
+    session.updateSettings.mockImplementation(() => {
+      store.state = { threadId: "t1", model: "gamma" };
+      return Promise.resolve(null);
+    });
+    await removeModelAndMoveDefault("alpha", "beta");
+    expect(store.set).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,7 @@ import {
   about,
   canBeDefault,
   filterShows,
+  noteSettled,
   fitLabel,
   fitReason,
   fitSymbol,
@@ -180,12 +181,13 @@ function Installed() {
   const [removing, setRemoving] = useState<{ row: InstalledRow; back: HTMLElement | null } | null>(null);
   const settingsNA = useStore((s) => s.settings === NA);
   const saved = useStore(savedDefault);
-  // A removal that worked but could not save the next default. Stays until a default is saved.
-  const [note, setNote] = useState<string | null>(null);
+  // A removal that worked but could not save the next default. Ends for good once a default is saved.
+  const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
+  if (note !== null && noteSettled(note.removed, saved)) setNote(null);
   const notice =
     note !== null && saved === undefined ? (
       <div className="mp-note">
-        <Fail err={note} />
+        <Fail err={note.text} />
       </div>
     ) : null;
   if (models === undefined) return <p className="mp-quiet">Checking which models are installed…</p>;
@@ -227,7 +229,7 @@ function Installed() {
           row={removing.row}
           next={settingsNA ? undefined : nextDefault(rows, removing.row.name, def)}
           rows={rows}
-          onDefaultFailed={setNote}
+          onDefaultFailed={(text) => setNote({ removed: removing.row.name, text })}
           onClose={() => {
             removing.back?.focus();
             setRemoving(null);
@@ -428,14 +430,17 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
+  // On open, and after a removal that failed. While one runs both buttons are disabled and the dialog holds focus.
+  useEffect(() => {
+    if (!busy) cancel.current?.focus();
+  }, [busy]);
   const name = row.label.text;
   const nextName = next ? (rows.find((r) => r.name === next)?.label.text ?? next) : null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      if (!busy) onClose();
     } else if (e.key === "Tab") {
       // keep focus inside the dialog
       const els = [...(box.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
@@ -446,7 +451,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
   };
   return (
     <div className="mp-scrim" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" ref={box} onKeyDown={onKey}>
+      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" ref={box} tabIndex={-1} onKeyDown={onKey}>
         <h3 id="mp-dlg-t">Remove {name}?</h3>
         <p>
           Frees {sizeText(row.info.sizeBytes)}. Chats you made with {name} stay, and you can download it again later.
@@ -460,7 +465,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
         )}
         <Fail err={err} />
         <div className="mp-r2">
-          <button ref={cancel} type="button" className="btn outline" onClick={onClose}>
+          <button ref={cancel} type="button" className="btn outline" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button
@@ -469,6 +474,7 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
             disabled={busy}
             onClick={() => {
               setBusy(true);
+              box.current?.focus();
               const done = removeModelAndMoveDefault(row.name, next);
               void run(done.then((d) => d.removeErr)).then(async (removed) => {
                 setBusy(false);

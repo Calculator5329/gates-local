@@ -825,6 +825,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* dialog */
 .mp-scrim{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--scrim)}
 .mp-dlg{width:420px;max-width:100%;padding:20px;background:var(--popover);border:1px solid var(--popover-border);border-radius:var(--r-xl);box-shadow:var(--popover-shadow)}
+.mp-dlg:focus{outline:none}
 .mp-dlg h3{margin:0 0 8px;font-size:16px;font-weight:600}
 .mp-dlg p{margin:0 0 8px;color:var(--muted-foreground);text-wrap:pretty}
 .mp-dlg p b{color:var(--foreground);font-weight:600}

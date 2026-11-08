@@ -36,10 +36,14 @@ export interface RemoveResult {
  * after the removal worked, and new chats start on it from then on.
  */
 export async function removeModelAndMoveDefault(name: string, next: string | null | undefined): Promise<RemoveResult> {
-  const wasCurrent = getState().model === name;
+  const before = getState();
+  const wasCurrent = before.model === name;
   const removeErr = await removeModel(name);
   if (removeErr !== null || next === undefined) return { removeErr, defaultErr: null };
+  const refreshed = getState().model;
   const defaultErr = await updateSettings({ defaultModel: next });
-  if (defaultErr === null && wasCurrent && next !== null) setState({ model: next });
+  // Only the chat that was on the removed model moves, and only if nothing chose for it during the save.
+  const now = getState();
+  if (defaultErr === null && wasCurrent && next !== null && now.threadId === before.threadId && now.model === refreshed) setState({ model: next });
   return { removeErr: null, defaultErr };
 }

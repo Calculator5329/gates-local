@@ -118,6 +118,9 @@ const FILTER_FROM = 8;
 /** A long list gets the filter, and it stays while it holds text: hiding it would leave a filter nobody can clear. */
 export const filterShows = (rows: number, typed: string): boolean => rows > FILTER_FROM || typed !== "";
 
+/** A note that the next default could not be saved is settled once any default other than the removed model is saved. */
+export const noteSettled = (removed: string, saved: string | undefined): boolean => saved !== undefined && saved !== removed;
+
 /** The row menu offers "Use as default" on any chat model that can load, except the current default. */
 export function canBeDefault(r: Row, def: string | undefined): boolean {
   return r.name !== def && r.chat && r.verdict !== "refuse";

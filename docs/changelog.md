@@ -12,6 +12,10 @@
   finished when the next default cannot be saved; the page says so instead
   of offering a retry that cannot work. A filter that still holds text
   stays on screen after the list gets short.
+- The Remove dialog stays until its removal has finished. A note about a
+  default that could not be saved ends for good once a default is saved,
+  and a removal no longer moves a chat that was opened or changed while it
+  ran.
 
 ## 2026-11-08: Dark by default
 

@@ -40,7 +40,8 @@ test("set a default from the row menu, then download a model into the list", asy
   await expect(page.locator('.mp-row[data-dm="qwen3.5:4b"]')).toBeVisible();
 });
 
-test("a removal that worked stays done when the new default cannot be saved", async ({ page, open }) => {
+// The first save of a default is answered with a failure; everything else reaches the server.
+const refuseFirstDefaultSave = async (page: Page) => {
   let refused = 0;
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
     const server = ws.connectToServer();
@@ -54,6 +55,70 @@ test("a removal that worked stays done when the new default cannot be saved", as
     });
     server.onMessage((m) => ws.send(m));
   });
+};
+
+test("a note about a default that was since saved does not come back with a later removal", async ({ page, open }) => {
+  await refuseFirstDefaultSave(page);
+  await open();
+  await waitReady(page);
+  await openModels(page);
+
+  const dialog = page.getByRole("dialog");
+  const note = page.locator(".mp").getByRole("alert");
+  await page.getByRole("button", { name: "More for Qwen 3.5 9B" }).click();
+  await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+  await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(note).toContainText("Qwen 3.5 9B was removed");
+  await page.getByRole("button", { name: /^Default for new chats:/ }).click();
+  await page.getByRole("option", { name: /Gemma 4 12B/ }).click();
+  await expect(note).toHaveCount(0);
+
+  // removing every model that can chat clears the default with no failure at all
+  const more = page.locator(".mp-row:not(.emb)").getByRole("button", { name: /^More for/ });
+  while ((await more.count()) > 0) {
+    await more.first().click();
+    await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+    await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+  await expect(note).toHaveCount(0);
+});
+
+test("the remove dialog stays until its removal has finished", async ({ page, open }) => {
+  let held: (() => void) | undefined;
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => {
+      if (m.toString().includes('"models.remove"')) {
+        held = () => server.send(m);
+        return;
+      }
+      server.send(m);
+    });
+    server.onMessage((m) => ws.send(m));
+  });
+  await open();
+  await waitReady(page);
+  await openModels(page);
+
+  await page.getByRole("button", { name: "More for Qwen 3.5 9B" }).click();
+  await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect.poll(() => held !== undefined).toBe(true);
+
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(page.locator(".mp")).toBeVisible();
+
+  held?.();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.mp-row[data-dm="qwen3.5:9b"]')).toHaveCount(0);
+});
+
+test("a removal that worked stays done when the new default cannot be saved", async ({ page, open }) => {
+  await refuseFirstDefaultSave(page);
   await open();
   await waitReady(page);
   await openModels(page);
