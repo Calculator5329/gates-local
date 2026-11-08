@@ -385,6 +385,13 @@ describe("Windows (platform injected)", () => {
     }
   });
 
+  it("S-01: the status says when this computer has no copy of its own to offer", async () => {
+    const none = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    expect((await none.discover()).noAppCopy).toBe(true);
+    const pinned = await runtime({ mode: "system", platform: "win32", arch: "x64", manifest: undefined, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    expect((await pinned.discover()).noAppCopy).toBeUndefined();
+  });
+
   it("R2-05 (win32 arm64, nothing pinned): app mode says in words that the app's own Ollama is not on Windows yet; never a start or an install", async () => {
     for (const allowInstall of [false, true]) {
       const rt = await runtime({ mode: "app", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt(), allowInstall });

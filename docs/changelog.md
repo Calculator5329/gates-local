@@ -6,6 +6,13 @@
   whatever the OS uses. Settings › General still offers Light and System. A
   theme already saved stays as it is.
 
+## 2026-11-08: No switch to a copy that cannot exist
+
+- Where the app has no build of Ollama to install (Windows ARM today), the
+  runtime status says so (`noAppCopy`). Settings › Runtime says it is not
+  available instead of offering "Install and switch", and still offers the
+  way back to the system Ollama.
+
 ## 2026-11-08: Switch runtimes while Ollama is down
 
 - Settings › Runtime offers the switch whenever Ollama is not usable, not

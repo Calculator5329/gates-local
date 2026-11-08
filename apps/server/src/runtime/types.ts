@@ -20,6 +20,8 @@ export type RuntimeStatus = {
   detail?: string;
   /** Ports that something other than Ollama holds (contracts RuntimeStatus.busyPorts). */
   busyPorts?: readonly string[];
+  /** The app has no build of Ollama to install here (contracts RuntimeStatus.noAppCopy). */
+  noAppCopy?: boolean;
 };
 
 export type ModelInfo = {
