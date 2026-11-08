@@ -8,8 +8,16 @@ export function trimOutput(output: string): string {
 
 /** At most this many calls run from one model reply; the rest are answered "not run". */
 export const MAX_CALLS_PER_REPLY = 8;
-/** Wall-clock time all of a turn's tools may use together. */
+/**
+ * The tool phase, measured from the start of the turn: every model request and
+ * tool run in rounds that may call tools. Past it no tool runs, the request in
+ * flight is aborted, and the loop asks for the final answer with tools off.
+ */
 export const TOOL_TIME_BUDGET_MS = 5 * 60 * 1000;
+/** Every model request, the final answer included, is aborted after this long without a streamed chunk. */
+export const STREAM_STALL_MS = 120 * 1000;
+/** The final-answer request (tools off) may take this long in all; the tool phase never cuts it. */
+export const FINAL_ANSWER_MS = 10 * 60 * 1000;
 /** Half the context at the 3 characters/token estimate the tool block uses. */
 export const toolOutputBudget = (numCtx: number): number => Math.floor(numCtx * 3 / 2);
 /** A step's detail is for the UI; the model gets the full (trimmed) output. */
@@ -23,7 +31,53 @@ const BUDGET = {
   output: "Not run: this turn's tool output budget ran out.",
 } as const;
 type Budget = keyof typeof BUDGET;
+const STOPPED_TIME = "Stopped: this turn's tool time budget ran out.";
+/** The longest fixed notice; each call still to be answered in a reply keeps room for one. */
+const NOTICE_MAX = Math.max(NOT_RUN_PER_REPLY.length, STOPPED_TIME.length, ...Object.values(BUDGET).map(t => t.length));
+const CUT = "\n[cut: this turn's tool output budget ran out]";
 const FINAL_ANSWER = (budget: Budget) => `This turn's tool ${budget} budget ran out. No more tools: answer now with what you have.`;
+const seconds = (ms: number) => `${ms / 1000} s`;
+
+/** Cuts an observation to `room` characters, marking the cut when the mark fits. */
+function fit(output: string, room: number): string {
+  if (output.length <= room) return output;
+  if (room <= CUT.length) return output.slice(0, Math.max(0, room));
+  return output.slice(0, room - CUT.length) + CUT;
+}
+
+/** Settles with `work`, or rejects with the signal's reason as soon as it aborts, whether or not `work` listens. */
+async function race<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  work.catch(() => undefined);
+  signal.throwIfAborted();
+  let fail: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    fail = () => reject(signal.reason);
+    signal.addEventListener("abort", fail, { once: true });
+  });
+  try { return await Promise.race([work, aborted]); } finally { signal.removeEventListener("abort", fail!); }
+}
+
+/** One model request under `signals` plus a stall guard that aborts it after `stallMs` without a chunk. */
+async function* modelRequest(stream: ModelStream, messages: readonly ModelMessage[], tools: boolean, signals: readonly AbortSignal[], stallMs: number): AsyncGenerator<ModelEvent> {
+  const stall = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const signal = AbortSignal.any([...signals, stall.signal]);
+  const iterator = stream(messages, { tools, signal })[Symbol.asyncIterator]();
+  try {
+    for (;;) {
+      // The clock runs only while waiting on the model, never while the consumer handles a chunk.
+      timer = setTimeout(() => stall.abort(new Error(`The model stopped sending for ${seconds(stallMs)}; the reply was stopped.`)), stallMs);
+      const next = await race(iterator.next(), signal);
+      clearTimeout(timer);
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    clearTimeout(timer);
+    // A stream deaf to its signal may never settle; do not wait for it to close.
+    void Promise.resolve().then(() => iterator.return?.()).catch(() => undefined);
+  }
+}
 
 /** Text-mode observations are labelled as data so a file cannot pose as the user. */
 export function textToolResult(name: string, output: string): string {
@@ -36,24 +90,36 @@ export interface LoopInput {
   messages: readonly ModelMessage[];
   stream: ModelStream;
   execute: (call: ToolCall, signal: AbortSignal) => Promise<ToolResult>;
+  /** The turn's cancel: aborts the model request or tool in flight at once. */
   signal: AbortSignal;
   native: boolean;
   maxTurns?: number;
   /** The turn's num_ctx; the tool output budget is num_ctx * 3 / 2 characters. */
   numCtx?: number;
+  /** The tool phase (TOOL_TIME_BUDGET_MS). */
   toolTimeBudgetMs?: number;
+  /** The stall guard (STREAM_STALL_MS). */
+  stallMs?: number;
+  /** The final-answer cap (FINAL_ANSWER_MS). */
+  finalAnswerMs?: number;
 }
 
 /** Collect one whole model response before running any tool; length stops are never executable. */
 export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
+  const phase = new AbortController();
+  const deadline = setTimeout(() => phase.abort(new Error(BUDGET.time)), input.toolTimeBudgetMs ?? TOOL_TIME_BUDGET_MS);
+  try { yield* turn(input, phase.signal); } finally { clearTimeout(deadline); }
+}
+
+async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopEvent> {
   const messages = [...input.messages];
   const tools: ToolStep[] = [];
   // Every step's visible text, in order: the saved message is what the user saw.
   const visible: string[] = [];
   const answer = (fallback = "") => visible.join("\n\n") || fallback;
-  const timeBudget = input.toolTimeBudgetMs ?? TOOL_TIME_BUDGET_MS;
+  const stallMs = input.stallMs ?? STREAM_STALL_MS;
+  const finalMs = input.finalAnswerMs ?? FINAL_ANSWER_MS;
   const outputBudget = toolOutputBudget(input.numCtx ?? 16384);
-  let toolTime = 0;
   let toolOutput = 0;
   let spent: Budget | undefined;
   let final = false;
@@ -61,16 +127,50 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
   let thinking = "";
   const finish = (content: string, stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content, stopReason, tools, ...(thinking ? { thinking } : {}) });
   const say = (text: string): LoopEvent => { visible.push(text); return { type: "delta", text }; };
-  const observe = (name: string, output: string): ModelMessage => input.native ? { role: "tool", tool_name: name, content: output } : { role: "user", content: textToolResult(name, output) };
-  for (let turn = 0; turn < (input.maxTurns ?? 24); turn++) {
+  /**
+   * The one path every observation takes (results, errors, invalid calls, "not run"):
+   * counted against the output budget and cut to what is left of it, keeping `reserve`
+   * characters for the calls still to be answered in this reply.
+   */
+  const observe = (name: string, output: string, reserve: number): string => {
+    const text = fit(output, outputBudget - toolOutput - reserve);
+    toolOutput += text.length;
+    if (text.length < output.length || toolOutput + reserve >= outputBudget) spent ??= "output";
+    messages.push(input.native ? { role: "tool", tool_name: name, content: text } : { role: "user", content: textToolResult(name, text) });
+    return text;
+  };
+  const askFinal = (budget: Budget) => {
+    spent ??= budget;
+    final = true;
+    messages.push({ role: "user", content: FINAL_ANSWER(spent) });
+  };
+  for (let round = 0; round < (input.maxTurns ?? 24); round++) {
     input.signal.throwIfAborted();
+    if (!final && phase.aborted) askFinal("time");
     let complete: Extract<ModelEvent, { type: "complete" }> | undefined;
-    for await (const event of input.stream(messages, { tools: !final })) {
+    // Native deltas the user has already seen, kept if the deadline cuts this request.
+    const shown: string[] = [];
+    const cap = new AbortController();
+    const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
+    try {
+      // Tool rounds live inside the tool phase; the final answer has its own cap instead.
+      for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs)) {
+        if (event.type === "complete") complete = event;
+        // Text-mode call syntax must not leak into the answer. Emit its visible answer after parsing.
+        else if (event.type === "thinking" || input.native) {
+          if (event.type === "delta") shown.push(event.text);
+          yield event;
+        }
+      }
+    } catch (e) {
       input.signal.throwIfAborted();
-      if (event.type === "complete") complete = event;
-      // Text-mode call syntax must not leak into the answer. Emit its visible answer after parsing.
-      else if (event.type === "thinking" || input.native) yield event;
-    }
+      if (final || !phase.aborted) throw e;
+      const seen = shown.join("").trim();
+      if (seen) visible.push(seen);
+      askFinal("time");
+      continue;
+    } finally { clearTimeout(capTimer); }
+    input.signal.throwIfAborted();
     if (!complete) throw new Error("The model stream ended without a done line");
     thinking += complete.thinking ?? "";
     const parsed = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
@@ -106,66 +206,56 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
     messages.push({ role: "assistant", content: complete.content,
       ...(input.native ? { tool_calls: pending.flatMap(p => p.call ? [{ function: { name: p.call.name, arguments: p.call.input } }] : []) } : {}) });
     let calls = 0;
-    for (const item of pending) {
+    for (const [index, item] of pending.entries()) {
       input.signal.throwIfAborted();
+      if (phase.aborted) spent ??= "time";
       const callId = randomUUID();
       const started = Date.now();
       const detail = item.call ? JSON.stringify(item.call) : item.error ?? "Invalid tool call";
       let output: string;
-      let step: ToolStep;
+      let step: Omit<ToolStep, "detail">;
       if (!item.call) {
         badCalls++;
         output = item.error ?? "Invalid tool call";
-        step = { callId, name: item.name, state: "error", summary: "Could not read the tool call", detail: clipDetail(`${detail}\n${output}`) };
+        step = { callId, name: item.name, state: "error", summary: "Could not read the tool call" };
       } else if (++calls > MAX_CALLS_PER_REPLY || spent) {
         output = spent ? BUDGET[spent] : NOT_RUN_PER_REPLY;
-        step = { callId, name: item.name, state: "error", summary: spent ? "Tool budget ran out" : "Too many tool calls in one reply", detail: clipDetail(`${detail}\n${output}`) };
+        step = { callId, name: item.name, state: "error", summary: spent ? "Tool budget ran out" : "Too many tool calls in one reply" };
       } else {
         const running: ToolStep = { callId, name: item.name, state: "running", summary: runningSummary(item.name), detail: clipDetail(detail) };
         yield { type: "tool", step: running };
-        // The call may use what is left of the turn's tool time; past that it is stopped.
-        const call = new AbortController();
-        const forward = () => call.abort(input.signal.reason);
-        input.signal.addEventListener("abort", forward, { once: true });
-        const timer = setTimeout(() => call.abort(new Error(BUDGET.time)), Math.max(0, timeBudget - toolTime));
+        // The call gets the turn's cancel and the tool-phase deadline; past either it is stopped.
+        const signal = AbortSignal.any([input.signal, phase]);
         try {
-          const result = await input.execute(item.call, call.signal);
-          input.signal.throwIfAborted();
+          const result = await race(input.execute(item.call, signal), signal);
           badCalls = 0;
           output = trimOutput(result.output);
-          step = { ...running, state: "done", summary: result.summary, detail: clipDetail(`${detail}\n${output}`), durationMs: Date.now() - started };
-          toolOutput += output.length;
-          if (toolOutput >= outputBudget) spent = "output";
+          step = { callId, name: item.name, state: "done", summary: result.summary, durationMs: Date.now() - started };
         } catch (e) {
           if (input.signal.aborted) {
             const cancelled: ToolStep = { ...running, state: "error", summary: "Tool was cancelled", durationMs: Date.now() - started };
             tools.push(cancelled); yield { type: "tool", step: cancelled };
             input.signal.throwIfAborted();
           }
-          const outOfTime = call.signal.aborted;
+          const outOfTime = phase.aborted;
+          if (outOfTime) spent ??= "time";
           // Invalid arguments count toward the format budget too; execution failures are observations.
           if (e instanceof TypeError && !outOfTime) badCalls++;
           else badCalls = 0;
-          output = trimOutput(outOfTime ? "Stopped: this turn's tool time budget ran out." : (e as Error).message);
-          step = { ...running, state: "error", summary: outOfTime ? "Tool budget ran out" : "Tool could not finish", detail: clipDetail(`${detail}\n${output}`), durationMs: Date.now() - started };
-        } finally {
-          clearTimeout(timer);
-          input.signal.removeEventListener("abort", forward);
-          toolTime += Date.now() - started;
-          if (toolTime >= timeBudget) spent = "time";
+          output = trimOutput(outOfTime ? STOPPED_TIME : (e as Error).message);
+          step = { callId, name: item.name, state: "error", summary: outOfTime ? "Tool budget ran out" : "Tool could not finish", durationMs: Date.now() - started };
         }
       }
-      tools.push(step); yield { type: "tool", step };
-      messages.push(observe(item.name, output));
+      const observed = observe(item.name, output, (pending.length - index - 1) * NOTICE_MAX);
+      const done: ToolStep = { ...step, detail: clipDetail(`${detail}\n${observed}`) };
+      tools.push(done); yield { type: "tool", step: done };
       if (badCalls >= 3) {
         yield say("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
         yield finish(answer()); return;
       }
     }
-    if (spent) {
-      final = true;
-      messages.push({ role: "user", content: FINAL_ANSWER(spent) });
-    }
+    if (phase.aborted) spent ??= "time";
+    if (spent) askFinal(spent);
   }
   yield say("Stopped after the tool turn limit. Ask a follow-up to continue.");
   yield finish(answer());
