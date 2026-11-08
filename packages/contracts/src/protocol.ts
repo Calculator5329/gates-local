@@ -22,6 +22,8 @@ import {
   Source,
   SourceKind,
   Thread,
+  UpdateCheck,
+  UpdateStatus,
 } from "./shapes.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -124,6 +126,10 @@ export const methods = {
   // ---- setup (2026-11-07): read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
+  // ---- updates (2026-11-07): status is local only; check fetches, and only runs on a click
+  "update.status": { params: NoParams, result: UpdateStatus },
+  "update.check": { params: NoParams, result: UpdateCheck },
+  "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }) },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */

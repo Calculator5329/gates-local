@@ -198,6 +198,27 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       totalBytes: 0,
     },
   },
+  "update.status": {
+    params: {},
+    result: {
+      version: { kind: "release", tag: "v0.1.0", commit: "85507ce", date: 1_762_500_000_000 },
+      result: { at: 1_762_500_005_000, outcome: "updated", line: "Updated to v0.1.0, 12 changes." },
+      lastCheck: null,
+    },
+  },
+  "update.check": {
+    params: {},
+    result: {
+      state: "available",
+      checkedAt: 1_762_500_006_000,
+      channel: "release",
+      current: "v0.1.0",
+      target: "v0.2.0",
+      total: 23,
+      changes: ["Settings: an Updates group", "Fix the model picker on phones"],
+    },
+  },
+  "update.dismissResult": { params: {}, result: { dismissed: true } },
 };
 
 /** One sample per channel; chat.event gets one per ChatEvent variant. */

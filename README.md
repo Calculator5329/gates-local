@@ -97,6 +97,35 @@ goes full screen while it has focus. The full guide, with the other keys,
 adding the app to your app list, updating, uninstalling and fixes for
 common problems, is [docs/setup/linux.md](docs/setup/linux.md).
 
+## Updating
+
+Close Gates Local, then run this in its folder:
+
+```sh
+pnpm run app-update
+```
+
+It says what is new and installs it: it fetches from the clone's git
+remote, moves to the new version, runs `pnpm install` and builds the app.
+If a step fails, it goes back to the version you had, builds that again
+and tells you where it stopped. Add `--check` to only see what is new.
+
+Once the project has releases (`v1.2.3` tags), it follows releases and
+never goes backwards. Until then, and whenever you pass `--channel main`
+or turn on "Get every change, not only releases" in Settings, it follows
+every change on the main branch.
+
+It changes nothing when a tracked file has changes of yours or the copy
+has commits of its own, and says how to keep them. Files git does not track,
+and your data folder, are never touched.
+
+In the app, Settings › General › Updates shows the version and has a
+"Check for updates" button. It checks only when you click it. In the desktop
+app, "Update and restart" closes the window, runs the same command and
+opens the app again. The next start shows how it went. On a phone or in a
+browser you see the version and the check, and install from the computer
+the app runs on.
+
 ## Windows
 
 Not supported yet. Linux is the tested platform today.
@@ -127,6 +156,11 @@ These are all the network calls the code makes:
   WebSocket on `127.0.0.1`, with a token that changes on every launch.
 - **Links.** A link you click opens in your web browser. The app never
   loads it itself.
+- **Updates.** Only when you click "Check for updates" or "Update and
+  restart", or run `pnpm run app-update`: `git fetch` and `git ls-remote`
+  to the remote your copy was cloned from (GitHub for a clone of this
+  repository). Updating also runs `pnpm install`, which downloads packages
+  from the npm registry. Nothing checks for updates on its own.
 
 Installing is separate: `pnpm install` downloads packages from the npm
 registry, and the first `pnpm start` downloads the Electron binary from

@@ -18,6 +18,8 @@
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+//   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
+//                                outside this one (src/update/guard.ts); the e2e stack sets it
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
 //   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
@@ -48,6 +50,11 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
+import { createUpdateModule } from "./update/module.ts";
+import { realRunner } from "./update/run.ts";
+
+/** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
+const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -173,7 +180,16 @@ async function main(): Promise<void> {
     ollamaUrl: () => runtime.baseUrl(),
   });
   const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
+  // Reads the last update's result file and nothing else at start; git runs only on update.check.
+  const update = createUpdateModule({
+    root: REPO_ROOT,
+    dataDir,
+    runner: realRunner,
+    everyChange: () => services.settings.get().updateEveryChange === true,
+    log: (line) => log(`update ${line}`),
+  });
   const app: App = createApp({
+    update,
     image,
     lease: gpuLease,
     store,

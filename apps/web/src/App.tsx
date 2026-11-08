@@ -13,6 +13,7 @@ import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { SettingsView } from "./Settings.tsx";
 import { Sidebar, focusComposer, goNew, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
+import { UpdateNote } from "./Updates.tsx";
 import { deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { POP_ANCHOR, Tip, closePop, place, togglePop } from "./ui.tsx";
@@ -85,6 +86,7 @@ function Draft() {
         <h1 className="hero">What would you like help with?</h1>
         <p className="hero-sub">Runs locally on your computer. Nothing you type leaves it.</p>
         <div className="banner-slot">
+          <UpdateNote />
           <Banner />
         </div>
         <div id="draftComposerSlot">
@@ -278,6 +280,7 @@ export function App() {
                     <Timeline threadId={threadId} />
                     <div className="cw">
                       <div className="banner-slot">
+                        <UpdateNote />
                         <Banner />
                       </div>
                       <Composer />

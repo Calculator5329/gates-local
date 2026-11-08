@@ -23,6 +23,7 @@ import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
+import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -98,6 +99,8 @@ export interface AppDeps {
    * its reservation to its end, so an image job never runs beside a stream.
    */
   readonly lease?: Pick<GpuLease, "acquire">;
+  /** Settings › Updates: the version, the one-click check and the last update's result (update/module.ts). */
+  readonly update?: UpdateModule;
 }
 
 export interface App {
@@ -297,6 +300,7 @@ export function createApp(deps: AppDeps): App {
     // Kept per thread like the tool's jobs, so threads.delete takes them back too.
     ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
+    ...(deps.update ? createUpdateHandlers(deps.update) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });

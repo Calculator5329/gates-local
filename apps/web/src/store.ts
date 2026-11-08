@@ -17,6 +17,7 @@ import type {
   Source,
   Thread,
   ToolStep,
+  UpdateStatus,
 } from "@gates-local/contracts";
 
 /** A v2 surface the server answers "not-implemented" for: the client hides it or says so. */
@@ -105,6 +106,10 @@ export interface State {
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
+  /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
+  readonly update: Maybe<UpdateStatus>;
+  /** A "Check for updates" click waiting for its answer. */
+  readonly updateChecking: boolean;
   /** Action methods that answered not-implemented once (models.load, models.pull, …). */
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
@@ -149,6 +154,8 @@ const initial: State = {
   pulls: {},
   sources: undefined,
   imageStatus: undefined,
+  update: undefined,
+  updateChecking: false,
   unavailable: {},
   notice: null,
   loadErrors: {},
