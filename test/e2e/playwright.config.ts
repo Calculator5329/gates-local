@@ -37,7 +37,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "e2e", testIgnore: /shots\.spec\.ts/ },
+    // Browser journeys are *.spec.ts; a *.test.ts here (seed.test.ts) is a vitest unit test.
+    { name: "e2e", testMatch: /\.spec\.ts$/, testIgnore: /shots\.spec\.ts/ },
     { name: "shots", testMatch: /(^|[\\/])shots\.spec\.ts$/ },
     { name: "readme", testMatch: /readme-shots\.spec\.ts$/ },
   ],

@@ -32,6 +32,7 @@ describe("window options", () => {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      spellcheck: false,
     });
   });
 });

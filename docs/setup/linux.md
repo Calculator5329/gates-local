@@ -53,7 +53,7 @@ not been tested on a real machine yet.
 ## 3. Get the code and start the app
 
 ```sh
-git clone https://github.com/<owner>/gates-local.git
+git clone https://github.com/Calculator5329/gates-local.git
 cd gates-local
 pnpm --version   # 11.10.0, read from package.json
 pnpm install

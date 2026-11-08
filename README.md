@@ -81,7 +81,7 @@ Ollama, for people who want local models without guessing whether they fit.
 Install Ollama and start it first. Then:
 
 ```sh
-git clone https://github.com/<owner>/gates-local.git
+git clone https://github.com/Calculator5329/gates-local.git
 cd gates-local
 corepack enable pnpm
 pnpm install
@@ -174,4 +174,8 @@ Early. The chat, fit check, model downloads, library and tools work, and
 are tested against fakes. Packaging, benchmarks and guided setup are not
 built yet. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
 
-<!-- LICENSE: chosen at publication -->
+## License
+
+MIT. See [LICENSE](LICENSE). Parts adapted from T3 Code and the Lucide
+icons keep their own notices, listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

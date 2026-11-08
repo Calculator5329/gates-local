@@ -184,3 +184,16 @@ push.
 I think we can push all 189 commits. And timing, let's just do it as soon
 as possible.”
 
+## 2026-11-07 · Full history confirmed after the audit
+
+The publication audit found no credentials in any of the 237 commits, but
+history still holds what the current tree no longer does: a captured list
+of the GPU's processes with home-folder paths, the full download name of a
+local model, and commit messages that name the machine. Shown that list and
+the choice between full history and a fresh one-commit snapshot (the
+auditor's pick), Ethan chose full history. Trigger: a friend on Windows
+wants to try the app, so the repository goes public now and the Windows
+lane follows.
+**Owner text (in chat):** “Hey my friend is on Windows and wants to try
+this out so we need to make the repo Public”, then “Full history”.
+

@@ -11,8 +11,4 @@ describe("the desktop window", () => {
   it("turns Electron's spellchecker off, so no dictionary is downloaded", () => {
     expect(prefs.spellcheck).toBe(false);
   });
-
-  it("keeps the renderer sandboxed and isolated", () => {
-    expect(prefs).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true });
-  });
 });
