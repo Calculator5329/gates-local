@@ -75,9 +75,26 @@ not start it.
 If you later quit Ollama from its tray icon, the app says "Ollama isn't
 running". Start Ollama from the Start menu and press Retry.
 
+### The app's own copy of Ollama
+
 You can switch to the app's own private copy of Ollama in Settings ›
-Runtime. That copy keeps its models apart from the system Ollama's, so a
-model you want there downloads again.
+Runtime › "Switch to Gates Local's copy". It runs on the first free port
+from 11435 to 11444, keeps its models in `%LOCALAPPDATA%\GatesLocal\models`
+apart from the system Ollama's (so a model you want there downloads
+again), and stops when you close the app.
+
+When the app finds no Ollama program of its own, it downloads the pinned
+Ollama 0.40.15 for Windows (`ollama-windows-amd64.zip`, 1.6 GB) from
+GitHub, checks its SHA-256, and unpacks it with Windows' own `tar.exe` into
+`%LOCALAPPDATA%\GatesLocal\runtime\ollama\0.40.15` (2.2 GB on disk). On the
+test machine that took 3 min 41 s from the click to a running copy. Then it
+downloaded Qwen 3.5 4B into the copy's models folder and answered a chat.
+To test this the app was started with its search for an installed Ollama
+turned off; with Ollama installed, the code runs the installed
+`ollama.exe` as its copy instead of downloading one (not tested).
+
+Switching back (Settings › Runtime › "Switch to the system Ollama") stops
+the copy. The downloaded copy stays in the data folder until you remove it.
 
 ### Your first model
 
@@ -121,7 +138,7 @@ This was not tested on Windows.
 | What | Where |
 | --- | --- |
 | Threads, settings, database copies, images, and the record and log of the app's own Ollama | `%LOCALAPPDATA%\GatesLocal` |
-| The models of the app's own Ollama copy (Settings › Runtime) | `%LOCALAPPDATA%\GatesLocal\models` |
+| The Ollama the app downloads, and the models of its own Ollama copy (Settings › Runtime) | `runtime\ollama\` and `models\` in `%LOCALAPPDATA%\GatesLocal` |
 | Electron's profile (window state and cache) | `%APPDATA%\gates-local` |
 | The Electron download | the zip in `%LOCALAPPDATA%\electron\Cache`, unpacked into the clone under `node_modules\.pnpm\electron@<version>\node_modules\electron\dist` |
 | Ollama itself | `%LOCALAPPDATA%\Programs\Ollama`, its logs in `%LOCALAPPDATA%\Ollama` |
@@ -166,7 +183,8 @@ Remove-Item -Recurse -Force gates-local
 ```
 
 That removes the app but keeps your data. To remove your data too, which is a
-separate choice and cannot be undone:
+separate choice and cannot be undone (this also removes the app's own Ollama
+copy and its models):
 
 ```powershell
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\GatesLocal", "$env:APPDATA\gates-local"
@@ -209,8 +227,8 @@ it from its tray icon.
   curl.exe http://127.0.0.1:11434/api/version
   ```
 
-- Or let the app run its own copy: Settings › Runtime › "Switch to Gates
-  Local's copy".
+- Settings › Runtime offers the switch to the app's own copy only while an
+  Ollama is running, so start Ollama first if you want to switch.
 
 ### The first reply takes minutes
 

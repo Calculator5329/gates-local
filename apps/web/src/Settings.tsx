@@ -537,7 +537,7 @@ function Runtime() {
                         Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
                       <li>
-                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one. Download a model again there to use it; {models && models.length > 0 ? `your ${count(models.length, "model")} in ` : "models in "}
+                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
                         <span className="mono">{folders.models}</span> stay where they are.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
@@ -570,7 +570,7 @@ function Runtime() {
       </Grp>
       <Grp title="Storage">
         <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
-          <span className="path">{folders.models}</span>
+          <span className="path">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>

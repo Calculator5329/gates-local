@@ -199,6 +199,21 @@ describe("hydration order (W-03, E-01)", () => {
   });
 });
 
+describe("the catalog follows the model list", () => {
+  it("a models.changed push (a removal, a runtime switch) reloads the catalog, so no stale Installed mark stays", async () => {
+    const sample = methodSamples["models.catalog"].result;
+    b.server.answer("models.catalog", () => sample.map((c) => ({ ...c, installed: true })));
+    await boot();
+    expect(store.getState().catalog).toEqual(sample.map((c) => ({ ...c, installed: true })));
+    b.server.answer("models.catalog", () => sample.map((c) => ({ ...c, installed: false })));
+    b.server.push("models.changed", []);
+    await until(() => {
+      const c = store.getState().catalog;
+      return Array.isArray(c) && c.every((e) => !e.installed);
+    }, 2000, "a refreshed catalog");
+  });
+});
+
 describe("reconnect reconciles cached threads (W-04)", () => {
   it("drops the retained partial reply once the server has its saved message", async () => {
     await boot();

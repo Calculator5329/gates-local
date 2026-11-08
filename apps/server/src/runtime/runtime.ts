@@ -32,7 +32,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeMode } from "@gates-local/contracts";
-import { PINNED_OLLAMA } from "./manifest.ts";
+import { PINNED_OLLAMA, pinnedOllamaFor } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
 import { checkOwnership, clearRecord, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
@@ -81,8 +81,8 @@ export type RuntimeOptions = {
   systemModelsDirs?: readonly string[];
   manifest?: InstallManifest;
   /**
-   * Install the pinned version when no binary is found. Default true on
-   * Linux x64 only: the pinned asset is the Linux amd64 build.
+   * Install the pinned version when no binary is found. Default true where
+   * a release is pinned (manifest.ts): Linux x64 and Windows x64.
    */
   allowInstall?: boolean;
   /**
@@ -194,9 +194,10 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   };
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
-  const manifest = options.manifest ?? PINNED_OLLAMA;
+  const pinned = pinnedOllamaFor(platform, options.arch ?? process.arch);
+  const manifest = options.manifest ?? pinned ?? PINNED_OLLAMA;
   const allowStart = options.allowStart ?? true;
-  const allowInstall = allowStart && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
+  const allowInstall = allowStart && (options.allowInstall ?? pinned !== undefined);
   const stateFile = ownedStateFile(stateDir);
   /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;

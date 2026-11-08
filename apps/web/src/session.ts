@@ -222,6 +222,9 @@ async function hydrateWith(
     chooseModel();
     invalidateFits();
     flushQueued();
+    // The catalog's Installed marks follow the list: a removal or a runtime
+    // switch (the app's own copy has its own models) must not leave them stale.
+    void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
   on("settings.changed", applySettings);
@@ -289,6 +292,12 @@ async function refreshThreads(): Promise<void> {
     const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
     return { threads: sortThreads(threads), ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
   });
+}
+
+async function refreshCatalog(): Promise<void> {
+  if (getState().catalog === NA) return;
+  const catalog = await probe("models.catalog", {});
+  if (catalog !== undefined) setState({ catalog });
 }
 
 export async function refreshModels(): Promise<void> {

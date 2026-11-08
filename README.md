@@ -57,9 +57,10 @@ Ollama, for people who want local models without guessing whether they fit.
   Windows, install it with `npm install -g pnpm@11.10.0` instead.
 - **Ollama.** Install it from <https://ollama.com/download>. If Ollama is
   not on your machine, the app tries to download a pinned Ollama release
-  from GitHub on first launch (Linux x64 only). That path has not been
-  tested on a real machine yet, so installing Ollama yourself is the safer
-  route.
+  from GitHub on first launch (Linux x64 and Windows x64). On Linux that
+  path has not been tested on a real machine yet, so installing Ollama
+  yourself is the safer route there. On Windows it was tested on one
+  machine.
 - **GPU:**
   - *NVIDIA:* the app reads free GPU memory with `nvidia-smi` and plans the
     model around it. If `nvidia-smi` is installed but fails, the app
@@ -156,9 +157,10 @@ The app also runs local commands: `nvidia-smi` to read GPU memory,
 `systemctl --user` to start and stop a `comfyui.service` unit if you have
 one, `systemd-run` and `bwrap` for the shell tool, and `tar` to unpack the
 Ollama download. On Windows it runs `nvidia-smi` if it is installed,
-`ollama.exe` when it starts its own copy of Ollama, and `powershell.exe` to
+`ollama.exe` when it starts its own copy of Ollama, `powershell.exe` to
 read the start time and command line of that copy, so it never stops a
-process it did not start.
+process it did not start, and Windows' own `tar.exe` to unpack the Ollama
+download.
 
 ## Development
 

@@ -9,6 +9,7 @@ import { httpGet } from "./http.ts";
 import { readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
 import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
 import { ADOPTED_WINDOWS_DETAIL, createOllamaRuntime, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
+import { PINNED_OLLAMA_WINDOWS, pinnedOllamaFor } from "./manifest.ts";
 import { createRuntimeSwitch } from "./switch.ts";
 import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 
@@ -230,9 +231,17 @@ describe("Windows (platform injected)", () => {
     expect(findSystemOllama(winEnv, "C:\\Users\\Ada", "win32", () => false)).toBeUndefined();
   });
 
-  it("does not install the Linux build: with no Ollama anywhere it is missing", async () => {
-    const rt = createOllamaRuntime({ appDataDir, home, appPort: await freePort(), externalBaseUrl: await nothingAt(), env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500, platform: "win32" });
-    expect(await rt.ensure()).toMatchObject({ state: "missing", detail: "No Ollama found on this machine." });
+  it("pins the Windows ZIP, never the Linux build, and installs only on x64", async () => {
+    expect(pinnedOllamaFor("win32", "x64")).toMatchObject({ format: "zip", url: expect.stringMatching(/\/ollama-windows-amd64\.zip$/) });
+    expect(pinnedOllamaFor("linux", "x64")).toMatchObject({ format: "tar.zst", url: expect.stringMatching(/\/ollama-linux-amd64\.tar\.zst$/) });
+    expect(pinnedOllamaFor("win32", "arm64")).toBeUndefined();
+    expect(pinnedOllamaFor("darwin", "x64")).toBeUndefined();
+    const base = { appDataDir, home, externalBaseUrl: await nothingAt(), env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500, platform: "win32" } as const;
+    // discover() only reports; nothing is downloaded here.
+    const x64 = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "x64" });
+    expect(await x64.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining(`will install Ollama ${PINNED_OLLAMA_WINDOWS.version}`) });
+    const arm = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "arm64" });
+    expect(await arm.ensure()).toMatchObject({ state: "missing", detail: "No Ollama found on this machine." });
   });
 
   it("system mode with nothing answering: installed but quit says stopped, not missing, and starts nothing", async () => {
