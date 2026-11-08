@@ -7,6 +7,8 @@ import { CONTROL_URL, appUrl } from "./env.ts";
 export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
 export type RuntimeMode = "system" | "app";
+/** Threads written before the server starts: N messages in one thread, the design's sidebar, the README's demo threads, or 0 for none. */
+export type Seed = number | "design" | "readme";
 
 async function control(route: string, body: unknown = {}): Promise<unknown> {
   const r = await fetch(`${CONTROL_URL}${route}`, { method: "POST", body: JSON.stringify(body) });
@@ -16,8 +18,14 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: number | "design" = 0, seedAt?: number, runtimeMode?: RuntimeMode): Promise<string | null> {
-    const r = await control("/reset", { scenario, seed, ...(seedAt === undefined ? {} : { seedAt }), ...(runtimeMode === undefined ? {} : { runtimeMode }) });
+  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[]): Promise<string | null> {
+    const r = await control("/reset", {
+      scenario,
+      seed,
+      ...(seedAt === undefined ? {} : { seedAt }),
+      ...(runtimeMode === undefined ? {} : { runtimeMode }),
+      ...(installed === undefined ? {} : { installed }),
+    });
     const id = typeof r === "object" && r !== null ? (r as { threadId?: unknown }).threadId : undefined;
     return typeof id === "string" ? id : null;
   },
@@ -30,8 +38,10 @@ export const stack = {
 interface Fixtures {
   /** The fake scenario the test starts in. */
   scenario: Scenario;
-  /** Threads seeded before the server starts: N messages in one thread, "design" for the design's sidebar, 0 for none. */
-  seed: number | "design";
+  /** Threads seeded before the server starts (see Seed). */
+  seed: Seed;
+  /** The fake's installed models for this test; undefined keeps the scenario's default set. */
+  installed: readonly string[] | undefined;
   /** Pins the seeded threads' clock (epoch ms); undefined seeds relative to now. */
   seedAt: number | undefined;
   /** Saved settings in this runtime mode before the server starts; undefined is a first launch (the server picks). */
@@ -51,10 +61,11 @@ export const test = base.extend<Fixtures>({
   seed: [0, { option: true }],
   seedAt: [undefined, { option: true }],
   runtimeMode: [undefined, { option: true }],
+  installed: [undefined, { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
-  seededThread: async ({ scenario, seed, seedAt, runtimeMode }, use) => {
-    await use(await stack.reset(scenario, seed, seedAt, runtimeMode));
+  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed }, use) => {
+    await use(await stack.reset(scenario, seed, seedAt, runtimeMode, installed));
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens
