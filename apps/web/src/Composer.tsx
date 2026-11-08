@@ -42,7 +42,9 @@ export function thinkUnavailable(model: ModelInfo | undefined, name: string, dow
 
 function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
   const q = modelFacts(m).quant;
-  return `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>${q ? ` · ${esc(q)}` : ""}`;
+  // a tag the catalog does not know is its own name: say it once, and its quant only when the tag does not
+  const head = name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
+  return `${head}${q && !tag.toLowerCase().includes(q.toLowerCase()) ? ` · ${esc(q)}` : ""}`;
 }
 
 export function Composer() {

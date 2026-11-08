@@ -67,6 +67,8 @@ function longName(width: number): void {
 
     const btn = page.locator("#modelBtn");
     await expect(btn).toHaveAttribute("data-tip", new RegExp(LONG_NAME));
+    // the whole tag once: a tag the catalog does not know is its own name
+    expect((await btn.getAttribute("data-tip"))?.split(LONG_NAME).length, "the tag appears once in the tooltip").toBe(2);
     const label = await btn.locator("span").first().evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, ellipsis: getComputedStyle(el).textOverflow }));
     expect.soft(label).toEqual({ clipped: true, ellipsis: "ellipsis" });
 
@@ -235,8 +237,10 @@ test.describe("thread menu", () => {
     const mb = await menu.boundingBox();
     expect(Math.abs((mb?.x ?? 0) - at.x), "menu at the pointer (x)").toBeLessThan(2);
     expect(Math.abs((mb?.y ?? 0) - at.y), "menu at the pointer (y)").toBeLessThan(2);
-    // the thread under the pointer is not opened by the right-click
+    // the thread under the pointer is not opened by the right-click, and its row is marked while the menu is open
     await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
+    await expect(target).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#moreBtn")).toHaveAttribute("aria-expanded", "false");
 
     await menu.getByRole("menuitem", { name: "Rename" }).click();
     const input = page.getByRole("textbox", { name: "Thread title" });
@@ -244,6 +248,7 @@ test.describe("thread menu", () => {
     await input.fill("Fix the nightly backup");
     await input.press("Enter");
     await expect(row(page, "Fix the nightly backup")).toBeVisible();
+    await expect(row(page, "Fix the nightly backup")).toHaveAttribute("aria-expanded", "false");
     await expect(row(page, "Library: Effect Schema books")).toBeVisible();
     // the server has it
     await page.reload();

@@ -157,7 +157,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-group{padding:16px 10px 4px;font-size:13px;font-weight:500;color:var(--muted-foreground)}   /* one section-label style: 13 px, 500, muted (sweep) */
 .sb-group:first-child{padding-top:8px}
 .sb-row{width:100%;height:var(--row-h);display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:var(--r-ctl);font-size:13.5px;color:color-mix(in srgb,var(--foreground) 78%,transparent);text-align:left;transition:background-color .12s,color .12s}
-.sb-row:hover{background:var(--hover);color:var(--foreground)}
+.sb-row:hover,.sb-row[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
 .sb-row.on{background:var(--sb-selected);color:var(--foreground);font-weight:500}
 .sb-row .t{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .sb-row .ago{font-size:12px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none}

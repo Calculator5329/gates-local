@@ -9,6 +9,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
+import { LONG_NAME } from "../fake-ollama/models.ts";
 import { SHOTS_DIR } from "./env.ts";
 import { type RuntimeMode, type Scenario, expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
@@ -75,6 +76,50 @@ const SHOTS: readonly Shot[] = [
   },
   { name: "S-131-code-hover", seed: 2, act: (p) => p.locator(".turn.a .md pre").last().hover() },
   { name: "S-132-think-hover", act: (p) => p.locator(".turn.a .think").last().hover() },
+  // chat-feel part 2: a long model tag truncated in the composer (its tooltip has the whole tag)
+  {
+    name: "S-134-composer-long-name",
+    scenario: "long-name",
+    act: async (p) => {
+      await p.locator("#modelBtn").click();
+      await p.locator("#pkSearch").fill("heretic");
+      await p.locator(`#picker .pk-r[data-m="${LONG_NAME}"]`).click();
+      await expect(p.locator("#picker")).toBeHidden();
+      await p.locator("#modelBtn").hover();
+      await expect(p.locator("#tip")).toContainText(LONG_NAME);
+    },
+  },
+  {
+    name: "S-135-picker-context-8k",
+    act: async (p) => {
+      await p.locator("#modelBtn").click();
+      await p.locator("#picker").getByRole("radiogroup", { name: "Context" }).getByRole("radio", { name: "8k" }).click();
+      await p.mouse.move(1400, 880);
+    },
+  },
+  {
+    name: "S-136-sidebar-thread-menu",
+    act: async (p) => {
+      await p.locator(".sb-row", { hasText: "Fix the backup cron" }).click({ button: "right", position: { x: 60, y: 14 } });
+      await expect(p.locator("#moreMenu")).toBeVisible();
+    },
+  },
+  {
+    name: "S-137-more-menu-gpu",
+    act: async (p) => {
+      await p.locator("#moreBtn").click();
+      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).hover();
+    },
+  },
+  {
+    name: "S-138-gpu-panel",
+    act: async (p) => {
+      await p.locator("#moreBtn").click();
+      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
+      await expect(p.locator("#fitPanel .fp-v")).toContainText("Runs on GPU");
+      await p.mouse.move(700, 720);
+    },
+  },
 ];
 
 const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-");
@@ -99,7 +144,7 @@ for (const shot of SHOTS) {
         await page.clock.setFixedTime(NOW);
         await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
         if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
-        else if (shot.scenario === undefined) await waitReady(page);
+        else if (shot.scenario === undefined || shot.scenario === "long-name") await waitReady(page);
         else await expect(page.locator(".banner")).toBeVisible();
         await shot.act?.(page);
         // let fit checks, popovers and fonts settle; animations are frozen below

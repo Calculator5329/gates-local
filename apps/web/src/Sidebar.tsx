@@ -75,6 +75,8 @@ function ThreadList() {
   const q = useStore((s) => s.search.trim().toLowerCase());
   const on = useStore((s) => (s.view === "thread" ? s.threadId : null));
   const live = useStore(liveThreadOf);
+  // the row whose thread menu is open stays marked while the menu acts on it
+  const menuFor = useStore((s) => (s.pop?.id === "more" ? (s.pop.thread ?? null) : null));
   const now = useNow(30_000);
   const shown = q === "" ? threads : threads.filter((t) => t.title.toLowerCase().includes(q));
   if (shown.length === 0) {
@@ -97,6 +99,7 @@ function ThreadList() {
               data-thread={t.id}
               data-tipt={t.title}
               aria-haspopup="menu"
+              aria-expanded={menuFor === t.id}
               onClick={() => openThread(t.id)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
               onKeyDown={(e) => rowMenuKey(e, t.id)}
