@@ -155,8 +155,8 @@ export const NumCtx = PositiveInt;
 // image lanes build against one table. A method with no handler answers
 // "not-implemented"; the client hides or explains what is not built yet.
 
-/** The three context sizes the product offers (16k floor, 32k and 64k where fit allows). */
-export const ContextSize = S.Literals([16384, 32768, 65536]);
+/** The context sizes the product offers (8k floor, 16k default, 32k and 64k where fit allows). */
+export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);
 export type ContextSize = typeof ContextSize.Type;
 
 export const Theme = S.Literals(["dark", "light", "system"]);

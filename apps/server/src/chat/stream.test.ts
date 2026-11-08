@@ -187,9 +187,17 @@ describe("streamTurn against a fake Ollama", () => {
     expect(s.requests).toEqual([]);
   });
 
-  it("refuses num_ctx below 16384 before any request is sent", async () => {
+  it("an 8k turn sends num_ctx 8192", async () => {
+    const s = await fakeChat((res) => streamPieces(res, [content("ok"), doneLine()]));
+    const events = await collect({ baseUrl: s.baseUrl, numCtx: 8192 });
+    expect(events.filter((e) => e.type === "done")).toHaveLength(1);
+    const bodies = s.requests.filter((r) => r.path === "/api/chat").map((r) => r.body as { options?: { num_ctx?: number } });
+    expect(bodies.map((b) => b.options?.num_ctx)).toEqual([8192]);
+  });
+
+  it("refuses num_ctx below 8192 before any request is sent", async () => {
     const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
-    for (const numCtx of [8192, 16383, 2048, 16384.5]) {
+    for (const numCtx of [4096, 8191, 2048, 8192.5]) {
       const events = await collect({ baseUrl: s.baseUrl, numCtx });
       expect(events).toEqual([expect.objectContaining({ type: "error", code: "num-ctx-below-floor" })]);
     }

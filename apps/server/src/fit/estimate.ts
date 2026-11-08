@@ -119,7 +119,7 @@ export function estimateKvCache(arch: ArchInfo, numCtx: number, bytesPerElement 
 
 export type CtxCheck = { ok: true } | { ok: false; message: string };
 
-/** The 16k floor and the model's own ceiling. */
+/** The 8k floor and the model's own ceiling. */
 export function checkNumCtx(model: string, numCtx: number, contextLength?: number): CtxCheck {
   if (!Number.isInteger(numCtx) || numCtx < NUM_CTX_FLOOR) {
     return { ok: false, message: `${model}: num_ctx ${numCtx} is below the ${NUM_CTX_FLOOR} floor; refused.` };

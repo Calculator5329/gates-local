@@ -2,7 +2,7 @@
 // decimal for GB, three verdict labels, the friendly model name first.
 import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress } from "@gates-local/contracts";
 
-export const CONTEXT_SIZES: readonly ContextSize[] = [16384, 32768, 65536];
+export const CONTEXT_SIZES: readonly ContextSize[] = [8192, 16384, 32768, 65536];
 
 const GIB = 1024 ** 3;
 

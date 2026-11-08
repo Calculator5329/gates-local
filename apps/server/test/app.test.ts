@@ -360,7 +360,7 @@ describe("chat.send", () => {
     // Below the num_ctx floor the fit check refuses before reading anything.
     const floor = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 4096 }));
     expect(floor.code).toBe("wont-fit");
-    expect(floor.message).toContain("16384");
+    expect(floor.message).toContain("below the 8192 floor");
 
     r.gpu.freeMib = 6000;
     r.gpu.memAvailableKb = 40_000_000;

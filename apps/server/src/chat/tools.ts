@@ -1,5 +1,6 @@
 import { Schema as S } from "effect";
 import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
+import { NUM_CTX_FLOOR } from "../fit/constants.ts";
 import type { StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 type ChatEvent = PlainChatEvent | { type: "tool"; step: import("../../../../packages/harness/src/types.ts").ToolStep };
@@ -23,8 +24,8 @@ const decodeChunk = S.decodeUnknownSync(S.Struct({
 
 /** Tools use the same chat endpoint and explicit context/think settings as the plain stream. */
 export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<ChatEvent> {
-  if (!Number.isInteger(input.numCtx) || input.numCtx < 16384) {
-    yield { type: "error", code: "num-ctx-below-floor", message: "num_ctx must be at least 16384; no request sent" }; return;
+  if (!Number.isInteger(input.numCtx) || input.numCtx < NUM_CTX_FLOOR) {
+    yield { type: "error", code: "num-ctx-below-floor", message: `num_ctx must be at least ${NUM_CTX_FLOOR}; no request sent` }; return;
   }
   const signal = input.signal ?? new AbortController().signal;
   const fetcher = input.fetch ?? fetch;

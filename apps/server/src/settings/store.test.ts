@@ -68,7 +68,7 @@ describe("settings store", () => {
 
   it("a value outside the schema is a bad file too", async () => {
     const dir = dataDir();
-    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 8192, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: false } }));
+    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 4096, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: false } }));
     const s = await open(dir);
     expect(s.loadNote).toContain("does not match the settings shape");
     expect(existsSync(`${fileIn(dir)}.bad-2026-11-07T21-04-05-123Z`)).toBe(true);

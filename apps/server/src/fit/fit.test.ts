@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { GIB, MIB, NUM_CTX_FLOOR, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
+import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { checkNumCtx, estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
@@ -160,9 +160,10 @@ describe("need estimate", () => {
     expect(() => parseArchInfo("x", { "general.architecture": "a", "a.block_count": 2 })).toThrow(/context_length/);
   });
 
-  it("refuses num_ctx below 16384 and above the model's context_length", () => {
+  it("refuses num_ctx below 8192 and above the model's context_length", () => {
     expect(checkNumCtx("m", 16384, 32768)).toEqual({ ok: true });
-    expect(checkNumCtx("m", 16383)).toMatchObject({ ok: false, message: expect.stringContaining("below the 16384 floor") });
+    expect(checkNumCtx("m", 8191)).toMatchObject({ ok: false, message: expect.stringContaining("below the 8192 floor") });
+    expect(checkNumCtx("m", 8192).ok).toBe(true);
     expect(checkNumCtx("m", 8192.5).ok).toBe(false);
     expect(checkNumCtx("m", 65536, 32768)).toMatchObject({ ok: false, message: expect.stringContaining("context_length 32768") });
   });
@@ -221,9 +222,9 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
   it("refuses below the floor before any request or nvidia-smi run", async () => {
     const s = await fakeOllama();
     const run = smi(MACHINE_GPU, MACHINE_APPS);
-    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 8192, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
-    expect(check.report).toMatchObject({ verdict: "refuse", numCtx: 8192 });
-    expect(check.report.message).toContain("below the 16384 floor");
+    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 4096, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(check.report).toMatchObject({ verdict: "refuse", numCtx: 4096 });
+    expect(check.report.message).toContain("below the 8192 floor");
     // The floor is the product's limit, not the model's: no contextLimit.
     expect(check.report.contextLimit).toBeUndefined();
     expect(s.requests).toEqual([]);
@@ -322,7 +323,7 @@ describe("checkModels", () => {
     // A crowded card: 13303 MiB used, 3000 MiB free; 4 GB RAM available.
     const lowGpu = "16303, 13303, 3000\n";
     const lowMem = `MemAvailable:    ${4_000_000} kB\n`;
-    const result = await checkModels({ baseUrl: s.baseUrl, numCtx: NUM_CTX_FLOOR, runNvidiaSmi: smi(lowGpu, MACHINE_APPS), readMeminfo: async () => lowMem });
+    const result = await checkModels({ baseUrl: s.baseUrl, numCtx: 16384, runNvidiaSmi: smi(lowGpu, MACHINE_APPS), readMeminfo: async () => lowMem });
     expect(result.runnable).toEqual([]);
     expect(result.checks.every((c) => c.report.verdict === "refuse")).toBe(true);
 

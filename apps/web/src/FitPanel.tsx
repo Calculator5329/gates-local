@@ -18,7 +18,7 @@ export function openFit(model?: string): void {
 }
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
-const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : 32768);
+const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : c === 8192 ? 16384 : 32768);
 
 /** "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti". */
 export function shortGpu(name: string | undefined): string {

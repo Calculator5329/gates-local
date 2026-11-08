@@ -1,6 +1,6 @@
 // One streamed turn against Ollama POST /api/chat. Every request carries an
 // explicit options.num_ctx (Ollama's own default is far below the floor),
-// and a num_ctx under 16384 is refused before any request is sent.
+// and a num_ctx under the 8192 floor is refused before any request is sent.
 //
 // Nothing persists here: the caller owns the thread store and feeds the
 // deltas to its turn buffer. Ends with exactly one done or one error event.

@@ -8,6 +8,7 @@
 // A download size alone never proves a fit: the estimate adds KV cache and
 // overhead, and a measured /api/ps report replaces it after a real load.
 import {
+  KV_RULE_TOKENS,
   NUM_CTX_FLOOR,
   PREDOWNLOAD_KV_FRACTION_PER_16K,
   RAM_SAFETY_MARGIN_BYTES,
@@ -327,7 +328,7 @@ export function estimateBeforeDownload(input: {
   measuredAt: number;
   margins?: Margins;
 }): FitReport {
-  const kv = Math.round(input.downloadBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (input.numCtx / NUM_CTX_FLOOR));
+  const kv = Math.round(input.downloadBytes * PREDOWNLOAD_KV_FRACTION_PER_16K * (input.numCtx / KV_RULE_TOKENS));
   return decideFit({
     model: input.model,
     numCtx: input.numCtx,

@@ -84,6 +84,23 @@ describe("tool chat transport", () => {
     expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
   });
+  it("a tool turn at 8k carries num_ctx 8192; 4096 is refused before any request", async () => {
+    const requests: Record<string, unknown>[] = [];
+    const fetcher = vi.fn(async (url, init) => {
+      if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion", "tools"] });
+      requests.push(JSON.parse(String(init?.body)));
+      return ndjson([{ message: { content: "ok" }, done: true }]);
+    });
+    const run = async (numCtx: number) => {
+      const events = [];
+      for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "hi" }], numCtx, sources: [], fetch: fetcher, execute: async () => ({ output: "", summary: "" }) })) events.push(e);
+      return events;
+    };
+    expect(await run(4096)).toEqual([expect.objectContaining({ type: "error", code: "num-ctx-below-floor" })]);
+    expect(fetcher).not.toHaveBeenCalled();
+    await run(8192);
+    expect(requests[0]).toMatchObject({ options: { num_ctx: 8192 } });
+  });
   it("uses text calls for gemma and refuses truncated native calls", async () => {
     for (const native of [true, false]) {
       const execute = vi.fn();

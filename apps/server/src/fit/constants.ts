@@ -4,8 +4,11 @@
 export const MIB = 1024 * 1024;
 export const GIB = 1024 * MIB;
 
-/** The context floor. Nothing runs below 16k. */
-export const NUM_CTX_FLOOR = 16384;
+/** The context floor. Nothing runs below 8k; the default stays 16k. */
+export const NUM_CTX_FLOOR = 8192;
+
+/** The token count PREDOWNLOAD_KV_FRACTION_PER_16K is per. */
+export const KV_RULE_TOKENS = 16384;
 
 /** VRAM kept free beyond the estimate: allocator slack and the desktop's growth. */
 export const VRAM_SAFETY_MARGIN_BYTES = 512 * MIB;
