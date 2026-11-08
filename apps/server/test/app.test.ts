@@ -122,6 +122,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease) => Imag
     probeTimeoutMs: 500,
   });
   const catalog = createModelCatalog(() => runtime.baseUrl());
+  cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
   const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000 };
   const storedAtDonePush: number[] = [];
 

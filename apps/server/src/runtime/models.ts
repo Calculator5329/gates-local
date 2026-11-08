@@ -117,7 +117,19 @@ export type ModelCatalogOptions = {
    * both settle. 0 turns it off. Default 5000.
    */
   retryMs?: number;
+  /** The retry timer; tests pass a fake. Default: an unref'd setTimeout. */
+  timers?: RetryTimers;
   log?: (line: string) => void;
+};
+
+export type RetryTimers = { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void };
+const realTimers: RetryTimers = {
+  set(fn, ms) {
+    const t = setTimeout(fn, ms);
+    t.unref?.();
+    return t;
+  },
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
 const RETRY_MAX_MS = 5 * 60_000;
@@ -137,7 +149,8 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
   let lastPick: { key: string; pick: ChatPick } | undefined;
   const retryBaseMs = opts.retryMs ?? 5000;
   let retryMs = retryBaseMs;
-  let retry: ReturnType<typeof setTimeout> | undefined;
+  const timers = opts.timers ?? realTimers;
+  let retry: unknown;
   let stopped = false;
 
   /** The list with the pick stamped, and whether that pick is a decision (not a guess to redo). */
@@ -162,14 +175,37 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
     return { models: stamped, settled: !failed && (chosen === undefined || chosen.complete) };
   };
 
-  const scheduleRetry = (settled: boolean) => {
-    if (settled) retryMs = retryBaseMs;
-    if (settled || stopped || retryBaseMs <= 0 || retry !== undefined) return;
-    retry = setTimeout(() => {
+  /** The runtime the backoff belongs to; a different one starts over from retryBaseMs. */
+  let backoffUrl: string | undefined;
+  const cancelRetry = () => {
+    if (retry !== undefined) timers.clear(retry);
+    retry = undefined;
+  };
+  const scheduleRetry = (url: string | undefined, settled: boolean) => {
+    if (url !== backoffUrl) {
+      cancelRetry();
+      retryMs = retryBaseMs;
+      backoffUrl = url;
+    }
+    if (settled) {
+      // Discovery settled: the retry armed by an earlier refresh has nothing left to do (MP2-02).
+      cancelRetry();
+      retryMs = retryBaseMs;
+      return;
+    }
+    if (stopped || retryBaseMs <= 0 || url === undefined || retry !== undefined) return;
+    retry = timers.set(() => {
       retry = undefined;
-      catalog.refresh({ force: true }).catch((e: unknown) => opts.log?.(`model discovery retry failed: ${(e as Error).message}`));
+      // A retry belongs to its runtime; after a switch the new one is refreshed by the switch itself.
+      if (stopped || baseUrl() !== url) return;
+      // A fetch already running for this runtime answers the retry too (MP2-02); its result re-arms if still unsettled.
+      const run = inFlight?.url === url ? inFlight.result : catalog.refresh({ force: true });
+      run.catch((e: unknown) => {
+        opts.log?.(`model discovery retry failed: ${(e as Error).message}`);
+        // A failed retry is armed again, at the next doubled delay (MP2-01).
+        if (baseUrl() === url) scheduleRetry(url, false);
+      });
     }, retryMs);
-    retry.unref?.();
     retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
   };
 
@@ -178,33 +214,66 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
     const listed = url ? await listModels(url, timeoutMs, capabilities) : [];
     const picked = url ? await withPick(listed, url) : { models: listed, settled: true };
     const next = picked.models;
-    // An older fetch (or one from the runtime before a switch) answers its own caller and changes nothing.
-    if (seq !== latest || baseUrl() !== url) return { models: next, changed: false };
+    // An older fetch (one from the runtime before a switch) changes nothing; its caller gets the current list (MP2-02).
+    if (seq !== latest || baseUrl() !== url) return { models: models ?? [], changed: false };
     const changed = models === undefined || key(models) !== key(next);
     models = next;
     // Unknown capabilities (MP-01) and an incomplete pick (MP-02) are asked again without waiting for a focus.
-    scheduleRetry(picked.settled && !next.some(capabilitiesUnknown));
+    scheduleRetry(url, picked.settled && !next.some(capabilitiesUnknown));
     if (changed) for (const l of listeners) l(next);
     return { models: next, changed };
+  };
+
+  /**
+   * One fetch at a time per runtime (MP2-02). An unforced refresh joins the
+   * running one; a forced one (a finished pull, a settings change) must see
+   * the runtime after it was asked, so it waits for the running fetch and
+   * then runs once, shared by every forced call that arrived meanwhile.
+   */
+  let inFlight: { url: string | undefined; result: Promise<Refreshed> } | undefined;
+  let queued: { url: string | undefined; result: Promise<Refreshed> } | undefined;
+  const start = (url: string | undefined): Promise<Refreshed> => {
+    const result = fetchNow(url);
+    const entry = { url, result };
+    inFlight = entry;
+    last = { at: now(), url, result };
+    const done = () => {
+      if (inFlight === entry) inFlight = undefined;
+    };
+    // A failed fetch is not reused.
+    result.then(done, () => {
+      done();
+      if (last?.result === result) last = undefined;
+    });
+    return result;
   };
 
   const catalog: ModelCatalog = {
     current: () => models,
     stop() {
       stopped = true;
-      if (retry !== undefined) clearTimeout(retry);
-      retry = undefined;
+      cancelRetry();
     },
     refresh(how) {
       const url = baseUrl();
-      if (how?.force !== true && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
-      const result = fetchNow(url);
-      last = { at: now(), url, result };
-      // A failed fetch is not reused.
-      result.catch(() => {
-        if (last?.result === result) last = undefined;
-      });
-      return result;
+      const force = how?.force === true;
+      if (!force && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
+      const running = inFlight;
+      if (running === undefined || running.url !== url) return start(url);
+      if (!force) return running.result;
+      if (queued !== undefined && queued.url === url) return queued.result;
+      const entry = {
+        url,
+        result: running.result.then(
+          () => undefined,
+          () => undefined,
+        ).then(() => {
+          if (queued === entry) queued = undefined;
+          return start(baseUrl());
+        }),
+      };
+      queued = entry;
+      return entry.result;
     },
     onChange(listener) {
       listeners.add(listener);
