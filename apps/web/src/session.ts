@@ -17,7 +17,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
-import { type ModelDecision, firstChatPull, modelChoice as pickChoice, newChatChoice, sendableModel } from "./pick.ts";
+import { type ModelDecision, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -147,6 +147,7 @@ async function hydrate(c: Client): Promise<void> {
     }
   });
   on("models.changed", (models) => {
+    modelsOrder.next();
     setState({ models });
     chooseModel();
     invalidateFits();
@@ -213,9 +214,12 @@ async function refreshThreads(): Promise<void> {
   });
 }
 
+const modelsOrder = newestOnly();
+
 export async function refreshModels(): Promise<void> {
+  const ticket = modelsOrder.next();
   const models = await call("models.refresh", {}).catch(() => undefined);
-  if (models === undefined) return;
+  if (models === undefined || !modelsOrder.current(ticket)) return;
   setState({ models });
   chooseModel();
   invalidateFits();
@@ -249,7 +253,7 @@ function chooseModel(): void {
 
 /** Keep, switch to the server's pick (pick.ts), or clear when no model can chat. */
 function modelChoice(s: State): ModelDecision {
-  return pickChoice(s.models, s.model);
+  return pickChoice(s.models, s.model, s.chosen);
 }
 
 const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
@@ -306,7 +310,8 @@ export function openThread(threadId: string): void {
 }
 
 export function newThread(): void {
-  setState((s) => ({ view: "new", threadId: null, notice: null, ...decided(newChatChoice(s.models, s.model)) }));
+  // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
+  setState((s) => ({ view: "new", threadId: null, notice: null, chosen: undefined, ...decided(pickChoice(s.models, s.model, undefined)) }));
   setHash(null);
 }
 
@@ -570,7 +575,7 @@ export function unqueue(id: string): void {
 // ---------------------------------------------------------------- composer and models
 
 export function pickModel(model: string): void {
-  setState({ model });
+  setState({ model, chosen: model });
   const s = getState();
   if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx });
 }

@@ -24,20 +24,33 @@ const keep: ModelDecision = { kind: "keep" };
 const canChatAs = (models: readonly ModelInfo[], name: string | undefined) => name !== undefined && models.some((m) => m.name === name && canChat(m));
 
 /**
- * Keep a current model that can chat. Otherwise switch to the server's pick
- * (or the first chat model), and clear the selection when no model can chat,
- * so an embedding model never stays selected. A list not fetched yet keeps it.
+ * `chosen` is the model the user picked, kept apart from `current` so a list
+ * that briefly lacks it (the runtime restarting) does not erase it (MP2-03).
+ * While it is installed and can chat, or is installed and not described yet,
+ * it is the selection; sendableModel still holds sends until it can chat.
+ * Otherwise the selection is the app's: the server's pick, which it follows as
+ * the pick changes (an incomplete survey recovering, a new default: MP-02,
+ * MP-05), else a current model that can chat, else the first chat model; it is
+ * cleared when no model can chat, so an embedding model never stays selected.
+ * A list not fetched yet keeps it.
  */
-export function modelChoice(models: readonly ModelInfo[] | undefined, current: string | undefined): ModelDecision {
-  if (models === undefined || canChatAs(models, current)) return keep;
-  const next = (pickedModel(models) ?? chatModels(models)[0])?.name;
-  return next === undefined ? { kind: "clear" } : { kind: "set", model: next };
+export function modelChoice(models: readonly ModelInfo[] | undefined, current: string | undefined, chosen: string | undefined): ModelDecision {
+  if (models === undefined) return keep;
+  const mine = models.find((m) => m.name === chosen);
+  const appChoice = pickedModel(models)?.name ?? (canChatAs(models, current) ? current : chatModels(models)[0]?.name);
+  const next = mine !== undefined && (canChat(mine) || mine.capabilities.includes("unknown")) ? mine.name : appChoice;
+  if (next === undefined) return { kind: "clear" };
+  return next === current ? keep : { kind: "set", model: next };
 }
 
-/** A new chat starts on the server's current pick (the default may have changed); without one, as modelChoice. */
-export function newChatChoice(models: readonly ModelInfo[] | undefined, current: string | undefined): ModelDecision {
-  const picked = pickedModel(models)?.name;
-  return picked === undefined || picked === current ? modelChoice(models, current) : { kind: "set", model: picked };
+/**
+ * Order for model-list answers: a ticket per models.refresh call or
+ * models.changed push. An answer applies only while its ticket is the newest,
+ * so an older call that lands late never overwrites a newer list (MP2-02).
+ */
+export function newestOnly(): { next(): number; current(ticket: number): boolean } {
+  let issued = 0;
+  return { next: () => ++issued, current: (ticket) => ticket === issued };
 }
 
 /** The model a message would go to: the current one only if it can chat. */
