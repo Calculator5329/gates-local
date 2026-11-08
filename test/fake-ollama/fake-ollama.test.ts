@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
 import { startFakeOllama, type FakeOllama } from "./fake-ollama.ts";
 
@@ -55,6 +55,60 @@ describe("fake ollama", () => {
     expect(fake.state().loaded).toMatchObject([{ name: "qwen3.5:9b", numCtx: 32768 }]);
   });
 
+  it("W-10: refuses think true for a model without thinking, with Ollama's status and error body", async () => {
+    const res = await post(fake, "/api/chat", { model: "gemma4:12b", think: true, messages: [{ role: "user", content: "x" }] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: '"gemma4:12b" does not support thinking' });
+    // think false, or left out, still chats.
+    const ok = await post(fake, "/api/chat", { model: "gemma4:12b", think: false, messages: [{ role: "user", content: "x" }] });
+    expect(ok.status).toBe(200);
+    await ok.text();
+  });
+
+  it("ends a reply with eval_duration that covers decode only, inside total_duration", async () => {
+    fake.setScenario("models", { tokenDelayMs: 2, firstTokenDelayMs: 40 });
+    const last = (await hello()).at(-1) ?? {};
+    const total = Number(last["total_duration"]);
+    const evalNs = Number(last["eval_duration"]);
+    const promptNs = Number(last["prompt_eval_duration"]);
+    expect(evalNs).toBeGreaterThan(0);
+    expect(promptNs).toBeGreaterThan(0);
+    // The first-token wait is load and prompt time, not decode: total splits into the two.
+    expect(total).toBe(promptNs + evalNs);
+  });
+
+  it("reads one end time, so total_duration splits exactly even when the clock ticks between reads (MP3-03)", async () => {
+    fake.setScenario("models", { tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    // The fake's own clock ticks 40 ms on every read, so any two reads differ, however many the fake makes (MP4-06).
+    let reads = 0;
+    const realNow = Date.now.bind(Date);
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ((new Error().stack ?? "").includes("fake-ollama.ts") ? 1000 + 40 * reads++ : realNow()));
+    let last: Record<string, unknown>;
+    try {
+      last = (await hello()).at(-1) ?? {};
+    } finally {
+      spy.mockRestore();
+    }
+    const promptNs = Number(last["prompt_eval_duration"]);
+    const evalNs = Number(last["eval_duration"]);
+    expect(promptNs).toBeGreaterThan(0);
+    expect(evalNs).toBeGreaterThan(0);
+    expect(Number(last["total_duration"])).toBe(promptNs + evalNs);
+  });
+
+  it("embed-smallest: an embedding model is installed and smallest, lists embedding only, and refuses chat", async () => {
+    fake.setScenario("embed-smallest");
+    const tags = (await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string; size: number }[] };
+    const smallest = tags.models.toSorted((a, b) => a.size - b.size)[0];
+    expect(smallest?.name).toBe("nomic-embed-text:latest");
+    expect(tags.models.map((m) => m.name)).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b", "nomic-embed-text:latest"]);
+    const show = (await (await post(fake, "/api/show", { model: "nomic-embed-text:latest" })).json()) as { capabilities: string[] };
+    expect(show.capabilities).toEqual(["embedding"]);
+    const chat = await post(fake, "/api/chat", { model: "nomic-embed-text:latest", messages: [{ role: "user", content: "x" }] });
+    expect(chat.status).toBe(400);
+    expect(await chat.json()).toEqual({ error: '"nomic-embed-text:latest" does not support chat' });
+  });
+
   it("returns native tool_calls when tools are offered and the prompt asks for one", async () => {
     const lines = await ndjson(
       await post(fake, "/api/chat", {
@@ -82,13 +136,33 @@ describe("fake ollama", () => {
     expect(lines.filter((l) => typeof l["completed"] === "number").length).toBeGreaterThan(2);
     expect(lines.at(-1)).toEqual({ status: "success" });
     expect(fake.state().installed).toEqual(["qwen3.5:4b"]);
+  });
 
-    await post(fake, "/__fake/scenario", { scenario: "no-models", pullTickMs: 50, pullChunkBytes: 1024 ** 2 });
+  it("a pull aborted after its first progress line never installs, even past its completion time (W-11)", async () => {
+    // ten ticks of 20 ms: an uncancelled pull of this model finishes in about 200 ms
+    const options = { scenario: "no-models", pullTickMs: 20, pullChunkBytes: Math.ceil(6594474711 / 10) };
+    await post(fake, "/__fake/scenario", options);
+    const started = Date.now();
+    expect((await ndjson(await post(fake, "/api/pull", { model: "qwen3.5:9b" }))).at(-1)).toEqual({ status: "success" });
+    const deadline = Date.now() - started;
+    expect(fake.state().installed).toEqual(["qwen3.5:9b"]);
+
+    await post(fake, "/__fake/scenario", options);
+    expect(fake.state().installed).toEqual([]);
     const abort = new AbortController();
     const res = await fetch(`${fake.url}/api/pull`, { method: "POST", body: JSON.stringify({ model: "qwen3.5:9b" }), signal: abort.signal });
-    expect(res.ok).toBe(true);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let seen = "";
+    while (!seen.includes('"completed"')) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("the pull ended before any progress");
+      seen += decoder.decode(value, { stream: true });
+    }
     abort.abort();
-    await new Promise((r) => setTimeout(r, 120));
+    await reader.cancel().catch(() => undefined);
+    // three times what the whole pull took uncancelled
+    await new Promise((r) => setTimeout(r, Math.max(600, 3 * deadline)));
     expect(fake.state().installed).toEqual([]);
   });
 
@@ -106,6 +180,16 @@ describe("fake ollama", () => {
     await post(fake, "/__fake/scenario", { scenario: "wrong-service" });
     expect(await (await fetch(`${fake.url}/`)).text()).not.toContain("Ollama is running");
     expect((await fetch(`${fake.url}/api/version`)).status).toBe(404);
+  });
+
+  it("installs the models a scenario names, and refuses a name it does not know", async () => {
+    const tags = async () => ((await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string }[] }).models.map((m) => m.name);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["gemma4:12b", "mistral-small3.2:24b"] })).status).toBe(200);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["nope:1b"] })).status).toBe(400);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    await post(fake, "/__fake/scenario", { scenario: "models" });
+    expect(await tags()).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b"]);
   });
 });
 

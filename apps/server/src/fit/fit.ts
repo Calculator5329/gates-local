@@ -89,8 +89,9 @@ export function decideFit(input: DecideInput): FitReport {
   };
 }
 
-function ctxRefusal(model: string, numCtx: number, message: string, gpu: GpuSnapshot | undefined, now: number): FitReport {
+function ctxRefusal(model: string, numCtx: number, message: string, gpu: GpuSnapshot | undefined, now: number, contextLimit?: number): FitReport {
   return {
+    ...(contextLimit === undefined ? {} : { contextLimit }),
     model,
     numCtx,
     freeVramBytes: gpu?.freeBytes ?? 0,
@@ -200,7 +201,9 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const arch = parseArchInfo(model, show.model_info);
   const ctx = checkNumCtx(model, numCtx, arch.contextLength);
   if (!ctx.ok) {
-    return { report: ctxRefusal(model, numCtx, ctx.message, r.gpu, now()), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
+    // Past the model's own ceiling (not below the floor): say the most it supports.
+    const limit = arch.contextLength !== undefined && numCtx > arch.contextLength ? arch.contextLength : undefined;
+    return { report: ctxRefusal(model, numCtx, ctx.message, r.gpu, now(), limit), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
   }
   const estimate = estimateNeed(model, numCtx, tag.size, arch, deps.estimate);
 
@@ -255,7 +258,7 @@ export interface LoadPlan {
  * preloads and chat.send. From one reading, it reclaims in this order: resident models not in
  * `busy` (no turn of this app uses them; their activity is unknown, see FitDeps.reclaim), then busy
  * models, the fewest and largest first, then the app-owned ComfyUI with MainPID `comfyPid` (its
- * nvidia-smi memory; none when unlisted). `busy` models are reclaimable only by stopping their
+ * nvidia-smi memory; when unlisted, `comfy` is a try with no busy turn). `busy` models are reclaimable only by stopping their
  * turns, which only chat.send does, so `report` never counts them. ComfyUI's stop claims the GPU
  * alone and so waits on every busy turn's chat claim: `report` counts it only when `busy` is empty,
  * and a plan that needs it with a busy turn running stops every busy turn first.
@@ -278,6 +281,10 @@ export async function planLoad(deps: FitDeps & { model: string; numCtx: number; 
     (await fitWithReadings({ ...deps, reclaim: [...idle, ...stop] }, deps.model, deps.numCtx, r, comfy ? comfyBytes : 0)).report;
   const alone = await plan([], false);
   if (alone.source === "measured" || alone.verdict === "fits") return { report: alone, stop: [], comfy: false };
+  // ComfyUI with no nvidia-smi row (unlisted, or [N/A]): its memory is unknown, so the plan cannot
+  // say stopping it helps; with no busy turn in the way, try (the caller stops it and plans again).
+  const comfyListed = r.gpu.tenants.some((t) => t.pid === deps.comfyPid && t.usedBytes !== undefined);
+  if (deps.comfyPid !== undefined && !comfyListed && busy.length === 0) return { report: alone, stop: [], comfy: true };
   const comfy = comfyBytes > 0;
   const comfyNow = comfy && busy.length === 0;
   const report = comfyNow ? await plan([], true) : alone;
@@ -346,6 +353,25 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   const result: ModelsFit = { checks, runnable, gpu: readings.gpu };
   if (runnable.length === 0) result.refusal = noModelFits(checks.map((c) => c.report), deps.numCtx);
   return result;
+}
+
+/**
+ * One GPU and RAM reading, then a fit function that checks models one at a
+ * time against it, for callers that stop early (the chat pick). A model
+ * whose check fails gives undefined; the reading itself failing throws.
+ */
+export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(model: string) => Promise<FitReport | undefined>> {
+  const now = deps.now ?? Date.now;
+  const readings = await takeReadings(deps);
+  return async (model) => {
+    const floor = checkNumCtx(model, deps.numCtx);
+    if (!floor.ok) return ctxRefusal(model, deps.numCtx, floor.message, readings.gpu, now());
+    try {
+      return (await fitWithReadings(deps, model, deps.numCtx, readings)).report;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 export interface FitSurvey {

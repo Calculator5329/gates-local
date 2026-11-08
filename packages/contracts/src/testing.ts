@@ -35,7 +35,7 @@ const assistantMessage: Message = {
   thinking: "greet back",
   model: "qwen3:14b",
   createdAt: 1_762_500_003_000,
-  stats: { promptTokens: 12, completionTokens: 4, durationMs: 812.5, numCtx: 16384 },
+  stats: { promptTokens: 12, completionTokens: 4, durationMs: 812.5, numCtx: 16384, evalDurationMs: 240.2, promptEvalDurationMs: 61.4 },
 };
 
 const models: ModelInfo[] = [
@@ -47,8 +47,24 @@ const models: ModelInfo[] = [
     parameterSize: "14.8B",
     quantization: "Q4_K_M",
     modifiedAt: "2026-11-01T10:00:00Z",
+    capabilities: ["completion", "tools", "thinking"],
+    pick: { numCtx: 16384, verdict: "fits" },
   },
-  { name: "gemma3:4b", digest: "sha256:def", sizeBytes: 3_300_000_000, modifiedAt: "2026-10-01T10:00:00Z" },
+  {
+    name: "gemma3:4b",
+    digest: "sha256:def",
+    sizeBytes: 3_300_000_000,
+    modifiedAt: "2026-10-01T10:00:00Z",
+    capabilities: ["completion", "vision"],
+  },
+  {
+    name: "nomic-embed-text:latest",
+    digest: "sha256:0a1",
+    sizeBytes: 274_302_450,
+    family: "nomic-bert",
+    modifiedAt: "2026-10-02T10:00:00Z",
+    capabilities: ["embedding"],
+  },
 ];
 
 const toolStep: ToolStep = {
@@ -140,6 +156,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
   "runtime.status": { params: {}, result: runtime },
+  "runtime.retry": { params: {}, result: runtime },
   "fit.check": {
     params: { model: "qwen3:14b", numCtx: 32768 },
     result: {
@@ -203,6 +220,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
 /** One sample per channel; chat.event gets one per ChatEvent variant. */
 export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "chat.event": [
+    { turnId: "turn-1", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } },
     { turnId: "turn-1", threadId: "t1", event: { type: "thinking", text: "greet" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
     { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },

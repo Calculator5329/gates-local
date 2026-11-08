@@ -133,7 +133,7 @@ export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () =
     [totalsText, appsText] = await untilAborted(Promise.all([run(GPU_TOTALS_ARGS, signal), run(GPU_APPS_ARGS, signal)]), signal);
   } catch (error) {
     if (signal?.aborted) throw signal.reason;
-    // No nvidia-smi at all (Windows on Geordi, a machine with no NVIDIA GPU):
+    // No nvidia-smi at all (for example a Windows machine with no NVIDIA GPU):
     // zero VRAM, so the fit check plans the whole model in system memory.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, tenants: [], measuredAt: now() };
     throw new FitError("gpu-unreadable", `nvidia-smi failed: ${error instanceof Error ? error.message : String(error)}`);

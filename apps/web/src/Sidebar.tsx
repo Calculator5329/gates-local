@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer with the download and runtime rows.
 import { Fragment, useEffect, useState } from "react";

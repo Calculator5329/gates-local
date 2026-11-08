@@ -83,6 +83,8 @@ export const methods = {
   "models.list": { params: NoParams, result: S.Array(ModelInfo) },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo) },
   "runtime.status": { params: NoParams, result: RuntimeStatus },
+  /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
+  "runtime.retry": { params: NoParams, result: RuntimeStatus },
   "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport },
   "chat.send": {
     params: S.Struct({

@@ -30,6 +30,10 @@ export type ModelInfo = {
   parameterSize?: string;
   quantization?: string;
   modifiedAt: string;
+  /** Ollama's words from /api/show (contracts ModelInfo.capabilities). */
+  capabilities: readonly string[];
+  /** The model chat starts on (contracts ModelPick); set by the catalog's pick hook. */
+  pick?: { numCtx: number; verdict?: "fits" | "spills" | "refuse" };
 };
 
 /** A model the runtime currently holds in memory (`/api/ps`). */

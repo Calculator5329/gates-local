@@ -91,6 +91,11 @@ export type RuntimeOptions = {
    * machine with none, so tests do not depend on the host. Default true.
    */
   searchBinary?: boolean;
+  /**
+   * Start an Ollama when none answers. Default true. False makes ensure()
+   * report like discover(): a pinned URL is the only Ollama the app may use.
+   */
+  allowStart?: boolean;
   /** Settings' runtimeMode; undefined uses the full discovery order. */
   mode?: RuntimeMode;
   platform?: NodeJS.Platform;
@@ -201,8 +206,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
   const manifest = options.manifest ?? PINNED_OLLAMA;
-  // Never on Windows, whatever the option says: the pinned asset is a Linux build.
-  const allowInstall = platform !== "win32" && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
+  const allowStart = options.allowStart ?? true;
+  // Install needs start allowed, and never on Windows, whatever the option says: the pinned asset is a Linux build.
+  const allowInstall = platform !== "win32" && allowStart && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
   const stateFile = ownedStateFile(stateDir);
   /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;
@@ -480,6 +486,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   async function ensureOnce(): Promise<RuntimeStatus> {
     const c = await classify();
     if (c.kind !== "startable") return setStatus(c.status);
+    if (!allowStart) return setStatus(statusFor(c));
     let binary = c.binary;
     if (!binary) {
       if (!allowInstall) return setStatus(statusFor(c));

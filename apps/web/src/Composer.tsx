@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
@@ -7,6 +8,7 @@ import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { closeFit, openFit } from "./FitPanel.tsx";
 import { type Verdict, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
+import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { ensureFit, firstPull, openSettings, pickModel, queueReason, send, stop } from "./session.ts";
 import { NA, type State, fitKey, getState, setState, streaming, useStore } from "./store.ts";
@@ -26,6 +28,17 @@ function usedTokens(s: State): number {
 function verdictFor(s: Pick<State, "fits" | "numCtx">, model: string): Verdict | undefined {
   const r = s.fits[fitKey(model, s.numCtx)];
   return r === undefined || r === "error" ? undefined : verdictOf(r);
+}
+
+/**
+ * Why the Thinking pill cannot be used now, or null when it can. It
+ * depends on the model's "thinking" capability, so it waits for a chat
+ * model to be installed (F70) and greys for a model without it.
+ */
+export function thinkUnavailable(model: ModelInfo | undefined, name: string, downloading: boolean): string | null {
+  if (downloading || model === undefined) return "Available when the model finishes downloading.";
+  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does, such as Qwen 3.5 9B.`;
+  return null;
 }
 
 function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
@@ -78,7 +91,10 @@ export function Composer() {
   const name = shownTag === undefined ? "No model" : describeModel(shownTag, catalog).name;
   const v = fit === undefined || fit === "error" ? undefined : verdictOf(fit);
   const text = draft.trim();
-  const noModel = model === undefined && !queueable;
+  const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
+  const noModel = (model === undefined || why !== undefined) && !queueable;
+  // During setup the gate style already greys every control; otherwise the pill says why it is off.
+  const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined);
 
   const modelLbl =
     rt === "installing" ? `${name} · downloads next` : first !== undefined ? `${name} · downloading ${firstProgress}%` : loadState === "loading" ? `${name} · loading` : name;
@@ -92,12 +108,13 @@ export function Composer() {
   const pct = Math.min(1, used / numCtx);
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
-  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? "Download a model to start chatting" : PLACEHOLDER[rt];
+  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
 
   let sendTip = "Send (Enter)";
   if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
-  else if (noModel) sendTip = "Download a model to start chatting";
+  else if (noModel) sendTip = why ?? "Download a model to start chatting";
+  else if (v?.k === "no" && v.limit !== undefined) sendTip = `${esc(name)} supports up to ${k(v.limit)} of context. Pick another model.`;
   else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(numCtx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.`;
   else if (!text) sendTip = "Type a message to send";
   const sendDisabled = (blocked && !queueable) || (!blocked && v?.k === "no") || noModel || !text;
@@ -153,7 +170,7 @@ export function Composer() {
               type="button"
               className="ctl gate"
               id="modelBtn"
-              aria-haspopup="listbox"
+              aria-haspopup="dialog"
               aria-expanded={pop === "picker"}
               data-tip={modelTip}
               onClick={() => togglePop("picker")}
@@ -195,15 +212,18 @@ export function Composer() {
             </button>
             <button
               type="button"
-              className="pill gate"
-              aria-pressed={think}
+              className={`pill gate${thinkNa !== null ? " unavail" : ""}`}
+              aria-pressed={thinkNa !== null ? false : think}
               aria-label="Thinking"
+              aria-disabled={thinkNa !== null ? true : undefined}
               data-tip={
-                think
+                thinkNa ??
+                (think
                   ? "<b>Thinking on.</b> The model reasons first; shown as one collapsed line. Click to turn off."
-                  : "<b>Thinking off.</b> Faster first token. Click to turn on."
+                  : "<b>Thinking off.</b> Faster first token. Click to turn on.")
               }
               onClick={() => {
+                if (thinkNa !== null) return;
                 setState({ think: !think });
                 closeTip();
               }}
@@ -361,7 +381,8 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
   const groups: Record<GroupKey, Row[]> = { gpu: [], spill: [], no: [], unknown: [] };
   const hit = (tag: string, name: string, purpose: string) =>
     q === "" || tag.toLowerCase().includes(q) || name.toLowerCase().includes(q) || purpose.toLowerCase().includes(q);
-  for (const m of s.models ?? []) {
+  // Embedding models never chat, so they are never a choice here.
+  for (const m of chatModels(s.models ?? [])) {
     const d = describeModel(m.name, catalog);
     if (!hit(m.name, d.name, d.purpose)) continue;
     const v = verdictFor(s, m.name);
@@ -388,9 +409,10 @@ function rowTip(r: Row, sysBytes: number | undefined): string {
   let tip = tagTip(r.name, r.info, r.tag);
   if (r.v) {
     tip += "<br>";
-    if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available for chat: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
+    if (r.v.k === "no" && r.v.limit !== undefined) tip += `${esc(r.name)} supports up to ${k(r.v.limit)} of context.`;
+    else if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available to this model: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
     else if (r.v.k === "spill") tip += `An estimated ${gb(r.v.amt)} runs from system memory, so replies are slower.`;
-    else tip += `Estimated need ${gb(r.v.need)} of ${gb(r.v.avail)} available.`;
+    else tip += `Estimated need ${gb(r.v.need)} of ${gb(r.v.avail)} available to this model.`;
   }
   if (r.info) tip += `<br>${gb(r.info.sizeBytes)} on disk`;
   return tip;
@@ -454,7 +476,7 @@ export function Picker() {
     setQ("");
     setHl(-1);
     setKb(pop?.kb ?? false);
-    for (const m of getState().models ?? []) ensureFit(m.name, getState().numCtx);
+    for (const m of chatModels(getState().models ?? [])) ensureFit(m.name, getState().numCtx);
     const t = setTimeout(() => input.current?.focus(), 0);
     return () => clearTimeout(t);
   }, [open, pop?.kb]);
@@ -498,12 +520,13 @@ export function Picker() {
     if (rows.length === 0) return [];
     const head = rows[0]?.v;
     return [
-      head && g !== "unknown" ? <VLabel key={`g-${g}`} v={head} cls="pk-g" /> : null,
+      // Headings are visual only: a listbox owns options, and each option's sub line already says its fit.
+      head && g !== "unknown" ? <VLabel key={`g-${g}`} v={head} cls="pk-g" hidden /> : null,
       ...rows.map((r) => {
         const loaded = loads[r.tag]?.state === "ready" && loads[r.tag]?.numCtx === numCtx;
         if (r.downloading !== undefined) {
           return (
-            <div key={r.tag} className="pk-r dis" aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>You can pick it when the download finishes.`}>
+            <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>You can pick it when the download finishes.`}>
               <span className="pk-c" />
               <div className="pk-m">
                 <div className="pk-n">{r.name}</div>
@@ -516,7 +539,7 @@ export function Picker() {
         const sub = rowSub(r, numCtx, loaded);
         if (r.v?.k === "no") {
           return (
-            <div key={r.tag} className="pk-r dis" data-m={r.tag} data-tip={tip}>
+            <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-m={r.tag} data-tip={tip}>
               <span className="pk-c" />
               <div className="pk-m">
                 <div className="pk-n">{r.name}</div>
@@ -535,6 +558,10 @@ export function Picker() {
             key={r.tag}
             type="button"
             className={`pk-r${sel ? " sel" : ""}${i === hl ? " hl" : ""}`}
+            role="option"
+            id={`pk-opt-${i}`}
+            // While the arrow keys move a highlight, it is the selection a screen reader announces.
+            aria-selected={hl >= 0 ? i === hl : sel}
             data-m={r.tag}
             data-i={i}
             data-tip={tip}
@@ -553,7 +580,7 @@ export function Picker() {
   });
 
   return (
-    <div className={`pop${open ? " open" : ""}${kb ? " kb" : ""}`} id="picker" role="listbox" aria-label="Choose a model" ref={ref}>
+    <div className={`pop${open ? " open" : ""}${kb ? " kb" : ""}`} id="picker" role="dialog" aria-label="Choose a model" ref={ref}>
       <div className="pk-h">
         <div className="pk-hin">
           <Icon id="search" />
@@ -562,6 +589,11 @@ export function Picker() {
             id="pkSearch"
             placeholder="Search models"
             aria-label="Search models"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="pkList"
+            aria-autocomplete="list"
+            aria-activedescendant={hl >= 0 ? `pk-opt-${hl}` : undefined}
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -575,6 +607,9 @@ export function Picker() {
       <div className="pk-wrap">
         <div
           className="pk-list"
+          id="pkList"
+          role="listbox"
+          aria-label="Models"
           ref={list}
           onScroll={() => {
             if (list.current && sb.current && th.current) thumb(list.current, sb.current, th.current);

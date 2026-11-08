@@ -1,6 +1,6 @@
 // Words and numbers the design fixes (shell.md F16, F34, F35, F62): one
 // decimal for GB, three verdict labels, the friendly model name first.
-import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo } from "@gates-local/contracts";
+import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress } from "@gates-local/contracts";
 
 export const CONTEXT_SIZES: readonly ContextSize[] = [16384, 32768, 65536];
 
@@ -29,6 +29,8 @@ export interface Verdict {
   readonly need: number;
   readonly avail: number;
   readonly measured: boolean;
+  /** Set when the refusal is the model's own context ceiling, not memory. */
+  readonly limit?: number;
 }
 
 export function verdictOf(r: FitReport): Verdict {
@@ -37,8 +39,30 @@ export function verdictOf(r: FitReport): Verdict {
   if (r.verdict === "spills") {
     return { ...base, k: "spill", chip: "system memory", word: "Uses system memory · slower", detail: `${gb(r.spillRamBytes)} in system memory`, amt: r.spillRamBytes };
   }
+  if (r.contextLimit !== undefined) {
+    const word = `Supports up to ${k(r.contextLimit)} context`;
+    return { ...base, k: "no", chip: `up to ${k(r.contextLimit)} context`, word, detail: `${k(r.numCtx)} is past its limit`, amt: 0, limit: r.contextLimit };
+  }
   const short = r.shortfallBytes ?? Math.max(0, r.needVramBytes - r.freeVramBytes);
   return { ...base, k: "no", chip: "not enough memory", word: `Not enough memory at ${k(r.numCtx)}`, detail: `needs ${gb(short)} more`, amt: short };
+}
+
+/**
+ * What the context size not chosen would do, for the line under a context
+ * control (F36b): "still runs on GPU; uses 2.5 GB more". A refusal past the
+ * model's context limit says so, never "not enough memory" (MP-06).
+ */
+export function otherCtxWords(cur: FitReport, other: FitReport): string {
+  const ov = verdictOf(other);
+  const cv = verdictOf(cur);
+  // "still" only when both are the same verdict for the same reason.
+  const same = ov.k === cv.k && (ov.limit === undefined) === (cv.limit === undefined);
+  if (ov.limit !== undefined) return `${same ? "still " : ""}past its context limit; it supports up to ${k(ov.limit)}`;
+  let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
+  if (same) says = `still ${says}`;
+  const d = other.needVramBytes - cur.needVramBytes;
+  const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
+  return `${says}; ${tail}`;
 }
 
 /** Tag words that read after the size ("Gemma 4 26B abliterated"); others read before it ("Qwen 3.5 VL 9B"). */
@@ -81,11 +105,21 @@ export function modelFacts(m: ModelInfo | undefined): { quant: string; disk: str
 export function replyMeta(name: string, msg: Message, firstTokenMs?: number): string {
   const parts = [name];
   if (firstTokenMs !== undefined) parts.push(`${(firstTokenMs / 1000).toFixed(1)} s to first token`);
-  const s = msg.stats;
-  if (s?.completionTokens !== undefined && s.durationMs !== undefined && s.durationMs > 0) {
-    parts.push(`${Math.round(s.completionTokens / (s.durationMs / 1000))} tok/s`);
-  }
+  const speed = decodeSpeed(msg.stats);
+  if (speed !== undefined) parts.push(`${speed} tok/s`);
   return parts.join(" · ");
+}
+
+/**
+ * Tokens per second of decoding: completion tokens over Ollama's
+ * eval_duration. durationMs is the whole call, model load and prompt
+ * included, so it is only the fallback for replies saved before decode time
+ * was kept.
+ */
+export function decodeSpeed(s: { completionTokens?: number; durationMs?: number; evalDurationMs?: number } | undefined): number | undefined {
+  if (s?.completionTokens === undefined) return undefined;
+  const ms = s.evalDurationMs ?? s.durationMs;
+  return ms !== undefined && ms > 0 ? Math.round(s.completionTokens / (ms / 1000)) : undefined;
 }
 
 /** "2:14 PM". */
@@ -131,4 +165,28 @@ export function turnTime(ms: number, now = Date.now()): string {
 export function titleFrom(text: string): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length > 48 ? `${t.slice(0, 46)}…` : t;
+}
+
+/** Seconds rounded up to 5 under a minute ("about 25 s"), whole minutes from there. */
+function timeLeft(seconds: number): string {
+  const whole = Math.max(1, Math.round(seconds));
+  const s = whole < 10 ? whole : Math.ceil(whole / 5) * 5;
+  return s < 60 ? `${s} s` : `${Math.ceil(seconds / 60)} min`;
+}
+
+/**
+ * The line under a download bar: bytes, speed, time left. Once every byte
+ * is in, Ollama is verifying or writing the model, so the line names that
+ * phase instead of a time worked out from download speed (G7-03).
+ */
+export function etaText(p: PullProgress): string {
+  if (p.state === "verifying") return "Verifying the download";
+  const total = p.totalBytes;
+  if (total && p.completedBytes >= total) return "Finishing the download";
+  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : "Starting"];
+  if (p.bytesPerSecond) {
+    parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
+    if (total) parts.push(`about ${timeLeft((total - p.completedBytes) / p.bytesPerSecond)} left`);
+  }
+  return parts.join(" · ");
 }

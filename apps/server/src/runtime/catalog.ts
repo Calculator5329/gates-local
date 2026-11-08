@@ -8,6 +8,7 @@ import type { CatalogEntry, FitReport } from "@gates-local/contracts";
 import { estimateBeforeDownload, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import { canonicalTag, CURATED_MODELS, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
+import { canChat } from "./pick.ts";
 import type { ModelInfo } from "./types.ts";
 
 export interface CatalogDeps {
@@ -19,8 +20,6 @@ export interface CatalogDeps {
   readonly log?: (line: string) => void;
 }
 
-/** Embedding models never chat, so they stay out of the catalog. */
-const isEmbedding = (m: ModelInfo) => /embed/i.test(m.name) || /bert/i.test(m.family ?? "");
 
 const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitReport | undefined): CatalogEntry => ({
   ...entry,
@@ -31,7 +30,10 @@ const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitRepor
 export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
   const numCtx = deps.settings.get().defaultNumCtx;
   const baseUrl = deps.baseUrl();
-  const installed = baseUrl === undefined ? [] : (await deps.installed()).filter((m) => !isEmbedding(m));
+  const listed = baseUrl === undefined ? [] : await deps.installed();
+  const installed = listed.filter(canChat); // embedding models never chat; unknown ones wait for discovery
+  // Every installed name, chat or not: an installed model is never offered as a download (MP-01).
+  const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
 
   let survey: FitSurvey | undefined;
   if (baseUrl !== undefined) {
@@ -48,7 +50,7 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
     const own = byTag.get(c.name);
     if (own) {
       entries.push(withFit({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true }, survey?.reports.get(own.name)));
-    } else if (c.pullable) {
+    } else if (c.pullable && !installedTags.has(c.name)) {
       const fit = survey
         ? estimateBeforeDownload({
             model: c.name,

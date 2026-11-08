@@ -70,6 +70,7 @@ async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLea
   const runtime = createOllamaRuntime({ externalBaseUrl: ollama.baseUrl, appPort: await freePort(), appDataDir: dir, allowInstall: false, env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500 });
   await runtime.discover();
   const catalog = createModelCatalog(() => runtime.baseUrl());
+  cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
 
   const pushes: { channel: Channel; payload: unknown }[] = [];
   const push = (channel: Channel, payload: unknown) => void pushes.push({ channel, payload });

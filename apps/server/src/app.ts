@@ -6,7 +6,7 @@
 // other than refuse; then the user message persists, the reply streams on
 // chat.event and only the finished assistant message reaches the store.
 import { randomUUID } from "node:crypto";
-import type { Channel, Message, Payload } from "@gates-local/contracts";
+import type { Channel, Message, Params, Payload } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -52,6 +52,7 @@ export type AppErrorCode =
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
   | "runtime-changed" // a runtime switch ended the turn (any text sent is saved, event.partial); the client sends the message again
   | "preempted" // chat.send stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
+  | "thread-not-found" // the store's code, also thrown while the thread's delete runs
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -76,13 +77,15 @@ const HALTED = Symbol("halted");
 /** chat.send stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
 const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
   new AppError("preempted", `${model} at num_ctx ${numCtx} needed the GPU memory ${held} was using, so this reply stopped. Send the message again.`, undefined, model);
+const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);
+const cancelledBeforeStart = () => new AppError("cancelled", "the turn was cancelled before it started");
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
 
 export interface AppDeps {
   readonly store: ThreadStore;
-  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange">;
+  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure">;
   readonly catalog: ModelCatalog;
   /** Bound late: main creates the ws server after the handlers. */
   readonly push: Push;
@@ -144,6 +147,8 @@ interface Turn {
  * The think flag a turn sends: none when /api/show lists the model's
  * capabilities without "thinking". An Ollama that lists none, or a show that
  * fails, keeps the request as asked; the chat request reports a real error.
+ * The turn's signal ends the probe: a cancel never waits on a stalled show
+ * (the aborted turn then ends as cancelled before any chat request).
  */
 async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined, signal: AbortSignal): Promise<boolean | undefined> {
   if (requested === undefined) return undefined;
@@ -217,14 +222,41 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
+  /** Threads whose threads.delete is running: marked before its first await, cleared when it ends. */
+  const deleting = new Set<string>();
+
+  /**
+   * Image jobs queued for a thread (its turns' tool, or image.generate with its
+   * threadId), until each job's wait settles: threads.delete takes them back.
+   * Each entry is the job id as a promise, so a generate still in flight counts.
+   */
+  const imageJobs = new Map<string, Set<Promise<string>>>();
+
+  /** Queues the job and, with a threadId, keeps it for threads.delete. Refuses a thread being deleted. */
+  const queueImage = (image: ImageModule, params: Params<"image.generate">): Promise<{ jobId: string }> => {
+    const { threadId } = params;
+    if (threadId === undefined) return image.generate(params);
+    if (deleting.has(threadId)) return Promise.reject(threadGoing(threadId));
+    const jobs = imageJobs.get(threadId) ?? new Set<Promise<string>>();
+    imageJobs.set(threadId, jobs);
+    const queued = image.generate(params).then((job) => job.jobId);
+    jobs.add(queued);
+    void queued.then((id) => image.wait(id)).catch(() => undefined).finally(() => {
+      jobs.delete(queued);
+      if (jobs.size === 0 && imageJobs.get(threadId) === jobs) imageJobs.delete(threadId);
+    });
+    return queued.then((jobId) => ({ jobId }));
+  };
+
   /**
    * The turn's image tool. It queues the job and returns: the job claims the
    * GPU alone, and this turn holds a shared claim until it ends, so waiting
    * here for the picture would wait forever. The job adds the picture to the
-   * thread after the reply; a cancelled turn takes its jobs back.
+   * thread after the reply; a cancelled turn takes its jobs back, and so does
+   * deleting the thread after the turn ended.
    */
   const queueImageFor = (threadId: string, turnSignal: AbortSignal) => async (prompt: string): Promise<{ jobId: string }> => {
-    const job = await deps.image!.generate({ prompt, threadId });
+    const job = await queueImage(deps.image!, { prompt, threadId });
     const takeBack = () => deps.image?.cancel(job.jobId);
     if (turnSignal.aborted) takeBack();
     else turnSignal.addEventListener("abort", takeBack, { once: true });
@@ -375,9 +407,21 @@ export function createApp(deps: AppDeps): App {
     await turn.ended;
   };
 
+  /** Cancels every image job queued for this thread that has not settled, and waits for each to end. */
+  const cancelThreadImages = async (threadId: string) => {
+    const image = deps.image;
+    const queued = [...(imageJobs.get(threadId) ?? [])];
+    if (image === undefined || queued.length === 0) return;
+    const ids = (await Promise.all(queued.map((p) => p.catch(() => undefined)))).filter((id) => id !== undefined);
+    for (const id of ids) image.cancel(id);
+    await Promise.all(ids.map((id) => image.wait(id).catch(() => undefined)));
+  };
+
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
+    // Kept per thread like the tool's jobs, so threads.delete takes them back too.
+    ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
@@ -392,8 +436,17 @@ export function createApp(deps: AppDeps): App {
       return thread;
     },
     "threads.delete": async ({ threadId }) => {
-      await cancelThreadTurn(threadId);
-      store.deleteThread(threadId);
+      // Before the first await: no new turn or image job for this thread from here on.
+      const marked = !deleting.has(threadId);
+      deleting.add(threadId);
+      try {
+        await cancelThreadTurn(threadId);
+        // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
+        await cancelThreadImages(threadId);
+        store.deleteThread(threadId);
+      } finally {
+        if (marked) deleting.delete(threadId);
+      }
       push("threads.changed", { threadId });
       return { threadId };
     },
@@ -402,6 +455,7 @@ export function createApp(deps: AppDeps): App {
     "models.refresh": async () => (await catalog.refresh()).models,
 
     "runtime.status": () => runtime.status(),
+    "runtime.retry": () => runtime.ensure(),
 
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();
@@ -421,6 +475,8 @@ export function createApp(deps: AppDeps): App {
 
     "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
+      // The thread is going: its delete has already listed what it takes back.
+      if (deleting.has(threadId)) throw threadGoing(threadId);
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
@@ -449,80 +505,103 @@ export function createApp(deps: AppDeps): App {
           else reservation.signal.addEventListener("abort", runtimeGone, { once: true });
         }
         // Before it started: a cancel, or the runtime switch above.
-        const stoppedEarly = () => turn.halted ?? new AppError("cancelled", "the turn was cancelled before it started");
+        const stoppedEarly = () => turn.halted ?? cancelledBeforeStart();
         // The runtime the reservation captured: fit, admit and chat all talk to it.
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
+        // Every plan reads with a signal (fit/planLoad ends each read on it); a plan error that lands
+        // after the turn's cancel is the cancel.
+        const turnSignal = turn.controller.signal;
         const refusal = (report: FitReport) =>
           new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
-        // The fit, planned beside the admitted turns. stopOthers ends the ones whose model holds
-        // memory this load needs, the way a switch does (each saves what it sent and ends
-        // "preempted"), waits for them and plans again until none is in the way: the plan that
-        // returns counts their memory, idle by then, as reclaimable. Without it, Ollama queues this
-        // load until those turns end on their own. With `comfy`, the plan may also stop the idle
-        // ComfyUI this app started, once, after the stopped turns have ended: each held a chat claim
-        // that stopIdle's exclusive one would wait on. A plan that needs a turn stopped without
-        // stopOthers, or that refuses even with every turn and ComfyUI gone, stops nothing.
-        // admit passes its own signal (the turn's and the runtime's); every other caller passes the turn's.
-        const fit = async (signal: AbortSignal, comfy?: ImageModule): Promise<FitReport> => {
-          let comfyTried = false;
+        // The plan beside the admitted turns. stopOthers ends the ones whose model holds memory this
+        // load needs, the way a switch does (each saves what it sent and ends "preempted"), waits
+        // for them and plans again until none is in the way: the plan that returns counts their
+        // memory, idle by then, as reclaimable. Without it, Ollama queues this load until those
+        // turns end on their own. `comfyPid` lets the plan count the idle ComfyUI this app started;
+        // this never stops it. admit passes its own signal (the turn's and the runtime's).
+        const fit = async (signal: AbortSignal, comfyPid?: number): Promise<{ report: FitReport; stop: Turn[]; comfy: boolean }> => {
           for (;;) {
-            const comfyPid = comfy === undefined || comfyTried ? undefined : reclaimableComfy();
             const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
             const victims = stopOthers === true ? plan.stop : [];
-            if (victims.length === 0 && (!plan.comfy || plan.report.verdict === "refuse")) return plan.report;
+            if (victims.length === 0) return plan;
             for (const t of victims) t.halt(preemptedBy(model, numCtx, t.model));
             await untilAborted(Promise.all(victims.map((t) => t.ended)), signal);
-            if (plan.comfy && comfy !== undefined) {
-              comfyTried = true;
-              await comfy.stopIdle(signal);
-            }
+          }
+        };
+        const planned = async (comfyPid?: number) => {
+          try {
+            return await fit(turnSignal, comfyPid);
+          } catch (e) {
+            if (turnSignal.aborted) throw stoppedEarly();
+            throw e;
           }
         };
         // Before the load gate: a cold turn holds the gate until its first token or its end, so the
-        // turns this load needs stopped (that one included) are stopped here, and the idle ComfyUI
-        // this app started is reclaimed here, before this turn's own claim (stopIdle claims the GPU
-        // alone; a nested claim would wait on itself). The plan inside the gate decides again.
-        // A cancel, switch or shutdown ends this at once, unless a ComfyUI stop has begun: the turn
-        // then ends with the stop, so a switch's drain waits for it (or fails the switch).
-        if (stopOthers === true || reclaimableComfy() !== undefined) {
-          const signal = turn.controller.signal;
-          let ahead: FitReport;
-          try {
-            ahead = await fit(signal, deps.image);
-          } catch (e) {
-            if (signal.aborted) throw stoppedEarly();
-            throw e;
-          }
-          // No plan fits: refuse now, never wait on a claim.
-          if (ahead.verdict === "refuse") throw refusal(ahead);
+        // turns this load needs stopped (that one included) are stopped here, the ComfyUI stop it
+        // also needs counted. No plan fits, even with every turn and ComfyUI gone: refuse now, never
+        // wait on a claim. The plan inside the gate decides again.
+        if (stopOthers === true) {
+          const ahead = await planned(reclaimableComfy());
+          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
-        try {
-          releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
-        } catch {
-          throw stoppedEarly();
+        const claim = async () => {
+          try {
+            releaseGpu = await deps.lease?.acquire("chat", turnSignal);
+          } catch {
+            throw stoppedEarly();
+          }
+        };
+        await claim();
+        // An idle ComfyUI this app started is the one GPU tenant besides chat models a turn may free.
+        // The check runs inside the claim, so a ComfyUI an image job started while this turn waited
+        // counts. With ComfyUI idle the plan decides (its nvidia-smi memory, or a try when unlisted);
+        // with a job still registered (one queued behind this turn) the turn tries when it does not
+        // fit. stopIdle claims the GPU alone: the turn lets its claim go first (a nested claim would
+        // wait on itself), then claims again and plans again. stopIdle declines while a job is
+        // registered: at most three tries, then admission decides as usual. A cancel, switch or
+        // shutdown ends a try at once, unless the ComfyUI stop has begun: the turn then ends with
+        // the stop, so a switch's drain waits for it (or fails the switch).
+        for (let attempt = 0; attempt < 3 && deps.image?.current().owner === "app"; attempt += 1) {
+          const idlePid = reclaimableComfy();
+          const inside = await planned(idlePid);
+          if (!inside.comfy && (idlePid !== undefined || inside.report.verdict === "fits")) break;
+          // Turns this turn may not stop are in the way too: stopIdle would wait on their claims.
+          if (inside.stop.length > 0) break;
+          releaseGpu?.();
+          releaseGpu = undefined;
+          try {
+            await deps.image.stopIdle(turnSignal);
+          } catch (e) {
+            if (turnSignal.aborted) throw stoppedEarly();
+            throw e;
+          }
+          await claim();
         }
         // Inside the gate: a passing fit admits the turn, so the next load plans around it.
         const admitted = async (signal: AbortSignal) => {
-          const r = await fit(signal);
+          const r = (await fit(signal)).report;
           if (r.verdict !== "refuse") turn.started = true;
           return r;
         };
         let report: FitReport;
         try {
-          report = load ? await load.admit(numCtx, { fit: admitted, signal: turn.controller.signal }) : await admitted(turn.controller.signal);
+          report = load ? await load.admit(numCtx, { fit: admitted, signal: turnSignal }) : await admitted(turnSignal);
         } catch (e) {
-          if (e instanceof AdmitCancelled || turn.halted) throw stoppedEarly();
+          // Without a loader too: a plan error that lands after a cancel is the cancel.
+          if (e instanceof AdmitCancelled || turn.halted || turnSignal.aborted) throw stoppedEarly();
           throw e;
         }
         if (report.verdict === "refuse") throw refusal(report);
-        if (turn.controller.signal.aborted) throw stoppedEarly();
+        if (turnSignal.aborted) throw stoppedEarly();
         const userMessage = store.appendMessage({ threadId, role: "user", content });
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
         turn.started = true;
+        // Before the answer, so every client (also one that did not send this) knows the turn first.
+        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
         void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {

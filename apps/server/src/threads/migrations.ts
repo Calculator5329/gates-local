@@ -56,6 +56,18 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    // Decode and prompt times from Ollama's eval_duration and
+    // prompt_eval_duration (2026-11-07), so speed is tokens over decode time
+    // and not over the wall time that includes the model load. NULL on older rows.
+    version: 3,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE messages ADD COLUMN eval_duration_ms REAL;
+        ALTER TABLE messages ADD COLUMN prompt_eval_duration_ms REAL;
+      `);
+    },
+  },
 ];
 
 export const LATEST_VERSION: number = MIGRATIONS.length;

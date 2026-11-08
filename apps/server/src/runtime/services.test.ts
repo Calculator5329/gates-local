@@ -917,7 +917,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
     const y = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
     for (let i = 0; i < 400 && !r.events.some((e) => e.turnId === y.turnId && e.type === "done"); i++) await sleep(5);
-    expect(r.events.filter((e) => e.turnId === y.turnId).map((e) => e.type)).toEqual(["delta", "done"]);
+    expect(r.events.filter((e) => e.turnId === y.turnId).map((e) => e.type)).toEqual(["start", "delta", "done"]);
     await r.done();
   });
 
