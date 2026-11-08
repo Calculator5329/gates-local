@@ -6,6 +6,12 @@
   whatever the OS uses. Settings › General still offers Light and System. A
   theme already saved stays as it is.
 
+## 2026-11-08: Set up with Claude Code
+
+- `docs/setup/with-claude-code.md` is a runbook an agent can follow to set
+  the app up on a new machine. `pnpm machine-check` reads the machine and
+  says which model and image setup fit it, and changes nothing.
+
 ## 2026-11-08: No switch to a copy that cannot exist
 
 - Where the app has no build of Ollama to install (Windows ARM today), the
