@@ -370,6 +370,23 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     stuck.end();
     await r.done();
   });
+
+  it("R4-07: after a failed switch Settings names the runtime still serving, and choosing the new mode again retries", async () => {
+    const r = await rig({}, { turnDrainMs: 200 });
+    const stuck = r.s.loader.reserve(MODEL);
+    const choose = (runtimeMode: "app" | "system") => r.s.handlers["settings.update"]!({ runtimeMode }, { clientId: 1 });
+    expect(choose("app")).toMatchObject({ runtimeMode: "app" });
+    for (let i = 0; i < 200 && r.s.runtime.status().state !== "error"; i++) await sleep(5);
+    expect(r.s.runtime.status()).toMatchObject({ state: "error", detail: expect.stringMatching(/still running/) });
+    await sleep(20);
+    expect(r.s.runtime.mode()).toBe("system");
+    expect(r.s.handlers["settings.get"]!({}, { clientId: 1 })).toMatchObject({ runtimeMode: "system" });
+    stuck.end();
+    choose("app");
+    for (let i = 0; i < 400 && r.s.runtime.mode() !== "app"; i++) await sleep(5);
+    expect(r.s.runtime.mode()).toBe("app");
+    await r.done();
+  });
 });
 
 describe("R3-02: a switch saves the reply streamed so far", () => {

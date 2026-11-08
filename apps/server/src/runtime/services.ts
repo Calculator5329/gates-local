@@ -148,7 +148,16 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     if (next.runtimeMode === previous.runtimeMode) return;
     runtime.setMode(next.runtimeMode).then(
       (s) => log(`runtime mode ${next.runtimeMode}: ${s.state} (${s.owner}) at ${s.baseUrl}`),
-      (e: unknown) => log(`runtime switch failed: ${(e as Error).message}`),
+      (e: unknown) => {
+        log(`runtime switch failed: ${(e as Error).message}`);
+        // The old runtime still serves: Settings says so, and choosing the new mode again retries.
+        if (settings.get().runtimeMode !== next.runtimeMode) return;
+        try {
+          options.push("settings.changed", settings.update({ runtimeMode: runtime.mode() }));
+        } catch (error) {
+          log(`settings not put back to ${runtime.mode()}: ${(error as Error).message}`);
+        }
+      },
     );
   });
 
