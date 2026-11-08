@@ -238,7 +238,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const progressListeners = new Set<Listener<InstallProgress>>();
   let inFlight: Promise<RuntimeStatus> | undefined;
 
-  const setStatus = (next: RuntimeStatus): RuntimeStatus => {
+  const setStatus = (status: RuntimeStatus): RuntimeStatus => {
+    const next = installable === undefined ? { ...status, noAppCopy: true } : status;
     if (JSON.stringify(next) !== JSON.stringify(current)) {
       current = next;
       for (const l of statusListeners) l(next);

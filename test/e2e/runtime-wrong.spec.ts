@@ -2,9 +2,37 @@
 // chose the system Ollama, chat is blocked with a plain reason everywhere it
 // shows. On a first launch the app picks its own copy and routes around the
 // taken port, and the first run says so. Nothing crashes.
+import type { Page } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "wrong-service" });
+
+function marked(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(marked);
+  if (typeof v !== "object" || v === null) return v;
+  const o = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, marked(x)]));
+  return "owner" in o && "baseUrl" in o ? { ...o, noAppCopy: true } : o;
+}
+
+/** Every runtime status reads as on a computer with no build of Ollama for the app to install (Windows ARM today). */
+async function noAppCopyHere(page: Page): Promise<void> {
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => server.send(m));
+    server.onMessage((m) => ws.send(typeof m === "string" ? JSON.stringify(marked(JSON.parse(m))) : m));
+  });
+}
+
+test.describe("with the app's own copy chosen", () => {
+  test.use({ runtimeMode: "app" });
+  test("on a computer with no copy to run, Settings still offers the way back to the system Ollama", async ({ page, open }) => {
+    await noAppCopyHere(page);
+    await open();
+    await page.locator(".sb-foot .rt").click();
+    await page.getByRole("button", { name: "Switch…" }).click();
+    await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Switch back to the system Ollama?");
+  });
+});
 
 test.describe("with the system Ollama chosen", () => {
   test.use({ runtimeMode: "system" });
@@ -29,6 +57,15 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await page.getByRole("button", { name: "Switch…" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Switch to Gates Local's own copy of Ollama?");
+  });
+
+  test("on a computer with no copy to run, Settings says so instead of offering to install it", async ({ page, open }) => {
+    await noAppCopyHere(page);
+    await open();
+    await page.locator(".sb-foot .rt").click();
+    await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
+    await expect(page.locator(".set")).toContainText("Not available on this computer");
+    await expect(page.getByRole("button", { name: "Switch…" })).toHaveCount(0);
   });
 
   test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {

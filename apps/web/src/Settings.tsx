@@ -440,13 +440,16 @@ function Runtime() {
         : rt === "starting"
           ? `Waiting for the server on port ${port}.`
           : rt === "missing"
-            ? "No Ollama is installed. Gates Local can install its own copy."
+            ? runtime?.noAppCopy === true
+              ? (runtime.detail ?? info.tip)
+              : "No Ollama is installed. Gates Local can install its own copy."
             : rt === "wrong"
               ? `Something other than Ollama answers on port ${port}.`
               : (runtime?.detail ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
   // A runtime that cannot be used has no owner, so the mode chosen says which way a switch goes.
   const ownCopy = rt === "ready" || !canSwitch ? app : settings.runtimeMode === "app";
+  const nothingToSwitchTo = !ownCopy && runtime?.noAppCopy === true;
   const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   const folders = folderWords();
@@ -463,7 +466,9 @@ function Runtime() {
           }
           desc={statD}
         />
-        {rt !== "installing" && rt !== "starting" && rt !== "offline" ? (
+        {nothingToSwitchTo ? (
+          <Row label="Gates Local's copy" desc="Not available on this computer. Gates Local uses the Ollama your system runs." />
+        ) : rt !== "installing" && rt !== "starting" && rt !== "offline" ? (
           <>
             <Row label={ownCopy ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={ownCopy ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
               {canSwitch ? (
