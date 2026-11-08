@@ -1,31 +1,46 @@
 /// <reference lib="dom" />
 // Journey: the phone path. The real server with the fake Ollama opens its
-// phone listener (GATES_LOCAL_WEB_LISTEN) on a free port; the page loads from
-// that listener, not the preview build, at a phone viewport, finds the server
-// on its own origin (the same-origin meta) and streams a reply. Playwright's
-// extraHTTPHeaders stands in for Tailscale Serve's Tailscale-User-Login; the
-// listener refuses the upgrade without it, so an open socket proves the
-// header reached the upgrade too.
-import { CONTROL_URL, PHONE_USER } from "./env.ts";
+// phone listener (GATES_LOCAL_WEB_LISTEN=unix:<path>) on an owner-only Unix
+// socket; a browser cannot open one, so the stack puts a Tailscale Serve
+// stand-in (serve-standin.ts) in front of it on a loopback port, rewriting
+// headers as Serve does for a unix: backend (Host localhost, X-Forwarded-Host,
+// its own Tailscale-User-Login). The page loads through it at a phone
+// viewport, finds the server on its own origin (the same-origin meta) and
+// streams a reply. The upgrade needs Serve's shape and the exact Origin, so
+// an open socket proves both reached it.
+import { request } from "node:http";
+import { CONTROL_URL } from "./env.ts";
 import { expect, sendMessage, test } from "./fixtures.ts";
 
-test.use({ viewport: { width: 412, height: 915 }, extraHTTPHeaders: { "Tailscale-User-Login": PHONE_USER } });
+test.use({ viewport: { width: 412, height: 915 } });
 
-async function phoneReset(): Promise<number> {
+async function phoneReset(): Promise<{ port: number; socket: string }> {
   const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true }) });
   if (!r.ok) throw new Error(`/reset: ${r.status} ${await r.text()}`);
-  const { phonePort } = (await r.json()) as { phonePort?: unknown };
-  if (typeof phonePort !== "number") throw new Error("the stack gave no phone port");
-  return phonePort;
+  const { phonePort, phoneSocket } = (await r.json()) as { phonePort?: unknown; phoneSocket?: unknown };
+  if (typeof phonePort !== "number" || typeof phoneSocket !== "string") throw new Error("the stack gave no phone port or socket");
+  return { port: phonePort, socket: phoneSocket };
 }
 
-test("a phone loads the client from the phone listener, sends a message and sees the streamed reply", async ({ page }) => {
-  const port = await phoneReset();
+/** Status of GET / straight to the socket, past the stand-in. */
+function direct(socketPath: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const r = request({ socketPath, path: "/", headers }, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    r.on("error", reject);
+    r.end();
+  });
+}
+
+test("a phone loads the client through Serve's stand-in, sends a message and sees the streamed reply", async ({ page }) => {
+  const { port, socket } = await phoneReset();
   expect(port < 5286 || port > 5289).toBe(true);
   const origin = `http://127.0.0.1:${port}`;
 
-  // Without the header the listener refuses even the page.
-  expect((await fetch(`${origin}/`)).status).toBe(403);
+  // Without Serve's headers the socket refuses even the page.
+  expect(await direct(socket, {})).toBe(403);
 
   const errors: string[] = [];
   page.on("console", (m) => {

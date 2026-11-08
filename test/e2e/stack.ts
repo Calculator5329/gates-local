@@ -12,8 +12,11 @@
 //                           settings in that mode, else first run picks it; the
 //                           reply carries the open thread's id; phone: true also
 //                           opens the phone listener (GATES_LOCAL_WEB_LISTEN) on a
+//                           Unix socket in a short 0700 dir under ~/.cache and a
+//                           Serve stand-in (serve-standin.ts) in front of it on a
 //                           free port outside 5286..5289, for PHONE_USER at
-//                           http://127.0.0.1:<port>, and the reply carries phonePort
+//                           http://127.0.0.1:<port>; the reply carries phonePort
+//                           (the stand-in's) and phoneSocket
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
 //
@@ -23,16 +26,24 @@
 // or at this user's app data (XDG_DATA_HOME is the run's own), so the runtime
 // states are the same on every machine.
 import { type ChildProcess, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
+import { homedir } from "node:os";
 import path from "node:path";
 import { createServer as createNetServer } from "node:net";
 import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
 import { seedDesign, seedLong } from "./seed.ts";
+import { type ServeStandIn, startServeStandIn } from "./serve-standin.ts";
 
 const runDir = path.join(DATA_ROOT, new Date().toISOString().replaceAll(/[:.]/g, "-"));
+// One per checkout, reused across runs, and short so the socket path stays
+// under sun_path's 107 bytes. The server makes it 0700; a socket a killed run
+// left is removed by the server's stale-socket rule.
+const phoneDir = path.join(homedir(), ".cache", "gates-local-e2e", `phone-${createHash("sha256").update(ROOT).digest("hex").slice(0, 8)}`);
+const phoneSocket = path.join(phoneDir, "phone.sock");
 const gpuState = path.join(runDir, "gpu-state.json");
 mkdirSync(runDir, { recursive: true });
 let resets = 0;
@@ -69,8 +80,9 @@ function stopChild(child: ChildProcess | null): Promise<void> {
 const fake = await start("fake", ["test/fake-ollama/main.ts", "--port", String(FAKE_PORT), "--gpu-state", gpuState], process.env, /fake ollama on /);
 
 let server: ChildProcess | null = null;
-/** The phone listener's port while a reset asked for it, else null. */
+/** The Serve stand-in's port while a reset asked for the phone listener, else null. */
 let phonePort: number | null = null;
+let standIn: ServeStandIn | null = null;
 
 /** A free loopback port the kernel picks, never one of the stack's fixed 5286..5289. */
 async function freePort(): Promise<number> {
@@ -91,7 +103,7 @@ async function freePort(): Promise<number> {
 function phoneEnv(): NodeJS.ProcessEnv {
   if (phonePort === null) return {};
   return {
-    GATES_LOCAL_WEB_LISTEN: `127.0.0.1:${phonePort}`,
+    GATES_LOCAL_WEB_LISTEN: `unix:${phoneSocket}`,
     GATES_LOCAL_WEB_ORIGIN: `http://127.0.0.1:${phonePort}`,
     GATES_LOCAL_WEB_USER: PHONE_USER,
     GATES_LOCAL_WEB_ROOT: path.join(ROOT, "apps/web/dist"),
@@ -177,9 +189,13 @@ const control = createServer((req, res) => {
         const body = await readJson(req);
         const { seed: _seed, seedAt: _at, runtimeMode, phone, ...fakeBody } = body;
         await fakeScenario({ scenario: "models", ...fakeBody });
+        await standIn?.close();
+        standIn = null;
         phonePort = phone === true ? await freePort() : null;
         const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined);
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ dataDir, threadId, phonePort }));
+        if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER);
+        const reply = phonePort === null ? { dataDir, threadId, phonePort } : { dataDir, threadId, phonePort, phoneSocket };
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));
       } else if (route === "POST /restart") {
         const body = await readJson(req);
         await stopChild(server);
@@ -202,7 +218,7 @@ control.listen(CONTROL_PORT, "127.0.0.1", () => log(`control on ${CONTROL_PORT};
 
 const shutdown = () => {
   control.close();
-  void Promise.all([stopChild(server), stopChild(fake)]).then(() => process.exit(0));
+  void Promise.all([stopChild(server), stopChild(fake), standIn?.close()]).then(() => process.exit(0));
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
