@@ -35,7 +35,15 @@ const SHOTS: readonly Shot[] = [
   { name: "S-01-thread", light: "S-26-light-thread" },
   { name: "S-04-new", start: "new" },
   { name: "S-05-picker", light: "S-62-light-picker", act: (p) => p.locator("#modelBtn").click() },
-  { name: "S-07-fit", light: "S-42-light-fit-panel", act: (p) => p.locator("#fitBtn").click() },
+  {
+    name: "S-07-fit",
+    light: "S-42-light-fit-panel",
+    // click once the verdict settles: the chip widens then, and an early click left the pointer over Thinking (its tooltip)
+    act: async (p) => {
+      await expect(p.locator("#fitBtn")).toContainText("on GPU");
+      await p.locator("#fitBtn").click();
+    },
+  },
   { name: "S-12-runtime-wrong", scenario: "wrong-service" },
   { name: "S-14-firstrun-found", light: "S-66-light-firstrun-found", start: "firstrun" },
   { name: "S-16-firstrun-nomodels", light: "S-76-light-firstrun-nomodels-before", scenario: "no-models", start: "firstrun" },
