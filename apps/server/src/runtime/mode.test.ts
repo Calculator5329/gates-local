@@ -104,6 +104,8 @@ describe("runtimeMode app", () => {
       const s = await rt.ensure();
       expect(s).toMatchObject({ state: "ready", owner: "app", baseUrl: `http://127.0.0.1:${base + 1}` });
       expect(s.detail).toContain(`Another Ollama, not started by this app, is on port ${base}; the app uses port ${base + 1}.`);
+      // an Ollama is not a busy port: the client says nothing about ports here
+      expect(s.busyPorts).toBeUndefined();
       expect(readRecord(ownedStateFile(appDataDir))?.baseUrl).toBe(`http://127.0.0.1:${base + 1}`);
       expect(other.requests.every((r) => r.startsWith("GET "))).toBe(true);
 

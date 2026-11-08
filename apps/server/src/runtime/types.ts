@@ -18,6 +18,8 @@ export type RuntimeStatus = {
   baseUrl: string;
   version?: string;
   detail?: string;
+  /** Ports that something other than Ollama holds (contracts RuntimeStatus.busyPorts). */
+  busyPorts?: readonly string[];
 };
 
 export type ModelInfo = {

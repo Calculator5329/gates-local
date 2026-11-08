@@ -85,23 +85,12 @@ export const RuntimeStatus = S.Struct({
   owner: RuntimeOwner,
   baseUrl: S.String,
   version: S.optional(S.String),
+  /** Words for people. It can quote another service's reply, so no client parses it. */
   detail: S.optional(S.String),
+  /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
+  busyPorts: S.optional(S.Array(S.String)),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
-
-/**
- * How a runtime `detail` names a port that something other than Ollama holds:
- * "port 5288 (http://127.0.0.1:5288)". The server's probe writes every
- * wrong-service sentence with it; clients read the ports back with busyPorts.
- */
-export const busyPortPlace = (port: string, baseUrl: string): string => `port ${port} (${baseUrl})`;
-
-/** The ports a runtime detail says something other than Ollama holds, in order, once each. */
-export function busyPorts(detail: string | undefined): string[] {
-  const ports = new Set<string>();
-  for (const m of (detail ?? "").matchAll(/\bport (\d+) \(https?:\/\/[^)\s]+\)/g)) if (m[1] !== undefined) ports.add(m[1]);
-  return [...ports];
-}
 
 export const FitVerdict = S.Literals(["fits", "spills", "refuse"]);
 export type FitVerdict = typeof FitVerdict.Type;

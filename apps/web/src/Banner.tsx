@@ -2,7 +2,6 @@
 // composer placeholder and the banner docked above the composer, one entry
 // per RuntimeStatus state plus "offline" for a dropped server connection.
 import type { ReactNode } from "react";
-import { busyPorts } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 import { recheckRuntime } from "./session.ts";
 import { NA, type State, useStore } from "./store.ts";
@@ -22,14 +21,14 @@ export function rtOf(s: RtSource): Rt {
 /**
  * When Gates Local runs its own Ollama (Settings' runtimeMode "app"), the one
  * sentence that says so and names any port it routed around; the ports come
- * from the server's runtime detail (contracts busyPorts). "" otherwise, and in
+ * from the server's runtime status (busyPorts, never parsed from the detail). "" otherwise, and in
  * the system-Ollama "wrong" state, which has its own words.
  */
 export function ownCopyNote(s: RtSource): string {
   const rt = rtOf(s);
   if (rt === "wrong" || rt === "ready" || rt === "offline") return "";
   const port = portOf(s.runtime?.baseUrl);
-  const busy = busyPorts(s.runtime?.detail).filter((p) => p !== port);
+  const busy = (s.runtime?.busyPorts ?? []).filter((p) => p !== port);
   if (busy.length > 0) {
     return `Something other than Ollama answers on ${busy.length === 1 ? "port" : "ports"} ${busy.join(" and ")}, so Gates Local uses its own Ollama on port ${port}.`;
   }
