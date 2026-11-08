@@ -445,6 +445,8 @@ function Runtime() {
               ? `Something other than Ollama answers on port ${port}.`
               : (runtime?.detail ?? info.tip);
   const canSwitch = settings !== NA && settings !== undefined;
+  // A runtime that cannot be used has no owner, so the mode chosen says which way a switch goes.
+  const ownCopy = rt === "ready" || !canSwitch ? app : settings.runtimeMode === "app";
   const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
   const folders = folderWords();
@@ -461,9 +463,9 @@ function Runtime() {
           }
           desc={statD}
         />
-        {rt === "ready" ? (
+        {rt !== "installing" && rt !== "starting" && rt !== "offline" ? (
           <>
-            <Row label={app ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={app ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
+            <Row label={ownCopy ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={ownCopy ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
               {canSwitch ? (
                 <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
                   Switch…
@@ -474,7 +476,7 @@ function Runtime() {
             </Row>
             {confirm && canSwitch ? (
               <div className="cfm" role="group" aria-label="Confirm switch">
-                {app ? (
+                {ownCopy ? (
                   <>
                     <b>Switch back to the system Ollama?</b>
                     <ul>
@@ -513,10 +515,10 @@ function Runtime() {
                     className="btn primary"
                     onClick={() => {
                       setState({ ownerConfirm: false });
-                      void run(updateSettings({ runtimeMode: app ? "system" : "app" }));
+                      void run(updateSettings({ runtimeMode: ownCopy ? "system" : "app" }));
                     }}
                   >
-                    {app ? "Switch" : "Install and switch"}
+                    {ownCopy ? "Switch" : "Install and switch"}
                   </button>
                 </div>
               </div>

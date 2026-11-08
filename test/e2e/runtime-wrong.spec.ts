@@ -23,6 +23,14 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.locator(".set")).toContainText(`Something other than Ollama answers on port ${port}.`);
   });
 
+  test("Settings still offers the app's own copy while the system Ollama cannot be used", async ({ page, open }) => {
+    await open();
+    await page.locator(".sb-foot .rt").click();
+    await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
+    await page.getByRole("button", { name: "Switch…" }).click();
+    await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Switch to Gates Local's own copy of Ollama?");
+  });
+
   test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {
     await open();
     await expect(page.locator(".banner")).toContainText("5288");
