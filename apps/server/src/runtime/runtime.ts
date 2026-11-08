@@ -84,6 +84,11 @@ export type RuntimeOptions = {
    * Linux x64 only: the pinned asset is the Linux amd64 build.
    */
   allowInstall?: boolean;
+  /**
+   * false: never look for an Ollama binary (the app's install, PATH), as on a
+   * machine with none, so tests do not depend on the host. Default true.
+   */
+  searchBinary?: boolean;
   /** Settings' runtimeMode; undefined uses the full discovery order. */
   mode?: RuntimeMode;
   platform?: NodeJS.Platform;
@@ -193,6 +198,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   };
 
   async function locateBinary(): Promise<Binary | undefined> {
+    if (options.searchBinary === false) return undefined;
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };

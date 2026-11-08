@@ -5,6 +5,8 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { CONTROL_URL, appUrl } from "./env.ts";
 
 export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service";
+/** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
+export type RuntimeMode = "system" | "app";
 
 async function control(route: string, body: unknown = {}): Promise<unknown> {
   const r = await fetch(`${CONTROL_URL}${route}`, { method: "POST", body: JSON.stringify(body) });
@@ -14,8 +16,8 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: number | "design" = 0, seedAt?: number): Promise<string | null> {
-    const r = await control("/reset", { scenario, seed, ...(seedAt === undefined ? {} : { seedAt }) });
+  async reset(scenario: Scenario = "models", seed: number | "design" = 0, seedAt?: number, runtimeMode?: RuntimeMode): Promise<string | null> {
+    const r = await control("/reset", { scenario, seed, ...(seedAt === undefined ? {} : { seedAt }), ...(runtimeMode === undefined ? {} : { runtimeMode }) });
     const id = typeof r === "object" && r !== null ? (r as { threadId?: unknown }).threadId : undefined;
     return typeof id === "string" ? id : null;
   },
@@ -32,6 +34,8 @@ interface Fixtures {
   seed: number | "design";
   /** Pins the seeded threads' clock (epoch ms); undefined seeds relative to now. */
   seedAt: number | undefined;
+  /** Saved settings in this runtime mode before the server starts; undefined is a first launch (the server picks). */
+  runtimeMode: RuntimeMode | undefined;
   /** Console errors this test expects, as patterns; anything else fails it. */
   allowedErrors: RegExp[];
   /** Mark first run done before load, so the app opens on a new thread. */
@@ -46,10 +50,11 @@ export const test = base.extend<Fixtures>({
   scenario: ["models", { option: true }],
   seed: [0, { option: true }],
   seedAt: [undefined, { option: true }],
+  runtimeMode: [undefined, { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
-  seededThread: async ({ scenario, seed, seedAt }, use) => {
-    await use(await stack.reset(scenario, seed, seedAt));
+  seededThread: async ({ scenario, seed, seedAt, runtimeMode }, use) => {
+    await use(await stack.reset(scenario, seed, seedAt, runtimeMode));
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens
