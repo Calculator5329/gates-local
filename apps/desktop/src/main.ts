@@ -142,6 +142,8 @@ function run(): void {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
+        // On by default; on Linux it downloads dictionaries from Google.
+        spellcheck: false,
       },
     });
     const contents = window.webContents;
