@@ -460,17 +460,18 @@ async function stalledThinkTurn() {
 }
 
 /** A fake image module: an idle ComfyUI with this owner; stopIdle claims the GPU alone, as image/module.ts does. */
-function idleComfy(owner: "app" | "external", onStop: () => void) {
+function idleComfy(owner: "app" | "external" | "none", onStop: () => void) {
   let stops = 0;
+  let current = owner;
   const build = (lease: GpuLease) => ({
-    current: () => ({ state: "ready", owner }),
+    current: () => ({ state: "ready", owner: current }),
     stopIdle: () => lease.run("image", undefined, async () => { stops += 1; onStop(); }),
   }) as unknown as ImageModule;
-  return { build, stops: () => stops };
+  return { build, stops: () => stops, setOwner: (next: typeof owner) => (current = next) };
 }
 
 describe("chat.send frees an idle ComfyUI the app started", () => {
-  it("stops it before the turn claims the GPU and measures again when the turn would not fit beside it", async () => {
+  it("stops it and measures again when the turn would not fit beside it", async () => {
     let gpu: Gpu | undefined;
     const comfy = idleComfy("app", () => { if (gpu) gpu.freeMib = 15000; });
     const r = await rig({ image: comfy.build });
@@ -481,6 +482,27 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(comfy.stops()).toBe(1);
+  });
+
+  it("decides after the turn's claim: a ComfyUI an image job started while the turn waited is stopped, and the turn admitted", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = idleComfy("none", () => { if (gpu) gpu.freeMib = 15000; });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    const t = await r.client.call("threads.create", {});
+    // An image job holds the GPU alone; no ComfyUI the app started is up yet.
+    const releaseImage = await r.lease!.acquire("image");
+    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await until(() => r.lease!.status().waiting.includes("chat"));
+    // The job started ComfyUI and finished; it keeps its weights, so the turn would not fit beside it.
+    comfy.setOwner("app");
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    releaseImage();
+    const sent = await sending;
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(1);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
   });
 
   it("leaves it running when the turn fits beside it", async () => {

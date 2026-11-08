@@ -304,18 +304,33 @@ export function createApp(deps: AppDeps): App {
         const baseUrl = runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
         const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
-        // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the
-        // GPU alone, so it runs before this turn's own claim: a nested claim would wait on itself.
-        if (deps.image?.current().owner === "app" && (await fit()).verdict !== "fits") await deps.image.stopIdle();
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
-        try {
-          releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
-        } catch {
-          throw new AppError("cancelled", "the turn was cancelled before it started");
+        const claim = async () => {
+          try {
+            releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
+          } catch {
+            throw new AppError("cancelled", "the turn was cancelled before it started");
+          }
+        };
+        await claim();
+        // An idle ComfyUI this app started is the one GPU tenant a turn may free. The check runs inside
+        // the claim, so a ComfyUI an image job started while this turn waited counts. stopIdle claims
+        // the GPU alone: the turn lets its claim go first (a nested claim would wait on itself), then
+        // claims again. Once per turn.
+        let measured: FitReport | undefined;
+        if (deps.image?.current().owner === "app") {
+          measured = await fit();
+          if (measured.verdict !== "fits") {
+            measured = undefined;
+            releaseGpu?.();
+            releaseGpu = undefined;
+            await deps.image.stopIdle();
+            await claim();
+          }
         }
         let report: FitReport;
         try {
-          report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit();
+          report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : measured ?? (await fit());
         } catch (e) {
           if (e instanceof AdmitCancelled) throw new AppError("cancelled", "the turn was cancelled before it started");
           throw e;
