@@ -5,6 +5,9 @@
 
 const GIB = 1024 ** 3;
 
+/** The long-name scenario's extra model: a tag long enough to crowd the composer. */
+export const LONG_NAME = "gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_M";
+
 export interface FakeModel {
   readonly name: string;
   readonly family: string;
@@ -18,7 +21,8 @@ export interface FakeModel {
   readonly headCount: number;
   readonly headCountKv: number;
   readonly keyLength: number;
-  readonly contextLength: number;
+  /** undefined: /api/show reports no maximum. */
+  readonly contextLength: number | undefined;
 }
 
 function model(m: Omit<FakeModel, "digest">): FakeModel {
@@ -101,6 +105,23 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 64,
     contextLength: 2048,
   }),
+  // The long-name scenario: a real Hugging Face GGUF tag of this length.
+  // Sized like the 12B so it can be picked; the test is about the name's
+  // length, not the fit.
+  model({
+    name: LONG_NAME,
+    family: "gemma4",
+    parameterSize: "25.8B",
+    parameterCount: 25_800_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(7.9 * GIB),
+    capabilities: ["completion", "tools"],
+    blockCount: 40,
+    headCount: 32,
+    headCountKv: 8,
+    keyLength: 128,
+    contextLength: 131_072,
+  }),
   // Not installed by default: the README shots install it as a model too big for the fixture GPU at 16k.
   model({
     name: "mistral-small3.2:24b",
@@ -116,6 +137,35 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 128,
     contextLength: 131_072,
   }),
+  // Not installed by default: a chat model whose own window is 2,048 tokens, and one that reports no maximum.
+  model({
+    name: "tiny-chat:2k",
+    family: "tiny",
+    parameterSize: "500M",
+    parameterCount: 500_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(0.4 * GIB),
+    capabilities: ["completion"],
+    blockCount: 12,
+    headCount: 8,
+    headCountKv: 8,
+    keyLength: 64,
+    contextLength: 2048,
+  }),
+  model({
+    name: "no-limit-chat:1b",
+    family: "tiny",
+    parameterSize: "1.0B",
+    parameterCount: 1_000_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(0.8 * GIB),
+    capabilities: ["completion"],
+    blockCount: 12,
+    headCount: 8,
+    headCountKv: 8,
+    keyLength: 64,
+    contextLength: undefined,
+  }),
 ];
 
 /** Installed when the scenario has models; qwen3.5:4b stays pullable. */
@@ -126,6 +176,9 @@ export const EMBED_SMALLEST_INSTALLED = [...DEFAULT_INSTALLED, "nomic-embed-text
 
 /** The embed-only scenario: an embedding model and nothing that can chat (MP-04). */
 export const EMBED_ONLY_INSTALLED = ["nomic-embed-text:latest"] as const;
+
+/** The long-name scenario: the defaults plus a long Hugging Face tag. */
+export const LONG_NAME_INSTALLED = [...DEFAULT_INSTALLED, LONG_NAME] as const;
 
 export function findFakeModel(name: string): FakeModel | undefined {
   const full = name.includes(":") ? name : `${name}:latest`;
@@ -141,7 +194,7 @@ export function showBody(m: FakeModel): Record<string, unknown> {
       "general.architecture": arch,
       "general.parameter_count": m.parameterCount,
       [`${arch}.block_count`]: m.blockCount,
-      [`${arch}.context_length`]: m.contextLength,
+      ...(m.contextLength === undefined ? {} : { [`${arch}.context_length`]: m.contextLength }),
       [`${arch}.embedding_length`]: m.headCount * m.keyLength,
       [`${arch}.attention.head_count`]: m.headCount,
       [`${arch}.attention.head_count_kv`]: m.headCountKv,

@@ -20,7 +20,9 @@ export function closePop(refocus = false): void {
   const p = getState().pop;
   if (p === null) return;
   setState({ pop: null });
-  if (refocus) document.getElementById(POP_ANCHOR[p.id])?.focus();
+  // a thread menu from the sidebar gives focus back to its row
+  const row = p.thread === undefined ? null : document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"]`);
+  if (refocus) (row ?? document.getElementById(POP_ANCHOR[p.id]))?.focus();
 }
 
 /** Escape text for a data-tip string. Every server or model value passes through it. */
@@ -76,12 +78,13 @@ export function Tip() {
       tipFor = t;
       el.innerHTML = html;
       el.classList.add("open");
-      const r = t.getBoundingClientRect();
+      // a tag inside a picker row places its tip by the row (F72); the picker's foot keeps the default
+      const r = (t.closest("#picker .pk-r, #picker .pk-dr") ?? t).getBoundingClientRect();
       const w = el.offsetWidth;
       const h = el.offsetHeight;
       let top = r.top - h - 6;
       let left = r.left + r.width / 2 - w / 2;
-      const picker = t.closest("#picker");
+      const picker = t.closest(".pk-foot") ? null : t.closest("#picker");
       if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
         // Beside its own row (F72), so it never covers another row's name or a group heading.
         top = r.top + r.height / 2 - h / 2;

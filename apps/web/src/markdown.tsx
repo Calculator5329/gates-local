@@ -1,15 +1,16 @@
 // A small Markdown renderer for model replies. It builds React elements and
 // never sets HTML, so model text cannot inject markup. It covers what local
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
-// inline code, bold, italics and http(s) links. Half-written input (a reply
-// mid-stream) renders as far as it goes.
-import { type ReactNode, memo } from "react";
+// inline code, bold, italics and http(s) links. A streaming reply arrives here
+// as whole blocks (reveal.ts); half-written input still renders as far as it goes.
+import { type ReactNode, memo, useEffect, useState } from "react";
+import { Icon } from "./icons.tsx";
 
 type Block =
   | { t: "p"; text: string }
   | { t: "h"; level: 1 | 2 | 3 | 4; text: string }
   | { t: "ul" | "ol"; items: string[] }
-  | { t: "code"; text: string }
+  | { t: "code"; lang: string; text: string }
   | { t: "quote"; text: string }
   | { t: "table"; head: string[]; rows: string[][]; num: boolean[] };
 
@@ -34,11 +35,12 @@ function parse(src: string): Block[] {
       continue;
     }
     if (/^\s*```/.test(line)) {
+      const lang = /^\s*```\s*([\w+#.-]*)/.exec(line)?.[1] ?? "";
       const body: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i] ?? "")) body.push(lines[i++] ?? "");
       i++;
-      out.push({ t: "code", text: body.join("\n") });
+      out.push({ t: "code", lang, text: body.join("\n") });
       continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
@@ -117,27 +119,46 @@ export function inline(text: string): ReactNode[] {
   return out;
 }
 
-const CARET = <span className="caret" aria-hidden="true" />;
+/** A fenced code block: the fence's language at the top left, its own copy button at the top right (shown on hover or focus). */
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <div className="cb">
+      <div className="cb-h">
+        {lang !== "" ? <span className="cb-lang">{lang}</span> : null}
+        <button
+          type="button"
+          className={copied ? "cb-copy on" : "cb-copy"}
+          aria-label="Copy code"
+          data-tip={copied ? undefined : "Copy code"}
+          onClick={() => {
+            navigator.clipboard?.writeText(code).catch(() => undefined);
+            setCopied(true);
+          }}
+        >
+          <Icon id={copied ? "check" : "copy"} />
+          {copied ? <span aria-live="polite">Copied</span> : null}
+        </button>
+      </div>
+      <pre>
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
 
-/** One block; `caret` puts the stream caret right after its last character. */
-function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
-  const c = caret ? CARET : null;
+function renderBlock(b: Block, key: number): ReactNode {
   switch (b.t) {
     case "p":
-      return (
-        <p key={key}>
-          {inline(b.text)}
-          {c}
-        </p>
-      );
+      return <p key={key}>{inline(b.text)}</p>;
     case "h": {
       const H = `h${b.level}` as const;
-      return (
-        <H key={key}>
-          {inline(b.text)}
-          {c}
-        </H>
-      );
+      return <H key={key}>{inline(b.text)}</H>;
     }
     case "ul":
     case "ol": {
@@ -145,28 +166,15 @@ function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
       return (
         <L key={key}>
           {b.items.map((it, j) => (
-            <li key={j}>
-              {inline(it)}
-              {j === b.items.length - 1 ? c : null}
-            </li>
+            <li key={j}>{inline(it)}</li>
           ))}
         </L>
       );
     }
     case "code":
-      return (
-        <pre key={key}>
-          <code>{b.text}</code>
-          {c}
-        </pre>
-      );
+      return <CodeBlock key={key} lang={b.lang} code={b.text} />;
     case "quote":
-      return (
-        <blockquote key={key}>
-          {inline(b.text)}
-          {c}
-        </blockquote>
-      );
+      return <blockquote key={key}>{inline(b.text)}</blockquote>;
     case "table":
       return (
         <table key={key}>
@@ -195,16 +203,7 @@ function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
   }
 }
 
-/** The reply body. A trailing caret element follows the text while it streams. */
-export const Markdown = memo(function Markdown({ text, caret }: { text: string; caret?: boolean }) {
-  const blocks = parse(text);
-  const last = blocks.at(-1);
-  // a table cannot hold the caret inline, so it follows the table
-  const trailing = caret === true && (last === undefined || last.t === "table");
-  return (
-    <div className="md">
-      {blocks.map((b, i) => renderBlock(b, i, caret === true && i === blocks.length - 1 && b.t !== "table"))}
-      {trailing ? CARET : null}
-    </div>
-  );
+/** The reply body. `live` marks a streaming reply, whose blocks fade in as they finish. */
+export const Markdown = memo(function Markdown({ text, live }: { text: string; live?: boolean }) {
+  return <div className={live === true ? "md live" : "md"}>{parse(text).map((b, i) => renderBlock(b, i))}</div>;
 });

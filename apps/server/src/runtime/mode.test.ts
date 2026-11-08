@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeStatus } from "@gates-local/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, startFakeServer } from "../fit/fake-http.ts";
 import { httpGet } from "./http.ts";
 import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
@@ -578,5 +578,44 @@ describe("Windows (platform injected)", () => {
     expect(await isUp(s.baseUrl)).toBe(true);
     expect(existsSync(ownedStateFile(appDataDir))).toBe(true);
     expect(calls.every((c) => c === "powershell.exe")).toBe(true);
+  });
+});
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const started = async (platform: NodeJS.Platform, procRun?: SyncRunner) => {
+  const asset = buildFakeRelease(work);
+  const release = await startReleaseServer(asset);
+  try {
+    const sha256 = createHash("sha256").update(asset).digest("hex");
+    const manifest = { version: VERSION, url: release.url, sha256, sizeBytes: asset.length, format: FAKE_RELEASE_FORMAT, verified: true, source: "test" };
+    const rt = await runtime({ platform, arch: "x64", manifest, allowInstall: true, ...(procRun ? { procRun } : {}), externalBaseUrl: await nothingAt() });
+    expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
+    const pid = readRecord(ownedStateFile(appDataDir))?.pid;
+    expect(pid).toBeDefined();
+    return { rt, pid: pid as number };
+  } finally {
+    await release.close();
+  }
+};
+
+describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
+  it("kills the copy this process started on Windows, where nothing could stop it after this process exits", async () => {
+    const { rt, pid } = await started("win32", cimFake([]));
+    rt.killNow();
+    await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+  });
+
+  it("leaves it running elsewhere, where the next run adopts it", async () => {
+    const { rt, pid } = await started("linux");
+    rt.killNow();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(alive(pid)).toBe(true);
   });
 });

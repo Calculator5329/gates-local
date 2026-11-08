@@ -1,31 +1,68 @@
-// The docked GPU memory panel (shell.md F16, F17b, F36, F48, F63): the verdict
-// for a model at a context, the context control, and where the memory goes,
-// from fit.check plus gpu.status when the server has it.
+// GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
+// verdict for a model at a context, the context control, and where the memory
+// goes, from fit.check plus gpu.status when the server has it.
 import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { ensureFit, setContext, updateSettings } from "./session.ts";
+import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
-/** Open the panel for a model (null: the chat's own model). It needs a ready runtime. */
+/** Open GPU memory in Settings › Advanced for a model (none: the chat's own model). */
 export function openFit(model?: string): void {
   const s = getState();
   closeTip();
-  if (!chatReady(s)) return;
-  setState({ pop: null, fitPanel: { open: true, model: model !== undefined && model !== s.model ? model : null } });
+  setState({ pop: null, fitPanel: { open: s.fitPanel.open, model: model !== undefined && model !== s.model ? model : null } });
+  openSettings("advanced");
 }
 
-export function closeFit(focusChip: boolean): void {
+/** The thread menu's GPU memory: the panel beside the chat, closed until asked for. */
+export function openGpuPanel(): void {
+  closeTip();
+  setState({ pop: null, fitPanel: { open: true, model: null } });
+  requestAnimationFrame(() => document.querySelector<HTMLElement>("#fitPanel .fpn-x")?.focus());
+}
+
+export function closeGpuPanel(refocus: boolean): void {
   if (!getState().fitPanel.open) return;
   closeTip();
   setState({ fitPanel: { open: false, model: null } });
-  if (focusChip && getState().view !== "settings") document.getElementById("fitBtn")?.focus();
+  if (refocus) (document.getElementById("moreBtn") ?? document.getElementById("ta"))?.focus();
+}
+
+const gpuHead = (gpu: GpuStatus | undefined): string =>
+  gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+
+/** GPU memory docked beside the chat (thread menu › GPU memory); Settings › Advanced has the same content. */
+export function GpuPanel() {
+  const open = useStore((s) => s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun");
+  const ready = useStore(chatReady);
+  const model = useStore((s) => s.fitPanel.model ?? s.model);
+  const gpuRaw = useStore((s) => s.gpu);
+  if (!open) return null;
+  const gpu = gpuRaw === NA ? undefined : gpuRaw;
+  const title = noGpu(gpu) ? "Memory" : "GPU memory";
+  return (
+    <aside className="fpanel" id="fitPanel" aria-label={title}>
+      <div className="fpn-h">
+        <div className="fp-h">
+          <span className="fp-t">{title}</span>
+          <span className="fp-gpu">{gpuHead(gpu)}</span>
+        </div>
+        <button type="button" className="ibtn xs fpn-x" aria-label={noGpu(gpu) ? "Close memory" : "Close GPU memory"} data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
+          <Icon id="x" cls="s14" />
+        </button>
+      </div>
+      <div className="fpn-b">
+        {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
+      </div>
+    </aside>
+  );
 }
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
-const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : 32768);
+const otherCtx = (c: ContextSize): ContextSize => (c === 65536 ? 32768 : c === 32768 ? 65536 : c === 8192 ? 16384 : 32768);
 
 /** "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti". */
 export function shortGpu(name: string | undefined): string {
@@ -43,13 +80,19 @@ export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize 
   const other = otherCtx(numCtx);
   const cur = useStore((s) => s.fits[fitKey(model, numCtx)]);
   const alt = useStore((s) => s.fits[fitKey(model, other)]);
-  useEffect(() => ensureFit(model, other), [model, other, alt]);
-  const line = ctxLine(cur === "error" ? undefined : cur, alt === "error" ? undefined : alt, other);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const canOther = max === undefined || other <= max;
+  useEffect(() => {
+    if (canOther) ensureFit(model, other);
+  }, [model, other, alt, canOther]);
+  const line = ctxLine(cur === "error" ? undefined : cur, alt === "error" || !canOther ? undefined : alt, other);
   const [lbl, rest] = line.alt?.split("|") ?? [];
+  const clamped = max !== undefined && numCtx > max;
   // F76: the definition and the other size's result are separate lines; the scope is the row label above.
   return (
     <>
       <span className="ctx-def">{line.lead}</span>
+      {clamped ? <span className="ctx-alt">Runs at {k(max)}, the most this model takes.</span> : null}
       {lbl !== undefined ? (
         <span className="ctx-alt">
           <span className="ctx-k">{lbl}</span> {rest}
@@ -196,13 +239,6 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
 
 function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
   const ctx = k(r.numCtx);
-  if (v.k === "no" && v.limit !== undefined) {
-    return (
-      <div className="fp-n">
-        <span className="fp-who">{name}</span> keeps at most {k(v.limit)} of conversation in view, so it cannot run at {ctx}. Memory is not the limit.
-      </div>
-    );
-  }
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
     const who = gpu && gpu.vendor === "nvidia" ? holders(gpu.occupants) : null;
@@ -238,10 +274,12 @@ function Body({ model }: { model: string }) {
   const gpuRaw = useStore((s) => s.gpu);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const load = useStore((s) => s.loads[model]);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
   useEffect(() => ensureFit(model, numCtx), [model, numCtx, report]);
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const name = describeModel(model, catalog).name;
-  const loaded = load?.state === "ready" && load.numCtx === numCtx;
+  const loaded = load?.state === "ready" && load.numCtx === ctx;
   const pickCtx = (c: ContextSize) => {
     closeTip();
     setContext(c);
@@ -256,12 +294,12 @@ function Body({ model }: { model: string }) {
         {v.k === "no" ? (
           <span className="vl no">
             <span className="vd no" />
-            {v.limit !== undefined ? v.word : `Needs ${gb(v.amt)} more at ${k(numCtx)}`}
+            {`Needs ${gb(v.amt)} more at ${k(ctx)}`}
           </span>
         ) : (
           <>
             <VLabel v={v} />
-            <span style={{ color: "var(--muted-foreground)" }}>at {k(numCtx)}</span>
+            <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
           </>
         )}
       </div>
@@ -271,7 +309,7 @@ function Body({ model }: { model: string }) {
         <span className="k">{inSettings ? "Default context" : "Context for this chat"}</span>
         <span className="mini-seg">
           {CONTEXT_SIZES.map((c) => (
-            <button key={c} type="button" data-ctx={c} className={numCtx === c ? "on" : ""} onClick={() => pickCtx(c)}>
+            <button key={c} type="button" data-ctx={c} className={ctx === c ? "on" : ""} disabled={max !== undefined && c > max} data-tip={max !== undefined && c > max ? `This model takes at most ${k(max)}.` : undefined} onClick={() => pickCtx(c)}>
               {k(c)}
             </button>
           ))}
@@ -291,38 +329,34 @@ function Body({ model }: { model: string }) {
       ) : gpu.vendor === "unreadable" ? (
         <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
       ) : (
-        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={numCtx} />
+        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={ctx} />
       )}
-      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
+      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={ctx} loaded={loaded} />}
     </>
   );
 }
 
-export function FitPanel() {
-  const open = useStore((s) => s.fitPanel.open && s.view !== "firstrun");
+/** GPU memory, the first group of Settings › Advanced: the same content the docked panel had, live from the store. */
+export function GpuMemory() {
   const ready = useStore(chatReady);
-  const model = useStore((s) => s.fitPanel.model ?? s.model);
+  const chat = useStore((s) => s.model);
+  const shown = useStore((s) => s.fitPanel.model);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const gpuRaw = useStore((s) => s.gpu);
-  useEffect(() => {
-    if (open && !ready) closeFit(false);
-  }, [open, ready]);
-  if (!open || !ready || model === undefined) return null;
-  const gpu = gpuRaw === NA ? undefined : gpuRaw;
-  const head = gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+  const model = shown ?? chat;
+  const head = gpuHead(gpuRaw === NA ? undefined : gpuRaw);
   return (
-    <aside className="fpanel" id="fitPanel" role="complementary" aria-label={noGpu(gpu) ? "Memory" : "GPU memory"}>
-      <div className="fpn-h">
-        <div className="fp-h">
-          <span className="fp-t">{noGpu(gpu) ? "Memory" : "GPU memory"}</span>
-          <span className="fp-gpu">{head}</span>
-        </div>
-        <button type="button" className="ibtn xs" aria-label="Close" data-tip="Close (Esc)" onClick={() => closeFit(true)}>
-          <Icon id="x" cls="s14" />
-        </button>
+    <div className="fp-set" id="gpuMemory">
+      <div className="fp-h">
+        <span className="fp-t">{model === undefined ? "No model yet" : describeModel(model, catalog).name}</span>
+        <span className="fp-gpu">{head}</span>
+        {shown !== null && chat !== undefined ? (
+          <button type="button" className="qa" onClick={() => setState((s) => ({ fitPanel: { open: s.fitPanel.open, model: null } }))}>
+            Show {describeModel(chat, catalog).name}
+          </button>
+        ) : null}
       </div>
-      <div className="fpn-b">
-        <Body model={model} />
-      </div>
-    </aside>
+      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
+    </div>
   );
 }

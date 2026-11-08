@@ -92,6 +92,6 @@ export const notForChat = (m: Caps | undefined): { label: string; tip: string } 
       : { label: "Embedding model, not for chat", tip: "Turns text into vectors for search; it cannot answer a chat." };
 
 /** The rule in words, for the Recommended tooltip. It says what pick.ts does. */
-export function pickRuleText(numCtx: number): string {
-  return `Your default model if it runs at ${k(numCtx)} of context. Otherwise the first model that fits your GPU at ${k(numCtx)}, checking Gates Local's recommended models in order, then your others from largest; if none fits, the first that runs partly in system memory. Embedding models are left out.`;
+export function pickRuleText(numCtx: number, cpu = false): string {
+  return `Your default model if it runs at ${k(numCtx)} of context. Otherwise the first model that ${cpu ? "fits in system memory" : "fits your GPU"} at ${k(numCtx)}, checking Gates Local's recommended models in order, then your others from largest; if none fits, the first that runs partly in system memory. Embedding models are left out.`;
 }

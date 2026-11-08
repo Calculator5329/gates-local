@@ -74,3 +74,24 @@ describe("Models on a computer with no supported GPU", () => {
     expect(empty).toContain("Download Qwen 3.5 4B");
   });
 });
+
+describe("Models with a model whose window is smaller than the default", () => {
+  it("shows it as usable, at the size it runs at, with no too-small label", () => {
+    const tag = "tiny-chat:2k";
+    // the server answers a 16k check at the most the model takes
+    const report = { ...fit(tag, "spills", 1), verdict: "fits", numCtx: 2048, spillRamBytes: 0 };
+    const html = render(
+      noGpuComputer({
+        gpu: { vendor: "nvidia", name: "Test GPU" },
+        models: [{ ...installed(tag), maxContext: 2048 }],
+        catalog: [],
+        fits: { [`${tag}@16384`]: report },
+        settings: { defaultModel: tag },
+      }),
+    );
+    expect(html).toContain("Runs well");
+    expect(html).not.toMatch(/supports up to|too small|unsupported|won.{1,6}t run/i);
+    expect(html).toContain("run at 2k");
+    expect(html).not.toContain("run at 16k");
+  });
+});

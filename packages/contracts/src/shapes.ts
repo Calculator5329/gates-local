@@ -89,6 +89,8 @@ export const ModelInfo = S.Struct({
   modifiedAt: S.String,
   /** From /api/show, cached by digest. A model without "completion" cannot chat. */
   capabilities: S.Array(ModelCapability),
+  /** The most context this model takes, from /api/show; the safe fallback when it does not say. */
+  maxContext: S.optional(PositiveInt),
   /** Set on exactly one model, the one chat starts on, when any installed model can chat. */
   pick: S.optional(ModelPick),
 });
@@ -133,7 +135,6 @@ export const FitReport = S.Struct({
   /** One sentence that names the numbers behind the verdict. */
   message: S.optional(S.String),
   /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
-  contextLimit: S.optional(PositiveInt),
 });
 export type FitReport = typeof FitReport.Type;
 
@@ -173,8 +174,8 @@ export const NumCtx = PositiveInt;
 // image lanes build against one table. A method with no handler answers
 // "not-implemented"; the client hides or explains what is not built yet.
 
-/** The three context sizes the product offers (16k floor, 32k and 64k where fit allows). */
-export const ContextSize = S.Literals([16384, 32768, 65536]);
+/** The context sizes the product offers; a model runs at the most it takes when that is less. */
+export const ContextSize = S.Literals([8192, 16384, 32768, 65536]);
 export type ContextSize = typeof ContextSize.Type;
 
 export const Theme = S.Literals(["dark", "light", "system"]);

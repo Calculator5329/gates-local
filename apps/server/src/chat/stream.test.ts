@@ -4,6 +4,8 @@ import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
 import { chatRequestBody, streamTurn, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent } from "./types.ts";
 
+const sentContents = (body: unknown) => ((body as { messages?: { content: string }[] } | undefined)?.messages ?? []).map((m) => m.content);
+
 let server: FakeServer | undefined;
 afterEach(async () => {
   await server?.close();
@@ -187,12 +189,60 @@ describe("streamTurn against a fake Ollama", () => {
     expect(s.requests).toEqual([]);
   });
 
-  it("refuses num_ctx below 16384 before any request is sent", async () => {
+  it("sends a small context as it is and refuses only a size that is not a count", async () => {
     const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
-    for (const numCtx of [8192, 16383, 2048, 16384.5]) {
+    for (const numCtx of [0, -1, 2048.5]) {
       const events = await collect({ baseUrl: s.baseUrl, numCtx });
-      expect(events).toEqual([expect.objectContaining({ type: "error", code: "num-ctx-below-floor" })]);
+      expect(events).toEqual([expect.objectContaining({ type: "error", code: "num-ctx-invalid" })]);
     }
+    expect(s.requests).toEqual([]);
+    await collect({ baseUrl: s.baseUrl, numCtx: 2048 });
+    expect(s.requests[0]?.body).toMatchObject({ options: { num_ctx: 2048 } });
+  });
+
+  it("drops the oldest turns that do not fit a small window and keeps the newest", async () => {
+    const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
+    const long = "x".repeat(8000);
+    await collect({
+      baseUrl: s.baseUrl,
+      numCtx: 2048,
+      messages: [
+        { role: "system", content: "Be brief." },
+        { role: "user", content: long },
+        { role: "assistant", content: long },
+        { role: "user", content: "recent question" },
+        { role: "assistant", content: "recent answer" },
+        { role: "user", content: "now" },
+      ],
+    });
+    expect(sentContents(s.requests[0]?.body)).toEqual(["Be brief.", "recent question", "recent answer", "now"]);
+  });
+
+  it("never starts what it keeps on a reply", async () => {
+    const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
+    await collect({
+      baseUrl: s.baseUrl,
+      numCtx: 2048,
+      messages: [
+        { role: "user", content: "x".repeat(8000) },
+        { role: "assistant", content: "fits on its own" },
+        { role: "user", content: "now" },
+      ],
+    });
+    expect(sentContents(s.requests[0]?.body)).toEqual(["now"]);
+  });
+
+  it("sends a normal thread whole in a normal window", async () => {
+    const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
+    const messages = ["a", "b", "c", "d", "e"].map((text, i) => ({ role: i % 2 === 0 ? ("user" as const) : ("assistant" as const), content: text }));
+    await collect({ baseUrl: s.baseUrl, numCtx: 16384, messages });
+    expect(sentContents(s.requests[0]?.body)).toHaveLength(5);
+  });
+
+  it("says so in plain words when the new message alone is too long for the window, and sends nothing", async () => {
+    const s = await fakeChat((res) => streamPieces(res, [doneLine()]));
+    const events = await collect({ baseUrl: s.baseUrl, numCtx: 2048, messages: [{ role: "user", content: "y".repeat(20000) }] });
+    expect(events).toEqual([expect.objectContaining({ type: "error", code: "context-too-small", message: expect.stringMatching(/too long for this model.*2k/) })]);
     expect(s.requests).toEqual([]);
   });
 });

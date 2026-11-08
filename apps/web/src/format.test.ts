@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { decodeSpeed, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, k, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
 
 const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
 describe("a Library source's size", () => {
@@ -26,13 +26,32 @@ const base: FitReport = {
   measuredAt: 1,
 };
 
+describe("the context a model runs at", () => {
+  const models = [{ name: "tiny:2k", maxContext: 2048 }, { name: "big:9b", maxContext: 262144 }, { name: "new:1b" }];
+
+  it("is the chosen size, never past what the model takes, and never jumps up to its maximum", () => {
+    expect(ctxFor(16384, models, "tiny:2k")).toBe(2048);
+    expect(ctxFor(16384, models, "big:9b")).toBe(16384);
+  });
+
+  it("stays the chosen size until the model is known", () => {
+    expect(ctxFor(16384, models, "new:1b")).toBe(16384);
+    expect(ctxFor(16384, models, "absent")).toBe(16384);
+    expect(ctxFor(16384, undefined, "tiny:2k")).toBe(16384);
+  });
+
+  it("offers an 8k choice and labels small windows honestly", () => {
+    expect(CONTEXT_SIZES).toEqual([8192, 16384, 32768, 65536]);
+    expect(k(2048)).toBe("2k");
+    expect(k(512)).toBe("512");
+  });
+});
+
 describe("verdictOf", () => {
-  it("words a context-limit refusal as the most the model supports", () => {
-    const v = verdictOf({ ...base, model: "nomic-embed-text:latest", contextLimit: 2048, message: "num_ctx 16384 is above the model's context_length 2048; refused." });
-    expect(v.k).toBe("no");
-    expect(v.word).toBe("Supports up to 2k context");
-    expect(v.chip).toBe("up to 2k context");
-    expect(v.word).not.toMatch(/memory/i);
+  it("a fitting report on a small model reads as any other fit, never as a refusal", () => {
+    const v = verdictOf({ ...base, numCtx: 2048, verdict: "fits" });
+    expect(v.k).toBe("gpu");
+    expect(v.word).toBe("Runs on GPU");
   });
 
   it("keeps the memory words for a memory refusal", () => {
@@ -48,23 +67,11 @@ const msg = (stats: Message["stats"]): Message => ({ id: "a", threadId: "t", rol
 const fits = (numCtx: number, need: number): FitReport => ({ ...base, numCtx, verdict: "fits", needVramBytes: need * GIB });
 
 describe("the other context size's words (F36b)", () => {
-  it("MP-06: a refusal past the model's context limit says so, not 'not enough memory'", () => {
-    const past = { ...base, numCtx: 32768, contextLimit: 16384, message: "num_ctx 32768 is above the model's context_length 16384; refused." };
-    const words = otherCtxWords(fits(16384, 6), past);
-    expect(words).toBe("past its context limit; it supports up to 16k");
-    expect(words).not.toMatch(/memory/i);
-  });
-
   it("keeps the memory and GPU words otherwise", () => {
     expect(otherCtxWords(fits(16384, 6), fits(32768, 8.5))).toBe("still runs on GPU; uses 2.5 GB more");
     expect(otherCtxWords(fits(16384, 6), { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB })).toBe("not enough memory; needs 3.0 GB more");
   });
 
-  it("does not say 'still' when the two refusals differ in kind", () => {
-    const limited = { ...base, numCtx: 65536, contextLimit: 32768 };
-    const memory = { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 1 * GIB };
-    expect(otherCtxWords(limited, memory)).toBe("not enough memory; needs 1.0 GB more");
-  });
 });
 
 describe("decode speed", () => {
@@ -78,5 +85,18 @@ describe("decode speed", () => {
   it("falls back to the total for a reply saved before decode time was kept", () => {
     expect(decodeSpeed({ completionTokens: 60, durationMs: 2000 })).toBe(30);
     expect(decodeSpeed({ completionTokens: 60 })).toBeUndefined();
+  });
+});
+
+describe("fileSize", () => {
+  it("moves up a unit when rounding reaches 1024 (LS-01)", () => {
+    expect(fileSize(1_048_064)).toBe("1 MB");
+    expect(fileSize(1_073_217_536)).toBe("1.0 GB");
+  });
+
+  it("stays in the unit below that", () => {
+    expect(fileSize(1023)).toBe("1023 bytes");
+    expect(fileSize(1_047_552)).toBe("1023 KB");
+    expect(fileSize(1_072_693_248)).toBe("1023 MB");
   });
 });

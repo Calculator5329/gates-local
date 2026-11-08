@@ -364,11 +364,6 @@ describe("chat.send", () => {
     expect(r.store.getThread(t.id).messages).toEqual([]);
     expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
 
-    // Below the num_ctx floor the fit check refuses before reading anything.
-    const floor = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 4096 }));
-    expect(floor.code).toBe("wont-fit");
-    expect(floor.message).toContain("16384");
-
     r.gpu.freeMib = 6000;
     r.gpu.memAvailableKb = 40_000_000;
     expect((await r.client.call("fit.check", { model: MODEL, numCtx: 16384 })).verdict).toBe("spills");
@@ -395,6 +390,40 @@ const caps = (capabilities: string[] | undefined) => {
   const { capabilities: _drop, ...rest } = SHOW as Record<string, unknown>;
   return capabilities === undefined ? rest : { ...rest, capabilities };
 };
+
+/** /api/show for a chat model whose own window is 2,048 tokens. */
+const TINY_SHOW = {
+  model_info: {
+    "general.architecture": "tiny",
+    "tiny.block_count": 4,
+    "tiny.context_length": 2048,
+    "tiny.attention.head_count": 4,
+    "tiny.attention.head_count_kv": 4,
+    "tiny.attention.key_length": 64,
+    "tiny.attention.value_length": 64,
+  },
+  capabilities: ["completion"],
+};
+
+describe("a model with a 2,048 context window", () => {
+  it("is allowed, runs at 2,048 when 16k is asked for, and says so in its stats", async () => {
+    const r = await rig({ show: TINY_SHOW });
+    const bodies: unknown[] = [];
+    r.setChat((res, body) => {
+      bodies.push(body);
+      return quickReply(res, body);
+    });
+    const report = await r.client.call("fit.check", { model: MODEL, numCtx: 16384 });
+    expect(report).toMatchObject({ verdict: "fits", numCtx: 2048 });
+    expect(await r.client.call("models.list", {})).toEqual([expect.objectContaining({ name: MODEL, maxContext: 2048 })]);
+
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const done = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(bodies[0]).toMatchObject({ options: { num_ctx: 2048 } });
+    expect(done.event).toMatchObject({ message: { stats: { numCtx: 2048 } } });
+  });
+});
 
 describe("chat.send and the think flag", () => {
   it("sends think as asked to a model that can think", async () => {
@@ -453,8 +482,13 @@ function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
  */
 async function stalledThinkTurn() {
   const r = await rig({ image: idleComfy("external", () => undefined).build });
-  // The catalog's first refresh asks /api/show for capabilities; let it land before counting the turn's shows.
-  await r.client.call("models.list", {});
+  // The catalog reads each model's capabilities with /api/show too (runtime/models.ts), on the
+  // runtime's ready event. Wait until it lists the model: its capabilities are then cached by
+  // digest, so the stall below meets only the turn's own calls (fit check, then think probe).
+  for (let i = 0; !(await r.client.call("models.list", {})).some((m) => m.name === MODEL); i += 1) {
+    if (i > 100) throw new Error("the catalog never listed the model");
+    await sleep(20);
+  }
   let shows = 0;
   r.setShow((res) => {
     shows += 1;

@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-11-08: A new default model takes effect while another is loaded
+
+- The app's model pick now counts a model that happens to be loaded as
+  room, the way an actual load does. A loaded idle model could keep a
+  new default from being picked, and a new chat stayed on the old one.
+
+## 2026-11-08: Thinking off with no GPU, Windows and size fixes
+
+- Thinking starts off on a computer with no supported GPU, where a
+  thought took 394 s on the test machine. The composer's button still
+  turns it on, and a reconnect keeps that choice.
+- Windows: a shutdown that runs out of time kills the app's own Ollama
+  through its handle (`killNow`), since nothing could stop it afterward.
+- The model catalog no longer stays empty when a newer request for it
+  failed, and the next model refresh asks again.
+- The first-run tooltip no longer promises a GPU on a computer with none.
+- File sizes move up a unit when rounding reaches 1024: "1 MB", not
+  "1024 KB".
+
+## 2026-11-08: no context minimum
+
+- The 16k floor is gone. A model runs at the size chosen, or at the most
+  it reports when that is less (`effectiveNumCtx`, set once in the fit
+  check and carried on `FitReport.numCtx` to chat, preloads and the pick).
+  A model that reports no maximum runs at 4k, Ollama's own default.
+- 8k joins 16k, 32k and 64k. A large model still defaults to 16k. The
+  context control disables sizes a model cannot take and says
+  "Runs at 2k, the most this model takes."
+- A window too small for the chat drops the oldest turns; a message too
+  long on its own gets a plain sentence and no request; tools that would
+  take over half the window mean a plain reply with a note saying why
+  (`chat/window.ts`). A small-window model is never a recommendation, so
+  it cannot displace one in the download list.
+
 ## 2026-11-07: source updates
 
 - `pnpm run app-update` (`scripts/update.ts`, `apps/server/src/update/`):

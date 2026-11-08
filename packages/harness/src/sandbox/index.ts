@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import type { Writable } from "node:stream";
+import { homedir } from "node:os";
+import path from "node:path";
+import type { Readable, Writable } from "node:stream";
 import { canonicalPathSync } from "../paths.ts";
 import type { LibraryEntry } from "../types.ts";
 import { isSeccompArch, lockFilter, type SeccompArch } from "./seccomp.ts";
@@ -14,10 +16,16 @@ export const SCOPE_LIMITS = { memoryMaxBytes: 512 * 1024 * 1024, tasksMax: 64 } 
 export const SCOPE_OFF = "The shell tool needs a user systemd session to cap its memory; it is off on this machine.";
 export const ARCH_OFF = "The shell tool's lock filter covers x86_64 and aarch64 only; it is off on this machine.";
 
-/** The capped scope bwrap runs in; an OOM inside it kills only the sandbox. */
+/**
+ * The capped scope bwrap runs in. The kernel kills the process that goes over the
+ * cap and the rest of the shell carries on, as in a terminal. OOMPolicy=continue
+ * keeps systemd from stopping the whole scope and marking it failed (oom-kill),
+ * which also raised a desktop out-of-memory notice for every hog.
+ */
 const scopeArgs = (unit: string) => [
   "--user", "--scope", "--quiet", "--collect", `--unit=${unit}`,
-  "-p", "MemoryMax=512M", "-p", "MemorySwapMax=0", "-p", `TasksMax=${SCOPE_LIMITS.tasksMax}`, "--",
+  "-p", "MemoryMax=512M", "-p", "MemorySwapMax=0", "-p", `TasksMax=${SCOPE_LIMITS.tasksMax}`,
+  "-p", "OOMPolicy=continue", "--",
 ];
 const tmpfs = (dest: string) => ["--size", TMPFS_BYTES, "--tmpfs", dest];
 /**
@@ -62,11 +70,69 @@ export interface SandboxHost {
   run: (command: string, args: readonly string[], fds?: readonly Buffer[]) => Promise<{ code: number | null; output: string; error?: Error }>;
 }
 
-function spawnScoped(command: string, args: readonly string[], fds: readonly Buffer[]) {
+/** `fds` are written to fds 3, 4, ...; `readFds` more pipes after them stay open for the child to write. */
+function spawnScoped(command: string, args: readonly string[], fds: readonly Buffer[], readFds = 0) {
   // bwrap --clearenv empties the sandbox's environment; this env only reaches systemd-run.
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe", ...fds.map(() => "pipe" as const)], detached: true, env: scopeEnv() });
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe", ...[...fds, ...Array<undefined>(readFds)].map(() => "pipe" as const)], detached: true, env: scopeEnv() });
   fds.forEach((data, i) => (child.stdio[3 + i] as Writable).on("error", () => undefined).end(data));
   return child;
+}
+
+/**
+ * fd 5 is the start marker: the sandbox's first process writes one byte to it once
+ * systemd-run and bwrap have set everything up, and closes it before the command
+ * runs. A failure with no marker came from the setup, never from the command.
+ */
+const MARKER_FD = 5;
+const launch = (command: string) => ["/usr/bin/bash", "--noprofile", "--norc", "-c",
+  `printf . >&${MARKER_FD}; exec ${MARKER_FD}>&-; exec /usr/bin/bash --noprofile --norc -c "$1"`, "gates-shell", command];
+
+const virtualPath = (source: LibraryEntry) => source.kind === "sqlite" ? `/data/${source.id}.db` : `/library/${source.id}`;
+/** The host path a source binds: the snapshot for a database, the folder or file itself otherwise. */
+const boundPath = (source: LibraryEntry) => source.kind === "sqlite" ? requiredSnapshot(source) : source.path;
+
+/** A source whose host path is gone, unreadable or moved, in virtual terms only. */
+function unavailable(source: LibraryEntry, error?: unknown): Error {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const what = source.kind === "folder" ? "folder" : "file";
+  const why = source.kind === "sqlite"
+    ? code === "ENOENT" || code === "ENOTDIR" ? "the source was removed during this reply" : "its snapshot could not be opened; refresh the source"
+    : code === undefined ? `its ${what} now resolves somewhere else; reconnect it`
+    : code === "ENOENT" || code === "ENOTDIR" ? `its ${what} was moved or removed`
+    : code === "EACCES" || code === "EPERM" ? `its ${what} can no longer be read`
+    : `its ${what} could not be opened`;
+  return new Error(`${virtualPath(source)}: no longer available (${why})`);
+}
+
+/** The first source whose host path no longer resolves to itself, as a virtual-path error. */
+function checkSources(sources: readonly LibraryEntry[]): Error | undefined {
+  for (const source of sources) {
+    const expected = boundPath(source);
+    let host: string;
+    try { host = canonicalPathSync(expected); } catch (e) { return unavailable(source, e); }
+    if (host !== expected) return unavailable(source);
+  }
+  return undefined;
+}
+
+/** A source's host paths: its own, and for a database the snapshot, the snapshots folder and the data dir. */
+const hostPaths = (source: LibraryEntry) => source.kind === "sqlite"
+  ? [source.path, requiredSnapshot(source), path.dirname(requiredSnapshot(source)), path.dirname(path.dirname(requiredSnapshot(source)))]
+  : [source.path];
+
+/**
+ * A failure before the command started. A source that went away is named; anything else
+ * is a fixed sentence with the virtual paths involved. systemd-run's or bwrap's own text
+ * is kept only when it holds no host path (a source, the data dir, home, the server's cwd).
+ */
+function setupFailure(sources: readonly LibraryEntry[], raw: string): Error {
+  const gone = checkSources(sources);
+  if (gone) return gone;
+  const named = sources.filter(source => hostPaths(source).some(host => raw.includes(host)));
+  const involved = (named.length > 0 ? named : sources).map(virtualPath);
+  const leaks = [...sources.flatMap(hostPaths), homedir(), process.cwd()].some(host => host && raw.includes(host));
+  const text = raw.trim();
+  return new Error(`The shell sandbox could not start${involved.length > 0 ? ` while setting up ${involved.join(", ")}` : ""}${!leaks && text ? `: ${text}` : "."}`);
 }
 
 /** systemd-run finds the user bus through XDG_RUNTIME_DIR; a server started outside a login shell may lack it. */
@@ -129,23 +195,37 @@ function killScope(pid: number | undefined, unit: string): void {
   try { process.kill(-pid, "SIGKILL"); } catch { /* the group is already gone */ }
 }
 
-export async function runSandbox(input: { command: string; sources: readonly LibraryEntry[]; signal?: AbortSignal; timeoutMs?: number; outputCap?: number }): Promise<string> {
+export interface SandboxInput {
+  command: string;
+  sources: readonly LibraryEntry[];
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  outputCap?: number;
+  /** Tests only: runs after the source check and the probe, just before launch, to race them deterministically. */
+  beforeLaunch?: () => void;
+  /** Tests only: stands in for systemd-run, to force a setup failure. */
+  launcher?: string;
+}
+
+export async function runSandbox(input: SandboxInput): Promise<string> {
   input.signal?.throwIfAborted();
+  // Sources first: one gone since the turn began is named by its virtual path, never its host path.
+  for (const source of input.sources) if (!/^[\w-]+$/.test(source.id)) throw new Error("Invalid Library source id");
+  const gone = checkSources(input.sources);
+  if (gone) throw gone;
+  const binds = input.sources.flatMap(source => ["--ro-bind", boundPath(source), virtualPath(source)]);
   const probe = await probeSandbox();
   if (!probe.available) throw new Error(probe.reason);
   input.signal?.throwIfAborted();
-  const args = baseArgs();
-  for (const source of input.sources) {
-    if (!/^[\w-]+$/.test(source.id)) throw new Error("Invalid Library source id");
-    const expected = source.kind === "sqlite" ? requiredSnapshot(source) : source.path;
-    const host = canonicalPathSync(expected);
-    if (host !== expected) throw new Error("Library source path changed; reconnect this source before using it");
-    args.push("--ro-bind", host, source.kind === "sqlite" ? `/data/${source.id}.db` : `/library/${source.id}`);
-  }
-  args.push(...finalMounts, "--", "/usr/bin/bash", "--noprofile", "--norc", "-c", input.command);
+  const args = [...baseArgs(), ...binds, ...finalMounts, "--", ...launch(input.command)];
   const unit = `gates-shell-${randomUUID()}`;
+  input.beforeLaunch?.();
   return new Promise((resolve, reject) => {
-    const child = spawnScoped(SYSTEMD_RUN, [...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch));
+    const child = spawnScoped(input.launcher ?? SYSTEMD_RUN, [...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch), 1);
+    // Until the marker arrives, everything on stdout and stderr is systemd-run's or bwrap's.
+    let started = false;
+    const marker = (child.stdio as readonly unknown[])[MARKER_FD] as Readable;
+    marker.on("data", () => { started = true; }).on("error", () => undefined);
     const chunks: Buffer[] = [];
     let bytes = 0;
     let failure: Error | undefined;
@@ -161,11 +241,12 @@ export async function runSandbox(input: { command: string; sources: readonly Lib
     };
     child.stdout!.on("data", data); child.stderr!.on("data", data);
     const cleanup = () => { clearTimeout(timer); input.signal?.removeEventListener("abort", abort); };
-    child.on("error", e => { cleanup(); reject(e); });
+    child.on("error", e => { cleanup(); reject(setupFailure(input.sources, e.message)); });
     child.on("close", (code, signal) => {
       cleanup();
       const output = Buffer.concat(chunks).toString("utf8");
       if (failure) reject(failure);
+      else if (!started && (code !== 0 || signal)) reject(setupFailure(input.sources, output));
       else if (signal || code === 137) reject(new Error(`Shell was killed${signal ? ` (${signal})` : ""}; it may have gone over its 512 MB memory cap: ${output}`));
       else if (code !== 0) reject(new Error(`Shell exited ${code}: ${output}`));
       else resolve(output);

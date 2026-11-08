@@ -290,9 +290,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     if (removing.has(canonicalTag(model))) throw new ModelActionError("model-removing", removingMessage(model));
   };
 
-  const loadModel = async (model: string, numCtx: number, baseUrl: string, gen: number, signal: AbortSignal): Promise<ModelLoad> => {
+  const loadModel = async (model: string, requested: number, baseUrl: string, gen: number, signal: AbortSignal): Promise<ModelLoad> => {
     const tag = canonicalTag(model);
     let notice: Notice | undefined;
+    // The size the model takes, once the fit has said so; what was asked for until then.
+    let numCtx = requested;
     const finish = (end: ModelLoad): ModelLoad => {
       if (notice !== undefined) return closeNotice(notice, end);
       send(end);
@@ -319,6 +321,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const report = await deps.fit(model, numCtx, baseUrl, signal);
       const afterFit = stopped();
       if (afterFit) return finish(afterFit);
+      numCtx = report.numCtx;
       if (report.verdict === "refuse") return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.` });
       notice = openNotice(model, numCtx);
       try {
@@ -442,10 +445,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
                 const entry = here.ok ? here.models.get(tag) : undefined;
                 // Released after the fit only when /api/ps proves no load is coming:
                 // resident, at this context. Unknown residency or context holds the gate.
-                if (report.verdict === "refuse" || (entry !== undefined && entry.contextLength === ctx)) return resolve(report);
+                numCtx = report.numCtx;
+                if (report.verdict === "refuse" || (entry !== undefined && entry.contextLength === report.numCtx)) return resolve(report);
                 // Proven absent: a cold load this turn causes and the app owns. Resident at
                 // another context, or /api/ps unreadable: held, but nothing claimed.
-                if (here.ok && entry === undefined) notice = openNotice(model, ctx);
+                if (here.ok && entry === undefined) notice = openNotice(model, report.numCtx);
                 const held = new Promise<void>((r) => (releaseGate = r));
                 resolve(report);
                 await held;

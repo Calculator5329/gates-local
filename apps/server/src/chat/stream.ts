@@ -1,12 +1,12 @@
 // One streamed turn against Ollama POST /api/chat. Every request carries an
-// explicit options.num_ctx (Ollama's own default is far below the floor),
-// and a num_ctx under 16384 is refused before any request is sent.
+// explicit options.num_ctx, the size the fit check settled on for this model.
+// What does not fit that window is dropped oldest first (chat/window.ts).
 //
 // Nothing persists here: the caller owns the thread store and feeds the
 // deltas to its turn buffer. Ends with exactly one done or one error event.
 import { Schema as S } from "effect";
-import { NUM_CTX_FLOOR } from "../fit/constants.ts";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
+import { fitToWindow } from "./window.ts";
 
 export interface StreamTurnInput {
   baseUrl: string;
@@ -20,6 +20,7 @@ export interface StreamTurnInput {
   threadId?: string;
   newId?: () => string;
   now?: () => number;
+  fetch?: typeof fetch;
 }
 
 const ChatChunk = S.Struct({
@@ -75,8 +76,13 @@ function parseLine(line: string): ChatChunk | { bad: string } {
 }
 
 export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEvent, void, undefined> {
-  if (!Number.isInteger(input.numCtx) || input.numCtx < NUM_CTX_FLOOR) {
-    yield fail("num-ctx-below-floor", `num_ctx ${input.numCtx} is below the ${NUM_CTX_FLOOR} floor; no request sent.`);
+  if (!Number.isInteger(input.numCtx) || input.numCtx < 1) {
+    yield fail("num-ctx-invalid", `num_ctx ${input.numCtx} is not a size; no request sent.`);
+    return;
+  }
+  const windowed = fitToWindow(input.messages, input.numCtx);
+  if (!windowed.ok) {
+    yield fail("context-too-small", windowed.message);
     return;
   }
   const { signal } = input;
@@ -88,10 +94,10 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
   const url = new URL("/api/chat", input.baseUrl);
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await (input.fetch ?? fetch)(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(chatRequestBody(input)),
+      body: JSON.stringify(chatRequestBody({ ...input, messages: windowed.messages })),
       ...(signal ? { signal } : {}),
     });
   } catch (error) {

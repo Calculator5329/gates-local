@@ -32,6 +32,8 @@ export type ModelInfo = {
   modifiedAt: string;
   /** Ollama's words from /api/show (contracts ModelInfo.capabilities). */
   capabilities: readonly string[];
+  /** The most context this model takes (contracts ModelInfo.maxContext). */
+  maxContext?: number;
   /** The model chat starts on (contracts ModelPick); set by the catalog's pick hook. */
   pick?: { numCtx: number; verdict?: "fits" | "spills" | "refuse" };
 };

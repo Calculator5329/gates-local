@@ -17,7 +17,7 @@ import {
   WireError,
   createClient,
 } from "@gates-local/contracts";
-import { describeModel, titleFrom } from "./format.ts";
+import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
@@ -262,7 +262,8 @@ async function hydrateWith(
   });
   on("models.load", (l) => {
     setState((s) => ({ loads: { ...s.loads, [l.model]: l } }));
-    if (l.state === "ready" || l.state === "unloaded") invalidateFits();
+    // a failed load may have freed what it took, so it changes memory too
+    if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits();
   });
   on("sources.changed", (sources) => setState({ sources }));
   on("image.status", (imageStatus) => setState({ imageStatus }));
@@ -307,7 +308,10 @@ async function hydrateWith(
     probe("image.status", {}),
     probe("update.status", {}),
   ]);
-  setState({ gpu, sources, imageStatus, update, ...(catalogOrder.current(catalogTicket) ? { catalog } : {}) });
+  // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
+  const startsOff = !thinkSeeded && noGpu(gpu);
+  thinkSeeded = true;
+  setState({ gpu, sources, imageStatus, update, ...(catalogLands(catalogTicket) ? { catalog } : {}), ...(startsOff ? { think: false } : {}) });
   release("none");
 
   const s = getState();
@@ -338,14 +342,19 @@ const modelsOrder = newestOnly();
 const runtimeOrder = newestOnly();
 // A catalog asked before a later models.changed describes the list before it: only the newest lands.
 const catalogOrder = newestOnly();
+/** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
+let thinkSeeded = false;
 // A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
 const threadsOrder = newestOnly();
+
+/** The newest answer lands; an older one only while there is nothing to show, since the newer question may have failed (W1-02). */
+const catalogLands = (ticket: number): boolean => catalogOrder.current(ticket) || getState().catalog === undefined;
 
 async function refreshCatalog(): Promise<void> {
   if (getState().catalog === NA) return;
   const ticket = catalogOrder.next();
   const catalog = await probe("models.catalog", {});
-  if (catalog !== undefined && catalogOrder.current(ticket)) setState({ catalog });
+  if (catalog !== undefined && catalogLands(ticket)) setState({ catalog });
 }
 
 export async function refreshModels(): Promise<void> {
@@ -356,13 +365,14 @@ export async function refreshModels(): Promise<void> {
   restoreSaved();
   chooseModel();
   invalidateFits();
+  if (getState().catalog === undefined) void refreshCatalog();
 }
 
 // The default model is not applied here: the server's pick (pick.ts) already honours it when it can chat.
 function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
   return {
     settings,
-    ...(first ? { numCtx: settings.defaultNumCtx, think: settings.thinking } : {}),
+    ...(first ? { numCtx: settings.defaultNumCtx, ...(thinkSeeded ? {} : { think: settings.thinking }) } : {}),
     ...(!settings.imageGen ? { image: false } : {}),
   };
 }
@@ -405,10 +415,25 @@ export function ensureFit(model: string | undefined, numCtx: number): void {
   const key = fitKey(model, numCtx);
   const s = getState();
   if (s.fits[key] !== undefined || inflight.has(key) || !chatReady(s)) return;
+  checkFit(model, numCtx, key, 0);
+}
+
+/** A failed check is asked again after this, doubling to FIT_RETRY_MAX_MS, until it answers or memory changes. */
+const FIT_RETRY_MS = 2000;
+const FIT_RETRY_MAX_MS = 30_000;
+
+function checkFit(model: string, numCtx: number, key: string, failures: number): void {
   inflight.add(key);
   call("fit.check", { model, numCtx })
     .then((r) => setState((st) => ({ fits: { ...st.fits, [key]: r } })))
-    .catch(() => setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } })))
+    .catch(() => {
+      setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } }));
+      // "error" is shown, not kept: an invalidation clears it, and otherwise the check is retried
+      setTimeout(() => {
+        const s = getState();
+        if (s.fits[key] === "error" && !inflight.has(key) && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
+      }, Math.min(FIT_RETRY_MAX_MS, FIT_RETRY_MS * 2 ** failures));
+    })
     .finally(() => inflight.delete(key));
 }
 
@@ -738,7 +763,7 @@ function refusal(code: string, model: string): string {
   const name = describeModel(model, catalogOf(getState())).name;
   switch (code) {
     case "wont-fit":
-      return `${name} doesn't fit in memory at ${Math.round(getState().numCtx / 1024)}k. Pick a smaller model or context.`;
+      return `${name} doesn't fit in memory at ${k(ctxFor(getState().numCtx, getState().models, model))}. Pick a smaller model or context.`;
     case "turn-active":
       return "A reply is still being written in this thread. Stop it or wait.";
     case "runtime-not-ready":

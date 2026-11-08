@@ -31,7 +31,7 @@ const BUDGET = {
   // paint, is not broken down further here. The gate also needs no long
   // task over longTaskMs while the keys go in (keysWithinBudget).
   keyP95Ms: 50,
-  // re-measured with the Settings › Models page (its own file and an mp- CSS block): JS 132.0, CSS 10.0
+  // re-measured with the T3-style picker, paragraph streaming, the memory menu and Settings › Models: JS 135.1, CSS 10.5
   jsGzipKb: 140, // measured 120.6 KB at first
   cssGzipKb: 11, // measured 8.1 KB at first
 };
@@ -433,7 +433,7 @@ async function streamFlushes(page: Page, open: (hash?: string) => Promise<void>,
   await sendMessage(page, "Stream something");
   // read once the reply has finished: a flush at the terminal event counts too (WF-05)
   await expect(page.locator(".turn.a.done")).toHaveCount(1, { timeout: 10_000 });
-  await expect(page.locator(".caret")).toHaveCount(0);
+  await expect(page.locator(".writing")).toHaveCount(0);
   await expect(page.locator(".turn.a.done .md")).toContainText("so streaming takes a");
   const r = await page.evaluate(() => {
     const w = window as unknown as FlushProbe;
@@ -485,7 +485,7 @@ test("negative control: one extra flush at the terminal event fails the flush ga
   expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(false);
 });
 
-/** Renders of the 6 seeded rows from the caret showing until well into the reply; bust turns the control on. */
+/** Renders of the 6 seeded rows from "Writing" showing until well into the reply; bust turns the control on. */
 async function seededRenders(page: Page, open: (hash?: string) => Promise<void>, thread: string | null, bust: boolean) {
   // window.glRows: the row-render test flag in apps/web/src/Thread.tsx
   await page.addInitScript((b) => {
@@ -499,21 +499,22 @@ async function seededRenders(page: Page, open: (hash?: string) => Promise<void>,
   await stack.scenario("models", { tokenDelayMs: 30 });
   await sendMessage(page, "Stream beside the old turns");
   const live = page.locator(".turn.a").last();
-  await expect(live.locator(".caret")).toBeVisible();
+  await expect(live.locator(".writing")).toBeVisible();
   const before = await page.evaluate(() => {
     const w = window as unknown as Probe;
     if (w.glRows) w.glRows.renders = {};
-    return w.glPerf?.flushes ?? 0;
+    return { flushes: w.glPerf?.flushes ?? 0, deltas: w.glPerf?.deltas ?? 0 };
   });
-  // well into the reply, and still streaming when the count is read
-  await expect(live.locator(".md")).toContainText("keeps every reply deterministic");
+  // well into the reply (12 more tokens; the fake's reply is one paragraph, so
+  // the live turn shows no text until it ends), and still streaming when the count is read
+  await page.waitForFunction((d) => ((window as unknown as Probe).glPerf?.deltas ?? 0) >= d + 12, before.deltas);
   const renders = await page.evaluate((ids) => ids.reduce((a, id) => a + ((window as unknown as Probe).glRows?.renders[id] ?? 0), 0), seeded);
-  await expect(live.locator(".caret")).toBeVisible();
-  const flushes = (await page.evaluate(() => (window as unknown as Probe).glPerf?.flushes ?? 0)) - before;
+  await expect(live.locator(".writing")).toBeVisible();
+  const flushes = (await page.evaluate(() => (window as unknown as Probe).glPerf?.flushes ?? 0)) - before.flushes;
   report(`seeded row renders while streaming${bust ? " (memo busted)" : ""}`, renders, "renders");
   report("flushes in the same window", flushes, "flushes");
   expect(flushes).toBeGreaterThan(5);
-  await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
   return renders;
 }
 
@@ -572,12 +573,13 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   // slow tokens so the stream outlasts the typing and the control after it
   reportLoad();
   await stack.scenario("models", { tokenDelayMs: 120 });
-  const caret = page.locator(".caret");
+  // "Writing" shows from the first token until the reply ends, whether or not a whole block has shown yet
+  const writing = page.locator(".writing");
   /** A reply streaming now: the one already running, else a new one. */
   const streaming = async () => {
-    if (await caret.isVisible()) return;
+    if (await writing.isVisible()) return;
     await sendMessage(page, "A slow reply please");
-    await expect(caret).toBeVisible();
+    await expect(writing).toBeVisible();
   };
   // one try: the burst typed while a reply streams; it counts only if the reply was still streaming at its end
   const streamTry = async () => {
@@ -588,7 +590,7 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
     await typeFreely(page, TYPED);
     await expect(ta).toHaveValue(TYPED);
     await page.evaluate(endKeys, TYPED.length);
-    const live = await caret.isVisible();
+    const live = await writing.isVisible();
     return { ...keyStats(await page.evaluate(readKeys)), live };
   };
   const passes = (s: Awaited<ReturnType<typeof streamTry>>) => s.live && keysWithinBudget(s);
@@ -639,7 +641,7 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   });
   await expect(ta).toHaveValue(BURST);
   await page.evaluate(endKeys, BURST.length);
-  await expect(page.locator(".caret")).toBeVisible();
+  await expect(writing).toBeVisible();
   const raw = await page.evaluate(readKeys);
   const delayed = keyStats(raw);
   reportKeys("stream + 100 ms delay control", delayed);

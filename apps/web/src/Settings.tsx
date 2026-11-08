@@ -4,8 +4,8 @@
 import { useEffect, useState } from "react";
 import type { ContextSize, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
-import { CtxLine } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, count, describeModel, folderWords, gb, k, sourceDetail, verdictOf } from "./format.ts";
+import { CtxLine, GpuMemory } from "./FitPanel.tsx";
+import { CONTEXT_SIZES, type Verdict, count, ctxFor, describeModel, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
@@ -85,57 +85,6 @@ function General() {
         </table>
       </Grp>
       <Updates />
-    </>
-  );
-}
-
-// ---------------------------------------------------------------- Models
-
-function useFit(model: string, numCtx: number): Verdict | undefined {
-  const r = useStore((s) => s.fits[fitKey(model, numCtx)]);
-  useEffect(() => ensureFit(model, numCtx), [model, numCtx, r]);
-  return r === undefined || r === "error" ? undefined : verdictOf(r);
-}
-
-/** The default context window, kept in this section where it was; the Models page itself (Models.tsx) holds no context control. */
-function DefaultContext() {
-  const settingsNA = useStore((s) => s.settings === NA);
-  const catalog = useStore(catalogOf);
-  const numCtx = useStore((s) => s.numCtx);
-  const model = useStore((s) => s.model);
-  const v = useFit(model ?? "", numCtx);
-  const [ctxErr, runCtx] = useAct();
-  return (
-    <>
-      {model !== undefined ? (
-        <Grp title="Default context window">
-          <div className="srow">
-            <div className="sl">
-              <b>Context window</b>
-              <span className="d">
-                <CtxLine model={model} numCtx={numCtx} />
-              </span>
-              {v ? (
-                <span className="d">
-                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
-                </span>
-              ) : null}
-              <Fail err={ctxErr} />
-            </div>
-            <div className="sv">
-              <Seg2<ContextSize>
-                label="Context window"
-                value={numCtx}
-                options={CONTEXT_SIZES.map((c) => [c, k(c)] as const)}
-                onPick={(c) => {
-                  setContext(c);
-                  if (!settingsNA) void runCtx(updateSettings({ defaultNumCtx: c }));
-                }}
-              />
-            </div>
-          </div>
-        </Grp>
-      ) : null}
     </>
   );
 }
@@ -440,20 +389,76 @@ function Library() {
   );
 }
 
+// ---------------------------------------------------------------- Advanced
+
+function useFit(model: string, numCtx: number): Verdict | undefined {
+  const r = useStore((s) => s.fits[fitKey(model, numCtx)]);
+  useEffect(() => ensureFit(model, numCtx), [model, numCtx, r]);
+  return r === undefined || r === "error" ? undefined : verdictOf(r);
+}
+
+/** The size new chats start at. Each chat's own size is in the model picker. */
+function DefaultContext() {
+  const settingsNA = useStore((s) => s.settings === NA);
+  const catalog = useStore(catalogOf);
+  const models = useStore((s) => s.models);
+  const numCtx = useStore((s) => s.numCtx);
+  const model = useStore((s) => s.model);
+  const v = useFit(model ?? "", numCtx);
+  const [ctxErr, runCtx] = useAct();
+  if (model === undefined) return null;
+  return (
+    <Grp title="Default context window">
+      <div className="srow">
+        <div className="sl">
+          <b>Context window</b>
+          <span className="d">
+            <CtxLine model={model} numCtx={numCtx} />
+          </span>
+          {v ? (
+            <span className="d">
+              {describeModel(model, catalog).name} at {k(ctxFor(numCtx, models, model))}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
+            </span>
+          ) : null}
+          <Fail err={ctxErr} />
+        </div>
+        <div className="sv">
+          <Seg2<ContextSize>
+            label="Context window"
+            value={numCtx}
+            options={CONTEXT_SIZES.map((c) => [c, k(c)] as const)}
+            onPick={(c) => {
+              setContext(c);
+              if (!settingsNA) void runCtx(updateSettings({ defaultNumCtx: c }));
+            }}
+          />
+        </div>
+      </div>
+    </Grp>
+  );
+}
+
+function Advanced() {
+  const cpu = useStore((s) => noGpu(s.gpu));
+  return (
+    <>
+      <Head title="Advanced">The numbers behind the model picker. Nothing here is needed to chat.</Head>
+      <Grp title={cpu ? "Memory" : "GPU memory"}>
+        <GpuMemory />
+      </Grp>
+      <DefaultContext />
+    </>
+  );
+}
+
 export function SettingsView() {
   const section = useStore((s) => s.section);
-  const addPage = useStore((s) => s.addPage);
   void SECTIONS;
   switch (section) {
     case "general":
       return <General />;
     case "models":
-      return (
-        <>
-          <ModelsPage />
-          {addPage ? null : <DefaultContext />}
-        </>
-      );
+      return <ModelsPage />;
     case "runtime":
       return <Runtime />;
     case "memory":
@@ -462,5 +467,7 @@ export function SettingsView() {
       return <Images />;
     case "library":
       return <Library />;
+    case "advanced":
+      return <Advanced />;
   }
 }

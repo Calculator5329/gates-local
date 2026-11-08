@@ -12,8 +12,9 @@ Ollama, for people who want local models without guessing whether they fit.
 - Checks memory before a model loads. Each model gets a label for the
   chosen context size: runs on GPU, uses system memory (slower), or not
   enough memory.
-- Uses a 16k context by default and never less, with 32k and 64k as
-  options.
+- Uses a 16k context by default, with 8k, 32k and 64k as options, and
+  never asks a model for more than it takes. A model with a small window
+  (2k, say) runs at its own size.
 - Streams replies, shows the model's thinking, and has Stop and Retry.
   Threads are saved in a local SQLite file and survive a server restart.
 - Downloads models from a short list inside the app, with progress and
@@ -115,8 +116,8 @@ pnpm start
 ```
 
 Nothing here needs administrator rights. Without an NVIDIA GPU, models run
-in system memory on the CPU and replies are slower; turning Thinking off
-helps. The shell tool is off on Windows. The full guide, with data folders,
+in system memory on the CPU and replies are slower, so Thinking starts off
+(the button in the message box turns it on). The shell tool is off on Windows. The full guide, with data folders,
 measured speeds, updating and uninstalling, is
 [docs/setup/windows.md](docs/setup/windows.md).
 

@@ -22,9 +22,9 @@ const big27 = model("qwen3.8-abliterated:27b", 17.4, ["completion", "thinking"],
 const own7 = model("llama3.1:8b", 4.9, chat, "8.0B");
 const own3 = model("llama3.2:3b", 2.0, chat, "3.2B");
 
-const report = (name: string, verdict: FitVerdict): FitReport => ({
+const report = (name: string, verdict: FitVerdict, numCtx: number): FitReport => ({
   model: name,
-  numCtx: 16384,
+  numCtx,
   freeVramBytes: 12 * GIB,
   needVramBytes: 8 * GIB,
   spillRamBytes: verdict === "spills" ? GIB : 0,
@@ -34,12 +34,12 @@ const report = (name: string, verdict: FitVerdict): FitReport => ({
 });
 
 /** A fit function from a verdict table; names not in it fit. Records the order asked. */
-function fitTable(table: Record<string, FitVerdict | "fail"> = {}) {
+function fitTable(table: Record<string, FitVerdict | "fail"> = {}, numCtx = 16384) {
   const asked: string[] = [];
   const fit = async (name: string) => {
     asked.push(name);
     const v = table[name] ?? "fits";
-    return v === "fail" ? undefined : report(name, v);
+    return v === "fail" ? undefined : report(name, v, numCtx);
   };
   return { fit, asked };
 }
@@ -90,7 +90,7 @@ describe("pickChatModel", () => {
   });
 
   it("falls back to the best model that spills when none fits", async () => {
-    const { fit } = fitTable({ "qwen3.5:9b": "spills", "gemma4:12b": "spills", "qwen3.8-abliterated:27b": "refuse" });
+    const { fit } = fitTable({ "qwen3.5:9b": "spills", "gemma4:12b": "spills", "qwen3.8-abliterated:27b": "refuse" }, 32768);
     expect(await pickChatModel({ models: [big27, gemma12, qwen9], numCtx: 32768, fit })).toEqual({
       name: "qwen3.5:9b",
       pick: { numCtx: 32768, verdict: "spills" },
@@ -98,8 +98,13 @@ describe("pickChatModel", () => {
     });
   });
 
+  it("states the size the model actually runs at", async () => {
+    const pick = await pickChatModel({ models: [own3], numCtx: 16384, fit: async (name) => report(name, "fits", 2048) });
+    expect(pick?.pick).toEqual({ numCtx: 2048, verdict: "fits" });
+  });
+
   it("says nothing fits: the best-ranked model with verdict refuse", async () => {
-    const { fit } = fitTable({ "qwen3.5:9b": "refuse", "qwen3.5:4b": "refuse" });
+    const { fit } = fitTable({ "qwen3.5:9b": "refuse", "qwen3.5:4b": "refuse" }, 65536);
     expect(await pickChatModel({ models: [qwen4, qwen9, embed], numCtx: 65536, fit })).toEqual({
       name: "qwen3.5:9b",
       pick: { numCtx: 65536, verdict: "refuse" },

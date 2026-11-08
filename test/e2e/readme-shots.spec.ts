@@ -36,7 +36,10 @@ const SHOTS: readonly Shot[] = [
     theme: "dark",
     act: async (p) => {
       await p.locator("#modelBtn").click();
-      await expect(p.getByText("Not enough memory at 16k")).toBeVisible();
+      const picker = p.locator("#picker");
+      await expect(picker.getByText("Not enough memory", { exact: true })).toBeVisible();
+      // every row's verdict has landed
+      await expect(picker.getByText("Checking…")).toHaveCount(0);
     },
   },
   { name: "first-run", theme: "dark", start: "firstrun" },
@@ -59,8 +62,10 @@ for (const shot of SHOTS) {
         await expect(page.locator(".first").getByText("Runs on GPU")).toBeVisible();
       } else {
         await waitReady(page);
-        // the fit chip widens once its verdict lands; shoot after that
-        await expect(page.locator("#fitBtn")).toContainText("on GPU");
+        // the composer has no fit chip; with an empty draft nothing on screen
+        // waits on the fit, so shoot once the model trigger is named and idle
+        await expect(page.locator("#modelBtn")).toContainText("Qwen");
+        await expect(page.locator("#modelBtn")).not.toHaveAttribute("aria-busy", "true");
       }
       await shot.act?.(page);
       await page.evaluate(() => document.fonts.ready.then(() => undefined));

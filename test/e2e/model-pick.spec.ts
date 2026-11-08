@@ -31,7 +31,7 @@ test.describe("first run", () => {
     await sendMessage(page, "Say hello");
     const reply = page.locator(".turn.a").last();
     await expect(reply.locator(".md")).toContainText("You asked: Say hello");
-    await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
     await expect(page.locator(".c-note")).toHaveCount(0);
   });
 
@@ -164,8 +164,8 @@ test("one Ctrl+N after saving a default starts the new chat on the new pick, eve
   await pickModel(page, "qwen", "qwen3.5:9b");
   await expect(modelBtn).toContainText("Qwen 3.5 9B");
   await expect(modelBtn).not.toContainText("loading");
-  // Forget the load (a loaded Qwen leaves no room for Gemma's row) and hold every /api/show,
-  // so the pick that follows the new default lands only after the new chat exists.
+  // Hold every /api/show, so the pick that follows the new default lands only after the new chat
+  // exists. A Qwen load that lands after this call stays resident, and must not keep the pick on it.
   await stack.scenario("embed-smallest", { showDelayMs: 1500 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();

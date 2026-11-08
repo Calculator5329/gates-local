@@ -45,6 +45,8 @@ export interface ModelServices {
   readonly handlers: Partial<Handlers>;
   /** Abort downloads, stop polling, stop the app's own Ollama if this process started it. */
   close(options: { stopRuntime: boolean }): Promise<void>;
+  /** Shutdown ran out of time: see OllamaRuntime.killNow. */
+  killRuntimeNow(): void;
 }
 
 export interface ModelServicesOptions {
@@ -214,6 +216,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     pulls,
     loader,
     handlers,
+    killRuntimeNow: () => runtime.killNow(),
     async close({ stopRuntime }) {
       pulls?.stop();
       gpu.stop();

@@ -11,17 +11,26 @@
 //   wrong-service     the port answers, but not as Ollama
 //   embed-smallest    the three models plus nomic-embed-text, the smallest
 //   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
+//   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
+//                     a code block, a table) over about 2 s; holdAfterTokens > 0
+//                     pauses the reply there until the request is cancelled
+//   long-name         the three models plus a long Hugging Face GGUF tag
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-const installedFor = (s: string): readonly string[] =>
-  s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : s === "embed-only" ? EMBED_ONLY_INSTALLED : DEFAULT_INSTALLED;
+const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
+  "no-models": [],
+  "embed-smallest": EMBED_SMALLEST_INSTALLED,
+  "embed-only": EMBED_ONLY_INSTALLED,
+  "long-name": LONG_NAME_INSTALLED,
+};
+const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -36,9 +45,19 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
+  /** slow-drip: after this many reply tokens the stream waits until cancelled; 0 never waits. */
+  holdAfterTokens: number;
+  /**
+   * A cold load (preload or chat) takes this long; 0 is instant. While it runs the
+   * model's memory fills the fake GPU in LOAD_STEPS steps and /api/ps leaves it out,
+   * as a real runner does until it is ready.
+   */
+  loadDelayMs: number;
   /** Delay before /api/show answers: holds the server's fit survey (and so its chat pick). */
   showDelayMs: number;
 }
+
+const LOAD_STEPS = 6;
 
 const DEFAULTS: FakeOptions = {
   tokenDelayMs: 12,
@@ -47,8 +66,36 @@ const DEFAULTS: FakeOptions = {
   pullTickMs: 100,
   replyWords: 60,
   errorAfterTokens: 8,
+  holdAfterTokens: 0,
+  loadDelayMs: 0,
   showDelayMs: 0,
 };
+
+/** The slow-drip reply: one of each block kind the reply renderer draws. */
+export const DRIP_REPLY = [
+  "Here is how to check the free disk space before you download a model. It takes a minute.",
+  "",
+  "## Steps",
+  "",
+  "- Open a terminal window.",
+  "- Run the two commands below.",
+  "- Compare the free space with the model size.",
+  "",
+  "```sh",
+  "df -h /",
+  "du -sh ~/.ollama/models",
+  "```",
+  "",
+  "| Model | Download |",
+  "| --- | --- |",
+  "| Gemma 4 12B | 8.1 GB |",
+  "| Qwen 3.5 9B | 6.6 GB |",
+  "",
+  "A model fits when the free space is larger than its download. Keep some room for the context cache.",
+].join("\n");
+
+/** The reply as stream tokens: each word with the whitespace before it, so newlines arrive with the next word. */
+export const dripTokens = (): string[] => DRIP_REPLY.match(/\s*\S+/g) ?? [];
 
 export const FAKE_VERSION = "0.40.4";
 
@@ -153,32 +200,48 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   let options: FakeOptions = { ...DEFAULTS, ...start.options };
   let installed = new Set<string>(installedFor(scenario));
   let loaded: LoadedEntry[] = [];
+  /** Loads still filling memory: on the GPU, not yet in /api/ps. */
+  let filling: LoadedEntry[] = [];
   const requests: FakeRequest[] = [];
 
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
-    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded }));
+    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling] }));
   };
   writeGpu();
 
   const setScenario = (next: Scenario, opts: ScenarioOptions = {}) => {
     const { installed: names, ...timing } = opts;
     scenario = next;
-    options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...timing };
+    const preset = next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : next === "slow-drip" ? { tokenDelayMs: 20 } : {};
+    options = { ...DEFAULTS, ...start.options, ...preset, ...timing };
     installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? installedFor(next)));
     loaded = [];
+    filling = [];
     writeGpu();
   };
-  if (scenario === "slow-first-token") setScenario(scenario, start.options);
+  if (scenario === "slow-first-token" || scenario === "slow-drip") setScenario(scenario, start.options);
 
   const isInstalled = (name: string): FakeModel | undefined => {
     const m = findFakeModel(name);
     return m && installed.has(m.name) ? m : undefined;
   };
 
-  const load = (m: FakeModel, numCtx: number) => {
+  const load = async (m: FakeModel, numCtx: number, signal: AbortSignal) => {
     const kv = m.blockCount * m.headCountKv * m.keyLength * 2 * 2 * numCtx;
-    loaded = [...loaded.filter((l) => l.name !== m.name), { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv }];
+    const entry = { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv };
+    const warm = loaded.some((l) => l.name === m.name && l.numCtx === numCtx);
+    if (!warm && options.loadDelayMs > 0) {
+      // the old copy goes first, then the new one fills memory a step at a time
+      loaded = loaded.filter((l) => l.name !== m.name);
+      for (let i = 1; i <= LOAD_STEPS && !signal.aborted; i++) {
+        filling = [...filling.filter((l) => l.name !== m.name), { ...entry, sizeBytes: Math.round((entry.sizeBytes * i) / LOAD_STEPS) }];
+        writeGpu();
+        await sleep(options.loadDelayMs / LOAD_STEPS, signal);
+      }
+      filling = filling.filter((l) => l.name !== m.name);
+    }
+    loaded = [...loaded.filter((l) => l.name !== m.name), entry];
     writeGpu();
   };
 
@@ -191,21 +254,25 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const think = field(body, "think");
     if (think === true && !m.capabilities.includes("thinking")) return json(res, 400, { error: `"${name}" does not support thinking` });
     const numCtx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
-    load(m, numCtx);
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    await load(m, numCtx, abort.signal);
+    if (abort.signal.aborted) return;
     const messages = field(body, "messages");
     const last = Array.isArray(messages) ? messages.findLast((x) => field(x, "role") === "user") : undefined;
     const prompt = str(last, "content") ?? "";
     const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
     const tools = field(body, "tools");
 
-    const abort = new AbortController();
-    res.on("close", () => abort.abort());
     res.writeHead(200, { "content-type": "application/x-ndjson" });
     const line = (v: unknown) => res.write(`${JSON.stringify(v)}\n`);
     const base = () => ({ model: m.name, created_at: new Date().toISOString() });
     const started = Date.now();
 
     await sleep(options.firstTokenDelayMs, abort.signal);
+    // A timer can fire a millisecond early by Date.now; the wait is at least the delay.
+    const short = started + options.firstTokenDelayMs - Date.now();
+    if (short > 0) await sleep(short, abort.signal);
     // Everything before the first token is load and prompt time; decode starts here.
     const decodeFrom = Date.now();
     let sent = 0;
@@ -224,8 +291,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         done: false,
       });
     }
-    for (const t of tokens(replyWords(prompt, options.replyWords))) {
+    for (const t of scenario === "slow-drip" ? dripTokens() : tokens(replyWords(prompt, options.replyWords))) {
       if (abort.signal.aborted) return;
+      if (scenario === "slow-drip" && options.holdAfterTokens > 0 && sent >= options.holdAfterTokens) {
+        await new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
+        return;
+      }
       if (scenario === "mid-stream-error" && sent >= options.errorAfterTokens) {
         line({ error: "an error was encountered while running the model: unexpected EOF" });
         return void res.end();
@@ -337,7 +408,11 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           if (unload) {
             loaded = loaded.filter((l) => l.name !== m.name);
             writeGpu();
-          } else load(m, Number(field(field(body, "options"), "num_ctx") ?? 4096));
+          } else {
+            const abort = new AbortController();
+            res.on("close", () => abort.abort());
+            await load(m, Number(field(field(body, "options"), "num_ctx") ?? 4096), abort.signal);
+          }
           return json(res, 200, { model: m.name, created_at: new Date().toISOString(), response: "", done: true, done_reason: unload ? "unload" : "load" });
         }
         case "POST /api/pull":

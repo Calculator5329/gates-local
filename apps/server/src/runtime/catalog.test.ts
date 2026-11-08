@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import { defaultSettings } from "../settings/store.ts";
-import { buildCatalog, markRecommended } from "./catalog.ts";
+import { buildCatalog, estimateOffered, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
 import { CURATED_MODELS } from "./recommended.ts";
 
@@ -78,13 +78,15 @@ describe("models.catalog", () => {
     expect(e.get("qwen3.8-abliterated:27b")).toMatchObject({ label: "qwen3.8-abliterated:27b", purpose: "Installed by you", installed: true });
     // The user's own model keeps its tag-derived name; embeddings stay out.
     expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")).toMatchObject({ label: "Tiny-Chat-GGUF:Q4_K_M", purpose: "Installed by you", installed: true });
-    expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.fit).toBeUndefined();
+    // Its /api/show gives no geometry and no maximum: a rough verdict at the safe fallback, and no recommendation.
+    expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.fit).toMatchObject({ numCtx: 4096, source: "estimate" });
+    expect(e.get("hf.co/someone/Tiny-Chat-GGUF:Q4_K_M")?.recommended).toBe(false);
     expect(e.has("nomic-embed-text:latest")).toBe(false);
     // A model whose capabilities are unknown is neither listed nor recommended until discovery succeeds.
     expect(e.has("search:latest")).toBe(false);
 
     for (const entry of entries) expect(entry.purpose.split(" ").length).toBeLessThanOrEqual(4);
-    expect(entries.filter((x) => x.recommended).map((x) => x.name)).toEqual(entries.filter((x) => x.fit?.verdict === "fits").map((x) => x.name));
+    expect(entries.filter((x) => x.recommended).map((x) => x.name)).toEqual(entries.filter((x) => x.fit?.verdict === "fits" && x.fit.numCtx === 16384).map((x) => x.name));
     expect(e.get("qwen3.5:9b")?.recommended).toBe(true);
   });
 
@@ -99,6 +101,27 @@ describe("models.catalog", () => {
     expect(entries.some((x) => x.fit?.verdict === "fits")).toBe(false);
     const recommended = entries.filter((x) => x.recommended);
     expect(recommended.map((x) => x.name)).toEqual(["qwen3.5:4b"]);
+  });
+
+  it("estimateOffered gives a model offered for download the catalog's own estimate at any context", async () => {
+    const s = await fakeOllama();
+    const fitDeps = { runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: () => 1 };
+    for (const numCtx of [16384, 65536] as const) {
+      const entries = await buildCatalog({
+        baseUrl: () => s.baseUrl,
+        installed: () => listModels(s.baseUrl),
+        settings: { get: () => ({ ...defaultSettings("system"), defaultNumCtx: numCtx }) },
+        fit: fitDeps,
+      });
+      const report = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", numCtx);
+      expect(report).toEqual(byName(entries).get("gpt-oss:20b")?.fit);
+      expect(report?.numCtx).toBe(numCtx);
+    }
+    const at16 = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", 16384);
+    const at64 = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", 65536);
+    expect(at64?.needVramBytes ?? 0).toBeGreaterThan(at16?.needVramBytes ?? 0);
+    // local-only builds and unknown models are not offered for download
+    for (const model of ["gemma4-abliterated:26b", "nope:1b"]) expect(await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, model, 16384)).toBeUndefined();
   });
 
   it("MP-01: an installed curated model whose capabilities are unknown is neither a chat choice nor a download", async () => {
@@ -139,12 +162,19 @@ const entry = (name: string, f?: FitReport): CatalogEntry => ({ name, label: nam
 
 describe("markRecommended", () => {
   it("recommends every model that fits, and nothing else", () => {
-    const out = markRecommended([entry("a", fit("fits", 5)), entry("b", fit("spills", 1)), entry("c", fit("fits", 9)), entry("d")]);
+    const out = markRecommended([entry("a", fit("fits", 5)), entry("b", fit("spills", 1)), entry("c", fit("fits", 9)), entry("d")], 16384);
     expect(out.map((e) => e.recommended)).toEqual([true, false, true, false]);
   });
 
   it("when nothing fits, recommends only the lightest that spills; a refusal never", () => {
-    const out = markRecommended([entry("a", fit("spills", 9)), entry("b", fit("refuse", 1)), entry("c", fit("spills", 4))]);
+    const out = markRecommended([entry("a", fit("spills", 9)), entry("b", fit("refuse", 1)), entry("c", fit("spills", 4))], 16384);
     expect(out.map((e) => e.recommended)).toEqual([false, false, true]);
+  });
+
+  it("never recommends a model that cannot hold the default context, whatever its verdict", () => {
+    const small = { ...fit("spills", 1), numCtx: 2048 };
+    const out = markRecommended([entry("tiny", small), entry("a", fit("spills", 4))], 16384);
+    expect(out.map((e) => e.recommended)).toEqual([false, true]);
+    expect(markRecommended([entry("tiny", { ...fit("fits", 1), numCtx: 2048 }), entry("a", fit("spills", 4))], 16384).map((e) => e.recommended)).toEqual([false, true]);
   });
 });

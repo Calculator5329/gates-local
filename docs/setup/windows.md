@@ -99,14 +99,14 @@ are not used for the plan.
 Measured on the test machine (i5-8500, CPU only) with `qwen3.5:4b` at 16k
 context, from the app window:
 
-- **Thinking on** (the default): the model thought for 394 s before the
-  first word of the answer. The first reply also includes loading the model.
+- **Thinking on**: the model thought for 394 s before the first word of
+  the answer. The first reply also includes loading the model.
 - **Thinking off**, model already loaded: 2.3 s to the first word, and the
   app showed 4 tok/s for the reply. The same prompt sent straight to Ollama
   generated 5.5 tokens per second by Ollama's own count.
 
-On a computer like this, turn **Thinking** off in the message box for
-everyday questions.
+On a computer with no supported GPU, **Thinking** starts off. The button in
+the message box turns it on for a question worth the wait.
 
 ### The app's own copy of Ollama
 
@@ -260,10 +260,11 @@ Each model shows one of three labels for the chosen context:
 - **Runs on GPU:** the model fits in free GPU memory (NVIDIA only).
 - **Uses system memory · slower:** all or part of it runs in system memory.
   Without an NVIDIA GPU every model that fits gets this label.
-- **Not enough memory at 16k:** it does not fit even with system memory. The
+- **Not enough memory at 16k** (or the size you chose): it does not fit even
+  with system memory. The
   label says how much more is needed.
 
-Choose a smaller model or a smaller context (16k is the smallest), or close
+Choose a smaller model or a smaller context (down to 8k), or close
 other programs. The app measures free memory at the moment it checks.
 
 ### The port is in use

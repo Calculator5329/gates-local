@@ -77,8 +77,8 @@ test.describe("while the server is down", () => {
     calm(await removed.textContent());
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await restart;
-    // back online, the model is still there
-    await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+    // back online (a healthy runtime has no footer row, and only the runtime row has a dot), the model is still there
+    await expect(page.locator(".sb-foot .rt .dot")).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByRole("button", { name: label })).toHaveCount(1);
   });
 });

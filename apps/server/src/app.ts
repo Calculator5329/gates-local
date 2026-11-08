@@ -15,7 +15,8 @@ import type { TurnMessage } from "./chat/types.ts";
 import { planLoad, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow, sameModel } from "./fit/ollama.ts";
-import type { FitReport } from "./fit/types.ts";
+import { FitError, type FitReport } from "./fit/types.ts";
+import { estimateOffered } from "./runtime/catalog.ts";
 import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
@@ -464,8 +465,15 @@ export function createApp(deps: AppDeps): App {
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw notReady();
-      // chat.send's plan without stopping any turn: the verdict the composer gates Send on.
-      return (await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).report;
+      try {
+        // chat.send's plan without stopping any turn: the verdict the composer gates Send on.
+        return (await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).report;
+      } catch (e) {
+        // not installed yet: a model offered for download gets the catalog's pre-download estimate at this size
+        const offered = e instanceof FitError && e.code === "model-not-found" ? await estimateOffered({ baseUrl, ...(deps.fit ? { fit: deps.fit } : {}) }, model, numCtx) : undefined;
+        if (offered === undefined) throw e;
+        return offered;
+      }
     },
 
     "turns.blocking": async ({ model, numCtx }) => {
@@ -529,7 +537,7 @@ export function createApp(deps: AppDeps): App {
             const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
             const victims = stopOthers === true ? plan.stop : [];
             if (victims.length === 0) return plan;
-            for (const t of victims) t.halt(preemptedBy(model, numCtx, t.model));
+            for (const t of victims) t.halt(preemptedBy(model, plan.report.numCtx, t.model));
             await untilAborted(Promise.all(victims.map((t) => t.ended)), signal);
           }
         };
@@ -606,7 +614,7 @@ export function createApp(deps: AppDeps): App {
         turn.started = true;
         // Before the answer, so every client (also one that did not send this) knows the turn first.
         push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
-        void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) {

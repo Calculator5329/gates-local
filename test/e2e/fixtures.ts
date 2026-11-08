@@ -1,10 +1,10 @@
 // Shared journey fixtures: every test starts on a fresh server data dir with
 // a chosen fake scenario, and fails if the page logs a console error or an
 // uncaught exception (a spec that expects some, like reconnect, lists them).
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import { CONTROL_URL, appUrl } from "./env.ts";
 
-export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only";
+export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
 export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar, the README's demo threads, or 0 for none. */
@@ -91,8 +91,17 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   await ta.press("Enter");
 }
 
-/** The sidebar's runtime row shows a ready dot: connected, and Ollama answers. */
+/** Open Settings › Advanced; resolves to its GPU memory group. */
+export async function openGpuMemory(page: Page): Promise<Locator> {
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  const gpu = page.locator(".set #gpuMemory");
+  await expect(gpu).toBeVisible();
+  return gpu;
+}
+
+/** The composer is unblocked: connected, and Ollama answers (a healthy runtime has no sidebar row). */
 export async function waitReady(page: Page): Promise<void> {
-  await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+  await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
   await expect(page.locator("#ta")).toBeEnabled();
 }

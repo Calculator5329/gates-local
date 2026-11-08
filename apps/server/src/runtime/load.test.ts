@@ -72,7 +72,7 @@ function loaderFor(s: FakeServer, pushes: ModelLoad[], fit: FitReport["verdict"]
     baseUrl: () => s.baseUrl,
     push: (l) => pushes.push(l),
     listLoaded: (url) => listLoaded(url),
-    fit: async () => report(fit),
+    fit: async (_model, numCtx) => ({ ...report(fit), numCtx }),
     ...extra,
   });
 }
@@ -86,6 +86,15 @@ function deferred(): { promise: Promise<void>; release: () => void } {
 }
 
 describe("models.load", () => {
+  it("loads at the context the fit settled on, not a larger one that was asked for", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes, "fits", { fit: async () => ({ ...report("fits"), numCtx: 2048 }) });
+    expect(await loader.load("qwen3.5:9b", 16384)).toEqual({ model: "qwen3.5:9b", numCtx: 2048, state: "ready" });
+    expect(s.requests.find((r) => r.path === "/api/generate")?.body).toMatchObject({ options: { num_ctx: 2048 } });
+    expect(pushes.map((p) => p.numCtx)).toEqual([2048, 2048]);
+  });
+
   it("preloads with an empty prompt, keep_alive and num_ctx, pushes loading then ready, and owns the model", async () => {
     const s = await fakeOllama([]);
     const pushes: ModelLoad[] = [];

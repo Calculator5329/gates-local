@@ -80,10 +80,6 @@ describe("fit words", () => {
     expect(sizeText(274 * 1024 ** 2)).toBe("274 MB");
     expect(sizeText(6.6 * GIB)).toBe("6.6 GB");
   });
-
-  it("says a model past its context limit is held back by the limit, not memory", () => {
-    expect(fitReason({ ...fit("refuse"), contextLimit: 8192 })).toBe("Supports up to 8k of context; new chats use 16k.");
-  });
 });
 
 describe("names", () => {

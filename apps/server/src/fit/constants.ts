@@ -4,8 +4,14 @@
 export const MIB = 1024 * 1024;
 export const GIB = 1024 * MIB;
 
-/** The context floor. Nothing runs below 16k. */
-export const NUM_CTX_FLOOR = 16384;
+/**
+ * The context a model runs at when /api/show reports no maximum: Ollama's own
+ * default, the one size any model it serves is known to take.
+ */
+export const UNREPORTED_MAX_CONTEXT = 4096;
+
+/** The context PREDOWNLOAD_KV_FRACTION_PER_16K is stated for. */
+export const KV_REFERENCE_CONTEXT = 16384;
 
 /** VRAM kept free beyond the estimate: allocator slack and the desktop's growth. */
 export const VRAM_SAFETY_MARGIN_BYTES = 512 * MIB;

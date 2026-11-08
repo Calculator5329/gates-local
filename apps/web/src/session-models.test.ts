@@ -45,11 +45,13 @@ class FakeSocket extends EventTarget {
 }
 
 /** Boots session.ts against a client whose answers the test may hold; returns the session, the store and a push. */
-async function boot(answers: Record<string, () => Promise<unknown>> = {}) {
+async function boot(answers: Record<string, () => Promise<unknown>> = {}, connections: Promise<void>[] = []) {
   const subs = new Map<string, (p: unknown) => void>();
   const calls: string[] = [];
   fake.client = {
-    closed: new Promise(noop),
+    get closed() {
+      return connections.shift() ?? new Promise(noop);
+    },
     subscribe: (channel: string, handler: (p: unknown) => void) => {
       subs.set(channel, handler);
       return noop;
@@ -276,4 +278,72 @@ it("a saved model that is installed but now only embeds is not restored (MP5-03)
   await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
   expect(store.getState().model).toBe(QWEN);
   expect(store.getState().threadModels["S"]).toBeUndefined();
+});
+
+describe("a catalog that has not landed yet (W1-02)", () => {
+  const sample = methodSamples["models.catalog"].result;
+
+  it("takes an older answer when the newer question failed", async () => {
+    const first = defer<unknown>();
+    let asked = 0;
+    const { store, push, calls, hydrated } = await boot({ "models.catalog": () => (asked++ === 0 ? first.promise : Promise.reject(new Error("no answer"))) });
+    await hydrated();
+    await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(1));
+    push("models.changed", [info(LLAMA, true)]);
+    await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 0));
+    first.resolve(sample);
+    await vi.waitFor(() => expect(store.getState().catalog).toEqual(sample));
+  });
+
+  it("asks again on the next model refresh when none ever arrived", async () => {
+    let asked = 0;
+    const { session, store, calls, hydrated } = await boot({ "models.refresh": async () => [info(LLAMA, true)], "models.catalog": () => (asked++ === 0 ? Promise.reject(new Error("no answer")) : Promise.resolve(sample)) });
+    await hydrated();
+    await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    await session.refreshModels();
+    await vi.waitFor(() => expect(store.getState().catalog).toEqual(sample));
+  });
+});
+
+const settled = () => new Promise((r) => setTimeout(r, 20));
+
+describe("Thinking at the start", () => {
+  const noGpuAnswer = { "gpu.status": async () => ({ vendor: "none" }) };
+
+  it("starts off on a computer with no supported GPU", async () => {
+    const { store, calls, hydrated } = await boot(noGpuAnswer);
+    await hydrated();
+    await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+    await vi.waitFor(() => expect(store.getState().think).toBe(false));
+  });
+
+  it("stays on with a GPU", async () => {
+    const { store, calls, hydrated } = await boot({ "gpu.status": async () => ({ vendor: "nvidia" }) });
+    await hydrated();
+    await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+    await settled();
+    expect(store.getState().think).toBe(true);
+  });
+
+  it("stays on while the GPU cannot be read", async () => {
+    const { store, calls, hydrated } = await boot({ "gpu.status": () => Promise.reject(new Error("no answer")) });
+    await hydrated();
+    await vi.waitFor(() => expect(calls).toContain("gpu.status"));
+    await settled();
+    expect(store.getState().think).toBe(true);
+  });
+
+  it("keeps the person's choice across a reconnect", async () => {
+    const dropped = defer<void>();
+    const { store, calls, hydrated } = await boot(noGpuAnswer, [dropped.promise]);
+    await hydrated();
+    await vi.waitFor(() => expect(store.getState().think).toBe(false));
+    store.setState({ think: true });
+    dropped.resolve();
+    await vi.waitFor(() => expect(calls.filter((m) => m === "gpu.status")).toHaveLength(2), { timeout: 3000 });
+    await settled();
+    expect(store.getState().think).toBe(true);
+  });
 });

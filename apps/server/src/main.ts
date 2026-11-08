@@ -219,6 +219,7 @@ async function main(): Promise<void> {
     log(`shutting down (${why})`);
     setTimeout(() => {
       log(`shutdown took over ${HARD_EXIT_MS} ms; exiting anyway`);
+      services.killRuntimeNow();
       process.exit(1);
     }, HARD_EXIT_MS);
     const step = async (name: string, fn: () => unknown) => {

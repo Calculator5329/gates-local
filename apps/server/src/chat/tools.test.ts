@@ -9,6 +9,8 @@ import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
 
+const sentMessages = (bodies: Record<string, unknown>[]) => (bodies[0]?.["messages"] ?? []) as { role: string; content: string }[];
+
 const ndjson = (items: unknown[]) => new Response(items.map(i => JSON.stringify(i)).join("\n") + "\n");
 /** No ComfyUI is up, so chat.send has nothing to free before its claim. */
 const noComfy = () => ({ state: "stopped", owner: "none" });
@@ -95,6 +97,25 @@ describe("tool chat transport", () => {
     // Decode time rides through the tool loop separately from the wall time.
     expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
+  });
+  it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let chatSignal: AbortSignal | undefined;
+      const fetcher = vi.fn(async (url, init) => {
+        if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+        chatSignal = init?.signal ?? undefined;
+        return hang(chatSignal);
+      });
+      const run = (async () => {
+        const events = [];
+        for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "hi" }], numCtx: 16384, sources: [], fetch: fetcher })) events.push(e);
+        return events;
+      })();
+      await vi.advanceTimersByTimeAsync(120_000 + 1); // the default stall guard, STREAM_STALL_MS
+      expect(chatSignal?.aborted).toBe(true);
+      expect((await run).at(-1)).toMatchObject({ type: "error", code: "stream-error", message: "The model stopped sending for 120 s; the reply was stopped." });
+    } finally { vi.useRealTimers(); }
   });
   it("names a SQLite source the way the offered tool takes it: a source id for sql on Windows, a /data path for the shell on Linux", async () => {
     const windows = await system("win32");
@@ -226,4 +247,50 @@ describe("tool chat transport", () => {
       } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
     });
   }
+});
+
+const answering = (bodies: Record<string, unknown>[]) => vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+  if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion", "tools"] });
+  bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+  return ndjson([{ message: { content: "ok" }, done: true, done_reason: "stop" }]);
+});
+const noRun = async () => ({ output: "", summary: "" });
+const manySources = Array.from({ length: 200 }, (_, i) => ({ id: `s${i}`, label: "a long library source name ".repeat(3), path: "live", kind: "folder" as const }));
+
+describe("tool turns in a small context window", () => {
+  it("runs with its tools at 2048 when they fit", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const events = [];
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "hi" }], numCtx: 2048, sources: [], fetch: answering(bodies), execute: noRun })) events.push(e);
+    expect(bodies[0]).toMatchObject({ options: { num_ctx: 2048 }, tools: expect.any(Array) });
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { stats: { numCtx: 2048 } } });
+  });
+
+  it("answers without tools and says why when they would take most of the window", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const events = [];
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "hi" }], numCtx: 2048, sources: manySources, fetch: answering(bodies), execute: noRun })) events.push(e);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).not.toHaveProperty("tools");
+    expect(sentMessages(bodies)).toHaveLength(1);
+    const note = { name: "note", state: "done", summary: expect.stringMatching(/2k.*without tools/) };
+    expect(events[0]).toMatchObject({ type: "tool", step: note });
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "ok", tools: [note] } });
+  });
+
+  it("drops the oldest history that does not fit beside the tools", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const messages = [{ role: "user" as const, content: "x".repeat(8000) }, { role: "assistant" as const, content: "x".repeat(8000) }, { role: "user" as const, content: "now" }];
+    for await (const _ of streamToolTurn({ baseUrl: "http://fake", model: "m", messages, numCtx: 2048, sources: [], fetch: answering(bodies), execute: noRun })) { /* drain */ }
+    expect(sentMessages(bodies).map((m) => m.role)).toEqual(["system", "user"]);
+    expect(sentMessages(bodies).at(-1)?.content).toBe("now");
+  });
+
+  it("says so plainly when the message is too long beside the tools, and sends nothing", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const events = [];
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "y".repeat(20000) }], numCtx: 2048, sources: [], fetch: answering(bodies), execute: noRun })) events.push(e);
+    expect(bodies).toEqual([]);
+    expect(events).toEqual([expect.objectContaining({ type: "error", code: "context-too-small" })]);
+  });
 });

@@ -2,7 +2,6 @@
 // fit words (three label sets, one switch), the installed order, the next
 // default after a removal and the name truncation.
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
-import { k } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
@@ -48,7 +47,6 @@ export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1
 
 /** The reason behind a verdict, outcome first, one number per resource. */
 export function fitReason(r: FitReport, cpu = false): string {
-  if (r.verdict === "refuse" && r.contextLimit !== undefined) return `Supports up to ${k(r.contextLimit)} of context; new chats use ${k(r.numCtx)}.`;
   const head = `Needs about ${about(r.needVramBytes)}.`;
   if (cpu) return `${head} This computer has no supported GPU, ${r.verdict === "refuse" ? "and system memory can't hold it, so it can't load." : "so it runs in slower system memory."}`;
   const gpu = `Your GPU has ${about(r.freeVramBytes)} free`;

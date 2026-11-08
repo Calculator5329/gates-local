@@ -67,8 +67,10 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
 
   await page.goto(`${origin}/`);
   expect(await page.locator('meta[name="gates-local-server"]').getAttribute("content")).toBe("same-origin");
-  // Connected and Ollama ready; attached rather than visible, since the sidebar may fold away at phone width.
-  await expect(page.locator(".sb-foot .rt .dot.ok")).toBeAttached({ timeout: 10_000 });
+  // Connected and Ollama ready: the composer is open and a healthy runtime has no footer row
+  // (checked only once the composer is up, so an unmounted sidebar cannot pass it).
+  await expect(page.locator(".composer:not(.blocked)")).toBeAttached({ timeout: 10_000 });
+  await expect(page.locator(".sb-foot .rt .dot")).toHaveCount(0);
   expect(sockets).toEqual([`ws://127.0.0.1:${port}/ws`]);
 
   await sendMessage(page, "Hello from the phone");

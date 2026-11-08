@@ -7,7 +7,7 @@
 // models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { FitReport, ModelInfo } from "@gates-local/contracts";
-import { k, noGpu } from "./format.ts";
+import { ctxFor, k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault } from "./models-actions.ts";
@@ -474,7 +474,8 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const [err, run] = useAct();
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
-  const numCtx = useStore((s) => s.numCtx);
+  const models = useStore((s) => s.models);
+  const ctx = k(ctxFor(useStore((s) => s.numCtx), models, def));
   const cpu = useStore((s) => noGpu(s.gpu));
   const chat = rows.filter((r) => r.chat);
   const runs = chat.filter((r) => r.verdict !== "refuse");
@@ -521,8 +522,8 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         <b>Default for new chats</b>
         <span>
           {cpu
-            ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${k(numCtx)}, otherwise on your best model that fits. Change it here; any chat can still switch.`
-            : `If it can't run at ${k(numCtx)}, new chats start on your best model that fits the GPU. Any chat can switch from its model menu.`}
+            ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${ctx}, otherwise on your best model that fits. Change it here; any chat can still switch.`
+            : `If it can't run at ${ctx}, new chats start on your best model that fits the GPU. Any chat can switch from its model menu.`}
         </span>
         <Fail err={err} />
       </div>
