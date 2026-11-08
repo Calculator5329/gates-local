@@ -1,6 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { CLIENT_ORIGIN, clientFile, externalUrl, originOf, sameClient } from "../src/client-protocol.ts";
+import { afterEach, describe, expect, it } from "vitest";
+import { CLIENT_ORIGIN, clientFile, externalUrl, originOf, sameClient, servedFile } from "../src/client-protocol.ts";
 
 describe("clientFile", () => {
   const root = path.resolve("/srv/web");
@@ -40,6 +42,18 @@ describe("originOf", () => {
     expect(new URL(`${CLIENT_ORIGIN}/index.html`).origin).toBe("null");
     expect(originOf(`${CLIENT_ORIGIN}/index.html`)).toBe(CLIENT_ORIGIN);
     expect(originOf("http://127.0.0.1:5187/")).toBe("http://127.0.0.1:5187");
+  });
+
+  it("canonicalises the custom scheme's host the way Chromium does", () => {
+    // gates-local is registered as a standard scheme, so Chromium lowercases
+    // and percent-decodes its host before it sends an Origin.
+    expect(originOf("gates-local://APP/index.html")).toBe(CLIENT_ORIGIN);
+    expect(originOf("gates-local://%61pp/index.html")).toBe(CLIENT_ORIGIN);
+    expect(originOf("gates-local://app:5000/")).toBe("gates-local://app:5000");
+    expect(originOf("gates-local://[::1]/")).toBe("gates-local://[::1]");
+    expect(sameClient("gates-local://APP/index.html", `${CLIENT_ORIGIN}/index.html#t=1`)).toBe(true);
+    expect(clientFile(path.resolve("/srv/web"), "gates-local://APP/a.js")).toBe(path.join(path.resolve("/srv/web"), "a.js"));
+    expect(clientFile(path.resolve("/srv/web"), "gates-local://app:5000/a.js")).toBeNull();
   });
 
   it("gives null for file URLs and garbage, so neither is ever allowed", () => {
@@ -88,5 +102,51 @@ describe("externalUrl", () => {
     ]) {
       expect(externalUrl(url), url).toBeNull();
     }
+  });
+});
+
+describe("servedFile (on disk)", () => {
+  let dir = "";
+  afterEach(() => {
+    if (dir !== "") rmSync(dir, { recursive: true, force: true });
+    dir = "";
+  });
+
+  function layout() {
+    dir = mkdtempSync(path.join(tmpdir(), "gates-desktop-served-"));
+    const root = path.join(dir, "dist");
+    const outside = path.join(dir, "outside");
+    mkdirSync(path.join(root, "assets"), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(path.join(root, "index.html"), "<p>client</p>");
+    writeFileSync(path.join(root, "assets", "a.js"), "1");
+    writeFileSync(path.join(outside, "secret.txt"), "secret");
+    symlinkSync(path.join(outside, "secret.txt"), path.join(root, "assets", "file-link.txt"));
+    symlinkSync(outside, path.join(root, "assets", "dir-link"), "dir");
+    // On Windows this is a junction; on Linux the type is ignored and it is a symlink.
+    symlinkSync(outside, path.join(root, "junction"), "junction");
+    symlinkSync(path.join(root, "assets", "a.js"), path.join(root, "inside-link.js"));
+    return root;
+  }
+
+  it("serves real files under the root, through links that stay inside it", async () => {
+    const root = layout();
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/`)).toEqual({ kind: "file", path: path.join(root, "index.html") });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/assets/a.js`)).toEqual({ kind: "file", path: path.join(root, "assets", "a.js") });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/inside-link.js`)).toEqual({ kind: "file", path: path.join(root, "assets", "a.js") });
+  });
+
+  it("refuses links that resolve outside the root", async () => {
+    const root = layout();
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/assets/file-link.txt`)).toEqual({ kind: "refused" });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/assets/dir-link/secret.txt`)).toEqual({ kind: "refused" });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/junction/secret.txt`)).toEqual({ kind: "refused" });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/..%2foutside%2fsecret.txt`)).toEqual({ kind: "refused" });
+  });
+
+  it("calls a missing file or a directory missing, so the load fails to the retry page", async () => {
+    const root = layout();
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/nope.js`)).toEqual({ kind: "missing" });
+    expect(await servedFile(root, `${CLIENT_ORIGIN}/assets`)).toEqual({ kind: "missing" });
   });
 });
