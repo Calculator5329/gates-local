@@ -220,7 +220,11 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "threads.changed": [{ threadId: "t1" }],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
-  "models.pull": [pull, { name: "qwen3.5:14b", state: "error", completedBytes: 0, message: "no space left" }],
+  "models.pull": [
+    pull,
+    { name: "qwen3.5:14b", state: "error", completedBytes: 0, message: "no space left", reason: "no-space" },
+    { name: "mistral-nemox", state: "error", completedBytes: 0, message: 'Ollama has no model named "mistral-nemox".', reason: "not-found" },
+  ],
   "models.load": [
     { model: "qwen3.5:9b", numCtx: 16384, state: "loading" },
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },

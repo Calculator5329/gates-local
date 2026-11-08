@@ -104,6 +104,13 @@ describe("boundary refusals", () => {
     expect(res.ok ? "sent" : res.error.code).toBe("bad-result");
     expect(decodePayload("chat.nope", {}).ok).toBe(false);
   });
+
+  it("carries a pull error's reason and refuses one it does not know", () => {
+    const err = { name: "x:1b", state: "error", completedBytes: 0, message: "m", reason: "not-found" } as const;
+    expect(encodePush("models.pull", err).ok).toBe(true);
+    const bad = encodePush("models.pull", { ...err, reason: "cosmic-rays" } as never);
+    expect(bad.ok ? "sent" : bad.error.code).toBe("bad-payload");
+  });
 });
 
 describe("static types", () => {

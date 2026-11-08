@@ -2,7 +2,7 @@ import type { ServerResponse } from "node:http";
 import type { PullProgress } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
-import { PULL_STOPPED_MESSAGE, createPullManager, plainPullError } from "./pull.ts";
+import { PULL_STOPPED_MESSAGE, createPullManager, plainPullError, pullErrorReason } from "./pull.ts";
 
 let server: FakeServer | undefined;
 afterEach(async () => {
@@ -150,8 +150,9 @@ describe("models.pull", () => {
     m.pull("big:70b");
     await until(() => pushes.filter((p) => p.state === "error").length === 2);
     const errors = pushes.filter((p) => p.state === "error");
-    expect(errors[0]).toMatchObject({ name: "nope:1b", message: 'Ollama has no model named "nope:1b". Check the name in the Ollama library.' });
+    expect(errors[0]).toMatchObject({ name: "nope:1b", message: 'Ollama has no model named "nope:1b". Check the name in the Ollama library.', reason: "not-found" });
     expect(errors[1]?.message).toMatch(/^Not enough disk space to download big:70b/);
+    expect(errors[1]?.reason).toBe("no-space");
     expect(errors[1]?.completedBytes).toBe(10);
   });
 
@@ -167,5 +168,14 @@ describe("models.pull", () => {
 describe("plainPullError", () => {
   it("keeps an unrecognised message, prefixed with what failed", () => {
     expect(plainPullError("m", " unexpected EOF ")).toBe("Downloading m failed: unexpected EOF");
+  });
+});
+
+describe("pullErrorReason", () => {
+  it("names the three failures a person can act on, and nothing else", () => {
+    expect(pullErrorReason("pull model manifest: file does not exist")).toBe("not-found");
+    expect(pullErrorReason("write x: no space left on device")).toBe("no-space");
+    expect(pullErrorReason("dial tcp: lookup registry.ollama.ai: no such host")).toBe("network");
+    expect(pullErrorReason("unexpected EOF")).toBeUndefined();
   });
 });
