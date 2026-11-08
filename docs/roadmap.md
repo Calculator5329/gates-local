@@ -93,6 +93,19 @@ never shows a whisper stop, start or restart.
 - [x] `think` on a model without thinking: run 2026-11-07 on the real
       runtime, HTTP 400 `"gemma3-abliterated:12b-q4" does not support
       thinking` in 18 ms, nothing loaded (evidence log).
+- [ ] A shell over its cap must not look like a low-memory desktop: every
+      `gates-shell-*` scope that hits `MemoryMax=512M` ends with result
+      oom-kill. Plasma's kded `oom_notifier` then tells the user "the system
+      is low on memory" and names the scope. On 2026-11-07, `sandbox.test.ts`
+      (the 1 GiB allocation case) fired about 130 of them across the lanes,
+      and a real user would get one for each command over the cap. Candidate:
+      `OOMPolicy=continue` on the scope plus reading the scope's
+      `memory.events` `oom_kill` count before collect, so the model still
+      hears "went over its 512 MB cap" when `sh` swallows the 137. The hub
+      filters these out for now (workspace-tools `oom_notify.py`, 307359f).
+      *Accept:* the cap test passes, the scope's unit result is not oom-kill,
+      and a shell `python3 …; echo ok` that goes over the cap still reports the
+      cap to the model.
 
 ## Next: slices 2 to 4
 
