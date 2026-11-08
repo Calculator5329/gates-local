@@ -16,9 +16,9 @@ export class RuntimeResponseError extends Error {
   }
 }
 
-async function getDecoded<T>(baseUrl: string, route: string, timeoutMs: number, parse: (v: unknown) => { ok: true; value: T } | { ok: false; message: string }): Promise<T> {
+async function getDecoded<T>(baseUrl: string, route: string, timeoutMs: number, parse: (v: unknown) => { ok: true; value: T } | { ok: false; message: string }, signal?: AbortSignal): Promise<T> {
   const url = new URL(route, baseUrl).href;
-  const r = await httpGet(url, timeoutMs);
+  const r = await httpGet(url, timeoutMs, signal);
   if (r.kind !== "response") throw new RuntimeResponseError(`GET ${url} failed: ${r.kind === "error" ? r.code : r.kind}`);
   if (r.status !== 200) throw new RuntimeResponseError(`GET ${url} gave HTTP ${r.status}`);
   const json = parseJson(r.body);
@@ -73,11 +73,13 @@ export async function listModels(baseUrl: string, timeoutMs = 5000, cache?: Capa
   return models.map((m, i) => ({ ...m, capabilities: caps[i] ?? [] }));
 }
 
-export async function listLoaded(baseUrl: string, timeoutMs = 5000): Promise<LoadedModel[]> {
-  const ps = await getDecoded(baseUrl, "/api/ps", timeoutMs, (v) => decode(PsResponse, v));
+/** /api/ps; `signal` ends the read early (shutdown, a runtime switch). */
+export async function listLoaded(baseUrl: string, timeoutMs = 5000, signal?: AbortSignal): Promise<LoadedModel[]> {
+  const ps = await getDecoded(baseUrl, "/api/ps", timeoutMs, (v) => decode(PsResponse, v), signal);
   return ps.models.map((m): LoadedModel => {
     const l: LoadedModel = { name: m.name, sizeBytes: m.size, sizeVramBytes: m.size_vram };
     if (m.expires_at) l.expiresAt = m.expires_at;
+    if (m.context_length !== undefined) l.contextLength = m.context_length;
     return l;
   });
 }

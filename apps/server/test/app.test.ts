@@ -72,6 +72,8 @@ function cacheTmp(): string {
 interface Gpu {
   freeMib: number;
   memAvailableKb: number;
+  /** nvidia-smi --query-compute-apps rows (pid, name, MiB); none by default. */
+  apps?: string;
 }
 
 interface Rig {
@@ -149,7 +151,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
       server?.push(c, p);
     },
     fit: {
-      runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - gpu.freeMib}, ${gpu.freeMib}\n` : ""),
+      runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - gpu.freeMib}, ${gpu.freeMib}\n` : (gpu.apps ?? "")),
       readMeminfo: async () => `MemTotal: 32541464 kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
     },
     log: () => undefined,
@@ -471,12 +473,16 @@ async function stalledThinkTurn() {
   return { r, t, sent };
 }
 
-/** A fake image module: an idle ComfyUI with this owner; stopIdle claims the GPU alone, as image/module.ts does. */
+/**
+ * A fake image module: an idle ComfyUI with this owner (MainPID 4242 when the app's); stopIdle
+ * claims the GPU alone, as image/module.ts does.
+ */
 function idleComfy(owner: "app" | "external" | "none", onStop: () => void) {
   let stops = 0;
   let current = owner;
   const build = (lease: GpuLease) => ({
     current: () => ({ state: "ready", owner: current }),
+    reclaimable: () => (current === "app" && stops === 0 ? 4242 : undefined),
     stopIdle: () => lease.run("image", undefined, async () => { stops += 1; onStop(); }),
   }) as unknown as ImageModule;
   return { build, stops: () => stops, setOwner: (next: typeof owner) => (current = next) };
@@ -485,12 +491,14 @@ function idleComfy(owner: "app" | "external" | "none", onStop: () => void) {
 describe("chat.send frees an idle ComfyUI the app started", () => {
   it("stops it and measures again when the turn would not fit beside it", async () => {
     let gpu: Gpu | undefined;
-    const comfy = idleComfy("app", () => { if (gpu) gpu.freeMib = 15000; });
+    const comfy = idleComfy("app", () => { if (gpu) { gpu.freeMib = 15000; delete gpu.apps; } });
     const r = await rig({ image: comfy.build });
     gpu = r.gpu;
     const t = await r.client.call("threads.create", {});
     r.gpu.freeMib = 3000;
     r.gpu.memAvailableKb = 1_000_000;
+    // The app's ComfyUI is listed holding what the turn needs beside the 3000 MiB free.
+    r.gpu.apps = "4242, /usr/bin/python3 main.py --port 8188, 12000\n";
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(comfy.stops()).toBe(1);

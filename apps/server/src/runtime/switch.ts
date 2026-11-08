@@ -19,8 +19,13 @@ export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" 
 export interface RuntimeSwitchOptions {
   readonly initialMode: RuntimeMode;
   readonly make: (mode: RuntimeMode) => OllamaRuntime;
-  /** Before a switch takes effect (abort downloads bound to the old runtime). */
-  readonly beforeSwitch?: () => void;
+  /**
+   * Before a switch takes effect (abort downloads and turns bound to the old
+   * runtime). The old runtime stops only after its promise settles.
+   */
+  readonly beforeSwitch?: () => void | Promise<void>;
+  /** Once the new runtime's ensure settled, however it went (always paired with beforeSwitch). */
+  readonly afterSwitch?: () => void;
   readonly log?: (line: string) => void;
 }
 
@@ -29,11 +34,30 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   let mode = options.initialMode;
   let inner = options.make(mode);
   let lastSent: string | undefined;
-  const forward = (s: RuntimeStatus) => {
+  const send = (s: RuntimeStatus) => {
     const key = JSON.stringify(s);
     if (key === lastSent) return;
     lastSent = key;
     for (const l of listeners) l(s);
+  };
+  /**
+   * From a switch's first line until its ensure settles: baseUrl() is
+   * undefined, so nothing new is sent to the runtime being stopped (or to a
+   * new one that is not ready yet).
+   */
+  let switching = false;
+  /**
+   * A switch beforeSwitch refused (turns on the old runtime would not end): the old runtime
+   * stays and serves, and status() says error with the reason until it next changes.
+   */
+  let refused: RuntimeStatus | undefined;
+  // A ready the new runtime announces mid-switch would reach listeners while baseUrl() still
+  // says undefined (app.ts refreshes the model list on it, and would empty it). It waits:
+  // setMode sends the settled status once baseUrl() is the new URL and the loader settled.
+  const forward = (s: RuntimeStatus) => {
+    refused = undefined;
+    if (switching && s.state === "ready") return;
+    send(s);
   };
   let off = inner.onChange(forward);
   // ensure, discover, setMode and stopIfStartedHere run one after another, so
@@ -53,8 +77,8 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   };
 
   return {
-    status: () => inner.status(),
-    baseUrl: () => inner.baseUrl(),
+    status: () => refused ?? inner.status(),
+    baseUrl: () => (switching ? undefined : inner.baseUrl()),
     ensure: () => serial(() => inner.ensure()),
     discover: () => serial(() => inner.discover()),
     startedByThisProcess: () => inner.startedByThisProcess(),
@@ -66,17 +90,28 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     setMode(next) {
       return serial(async () => {
         if (next === mode) return inner.status();
-        options.beforeSwitch?.();
-        const old = inner;
-        off();
-        await stopIfStartedHere(old);
-        mode = next;
-        inner = options.make(next);
-        off = inner.onChange(forward);
-        const status = await inner.ensure();
-        // A fresh runtime that lands on its initial status emits nothing itself.
-        forward(status);
-        return status;
+        switching = true;
+        refused = undefined;
+        try {
+          try {
+            await options.beforeSwitch?.();
+          } catch (e) {
+            refused = { ...inner.status(), state: "error", detail: `Switching to the ${next} runtime failed: ${(e as Error).message}. Still on the ${mode} runtime.` };
+            throw e;
+          }
+          const old = inner;
+          off();
+          await stopIfStartedHere(old);
+          mode = next;
+          inner = options.make(next);
+          off = inner.onChange(forward);
+          return await inner.ensure();
+        } finally {
+          switching = false;
+          options.afterSwitch?.();
+          // The settled status, ready included; a fresh runtime that lands on its initial status emits nothing itself.
+          send(refused ?? inner.status());
+        }
       });
     },
     stopIfStartedHere: () => serial(() => stopIfStartedHere(inner)),

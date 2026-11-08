@@ -68,6 +68,18 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
 };
 /** An Ollama reply that never comes; it rejects when the turn aborts the request. */
 const hang = (signal: AbortSignal | undefined) => new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+/** The system prompt a tool turn sends for one SQLite and one folder source on this platform. */
+const system = async (platform: NodeJS.Platform) => {
+  const bodies: { messages: { role: string; content: string }[] }[] = [];
+  const fetcher = vi.fn(async (url, init) => {
+    if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+    bodies.push(JSON.parse(String(init?.body)));
+    return ndjson([{ message: { content: "ok" }, done: true }]);
+  });
+  const sources = [{ id: "books", label: "books.db", path: "live", snapshotPath: "snap", kind: "sqlite" as const }, { id: "notes", label: "Notes", path: "folder", kind: "folder" as const }];
+  for await (const _ of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [], numCtx: 16384, sources, platform, fetch: fetcher, execute: async () => ({ output: "", summary: "" }) })) { /* drain */ }
+  return bodies[0]!.messages[0]!.content;
+};
 describe("tool chat transport", () => {
   it("chooses native tool_calls from /api/show and carries think and num_ctx", async () => {
     const requests: Record<string, unknown>[] = [];
@@ -100,6 +112,13 @@ describe("tool chat transport", () => {
     expect(fetcher).not.toHaveBeenCalled();
     await run(8192);
     expect(requests[0]).toMatchObject({ options: { num_ctx: 8192 } });
+  });
+  it("names a SQLite source the way the offered tool takes it: a source id for sql on Windows, a /data path for the shell on Linux", async () => {
+    const windows = await system("win32");
+    expect(windows).not.toContain("/data/");
+    expect(windows).toContain('books: books.db (sqlite): use sql with source "books"');
+    expect(windows).toContain("notes: Notes (folder) at /library/notes");
+    expect(await system("linux")).toContain("books: books.db (sqlite) at /data/books.db");
   });
   it("uses text calls for gemma and refuses truncated native calls", async () => {
     for (const native of [true, false]) {

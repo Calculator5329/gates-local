@@ -122,9 +122,8 @@ GitHub, checks its SHA-256, and unpacks it with Windows' own `tar.exe` into
 `%LOCALAPPDATA%\GatesLocal\runtime\ollama\0.40.15` (2.2 GB on disk). On the
 test machine that took 3 min 41 s from the click to a running copy. Then it
 downloaded Qwen 3.5 4B into the copy's models folder and answered a chat.
-To test this the app was started with its search for an installed Ollama
-turned off; with Ollama installed, the code runs the installed
-`ollama.exe` as its copy instead of downloading one (not tested).
+The copy is always this pinned build: the app never runs an `ollama.exe` it
+finds on PATH as its copy. The app's own copy is not available on Windows ARM.
 
 Switching back (Settings › Runtime › "Switch to the system Ollama") stops
 the copy. The downloaded copy stays in the data folder until you remove it.
@@ -169,13 +168,22 @@ pnpm start
 
 ## 6. Updating
 
-Close the app, then, from the clone:
+In the app, open Settings › General › Updates, click "Check for updates" and
+then "Update and restart". The window closes, the new version installs and
+the app opens again.
+
+A copy from before that button existed has to update once by hand, and this
+path always works. Close the app, then, from the clone:
 
 ```powershell
 git pull
 pnpm install
 pnpm start
 ```
+
+`pnpm run app-update` does the same update from a terminal, goes back to the
+version you had if a step fails, and says what is new first; add `--check` to
+only see what is new.
 
 Your threads and settings stay where they are. If a newer build changed the
 thread database, an older build refuses to open it rather than change it.

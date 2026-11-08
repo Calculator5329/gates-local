@@ -16,10 +16,10 @@ export const GPU_APPS_ARGS = [
   "--format=csv,noheader,nounits",
 ] as const;
 
-export const defaultNvidiaSmi: NvidiaSmiRunner = (args) =>
+export const defaultNvidiaSmi: NvidiaSmiRunner = (args, signal) =>
   new Promise((resolve, reject) => {
     // windowsHide: the server has no console on Windows, so each run would flash one.
-    execFile("nvidia-smi", [...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true }, (error, stdout) => {
+    execFile("nvidia-smi", [...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });
@@ -29,8 +29,34 @@ export const defaultNvidiaSmi: NvidiaSmiRunner = (args) =>
  * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.freemem()
  * rendered as a MemAvailable line, so one parser serves every platform.
  */
-export const defaultMeminfo: MeminfoReader = () =>
-  process.platform === "linux" ? readFile("/proc/meminfo", "utf8") : Promise.resolve(`MemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
+export const defaultMeminfo: MeminfoReader = (signal) =>
+  process.platform === "linux"
+    ? readFile("/proc/meminfo", { encoding: "utf8", ...(signal ? { signal } : {}) })
+    : Promise.resolve(`MemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
+
+/** `work`'s result, or the signal's reason as soon as it aborts (a runner that ignores the signal still lets go). */
+export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return work;
+  if (signal.aborted) {
+    // The work is dropped, not left unobserved: its own rejection must not reach the process.
+    work.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
 
 function parseMib(field: string | undefined): number | undefined {
   if (field === undefined) return undefined;
@@ -99,12 +125,15 @@ export function parseComputeApps(text: string): GpuTenant[] {
   return tenants;
 }
 
-export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now): Promise<GpuSnapshot> {
+/** `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
+export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal): Promise<GpuSnapshot> {
+  signal?.throwIfAborted();
   let totalsText: string;
   let appsText: string;
   try {
-    [totalsText, appsText] = await Promise.all([run(GPU_TOTALS_ARGS), run(GPU_APPS_ARGS)]);
+    [totalsText, appsText] = await untilAborted(Promise.all([run(GPU_TOTALS_ARGS, signal), run(GPU_APPS_ARGS, signal)]), signal);
   } catch (error) {
+    if (signal?.aborted) throw signal.reason;
     // No nvidia-smi at all (for example a Windows machine with no NVIDIA GPU):
     // zero VRAM, so the fit check plans the whole model in system memory.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, tenants: [], measuredAt: now() };
@@ -121,11 +150,13 @@ export function parseMemAvailable(text: string): number {
   return Number(match[1]) * 1024;
 }
 
-export async function readMemAvailable(read: MeminfoReader = defaultMeminfo): Promise<number> {
+export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<number> {
+  signal?.throwIfAborted();
   let text: string;
   try {
-    text = await read();
+    text = await untilAborted(read(signal), signal);
   } catch (error) {
+    if (signal?.aborted) throw signal.reason;
     throw new FitError("meminfo-unreadable", `cannot read /proc/meminfo: ${error instanceof Error ? error.message : String(error)}`);
   }
   return parseMemAvailable(text);

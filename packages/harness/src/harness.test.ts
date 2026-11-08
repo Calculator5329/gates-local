@@ -136,6 +136,17 @@ describe("turn budgets", () => {
     expect(requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringContaining("time budget ran out") });
     expect(complete.content).toBe("Here is what I found.");
   });
+  it("spends the time budget when its timer stops a tool, even if the clock shows less time used", async () => {
+    // Node's timer can fire a millisecond before Date.now() reaches the budget; a frozen
+    // clock makes that race certain. The stopped tool must still end the turn's tools.
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      const execute = vi.fn((_call: unknown, signal: AbortSignal) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))));
+      const { requests } = await collect({ execute, toolTimeBudgetMs: 20, replies: [{ calls: reads(3) }, { content: "Done." }] });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(requests.map(r => r.options)).toEqual([{ tools: true }, { tools: false }]);
+    } finally { now.mockRestore(); }
+  });
   it("stops tools past an output budget of num_ctx * 3 / 2 characters", async () => {
     expect(toolOutputBudget(16384)).toBe(24576);
     const execute = vi.fn(async () => ({ output: "x".repeat(9000), summary: "Read" }));

@@ -61,8 +61,12 @@ function decode<Sch extends S.ConstraintDecoder<unknown>>(schema: Sch, path: str
   }
 }
 
-export async function fetchTags(baseUrl: string): Promise<TagsResponse> {
-  return decode(TagsResponse, "/api/tags", await request(baseUrl, "/api/tags", undefined));
+/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
+const withSignal = (signal: AbortSignal | undefined): RequestInit => (signal === undefined ? {} : { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
+
+/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
+export async function fetchTags(baseUrl: string, signal?: AbortSignal): Promise<TagsResponse> {
+  return decode(TagsResponse, "/api/tags", await request(baseUrl, "/api/tags", withSignal(signal)));
 }
 
 /** `signal` ends the request early; it is combined with the usual 15 s timeout. */
@@ -76,8 +80,9 @@ export async function fetchShow(baseUrl: string, model: string, signal?: AbortSi
   return decode(ShowResponse, "/api/show", body);
 }
 
-export async function fetchPs(baseUrl: string): Promise<PsResponse> {
-  return decode(PsResponse, "/api/ps", await request(baseUrl, "/api/ps", undefined));
+/** `signal` ends the request early; it is combined with the usual 15 s timeout. */
+export async function fetchPs(baseUrl: string, signal?: AbortSignal): Promise<PsResponse> {
+  return decode(PsResponse, "/api/ps", await request(baseUrl, "/api/ps", withSignal(signal)));
 }
 
 /** Ollama names carry an implicit ":latest"; match either spelling. */

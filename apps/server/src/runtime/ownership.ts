@@ -8,8 +8,14 @@
 // runtime.ts stops the child it spawned through its handle, and a record
 // from an earlier run is "adopted" and left running. The platform and the
 // command runner are injectable so both paths are tested on Linux.
+//
+// A live identity is not enough to adopt a port: the recorded process may
+// have let go of it (shutting down, cleaning up runners) and another Ollama
+// taken it. listenerPid() names the process that holds a listening port.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { isIPv4, isIPv6 } from "node:net";
+import { endianness } from "node:os";
 import path from "node:path";
 import { OwnedRecord, decode, parseJson } from "./schemas.ts";
 
@@ -59,6 +65,177 @@ export function readProc(pid: number, on: ProcPlatform = {}): ProcIdentity | und
     if (!startTime || state === "Z" || state === "X") return undefined;
     const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
     return { pid, startTime, command, state };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The file reads behind the Linux listener lookup (tests inject fixtures). */
+export interface ListenerFs {
+  readFile(file: string): string;
+  readdir(dir: string): string[];
+  readlink(file: string): string;
+}
+
+const realFs: ListenerFs = {
+  readFile: (file) => readFileSync(file, "utf8"),
+  readdir: (dir) => readdirSync(dir),
+  readlink: (file) => readlinkSync(file),
+};
+
+export interface ListenerOptions extends ProcPlatform {
+  /** Linux: search only these processes' fds (the recorded or spawned pid); default every /proc/<pid>. */
+  readonly pids?: readonly number[];
+  /** Linux: the probed address (an IP literal); a listener counts only on it or a wildcard. Default 127.0.0.1. */
+  readonly host?: string;
+  readonly fs?: ListenerFs;
+}
+
+/**
+ * The address bytes of a /proc/net/tcp{,6} local_address hex field: 32-bit
+ * words printed in host byte order, so each word is reversed on little-endian.
+ */
+function procAddressBytes(hex: string): number[] | undefined {
+  if (!/^[0-9A-Fa-f]+$/.test(hex) || (hex.length !== 8 && hex.length !== 32)) return undefined;
+  const bytes: number[] = [];
+  for (let w = 0; w < hex.length; w += 8) {
+    const word = [0, 2, 4, 6].map((i) => Number.parseInt(hex.slice(w + i, w + i + 2), 16));
+    bytes.push(...(endianness() === "LE" ? word.toReversed() : word));
+  }
+  return bytes;
+}
+
+/** The bytes of an IPv4 or IPv6 literal (IPv6 brackets allowed); undefined for anything else. */
+function hostBytes(host: string): { family: 4 | 6; bytes: number[] } | undefined {
+  const bare = host.replace(/^\[(.*)\]$/, "$1");
+  if (isIPv4(bare)) return { family: 4, bytes: bare.split(".").map(Number) };
+  if (!isIPv6(bare) || bare.includes("%")) return undefined;
+  // Normalise through the URL parser: compressed, IPv4 tail as hex groups.
+  const groups = new URL(`http://[${bare}]/`).hostname.slice(1, -1).split(":");
+  const gap = groups.indexOf("");
+  const full = gap === -1 ? groups : [...groups.slice(0, gap), ...Array.from({ length: 8 - groups.filter(Boolean).length }, () => "0"), ...groups.slice(gap).filter(Boolean)];
+  return { family: 6, bytes: full.flatMap((g) => [Number.parseInt(g, 16) >> 8, Number.parseInt(g, 16) & 0xff]) };
+}
+
+const same = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+const MAPPED_PREFIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
+
+/**
+ * A listener bound to `local` serves `probed`: the same address, or a
+ * wildcard in the probed family, and [::ffff:a.b.c.d] serves a.b.c.d. A tcp6
+ * [::] never counts for IPv4: whether that one socket is dual-stack is its
+ * own IPV6_V6ONLY, which /proc does not show (bindv6only is only the
+ * default), so an IPv6-only listener could be taken for the IPv4 one.
+ */
+function serves(local: number[], probed: { family: 4 | 6; bytes: number[] }): boolean {
+  if (local.length === 4) return probed.family === 4 && (same(local, probed.bytes) || local.every((b) => b === 0));
+  if (probed.family === 6) return same(local, probed.bytes) || local.every((b) => b === 0);
+  return same(local.slice(0, 12), MAPPED_PREFIX) && same(local.slice(12), probed.bytes);
+}
+
+/**
+ * Linux: the inodes of LISTEN sockets on `port` in /proc/net/tcp or
+ * /proc/net/tcp6 text; with `host`, only those bound to it or a wildcard.
+ */
+export function listenInodes(text: string, port: number, host?: string): string[] {
+  const probed = host === undefined ? undefined : hostBytes(host);
+  if (host !== undefined && probed === undefined) return [];
+  const inodes: string[] = [];
+  for (const line of text.split("\n").slice(1)) {
+    // sl local_address rem_address st tx:rx tr:when retrnsmt uid timeout inode ...
+    const f = line.trim().split(/\s+/);
+    const local = f[1];
+    if (f.length < 10 || local === undefined || f[3] !== "0A") continue;
+    const inode = f[9];
+    if (inode === undefined || inode === "0") continue;
+    const colon = local.lastIndexOf(":");
+    if (Number.parseInt(local.slice(colon + 1), 16) !== port) continue;
+    if (probed !== undefined) {
+      const bytes = procAddressBytes(local.slice(0, colon));
+      if (bytes === undefined || !serves(bytes, probed)) continue;
+    }
+    inodes.push(inode);
+  }
+  return inodes;
+}
+
+/**
+ * Linux, synchronous: the process among `pids` (default all) holding a
+ * LISTEN socket that serves `host`:`port` (R2-06: a listener on another
+ * loopback address with the same port is not it).
+ */
+export function readLinuxListenerPid(port: number, pids?: readonly number[], fs: ListenerFs = realFs, host = "127.0.0.1"): number | undefined {
+  const inodes = new Set<string>();
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text: string;
+    try {
+      text = fs.readFile(file);
+    } catch {
+      continue;
+    }
+    for (const inode of listenInodes(text, port, host)) inodes.add(inode);
+  }
+  if (inodes.size === 0) return undefined;
+  const candidates = pids ?? fs.readdir("/proc").filter((n) => /^\d+$/.test(n)).map(Number);
+  for (const pid of candidates) {
+    let fds: string[];
+    try {
+      fds = fs.readdir(`/proc/${pid}/fd`);
+    } catch {
+      continue;
+    }
+    for (const fd of fds) {
+      let link: string;
+      try {
+        link = fs.readlink(`/proc/${pid}/fd/${fd}`);
+      } catch {
+        continue;
+      }
+      const m = /^socket:\[(\d+)\]$/.exec(link);
+      if (m?.[1] !== undefined && inodes.has(m[1])) return pid;
+    }
+  }
+  return undefined;
+}
+
+/** The PowerShell query behind a Windows listener read. */
+export const windowsListenerQuery = (port: number) =>
+  `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object OwningProcess | ConvertTo-Json -Compress`;
+
+/** Windows: the one OwningProcess in the query's answer; undefined when empty, malformed or several differ. */
+export function parseWindowsListener(out: string): number | undefined {
+  const text = out.trim();
+  if (text === "") return undefined;
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const rows = Array.isArray(v) ? (v as unknown[]) : [v];
+  const pids = new Set<number>();
+  for (const row of rows) {
+    const pid = typeof row === "object" && row !== null ? (row as Record<string, unknown>).OwningProcess : undefined;
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
+    pids.add(pid);
+  }
+  return pids.size === 1 ? [...pids][0] : undefined;
+}
+
+/**
+ * The process listening on loopback `port`: Linux matches the LISTEN
+ * socket's inode in /proc/net/tcp{,6} against /proc/<pid>/fd links, Windows
+ * asks Get-NetTCPConnection. Any other platform, or any failed read, is
+ * undefined (never "ours").
+ */
+export async function listenerPid(port: number, options: ListenerOptions = {}): Promise<number | undefined> {
+  const platform = options.platform ?? process.platform;
+  try {
+    if (platform === "win32") {
+      return parseWindowsListener((options.run ?? runSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsListenerQuery(port)]));
+    }
+    if (platform === "linux") return readLinuxListenerPid(port, options.pids, options.fs, options.host);
+    return undefined;
   } catch {
     return undefined;
   }

@@ -19,6 +19,8 @@
 //                                test/fake-ollama/nvidia-smi.ts; on Windows a .ts/.js script
 //                                runs through this Node or Electron); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+//   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
+//                                outside this one (src/update/guard.ts); the e2e stack sets it
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
 //   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
@@ -49,6 +51,11 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
+import { createUpdateModule } from "./update/module.ts";
+import { realRunner } from "./update/run.ts";
+
+/** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
+const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -135,13 +142,14 @@ async function main(): Promise<void> {
   const fit = {
     ...(smiFile
       ? {
-          runNvidiaSmi: (args: readonly string[]) =>
+          // A called-off fit (shutdown, a runtime switch) kills the child.
+          runNvidiaSmi: (args: readonly string[], signal?: AbortSignal) =>
             new Promise<string>((resolve, reject) =>
-              execFile(smiFile, [...smiPre, ...args], { timeout: 10_000, windowsHide: true }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+              execFile(smiFile, [...smiPre, ...args], { timeout: 10_000, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
             ),
         }
       : {}),
-    ...(meminfoPath ? { readMeminfo: () => readFile(meminfoPath, "utf8") } : {}),
+    ...(meminfoPath ? { readMeminfo: (signal?: AbortSignal) => readFile(meminfoPath, { encoding: "utf8", ...(signal ? { signal } : {}) }) } : {}),
   };
 
   let server: WsServer | undefined;
@@ -177,7 +185,16 @@ async function main(): Promise<void> {
     ollamaUrl: () => runtime.baseUrl(),
   });
   const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
+  // Reads the last update's result file and nothing else at start; git runs only on update.check.
+  const update = createUpdateModule({
+    root: REPO_ROOT,
+    dataDir,
+    runner: realRunner,
+    everyChange: () => services.settings.get().updateEveryChange === true,
+    log: (line) => log(`update ${line}`),
+  });
   const app: App = createApp({
+    update,
     image,
     lease: gpuLease,
     store,
@@ -212,6 +229,8 @@ async function main(): Promise<void> {
       }
     };
     await step("cancel turns", () => app.shutdown());
+    // A cold preload holds a shared GPU claim for minutes; image.close() needs the GPU alone.
+    await step("drain model loads", () => services.loader.close());
     await step("close image module", () => image.close());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());

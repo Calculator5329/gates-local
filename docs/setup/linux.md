@@ -194,7 +194,45 @@ closed, to keep what is in it.
 Close the app, then, from the clone:
 
 ```sh
-git pull
+pnpm run app-update
+pnpm start
+```
+
+`pnpm run app-update` lists what is new (at most 20 changes, or a
+release's notes), moves the clone to it, runs `pnpm install` and builds the
+app. `pnpm run app-update --check` only lists. The app's Settings ›
+General › Updates does the same: "Check for updates" checks when you
+click it, never on its own, and "Update and restart" closes the window,
+updates and opens the app again.
+
+Which version it moves to:
+
+- Once the project has release tags (`v1.2.3`), the newest release, by
+  version number, so `v0.10.0` comes after `v0.9.0`. A copy already past
+  that release is up to date: it never goes backwards.
+- With no release tags yet, or with `--channel main`, or with "Get every
+  change, not only releases" on in Settings, the newest commit on the
+  branch the clone follows.
+
+It refuses, and changes nothing, when:
+
+- a tracked file has changes. It lists them, and `git stash`, the update,
+  then `git stash pop` keeps them. Untracked and ignored files do not count.
+- the clone has commits of its own. It never merges or resets over them.
+- the app is still running.
+
+If a step fails (no network, `pnpm install` or a build stops), it goes back
+with `git reset --keep` to the commit you had, installs and builds that
+again, and prints `The update to <new> stopped at <step>: <reason>. Gates
+Local is still on <old>.` The full output is in `update-logs/` in the data
+folder. If going back fails too, it prints the exact commands to run in
+the clone.
+
+The manual way still works, and is what to use if the command itself
+cannot run:
+
+```sh
+git pull --ff-only
 pnpm install
 pnpm start
 ```

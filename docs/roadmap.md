@@ -89,6 +89,21 @@ never shows a whisper stop, start or restart.
       and put the reason in the refusal text.
 - [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
       when 11435 is busy with another service.
+- [ ] Stopped replies (turns/queue lane, from the runtime-fix04 review,
+      R3-02 and R4-06): a reply cut by a runtime switch or a preemption is
+      saved with its text and thinking, but nothing stored marks it stopped
+      (the stopped code is only on the chat event), and its tool steps are
+      not saved. `endHalted` in `apps/server/src/app.ts`.
+      *Accept:* a reloaded thread shows the cut reply as stopped, with the
+      tool steps it had sent.
+- [ ] Shutdown order (turns/queue lane, runtime-fix04 review R2-03):
+      `apps/server/src/main.ts` exits by force after 2.5 s, but
+      `image.close()` can wait up to 15 s for a ComfyUI stop already under
+      way, and the app-owned Ollama is stopped only after it, so a slow
+      ComfyUI stop skips the Ollama cleanup. Run that cleanup first or
+      alongside, behind a shutdown sequence a test can drive.
+      *Accept:* with a ComfyUI stop held, the owned Ollama is still
+      stopped before the forced exit.
 - [ ] Cancel a turn that waits for the GPU: a turn queued behind an image
       job holds no claim yet, and Stop only aborts once the claim lands.
       *Accept:* a test queues a turn behind a held image claim, presses
@@ -119,6 +134,17 @@ never shows a whisper stop, start or restart.
       *Accept:* the cap test passes, the scope's unit result is not oom-kill,
       and a shell `python3 …; echo ok` that goes over the cap still reports the
       cap to the model.
+- [x] Source updates for a git clone: `pnpm run app-update` (`--check`,
+      `--channel main|release`) and Settings › General › Updates (version,
+      a check that runs only on a click, "Update and restart" in the
+      desktop app, the result on the next start).
+      *Accept:* a failed install or build leaves the clone on the commit it
+      had, installed and built again; tracked changes and local commits
+      refuse with nothing changed; releases follow semver and never go
+      backwards; the tests run on temporary repositories only, behind a
+      guard that refuses any other folder.
+      *Done 2026-11-07:* lane/update; checked on Linux, Windows by reading
+      only (changelog).
 
 ## Next: slices 2 to 4
 
@@ -233,6 +259,9 @@ never shows a whisper stop, start or restart.
       selected models ready, whisper unchanged through success and failure.
       *Accept:* `pnpm release:smoke` on this machine plus a try-it packet for
       Ethan. Packaging does not authorize a release or publication.
+- [ ] Packaged releases (AppImage, Windows installer, auto-update) once
+      Ethan picks that path. `pnpm run app-update` covers git clones only;
+      a packaged copy says it cannot update itself.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
       Prepared on lane/readme: README, `docs/setup/linux.md` and the

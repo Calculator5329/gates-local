@@ -427,6 +427,35 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.calls).toContain("stop");
   });
 
+  it("a reclaim cancelled after its first inspection never starts the idle read and gives the image claim back at once (R5-05)", async () => {
+    let up = false;
+    let cancel: AbortController | undefined;
+    const unit = () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: 42 });
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ service: {
+      // When armed, the abort lands after this inspection has resolved and before stopIdle's next statement runs.
+      inspect: () => {
+        const read = Promise.resolve(unit());
+        const c = cancel; cancel = undefined;
+        if (c) queueMicrotask(() => void read.then(() => c.abort(new Error("reclaim cancelled"))));
+        return read;
+      },
+      start: async () => { up = true; f.configure({ answering: true }); },
+      stop: async () => { f.calls.push("stop"); up = false; f.configure({ answering: false }); },
+    } });
+    f.configure({ answering: false });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.module.current().owner).toBe("app");
+    const before = f.calls.length;
+    cancel = new AbortController();
+    const signal = cancel.signal;
+    await expect(f.module.stopIdle(signal)).rejects.toThrow("reclaim cancelled");
+    expect(signal.aborted).toBe(true);
+    expect(f.calls.slice(before)).toEqual([]);
+    expect(f.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    expect(f.module.current().owner).toBe("app");
+  });
+
   it("clears and unrefs the job timer once the image bytes are fetched, before the PNG is written", async () => {
     const f = await fixture({ jobTimeoutMs: 600_000 }); vi.useFakeTimers();
     const timers = vi.spyOn(globalThis, "setTimeout");
