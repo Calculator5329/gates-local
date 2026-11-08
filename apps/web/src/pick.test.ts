@@ -90,10 +90,12 @@ describe("client model choice", () => {
     expect(order.current(inFlight)).toBe(false);
   });
 
-  it("an Ollama too old to report capabilities is the reason nothing can chat, not a missing download", () => {
+  it("an Ollama that does not report capabilities is the reason nothing can chat, not a missing download", () => {
     const old = [m("qwen3.5:9b", 1, ["unknown", "unreported"]), m("gemma4:12b", 1, ["unknown", "unreported"])];
-    expect(chatBlockedReason(old, undefined)).toBe("Your Ollama is too old to say what its models can do, so none can chat. Update Ollama.");
-    expect(notForChat(old[0]).label).toBe("Ollama too old to say");
+    // Only the missing field is known, not that the version is old: true either way.
+    expect(chatBlockedReason(old, undefined)).toBe("This Ollama doesn't say which models can chat. Updating Ollama fixes this.");
+    expect(chatBlockedReason(old, undefined, "0.1.32")).toBe("Ollama 0.1.32 doesn't say which models can chat. Updating Ollama fixes this.");
+    expect(notForChat(old[0]).label).toBe("Ollama doesn't say");
     // A chosen model not described yet: sends wait for it.
     expect(chatBlockedReason([m("gemma4:12b", 1, ["unknown"]), small], "gemma4:12b")).toBe("Checking what this model can do; you can send once Ollama answers.");
     // Otherwise the existing words stand: a model that can chat, or nothing installed.
