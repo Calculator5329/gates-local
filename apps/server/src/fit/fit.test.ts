@@ -74,15 +74,15 @@ describe("nvidia-smi parsing", () => {
     expect(tenants).toHaveLength(13);
     const whisper = tenants.filter((t) => t.permanent);
     expect(whisper).toEqual([
-      expect.objectContaining({ pid: 428377, label: "whisper-server", role: "whisper", usedBytes: 2202 * MIB }),
+      expect.objectContaining({ pid: 5100, label: "whisper-server", role: "whisper", usedBytes: 2202 * MIB }),
     ]);
-    expect(tenants.find((t) => t.pid === 2303957)).toMatchObject({
+    expect(tenants.find((t) => t.pid === 5400)).toMatchObject({
       label: "media-vault vision runtime",
       role: "occupant",
       permanent: false,
       usedBytes: 1822 * MIB,
     });
-    expect(tenants.find((t) => t.pid === 4192851)?.label).toBe("chrome");
+    expect(tenants.find((t) => t.pid === 4400)?.label).toBe("browser");
   });
 
   it("survives commas in names, [N/A] memory, blank and junk lines", () => {
@@ -201,7 +201,7 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     const need = 6594474711 + 8 * 4 * 512 * 16384 * 2 + RUNTIME_OVERHEAD_BYTES;
     expect(check.estimate?.totalBytes).toBe(need);
     expect(check.report).toMatchObject({ verdict: "fits", needVramBytes: need, freeVramBytes: 9468 * MIB, spillRamBytes: 0, source: "estimate" });
-    expect(check.gpu?.tenants.find((t) => t.permanent)?.pid).toBe(428377);
+    expect(check.gpu?.tenants.find((t) => t.permanent)?.pid).toBe(5100);
   });
 
   it("gemma4 26b at 16k spills to RAM and shows how much", async () => {
