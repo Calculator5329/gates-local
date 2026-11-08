@@ -250,7 +250,8 @@ Three states stop the next run until you step in, and each says what to do:
   to keep, then run `git reset --hard` and the update again.
 - You changed tracked files, the branch or the commit while the update
   ran, and a step then failed. It does not go back, so your work stays put.
-  Save it with `git stash` or a commit and run the update again.
+  Close the app, then run `pnpm install` and `pnpm start`, which install and
+  build what the copy is on now.
 
 An update that is still running is never taken over, however quiet it has
 been: wait for it, or end the process it names.

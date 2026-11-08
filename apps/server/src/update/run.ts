@@ -27,7 +27,7 @@ export interface RunOptions {
   readonly timeoutMs?: number;
   /** Each chunk of stdout and stderr as it arrives (the update log). */
   readonly onOutput?: (chunk: string) => void;
-  /** The started process's id, as soon as it is known. */
+  /** The started process's id, as soon as it is known. If this throws, the command is ended at once. */
   readonly onStart?: (pid: number) => void;
   /** Run through the shell. Needed for pnpm.cmd on Windows; the arguments must be plain words. */
   readonly shell?: boolean;
@@ -184,7 +184,12 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       }
       const group = ownGroup ? child.pid : undefined;
       if (group !== undefined) trackGroup(group);
-      if (child.pid !== undefined) options.onStart?.(child.pid);
+      let refusedAtStart = false;
+      try {
+        if (child.pid !== undefined) options.onStart?.(child.pid);
+      } catch {
+        refusedAtStart = true;
+      }
       let settled = false;
       const finish = (code: number | null, treeStillRunning = false) => {
         if (settled) return;
@@ -193,8 +198,8 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
         if (group !== undefined) untrackGroup(group);
         resolve({ code: failure === undefined ? code : null, stdout, stderr, ...(failure === undefined ? {} : { failure }), ...(treeStillRunning ? { treeStillRunning } : {}) });
       };
-      const timer = options.timeoutMs === undefined ? undefined : setTimeout(() => {
-        failure = "timeout";
+      const stopTree = (why: NonNullable<RunResult["failure"]>) => {
+        failure = why;
         stopping = true;
         const pid = child.pid;
         if (pid === undefined) {
@@ -207,7 +212,8 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
           child.stderr.destroy();
           finish(null, !ended);
         });
-      }, options.timeoutMs);
+      };
+      const timer = options.timeoutMs === undefined ? undefined : setTimeout(() => stopTree("timeout"), options.timeoutMs);
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
@@ -229,6 +235,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       child.on("close", (code) => {
         if (!stopping) finish(code);
       });
+      if (refusedAtStart) stopTree("spawn-error");
     });
   };
 }

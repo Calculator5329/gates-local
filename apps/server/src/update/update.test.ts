@@ -12,7 +12,7 @@ import { UpdateGuardError } from "./guard.ts";
 import { RECORD_FILE } from "./record.ts";
 import { groupExists, realRunner, type Runner } from "./run.ts";
 import { type Repos, commit, fakePnpm, git, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
-import { readTransaction } from "./transaction.ts";
+import { TRANSACTION_FILE, readTransaction } from "./transaction.ts";
 
 let r: Repos;
 const survivors = new Set<number>();
@@ -644,6 +644,130 @@ describe.skipIf(process.platform === "win32")("a step that would not stop", () =
     expect(atBuild).not.toHaveProperty("running");
     await endSurvivor(pid);
   });
+
+  it("--check names a process still running before it offers the manual path, and changes nothing", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const pid = survivor();
+    const fake = fakePnpm();
+    const runner: Runner = async (command, args, options) => {
+      if (!isCommand(INSTALL_ARGS)(command, args)) return fake.runner(command, args, options);
+      options.onStart?.(pid);
+      throw new Error("the power went out");
+    };
+    await expect(update({ ...fake, runner })).rejects.toThrow("the power went out");
+    const saved = path.join(r.clone, ".git", TRANSACTION_FILE);
+    const before = readFileSync(saved, "utf8");
+
+    const check = await cli(["--check"]);
+    expect(check.code).toBe(1);
+    expect(check.text).toContain(`(process ${pid})`);
+    expect(check.text).toContain("End that process");
+    expect(check.text).toContain("Or by hand, once it has ended");
+    expect(check.text.indexOf("End that process")).toBeLessThan(check.text.indexOf("git pull"));
+    expect(readFileSync(saved, "utf8")).toBe(before);
+    expect(pnpmWords(check.fake)).toEqual([]);
+    expect(groupExists(pid)).toBe(true);
+
+    await endSurvivor(pid);
+    const after = await cli(["--check"]);
+    expect(after.text).not.toContain(`(process ${pid})`);
+    expect(after.text).toContain("Or by hand: close Gates Local");
+  });
+});
+
+/** A real write error from here on, where the updater writes its saved state. */
+const failSaves = () => mkdirSync(path.join(r.clone, ".git", `${TRANSACTION_FILE}.${process.pid}.tmp`));
+const allowSaves = () => rmSync(path.join(r.clone, ".git", `${TRANSACTION_FILE}.${process.pid}.tmp`), { recursive: true });
+
+describe("the saved state cannot be written", () => {
+  it("does not start the merge, and leaves the copy where it was", async () => {
+    const old = head(r.clone);
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = fakePnpm();
+    const runner: Runner = async (command, args, options) => {
+      if (isCommand(["--version"])(command, args)) failSaves();
+      return fake.runner(command, args, options);
+    };
+    const run = await update({ ...fake, runner });
+    expect(run).toMatchObject({ outcome: "refused", refusal: { reason: "cannot-save", pid: null } });
+    expect(fake.commands.filter((c) => c.startsWith("git merge "))).toEqual([]);
+    expect(head(r.clone)).toBe(old);
+    expect(readTransaction(r.clone)).toBeNull();
+  });
+
+  it("does not start the install, says why, and the next run finishes it", async () => {
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = fakePnpm();
+    const runner: Runner = async (command, args, options) => {
+      const result = await fake.runner(command, args, options);
+      if (isMerge(command, args)) failSaves();
+      return result;
+    };
+    const run = await cli([], { ...fake, runner });
+    expect(run.code).toBe(1);
+    expect(run.text).toContain("EISDIR");
+    expect(run.text).toContain("pnpm run app-update");
+    expect(run.text).toContain("git pull");
+    expect(pnpmWords(fake)).toEqual(["--version"]);
+    expect(head(r.clone)).toBe(target);
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "forward" });
+
+    allowSaves();
+    const next = await cli([]);
+    expect(next.code).toBe(0);
+    expect(next.fake.calls.slice(1).map((c) => c.args)).toEqual([INSTALL_ARGS, BUILD_WEB_ARGS, BUILD_DESKTOP_ARGS]);
+  });
+
+  it.skipIf(process.platform === "win32")("ends a step at once when its process cannot be saved, and nothing runs after it", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = fakePnpm();
+    let started = 0;
+    const runner: Runner = (command, args, options) => {
+      if (!isCommand(INSTALL_ARGS)(command, args)) return fake.runner(command, args, options);
+      // The save before the step worked; the one naming its process does not.
+      failSaves();
+      return realRunner("sleep", ["60"], {
+        ...options,
+        onStart: (pid) => {
+          started = pid;
+          survivors.add(pid);
+          options.onStart?.(pid);
+        },
+      });
+    };
+    const run = await update({ ...fake, runner });
+    expect(run).toMatchObject({ outcome: "refused", refusal: { reason: "cannot-save", pid: null } });
+    expect(started).toBeGreaterThan(0);
+    expect(groupExists(started)).toBe(false);
+    expect(pnpmWords(fake)).toEqual(["--version"]);
+  });
+
+  it.skipIf(process.platform === "win32")("names a process it could neither save nor stop, and does not reopen the app", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const pid = survivor();
+    const fake = fakePnpm();
+    const runner: Runner = async (command, args, options) => {
+      if (!isCommand(INSTALL_ARGS)(command, args)) return fake.runner(command, args, options);
+      failSaves();
+      try {
+        options.onStart?.(pid);
+      } catch {
+        // The real runner stops the command here and reports whether that worked.
+      }
+      return { code: null, stdout: "", stderr: "", failure: "spawn-error", treeStillRunning: true };
+    };
+    const run = await cli(["--restart"], { ...fake, runner });
+    expect(run.code).toBe(1);
+    expect(run.text).toContain(`(process ${pid})`);
+    expect(run.text).toContain("restart the computer");
+    expect(run.relaunch).not.toHaveBeenCalled();
+    await endSurvivor(pid);
+  });
 });
 
 /** The first install fails, after `change` has run: the person editing while it installed. */
@@ -670,6 +794,8 @@ const stageThenEdit = () => {
   writeFileSync(path.join(r.clone, "other.txt"), "working\n");
 };
 
+const scripts = (file: string) => (JSON.parse(readFileSync(path.join(import.meta.dirname, "../../../..", file), "utf8")) as { scripts: Record<string, string> }).scripts;
+
 describe("the person changes the copy while it installs", () => {
   it("keeps a staged version and the working copy: no automatic reset, and the steps by hand", async () => {
     unrelatedFile();
@@ -683,9 +809,24 @@ describe("the person changes the copy while it installs", () => {
     expect(git(r.clone, "show", ":other.txt")).toBe("staged");
     expect(readFileSync(path.join(r.clone, "other.txt"), "utf8")).toBe("working\n");
     expect(run.text).toContain("other.txt");
-    expect(run.text).toContain("git stash");
     expect(run.text).toContain("git pull");
     expect(readTransaction(r.clone)).not.toBeNull();
+  });
+
+  // After a commit of your own the updater finds nothing newer and says "up to date" without building, so it cannot be the advice.
+  it.each([
+    ["files", stageThenEdit],
+    ["branch", () => git(r.clone, "switch", "--quiet", "-c", "mine")],
+    ["commit", () => git(r.clone, "commit", "--quiet", "--allow-empty", "-m", "Mine")],
+  ])("after a change to the %s, the advice installs and builds what is there", async (_kind, change) => {
+    unrelatedFile();
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const { text } = await cli([], failsAfter(change));
+    expect(text).toContain("close Gates Local, then run `pnpm install`, then `pnpm start`");
+    expect(text).not.toContain("then run `pnpm run app-update`");
+    expect(scripts("package.json")["start"]).toContain("build");
+    expect(scripts("apps/desktop/package.json")["start"]).toContain("build");
   });
 
   it("leaves a branch switched to during the install", async () => {
