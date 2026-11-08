@@ -9,7 +9,8 @@
 //   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama, and
 //                                its port as the first of the app's own ports; discover-only
 //                                (never install, start or stop one). Settings › Runtime still
-//                                applies: "app" looks for the app's copy on that port and the
+//                                applies: "app" first tries the copy this data dir's ownership
+//                                record names, at its recorded port, then that port and the
 //                                nine after it, as it does on 11435..11444 without a pin
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
@@ -71,9 +72,12 @@ async function main(): Promise<void> {
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
   // A pinned Ollama URL stands in for the system Ollama, and its port is the
-  // first app port, so no probe reaches the real 11434 or 11435. It is also
-  // discover-only: the app never installs, starts or stops an Ollama when the
-  // URL names the one to use.
+  // first app port. "app" mode still tries the copy this data dir's ownership
+  // record names first, at whatever port it recorded, then scans the pinned
+  // port and the nine after it. So a pin keeps every probe off 11434..11444
+  // only with a fresh data dir and a pinned span clear of them, as the e2e
+  // runs have. It is also discover-only: the app never installs, starts or
+  // stops an Ollama when the URL names the one to use.
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
   let pinned: URL | undefined;
   if (ollamaUrl) {

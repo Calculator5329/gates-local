@@ -7,6 +7,7 @@
 
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const CLIENT_SCHEME = "gates-local";
 export const CLIENT_HOST = "app";
@@ -134,4 +135,18 @@ export async function servedFile(root: string, requestUrl: string): Promise<Serv
   } catch {
     return { kind: "missing" };
   }
+}
+
+/**
+ * The gates-local:// handler's answer. A refused path is a plain 404; a
+ * missing file rejects, which fails the load and routes a main frame to the
+ * retry page. Electron logs a rejection, and a link into the client can carry
+ * a token in its path, query or fragment, so the error names nothing from
+ * the request.
+ */
+export async function clientResponse(root: string, requestUrl: string, fetchFile: (fileUrl: string) => Promise<Response>): Promise<Response> {
+  const served = await servedFile(root, requestUrl);
+  if (served.kind === "refused") return new Response("Not found", { status: 404 });
+  if (served.kind === "missing") throw new Error("no client file for this gates-local request");
+  return fetchFile(pathToFileURL(served.path).toString());
 }

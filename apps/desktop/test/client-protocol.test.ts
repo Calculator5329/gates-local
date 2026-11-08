@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CLIENT_ORIGIN, clientFile, externalUrl, originOf, sameClient, servedFile } from "../src/client-protocol.ts";
+import { CLIENT_ORIGIN, clientFile, clientResponse, externalUrl, originOf, sameClient, servedFile } from "../src/client-protocol.ts";
 
 describe("clientFile", () => {
   const root = path.resolve("/srv/web");
@@ -151,5 +151,24 @@ describe("servedFile (on disk)", () => {
     const root = layout();
     expect(await servedFile(root, `${CLIENT_ORIGIN}/nope.js`)).toEqual({ kind: "missing" });
     expect(await servedFile(root, `${CLIENT_ORIGIN}/assets`)).toEqual({ kind: "missing" });
+  });
+
+  it("the handler's answer for a missing file names nothing from the request (Electron logs it)", async () => {
+    const root = layout();
+    const fetched: string[] = [];
+    const fetchFile = (fileUrl: string) => {
+      fetched.push(fileUrl);
+      return Promise.resolve(new Response("ok"));
+    };
+    const error = await clientResponse(root, `${CLIENT_ORIGIN}/missing/private?token=example#frag`, fetchFile).then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(error).toBeInstanceOf(Error);
+    for (const part of ["missing", "private", "token", "example", "frag", root]) expect(error!.message).not.toContain(part);
+    expect(fetched).toEqual([]);
+    expect((await clientResponse(root, `${CLIENT_ORIGIN}/assets/file-link.txt`, fetchFile)).status).toBe(404);
+    expect(await (await clientResponse(root, `${CLIENT_ORIGIN}/assets/a.js`, fetchFile)).text()).toBe("ok");
+    expect(fetched).toEqual([new URL(`file://${path.join(root, "assets", "a.js")}`).href]);
   });
 });

@@ -4,9 +4,8 @@
 
 import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
-import { CLIENT_ORIGIN, CLIENT_SCHEME, originOf, sameClient, servedFile } from "./client-protocol.ts";
+import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
 import { serverDataDir } from "./data-dir.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
@@ -191,13 +190,7 @@ function run(): void {
   void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     const root = webRoot();
-    protocol.handle(CLIENT_SCHEME, async (request) => {
-      const served = await servedFile(root, request.url);
-      if (served.kind === "refused") return new Response("Not found", { status: 404 });
-      // A rejected handler fails the load, which routes a main frame to the retry page.
-      if (served.kind === "missing") throw new Error(`no client file for ${request.url}`);
-      return net.fetch(pathToFileURL(served.path).toString());
-    });
+    protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
     win = createWindow();
     route(supervisor.state);
     void supervisor.start();
