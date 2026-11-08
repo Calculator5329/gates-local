@@ -25,7 +25,9 @@
 - Where the app has no build of Ollama to install (Windows ARM today), the
   runtime status says so (`noAppCopy`). Settings › Runtime says it is not
   available instead of offering "Install and switch", and still offers the
-  way back to the system Ollama.
+  way back to the system Ollama. A copy already on the computer counts as
+  the app's own, so the flag is only set when there is neither, and the
+  recovery text stops offering a copy that is not there.
 
 ## 2026-11-08: Switch runtimes while Ollama is down
 

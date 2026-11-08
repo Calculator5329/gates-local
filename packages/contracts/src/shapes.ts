@@ -119,7 +119,7 @@ export const RuntimeStatus = S.Struct({
   detail: S.optional(S.String),
   /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
   busyPorts: S.optional(S.Array(S.String)),
-  /** True where the app has no build of Ollama to install (Windows ARM today), so no client offers one. */
+  /** True where the app has no build of Ollama to install and no copy to run (Windows ARM today), so no client offers one. */
   noAppCopy: S.optional(S.Boolean),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
