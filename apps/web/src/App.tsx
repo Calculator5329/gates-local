@@ -12,7 +12,7 @@ import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { SettingsView } from "./Settings.tsx";
 import { Sidebar, focusComposer, goNew, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
-import { deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
+import { call, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { POP_ANCHOR, Tip, closePop, place, togglePop } from "./ui.tsx";
 
@@ -164,12 +164,27 @@ function renameFromMenu(id: string): void {
   setState({ renaming: true });
 }
 
-/** Export needs the thread's messages; a thread from the sidebar opens first and exports once they arrive. */
+/** How long Export as Markdown waits for its thread to load before it gives up. */
+const EXPORT_WAIT_MS = 8000;
+
+/**
+ * Export loads the thread it was asked for (cached or not) and makes a file only from a
+ * successful load of it; a failed or slow load, or a thread deleted meanwhile, says so instead.
+ */
 async function exportFromMenu(id: string): Promise<void> {
-  if (getState().messages[id] === undefined) {
-    openThread(id);
-    for (let i = 0; i < 100 && getState().messages[id] === undefined; i++) await new Promise((r) => setTimeout(r, 50));
-  }
+  const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((done) => {
+    timer = setTimeout(() => done("late"), EXPORT_WAIT_MS);
+  });
+  const got = await Promise.race([call("threads.get", { threadId: id }), late])
+    .catch(() => "failed" as const)
+    .finally(() => clearTimeout(timer));
+  const fail = (why: string) => setState({ notice: `Couldn't export “${title}”: ${why}` });
+  if (!getState().threads.some((t) => t.id === id)) return fail("it was deleted.");
+  if (got === "late") return fail("it took too long to load. Try again.");
+  if (got === "failed") return fail("it didn't load. Try again.");
+  if (getState().messages[id] === undefined) setState((s) => ({ messages: { ...s.messages, [id]: got.messages } }));
   exportThread(id);
 }
 
