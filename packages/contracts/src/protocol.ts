@@ -3,6 +3,7 @@
 // that does not decode comes back as a WireError with a named code.
 import { Result, Schema as S } from "effect";
 import {
+  BlockingTurn,
   CatalogEntry,
   ChatEvent,
   FitReport,
@@ -95,8 +96,22 @@ export const methods = {
       tools: S.optional(S.Boolean),
       /** The model may make an image this turn (needs image generation set up). */
       image: S.optional(S.Boolean),
+      /**
+       * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
+       * end those turns first: each saves its partial reply and ends with error code "preempted"
+       * (neededBy: this model). Omitted or false: this turn waits for them, as before.
+       */
+      stopOthers: S.optional(S.Boolean),
     }),
     result: S.Struct({ turnId: S.String, userMessage: Message }),
+  },
+  /**
+   * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
+   * it; empty when none (same model, or it fits beside them). Reads only; never loads.
+   */
+  "turns.blocking": {
+    params: S.Struct({ model: S.String, numCtx: NumCtx }),
+    result: S.Array(BlockingTurn),
   },
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images

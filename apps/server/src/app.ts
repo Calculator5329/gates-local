@@ -12,9 +12,9 @@ import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { TurnMessage } from "./chat/types.ts";
-import { checkFit, type FitDeps } from "./fit/fit.ts";
+import { blockingModels, checkFit, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
-import { fetchShow } from "./fit/ollama.ts";
+import { fetchShow, sameModel } from "./fit/ollama.ts";
 import type { FitReport } from "./fit/types.ts";
 import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
@@ -51,6 +51,7 @@ export type AppErrorCode =
   | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
   | "runtime-changed" // a runtime switch ended the turn (any text sent is saved, event.partial); the client sends the message again
+  | "preempted" // chat.send stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -72,6 +73,9 @@ export class AppError extends Error {
 export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
 const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
 const HALTED = Symbol("halted");
+/** chat.send stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
+const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
+  new AppError("preempted", `${model} at num_ctx ${numCtx} needed the GPU memory ${held} was using, so this reply stopped. Send the message again.`, undefined, model);
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
@@ -129,6 +133,8 @@ interface Turn {
   /** Resolves with halted. */
   readonly onHalt: Promise<typeof HALTED>;
   halt(reason: AppError): void;
+  /** Admitted: its user message is saved and its reply runs (turns.blocking counts only these). */
+  started: boolean;
 }
 
 /**
@@ -194,6 +200,7 @@ export function createApp(deps: AppDeps): App {
         turn.controller.abort(reason);
         wake(HALTED);
       },
+      started: false,
     };
     turns.set(turn.turnId, turn);
     byThread.set(threadId, turn);
@@ -318,6 +325,17 @@ export function createApp(deps: AppDeps): App {
     }
   };
 
+  /**
+   * The running turns on other models that a load of `model` at `numCtx` would push out of the
+   * GPU, as the fit plans it (fit/blockingModels). Reads only.
+   */
+  const blockingTurns = async (baseUrl: string, model: string, numCtx: number, signal?: AbortSignal): Promise<Turn[]> => {
+    const busy = [...turns.values()].filter((t) => t.started && t.halted === undefined && !sameModel(t.model, model));
+    if (busy.length === 0) return [];
+    const names = await blockingModels({ ...deps.fit, baseUrl, model, numCtx, busy: busy.map((t) => t.model), ...(signal ? { signal } : {}) });
+    return busy.filter((t) => names.some((n) => sameModel(n, t.model)));
+  };
+
   const cancelThreadTurn = async (threadId: string) => {
     const turn = byThread.get(threadId);
     if (turn === undefined) return;
@@ -359,7 +377,16 @@ export function createApp(deps: AppDeps): App {
       return (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image }) => {
+    "turns.blocking": async ({ model, numCtx }) => {
+      if (![...turns.values()].some((t) => t.started)) return [];
+      const baseUrl = runtime.baseUrl();
+      if (baseUrl === undefined) throw notReady();
+      const blocking = await blockingTurns(baseUrl, model, numCtx);
+      const titles = new Map(store.listThreads().map((t) => [t.id, t.title]));
+      return blocking.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model }));
+    },
+
+    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
@@ -393,8 +420,10 @@ export function createApp(deps: AppDeps): App {
         // The runtime the reservation captured: fit, admit and chat all talk to it.
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
+        // Models whose turns stopOthers ended for this load: the fit counts their VRAM as free.
+        let reclaim: string[] = [];
         // admit passes its own signal (the turn's and the runtime's); every other caller passes the turn's.
-        const fit = async (signal: AbortSignal) => (await checkFit({ ...deps.fit, baseUrl, model, numCtx, signal })).report;
+        const fit = async (signal: AbortSignal) => (await checkFit({ ...deps.fit, baseUrl, model, numCtx, signal, reclaim })).report;
         // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the
         // GPU alone, so it runs before this turn's own claim: a nested claim would wait on itself.
         // A cancel, switch or shutdown ends the reclaim at once; a cancelled stopIdle never stops ComfyUI.
@@ -403,6 +432,21 @@ export function createApp(deps: AppDeps): App {
           const signal = turn.controller.signal;
           try {
             if ((await fit(signal)).verdict !== "fits") await untilAborted(comfy.stopIdle(signal), signal);
+          } catch (e) {
+            if (signal.aborted) throw stoppedEarly();
+            throw e;
+          }
+        }
+        // stopOthers: end the running turns whose model holds memory this load needs, the way a
+        // switch does (each saves what it sent and ends "preempted"), before this turn is admitted.
+        // Without it, Ollama queues this load until those turns end on their own.
+        if (stopOthers === true) {
+          const signal = turn.controller.signal;
+          try {
+            const blocking = await blockingTurns(baseUrl, model, numCtx, signal);
+            for (const t of blocking) t.halt(preemptedBy(model, numCtx, t.model));
+            await untilAborted(Promise.all(blocking.map((t) => t.ended)), signal);
+            reclaim = [...new Set(blocking.map((t) => t.model))];
           } catch (e) {
             if (signal.aborted) throw stoppedEarly();
             throw e;
@@ -429,6 +473,7 @@ export function createApp(deps: AppDeps): App {
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
         started = true;
+        turn.started = true;
         void runTurn(turn, end, baseUrl, model, numCtx, history, load, { tools, think, image });
         return { turnId: turn.turnId, userMessage };
       } finally {

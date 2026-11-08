@@ -178,6 +178,8 @@ const expectRuntimeChangedEnd = (events: { type: string; code?: string; message?
 };
 
 const MODEL = "qwen3.5:9b";
+/** nvidia-smi on a 16303 MiB GPU with `freeMib` free and no compute apps listed. */
+const smi = (freeMib: number) => async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - freeMib}, ${freeMib}\n` : "");
 
 interface RigOptions {
   readonly image?: ImageModule;
@@ -208,13 +210,16 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
   expect(s.runtime.mode()).toBe("system");
   expect((await s.runtime.ensure()).state).toBe("ready");
   const store = openThreadStore(path.join(work, "threads.sqlite"));
-  const events: { type: string; code?: string; message?: string; text?: string; neededBy?: string; partial?: { id: string; content: string; thinking?: string } }[] = [];
+  const events: { turnId: string; type: string; code?: string; message?: string; text?: string; neededBy?: string; partial?: { id: string; content: string; thinking?: string } }[] = [];
   const app = createApp({
     store,
     runtime: s.runtime,
     catalog: s.catalog,
     push: (channel, payload) => {
-      if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
+      if (channel === "chat.event") {
+        const { turnId, event } = payload as { turnId: string; event: { type: string } };
+        events.push({ ...event, turnId });
+      }
     },
     models: { handlers: s.handlers, loader: s.loader },
     fit: options.fit ?? fit,
@@ -443,5 +448,106 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await r.done();
     comfy.close();
+  });
+});
+
+describe("a load that needs a busy model's GPU: turns.blocking and chat.send stopOthers", () => {
+  const Y = "gemma3:12b";
+  const X_VRAM = 9_000_000_000;
+  /** 1000 MiB free beside X: Y (6.6 GB) does not fit beside X, and fits in what X holds. */
+  const tight = { ...fit, runNvidiaSmi: smi(1000) };
+  /** Plenty free: Y fits beside X. */
+  const roomy = { ...fit, runNvidiaSmi: smi(15000) };
+  const ndjson = { "content-type": "application/x-ndjson" };
+  const ctx = { clientId: 1 };
+
+  /**
+   * X (MODEL) resident at 16k. X's reply streams "X so far" and stays open until its connection
+   * closes; Y's request waits for that, as Ollama queues a load that needs a busy model's memory.
+   */
+  function twoModels() {
+    const xStreaming = signalled();
+    const xClosed = signalled();
+    const routes: Record<string, Route> = {
+      "GET /api/tags": (_b, res) =>
+        json(res, 200, {
+          models: [
+            { name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" },
+            { name: Y, size: 6_600_000_000, digest: "e", modified_at: "2026-11-01T00:00:00Z" },
+          ],
+        }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: X_VRAM, size_vram: X_VRAM, context_length: 16384 }] }),
+      "POST /api/chat": async (b, res) => {
+        const { model } = b as { model: string };
+        res.writeHead(200, ndjson);
+        if (model === MODEL) {
+          res.write(line({ model, message: { role: "assistant", content: "X so far" }, done: false }));
+          xStreaming.resolve();
+          await new Promise<void>((resolve) => res.on("close", () => resolve()));
+          xClosed.resolve();
+          return;
+        }
+        await xClosed.promise;
+        res.end(line({ model, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
+      },
+    };
+    return { routes, xStreaming, xClosed };
+  }
+
+  async function withX(fitDeps: AppDeps["fit"]) {
+    const m = twoModels();
+    const r = await rig(m.routes, { fit: fitDeps });
+    const xThread = r.store.createThread({ title: "Long answer" });
+    const x = await r.app.handlers["chat.send"]({ threadId: xThread.id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    expect(await settledWithin(m.xStreaming.promise, 1000)).toEqual({ resolved: undefined });
+    for (let i = 0; i < 200 && !r.events.some((e) => e.turnId === x.turnId && e.type === "delta"); i++) await sleep(5);
+    const of = (turnId: string) => r.events.filter((e) => e.turnId === turnId);
+    const terminal = (turnId: string) => of(turnId).filter((e) => e.type === "error" || e.type === "done");
+    return { ...m, r, xThread, x, of, terminal };
+  }
+
+  it("stopOthers: X's turn ends now (partial saved, preempted, names Y) and Y's turn reaches its first token", async () => {
+    const t = await withX(tight);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    const xEnd = t.terminal(t.x.turnId);
+    expect(xEnd).toHaveLength(1);
+    expect(xEnd[0]).toMatchObject({ type: "error", code: "preempted", neededBy: Y, partial: { content: "X so far", model: MODEL } });
+    expect(xEnd[0]?.message).toContain(Y);
+    expect(t.r.events.indexOf(xEnd[0]!)).toBeLessThan(t.r.events.findIndex((e) => e.turnId === y.turnId && e.type === "delta"));
+    expect(t.r.store.getThread(t.xThread.id).messages.map((m) => [m.role, m.content])).toEqual([["user", "write a lot"], ["assistant", "X so far"]]);
+    for (let i = 0; i < 200 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
+    await t.r.done();
+  });
+
+  it("without stopOthers: turns.blocking names X (and loads nothing); Y waits until X ends", async () => {
+    const t = await withX(tight);
+    const generates = () => t.r.old.requests.filter((q) => q.path === "/api/generate").length;
+    expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([{ threadId: t.xThread.id, title: "Long answer", model: MODEL }]);
+    expect(generates()).toBe(0);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
+    await sleep(300);
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.of(y.turnId).filter((e) => e.type === "delta")).toEqual([]);
+    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "cancelled" }]);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    await t.r.done();
+  });
+
+  it("turns on the same model, or on a model that fits beside, are never stopped", async () => {
+    const t = await withX(roomy);
+    expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
+    expect(await t.r.app.handlers["turns.blocking"]!({ model: MODEL, numCtx: 16384 }, ctx)).toEqual([]);
+    const other = t.r.store.createThread({});
+    await t.r.app.handlers["chat.send"]({ threadId: other.id, content: "hi", model: MODEL, numCtx: 16384, stopOthers: true }, ctx);
+    await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    await sleep(200);
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.r.app.activeTurns()).toBe(3);
+    await t.r.done();
   });
 });
