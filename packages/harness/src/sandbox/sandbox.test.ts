@@ -92,6 +92,12 @@ describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [
     expect(process.memoryUsage().rss - before).toBeLessThan(256 * 1024 * 1024);
     expect(await runSandbox({ command: "echo still here", sources })).toContain("still here");
   }, 40000);
+  it("an OOM kill of one process leaves the rest of the shell running", async () => {
+    // With the scope's default OOM policy (stop), systemd stops the whole scope and
+    // marks it failed with result oom-kill, which also raises a desktop OOM notice.
+    const out = await runSandbox({ command: "python3 -c \"x = b'a' * (1 << 30)\"; echo \"after the hog: $?\"", sources, timeoutMs: 30000 });
+    expect(out).toContain("after the hog: 137");
+  }, 40000);
   it("hits the task cap before 200 background sleeps", async () => {
     const spawnMany = 'import subprocess\nps = []\ntry:\n    for i in range(200): ps.append(subprocess.Popen(["sleep", "30"]))\nexcept OSError as e:\n    print("capped at", len(ps), e.errno)\n    raise SystemExit(3)\nprint("ran", len(ps))';
     const error = await runSandbox({ command: `python3 -c '${spawnMany}'`, sources, timeoutMs: 20000 }).then(() => undefined, (e: Error) => e);

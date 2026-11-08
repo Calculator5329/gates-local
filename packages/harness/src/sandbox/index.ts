@@ -16,10 +16,16 @@ export const SCOPE_LIMITS = { memoryMaxBytes: 512 * 1024 * 1024, tasksMax: 64 } 
 export const SCOPE_OFF = "The shell tool needs a user systemd session to cap its memory; it is off on this machine.";
 export const ARCH_OFF = "The shell tool's lock filter covers x86_64 and aarch64 only; it is off on this machine.";
 
-/** The capped scope bwrap runs in; an OOM inside it kills only the sandbox. */
+/**
+ * The capped scope bwrap runs in. The kernel kills the process that goes over the
+ * cap and the rest of the shell carries on, as in a terminal. OOMPolicy=continue
+ * keeps systemd from stopping the whole scope and marking it failed (oom-kill),
+ * which also raised a desktop out-of-memory notice for every hog.
+ */
 const scopeArgs = (unit: string) => [
   "--user", "--scope", "--quiet", "--collect", `--unit=${unit}`,
-  "-p", "MemoryMax=512M", "-p", "MemorySwapMax=0", "-p", `TasksMax=${SCOPE_LIMITS.tasksMax}`, "--",
+  "-p", "MemoryMax=512M", "-p", "MemorySwapMax=0", "-p", `TasksMax=${SCOPE_LIMITS.tasksMax}`,
+  "-p", "OOMPolicy=continue", "--",
 ];
 const tmpfs = (dest: string) => ["--size", TMPFS_BYTES, "--tmpfs", dest];
 /**
