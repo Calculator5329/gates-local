@@ -2,6 +2,9 @@
 // per-launch token and an absent or allowed Origin, so another local web
 // page cannot drive the app. Every inbound frame is decoded against the
 // contracts tables; a bad one gets a named error and the socket stays up.
+// With `phone` set a second loopback listener serves the web client and the
+// same socket on /ws, admitted by Tailscale Serve's headers instead of the
+// token (src/web/phone.ts); both listeners share handlers and pushes.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
