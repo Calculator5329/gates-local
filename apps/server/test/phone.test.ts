@@ -7,14 +7,15 @@
 // Origin. There is no token on this listener.
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
-import { createServer } from "node:net";
+import { type Server, createServer as createHttpServer, request } from "node:http";
+import { connect, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { type Client, type SocketLike, createClient } from "@gates-local/contracts";
 import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { type SocketTestHooks, listenOwnerSocket } from "../src/web/socket.ts";
 import { type Handlers, type WsServer, startWsServer } from "../src/ws/server.ts";
 
 const TOKEN = "per-launch-secret";
@@ -379,6 +380,24 @@ describe("phone listener static files", () => {
 });
 
 /** Run fn with this umask, restoring the old one after. */
+/** A promise and the function that resolves it. */
+function gate(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: (() => void) | null = null;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve: () => resolve?.() };
+}
+
+/** A socket file at fx.socketPath that nothing listens on: a child binds it and is SIGKILLed. */
+async function staleSocket(fx: Fixture): Promise<void> {
+  mkdirSync(fx.runDir, { mode: 0o700 });
+  const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${JSON.stringify(fx.socketPath)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "inherit"] });
+  await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGKILL");
+  await exited;
+  expect(lstatSync(fx.socketPath).isSocket()).toBe(true);
+}
+
 async function withUmask<T>(mask: number, fn: () => Promise<T>): Promise<T> {
   const old = process.umask(mask);
   try {
@@ -449,16 +468,73 @@ describe("phone socket", () => {
 
   it("removes a stale socket a dead server left, then listens", async () => {
     const fx = fixture();
-    mkdirSync(fx.runDir, { mode: 0o700 });
-    // A child that binds the path and is SIGKILLed leaves the socket file behind.
-    const child = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${JSON.stringify(fx.socketPath)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "inherit"] });
-    await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
-    const exited = new Promise((resolve) => child.once("exit", resolve));
-    child.kill("SIGKILL");
-    await exited;
-    expect(lstatSync(fx.socketPath).isSocket()).toBe(true);
+    await staleSocket(fx);
     const s = await start(fx);
     expect((await req(s.phoneSocket, "/")).status).toBe(200);
+  });
+
+  it("two starts that both find the same stale socket: exactly one binds, and the path reaches it", async () => {
+    const fx = fixture();
+    await staleSocket(fx);
+    // The interleaving that lets the second start remove the first's new
+    // socket: both probes are refused by the dead one, the first unlinks and
+    // binds, then the second goes on from its probe, and only once it has
+    // finished does the first make its own after-bind check.
+    const secondProbed = gate();
+    const firstBound = gate();
+    const secondDone = gate();
+    const firstHooks: SocketTestHooks = {
+      afterRefusedProbe: () => secondProbed.promise,
+      afterBind: () => {
+        firstBound.resolve();
+        return secondDone.promise;
+      },
+    };
+    const secondHooks: SocketTestHooks = {
+      afterRefusedProbe: () => {
+        secondProbed.resolve();
+        return firstBound.promise;
+      },
+    };
+    const servers = ["first", "second"].map((name) => {
+      const s = createHttpServer((_q, r) => r.end(name));
+      cleanups.push(() => new Promise((resolve) => s.close(resolve)));
+      return s;
+    });
+    const results = await Promise.allSettled([
+      listenOwnerSocket(servers[0] as Server, fx.socketPath, firstHooks),
+      listenOwnerSocket(servers[1] as Server, fx.socketPath, secondHooks).finally(() => secondDone.resolve()),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected"]);
+    expect(String((results[1] as PromiseRejectedResult).reason)).toMatch(/changed while it was being checked/);
+    expect(servers[1]?.listening).toBe(false);
+    expect((await req(fx.socketPath, "/")).body).toBe("first");
+  });
+
+  it("refuses to run when the path is no longer the socket it bound, and leaves the other socket alone", async () => {
+    const fx = fixture();
+    mkdirSync(fx.runDir, { mode: 0o700 });
+    const other = createServer((c) => c.on("error", () => undefined).end("other\n"));
+    cleanups.push(() => new Promise((resolve) => other.close(resolve)));
+    const ours = createHttpServer((_q, r) => r.end("ours"));
+    cleanups.push(() => new Promise((resolve) => ours.close(resolve)));
+    const hooks: SocketTestHooks = {
+      // Another start of the same user replaces the path, owner-only too, the
+      // moment after this one bound it.
+      afterBind: () => {
+        rmSync(fx.socketPath);
+        return withUmask(0o177, () => new Promise<void>((resolve) => other.listen(fx.socketPath, resolve)));
+      },
+    };
+    await expect(listenOwnerSocket(ours, fx.socketPath, hooks)).rejects.toThrow(/not the socket this server bound/);
+    const reply = await new Promise<string>((resolve, reject) => {
+      const c = connect(fx.socketPath);
+      let text = "";
+      c.on("data", (d: Buffer) => (text += d.toString()));
+      c.on("end", () => resolve(text));
+      c.on("error", reject);
+    });
+    expect(reply).toBe("other\n");
   });
 
   it("refuses a socket another server is listening on, and that server keeps it", async () => {
