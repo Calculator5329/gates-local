@@ -29,6 +29,7 @@ import {
 } from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
+const startDir = process.cwd();
 let work: string;
 let appDataDir: string;
 let home: string;
@@ -39,12 +40,15 @@ beforeEach(() => {
   work = tmpDir("mode");
   appDataDir = path.join(work, "data");
   home = path.join(work, "home");
+  // A faked win32 joins the models path with backslashes: on POSIX that is one odd folder name relative to here.
+  process.chdir(work);
 });
 
 afterEach(async () => {
   for (const rt of runtimes.splice(0)) await rt.stop();
   await system?.close();
   system = undefined;
+  process.chdir(startDir);
   removeDir(work);
 });
 
@@ -381,6 +385,32 @@ describe("Windows (platform injected)", () => {
     }
   });
 
+  it("S-01: the status says when this computer has no copy of its own to offer", async () => {
+    const none = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    expect((await none.discover()).noAppCopy).toBe(true);
+    const pinned = await runtime({ mode: "system", platform: "win32", arch: "x64", manifest: undefined, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    expect((await pinned.discover()).noAppCopy).toBeUndefined();
+  });
+
+  it("TS-01: with no build to install, a copy already on this computer still counts as the app's own", async () => {
+    const bare = { mode: "system", platform: "linux", ...noPin, externalBaseUrl: await nothingAt() } as const;
+    expect((await (await runtime(bare)).discover()).noAppCopy).toBe(true);
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const found = await (await runtime(bare)).discover();
+    expect(found.noAppCopy).toBeUndefined();
+    expect(found.detail).toMatch(/choose the app's own copy/);
+  });
+
+  it("TS-02: the recovery text offers the app's own copy only where there is one", async () => {
+    const missing = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    const none = await missing.discover();
+    expect(none.detail).toMatch(/Start your Ollama\.$/);
+    const exe = "C:\\Users\\Ada\\AppData\\Local\\Programs\\Ollama\\ollama.exe";
+    const stopped = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), home: "C:\\Users\\Ada", env: winEnv, isExecutable: (f) => f === exe, externalBaseUrl: await nothingAt() });
+    const quit = await stopped.discover();
+    expect(quit.detail).toMatch(/Start Ollama from the Start menu\.$/);
+  });
+
   it("R2-05 (win32 arm64, nothing pinned): app mode says in words that the app's own Ollama is not on Windows yet; never a start or an install", async () => {
     for (const allowInstall of [false, true]) {
       const rt = await runtime({ mode: "app", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt(), allowInstall });
@@ -610,6 +640,20 @@ describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
     const { rt, pid } = await started("win32", cimFake([]));
     rt.killNow();
     await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+  });
+
+  it("reaches a copy still starting, before it has answered (R-04)", async () => {
+    const pidFile = path.join(work, "started-pid");
+    const neverAnswers = `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => undefined, 1000);\n`;
+    writeFakeBinary(installedBinary(appDataDir, VERSION), neverAnswers);
+    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake([]), externalBaseUrl: await nothingAt(), startTimeoutMs: 3000 });
+    const starting = rt.ensure();
+    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 2500 });
+    rt.killNow();
+    const end = await starting;
+    expect(end.state).toBe("error");
+    expect(end.detail).toContain("before it answered");
+    expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
   });
 
   it("leaves it running elsewhere, where the next run adopts it", async () => {

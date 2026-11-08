@@ -39,7 +39,7 @@ export interface SettingsStoreOptions {
 
 /** Defaults for a first run. runtimeMode comes from whether a system Ollama answers. */
 export function defaultSettings(runtimeMode: Settings["runtimeMode"]): Settings {
-  return { defaultNumCtx: 16384, thinking: true, theme: "system", runtimeMode, tools: true, imageGen: false };
+  return { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode, tools: true, imageGen: false };
 }
 
 const SettingsFile = S.Struct({ version: S.Number, settings: S.Unknown });

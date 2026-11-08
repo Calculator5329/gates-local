@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
-import { blockingModels, checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
+import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit } from "./fit.ts";
 import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 
@@ -410,6 +410,15 @@ describe("blockingModels: which busy resident models a load would push out", () 
     const check = await checkFit({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, reclaim: [QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty });
     expect(check.report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
     expect(check.report.message).toContain(`held by ${QWEN27}, which Ollama unloads to make room`);
+  });
+});
+
+describe("fitEach: the chat pick's fit", () => {
+  it("MP-05: a model that happens to be loaded counts as room, the way a load counts it", async () => {
+    const QWEN27 = "qwen3.8-abliterated:27b";
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 12e9 }]));
+    const fit = await fitEach({ baseUrl: s.baseUrl, numCtx: 16384, runNvidiaSmi: gpuWith(500), readMeminfo: plenty });
+    expect(await fit("qwen3.5:9b")).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
   });
 });
 

@@ -237,8 +237,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const statusListeners = new Set<Listener<RuntimeStatus>>();
   const progressListeners = new Set<Listener<InstallProgress>>();
   let inFlight: Promise<RuntimeStatus> | undefined;
+  /** Nothing to install here, and nothing on this computer the app could run as its own. Set by `classify`. */
+  let noAppCopy = installable === undefined;
 
-  const setStatus = (next: RuntimeStatus): RuntimeStatus => {
+  const setStatus = (status: RuntimeStatus): RuntimeStatus => {
+    const next = noAppCopy ? { ...status, noAppCopy: true } : status;
     if (JSON.stringify(next) !== JSON.stringify(current)) {
       current = next;
       for (const l of statusListeners) l(next);
@@ -338,6 +341,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   }
 
   async function classify(): Promise<Classified> {
+    if (installable === undefined) noAppCopy = (await locateBinary()) === undefined;
     // "app" mode never looks at (or reuses) the system port.
     if (mode === "app") return classifyApp();
     const ext: ProbeResult = await probe(externalBaseUrl, probeTimeoutMs);
@@ -348,6 +352,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (ext.kind === "wrong-service") {
         return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
       }
+      const orOwnCopy = noAppCopy ? "" : ", or choose the app's own copy in Settings › Runtime";
       const quit = quitWindowsOllama();
       if (quit !== undefined) {
         return {
@@ -356,7 +361,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
             state: "stopped",
             owner: "none",
             baseUrl: externalBaseUrl,
-            detail: `Ollama is installed (${quit}) but nothing answers at ${externalBaseUrl}. Start Ollama from the Start menu, or choose the app's own copy in Settings › Runtime.`,
+            detail: `Ollama is installed (${quit}) but nothing answers at ${externalBaseUrl}. Start Ollama from the Start menu${orOwnCopy}.`,
           },
         };
       }
@@ -366,7 +371,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
           state: "missing",
           owner: "none",
           baseUrl: externalBaseUrl,
-          detail: `No Ollama answers at ${externalBaseUrl}. Start your Ollama, or choose the app's own copy in Settings › Runtime.`,
+          detail: `No Ollama answers at ${externalBaseUrl}. Start your Ollama${orOwnCopy}.`,
         },
       };
     }
@@ -449,11 +454,14 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
     const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
+    // Kept from the first moment: a shutdown that runs out of time during the start must still reach it (killNow).
+    spawned = child;
     child.on("error", (e) => {
       exited = e.message;
     });
     child.on("exit", (code, sig) => {
       exited = `exited with ${sig ?? `code ${code}`}`;
+      if (spawned === child) spawned = undefined;
     });
     child.unref();
 
@@ -509,10 +517,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       startedAt: Date.now(),
     });
     startedPid = proc.pid;
-    spawned = child;
-    child.once("exit", () => {
-      if (spawned === child) spawned = undefined;
-    });
     const modelsNote =
       (models ? ` Models from ${models.path}.` : "") +
       (readOnly ? ` Models in ${readOnly.path} belong to another user and are not writable here, so they are not shared.` : "");

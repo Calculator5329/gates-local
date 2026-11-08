@@ -6,6 +6,8 @@ far.
 You need a graphical desktop session (X11 or Wayland). The app is a desktop
 window and does not run over a plain SSH or console login.
 
+Rather not do this by hand? [Let Claude Code set it up](with-claude-code.md).
+
 ## 1. Install Node.js 24 and pnpm 11
 
 Gates Local needs Node.js 24 or newer. Install it from your distribution, or

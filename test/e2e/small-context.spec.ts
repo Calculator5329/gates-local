@@ -27,6 +27,18 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 2k, the most this model takes.");
   });
 
+  test("Settings › Models lists it as a usable model, with no too-small label", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+    const row = page.locator('.mp-row[data-dm="tiny-chat:2k"]');
+    await expect(row.locator(".mp-fitc")).toHaveText("Runs well");
+    await expect(row).not.toHaveClass(/\bcant\b/);
+    await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
+    await expect(page.locator(".mp-defrow")).toContainText("If it can't run at 2k");
+  });
+
   test("says in plain words when a message is too long for it", async ({ page, open }) => {
     await open();
     await waitReady(page);

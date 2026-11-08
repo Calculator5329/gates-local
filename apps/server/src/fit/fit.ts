@@ -351,9 +351,12 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
  */
 export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(model: string) => Promise<FitReport | undefined>> {
   const readings = await takeReadings(deps);
+  // The pick asks whether a model can run, not whether it runs beside what happens to be loaded:
+  // a load unloads those first (planLoad), and the pick is cached without looking at what is loaded.
+  const reclaim = readings.ps.models.map((m) => m.name);
   return async (model) => {
     try {
-      return (await fitWithReadings(deps, model, deps.numCtx, readings)).report;
+      return (await fitWithReadings({ ...deps, reclaim }, model, deps.numCtx, readings)).report;
     } catch {
       return undefined;
     }

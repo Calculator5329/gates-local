@@ -67,6 +67,8 @@ for (const shot of SHOTS) {
         await expect(page.locator("#modelBtn")).toContainText("Qwen");
         await expect(page.locator("#modelBtn")).not.toHaveAttribute("aria-busy", "true");
       }
+      // the app is dark by default; a light shot asks for the light tokens
+      if (shot.theme === "light") await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
       await shot.act?.(page);
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.waitForTimeout(400);

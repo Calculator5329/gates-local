@@ -309,11 +309,13 @@ async function hydrateWith(
     probe("image.status", {}),
     probe("update.status", {}),
   ]);
-  // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
-  const startsOff = !thinkSeeded && noGpu(gpu);
-  thinkSeeded = true;
-  setState({ gpu, sources, imageStatus, update, ...(catalogLands(catalogTicket) ? { catalog } : {}), ...(startsOff ? { think: false } : {}) });
+  setState({ gpu, sources, imageStatus, update, ...(catalogLands(catalogTicket) ? { catalog } : {}) });
   release("none");
+  // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
+  // Read after the release: a GPU push held behind gpu.status is the newer answer.
+  const startsOff = !thinkSeeded && noGpu(getState().gpu);
+  thinkSeeded = true;
+  if (startsOff) setState({ think: false });
 
   const s = getState();
   if (s.view === "new" && threads.length === 0 && !firstRunDone()) setState({ view: "firstrun" });

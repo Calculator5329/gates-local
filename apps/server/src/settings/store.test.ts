@@ -22,7 +22,7 @@ describe("settings store", () => {
   it("first run: defaults with the system Ollama when one answers, written to disk", async () => {
     const dir = dataDir();
     const s = await open(dir, true);
-    expect(s.get()).toEqual({ defaultNumCtx: 16384, thinking: true, theme: "system", runtimeMode: "system", tools: true, imageGen: false });
+    expect(s.get()).toEqual({ defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: false });
     expect(s.loadNote).toBeUndefined();
     expect(JSON.parse(readFileSync(fileIn(dir), "utf8"))).toEqual({ version: 1, settings: s.get() });
   });
@@ -53,7 +53,7 @@ describe("settings store", () => {
     expect(readFileSync(aside, "utf8")).toBe("{ not json");
     expect(s.loadNote).toContain("is not valid JSON");
     expect(s.loadNote).toContain(aside);
-    expect(s.get().theme).toBe("system");
+    expect(s.get().theme).toBe("dark");
   });
 
   it("a file a newer build wrote is kept aside, not overwritten in place", async () => {
@@ -101,12 +101,12 @@ describe("settings store", () => {
     const dir = dataDir();
     const a = await open(dir);
     const b = await open(dir);
-    a.update({ defaultModel: "qwen3.5:9b", theme: "dark" });
+    a.update({ defaultModel: "qwen3.5:9b", theme: "light" });
     b.update({ defaultModel: "gemma3:4b" });
     const onDisk = JSON.parse(readFileSync(fileIn(dir), "utf8")) as { version: number; settings: Record<string, unknown> };
     expect(onDisk.version).toBe(1);
     expect(onDisk.settings).toEqual(b.get());
-    expect(onDisk.settings).toMatchObject({ defaultModel: "gemma3:4b", theme: "system" });
+    expect(onDisk.settings).toMatchObject({ defaultModel: "gemma3:4b", theme: "dark" });
     expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
     expect((await open(dir)).get().defaultModel).toBe("gemma3:4b");
   });
@@ -119,11 +119,11 @@ describe("settings handlers", () => {
     const seen: string[] = [];
     s.onChange((next, prev) => seen.push(`${prev.theme}->${next.theme}`));
     const h = createSettingsHandlers({ settings: s, push: (channel, payload) => pushes.push({ channel, payload }) });
-    const next = await h["settings.update"]({ theme: "dark" });
-    expect(next.theme).toBe("dark");
-    await h["settings.update"]({ theme: "dark" });
+    const next = await h["settings.update"]({ theme: "light" });
+    expect(next.theme).toBe("light");
+    await h["settings.update"]({ theme: "light" });
     expect(pushes).toEqual([{ channel: "settings.changed", payload: next }]);
-    expect(seen).toEqual(["system->dark"]);
+    expect(seen).toEqual(["dark->light"]);
     expect(await h["settings.get"]()).toEqual(next);
   });
 });

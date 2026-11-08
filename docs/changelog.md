@@ -1,5 +1,50 @@
 # Changelog
 
+## 2026-11-08: A Models page that is only models
+
+- Settings › Models holds what is installed, the default for new chats, and
+  a Download tab for new models. Each model's actions, Remove among them,
+  sit in the row's ⋯ menu at every width. The default context size moved
+  to Settings › Advanced. Character and system prompt settings left this
+  page.
+
+## 2026-11-08: Dark by default
+
+- A new install starts dark, as the design always said (`docs/design/shell.md`),
+  whatever the OS uses. Settings › General still offers Light and System. A
+  theme already saved stays as it is.
+
+## 2026-11-08: Set up with Claude Code
+
+- `docs/setup/with-claude-code.md` is a runbook an agent can follow to set
+  the app up on a new machine. `pnpm machine-check` reads the machine and
+  says which model and image setup fit it, and changes nothing.
+
+## 2026-11-08: No switch to a copy that cannot exist
+
+- Where the app has no build of Ollama to install (Windows ARM today), the
+  runtime status says so (`noAppCopy`). Settings › Runtime says it is not
+  available instead of offering "Install and switch", and still offers the
+  way back to the system Ollama. A copy already on the computer counts as
+  the app's own, so the flag is only set when there is neither, and the
+  recovery text stops offering a copy that is not there.
+
+## 2026-11-08: Switch runtimes while Ollama is down
+
+- Settings › Runtime offers the switch whenever Ollama is not usable, not
+  only when it runs. The direction comes from the runtime chosen, so a
+  system Ollama that is missing, stopped or has its port taken can be left
+  for the app's own copy.
+- Thinking's no-GPU start reads the GPU after held pushes replay, so a newer
+  GPU answer decides it (R-02).
+- Windows: `killNow` reaches a copy of Ollama that is still starting (R-04).
+
+## 2026-11-08: A new default model takes effect while another is loaded
+
+- The app's model pick now counts a model that happens to be loaded as
+  room, the way an actual load does. A loaded idle model could keep a
+  new default from being picked, and a new chat stayed on the old one.
+
 ## 2026-11-08: Thinking off with no GPU, Windows and size fixes
 
 - Thinking starts off on a computer with no supported GPU, where a

@@ -31,9 +31,9 @@ const BUDGET = {
   // paint, is not broken down further here. The gate also needs no long
   // task over longTaskMs while the keys go in (keysWithinBudget).
   keyP95Ms: 50,
-  // re-measured with the T3-style picker, paragraph streaming and the memory menu: JS 131.4, one chunk
+  // re-measured with the T3-style picker, paragraph streaming, the memory menu and Settings › Models: JS 135.1, CSS 10.5
   jsGzipKb: 140, // measured 120.6 KB at first
-  cssGzipKb: 9, // measured 8.1 KB
+  cssGzipKb: 11, // measured 8.1 KB at first
 };
 
 /** Tries per timing gate: the gate passes when one try is inside the budget. */

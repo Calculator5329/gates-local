@@ -5,12 +5,10 @@
 // fit from /api/ps, unloads only a model this script loaded, and checks
 // whisper again. Loads nothing when the fit refuses. Exits 1 if whisper
 // changed or the turn did not finish.
-import { checkFit, fetchPs, findLoaded, formatBytes, measuredFit, readGpu, type GpuSnapshot } from "../fit/index.ts";
+import { pathToFileURL } from "node:url";
+import { checkFit, fetchPs, findLoaded, formatBytes, measuredFit, readGpu, type FitDeps, type GpuSnapshot } from "../fit/index.ts";
 import { streamTurn } from "./stream.ts";
 
-const baseUrl = process.env.OLLAMA_HOST_URL ?? "http://127.0.0.1:11434";
-const model = process.argv[2] ?? "qwen3.5:9b";
-const numCtx = Number(process.argv[3] ?? 16384);
 const prompt = "Reply with one sentence: what is 2+2?";
 const WHISPER_TOLERANCE_MIB = 8;
 const MiB = 1024 * 1024;
@@ -29,7 +27,7 @@ function printGpu(label: string, gpu: GpuSnapshot) {
   }
 }
 
-async function unload(name: string): Promise<void> {
+async function unload(baseUrl: string, name: string): Promise<void> {
   const res = await fetch(new URL("/api/generate", baseUrl), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -38,9 +36,10 @@ async function unload(name: string): Promise<void> {
   console.log(`[${stamp()}] unload ${name}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
 }
 
-async function main(): Promise<number> {
+/** The check itself; `probes` stand in for nvidia-smi and /proc/meminfo in the test. */
+export async function realCheck({ baseUrl, model, numCtx }: { baseUrl: string; model: string; numCtx: number }, probes: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo"> = {}): Promise<number> {
   console.log(`== real check: ${model} at num_ctx ${numCtx} against ${baseUrl}`);
-  const gpuBefore = await readGpu();
+  const gpuBefore = await readGpu(probes.runNvidiaSmi);
   printGpu("before", gpuBefore);
   const whisperBefore = whisperOf(gpuBefore);
   console.log(`[${stamp()}] whisper before: ${JSON.stringify(whisperBefore)}`);
@@ -52,7 +51,7 @@ async function main(): Promise<number> {
   console.log(`[${stamp()}] /api/ps before: ${JSON.stringify(psBefore.models.map((m) => ({ name: m.name, size: m.size, size_vram: m.size_vram, context_length: m.context_length })))}`);
   const wasLoaded = findLoaded(psBefore, model) !== undefined;
 
-  const fit = await checkFit({ baseUrl, model, numCtx });
+  const fit = await checkFit({ baseUrl, model, numCtx, ...probes });
   const est = fit.estimate;
   if (est) {
     console.log(
@@ -65,6 +64,9 @@ async function main(): Promise<number> {
     console.log("Refused: nothing loaded.");
     return 0;
   }
+  // The size the model runs at: what was asked for, never past the model's maximum.
+  const effective = fit.report.numCtx;
+  if (effective !== numCtx) console.log(`[${stamp()}] ${model} runs at num_ctx ${effective}, not the ${numCtx} asked for.`);
 
   let finished = false;
   process.stdout.write(`[${stamp()}] streaming "${prompt}"\n    deltas: `);
@@ -73,7 +75,7 @@ async function main(): Promise<number> {
   for await (const event of streamTurn({
     baseUrl,
     model,
-    numCtx,
+    numCtx: effective,
     think: false,
     messages: [{ role: "user", content: prompt }],
     signal: AbortSignal.timeout(300_000),
@@ -96,7 +98,7 @@ async function main(): Promise<number> {
   }
 
   try {
-    const measured = await measuredFit({ baseUrl, model, numCtx });
+    const measured = await measuredFit({ baseUrl, model, numCtx: effective, ...probes });
     console.log(`[${stamp()}] fit (${measured.report.source}): ${measured.report.verdict}`);
     console.log(`    ${measured.report.message}`);
     if (est) {
@@ -109,11 +111,11 @@ async function main(): Promise<number> {
   }
 
   if (wasLoaded) console.log(`[${stamp()}] ${model} was loaded before this script; leaving it loaded.`);
-  else await unload(model);
+  else await unload(baseUrl, model);
   const psAfter = await fetchPs(baseUrl);
   console.log(`[${stamp()}] /api/ps after: ${JSON.stringify(psAfter.models.map((m) => m.name))}`);
 
-  const gpuAfter = await readGpu();
+  const gpuAfter = await readGpu(probes.runNvidiaSmi);
   printGpu("after", gpuAfter);
   const whisperAfter = whisperOf(gpuAfter);
   console.log(`[${stamp()}] whisper after: ${JSON.stringify(whisperAfter)}`);
@@ -129,10 +131,12 @@ async function main(): Promise<number> {
   return unchanged && finished ? 0 : 1;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (error: unknown) => {
-    console.error(error);
-    process.exit(1);
-  },
-);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  realCheck({ baseUrl: process.env.OLLAMA_HOST_URL ?? "http://127.0.0.1:11434", model: process.argv[2] ?? "qwen3.5:9b", numCtx: Number(process.argv[3] ?? 16384) }).then(
+    (code) => process.exit(code),
+    (error: unknown) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );
+}

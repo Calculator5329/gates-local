@@ -5,7 +5,7 @@
 import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
-import { DlDetail } from "./Settings.tsx";
+import { DlDetail } from "./ModelDownloads.tsx";
 import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
