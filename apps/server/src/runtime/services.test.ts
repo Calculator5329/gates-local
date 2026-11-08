@@ -3,7 +3,7 @@
 // GPU watcher is stopped at once so nothing reads systemd or the real GPU.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type AppDeps } from "../app.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import type { ImageModule } from "../image/module.ts";
@@ -376,6 +376,12 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
   it("R4-07: after a failed switch Settings names the runtime still serving, and choosing the new mode again retries", async () => {
     const r = await rig({}, { turnDrainMs: 200 });
     const stuck = r.s.loader.reserve(MODEL);
+    const switches: string[] = [];
+    const setMode = r.s.runtime.setMode.bind(r.s.runtime);
+    vi.spyOn(r.s.runtime, "setMode").mockImplementation((mode) => {
+      switches.push(mode);
+      return setMode(mode);
+    });
     const choose = (runtimeMode: "app" | "system") => r.s.handlers["settings.update"]!({ runtimeMode }, { clientId: 1 });
     expect(choose("app")).toMatchObject({ runtimeMode: "app" });
     for (let i = 0; i < 200 && r.s.runtime.status().state !== "error"; i++) await sleep(5);
@@ -383,10 +389,39 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     await sleep(20);
     expect(r.s.runtime.mode()).toBe("system");
     expect(r.s.handlers["settings.get"]!({}, { clientId: 1 })).toMatchObject({ runtimeMode: "system" });
+    // R5-04: putting Settings back schedules no switch.
+    expect(switches).toEqual(["app"]);
     stuck.end();
     choose("app");
     for (let i = 0; i < 400 && r.s.runtime.mode() !== "app"; i++) await sleep(5);
     expect(r.s.runtime.mode()).toBe("app");
+    await r.done();
+  });
+
+  it("R5-04: only the newest choice reconciles; an older failed switch neither rolls Settings back nor schedules another switch", async () => {
+    const r = await rig({}, { turnDrainMs: 300 });
+    const stuck = r.s.loader.reserve(MODEL);
+    const switches: string[] = [];
+    let first: Promise<unknown> | undefined;
+    const setMode = r.s.runtime.setMode.bind(r.s.runtime);
+    vi.spyOn(r.s.runtime, "setMode").mockImplementation((mode) => {
+      switches.push(mode);
+      const switching = setMode(mode);
+      // The stuck turn ends once the first switch has failed on it, so the later ones can drain.
+      if (switches.length === 1) first = switching.catch((e: unknown) => { stuck.end(); return e; });
+      return switching;
+    });
+    const choose = (runtimeMode: "app" | "system") => r.s.handlers["settings.update"]!({ runtimeMode }, { clientId: 1 });
+    choose("app");
+    // While the first switch drains: system, then app again.
+    choose("system");
+    choose("app");
+    expect(await settledWithin(first!, 2000)).toMatchObject({ resolved: { message: expect.stringMatching(/still running/) } });
+    for (let i = 0; i < 400 && r.s.runtime.mode() !== "app"; i++) await sleep(5);
+    await sleep(100);
+    expect(r.s.runtime.mode()).toBe("app");
+    expect(r.s.handlers["settings.get"]!({}, { clientId: 1 })).toMatchObject({ runtimeMode: "app" });
+    expect(switches).toEqual(["app", "system", "app"]);
     await r.done();
   });
 });

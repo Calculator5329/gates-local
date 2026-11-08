@@ -144,18 +144,27 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     log,
   });
 
+  // Each mode choice gets a generation; only the newest one's failure puts Settings back.
+  let requested = 0;
+  let puttingBack = false;
   settings.onChange((next, previous) => {
-    if (next.runtimeMode === previous.runtimeMode) return;
+    if (puttingBack || next.runtimeMode === previous.runtimeMode) return;
+    const generation = ++requested;
     runtime.setMode(next.runtimeMode).then(
       (s) => log(`runtime mode ${next.runtimeMode}: ${s.state} (${s.owner}) at ${s.baseUrl}`),
       (e: unknown) => {
         log(`runtime switch failed: ${(e as Error).message}`);
+        // A newer choice is queued behind this one and decides the mode.
+        if (generation !== requested) return;
         // The old runtime still serves: Settings says so, and choosing the new mode again retries.
-        if (settings.get().runtimeMode !== next.runtimeMode) return;
+        // Putting it back schedules no switch.
+        puttingBack = true;
         try {
           options.push("settings.changed", settings.update({ runtimeMode: runtime.mode() }));
         } catch (error) {
           log(`settings not put back to ${runtime.mode()}: ${(error as Error).message}`);
+        } finally {
+          puttingBack = false;
         }
       },
     );
