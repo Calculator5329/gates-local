@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { streamToolTurn } from "./tools.ts";
+import { estimateTokens } from "./window.ts";
 import { createSources } from "../sources/index.ts";
 import { createApp } from "../app.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
@@ -293,4 +294,89 @@ describe("tool turns in a small context window", () => {
     expect(bodies).toEqual([]);
     expect(events).toEqual([expect.objectContaining({ type: "error", code: "context-too-small" })]);
   });
+});
+
+/** What a 2048 window can spend on a request: all but the quarter kept for the reply. */
+const ROOM_AT_2048 = 2048 - 512;
+/** Estimated tokens of one /api/chat body, tool definitions included. */
+const requestTokens = (body: Record<string, unknown>) => (body["messages"] as { content: string; tool_calls?: unknown }[])
+  .reduce((sum, m) => sum + estimateTokens(m.content) + (m.tool_calls ? Math.ceil(JSON.stringify(m.tool_calls).length / 4) : 0), 0)
+  + (body["tools"] ? estimateTokens(JSON.stringify(body["tools"])) : 0);
+/** A model that calls read once and answers on the next request. */
+const callsOnceThenAnswers = (bodies: Record<string, unknown>[], native: boolean) => vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+  if (String(url).endsWith("/api/show")) return Response.json({ capabilities: native ? ["completion", "tools"] : ["completion"] });
+  bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+  if (bodies.length > 1) return ndjson([{ message: { content: "the answer" }, done: true }]);
+  const call = { name: "read", arguments: { path: "/library/s0" } };
+  return ndjson([{ message: native ? { tool_calls: [{ function: call }] } : { content: `<tool_call>${JSON.stringify(call)}</tool_call>` }, done: true }]);
+});
+type Asked = { role: "user" | "assistant"; content: string };
+const toolRound = async (o: { native: boolean; numCtx?: number; sources?: number; messages?: Asked[]; output: string }) => {
+  const bodies: Record<string, unknown>[] = [];
+  const events = [];
+  const execute = async () => ({ output: o.output, summary: "Read" });
+  for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: o.messages ?? [{ role: "user", content: "read it" }], numCtx: o.numCtx ?? 2048, sources: manySources.slice(0, o.sources ?? 0), fetch: callsOnceThenAnswers(bodies, o.native), execute })) events.push(e);
+  return { bodies, events, sent: (bodies[1]?.["messages"] ?? []) as { role: string; content: string }[] };
+};
+const WINDOW_FULL = "\n[cut: this model's context window is full]";
+
+describe("every request of a tool turn fits the context window (R-01)", () => {
+  for (const native of [true, false]) {
+    const mode = native ? "native" : "text";
+    for (const sources of [0, 18]) {
+      it(`${mode}, ${sources} sources: a 10,000-character result at 2048 is cut to fit and the model still answers`, async () => {
+        const output = "abcdefgh".repeat(1250);
+        const { bodies, events, sent } = await toolRound({ native, sources, output });
+        expect(bodies).toHaveLength(2);
+        expect(bodies.map(requestTokens).filter(tokens => tokens > ROOM_AT_2048)).toEqual([]);
+        expect(sent.map(m => m.content).join("")).toContain(output.slice(0, 200));
+        expect(events.filter(e => e.type === "error")).toEqual([]);
+        expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "the answer", tools: [{ name: "read", state: "done" }] } });
+      });
+    }
+    it(`${mode}: the oldest turns go before the tool's output does`, async () => {
+      const older: Asked[] = [{ role: "user", content: "q".repeat(1200) }, { role: "assistant", content: "a".repeat(1200) }, { role: "user", content: "r".repeat(1200) }, { role: "assistant", content: "b".repeat(1200) }];
+      const output = "o".repeat(2000);
+      const { bodies, sent } = await toolRound({ native, sources: 8, messages: [...older, { role: "user", content: "read it" }], output });
+      expect(bodies.map(requestTokens).filter(tokens => tokens > ROOM_AT_2048)).toEqual([]);
+      const text = sent.map(m => m.content).join("");
+      expect(text).toContain(output);
+      expect(text).not.toContain(WINDOW_FULL);
+      expect(text).toContain("read it");
+      // What is left of the older chat starts with what was asked, never with a reply.
+      expect(sent.find(m => m.role !== "system")?.role).toBe("user");
+      expect(text).not.toContain("q".repeat(1200));
+    });
+  }
+  it("native: when only the tool definitions stand in the way, the follow-up is sent without them", async () => {
+    const first = await toolRound({ native: true, output: "" });
+    const room = ROOM_AT_2048 - requestTokens(first.bodies[0]!) + estimateTokens("read it");
+    // The question fills the first request, definitions included: no room is left for them beside the call and its result.
+    const { bodies, events } = await toolRound({ native: true, messages: [{ role: "user", content: "x".repeat((room - 4) * 4) }], output: "o".repeat(1200) });
+    expect(bodies[0]).toHaveProperty("tools");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).not.toHaveProperty("tools");
+    expect(bodies.map(requestTokens).filter(tokens => tokens > ROOM_AT_2048)).toEqual([]);
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "the answer" } });
+  });
+  it("text mode: when nothing more fits, the turn ends with a plain sentence and no second request", async () => {
+    const first = await toolRound({ native: false, output: "" });
+    const room = ROOM_AT_2048 - requestTokens(first.bodies[0]!) + estimateTokens("read it");
+    // The question takes all that the first request has left.
+    const { bodies, events } = await toolRound({ native: false, messages: [{ role: "user", content: "x".repeat((room - 4) * 4) }], output: "o".repeat(5000) });
+    expect(bodies).toHaveLength(1);
+    expect(events.filter(e => e.type === "error")).toEqual([]);
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { content: expect.stringMatching(/2k context.*more context/), tools: [{ name: "read", state: "done" }] } });
+  });
+  for (const native of [true, false]) {
+    it(`${native ? "native" : "text"}: at 16384 a tool result that fits is sent whole and nothing is dropped`, async () => {
+      const older: Asked[] = [{ role: "user", content: "q".repeat(4000) }, { role: "assistant", content: "a".repeat(4000) }];
+      const output = "z".repeat(10000);
+      const { bodies, sent } = await toolRound({ native, numCtx: 16384, messages: [...older, { role: "user", content: "read it" }], output });
+      const firstRequest = bodies[0]!["messages"] as unknown[];
+      expect(firstRequest).toEqual(sent.slice(0, firstRequest.length));
+      expect(sent.at(-1)?.content).toContain(output);
+      if (native) expect(bodies[1]).toHaveProperty("tools");
+    });
+  }
 });
