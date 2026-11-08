@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ImageEvent, ImageStatus, Params } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
-import { readGpu } from "../fit/gpu.ts";
+import { readGpu, untilAborted } from "../fit/gpu.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
@@ -117,18 +117,6 @@ export async function isLocalHost(hostname: string, own: readonly string[] = loc
   }
 }
 
-/** The promise's result, or the signal's reason as soon as it aborts; the listener goes either way. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
-      (error: unknown) => { signal.removeEventListener("abort", onAbort); reject(error); },
-    );
-  });
-}
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
@@ -372,7 +360,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
         // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
+        signal?.throwIfAborted();
         if (!await untilAborted(client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined), signal)) { armIdle(); return; }
+        signal?.throwIfAborted();
         const latest = await untilAborted(service.inspect(), signal);
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
