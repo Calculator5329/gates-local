@@ -80,6 +80,21 @@ Ollama, for people who want local models without guessing whether they fit.
 - **ComfyUI (optional):** only for image generation. See
   [docs/setup/linux.md](docs/setup/linux.md#4-optional-image-generation-with-comfyui).
 
+## Let Claude Code set it up
+
+If you use [Claude Code](https://claude.com/claude-code), it can do the setup
+for you. Clone this repository, open Claude Code in the folder and say:
+
+> Look at this folder and set me up with the best models this computer can run.
+
+It reads your machine with `pnpm machine-check`, which picks the best text
+model the same way the app does and, with no GPU or too little GPU memory,
+says to skip image generation and why. It tells you the size of anything
+large and asks before downloading it or installing anything system-wide. At
+the end it tells you what it set up and what it skipped. The steps it follows
+are in [docs/setup/with-claude-code.md](docs/setup/with-claude-code.md). They
+have not been run from start to finish on a clean machine yet.
+
 ## Quick start on Linux
 
 Install Ollama and start it first. Then:
@@ -244,8 +259,8 @@ and what each part owns.
 ## Status
 
 Early. The chat, fit check, model downloads, library and tools work, and
-are tested against fakes. Packaging, benchmarks and guided setup are not
-built yet. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
+are tested against fakes. Packaging, benchmarks and guided setup inside the
+app are not built yet. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
 
 ## License
 
