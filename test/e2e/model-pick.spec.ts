@@ -3,7 +3,7 @@
 // offers the embedding model, and the Thinking pill follows the model's
 // capabilities. The picker is a combobox a screen reader can follow.
 import type { Page } from "@playwright/test";
-import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "embed-smallest" });
 
@@ -135,6 +135,46 @@ test.describe("first download", () => {
     await expect(pill).not.toHaveAttribute("aria-disabled", /./, { timeout: 20_000 });
     await expect(pill).toHaveAttribute("data-tip", /^<b>Thinking (on|off)\.<\/b>/);
   });
+});
+
+test.describe("first download with only an embedding model installed (MP-04)", () => {
+  test.use({ scenario: "embed-only", skipFirstRun: false });
+
+  test("shows the download's progress and Start chatting, and a typed message waits for it", async ({ page, open }) => {
+    await open();
+    await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
+    await expect(page.locator(".fr-st")).toContainText("no chat models yet");
+    await page.getByRole("button", { name: "Download and start" }).click();
+    await expect(page.getByRole("heading", { name: "Downloading your first model" })).toBeVisible();
+    await expect(page.getByRole("progressbar")).toBeVisible();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await sendMessage(page, "Hello there");
+    await expect(page.getByText("Sends when the download finishes")).toBeVisible();
+    await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
+    await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
+  });
+});
+
+// The open chat keeping the user's model when the pick changes is the unit test's (apps/web/src/pick.test.ts).
+test("one Ctrl+N after saving a default starts the new chat on the new pick, even when the pick lands after the chat exists (MP-05)", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const modelBtn = page.locator("#modelBtn");
+  // The user picks Qwen themselves, so only a new chat may move off it.
+  await pickModel(page, "qwen", "qwen3.5:9b");
+  await expect(modelBtn).toContainText("Qwen 3.5 9B");
+  await expect(modelBtn).not.toContainText("loading");
+  // Forget the load (a loaded Qwen leaves no room for Gemma's row) and hold every /api/show,
+  // so the pick that follows the new default lands only after the new chat exists.
+  await stack.scenario("embed-smallest", { showDelayMs: 1500 });
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await page.locator(`.mrow[data-dm="gemma4:12b"]`).click();
+  await expect(page.locator(`.mrow[data-dm="gemma4:12b"]`)).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+n");
+  await expect(modelBtn).toContainText("Qwen 3.5 9B"); // the survey is still held
+  await expect(modelBtn).toContainText("Gemma 4 12B", { timeout: 20_000 });
 });
 
 test("Settings lists the embedding model as not for chat, with Remove and no default choice", async ({ page, open }) => {

@@ -10,6 +10,7 @@
 //   mid-stream-error  the stream breaks with an error after a few tokens
 //   wrong-service     the port answers, but not as Ollama
 //   embed-smallest    the three models plus nomic-embed-text, the smallest
+//   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
 //   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
 //                     a code block, a table) over about 2 s; holdAfterTokens > 0
 //                     pauses the reply there until the request is cancelled
@@ -19,12 +20,17 @@
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-const installedFor = (s: string): readonly string[] =>
-  s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : s === "long-name" ? LONG_NAME_INSTALLED : DEFAULT_INSTALLED;
+const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
+  "no-models": [],
+  "embed-smallest": EMBED_SMALLEST_INSTALLED,
+  "embed-only": EMBED_ONLY_INSTALLED,
+  "long-name": LONG_NAME_INSTALLED,
+};
+const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "slow-drip", "long-name"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -47,6 +53,8 @@ export interface FakeOptions {
    * as a real runner does until it is ready.
    */
   loadDelayMs: number;
+  /** Delay before /api/show answers: holds the server's fit survey (and so its chat pick). */
+  showDelayMs: number;
 }
 
 const LOAD_STEPS = 6;
@@ -60,6 +68,7 @@ const DEFAULTS: FakeOptions = {
   errorAfterTokens: 8,
   holdAfterTokens: 0,
   loadDelayMs: 0,
+  showDelayMs: 0,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -297,14 +306,18 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       await sleep(options.tokenDelayMs, abort.signal);
     }
     if (abort.signal.aborted) return;
+    // One end time for both durations, so total is exactly prompt plus decode (MP3-03).
+    const ended = Date.now();
+    const promptMs = Math.max(1, decodeFrom - started);
+    const evalMs = Math.max(1, ended - decodeFrom);
     line({
       ...base(),
       message: { role: "assistant", content: "" },
       done: true,
       done_reason: "stop",
-      total_duration: (Date.now() - started) * 1e6,
-      prompt_eval_duration: Math.max(1, decodeFrom - started) * 1e6,
-      eval_duration: Math.max(1, Date.now() - decodeFrom) * 1e6,
+      total_duration: (promptMs + evalMs) * 1e6,
+      prompt_eval_duration: promptMs * 1e6,
+      eval_duration: evalMs * 1e6,
       prompt_eval_count: 24 + prompt.length,
       eval_count: sent,
     });
@@ -382,6 +395,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
             })),
           });
         case "POST /api/show": {
+          if (options.showDelayMs > 0) await new Promise((r) => setTimeout(r, options.showDelayMs));
           const m = isInstalled(str(body, "model") ?? str(body, "name") ?? "");
           return m ? json(res, 200, showBody(m)) : json(res, 404, { error: "model not found" });
         }

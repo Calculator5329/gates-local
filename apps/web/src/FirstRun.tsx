@@ -10,7 +10,7 @@ import { describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
 import { NA, type State, fitKey, useStore } from "./store.ts";
-import { canChat, chatModels, pickRuleText, pickedModel } from "./pick.ts";
+import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
 
@@ -166,7 +166,9 @@ function NoModels() {
       Ollama{version ? ` ${version}` : ""} · {others > 0 ? "no chat models yet" : "no models yet"}
     </>
   );
-  const sub = `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`;
+  // An Ollama that does not report capabilities: a download would not help, so say what would.
+  const tooOld = useStore((s) => chatBlockedReason(s.models, undefined, s.runtime?.version));
+  const sub = tooOld ?? `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`;
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
@@ -188,6 +190,14 @@ function NoModels() {
         </RecCard>
         <Cta label="Start chatting" onGo={startChat} />
         <p className="fr-note">You can type now; replies start when the download finishes.</p>
+      </Shell>
+    );
+  }
+  if (tooOld !== undefined) {
+    // with or without a catalog entry: a downloaded model would be as undescribed as the installed ones
+    return (
+      <Shell st={st} title="Update Ollama to chat" sub={tooOld}>
+        <Cta label="Retry" onGo={() => void recheckRuntime()} />
       </Shell>
     );
   }

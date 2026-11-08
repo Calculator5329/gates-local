@@ -53,7 +53,10 @@ export async function estimateOffered(deps: { baseUrl: string; fit?: CatalogDeps
 export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
   const numCtx = deps.settings.get().defaultNumCtx;
   const baseUrl = deps.baseUrl();
-  const installed = baseUrl === undefined ? [] : (await deps.installed()).filter(canChat); // embedding models never chat
+  const listed = baseUrl === undefined ? [] : await deps.installed();
+  const installed = listed.filter(canChat); // embedding models never chat; unknown ones wait for discovery
+  // Every installed name, chat or not: an installed model is never offered as a download (MP-01).
+  const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
 
   let survey: FitSurvey | undefined;
   if (baseUrl !== undefined) {
@@ -70,7 +73,7 @@ export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
     const own = byTag.get(c.name);
     if (own) {
       entries.push(withFit({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true }, survey?.reports.get(own.name)));
-    } else if (c.pullable) {
+    } else if (c.pullable && !installedTags.has(c.name)) {
       const fit = survey ? preDownload(c, numCtx, survey, deps.fit) : undefined;
       entries.push(withFit({ name: c.name, label: c.label, purpose: c.purpose, downloadBytes: c.downloadBytes, installed: false }, fit));
     }

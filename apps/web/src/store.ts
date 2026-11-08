@@ -93,6 +93,10 @@ export interface State {
   readonly search: string;
 
   readonly model: string | undefined;
+  /** The model the user picked in this chat; `model` returns to it when the list has it again (pick.ts). */
+  readonly chosen: string | undefined;
+  /** The model each thread opened this session was last on; the composer's model is one value, so leaving a thread would lose it. */
+  readonly threadModels: Readonly<Record<string, string>>;
   readonly numCtx: ContextSize;
   readonly think: boolean;
   readonly image: boolean;
@@ -138,6 +142,8 @@ const initial: State = {
   searchOpen: false,
   search: "",
   model: undefined,
+  chosen: undefined,
+  threadModels: {},
   numCtx: 16384,
   think: true,
   image: false,

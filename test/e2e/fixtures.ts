@@ -4,7 +4,7 @@
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import { CONTROL_URL, appUrl } from "./env.ts";
 
-export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "slow-drip" | "long-name";
+export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
 export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar, the README's demo threads, or 0 for none. */

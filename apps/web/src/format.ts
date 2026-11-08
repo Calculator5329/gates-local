@@ -47,6 +47,24 @@ export function verdictOf(r: FitReport): Verdict {
   return { ...base, k: "no", chip: "not enough memory", word: `Not enough memory at ${k(r.numCtx)}`, detail: `needs ${gb(short)} more`, amt: short };
 }
 
+/**
+ * What the context size not chosen would do, for the line under a context
+ * control (F36b): "still runs on GPU; uses 2.5 GB more". A refusal past the
+ * model's context limit says so, never "not enough memory" (MP-06).
+ */
+export function otherCtxWords(cur: FitReport, other: FitReport): string {
+  const ov = verdictOf(other);
+  const cv = verdictOf(cur);
+  // "still" only when both are the same verdict for the same reason.
+  const same = ov.k === cv.k && (ov.limit === undefined) === (cv.limit === undefined);
+  if (ov.limit !== undefined) return `${same ? "still " : ""}past its context limit; it supports up to ${k(ov.limit)}`;
+  let says = ov.k === "gpu" ? "runs on GPU" : ov.k === "spill" ? "uses system memory, slower" : "not enough memory";
+  if (same) says = `still ${says}`;
+  const d = other.needVramBytes - cur.needVramBytes;
+  const tail = ov.k === "gpu" ? `uses ${gb(Math.abs(d))} ${d > 0 ? "more" : "less"}` : ov.detail;
+  return `${says}; ${tail}`;
+}
+
 /** Tag words that read after the size ("Gemma 4 26B abliterated"); others read before it ("Qwen 3.5 VL 9B"). */
 const AFTER_SIZE = new Set(["abliterated", "uncensored", "instruct", "chat", "coder"]);
 

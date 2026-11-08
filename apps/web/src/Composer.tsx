@@ -8,7 +8,7 @@ import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./FitPanel.tsx";
 import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
-import { canThink, chatModels, pickRuleText, pickedModel } from "./pick.ts";
+import { canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { ensureFit, firstPull, openSettings, pickModel, pull, queueReason, send, setContext, stop } from "./session.ts";
 import { NA, type State, fitKey, getState, setState, streaming, useStore } from "./store.ts";
@@ -104,7 +104,8 @@ export function Composer() {
   const v = loading ? (kept ?? fresh) : (fresh ?? kept);
   if (!loading && fresh !== undefined) held.current = { at: fitAt, v: fresh };
   const text = draft.trim();
-  const noModel = model === undefined && !queueable;
+  const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
+  const noModel = (model === undefined || why !== undefined) && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined);
 
@@ -120,12 +121,12 @@ export function Composer() {
   const pct = Math.min(1, used / numCtx);
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
-  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? "Download a model to start chatting" : PLACEHOLDER[rt];
+  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
 
   let sendTip = "Send (Enter)";
   if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
-  else if (noModel) sendTip = "Download a model to start chatting";
+  else if (noModel) sendTip = why ?? "Download a model to start chatting";
   else if (v?.k === "no" && v.limit !== undefined) sendTip = `${esc(name)} supports up to ${k(v.limit)} of context. Pick another model.`;
   else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(numCtx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
   else if (!text) sendTip = "Type a message to send";

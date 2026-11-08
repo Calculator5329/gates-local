@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { decodeSpeed, replyMeta, verdictOf } from "./format.ts";
+import { decodeSpeed, otherCtxWords, replyMeta, verdictOf } from "./format.ts";
 
 const GIB = 1024 ** 3;
 const base: FitReport = {
@@ -32,6 +32,28 @@ describe("verdictOf", () => {
 });
 
 const msg = (stats: Message["stats"]): Message => ({ id: "a", threadId: "t", role: "assistant", content: "x", createdAt: 1, ...(stats ? { stats } : {}) });
+
+const fits = (numCtx: number, need: number): FitReport => ({ ...base, numCtx, verdict: "fits", needVramBytes: need * GIB });
+
+describe("the other context size's words (F36b)", () => {
+  it("MP-06: a refusal past the model's context limit says so, not 'not enough memory'", () => {
+    const past = { ...base, numCtx: 32768, contextLimit: 16384, message: "num_ctx 32768 is above the model's context_length 16384; refused." };
+    const words = otherCtxWords(fits(16384, 6), past);
+    expect(words).toBe("past its context limit; it supports up to 16k");
+    expect(words).not.toMatch(/memory/i);
+  });
+
+  it("keeps the memory and GPU words otherwise", () => {
+    expect(otherCtxWords(fits(16384, 6), fits(32768, 8.5))).toBe("still runs on GPU; uses 2.5 GB more");
+    expect(otherCtxWords(fits(16384, 6), { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB })).toBe("not enough memory; needs 3.0 GB more");
+  });
+
+  it("does not say 'still' when the two refusals differ in kind", () => {
+    const limited = { ...base, numCtx: 65536, contextLimit: 32768 };
+    const memory = { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 1 * GIB };
+    expect(otherCtxWords(limited, memory)).toBe("not enough memory; needs 1.0 GB more");
+  });
+});
 
 describe("decode speed", () => {
   it("divides by decode time, not the total that includes the load", () => {

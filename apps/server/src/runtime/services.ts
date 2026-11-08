@@ -16,7 +16,7 @@ import type { Handlers } from "../ws/server.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
 import { createModelLoader, type ModelLoader } from "./load.ts";
 import { createModelCatalog, listLoaded, type ModelCatalog } from "./models.ts";
-import { pickChatModel } from "./pick.ts";
+import { canChat, pickChatModel } from "./pick.ts";
 import { probe } from "./probe.ts";
 import { createPullManager, type PullManager } from "./pull.ts";
 import { canonicalTag, modelLabel } from "./recommended.ts";
@@ -87,6 +87,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     minIntervalMs: MODELS_REFRESH_MIN_MS,
     // The chat pick (runtime/pick.ts): one GPU reading, every chat model fitted against it.
     pick: async (models, baseUrl) => {
+      // Nothing to pick from (an Ollama too old to say, only embedding models): skip the GPU and memory reads each retry would take.
+      if (!models.some(canChat)) return undefined;
       const { defaultModel, defaultNumCtx } = settings.get();
       let fit: (model: string) => Promise<FitReport | undefined> = noFit;
       try {
@@ -173,6 +175,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     async close({ stopRuntime }) {
       pulls?.stop();
       gpu.stop();
+      catalog.stop();
       if (stopRuntime) await runtime.stopIfStartedHere();
     },
   };
