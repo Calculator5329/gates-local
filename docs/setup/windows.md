@@ -1,7 +1,8 @@
 # Setting up Gates Local on Windows
 
-This guide covers Windows 11 on x64. Everything here installs for your user
-account only; no step needs administrator rights.
+This guide covers Windows 11 on x64. Gates Local, pnpm and Ollama install for
+your user account only. The Node.js and Git installers normally ask for
+administrator rights; [there is a way without them](#no-administrator-rights).
 
 Rather not do this by hand? [Let Claude Code set it up](with-claude-code.md).
 
@@ -43,6 +44,20 @@ which needs administrator rights.
 If PowerShell says "running scripts is disabled on this system" when you run
 `npm` or `pnpm`, see
 [PowerShell refuses to run npm or pnpm](#powershell-refuses-to-run-npm-or-pnpm).
+
+### No administrator rights?
+
+The `.msi` above and the Git installer below normally need them. These
+replacements install for your account only, and were not tested:
+
+- **Node.js:** download the Standalone Binary (`.zip`) from the same page and
+  unpack it into a folder of your own, such as
+  `%LOCALAPPDATA%\Programs\node`. Open **Edit environment variables for your
+  account** from the Start menu and add that folder to `Path`. After the
+  `npm install -g` above, run `npm config get prefix` and add that folder too
+  if it is a different one.
+- **Git:** download Portable Git from <https://git-scm.com/download/win>,
+  unpack it, and add its `cmd` folder to the same `Path`.
 
 ## 2. Install Ollama
 

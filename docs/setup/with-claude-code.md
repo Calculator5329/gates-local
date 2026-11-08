@@ -52,7 +52,10 @@ If Node.js 24 or pnpm 11.10.0 is missing, install them as section 1 of the
 [Linux](linux.md#1-install-nodejs-24-and-pnpm-11) or
 [Windows](windows.md#1-install-nodejs-24-and-pnpm-11) guide says. On Linux, a
 distribution package or a `corepack enable pnpm` on a system Node.js needs
-sudo, so ask first. On Windows nothing here needs administrator rights.
+sudo, so ask first. On Windows the Node.js `.msi` and the Git installer
+normally need administrator rights, so ask first. The guide's
+[way without them](windows.md#no-administrator-rights) installs for this user
+only, and was not tested.
 
 Then, in this folder:
 
