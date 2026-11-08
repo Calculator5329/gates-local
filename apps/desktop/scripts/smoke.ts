@@ -209,11 +209,25 @@ async function untilTrue(probe: () => Promise<boolean> | boolean, label: string,
   fail(`timed out waiting for ${label}`);
 }
 
+/** A second launch must hand off to the running instance and exit 0 within 10 s; the caller kills it in finally either way. */
+async function handsOff(second: ReturnType<typeof launch>, label: string): Promise<number> {
+  const code = await Promise.race([second.exited, sleep(10_000).then(() => "hung" as const)]);
+  if (code === "hung") fail(`${label} did not hand off to the running instance and exit within 10 s`);
+  if (code !== 0) fail(`${label} exited ${String(code)}, not 0`);
+  return code;
+}
+
 /** Background mode: no window at start, a second launch opens one, closing it keeps the one server, SIGTERM stops it. */
 async function background(work: string): Promise<void> {
   const debugPort = await findFreePort();
-  const phone = { GATES_LOCAL_WEB_LISTEN: "127.0.0.1:1", GATES_LOCAL_WEB_ORIGIN: "https://hub.example.ts.net:8456", GATES_LOCAL_WEB_USER: "owner@example.com" };
+  const phone = {
+    GATES_LOCAL_WEB_LISTEN: `unix:${path.join(work, "run", "phone.sock")}`,
+    GATES_LOCAL_WEB_ORIGIN: "https://hub.example.ts.net:8456",
+    GATES_LOCAL_WEB_USER: "owner@example.com",
+  };
   const { electron, dataDir, exited } = launch(work, debugPort, ["--background"], phone);
+  // Every second launch, so a hung one never outlives the smoke.
+  const seconds: ChildProcess[] = [];
   try {
     await untilTrue(() => serverPids(dataDir).length === 1 && serverPids(dataDir).every(alive), "the background server");
     const [pid] = serverPids(dataDir);
@@ -226,8 +240,8 @@ async function background(work: string): Promise<void> {
     log("7 --background: server up, no window, phone knobs and the dist dir passed to the server");
 
     const again = launch(work, null);
-    const againCode = await Promise.race([again.exited, sleep(10_000).then(() => "hung" as const)]);
-    if (againCode === "hung") fail("a second launch did not hand off to the running instance");
+    seconds.push(again.electron);
+    const againCode = await handsOff(again, "a second launch");
     const cdp = await Cdp.connect(debugPort);
     await cdp.until(`location.protocol === "file:" && window.__serverUrl`, "client in the window the second launch opened");
     if (serverPids(dataDir).length !== 1) fail(`a second launch started another server: ${serverPids(dataDir).join(" ")}`);
@@ -242,16 +256,18 @@ async function background(work: string): Promise<void> {
     log("9 closing the last window: Electron and the server keep running");
 
     const quiet = launch(work, null, ["--background"]);
-    await Promise.race([quiet.exited, sleep(10_000)]);
+    seconds.push(quiet.electron);
+    const quietCode = await handsOff(quiet, "a second --background launch");
     await sleep(1000);
     if ((await pages(debugPort)) !== 0) fail("a second background launch opened a window");
+    if (serverPids(dataDir).length !== 1) fail(`a second --background launch started another server: ${serverPids(dataDir).join(" ")}`);
 
     electron.kill("SIGTERM");
     const code = await exited;
     if (!(await waitGone(serverPids(dataDir), 4_000))) fail("the server outlived SIGTERM to a background instance");
-    log(`10 second --background launch opened nothing; SIGTERM: exit ${String(code)}, server ${String(pid)} gone`);
+    log(`10 second --background launch (exit ${String(quietCode)}) opened nothing; SIGTERM: exit ${String(code)}, server ${String(pid)} gone`);
   } finally {
-    if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
+    for (const child of [electron, ...seconds]) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }
 }
 
