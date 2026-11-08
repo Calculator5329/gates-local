@@ -498,3 +498,114 @@ describe("discovery retries (MP2-01, MP2-02)", () => {
     }
   });
 });
+
+const noop = () => undefined;
+const defer = () => {
+  let resolve: () => void = noop;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve: () => resolve() };
+};
+const settle = () => new Promise((r) => setTimeout(r, 50));
+
+/** A runtime whose every /api/tags waits until released; counts calls and the most running at once. */
+async function heldRuntime() {
+  const gates: ReturnType<typeof defer>[] = [];
+  const gate = (i: number) => (gates[i] ??= defer());
+  const state = { calls: 0, active: 0, max: 0, open: false };
+  const s = await startFakeServer({
+    "GET /api/tags": async (_b, res) => {
+      const i = state.calls++;
+      state.max = Math.max(state.max, ++state.active);
+      try {
+        if (!state.open) await gate(i).promise;
+        json(res, 200, { models: [qwen] });
+      } finally {
+        state.active--;
+      }
+    },
+    "POST /api/show": (_b, res) => json(res, 200, { capabilities: ["completion"] }),
+  });
+  const release = (i: number) => gate(i).resolve();
+  const releaseAll = () => {
+    state.open = true;
+    for (const g of gates) g?.resolve();
+  };
+  return { s, state, release, releaseAll };
+}
+
+describe("one fetch at a time, and stop() (MP2-02, MP3-01)", () => {
+  it("queued work from the runtime before a switch never fetches beside the new runtime's fetch", async () => {
+    const a = await heldRuntime();
+    const b = await heldRuntime();
+    let url = a.s.baseUrl;
+    const catalog = catalogFor(() => url, { retryMs: 0 });
+    try {
+      const old = catalog.refresh();
+      await vi.waitFor(() => expect(a.state.calls).toBe(1));
+      const queued = catalog.refresh({ force: true });
+      url = b.s.baseUrl;
+      const fresh = catalog.refresh();
+      await vi.waitFor(() => expect(b.state.calls).toBe(1));
+      a.releaseAll();
+      await old;
+      await settle(); // the queued work has had its chance to start
+      expect(b.state.max).toBe(1);
+      b.releaseAll();
+      await Promise.all([queued, fresh]);
+      expect(b.state.max).toBe(1);
+    } finally {
+      a.releaseAll();
+      b.releaseAll();
+      catalog.stop();
+      await a.s.close();
+      await b.s.close();
+    }
+  });
+
+  it("a forced refresh asked as the running fetch settles joins the queued one, not a second fetch beside it", async () => {
+    const r = await heldRuntime();
+    const catalog = catalogFor(() => r.s.baseUrl, { retryMs: 0 });
+    try {
+      const first = catalog.refresh();
+      await vi.waitFor(() => expect(r.state.calls).toBe(1));
+      const queued = catalog.refresh({ force: true });
+      r.release(0);
+      await first;
+      const manual = catalog.refresh({ force: true });
+      await vi.waitFor(() => expect(r.state.calls).toBe(2));
+      await settle();
+      expect(r.state.max).toBe(1);
+      expect(r.state.calls).toBe(2);
+      r.releaseAll();
+      await Promise.all([queued, manual]);
+    } finally {
+      r.releaseAll();
+      catalog.stop();
+      await r.s.close();
+    }
+  });
+
+  it("stop() drops queued work and keeps the running fetch from publishing (MP3-01)", async () => {
+    const r = await heldRuntime();
+    const catalog = catalogFor(() => r.s.baseUrl);
+    let emits = 0;
+    catalog.onChange(() => emits++);
+    try {
+      const first = catalog.refresh();
+      await vi.waitFor(() => expect(r.state.calls).toBe(1));
+      const queued = catalog.refresh({ force: true });
+      catalog.stop();
+      r.releaseAll();
+      await Promise.all([first, queued]);
+      await settle();
+      expect(r.state.calls).toBe(1);
+      expect(emits).toBe(0);
+      expect(catalog.current()).toBeUndefined();
+      expect(timers.pending()).toBe(0);
+    } finally {
+      r.releaseAll();
+      catalog.stop();
+      await r.s.close();
+    }
+  });
+});

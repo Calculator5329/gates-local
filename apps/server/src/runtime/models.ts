@@ -217,7 +217,8 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
     const picked = url ? await withPick(listed, url) : { models: listed, settled: true };
     const next = picked.models;
     // An older fetch (one from the runtime before a switch) changes nothing; its caller gets the current list (MP2-02).
-    if (seq !== latest || baseUrl() !== url) return { models: models ?? [], changed: false };
+    // After stop() nothing is applied or announced (MP3-01).
+    if (stopped || seq !== latest || baseUrl() !== url) return { models: models ?? [], changed: false };
     const changed = models === undefined || key(models) !== key(next);
     models = next;
     // Unknown capabilities (MP-01) and an incomplete pick (MP-02) are asked again without waiting for a focus.
@@ -261,9 +262,10 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
       const force = how?.force === true;
       if (!force && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
       const running = inFlight;
+      // Work queued for this runtime has not started yet, so it answers this call too, even between the running fetch settling and it starting.
+      if (queued !== undefined && queued.url === url && (force || running === undefined)) return queued.result;
       if (running === undefined || running.url !== url) return start(url);
       if (!force) return running.result;
-      if (queued !== undefined && queued.url === url) return queued.result;
       const entry = {
         url,
         result: running.result.then(
@@ -271,7 +273,8 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
           () => undefined,
         ).then(() => {
           if (queued === entry) queued = undefined;
-          return start(baseUrl());
+          // Back through refresh(), so it waits behind whatever runs now (a fetch for a newer runtime); stop() drops it.
+          return stopped ? { models: models ?? [], changed: false } : catalog.refresh({ force: true });
         }),
       };
       queued = entry;
