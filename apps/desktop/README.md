@@ -38,7 +38,9 @@ The coordinator's `apps/server/src/main.ts` must follow this; the fake in
      stderr and exit non-zero; the user gets the error view and Restart
      picks a fresh port.
    - `--data-dir`: created by the supervisor before spawn. Default
-     `~/.config/gates-local/server-data`.
+     `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local`
+     (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on
+     macOS (see `src/data-dir.ts`).
 2. **Token.** In the environment as `GATES_LOCAL_SERVER_TOKEN` (64 hex
    characters, `crypto.randomBytes(32)`, new on every launch). Not in argv:
    `/proc/<pid>/cmdline` is readable by every local user, the environment
@@ -136,7 +138,7 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
 | Variable | Default | Use |
 | --- | --- | --- |
 | `GATES_LOCAL_SERVER_ENTRY` | `apps/server/src/main.ts` (packaged: `<resources>/server/main.ts`, provisional) | Server entry passed to the child. |
-| `GATES_LOCAL_DATA_DIR` | `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local` (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on macOS or when `GATES_LOCAL_USER_DATA` is set | `--data-dir`: threads, settings, and the app's own Ollama and models (large, so never the roaming profile or `~/.config`). |
+| `GATES_LOCAL_DATA_DIR` | `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local` (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on macOS or when `GATES_LOCAL_USER_DATA` is set | `--data-dir`: threads, settings, snapshots, the Ollama ownership record and serve log. The app's own Ollama install and models stay in the server's shared store (`%LOCALAPPDATA%\GatesLocal`, `~/.local/share/gates-local`) whatever this is set to, so this does not move model downloads to another disk. |
 | `GATES_LOCAL_USER_DATA` | `~/.config/gates-local` | Electron userData (smoke runs use a temp dir). |
 | `GATES_LOCAL_WEB` | built client on `gates-local://app` | `dev` loads Vite on 5187 (run `pnpm --filter @gates-local/web dev`). |
 | `GATES_LOCAL_WEB_URL` | none | Exact client URL; wins over `GATES_LOCAL_WEB`. |

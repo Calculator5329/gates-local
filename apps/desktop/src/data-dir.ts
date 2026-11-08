@@ -1,9 +1,9 @@
 // Where the desktop app tells the server to keep its data (`--data-dir`):
-// threads, settings, snapshots, and the app's own Ollama install and models,
-// which can be many GB. That is local machine data, so it never goes in the
-// Electron profile on Windows (%APPDATA% roams) or ~/.config on Linux. The
-// folder is the server's own default (runtime/paths.ts defaultAppDataDir),
-// so the models stay where they were before each data dir got its own store.
+// threads, settings, snapshots, the Ollama ownership record and serve log.
+// The app's own Ollama install and its models (many GB) live in the server's
+// shared store (runtime/paths.ts defaultAppDataDir), which this default
+// matches on Windows and Linux. Both are local machine data, so neither goes
+// in the Electron profile on Windows (%APPDATA% roams) or ~/.config on Linux.
 import path from "node:path";
 
 export type DataDirInput = {

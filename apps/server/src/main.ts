@@ -10,8 +10,8 @@
 //                                its port as the first of the app's own ports; discover-only
 //                                (never install, start or stop one). Settings › Runtime still
 //                                applies: "app" first tries the copy this data dir's ownership
-//                                record names, at its recorded port, then that port and the
-//                                nine after it, as it does on 11435..11444 without a pin
+//                                record names, at its recorded port, then the pinned port and
+//                                the nine after it, as it does on 11435..11444 without a pin
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"

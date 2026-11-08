@@ -24,7 +24,7 @@ describe("serverDataDir", () => {
     expect(serverDataDir(mac)).toBe(path.posix.join(mac.userData, "server-data"));
   });
 
-  it("an isolated profile keeps its data inside it, so a test run never touches the real folder", () => {
+  it("an isolated profile keeps the server's per-instance data inside it", () => {
     expect(serverDataDir({ ...linux, userData: "/work/user-data", env: { GATES_LOCAL_USER_DATA: "/work/user-data" } })).toBe("/work/user-data/server-data");
   });
 
