@@ -63,6 +63,7 @@ One word per idea, on every surface:
 | ~~Cancel~~ | ~~"Cancel download" in first run only~~ **Superseded by F61 and F64** (next two rows) | |
 | Withdraw a download | "Cancel download", a quiet underlined text action, never an ×; then "Download cancelled" with the way on | first-run install and first-model download (F54), the runtime banner's install block, Settings › Models downloading row (F64), the download page's action column (F64) |
 | Withdraw a waiting message | "Cancel send", a quiet text action 12 px after "Sends when setup finishes" / "Sends when the download finishes"; the text goes back into the composer and setup carries on | the queued user turn (F61) |
+| Messages that wait, as built | **Supersedes the queued bubble and "Cancel send" above; `shell.html` still draws the old form.** One tray above the composer, one row per message with its reason ("Sends when setup finishes", "Sends after this reply", "On hold") and "Send now", "Edit", "Remove". Enter during a reply queues and never stops it; Stop beside Send stops it and holds the queue | the composer's queue tray |
 | Recover a stopped reply | "Stopped after 3 s" · "Retry" | stopped reply only (F56) |
 | ~~Download in progress~~ | ~~"Downloading · 34%" in the picker row, Settings › Models row, sidebar footer~~ **Superseded by F64** (next row) | |
 | ~~Download in progress~~ | ~~Full in Settings and first run; short "Downloading · 34%" in the picker row~~ **Superseded by SW5b-1 and F71** (next row) | |

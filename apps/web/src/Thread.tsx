@@ -1,15 +1,15 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
 // are memoised by message, so a streaming token re-renders only the live turn.
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Message, ToolStep } from "@gates-local/contracts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { reveal } from "./reveal.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { fileUrl, reloadThread, retry, unqueue } from "./session.ts";
-import { NA, type Queued, type State, setState, useStore } from "./store.ts";
+import { fileUrl, reloadThread, retry } from "./session.ts";
+import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
@@ -90,9 +90,9 @@ function ActRow({ text, meta, regen }: { text: string; meta: string; regen: bool
   );
 }
 
-function UserBubble({ text, time, queued }: { text: string; time: string; queued?: Queued }) {
+function UserBubble({ text, time }: { text: string; time: string }) {
   return (
-    <div className={`turn u${queued ? " queued" : ""}`} tabIndex={0} aria-label="Your message">
+    <div className="turn u" tabIndex={0} aria-label="Your message">
       <div className="u-row">
         <div className="u-act">
           <span className="tm">{time}</span>
@@ -113,26 +113,6 @@ function UserBubble({ text, time, queued }: { text: string; time: string; queued
         </div>
         <div className="bubble">{text}</div>
       </div>
-      {queued ? (
-        <div className="u-q">
-          <span className="u-qs" role="status">
-            <Icon id="clock" cls="s14" />
-            {queued.waitFor === "download" ? "Sends when the download finishes" : "Sends when setup finishes"}
-          </span>
-          <button
-            type="button"
-            className="qa"
-            data-unqueue
-            onClick={() => {
-              closeTip();
-              unqueue(queued.id);
-              focusComposer();
-            }}
-          >
-            Cancel send
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -267,6 +247,9 @@ function Working({ startedAt, loading, thinking }: { startedAt: number; loading:
   );
 }
 
+/** Errors whose message is already the plain sentence to show. */
+const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
+
 function LiveTurnView({ threadId }: { threadId: string }) {
   const live = useStore((s) => (s.live?.threadId === threadId ? s.live : null));
   const catalog = useStore(catalogOf);
@@ -305,7 +288,7 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {end?.kind === "error" ? (
           <div className="err-line" data-tip={esc(end.message)}>
             <Icon id="alert" cls="s14" />
-            <span>{end.code === "context-too-small" ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
+            <span>{SAYS_WHY.has(end.code) ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
             <button type="button" className="qa" onClick={retry}>
               Retry
             </button>
@@ -317,8 +300,6 @@ function LiveTurnView({ threadId }: { threadId: string }) {
   );
 }
 
-const QUEUED_NONE: readonly Queued[] = [];
-
 /** From this many messages, turns out of view skip rendering work (styles.css `.col.long`). */
 const LONG_THREAD = 50;
 
@@ -326,8 +307,7 @@ const LONG_THREAD = 50;
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
   const loadError = useStore((s) => s.loadErrors[threadId]);
-  const queuedAll = useStore((s) => (s.queued.length === 0 ? QUEUED_NONE : s.queued));
-  const queued = queuedAll.filter((q) => q.threadId === threadId);
+  const stopNotes = useStore((s) => s.stopNotes);
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
   const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.live?.text.length ?? 0) : 0));
   const row = (m: Message) => (bust === 0 ? m : { ...m });
@@ -365,11 +345,15 @@ export function Timeline({ threadId }: { threadId: string }) {
   return (
     <div className="tl" ref={tl}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
-        {messages.map((m, i) =>
-          m.role === "user" ? <UserTurn key={m.id} msg={row(m)} /> : <AsstTurn key={m.id} msg={row(m)} last={i === lastAsst && i === messages.length - 1} />,
-        )}
-        {queued.map((q) => (
-          <UserBubble key={q.id} text={q.text} time={turnTime(q.at)} queued={q} />
+        {messages.map((m, i) => (
+          <Fragment key={m.id}>
+            {m.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn msg={row(m)} last={i === lastAsst && i === messages.length - 1} />}
+            {stopNotes[m.id] !== undefined ? (
+              <div className="stop-note" role="status">
+                {stopNotes[m.id]}
+              </div>
+            ) : null}
+          </Fragment>
         ))}
         {loadError !== undefined ? (
           <div className="err-line" role="status" data-load-error>
