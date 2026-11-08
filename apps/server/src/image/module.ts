@@ -90,21 +90,40 @@ const isLocalAddress = (address: string, own: readonly string[]) => {
  * loopback, the wildcard address ComfyUI prints when started with --listen,
  * or one of this machine's interface addresses. A name is local when any
  * address it resolves to is local; `localhost` and `*.localhost` always are.
- * One trailing dot is ignored. When the name cannot be resolved the answer
- * is true: an unknown host gets the fit, never a skipped one.
+ * One trailing dot is ignored for those checks, but DNS gets the name as
+ * the HTTP request will send it: with search suffixes, `comfy.lan.` and
+ * `comfy.lan` can resolve to different hosts. When the name cannot be
+ * resolved the answer is true: an unknown host gets the fit, never a
+ * skipped one. An aborted signal ends a pending lookup with its reason.
  */
 export async function isLocalHost(hostname: string, own: readonly string[] = localAddresses(),
-  lookup: (name: string) => Promise<readonly string[]> = lookupHost): Promise<boolean> {
-  const h = hostname.toLowerCase().replace(/\.$/, "");
+  lookup: (name: string) => Promise<readonly string[]> = lookupHost, signal?: AbortSignal): Promise<boolean> {
+  const name = hostname.toLowerCase();
+  const h = name.replace(/\.$/, "");
   if (h === "localhost" || h.endsWith(".localhost")) return true;
   const literal = h.replace(/^\[(.*)\]$/, "$1");
   if (net.isIP(literal)) return isLocalAddress(literal, own);
+  signal?.throwIfAborted();
   try {
-    const addresses = await lookup(h);
+    const addresses = await untilAborted(lookup(name), signal);
     return addresses.length === 0 || addresses.some((address) => isLocalAddress(address, own));
   } catch {
+    if (signal?.aborted) throw signal.reason;
     return true;
   }
+}
+
+/** The promise's result, or the signal's reason as soon as it aborts; the listener goes either way. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
 }
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -178,7 +197,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: gpu.tenants.map((t) => `${t.label} (${t.usedBytes === undefined ? "unknown" : gib(t.usedBytes)})`).join(", ") || "unlisted GPU occupants" };
   });
   const fit = async (cfg: ReturnType<typeof config>, signal: AbortSignal) => {
-    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost)) return;
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return;
     signal.throwIfAborted();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
