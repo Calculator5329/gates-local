@@ -3,7 +3,7 @@
 // module touches window at load, so each test stubs the browser globals and
 // imports a fresh copy.
 import type { ModelInfo } from "@gates-local/contracts";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ client: undefined as unknown }));
 vi.mock("@gates-local/contracts", async (orig) => ({ ...(await orig<typeof import("@gates-local/contracts")>()), createClient: () => fake.client }));
@@ -69,7 +69,8 @@ async function boot(answers: Record<string, () => Promise<unknown>> = {}) {
   session.connect();
   await vi.waitFor(() => expect(subs.has("models.changed")).toBe(true));
   const push = (channel: string, payload: unknown) => subs.get(channel)?.(payload);
-  const hydrated = () => vi.waitFor(() => expect(store.getState().runtime).toBeDefined());
+  // threads.list is answered in hydration's first batch, so its threads mark that batch as applied.
+  const hydrated = () => vi.waitFor(() => expect(store.getState().threads).toHaveLength(1));
   return { session, store, push, calls, hydrated };
 }
 
@@ -87,14 +88,16 @@ it("a models.list answered after a newer models.changed push is dropped (MP2-02)
   expect(store.getState().model).toBe(GEMMA);
 });
 
-it("a models.list asked before a runtime change is dropped, and the list is asked for again (MP2-02)", async () => {
+it("hydration answers older than a runtime change keep neither the old list nor the old runtime status (MP2-02, MP4-03)", async () => {
   const list = defer<ModelInfo[]>();
   const { store, push, calls, hydrated } = await boot({ "models.list": () => list.promise, "models.refresh": async () => [info(GEMMA, true)] });
-  push("runtime.changed", { state: "ready", owner: "external", version: "0.12.0" });
+  // hydration's runtime.status answered for runtime A (0.12.0); the push is newer: runtime B
+  push("runtime.changed", { state: "ready", owner: "external", baseUrl: "http://runtime-b", version: "0.40.4" });
   list.resolve([info(QWEN, true)]);
   await hydrated();
   await vi.waitFor(() => expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]));
   expect(calls).toContain("models.refresh");
+  expect(store.getState().runtime).toMatchObject({ state: "ready", baseUrl: "http://runtime-b", version: "0.40.4" });
 });
 
 it("a thread keeps its model when the pick changes; only a new empty chat follows the pick (MP-02)", async () => {
@@ -112,4 +115,55 @@ it("a thread keeps its model when the pick changes; only a new empty chat follow
   expect(model()).toBe(GEMMA); // a recommendation never moves a thread
   session.newThread();
   expect(model()).toBe(QWEN); // the new, empty chat follows it
+});
+
+const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });
+const qwenPicked = [info(QWEN, true), info(GEMMA), info(LLAMA)];
+
+describe("a thread restored from storage takes the model of its latest saved reply (MP4-04)", () => {
+  it("opens on that model and records it as the thread's", async () => {
+    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": async () => savedReply(GEMMA) });
+    await hydrated();
+    expect(store.getState().model).toBe(QWEN);
+    session.openThread("S");
+    await vi.waitFor(() => expect(store.getState().model).toBe(GEMMA));
+    expect(store.getState().threadModels["S"]).toBe(GEMMA);
+  });
+
+  it("an unsent pick made in the thread before its history loads wins", async () => {
+    const history = defer<unknown>();
+    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": () => history.promise });
+    await hydrated();
+    session.openThread("S");
+    session.pickModel(QWEN);
+    history.resolve(savedReply(GEMMA));
+    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+    expect(store.getState().model).toBe(QWEN);
+    expect(store.getState().threadModels["S"]).toBe(QWEN);
+  });
+
+  it("a saved model no longer installed is not taken or recorded", async () => {
+    const { session, store, hydrated } = await boot({ "models.list": async () => qwenPicked, "threads.get": async () => savedReply("gone:1b") });
+    await hydrated();
+    session.openThread("S");
+    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+    expect(store.getState().model).toBe(QWEN);
+    expect(store.getState().threadModels["S"]).not.toBe("gone:1b");
+  });
+});
+
+it("a deleted thread, or one a refresh no longer lists, leaves no threadModels entry (MP4-05)", async () => {
+  const answers: Record<string, () => Promise<unknown>> = {};
+  const { session, store, push, hydrated } = await boot(answers);
+  await hydrated();
+  session.openThread("A");
+  session.pickModel(GEMMA);
+  session.openThread("B");
+  session.pickModel(QWEN);
+  expect(Object.keys(store.getState().threadModels).toSorted()).toEqual(["A", "B"]);
+  await session.deleteThread("A");
+  expect(Object.keys(store.getState().threadModels)).toEqual(["B"]);
+  answers["threads.list"] = async () => [];
+  push("threads.changed", {});
+  await vi.waitFor(() => expect(store.getState().threadModels).toEqual({}));
 });

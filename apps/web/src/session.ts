@@ -142,6 +142,7 @@ async function hydrate(c: Client): Promise<void> {
   on("runtime.changed", (runtime) => {
     // A list asked before the change describes the runtime before it (MP2-02); ask again.
     modelsOrder.next();
+    runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
     setState({ runtime });
     if (runtime.state === "ready") {
       invalidateFits();
@@ -179,16 +180,18 @@ async function hydrate(c: Client): Promise<void> {
   // catalog can take a few hundred ms and follow. The list takes a ticket like
   // any other answer, so one that lands after a newer push is dropped (MP2-02).
   const ticket = modelsOrder.next();
-  const [runtime, listed, threads, settings] = await Promise.all([
+  const statusTicket = runtimeOrder.next();
+  const [status, listed, threads, settings] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
     probe("settings.get", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
+  const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
-    const next: State = { ...s, runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
@@ -216,11 +219,13 @@ async function refreshThreads(): Promise<void> {
   if (threads === undefined) return;
   setState((s) => {
     const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
-    return { threads: sortThreads(threads), ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
+    const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
+    return { threads: sortThreads(threads), threadModels, ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
   });
 }
 
 const modelsOrder = newestOnly();
+const runtimeOrder = newestOnly();
 
 export async function refreshModels(): Promise<void> {
   const ticket = modelsOrder.next();
@@ -307,18 +312,31 @@ async function loadThread(threadId: string, force = false): Promise<void> {
   if (!force && getState().messages[threadId] !== undefined) return;
   try {
     const { messages } = await call("threads.get", { threadId });
-    setState((s) => ({ messages: { ...s.messages, [threadId]: messages } }));
+    setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...savedModel(s, threadId, messages) }));
   } catch (e) {
     if (codeOf(e) !== "closed") setState({ view: "new", threadId: null });
   }
 }
 
+/**
+ * A thread restored from storage takes the model of its latest saved reply (MP4-04), unless a
+ * pick made in it this session is already recorded. A saved model no longer installed is not
+ * taken: an open thread then keeps the composer's model, as before.
+ */
+function savedModel(s: State, threadId: string, messages: State["messages"][string]): Partial<State> {
+  if (s.threadModels[threadId] !== undefined) return {};
+  const saved = messages.findLast((m) => m.role === "assistant" && m.model !== undefined)?.model;
+  const open = s.threadId === threadId;
+  const model = saved !== undefined && s.models?.some((m) => m.name === saved) === true ? saved : open ? s.model : undefined;
+  if (model === undefined) return {};
+  return { threadModels: { ...s.threadModels, [threadId]: model }, ...(open ? { model } : {}) };
+}
+
 export function openThread(threadId: string): void {
   setState((s) => {
-    // Back on the model last used in this thread; a thread new to this session keeps the composer's.
+    // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
     const model = s.threadModels[threadId] ?? s.model;
-    const own = model === undefined ? {} : { model, threadModels: { ...s.threadModels, [threadId]: model } };
-    return { view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false, ...own };
+    return { view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false, ...(model === undefined ? {} : { model }) };
   });
   chooseModel();
   setHash(threadId);
@@ -350,7 +368,8 @@ export async function deleteThread(threadId: string): Promise<void> {
   await call("threads.delete", { threadId }).catch(() => undefined);
   setState((s) => {
     const { [threadId]: _gone, ...messages } = s.messages;
-    return { messages, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
+    const { [threadId]: _model, ...threadModels } = s.threadModels;
+    return { messages, threadModels, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
   });
   if (getState().threadId === threadId) newThread();
 }
@@ -401,7 +420,9 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
     try {
       const t = await call("threads.create", { title: titleFrom(content) });
       threadId = t.id;
-      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] } }));
+      // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
+      const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
+      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
       openThread(t.id);
     } catch {
       setState({ draft: content, notice: "The message didn't send. Gates Local isn't answering; try again in a moment." });
