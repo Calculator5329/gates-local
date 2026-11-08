@@ -140,6 +140,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
   "runtime.status": { params: {}, result: runtime },
+  "runtime.retry": { params: {}, result: runtime },
   "fit.check": {
     params: { model: "qwen3:14b", numCtx: 32768 },
     result: {

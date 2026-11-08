@@ -68,7 +68,7 @@ type WireEvent = Payload<"chat.event">["event"];
 
 export interface AppDeps {
   readonly store: ThreadStore;
-  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange">;
+  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure">;
   readonly catalog: ModelCatalog;
   /** Bound late: main creates the ws server after the handlers. */
   readonly push: Push;
@@ -275,6 +275,7 @@ export function createApp(deps: AppDeps): App {
     "models.refresh": async () => (await catalog.refresh()).models,
 
     "runtime.status": () => runtime.status(),
+    "runtime.retry": () => runtime.ensure(),
 
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();

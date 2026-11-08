@@ -268,7 +268,8 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {end?.kind === "stopped" ? (
           <div className="stopped">
             <span>Stopped after {end.secs} s</span>
-            <button type="button" className="qa" data-regen onClick={retry}>
+            {/* off until the server has ended the stopped turn (W-02) */}
+            <button type="button" className="qa" data-regen disabled={live.ending === true} onClick={retry}>
               Retry
             </button>
           </div>

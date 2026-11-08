@@ -150,7 +150,10 @@ async function main(): Promise<void> {
     sources,
     // A turn that does not say runs tools when Settings has them on.
     toolsEnabled: () => services.settings.get().tools,
-    runtime,
+    // discover-only never starts Ollama: runtime Retry looks again without starting one
+    runtime: discoverOnly
+      ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover() }
+      : runtime,
     catalog,
     fit,
     push: (channel, payload) => server?.push(channel, payload),

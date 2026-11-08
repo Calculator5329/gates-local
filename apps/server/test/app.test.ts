@@ -495,6 +495,30 @@ describe("chat.cancel and threads.delete during a turn", () => {
   });
 });
 
+describe("runtime.retry (W-06)", () => {
+  it("looks for Ollama again instead of answering the cached status", async () => {
+    const store = openThreadStore(path.join(cacheTmp(), "threads.sqlite"));
+    cleanups.push(() => store.close());
+    let ensured = 0;
+    const app = createApp({
+      store,
+      // a stub: the real runtime's ensure() may start Ollama, which these tests never do
+      runtime: {
+        status: () => ({ state: "wrong-service", owner: "none", baseUrl: "http://127.0.0.1:1", detail: "nginx" }),
+        baseUrl: () => undefined,
+        onChange: () => () => undefined,
+        ensure: async () => (ensured++, { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:1" }),
+      },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined },
+      push: () => undefined,
+    });
+    cleanups.push(() => app.shutdown());
+    expect((await app.handlers["runtime.status"]({}, { clientId: 1 })).state).toBe("wrong-service");
+    expect(await app.handlers["runtime.retry"]?.({}, { clientId: 1 })).toMatchObject({ state: "ready" });
+    expect(ensured).toBe(1);
+  });
+});
+
 describe("turn failures", () => {
   it("an Ollama error mid-stream is forwarded and nothing partial persists", async () => {
     const r = await rig();
