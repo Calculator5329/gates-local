@@ -1,8 +1,8 @@
 # Decisions
 
-The rulings before 2026-11-07 live in
-`~/projects/planning/incubator/local-ai-app/decisions.md` (D1 to D8 and the
-media-vault ruling). New decisions are appended here.
+The rulings before 2026-11-07 (D1 to D8 and the media-vault ruling) live in
+the incubator decisions file in the maintainer's private planning
+workspace, which is not published. New decisions are appended here.
 
 ## 2026-11-07 · Promotion
 

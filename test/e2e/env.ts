@@ -36,8 +36,8 @@ export function checkoutKey(root: string): string {
 export const DATA_ROOT = process.env["GL_E2E_DATA_ROOT"] ?? path.join(CHECKOUT_CACHE, "e2e-data");
 /** Traces and failure screenshots. */
 export const RESULTS_DIR = process.env["GL_E2E_RESULTS"] ?? path.join(CHECKOUT_CACHE, "e2e-results");
-/** Where `pnpm e2e:shots` writes its PNGs. */
-export const SHOTS_DIR = process.env["GL_E2E_SHOTS_DIR"] ?? path.join(homedir(), ".cache/gates-local-design/rounds/app-1/shots");
+/** Where `pnpm e2e:shots` writes its PNGs (set GL_E2E_SHOTS_DIR to choose). */
+export const SHOTS_DIR = process.env["GL_E2E_SHOTS_DIR"] ?? path.join(CHECKOUT_CACHE, "shots");
 
 process.env["GL_E2E_TOKEN"] ??= randomUUID();
 export const TOKEN = process.env["GL_E2E_TOKEN"];
