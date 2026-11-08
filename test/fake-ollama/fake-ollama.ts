@@ -34,6 +34,8 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
+  /** Delay before /api/show answers: holds the server's fit survey (and so its chat pick). */
+  showDelayMs: number;
 }
 
 const DEFAULTS: FakeOptions = {
@@ -43,6 +45,7 @@ const DEFAULTS: FakeOptions = {
   pullTickMs: 100,
   replyWords: 60,
   errorAfterTokens: 8,
+  showDelayMs: 0,
 };
 
 export const FAKE_VERSION = "0.40.4";
@@ -307,6 +310,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
             })),
           });
         case "POST /api/show": {
+          if (options.showDelayMs > 0) await new Promise((r) => setTimeout(r, options.showDelayMs));
           const m = isInstalled(str(body, "model") ?? str(body, "name") ?? "");
           return m ? json(res, 200, showBody(m)) : json(res, 404, { error: "model not found" });
         }
