@@ -7,7 +7,8 @@
 // Knobs (environment):
 //   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins (the desktop app sets it)
 //   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
-//                                never install or start one, and never probe another port
+//                                discover-only (never install, start or stop one), and never
+//                                probe another port
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
 //                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
@@ -67,8 +68,20 @@ async function main(): Promise<void> {
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
-  const discoverOnly = mode === "discover-only";
+  // A pinned Ollama URL is the only Ollama: its port doubles as the app port,
+  // so a wrong service there never sends the probe to the real 11435. It is
+  // also discover-only: the app never installs, starts or stops an Ollama
+  // when the URL names the one to use.
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
+  let pinned: URL | undefined;
+  if (ollamaUrl) {
+    try {
+      pinned = new URL(ollamaUrl);
+    } catch {
+      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
+    }
+  }
+  const discoverOnly = mode === "discover-only" || pinned !== undefined;
   const extraOrigins = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "")
     .split(",")
     .map((o) => o.trim())
@@ -82,16 +95,6 @@ async function main(): Promise<void> {
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 
-  // A pinned Ollama URL is the only Ollama: its port doubles as the app port,
-  // so a wrong service there never sends the probe to the real 11435.
-  let pinned: URL | undefined;
-  if (ollamaUrl) {
-    try {
-      pinned = new URL(ollamaUrl);
-    } catch {
-      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
-    }
-  }
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
   const fit = {
@@ -116,7 +119,7 @@ async function main(): Promise<void> {
       push: (channel, payload) => server?.push(channel, payload),
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
-        ...(discoverOnly || pinned ? { allowInstall: false } : {}),
+        ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),
       },
       // Tests point the GPU and memory reads at fakes; the GPU status and every fit use them.
       fit,

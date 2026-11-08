@@ -150,6 +150,18 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.detail).toContain("from PATH");
   });
 
+  it("with starts off (a pinned URL), an ollama on PATH is reported, never run", async () => {
+    const binDir = path.join(work, "bin");
+    const ran = path.join(work, "ran");
+    writeFakeBinary(path.join(binDir, "ollama"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(ran)}, "ran");\n`);
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir }, allowStart: false });
+    const s = await rt.ensure();
+    expect(s.state).toBe("stopped");
+    expect(s.owner).toBe("none");
+    expect(existsSync(ran)).toBe(false);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+  });
+
   it("a binary that dies on start is an error with the log tail, no record left", async () => {
     writeFakeBinary(installedBinary(appDataDir, VERSION), `#!${process.execPath}\nconsole.error("boom: cannot bind");\nprocess.exit(3);\n`);
     const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt() });
