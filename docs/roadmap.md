@@ -134,6 +134,17 @@ never shows a whisper stop, start or restart.
       *Accept:* the cap test passes, the scope's unit result is not oom-kill,
       and a shell `python3 …; echo ok` that goes over the cap still reports the
       cap to the model.
+- [x] Source updates for a git clone: `pnpm run app-update` (`--check`,
+      `--channel main|release`) and Settings › General › Updates (version,
+      a check that runs only on a click, "Update and restart" in the
+      desktop app, the result on the next start).
+      *Accept:* a failed install or build leaves the clone on the commit it
+      had, installed and built again; tracked changes and local commits
+      refuse with nothing changed; releases follow semver and never go
+      backwards; the tests run on temporary repositories only, behind a
+      guard that refuses any other folder.
+      *Done 2026-11-07:* lane/update; checked on Linux, Windows by reading
+      only (changelog).
 
 ## Next: slices 2 to 4
 
@@ -248,6 +259,9 @@ never shows a whisper stop, start or restart.
       selected models ready, whisper unchanged through success and failure.
       *Accept:* `pnpm release:smoke` on this machine plus a try-it packet for
       Ethan. Packaging does not authorize a release or publication.
+- [ ] Packaged releases (AppImage, Windows installer, auto-update) once
+      Ethan picks that path. `pnpm run app-update` covers git clones only;
+      a packaged copy says it cannot update itself.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
       Prepared on lane/readme: README, `docs/setup/linux.md` and the

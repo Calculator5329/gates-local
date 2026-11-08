@@ -2,7 +2,7 @@
 // else. Bundled to out/preload.cjs; may import only bridge.ts and electron.
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { BRIDGE_KEY, IPC, type BridgeState, type GatesLocalBridge, type RestartResult } from "./bridge.ts";
+import { BRIDGE_KEY, IPC, type BridgeState, type GatesLocalBridge, type RestartResult, type UpdateAndRestartResult } from "./bridge.ts";
 
 const bridge: GatesLocalBridge = {
   getState: async () => (await ipcRenderer.invoke(IPC.getState)) as BridgeState,
@@ -21,6 +21,7 @@ const bridge: GatesLocalBridge = {
   reloadClient: async () => {
     await ipcRenderer.invoke(IPC.reloadClient);
   },
+  updateAndRestart: async () => (await ipcRenderer.invoke(IPC.updateAndRestart)) as UpdateAndRestartResult,
 };
 
 contextBridge.exposeInMainWorld(BRIDGE_KEY, bridge);

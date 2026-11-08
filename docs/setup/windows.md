@@ -5,10 +5,16 @@ account only; no step needs administrator rights.
 
 **What was tested:** one Windows 11 Pro machine (Intel Core i5-8500, 16 GB
 RAM, Intel UHD 630 graphics, no NVIDIA GPU), with Node.js 24.18, pnpm
-11.10.0 and Ollama 0.40.15. Models ran on the CPU there. **Not tested yet:**
-an NVIDIA GPU on Windows, the shell tool (it needs bubblewrap, which is
-Linux only, so it is off on Windows), and starting ComfyUI automatically
-(Linux only; a ComfyUI you start yourself still works, see section 4).
+11.10.0 and Ollama 0.40.15. Models ran on the CPU there. The test ran over
+a remote session with no visible desktop: the app's window was driven and
+photographed through its developer tools port, and Ollama's tray app could
+not start there ("Unable to init instance"), so the installed `ollama.exe`
+ran as `ollama serve` in its place. The Library read a connected folder; a
+question about a connected SQLite file reached the right answer only after
+many failed tool calls. **Not tested yet:** an NVIDIA GPU on Windows, the
+Ollama tray app, the shell tool (it needs bubblewrap, which is Linux only,
+so it is off on Windows), and starting ComfyUI automatically (Linux only; a
+ComfyUI you start yourself still works, see section 4).
 
 ## 1. Install Node.js 24 and pnpm 11
 
@@ -28,8 +34,9 @@ pnpm --version   # 11.10.0
 ```
 
 This puts pnpm in `%APPDATA%\npm`, which the Node.js installer already added
-to your `PATH`. Do not run `corepack enable` on Windows: it writes into
-`C:\Program Files\nodejs` and needs administrator rights.
+to your `PATH`. The Linux guide's `corepack enable` is not used here: it
+writes its launchers into the Node.js folder (`C:\Program Files\nodejs`),
+which needs administrator rights.
 
 If PowerShell says "running scripts is disabled on this system" when you run
 `npm` or `pnpm`, see
@@ -75,27 +82,6 @@ not start it.
 If you later quit Ollama from its tray icon, the app says "Ollama isn't
 running". Start Ollama from the Start menu and press Retry.
 
-### The app's own copy of Ollama
-
-You can switch to the app's own private copy of Ollama in Settings ›
-Runtime › "Switch to Gates Local's copy". It runs on the first free port
-from 11435 to 11444, keeps its models in `%LOCALAPPDATA%\GatesLocal\models`
-apart from the system Ollama's (so a model you want there downloads
-again), and stops when you close the app.
-
-When the app finds no Ollama program of its own, it downloads the pinned
-Ollama 0.40.15 for Windows (`ollama-windows-amd64.zip`, 1.6 GB) from
-GitHub, checks its SHA-256, and unpacks it with Windows' own `tar.exe` into
-`%LOCALAPPDATA%\GatesLocal\runtime\ollama\0.40.15` (2.2 GB on disk). On the
-test machine that took 3 min 41 s from the click to a running copy. Then it
-downloaded Qwen 3.5 4B into the copy's models folder and answered a chat.
-To test this the app was started with its search for an installed Ollama
-turned off; with Ollama installed, the code runs the installed
-`ollama.exe` as its copy instead of downloading one (not tested).
-
-Switching back (Settings › Runtime › "Switch to the system Ollama") stops
-the copy. The downloaded copy stays in the data folder until you remove it.
-
 ### Your first model
 
 With no models installed, the first-run screen recommends one and labels it
@@ -121,6 +107,26 @@ context, from the app window:
 
 On a computer like this, turn **Thinking** off in the message box for
 everyday questions.
+
+### The app's own copy of Ollama
+
+You can switch to the app's own private copy of Ollama in Settings ›
+Runtime › "Switch to Gates Local's copy". It runs on the first free port
+from 11435 to 11444, keeps its models in `%LOCALAPPDATA%\GatesLocal\models`
+apart from the system Ollama's (so a model you want there downloads
+again), and stops when you close the app.
+
+When the app finds no Ollama program of its own, it downloads the pinned
+Ollama 0.40.15 for Windows (`ollama-windows-amd64.zip`, 1.6 GB) from
+GitHub, checks its SHA-256, and unpacks it with Windows' own `tar.exe` into
+`%LOCALAPPDATA%\GatesLocal\runtime\ollama\0.40.15` (2.2 GB on disk). On the
+test machine that took 3 min 41 s from the click to a running copy. Then it
+downloaded Qwen 3.5 4B into the copy's models folder and answered a chat.
+The copy is always this pinned build: the app never runs an `ollama.exe` it
+finds on PATH as its copy. The app's own copy is not available on Windows ARM.
+
+Switching back (Settings › Runtime › "Switch to the system Ollama") stops
+the copy. The downloaded copy stays in the data folder until you remove it.
 
 ## 4. Optional: image generation with ComfyUI
 
@@ -153,7 +159,7 @@ Inside the data folder, `threads.sqlite` holds your threads,
 `images\` the generated images.
 
 To move only the data folder, set `GATES_LOCAL_DATA_DIR` to an absolute path
-before `pnpm start`:
+before `pnpm start` (not tested on Windows):
 
 ```powershell
 $env:GATES_LOCAL_DATA_DIR = "D:\GatesLocal"
@@ -162,13 +168,22 @@ pnpm start
 
 ## 6. Updating
 
-Close the app, then, from the clone:
+In the app, open Settings › General › Updates, click "Check for updates" and
+then "Update and restart". The window closes, the new version installs and
+the app opens again.
+
+A copy from before that button existed has to update once by hand, and this
+path always works. Close the app, then, from the clone:
 
 ```powershell
 git pull
 pnpm install
 pnpm start
 ```
+
+`pnpm run app-update` does the same update from a terminal, goes back to the
+version you had if a step fails, and says what is new first; add `--check` to
+only see what is new.
 
 Your threads and settings stay where they are. If a newer build changed the
 thread database, an older build refuses to open it rather than change it.

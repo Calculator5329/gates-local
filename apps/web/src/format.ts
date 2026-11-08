@@ -1,6 +1,6 @@
 // Words and numbers the design fixes (shell.md F16, F34, F35, F62): one
 // decimal for GB, three verdict labels, the friendly model name first.
-import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress } from "@gates-local/contracts";
+import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress, Source } from "@gates-local/contracts";
 
 export const CONTEXT_SIZES: readonly ContextSize[] = [16384, 32768, 65536];
 
@@ -9,6 +9,24 @@ const GIB = 1024 ** 3;
 /** "6.6 GB": one decimal everywhere. The design's sizes are GiB (16303 MiB reads 15.9 GB). */
 export function gb(bytes: number): string {
   return `${(bytes / GIB).toFixed(1)} GB`;
+}
+
+/** A Library file's size: "223 bytes", "39 KB", "5 MB", "3.0 GB". */
+export function fileSize(bytes: number): string {
+  if (bytes >= GIB) return gb(bytes);
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+}
+
+/** A Library row's detail: "Refreshing…", the error, or "223 bytes · read Nov 7". */
+export function sourceDetail(src: Source): string {
+  if (src.state === "refreshing") return "Refreshing…";
+  if (src.state === "error") return src.detail ?? "Couldn't read it.";
+  const parts: string[] = [];
+  if (src.sizeBytes !== undefined) parts.push(fileSize(src.sizeBytes));
+  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
+  return parts.join(" · ") || "Read-only";
 }
 
 /** 16384 → "16k". */

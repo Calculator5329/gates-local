@@ -3,13 +3,17 @@
 // renderer's reconnect duties.
 
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
-import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
+import { IPC, describeCrash, toBridgeState, type BridgeState, type UpdateAndRestartResult } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
 import { serverDataDir } from "./data-dir.ts";
 import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
+import { clearRunning, writeRunning } from "./running.ts";
+import { cannotUpdate, updaterLaunch, type UpdaterLaunch } from "./update-launch.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 import { iconFile, windowOptions } from "./window.ts";
@@ -18,6 +22,8 @@ const DEV_WEB_URL = "http://127.0.0.1:5187/";
 
 // out/main.cjs -> apps/desktop
 const desktopDir = path.resolve(__dirname, "..");
+// The clone, for "Update and restart" (apps/desktop -> the repo root).
+const repoRoot = path.resolve(desktopDir, "..", "..");
 
 app.setName("gates-local");
 app.setPath("userData", process.env["GATES_LOCAL_USER_DATA"] ?? path.join(app.getPath("appData"), "gates-local"));
@@ -62,8 +68,29 @@ if (!app.requestSingleInstanceLock({ background: mode.background })) {
   run();
 }
 
+/** Starts the updater on its own, outside this app's process group, so it outlives the quit. */
+function startDetached(plan: UpdaterLaunch): Promise<UpdateAndRestartResult> {
+  return new Promise((resolve) => {
+    const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env: process.env, detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", (e) =>
+      resolve({ ok: false, message: `The updater could not be started (${e.message}). Install Node 24 on your PATH, or run pnpm run app-update in the Gates Local folder.` }),
+    );
+    child.once("spawn", () => {
+      child.unref();
+      resolve({ ok: true });
+    });
+  });
+}
+
 function run(): void {
   const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData") });
+  // pnpm run app-update reads this to refuse while the app is open.
+  try {
+    writeRunning(dataDir, process.pid, Date.now());
+  } catch (e) {
+    console.error(`[desktop] could not write the pid file: ${(e as Error).message}`);
+  }
+  process.on("exit", () => clearRunning(dataDir, process.pid));
   // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
   const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot() });
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
@@ -128,6 +155,21 @@ function run(): void {
   ipcMain.handle(IPC.reloadClient, (event) => {
     if (!fromOurWindow(event)) throw new Error("refused");
     if (supervisor.state.status === "ready") showClient();
+  });
+  let updating = false;
+  ipcMain.handle(IPC.updateAndRestart, async (event): Promise<UpdateAndRestartResult> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    if (updating) return { ok: true };
+    const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });
+    if (refused !== null) return { ok: false, message: refused };
+    const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync });
+    const started = await startDetached(plan);
+    if (!started.ok) return started;
+    updating = true;
+    console.error(`[desktop] updater started; quitting so it can update ${repoRoot}`);
+    // Let the reply reach the renderer before the window goes.
+    setTimeout(() => app.quit(), 200);
+    return started;
   });
 
   supervisor.subscribe(route);

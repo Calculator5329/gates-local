@@ -11,6 +11,7 @@ export const IPC = {
   getState: "gates-local:get-state",
   restart: "gates-local:restart",
   reloadClient: "gates-local:reload-client",
+  updateAndRestart: "gates-local:update-and-restart",
   state: "gates-local:state",
 } as const;
 
@@ -45,6 +46,9 @@ export type RestartResult =
   | { readonly ok: false; readonly reason: "not-crashed" }
   | { readonly ok: false; readonly reason: "rate-limited"; readonly retryAfterMs: number };
 
+/** Main has started the updater and is quitting, or says in plain words why it did not. */
+export type UpdateAndRestartResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
+
 /** `window.gatesLocal` in the renderer. */
 export interface GatesLocalBridge {
   /** Current state; resolves immediately. */
@@ -57,6 +61,11 @@ export interface GatesLocalBridge {
   restart(): Promise<RestartResult>;
   /** Ask main to load the web client again (after a failed load). */
   reloadClient(): Promise<void>;
+  /**
+   * Start `pnpm run app-update` in the background and quit; it waits for this
+   * app to close, updates the clone and opens the app again.
+   */
+  updateAndRestart(): Promise<UpdateAndRestartResult>;
 }
 
 /** The one place the server URL shape is defined. */

@@ -197,6 +197,8 @@ export const Settings = S.Struct({
   imageGen: S.Boolean,
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
+  /** Updates take every change on the main branch, not only releases. Unset means off. */
+  updateEveryChange: S.optional(S.Boolean),
 });
 export type Settings = typeof Settings.Type;
 
@@ -209,6 +211,7 @@ export const SettingsPatch = S.Struct({
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
   comfyUrl: S.optional(S.NullOr(S.String)),
+  updateEveryChange: S.optional(S.Boolean),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
 
@@ -370,3 +373,65 @@ export const SetupPlan = S.Struct({
   totalBytes: Count,
 });
 export type SetupPlan = typeof SetupPlan.Type;
+
+// ---------------------------------------------------------------- updates (2026-11-07)
+
+/** The version this copy runs, read from the clone's .git folder (no git process, no network). */
+export const UpdateVersion = S.Union([
+  // date: the commit's date, when the .git folder could be read for it.
+  S.Struct({ kind: S.Literal("release"), tag: S.String, commit: S.String, date: S.optional(Millis) }),
+  S.Struct({ kind: S.Literal("commit"), commit: S.String, date: S.optional(Millis) }),
+  S.Struct({ kind: S.Literal("not-a-clone") }),
+  S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
+]);
+export type UpdateVersion = typeof UpdateVersion.Type;
+
+/** main: every change on the branch. release: the newest v1.2.3 tag. */
+export const UpdateChannel = S.Literals(["main", "release"]);
+export type UpdateChannel = typeof UpdateChannel.Type;
+
+/** Why a check could not say whether there is an update. */
+export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "error"]);
+export type UpdateBlocked = typeof UpdateBlocked.Type;
+
+/** One click of "Check for updates": fetches from the clone's remote, changes nothing. */
+export const UpdateCheck = S.Union([
+  S.Struct({ state: S.Literal("up-to-date"), checkedAt: Millis, channel: UpdateChannel, current: S.String }),
+  S.Struct({
+    state: S.Literal("available"),
+    checkedAt: Millis,
+    channel: UpdateChannel,
+    current: S.String,
+    target: S.String,
+    /** Every commit between current and target. */
+    total: Count,
+    /** Commit subjects, newest first, at most 20. */
+    changes: S.Array(S.String),
+    /** A release's tag message, shown instead of the subjects when there is one. */
+    notes: S.optional(S.String),
+  }),
+  /** lines: what happened, then what to do, in plain words. */
+  S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String) }),
+]);
+export type UpdateCheck = typeof UpdateCheck.Type;
+
+/** The last update run, shown once on the next start. */
+export const UpdateResult = S.Struct({
+  at: Millis,
+  outcome: S.Literals(["updated", "stopped", "rollback-failed", "refused"]),
+  /** "Updated to v0.2.0, 12 changes." or the stopped-at line. */
+  line: S.String,
+  logPath: S.optional(S.String),
+  /** rollback-failed: the commands that finish going back, run in the clone. */
+  commands: S.optional(S.Array(S.String)),
+});
+export type UpdateResult = typeof UpdateResult.Type;
+
+export const UpdateStatus = S.Struct({
+  version: UpdateVersion,
+  /** Present until update.dismissResult. */
+  result: S.NullOr(UpdateResult),
+  /** The last check since the server started; null until someone clicks Check. */
+  lastCheck: S.NullOr(UpdateCheck),
+});
+export type UpdateStatus = typeof UpdateStatus.Type;

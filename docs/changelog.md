@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-11-07: source updates
+
+- `pnpm run app-update` (`scripts/update.ts`, `apps/server/src/update/`):
+  checks for git, a clone with an upstream, the app closed (the desktop
+  pid file) and no tracked changes, then fetches, picks the target and
+  lists up to 20 changes or the release's notes. Local commits refuse. It
+  fast-forwards, runs `pnpm install --frozen-lockfile` and builds web and
+  desktop; a failed step goes back with `git reset --keep`, installs and
+  builds the old commit again and says where it stopped. The result file
+  in the data folder is shown once on the next start.
+- Channels: the newest `v*` tag by semver once the remote has one, never
+  backwards; the upstream branch until then, or always with `--channel
+  main` or the new Settings switch "Get every change, not only releases".
+- Settings › General › Updates: the version (read from the `.git` folder,
+  no git process), "Check for updates" (only on a click), and in the
+  desktop app "Update and restart", which starts the updater detached with
+  its pid and quits; the updater waits for the pid, updates and opens the
+  app the way it was started. New methods `update.status`, `update.check`
+  and `update.dismissResult`; phones and browsers get the version and the
+  check.
+- Safety: every command the updater runs passes a guard that, under a test
+  root (`GATES_LOCAL_UPDATE_TEST_ROOT`, and always under vitest), refuses
+  any folder outside it. The tests build a bare origin, a seed and a clone
+  in a temporary folder with an empty git config; e2e sets the root to its
+  run folder.
+- Windows was checked by reading only: `pnpm.cmd` runs through the shell,
+  the wait uses `process.kill(pid, 0)`, a 2 s pause covers Electron helper
+  processes, and the detached updater is a plain `node` process.
+
 ## 2026-11-07: slice 1 foundation and design round 2
 
 - Thread store (5b475b9): node:sqlite WAL, migrations through
