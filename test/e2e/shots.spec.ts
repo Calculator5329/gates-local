@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
-import { SHOTS_DIR } from "./env.ts";
+import { CHECKOUT_CACHE, SHOTS_DIR } from "./env.ts";
 import { type RuntimeMode, type Scenario, expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
@@ -56,7 +56,8 @@ const SHOTS: readonly Shot[] = [
   { name: "S-17-settings-general", act: settings("General") },
   { name: "S-18-settings-models", light: "S-90-light-settings-models", act: settings("Models") },
   { name: "S-19-settings-runtime", light: "S-60-light-settings-runtime", act: settings("Runtime") },
-  { name: "S-20-settings-memory", act: settings("Memory") },
+  { name: "S-20-settings-tools", act: settings("Tools") },
+  { name: "S-22-settings-shortcuts", act: settings("Shortcuts") },
   { name: "S-21-settings-images", act: settings("Image generation") },
   { name: "S-109-settings-library", light: "S-110-light-settings-library", act: settings("Library") },
   { name: "S-23-thread-hover-actions", act: (p) => p.locator(".turn.a").last().locator(".md").hover() },
@@ -213,6 +214,61 @@ test.describe("models page", () => {
         await page.screenshot({ path: path.join(SHOTS_DIR, `${shot.name}.png`), animations: "disabled", caret: "hide" });
       });
     });
+  }
+});
+
+/** Every Settings section at desktop and phone width, dark, named by section. */
+const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promise<void>)?])[] = [
+  ["general", "General"],
+  ["library", "Library"],
+  [
+    "library-with-a-folder",
+    "Library",
+    async (p) => {
+      const folder = path.join(CHECKOUT_CACHE, "e2e-library", "notes");
+      mkdirSync(folder, { recursive: true });
+      await p.getByRole("button", { name: "Add folder…" }).click();
+      await p.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
+      await p.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(p.locator(".srow.src")).toHaveCount(1);
+    },
+  ],
+  ["tools", "Tools"],
+  ["image-generation", "Image generation"],
+  [
+    "image-generation-on",
+    "Image generation",
+    async (p) => {
+      await p.getByRole("switch", { name: "Generate images" }).click();
+      await expect(p.locator(".srow", { hasText: "Not found" })).toBeVisible();
+    },
+  ],
+  ["runtime", "Runtime"],
+  ["runtime-confirm", "Runtime", (p) => p.getByRole("button", { name: /^Use .*Ollama…$/ }).click()],
+  ["advanced", "Advanced"],
+  ["advanced-details", "Advanced", (p) => p.getByText("Details", { exact: true }).click()],
+  ["advanced-reset", "Advanced", (p) => p.getByRole("button", { name: "Reset…" }).click()],
+  ["shortcuts", "Shortcuts"],
+  ["models", "Models"],
+];
+
+test.describe("settings sections", () => {
+  for (const [file, label, act] of SETTINGS_PAGES) {
+    for (const width of [1280, 360]) {
+      test.describe(`s1 settings-${file}-${width}`, () => {
+        test.use({ viewport: { width, height: 800 }, colorScheme: "dark", comfyUrl: "http://127.0.0.1:9" });
+        test("shot", async ({ page, open, seededThread }) => {
+          await page.clock.setFixedTime(NOW);
+          await open(`#thread=${seededThread ?? ""}`);
+          await waitReady(page);
+          await settings(label)(page);
+          await act?.(page);
+          await page.evaluate(() => document.fonts.ready.then(() => undefined));
+          await page.waitForTimeout(400);
+          await page.screenshot({ path: path.join(SHOTS_DIR, `settings-${file}-${width}.png`), animations: "disabled", caret: "hide" });
+        });
+      });
+    }
   }
 });
 

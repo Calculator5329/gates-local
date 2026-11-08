@@ -267,3 +267,13 @@ never shows a whisper stop, start or restart.
       Prepared on lane/readme: README, `docs/setup/linux.md` and the
       `pnpm shots:readme` images; the license is still open.
 - [ ] <!-- workspace:id=work:fbd76a2b-2cb1-5aeb-8864-bfc67cb7bf45 --> Finetuning: scoped once benchmarks show a gap a finetune can close.
+- [ ] Settings left for later (Settings council S1), each added only when
+      the feature behind it exists:
+      - Instructions: one home for what the model is told in every chat.
+      - Tools: a switch per tool, past the one switch and the list.
+      - MCP servers.
+      - Shortcuts: rebinding keys, and a choice of which key sends.
+      - Export chats and settings.
+      - Start on login, in the desktop app.
+      - Image generation: choosing a checkpoint, once the workflow can switch.
+      - Notes: comes back with gated memory, which needs its own approval step.

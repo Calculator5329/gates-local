@@ -12,6 +12,8 @@ export const IPC = {
   restart: "gates-local:restart",
   reloadClient: "gates-local:reload-client",
   updateAndRestart: "gates-local:update-and-restart",
+  dataFolder: "gates-local:data-folder",
+  openDataFolder: "gates-local:open-data-folder",
   state: "gates-local:state",
 } as const;
 
@@ -66,6 +68,10 @@ export interface GatesLocalBridge {
    * app to close, updates the clone and opens the app again.
    */
   updateAndRestart(): Promise<UpdateAndRestartResult>;
+  /** The folder the app keeps its data in, for Settings › Advanced. */
+  dataFolder(): Promise<string>;
+  /** Open that folder in the file manager; a sentence if it could not. */
+  openDataFolder(): Promise<string | null>;
 }
 
 /** The one place the server URL shape is defined. */

@@ -202,18 +202,21 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await expect(page.locator("#fitPanel")).toHaveCount(0);
   await page.keyboard.press("Control+Comma");
   const nav = page.locator(".snav").getByRole("button");
-  await expect(nav.last()).toHaveText("Advanced");
-  await expect(page.locator(".snav").getByRole("button", { name: "Memory", exact: true })).toBeVisible();
-  await nav.last().click();
+  await expect(nav.last()).toHaveText("Shortcuts");
+  await expect(page.locator(".snav").getByRole("button", { name: "Memory", exact: true })).toHaveCount(0);
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   const set = page.locator(".set");
   await expect(set.getByRole("heading", { name: "Advanced" })).toBeVisible();
   await expect(set.locator(".grp").first()).toContainText("GPU memory");
-  await expect(set).toContainText("Where the memory goes");
+  await set.getByText("Details", { exact: true }).click();
+  await expect(set.getByText("Where the memory goes")).toBeVisible();
   await expect(set).toContainText("Qwen 3.5 9B");
   // live: a context change elsewhere shows here
   await set.getByRole("button", { name: "32k" }).first().click();
   await expect(set.locator(".fp-v")).toContainText("at 32k");
-  await expect(set).toContainText("At 64k: ");
+  // each size's fit is on its own segment, never in a sentence about a size not chosen
+  await expect(set.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /at 64k/);
+  await expect(set).not.toContainText("At 64k: ");
 });
 
 /** How many /api/chat requests the fake has seen. */

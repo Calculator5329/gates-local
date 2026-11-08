@@ -121,7 +121,9 @@ export function UpdatesView(p: UpdatesViewProps) {
     return (
       <Grp title="Updates">
         <Row label="Version">
-          <Na>Not available in this build. Run pnpm run app-update in the Gates Local folder.</Na>
+          <Na>
+            To update, run <span className="mono">pnpm run app-update</span> in the Gates Local folder.
+          </Na>
         </Row>
       </Grp>
     );
@@ -152,13 +154,11 @@ export function UpdatesView(p: UpdatesViewProps) {
           {check !== null && !p.checking ? (
             <CheckResult check={check} canUpdate={p.canUpdate} onUpdate={p.onUpdate} updateErr={p.updateErr ?? null} updating={p.updating === true} />
           ) : null}
-          <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
-            {settings === undefined || p.settingsLocked ? (
-              <Na />
-            ) : (
+          {settings === undefined || p.settingsLocked ? null : (
+            <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
-            )}
-          </Row>
+            </Row>
+          )}
         </>
       ) : null}
     </Grp>

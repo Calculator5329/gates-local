@@ -157,6 +157,16 @@ function run(): void {
     if (supervisor.state.status === "ready") showClient();
   });
   let updating = false;
+  ipcMain.handle(IPC.dataFolder, (event) => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    return dataDir;
+  });
+  ipcMain.handle(IPC.openDataFolder, async (event): Promise<string | null> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    // shell.openPath resolves to an error message, "" when it worked
+    const failed = await shell.openPath(dataDir);
+    return failed === "" ? null : `Couldn't open the data folder: ${failed}`;
+  });
   ipcMain.handle(IPC.updateAndRestart, async (event): Promise<UpdateAndRestartResult> => {
     if (!fromOurWindow(event)) throw new Error("refused");
     if (updating) return { ok: true };

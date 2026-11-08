@@ -20,14 +20,14 @@ export function fileSize(bytes: number): string {
   return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
 }
 
-/** A Library row's detail: "Refreshing…", the error, or "223 bytes · read Nov 7". */
+/** A Library row's detail: "Refreshing…", the error, or "223 bytes · copied Nov 7". */
 export function sourceDetail(src: Source): string {
   if (src.state === "refreshing") return "Refreshing…";
   if (src.state === "error") return src.detail ?? "Couldn't read it.";
   const parts: string[] = [];
   if (src.sizeBytes !== undefined) parts.push(fileSize(src.sizeBytes));
-  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Read-only";
+  if (src.snapshotAt !== undefined) parts.push(`copied ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
+  return parts.join(" · ") || "Available";
 }
 
 /** 16384 → "16k", 512 → "512". */

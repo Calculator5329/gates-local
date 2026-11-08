@@ -12,11 +12,12 @@ import { closeTip, esc } from "./ui.tsx";
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "sliders"],
   ["models", "Models", "cpu"],
-  ["runtime", "Runtime", "server"],
-  ["memory", "Memory", "note"],
+  ["library", "Library", "folder"],
+  ["tools", "Tools", "wrench"],
   ["images", "Image generation", "image"],
-  ["library", "Library", "db"],
+  ["runtime", "Runtime", "server"],
   ["advanced", "Advanced", "gear"],
+  ["shortcuts", "Shortcuts", "keyboard"],
 ];
 
 /** Re-render every interval so "5m" ages without a store change. */
@@ -170,7 +171,7 @@ function SettingsNav() {
           <span className="ks">Esc</span>
         </button>
         {SECTIONS.map(([id, label, icon]) => (
-          <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}`} onClick={() => openSettings(id)}>
+          <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => openSettings(id)}>
             <Icon id={icon} />
             <span className="grow">{label}</span>
           </button>
@@ -223,12 +224,14 @@ export function Sidebar() {
   const inSettings = useStore((s) => s.view === "settings");
   return (
     <aside className="sb">
-      <div className="sb-head">
-        <svg className="mark" aria-hidden="true">
-          <use href="#i-mark" />
-        </svg>
-        <span className="wordmark">Gates Local</span>
-      </div>
+      {inSettings ? null : (
+        <div className="sb-head">
+          <svg className="mark" aria-hidden="true">
+            <use href="#i-mark" />
+          </svg>
+          <span className="wordmark">Gates Local</span>
+        </div>
+      )}
       {inSettings ? <SettingsNav /> : <ChatNav />}
       <div className="sb-foot">
         <DownloadRow />

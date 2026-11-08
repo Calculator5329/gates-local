@@ -65,7 +65,7 @@ describe("Models on a computer with no supported GPU", () => {
     const empty = render(noGpuComputer({ models: [], fits: {} }));
     expect([...gpuPromises(list), ...gpuPromises(download), ...gpuPromises(empty)]).toEqual([]);
     expect(list).toContain(
-      "This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at 16k, otherwise on your best model that fits. Change it here; any chat can still switch.",
+      "New chats start on this model. If it&#x27;s too big for this computer, they start on the best one that fits. Any chat can switch from its model menu.",
     );
     expect(list).toContain("Runs in system memory");
     expect(list).not.toContain("Runs slower");

@@ -187,6 +187,10 @@ export type Theme = typeof Theme.Type;
 export const RuntimeMode = S.Literals(["system", "app"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
+/** How large messages and the message box are drawn. */
+export const TextSize = S.Literals(["small", "default", "large"]);
+export type TextSize = typeof TextSize.Type;
+
 export const Settings = S.Struct({
   /** Unset means the server picks: the best installed chat model that fits at defaultNumCtx (apps/server/src/runtime/pick.ts). */
   defaultModel: S.optional(S.String),
@@ -194,7 +198,7 @@ export const Settings = S.Struct({
   thinking: S.Boolean,
   theme: Theme,
   runtimeMode: RuntimeMode,
-  /** Model tool calls (read, sql, shell, note) on or off for new turns. */
+  /** Model tool calls (read, sql, shell) on or off for new turns. The image tool has its own switch, imageGen. */
   tools: S.Boolean,
   /** Image generation through ComfyUI; off until the user sets it up. */
   imageGen: S.Boolean,
@@ -202,6 +206,8 @@ export const Settings = S.Struct({
   comfyUrl: S.optional(S.String),
   /** Updates take every change on the main branch, not only releases. Unset means off. */
   updateEveryChange: S.optional(S.Boolean),
+  /** Unset means "default". */
+  textSize: S.optional(TextSize),
 });
 export type Settings = typeof Settings.Type;
 
@@ -215,6 +221,7 @@ export const SettingsPatch = S.Struct({
   imageGen: S.optional(S.Boolean),
   comfyUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
+  textSize: S.optional(TextSize),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
 

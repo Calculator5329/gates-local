@@ -3,7 +3,7 @@
 // control endpoint the specs call between journeys.
 //
 //   GET  /health            200 once the fake and the server are up
-//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, phone?, ...fakeOptions}
+//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, comfyUrl?, phone?, ...fakeOptions}
 //                           set the fake's scenario, then restart the server
 //                           on a fresh data dir (rediscovers Ollama). seed: N
 //                           writes one thread of N messages, seed: "design" the
@@ -146,14 +146,15 @@ type Seed =
   | { readonly kind: "design" | "readme"; readonly at: number };
 
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
-async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"]): Promise<string | null> {
+async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string): Promise<string | null> {
   await stopChild(server);
   resets += 1;
   dataDir = path.join(runDir, `data-${resets}`);
   mkdirSync(dataDir, { recursive: true });
   const db = path.join(dataDir, "threads.sqlite");
-  if (runtimeMode !== undefined) {
-    writeFileSync(path.join(dataDir, SETTINGS_FILE_NAME), JSON.stringify({ version: SETTINGS_FILE_VERSION, settings: defaultSettings(runtimeMode) }));
+  if (runtimeMode !== undefined || comfyUrl !== undefined) {
+    const settings = { ...defaultSettings(runtimeMode ?? "system"), ...(comfyUrl === undefined ? {} : { comfyUrl }) };
+    writeFileSync(path.join(dataDir, SETTINGS_FILE_NAME), JSON.stringify({ version: SETTINGS_FILE_VERSION, settings }));
   }
   const threadId =
     seed.kind === "long" ? seedLong(db, seed.messages, seed.at, "A long thread")
@@ -203,12 +204,12 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, runtimeMode, phone, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, phone, ...fakeBody } = body;
         await fakeScenario({ scenario: "models", ...fakeBody });
         await standIn?.close();
         standIn = null;
         phonePort = phone === true ? await freePort() : null;
-        const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined);
+        const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined, typeof comfyUrl === "string" ? comfyUrl : undefined);
         if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER, PHONE_ADDR);
         const reply = phonePort === null ? { dataDir, threadId, phonePort } : { dataDir, threadId, phonePort, phoneSocket };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));

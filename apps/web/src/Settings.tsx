@@ -1,18 +1,18 @@
-// Settings (shell.md F20, F27, F36, F45, F46, F59, F62-F66): six sections
-// wired to settings.get/update and the v2 methods. A section whose method the
-// server answers "not-implemented" says so in one calm line; nothing crashes.
-import { useEffect, useState } from "react";
-import type { ContextSize, Source } from "@gates-local/contracts";
+// Settings (shell.md F20, F27, F45, F46, F59, F62-F66; the S1 council): one
+// page per nav item, wired to settings.get/update and the v2 methods. Three
+// control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
+// for what is rare or destructive. A control the server cannot back is left
+// out instead of being shown switched off.
+import { useEffect, useRef, useState } from "react";
+import type { Source, TextSize, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
-import { CtxLine, GpuMemory } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, count, ctxFor, describeModel, folderWords, gb, k, noGpu, sourceDetail, verdictOf } from "./format.ts";
-import { Icon } from "./icons.tsx";
+import { GpuMemory } from "./FitPanel.tsx";
+import { count, folderWords, gb, noGpu, sourceDetail } from "./format.ts";
+import { Icon, type IconId } from "./icons.tsx";
 import { ModelsPage } from "./Models.tsx";
-import { SECTIONS } from "./Sidebar.tsx";
-import { addSource, ensureFit, refreshSource, removeSource, setContext, updateSettings } from "./session.ts";
-import { NA, type State, fitKey, setState, useStore } from "./store.ts";
-import { VLabel } from "./ui.tsx";
-import { Fail, Grp, Head, NOT_HERE, Na, Row, useAct } from "./settings-ui.tsx";
+import { addSource, checkImageStatus, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, updateSettings } from "./session.ts";
+import { NA, setState, useStore } from "./store.ts";
+import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./Updates.tsx";
 
 function Seg2<T extends string | number>({ value, options, onPick, label }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string }) {
@@ -27,63 +27,45 @@ function Seg2<T extends string | number>({ value, options, onPick, label }: { va
   );
 }
 
-const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
-
 // ---------------------------------------------------------------- General
 
-const SHORTCUTS: readonly (readonly [string, readonly string[]])[] = [
-  ["New thread", ["Ctrl", "N"]],
-  ["Search threads", ["Ctrl", "K"]],
-  ["Choose a model", ["Ctrl", "M"]],
-  ["Settings", ["Ctrl", ","]],
-  ["Send", ["Enter"]],
-  ["New line", ["Shift", "Enter"]],
-  ["Approve a pending note", ["Ctrl", "Enter"]],
-  ["Close a menu or Settings", ["Esc"]],
+const THEME_WORDS: Record<Theme, string> = {
+  dark: "Always dark.",
+  light: "Always light.",
+  system: "System matches your desktop's light or dark setting.",
+};
+
+const THEMES: readonly (readonly [Theme, string])[] = [
+  ["dark", "Dark"],
+  ["light", "Light"],
+  ["system", "System"],
+];
+
+const TEXT_SIZES: readonly (readonly [TextSize, string])[] = [
+  ["small", "Small"],
+  ["default", "Default"],
+  ["large", "Large"],
 ];
 
 function General() {
   const settings = useStore((s) => s.settings);
   const unavailable = useStore((s) => s.unavailable["settings.update"] === true);
-  const theme = settings === NA ? undefined : settings?.theme;
-  const [err, run] = useAct();
+  const current = settings === NA ? undefined : settings;
+  const [themeErr, runTheme] = useAct();
+  const [textErr, runText] = useAct();
   return (
     <>
-      <Head title="General">The defaults work out of the box. Nothing here is needed to start chatting.</Head>
-      <Grp title="Appearance">
-        <Row label="Theme" desc="Dark by default. System follows your desktop." err={err}>
-          {settings === NA || unavailable ? (
-            <Na>Follows your desktop. Changing it is not available in this build.</Na>
-          ) : (
-            <Seg2
-              label="Theme"
-              value={theme}
-              options={[
-                ["system", "System"],
-                ["dark", "Dark"],
-                ["light", "Light"],
-              ]}
-              onPick={(t) => void run(updateSettings({ theme: t }))}
-            />
-          )}
-        </Row>
-      </Grp>
-      <Grp title="Keyboard shortcuts">
-        <table className="kl">
-          <tbody>
-            {SHORTCUTS.map(([what, keys]) => (
-              <tr key={what}>
-                <td>{what}</td>
-                <td className="k">
-                  {keys.map((x) => (
-                    <kbd key={x}>{x}</kbd>
-                  ))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Grp>
+      <Head title="General" />
+      {settings === NA || unavailable ? null : (
+        <Grp title="Appearance">
+          <Row label="Theme" desc={current === undefined ? undefined : THEME_WORDS[current.theme]} err={themeErr}>
+            <Seg2 label="Theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
+          </Row>
+          <Row label="Text size" desc="Applies to messages and the message box." err={textErr}>
+            <Seg2 label="Text size" value={current === undefined ? undefined : (current.textSize ?? "default")} options={TEXT_SIZES} onPick={(t) => void runText(updateSettings({ textSize: t }))} />
+          </Row>
+        </Grp>
+      )}
       <Updates />
     </>
   );
@@ -106,16 +88,16 @@ function Runtime() {
   const statD =
     rt === "ready"
       ? app
-        ? `Gates Local's copy · port ${port}. It starts and stops with the app.`
-        : `Started by your system · port ${port}. Gates Local won't stop it.`
+        ? "Started by Gates Local. It stops when you quit."
+        : "Started by your system. It keeps running when you quit Gates Local."
       : rt === "installing"
-        ? "Installing Gates Local's copy."
+        ? "Installing Gates Local's own Ollama."
         : rt === "starting"
-          ? `Waiting for the server on port ${port}.`
+          ? "Waiting for Ollama to answer."
           : rt === "missing"
             ? runtime?.noAppCopy === true
               ? (runtime.detail ?? info.tip)
-              : "No Ollama is installed. Gates Local can install its own copy."
+              : "No Ollama is installed. Gates Local can install its own."
             : rt === "wrong"
               ? `Something other than Ollama answers on port ${port}.`
               : (runtime?.detail ?? info.tip);
@@ -128,8 +110,8 @@ function Runtime() {
   const folders = folderWords();
   return (
     <>
-      <Head title="Runtime">Gates Local finds Ollama on its own.</Head>
-      <Grp title="Ollama">
+      <Head title="Runtime">Ollama is the program that runs your models. Gates Local finds it on its own.</Head>
+      <Grp>
         <Row
           label={
             <span className="stat">
@@ -137,50 +119,53 @@ function Runtime() {
               {stat}
             </span>
           }
-          desc={statD}
+          desc={
+            <>
+              {statD}
+              {runtime?.baseUrl === undefined ? null : (
+                <span className="d">
+                  Ollama address <span className="mono">{runtime.baseUrl}</span>
+                </span>
+              )}
+            </>
+          }
         />
         {nothingToSwitchTo ? (
-          <Row label="Gates Local's copy" desc="Not available on this computer. Gates Local uses the Ollama your system runs." />
-        ) : rt !== "installing" && rt !== "starting" && rt !== "offline" ? (
+          <Row label="Gates Local's own Ollama" desc="Not available on this computer. Gates Local uses the Ollama your system runs." />
+        ) : canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline" ? (
           <>
-            <Row label={ownCopy ? "Switch to the system Ollama" : "Switch to Gates Local's copy"} desc={ownCopy ? "The one your system starts" : "A private copy it starts and stops"} err={err}>
-              {canSwitch ? (
-                <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
-                  Switch…
-                </button>
-              ) : (
-                <Na />
-              )}
+            <Row label={ownCopy ? "Using Gates Local's own Ollama" : "Using the system Ollama"} desc={ownCopy ? "A private Ollama that Gates Local installs, starts and stops." : "The Ollama your computer already has."} err={err}>
+              <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
+                {ownCopy ? "Use the system Ollama…" : "Use Gates Local's own Ollama…"}
+              </button>
             </Row>
-            {confirm && canSwitch ? (
+            {confirm ? (
               <div className="cfm" role="group" aria-label="Confirm switch">
                 {ownCopy ? (
                   <>
-                    <b>Switch back to the system Ollama?</b>
+                    <b>Go back to the system Ollama?</b>
                     <ul>
-                      <li>Gates Local stops its copy and connects to the system one on port 11434.</li>
+                      <li>The model in use stops and has to load again. Chats pause for a few seconds.</li>
                       <li>
-                        The system one reads its own models folder, <span className="mono">{folders.models}</span>. Models downloaded into Gates Local's copy stay in <span className="mono">{folders.appModels}</span>.
+                        The system Ollama reads its own folder, <span className="mono">{folders.models}</span>. Models you downloaded here stay in <span className="mono">{folders.appModels}</span>.
                       </li>
                       <li>
-                        Its copy stays in <span className="mono">{folders.appCopy}</span> until you remove it.
+                        Gates Local's own Ollama stays in <span className="mono">{folders.appCopy}</span> until you remove it.
                       </li>
-                      <li>Chats pause for a few seconds while it reconnects.</li>
                     </ul>
                   </>
                 ) : (
                   <>
-                    <b>Switch to Gates Local's own copy of Ollama?</b>
+                    <b>Use Gates Local's own Ollama?</b>
                     <ul>
                       <li>
                         Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
+                      <li>The model in use has to load again. Chats pause for about a minute while it installs and starts.</li>
                       <li>
-                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
-                        <span className="mono">{folders.models}</span> stay where they are.
+                        Your models stay where they are, in <span className="mono">{folders.models}</span>. It keeps its own in <span className="mono">{folders.appModels}</span>, so a model you want there downloads again.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
-                      <li>Chats pause for about a minute while it installs and starts.</li>
                     </ul>
                   </>
                 )}
@@ -203,278 +188,451 @@ function Runtime() {
             ) : null}
           </>
         ) : null}
-        <Row label="Port" desc="Where Gates Local looks for Ollama.">
-          <span className="path">{port}</span>
-        </Row>
-      </Grp>
-      <Grp title="Storage">
-        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
-          <span className="path">{app ? folders.appModels : folders.models}</span>
+        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)}` : undefined}>
+          <span className="mono">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>
   );
 }
 
-// ---------------------------------------------------------------- Memory, Images, Library
+// ---------------------------------------------------------------- Tools
 
-function Memory() {
+function Tools() {
+  const settings = useStore((s) => s.settings);
+  const sources = useStore((s) => s.sources);
+  const [err, run] = useAct();
+  const on = settings === NA || settings?.tools === true;
+  const nothingToRead = sources !== NA && sources !== undefined && sources.length === 0;
+  const windows = /\bWindows\b/.test(navigator.userAgent);
+  const library = on ? (
+    <button type="button" className="btn outline" onClick={() => openSettings("library")}>
+      Library
+    </button>
+  ) : (
+    <span className="na">Off</span>
+  );
   return (
     <>
-      <Head title="Memory">Say "remember" in a chat and the model proposes a note. You see the diff before anything is saved.</Head>
-      <Grp title="Notes">
-        <Row label="Notes folder" desc="Plain Markdown files you can open and edit yourself.">
-          <Na />
+      <Head title="Tools">What the model can do in a chat beyond writing a reply.</Head>
+      {settings === NA || settings === undefined ? null : (
+        <Grp>
+          <Row label="Let the model use tools" desc={!on ? "Off. It answers from the conversation alone." : nothingToRead ? "On, but nothing is in your Library yet, so no tool is offered." : "On. It can use the tools below when a chat needs them."} err={err}>
+            <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />
+          </Row>
+        </Grp>
+      )}
+      <Grp>
+        <Row label="Read files" desc="Reads the folders and files in your Library. It can't change them.">
+          {library}
         </Row>
-        <Row label="Approval" desc="Every note edit waits as a diff above the message box.">
-          <span className="lockv tipd" tabIndex={0} data-tip="This can't be turned off. The model never writes a note on its own.">
-            <Icon id="lock" cls="s14" />
-            Always required
-          </span>
+        {windows ? (
+          <Row label="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library.">
+            {library}
+          </Row>
+        ) : (
+          <Row label="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network.">
+            {library}
+          </Row>
+        )}
+        <Row label="Make images" desc="Uses ComfyUI, only in chats where you turn Image on.">
+          <button type="button" className="btn outline" onClick={() => openSettings("images")}>
+            Image generation
+          </button>
         </Row>
       </Grp>
     </>
   );
 }
 
-const IMAGE_WORDS: Record<string, string> = {
-  off: "Off.",
-  missing: "No ComfyUI install was found.",
-  stopped: "Found. Started only when a chat asks for an image.",
-  starting: "Starting ComfyUI.",
-  ready: "Running.",
-  busy: "Making an image.",
-  error: "ComfyUI reported a problem.",
-};
+// ---------------------------------------------------------------- Image generation
+
+/** The status row: what ComfyUI is doing now and the one thing to do about it. */
+function ImageState({ address }: { address: string }) {
+  const status = useStore((s) => s.imageStatus);
+  const [err, run] = useAct();
+  if (status === NA) return null;
+  const state = status === undefined || status.state === "off" ? "checking" : status.state;
+  const word = { checking: "Checking", missing: "Not found", stopped: "Found", starting: "Starting", ready: "Connected", busy: "Making an image", error: "Something went wrong" }[state];
+  const dot = state === "ready" || state === "busy" || state === "stopped" ? "ok" : state === "missing" || state === "error" ? "err" : "run";
+  const desc =
+    state === "missing"
+      ? `ComfyUI did not answer at ${address}.`
+      : state === "stopped"
+        ? "It starts when a chat asks for an image."
+        : state === "error"
+          ? (status?.detail ?? "ComfyUI reported a problem.")
+          : undefined;
+  return (
+    <Row
+      label={
+        <span className="stat">
+          <span className={`dot ${dot}`} />
+          {word}
+        </span>
+      }
+      desc={desc}
+      err={err}
+    >
+      {state === "missing" ? (
+        <a className="btn outline" href="https://github.com/Calculator5329/gates-local/blob/main/docs/setup/linux.md#4-optional-image-generation-with-comfyui" target="_blank" rel="noreferrer noopener">
+          How to set up
+        </a>
+      ) : state === "error" ? (
+        <button type="button" className="btn outline" onClick={() => void run(checkImageStatus())}>
+          Retry
+        </button>
+      ) : state === "ready" || state === "busy" ? (
+        <a className="btn outline" href={status?.baseUrl ?? address} target="_blank" rel="noreferrer noopener">
+          Open
+        </a>
+      ) : null}
+    </Row>
+  );
+}
 
 function Images() {
   const settings = useStore((s) => s.settings);
   const status = useStore((s) => s.imageStatus);
   const [url, setUrl] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
   const [genErr, runGen] = useAct();
   const [urlErr, runUrl] = useAct();
   const on = settings !== NA && settings?.imageGen === true;
   const comfy = settings === NA ? undefined : settings?.comfyUrl;
+  const address = (status !== undefined && status !== NA ? status.baseUrl : undefined) ?? comfy ?? "http://127.0.0.1:8188";
+  // the typed address stays until the server saved it (W-07)
+  const save = async (): Promise<boolean> => {
+    if (url === null) return true;
+    const ok = await runUrl(updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() }));
+    if (ok) setUrl(null);
+    return ok;
+  };
+  const test = async () => {
+    setTesting(true);
+    if (await save()) await runUrl(checkImageStatus());
+    setTesting(false);
+  };
   return (
     <>
-      <Head title="Image generation">Off by default. When on, the model can queue image jobs in ComfyUI on this GPU.</Head>
-      <Grp title="ComfyUI">
-        <Row label="Generate images" desc={settings === NA ? NOT_HERE : on ? "On. The Image toggle in the message box turns it on for a chat." : "Off. The model can't queue image jobs."} err={genErr}>
-          {settings === NA ? null : (
-            <button
-              type="button"
-              className="switch"
-              role="switch"
-              aria-checked={on}
-              aria-label="Generate images"
-              onClick={() => void runGen(updateSettings({ imageGen: !on }))}
-            />
-          )}
-        </Row>
-        <Row label="ComfyUI install" desc={status === NA ? NOT_HERE : status === undefined ? "Checking…" : `${IMAGE_WORDS[status.state] ?? ""}${status.detail ? ` ${status.detail}` : ""}`}>
-          {status !== NA && status?.baseUrl ? <span className="path">{status.baseUrl}</span> : null}
-        </Row>
-        {settings !== NA && settings !== undefined ? (
-          <Row label="ComfyUI address" desc="Where Gates Local finds ComfyUI." err={urlErr}>
-            <input
-              className="inp"
-              aria-label="ComfyUI address"
-              placeholder="http://127.0.0.1:8188"
-              value={url ?? comfy ?? ""}
-              onChange={(e) => setUrl(e.target.value)}
-              onBlur={() => {
-                if (url === null) return;
-                // the typed address stays until the server saved it (W-07)
-                void runUrl(updateSettings({ comfyUrl: url.trim() === "" ? null : url.trim() })).then((ok) => ok && setUrl(null));
-              }}
-            />
+      <Head title="Image generation">Let the assistant make images on this computer. It uses ComfyUI, a separate free program you install yourself.</Head>
+      {settings === NA || settings === undefined ? null : (
+        <Grp>
+          <Row label="Generate images" desc={on ? "The Image button in the message box turns it on for a chat. If the GPU is short, the chat model is unloaded while an image renders." : undefined} err={genErr}>
+            <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />
           </Row>
-        ) : null}
-      </Grp>
+        </Grp>
+      )}
+      {on ? (
+        <Grp title="Connection">
+          <ImageState address={address} />
+          <Row label="ComfyUI address" err={urlErr}>
+            <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
+            <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
+              {testing ? "Testing…" : "Test"}
+            </button>
+          </Row>
+        </Grp>
+      ) : null}
     </>
   );
 }
 
+// ---------------------------------------------------------------- Library
+
+type SourceKind = Source["kind"];
+
+const ADD_WORDS: Record<SourceKind, { noun: string; hint: string }> = {
+  folder: { noun: "folder", hint: "~/docs" },
+  file: { noun: "file", hint: "~/notes/todo.md" },
+  sqlite: { noun: "database", hint: "~/docs/library.db" },
+};
+
+const KIND_ICON: Record<SourceKind, IconId> = { folder: "folder", file: "file", sqlite: "db" };
+
 function SourceRow({ src }: { src: Source }) {
+  const [open, setOpen] = useState(false);
   const [err, run] = useAct();
+  const box = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const name = src.label || src.path;
+  const close = (refocus = true) => {
+    setOpen(false);
+    if (refocus) btn.current?.focus();
+  };
+  useOutside(box, open, () => close(false));
+  useEffect(() => {
+    if (open) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [open]);
+  const broken = src.state === "error";
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${sourceDetail(src)}`} err={err}>
-      <span className="badge">read-only</span>
-      <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
-        Refresh
-      </button>
-      <button type="button" className="qa" onClick={() => void run(removeSource(src.id))}>
-        Remove
+    <div className="srow src">
+      <Icon id={KIND_ICON[src.kind]} cls="src-ic" />
+      <div className="sl">
+        <b>{name}</b>
+        {src.label && src.label !== src.path ? <span className="d mono">{src.path}</span> : null}
+        {broken ? <span className="act-err">{sourceDetail(src)}</span> : null}
+        <Fail err={err} />
+      </div>
+      <div className="sv">
+        <span className="src-d">{broken ? "Unavailable" : sourceDetail(src)}</span>
+        <div className="mp-acts" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
+          <button ref={btn} type="button" className={`mp-kebab${open ? " on" : ""}`} aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+            <Icon id="more" />
+          </button>
+          {open ? (
+            <div className="mp-menu src-menu" role="menu">
+              {src.kind === "sqlite" || broken ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="mp-mi"
+                  onClick={() => {
+                    close();
+                    void run(refreshSource(src.id));
+                  }}
+                >
+                  Refresh
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="mp-mi danger"
+                onClick={() => {
+                  close();
+                  void run(removeSource(src.id));
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The path field an Add button opens: the browser cannot pick a path. */
+function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
+  const [path, setPath] = useState("");
+  const [err, run] = useAct();
+  const input = useRef<HTMLInputElement>(null);
+  const { noun, hint } = ADD_WORDS[kind];
+  useEffect(() => input.current?.focus(), []);
+  return (
+    <Row label={`Add a ${noun}`} err={err}>
+      <input
+        ref={input}
+        className="inp"
+        aria-label={`Add a ${noun} path`}
+        placeholder={hint}
+        value={path}
+        onChange={(e) => setPath(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            close();
+          }
+        }}
+      />
+      <button
+        type="button"
+        className="btn outline"
+        disabled={path.trim() === ""}
+        // the form keeps the typed path until the server added it (W-07)
+        onClick={() => void run(addSource(kind, path)).then((ok) => ok && close())}
+      >
+        Add
       </button>
     </Row>
   );
 }
 
-/** "Add folder…" opens a path field: the browser cannot pick a folder path (desktop picker wanted). */
-function AddSource({ kind, label, desc, button, icon }: { kind: "folder" | "file" | "sqlite"; label: string; desc: string; button: string; icon: "folder" | "file" | "db" }) {
-  const [open, setOpen] = useState(false);
-  const [path, setPath] = useState("");
-  const [err, run] = useAct();
+function SourceGroup({ title, desc, none, kinds, items }: { title: string; desc: string; none: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
+  const [adding, setAdding] = useState<SourceKind | null>(null);
+  const action = kinds.map((kind) => (
+    <button key={kind} type="button" className="btn outline" onClick={() => setAdding(kind)}>
+      Add {ADD_WORDS[kind].noun}…
+    </button>
+  ));
   return (
-    <Row label={label} desc={desc} err={err}>
-      {open ? (
-        <>
-          <input
-            className="inp"
-            aria-label={`${label} path`}
-            placeholder={kind === "folder" ? "~/docs" : kind === "sqlite" ? "~/docs/library.db" : "~/notes/todo.md"}
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                setOpen(false);
-              }
-            }}
-          />
-          <button
-            type="button"
-            className="btn outline"
-            disabled={path.trim() === ""}
-            onClick={() => {
-              // the form keeps the typed path until the server added it (W-07)
-              void run(addSource(kind, path)).then((ok) => {
-                if (!ok) return;
-                setPath("");
-                setOpen(false);
-              });
-            }}
-          >
-            Add
-          </button>
-        </>
-      ) : (
-        <button type="button" className="btn outline" onClick={() => setOpen(true)}>
-          <Icon id={icon} cls="s14" />
-          {button}
-        </button>
-      )}
-    </Row>
+    <Grp title={title} desc={desc} action={action}>
+      {adding === null ? null : <AddRow key={adding} kind={adding} close={() => setAdding(null)} />}
+      {items.map((x) => (
+        <SourceRow key={x.id} src={x} />
+      ))}
+      {items.length === 0 && adding === null ? <div className="src-none">{none}</div> : null}
+    </Grp>
   );
 }
 
 function Library() {
   const sources = useStore((s) => s.sources);
   const list = sources === NA || sources === undefined ? [] : sources;
-  const head = (
-    <Head title="Library">Sources the model may read in every chat: folders, files and databases. Everything here is read-only; nothing is connected on its own.</Head>
-  );
-  if (sources === NA) {
-    return (
-      <>
-        {head}
-        <p className="na">The Library is not available in this build.</p>
-      </>
-    );
-  }
   return (
     <>
-      {head}
-      <Grp title="Folders">
-        {list
-          .filter((x) => x.kind !== "sqlite")
-          .map((x) => (
-            <SourceRow key={x.id} src={x} />
-          ))}
-        <AddSource kind="folder" label="Add a folder" desc="Pick a folder of notes, books or documents." button="Add folder…" icon="folder" />
-        <AddSource kind="file" label="Add a file" desc="One document the model may read." button="Add file…" icon="file" />
-      </Grp>
-      <Grp title="Databases">
-        {list
-          .filter((x) => x.kind === "sqlite")
-          .map((x) => (
-            <SourceRow key={x.id} src={x} />
-          ))}
-        <AddSource kind="sqlite" label="Add a database" desc="SQLite files are opened read-only." button="Add database…" icon="db" />
-      </Grp>
+      <Head title="Library">Folders, files and databases the model can read in every chat. Gates Local never changes them.</Head>
+      {sources === NA ? null : (
+        <>
+          <SourceGroup title="Files and folders" desc="Read as they are now." none="No folders or files yet. Add one and the model can read it." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
+          <SourceGroup title="SQLite databases" desc="Read from a copy made when you add one." none="No databases yet. Add a SQLite file and the model can look things up in it." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
+        </>
+      )}
     </>
   );
 }
 
 // ---------------------------------------------------------------- Advanced
 
-function useFit(model: string, numCtx: number): Verdict | undefined {
-  const r = useStore((s) => s.fits[fitKey(model, numCtx)]);
-  useEffect(() => ensureFit(model, numCtx), [model, numCtx, r]);
-  return r === undefined || r === "error" ? undefined : verdictOf(r);
+/** Only the desktop window knows this folder and can open it. */
+function DataFolder() {
+  const [path, setPath] = useState<string | null>(null);
+  const [err, run] = useAct();
+  useEffect(() => {
+    let live = true;
+    void dataFolder().then((p) => {
+      if (live) setPath(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (path === null) return null;
+  return (
+    <Row label="Data folder" desc={<span className="mono">{path}</span>} err={err}>
+      <button type="button" className="btn outline" onClick={() => void run(openDataFolder())}>
+        Open folder
+      </button>
+    </Row>
+  );
 }
 
-/** The size new chats start at. Each chat's own size is in the model picker. */
-function DefaultContext() {
-  const settingsNA = useStore((s) => s.settings === NA);
-  const catalog = useStore(catalogOf);
-  const models = useStore((s) => s.models);
-  const numCtx = useStore((s) => s.numCtx);
-  const model = useStore((s) => s.model);
-  const v = useFit(model ?? "", numCtx);
-  const [ctxErr, runCtx] = useAct();
-  if (model === undefined) return null;
+function ResetSettings() {
+  const [asking, setAsking] = useState(false);
+  const [err, run] = useAct();
   return (
-    <Grp title="Default context window">
-      <div className="srow">
-        <div className="sl">
-          <b>Context window</b>
-          <span className="d">
-            <CtxLine model={model} numCtx={numCtx} />
-          </span>
-          {v ? (
-            <span className="d">
-              {describeModel(model, catalog).name} at {k(ctxFor(numCtx, models, model))}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
-            </span>
-          ) : null}
-          <Fail err={ctxErr} />
+    <>
+      <Row label="Reset settings" desc="Put every setting back to how it started." err={err}>
+        <button type="button" className={`btn outline${asking ? " pressed" : ""}`} aria-expanded={asking} onClick={() => setAsking(!asking)}>
+          Reset…
+        </button>
+      </Row>
+      {asking ? (
+        <div className="cfm" role="group" aria-label="Confirm reset">
+          <b>Reset every setting?</b>
+          <ul>
+            <li>Theme, text size, default model, context, tools and image generation go back to how they started.</li>
+            <li>Your chats, Library and downloaded models stay.</li>
+            <li>Which Ollama Gates Local uses stays as it is.</li>
+          </ul>
+          <div className="ca">
+            <button type="button" className="btn ghost" onClick={() => setAsking(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                setAsking(false);
+                void run(resetSettings());
+              }}
+            >
+              Reset
+            </button>
+          </div>
         </div>
-        <div className="sv">
-          <Seg2<ContextSize>
-            label="Context window"
-            value={numCtx}
-            options={CONTEXT_SIZES.map((c) => [c, k(c)] as const)}
-            onPick={(c) => {
-              setContext(c);
-              if (!settingsNA) void runCtx(updateSettings({ defaultNumCtx: c }));
-            }}
-          />
-        </div>
-      </div>
-    </Grp>
+      ) : null}
+    </>
   );
 }
 
 function Advanced() {
   const cpu = useStore((s) => noGpu(s.gpu));
+  const canReset = useStore((s) => s.settings !== NA && s.unavailable["settings.update"] !== true);
   return (
     <>
-      <Head title="Advanced">The numbers behind the model picker. Nothing here is needed to chat.</Head>
-      <Grp title={cpu ? "Memory" : "GPU memory"}>
+      <Head title="Advanced" />
+      <Grp title={cpu ? "System memory" : "GPU memory"}>
         <GpuMemory />
       </Grp>
-      <DefaultContext />
+      <Grp>
+        <DataFolder />
+        {canReset ? <ResetSettings /> : null}
+      </Grp>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- Shortcuts
+
+/** The bindings App.tsx, Sidebar.tsx and Composer.tsx really handle. */
+const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonly string[]])[]])[] = [
+  [
+    "Navigation",
+    [
+      ["New thread", ["Ctrl", "N"]],
+      ["Search threads", ["Ctrl", "K"]],
+      ["Choose a model", ["Ctrl", "M"]],
+      ["Settings", ["Ctrl", ","]],
+      ["Close a menu or Settings", ["Esc"]],
+      ["Open a thread's menu", ["Shift", "F10"]],
+    ],
+  ],
+  [
+    "Chat",
+    [
+      ["Send", ["Enter"]],
+      ["New line", ["Shift", "Enter"]],
+    ],
+  ],
+];
+
+function Shortcuts() {
+  return (
+    <>
+      <Head title="Shortcuts" />
+      {SHORTCUTS.map(([group, rows]) => (
+        <Grp key={group} title={group}>
+          <table className="kl">
+            <tbody>
+              {rows.map(([what, keys]) => (
+                <tr key={what}>
+                  <td>{what}</td>
+                  <td className="k">
+                    {keys.map((x) => (
+                      <kbd key={x}>{x}</kbd>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Grp>
+      ))}
     </>
   );
 }
 
 export function SettingsView() {
   const section = useStore((s) => s.section);
-  void SECTIONS;
   switch (section) {
     case "general":
       return <General />;
     case "models":
       return <ModelsPage />;
-    case "runtime":
-      return <Runtime />;
-    case "memory":
-      return <Memory />;
-    case "images":
-      return <Images />;
     case "library":
       return <Library />;
+    case "tools":
+      return <Tools />;
+    case "images":
+      return <Images />;
+    case "runtime":
+      return <Runtime />;
     case "advanced":
       return <Advanced />;
+    case "shortcuts":
+      return <Shortcuts />;
   }
 }

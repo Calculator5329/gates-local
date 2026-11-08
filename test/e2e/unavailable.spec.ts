@@ -12,6 +12,9 @@ import type { Page } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 const DEAD_COMFY = "http://127.0.0.1:9";
+const OTHER_DEAD_COMFY = "http://127.0.0.1:7";
+
+test.use({ comfyUrl: DEAD_COMFY });
 
 const section = async (page: Page, label: string) => {
   await page.keyboard.press("Control+Comma");
@@ -35,14 +38,12 @@ async function replyEnded(page: Page, timeout = 15_000): Promise<void> {
 /** Image generation on, pointed at an address where nothing answers; back in the chat with Image on. */
 async function imageWithNoComfy(page: Page): Promise<void> {
   await section(page, "Image generation");
-  // the address first: with generation still off, saving it reaches nothing
-  const address = page.getByRole("textbox", { name: "ComfyUI address" });
-  await address.fill(DEAD_COMFY);
-  await address.press("Tab");
-  await expect(address).toHaveValue(DEAD_COMFY);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  // off, the page is the switch and the one line about ComfyUI; the address arrives with the switch
+  await expect(page.getByRole("textbox", { name: "ComfyUI address" })).toHaveCount(0);
   await page.getByRole("switch", { name: "Generate images" }).click();
   await expect(page.getByRole("switch", { name: "Generate images" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("textbox", { name: "ComfyUI address" })).toHaveValue(DEAD_COMFY);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 }
 
 test("a Library with no sources says nothing is connected, and a chat that asks for a tool still answers", async ({ page, open }) => {
@@ -51,8 +52,10 @@ test("a Library with no sources says nothing is connected, and a chat that asks 
   await page.locator("#plusBtn").click();
   await page.getByRole("menuitem", { name: /Add to library/ }).click();
   await expect(page.locator(".snav").getByRole("button", { name: "Library", exact: true })).toHaveClass(/on/);
-  await expect(page.getByText("Everything here is read-only; nothing is connected on its own.")).toBeVisible();
-  await expect(page.locator(".badge", { hasText: "read-only" })).toHaveCount(0);
+  await expect(page.getByText("Gates Local never changes them.")).toBeVisible();
+  await expect(page.getByText("No folders or files yet.")).toBeVisible();
+  await expect(page.getByText("No databases yet.")).toBeVisible();
+  await expect(page.locator(".srow.src")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add folder…" })).toBeVisible();
 
   await page.keyboard.press("Escape");
@@ -71,10 +74,14 @@ test("image generation with no ComfyUI says none was found, and a chat with Imag
   await open();
   await waitReady(page);
   await imageWithNoComfy(page);
-  const install = page.locator(".srow", { hasText: "ComfyUI install" });
-  await expect(install).toContainText("No ComfyUI install was found.");
-  await expect(install).toContainText("ComfyUI did not answer.");
-  await expect(install).toContainText(DEAD_COMFY);
+  const install = page.locator(".srow", { hasText: "Not found" });
+  await expect(install).toContainText(`ComfyUI did not answer at ${DEAD_COMFY}.`);
+  await expect(install.getByRole("link", { name: "How to set up" })).toBeVisible();
+
+  // Test saves the typed address and asks again, so the status row names the new one
+  await page.getByRole("textbox", { name: "ComfyUI address" }).fill(OTHER_DEAD_COMFY);
+  await page.getByRole("button", { name: "Test", exact: true }).click();
+  await expect(install).toContainText(`ComfyUI did not answer at ${OTHER_DEAD_COMFY}.`);
 
   await page.keyboard.press("Escape");
   await waitReady(page);

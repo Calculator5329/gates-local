@@ -7,6 +7,7 @@ import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, g
 import { Icon } from "./icons.tsx";
 import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
+import { Fail, useAct } from "./settings-ui.tsx";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
 /** Open GPU memory in Settings › Advanced for a model (none: the chat's own model). */
@@ -42,7 +43,7 @@ export function GpuPanel() {
   const gpuRaw = useStore((s) => s.gpu);
   if (!open) return null;
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
-  const title = noGpu(gpu) ? "Memory" : "GPU memory";
+  const title = noGpu(gpu) ? "System memory" : "GPU memory";
   return (
     <aside className="fpanel" id="fitPanel" aria-label={title}>
       <div className="fpn-h">
@@ -50,7 +51,7 @@ export function GpuPanel() {
           <span className="fp-t">{title}</span>
           <span className="fp-gpu">{gpuHead(gpu)}</span>
         </div>
-        <button type="button" className="ibtn xs fpn-x" aria-label={noGpu(gpu) ? "Close memory" : "Close GPU memory"} data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
+        <button type="button" className="ibtn xs fpn-x" aria-label={noGpu(gpu) ? "Close system memory" : "Close GPU memory"} data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
           <Icon id="x" cls="s14" />
         </button>
       </div>
@@ -102,6 +103,17 @@ export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize 
   );
 }
 
+/** A context segment's tooltip in Settings, and whether that size cannot run. */
+function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean): { tip: string | undefined; wont: boolean } {
+  if (max !== undefined && c > max) return { tip: `This model takes at most ${k(max)}.`, wont: false };
+  if (r === undefined || r === "error") return { tip: undefined, wont: false };
+  const v = verdictOf(r);
+  const at = k(c);
+  if (v.k === "gpu") return { tip: `Runs on the GPU at ${at}.`, wont: false };
+  if (v.k === "spill") return { tip: cpu ? `Runs in system memory at ${at}.` : `Slower at ${at}: ${gb(v.amt)} runs from system memory.`, wont: false };
+  return { tip: `Won't fit at ${at}: needs ${gb(v.amt)} more.`, wont: true };
+}
+
 function occName(o: GpuOccupant): { nm: string; small: string; tip: string } {
   switch (o.kind) {
     case "whisper":
@@ -111,7 +123,7 @@ function occName(o: GpuOccupant): { nm: string; small: string; tip: string } {
     case "other-app":
       return { nm: o.label, small: "other app", tip: "<b>Another app</b> holds this memory right now. Measured, never stopped." };
     default:
-      return { nm: o.label, small: "other", tip: `<b>${esc(o.label)}</b> holds this memory right now. Measured, never stopped.` };
+      return { nm: o.label, small: /^other$/i.test(o.label) ? "" : "other", tip: `<b>${esc(o.label)}</b> holds this memory right now. Measured, never stopped.` };
   }
 }
 
@@ -162,7 +174,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
               <span className="nm">
                 {n.nm}
                 {p.o.protected ? <Icon id="lock" /> : null}
-                <small>{n.small}</small>
+                {n.small === "" ? null : <small>{n.small}</small>}
               </span>
               <span className="v">{p.gb.toFixed(1)} GB</span>
             </div>
@@ -175,7 +187,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
               {name}
               <small>{loaded ? "loaded" : `est. at ${k(numCtx)}`}</small>
             </span>
-            <span className={`v${loaded ? "" : " est"}`}>{ch.toFixed(1)} GB</span>
+            <span className="v">{ch.toFixed(1)} GB</span>
           </div>
         ) : null}
         {un > 0 ? (
@@ -267,9 +279,128 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   );
 }
 
+/** Where the memory goes: the numbers Settings folds under Details and the docked panel shows open. */
+function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
+  const gpu = gpuRaw === NA ? undefined : gpuRaw;
+  const v = verdictOf(report);
+  if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
+  return (
+    <>
+      <div className="fp-sep" />
+      <div className="fp-mt">Where the memory goes</div>
+      {gpu === undefined ? (
+        <div className="na">Gates Local couldn't read the GPU just now.</div>
+      ) : gpu.vendor === "none" ? (
+        <div className="fp-n">{NO_GPU_TEXT}</div>
+      ) : gpu.vendor === "unreadable" ? (
+        <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
+      ) : (
+        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={numCtx} />
+      )}
+      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
+    </>
+  );
+}
+
+function FitLine({ v, ctx }: { v: Verdict; ctx: number }) {
+  return (
+    <div className="fp-v">
+      {v.k === "no" ? (
+        <span className="vl no">
+          <span className="vd no" />
+          {`Needs ${gb(v.amt)} more at ${k(ctx)}`}
+        </span>
+      ) : (
+        <>
+          <VLabel v={v} />
+          <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The one default-context control (S1-06): a line for the size chosen, each
+ * segment's fit in its tooltip, and the GB numbers one step away under Details.
+ */
+function SettingsBody({ model }: { model: string }) {
+  const numCtx = useStore((s) => s.numCtx);
+  const fits = useStore((s) => s.fits);
+  const gpuRaw = useStore((s) => s.gpu);
+  const settingsNA = useStore((s) => s.settings === NA);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
+  const load = useStore((s) => s.loads[model]);
+  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
+  const [err, run] = useAct();
+  const ctx = max === undefined ? numCtx : Math.min(numCtx, max);
+  useEffect(() => {
+    for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
+  }, [model, max, fits]);
+  const gpu = gpuRaw === NA ? undefined : gpuRaw;
+  const cpu = noGpu(gpu);
+  const name = describeModel(model, catalog).name;
+  const loaded = load?.state === "ready" && load.numCtx === ctx;
+  const report = fits[fitKey(model, numCtx)];
+  const pick = (c: ContextSize) => {
+    closeTip();
+    setContext(c);
+    if (!settingsNA) void run(updateSettings({ defaultNumCtx: c }));
+  };
+  return (
+    <>
+      {report === undefined ? (
+        <div className="fp-n">Checking {cpu ? "memory" : "GPU memory"}…</div>
+      ) : report === "error" ? (
+        <div className="fp-n">Gates Local couldn't check {cpu ? "memory" : "GPU memory"} for {name} right now.</div>
+      ) : (
+        <FitLine v={verdictOf(report)} ctx={ctx} />
+      )}
+      <div className="fp-row fp-ctl">
+        <span className="k">Default context</span>
+        <span className="mini-seg" role="group" aria-label="Default context">
+          {CONTEXT_SIZES.map((c) => {
+            const f = ctxFit(c, max, fits[fitKey(model, c)], cpu);
+            return (
+              <button
+                key={c}
+                type="button"
+                data-ctx={c}
+                className={`${ctx === c ? "on" : ""}${f.wont ? " dim" : ""}`}
+                aria-pressed={ctx === c}
+                aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
+                disabled={max !== undefined && c > max}
+                data-tip={f.tip}
+                onClick={() => pick(c)}
+              >
+                {k(c)}
+              </button>
+            );
+          })}
+        </span>
+      </div>
+      <div className="ctx-line">
+        <span className="ctx-def">How much conversation the model can keep in view.</span>
+        <Fail err={err} />
+      </div>
+      {report === undefined || report === "error" ? null : (
+        <details className="upd-more fp-more">
+          <summary>Details</summary>
+          <Numbers r={report} v={verdictOf(report)} name={name} gpu={gpu} loaded={loaded} />
+          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
+        </details>
+      )}
+    </>
+  );
+}
+
+function pickChatCtx(c: ContextSize): void {
+  closeTip();
+  setContext(c);
+}
+
 function Body({ model }: { model: string }) {
   const numCtx = useStore((s) => s.numCtx);
-  const inSettings = useStore((s) => s.view === "settings");
   const report = useStore((s) => s.fits[fitKey(model, numCtx)]);
   const gpuRaw = useStore((s) => s.gpu);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
@@ -280,36 +411,19 @@ function Body({ model }: { model: string }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const name = describeModel(model, catalog).name;
   const loaded = load?.state === "ready" && load.numCtx === ctx;
-  const pickCtx = (c: ContextSize) => {
-    closeTip();
-    setContext(c);
-    if (inSettings) void updateSettings({ defaultNumCtx: c });
-  };
   if (report === undefined) return <div className="fp-n">Checking GPU memory…</div>;
   if (report === "error") return <div className="fp-n">Gates Local couldn't check GPU memory for {name} right now.</div>;
   const v = verdictOf(report);
   return (
     <>
-      <div className="fp-v">
-        {v.k === "no" ? (
-          <span className="vl no">
-            <span className="vd no" />
-            {`Needs ${gb(v.amt)} more at ${k(ctx)}`}
-          </span>
-        ) : (
-          <>
-            <VLabel v={v} />
-            <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
-          </>
-        )}
-      </div>
+      <FitLine v={v} ctx={ctx} />
       <Numbers r={report} v={v} name={name} gpu={gpu} loaded={loaded} />
       <div className="fp-sep" />
       <div className="fp-row">
-        <span className="k">{inSettings ? "Default context" : "Context for this chat"}</span>
-        <span className="mini-seg">
+        <span className="k">Context for this chat</span>
+        <span className="mini-seg" role="group" aria-label="Context for this chat">
           {CONTEXT_SIZES.map((c) => (
-            <button key={c} type="button" data-ctx={c} className={ctx === c ? "on" : ""} disabled={max !== undefined && c > max} data-tip={max !== undefined && c > max ? `This model takes at most ${k(max)}.` : undefined} onClick={() => pickCtx(c)}>
+            <button key={c} type="button" data-ctx={c} className={ctx === c ? "on" : ""} aria-pressed={ctx === c} disabled={max !== undefined && c > max} data-tip={max !== undefined && c > max ? `This model takes at most ${k(max)}.` : undefined} onClick={() => pickChatCtx(c)}>
               {k(c)}
             </button>
           ))}
@@ -318,20 +432,7 @@ function Body({ model }: { model: string }) {
       <div className="ctx-line">
         <CtxLine model={model} numCtx={numCtx} />
       </div>
-      <div className="fp-sep" />
-      <div className="fp-mt">Where the memory goes</div>
-      {gpuRaw === NA ? (
-        <div className="na">A breakdown by app is not available in this build.</div>
-      ) : gpu === undefined ? (
-        <div className="na">Gates Local couldn't read the GPU just now.</div>
-      ) : gpu.vendor === "none" ? (
-        <div className="fp-n">{NO_GPU_TEXT}</div>
-      ) : gpu.vendor === "unreadable" ? (
-        <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
-      ) : (
-        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={ctx} />
-      )}
-      {v.k === "no" ? null : <Speed model={model} name={name} numCtx={ctx} loaded={loaded} />}
+      <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
     </>
   );
 }
@@ -356,7 +457,7 @@ export function GpuMemory() {
           </button>
         ) : null}
       </div>
-      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
+      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <SettingsBody model={model} />}
     </div>
   );
 }

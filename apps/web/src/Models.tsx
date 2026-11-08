@@ -5,9 +5,9 @@
 // remove dialog that says what happens, and a Download tab that is the
 // download flow as it was (ModelDownloads.tsx). The rules live in
 // models-rules.ts and the session calls in models-actions.ts.
-import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { FitReport, ModelInfo } from "@gates-local/contracts";
-import { ctxFor, k, noGpu } from "./format.ts";
+import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault } from "./models-actions.ts";
@@ -28,7 +28,7 @@ import {
 } from "./models-rules.ts";
 import { canChat, notForChat } from "./pick.ts";
 import { ensureFit, leaveSettings, pull } from "./session.ts";
-import { Fail, useAct } from "./settings-ui.tsx";
+import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -285,36 +285,6 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Close a popover on a press outside it. */
-function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void): void {
-  useEffect(() => {
-    if (!open) return;
-    const down = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) close();
-    };
-    document.addEventListener("pointerdown", down);
-    return () => document.removeEventListener("pointerdown", down);
-  }, [ref, open, close]);
-}
-
-/** Arrow keys walk the items of a menu or list, skipping disabled ones; Escape closes it. */
-function walk(e: KeyboardEvent<HTMLElement>, box: HTMLElement | null, selector: string, close: () => void): void {
-  if (e.key === "Escape") {
-    e.preventDefault();
-    e.stopPropagation();
-    close();
-    return;
-  }
-  if (e.key === "Tab") return close();
-  const items = [...(box?.querySelectorAll<HTMLElement>(selector) ?? [])].filter((el) => el.getAttribute("aria-disabled") !== "true");
-  const at = items.indexOf(document.activeElement as HTMLElement);
-  const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-  if (step === 0 && e.key !== "Home" && e.key !== "End") return;
-  e.preventDefault();
-  const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + step + items.length) % items.length;
-  items[next]?.focus();
-}
-
 function RowMenu({ r, def, onRemove }: { r: InstalledRow; def: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
@@ -474,13 +444,14 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const [err, run] = useAct();
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
-  const models = useStore((s) => s.models);
-  const ctx = k(ctxFor(useStore((s) => s.numCtx), models, def));
-  const cpu = useStore((s) => noGpu(s.gpu));
   const chat = rows.filter((r) => r.chat);
   const runs = chat.filter((r) => r.verdict !== "refuse");
   const wont = chat.filter((r) => r.verdict === "refuse");
   const current = rows.find((r) => r.name === def);
+  const numCtx = useStore((s) => s.numCtx);
+  // the number is only worth showing when this model cannot reach the default size
+  const max = current?.info.maxContext;
+  const limit = max !== undefined && max < numCtx ? max : undefined;
   const close = (refocus = true) => {
     setOpen(false);
     if (refocus) btn.current?.focus();
@@ -521,9 +492,8 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
       <div className="mp-dl-l">
         <b>Default for new chats</b>
         <span>
-          {cpu
-            ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${ctx}, otherwise on your best model that fits. Change it here; any chat can still switch.`
-            : `If it can't run at ${ctx}, new chats start on your best model that fits the GPU. Any chat can switch from its model menu.`}
+          New chats start on this model. If it's too big for this computer, they start on the best one that fits. Any chat can switch from its model menu.
+          {limit === undefined ? null : ` This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
         </span>
         <Fail err={err} />
       </div>
