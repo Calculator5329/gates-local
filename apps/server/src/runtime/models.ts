@@ -55,7 +55,8 @@ async function capabilitiesOf(baseUrl: string, m: ModelInfo, timeoutMs: number, 
   }
 }
 
-export async function listModels(baseUrl: string, timeoutMs = 5000, cache?: CapabilityCache): Promise<ModelInfo[]> {
+/** `stopped`: checked once the tags arrive; when it holds, no /api/show starts and capabilities stay empty. */
+export async function listModels(baseUrl: string, timeoutMs = 5000, cache?: CapabilityCache, stopped?: () => boolean): Promise<ModelInfo[]> {
   const tags = await getDecoded(baseUrl, "/api/tags", timeoutMs, (v) => decode(TagsResponse, v));
   const models = tags.models
     .map((m): ModelInfo => {
@@ -66,6 +67,7 @@ export async function listModels(baseUrl: string, timeoutMs = 5000, cache?: Capa
       return info;
     })
     .toSorted((a, b) => a.name.localeCompare(b.name));
+  if (stopped?.() === true) return models;
   // One /api/show per digest not seen before, all at once.
   const caps = await Promise.all(models.map((m) => capabilitiesOf(baseUrl, m, timeoutMs, cache)));
   return models.map((m, i) => ({ ...m, capabilities: caps[i] ?? [] }));
@@ -145,8 +147,6 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
   let models: ModelInfo[] | undefined;
   let last: { at: number; url: string | undefined; result: Promise<Refreshed> } | undefined;
   const listeners = new Set<Listener<readonly ModelInfo[]>>();
-  /** Bumped per fetch started; only the latest one, still for the current base URL, may set `models`. */
-  let latest = 0;
   const capabilities: CapabilityCache = new Map();
   let lastPick: { key: string; pick: ChatPick } | undefined;
   const retryBaseMs = opts.retryMs ?? 5000;
@@ -201,7 +201,7 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
       // A retry belongs to its runtime; after a switch the new one is refreshed by the switch itself.
       if (stopped || baseUrl() !== url) return;
       // A fetch already running for this runtime answers the retry too (MP2-02); its result re-arms if still unsettled.
-      const run = inFlight?.url === url ? inFlight.result : catalog.refresh({ force: true });
+      const run = inFlight.get(url) ?? catalog.refresh({ force: true });
       run.catch((e: unknown) => {
         opts.log?.(`model discovery retry failed: ${(e as Error).message}`);
         // A failed retry is armed again, at the next doubled delay (MP2-01).
@@ -211,14 +211,16 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
     retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
   };
 
+  const unchanged = (): Refreshed => ({ models: models ?? [], changed: false });
   const fetchNow = async (url: string | undefined): Promise<Refreshed> => {
-    const seq = ++latest;
-    const listed = url ? await listModels(url, timeoutMs, capabilities) : [];
+    const listed = url ? await listModels(url, timeoutMs, capabilities, () => stopped) : [];
+    // After stop() no later stage starts, and nothing is applied or announced (MP3-01, MP4-02).
+    if (stopped) return unchanged();
     const picked = url ? await withPick(listed, url) : { models: listed, settled: true };
     const next = picked.models;
-    // An older fetch (one from the runtime before a switch) changes nothing; its caller gets the current list (MP2-02).
-    // After stop() nothing is applied or announced (MP3-01).
-    if (stopped || seq !== latest || baseUrl() !== url) return { models: models ?? [], changed: false };
+    // A fetch from a runtime that is no longer current changes nothing; its caller gets the current list (MP2-02).
+    // Fetches for one runtime never overlap (refresh below), so the last to settle for the current runtime is the newest.
+    if (stopped || baseUrl() !== url) return unchanged();
     const changed = models === undefined || key(models) !== key(next);
     models = next;
     // Unknown capabilities (MP-01) and an incomplete pick (MP-02) are asked again without waiting for a focus.
@@ -233,15 +235,15 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
    * the runtime after it was asked, so it waits for the running fetch and
    * then runs once, shared by every forced call that arrived meanwhile.
    */
-  let inFlight: { url: string | undefined; result: Promise<Refreshed> } | undefined;
-  let queued: { url: string | undefined; result: Promise<Refreshed> } | undefined;
+  // Kept per runtime until it settles, so a switch A, B, back to A finds A's fetch still running (MP4-01).
+  const inFlight = new Map<string | undefined, Promise<Refreshed>>();
+  const queued = new Map<string | undefined, Promise<Refreshed>>();
   const start = (url: string | undefined): Promise<Refreshed> => {
     const result = fetchNow(url);
-    const entry = { url, result };
-    inFlight = entry;
+    inFlight.set(url, result);
     last = { at: now(), url, result };
     const done = () => {
-      if (inFlight === entry) inFlight = undefined;
+      if (inFlight.get(url) === result) inFlight.delete(url);
     };
     // A failed fetch is not reused.
     result.then(done, () => {
@@ -258,27 +260,28 @@ export function createModelCatalog(baseUrl: () => string | undefined, options: n
       cancelRetry();
     },
     refresh(how) {
+      if (stopped) return Promise.resolve(unchanged());
       const url = baseUrl();
       const force = how?.force === true;
       if (!force && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
-      const running = inFlight;
+      const running = inFlight.get(url);
+      const waiting = queued.get(url);
       // Work queued for this runtime has not started yet, so it answers this call too, even between the running fetch settling and it starting.
-      if (queued !== undefined && queued.url === url && (force || running === undefined)) return queued.result;
-      if (running === undefined || running.url !== url) return start(url);
-      if (!force) return running.result;
-      const entry = {
-        url,
-        result: running.result.then(
+      if (waiting !== undefined && (force || running === undefined)) return waiting;
+      if (running === undefined) return start(url);
+      if (!force) return running;
+      const result: Promise<Refreshed> = running
+        .then(
           () => undefined,
           () => undefined,
-        ).then(() => {
-          if (queued === entry) queued = undefined;
+        )
+        .then(() => {
+          if (queued.get(url) === result) queued.delete(url);
           // Back through refresh(), so it waits behind whatever runs now (a fetch for a newer runtime); stop() drops it.
-          return stopped ? { models: models ?? [], changed: false } : catalog.refresh({ force: true });
-        }),
-      };
-      queued = entry;
-      return entry.result;
+          return catalog.refresh({ force: true });
+        });
+      queued.set(url, result);
+      return result;
     },
     onChange(listener) {
       listeners.add(listener);

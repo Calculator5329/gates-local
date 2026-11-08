@@ -508,22 +508,25 @@ const defer = () => {
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
 /** A runtime whose every /api/tags waits until released; counts calls and the most running at once. */
-async function heldRuntime() {
+async function heldRuntime(tag: FakeTag = qwen) {
   const gates: ReturnType<typeof defer>[] = [];
   const gate = (i: number) => (gates[i] ??= defer());
-  const state = { calls: 0, active: 0, max: 0, open: false };
+  const state = { calls: 0, active: 0, max: 0, open: false, shows: 0 };
   const s = await startFakeServer({
     "GET /api/tags": async (_b, res) => {
       const i = state.calls++;
       state.max = Math.max(state.max, ++state.active);
       try {
         if (!state.open) await gate(i).promise;
-        json(res, 200, { models: [qwen] });
+        json(res, 200, { models: [tag] });
       } finally {
         state.active--;
       }
     },
-    "POST /api/show": (_b, res) => json(res, 200, { capabilities: ["completion"] }),
+    "POST /api/show": (_b, res) => {
+      state.shows++;
+      json(res, 200, { capabilities: ["completion"] });
+    },
   });
   const release = (i: number) => gate(i).resolve();
   const releaseAll = () => {
@@ -602,6 +605,69 @@ describe("one fetch at a time, and stop() (MP2-02, MP3-01)", () => {
       expect(emits).toBe(0);
       expect(catalog.current()).toBeUndefined();
       expect(timers.pending()).toBe(0);
+    } finally {
+      r.releaseAll();
+      catalog.stop();
+      await r.s.close();
+    }
+  });
+
+  it("a runtime switch A, B, back to A while both first fetches are held never runs two against A (MP4-01)", async () => {
+    const a = await heldRuntime(qwen);
+    const b = await heldRuntime(gemma);
+    let url = a.s.baseUrl;
+    const catalog = catalogFor(() => url, { retryMs: 0 });
+    try {
+      const p1 = catalog.refresh();
+      await vi.waitFor(() => expect(a.state.calls).toBe(1));
+      url = b.s.baseUrl;
+      const p2 = catalog.refresh();
+      await vi.waitFor(() => expect(b.state.calls).toBe(1));
+      url = a.s.baseUrl;
+      const p3 = catalog.refresh();
+      const p4 = catalog.refresh({ force: true });
+      await settle();
+      expect(a.state.max).toBe(1);
+      a.releaseAll();
+      b.releaseAll();
+      await Promise.all([p1, p2, p3, p4]);
+      expect(a.state.max).toBe(1);
+      // Back on A, the catalog holds A's list, not B's.
+      expect(catalog.current()?.map((m) => m.name)).toEqual([qwen.name]);
+    } finally {
+      a.releaseAll();
+      b.releaseAll();
+      catalog.stop();
+      await a.s.close();
+      await b.s.close();
+    }
+  });
+
+  it("after stop() a held tags request finishes but nothing follows it, and refresh() starts nothing (MP4-02)", async () => {
+    const r = await heldRuntime();
+    let picks = 0;
+    const catalog = catalogFor(() => r.s.baseUrl, {
+      pick: async () => {
+        picks++;
+        return undefined;
+      },
+    });
+    let emits = 0;
+    catalog.onChange(() => emits++);
+    try {
+      const first = catalog.refresh();
+      await vi.waitFor(() => expect(r.state.calls).toBe(1));
+      catalog.stop();
+      r.releaseAll();
+      await first;
+      await catalog.refresh({ force: true });
+      await catalog.refresh();
+      await settle();
+      expect(r.state.calls).toBe(1);
+      expect(r.state.shows).toBe(0);
+      expect(picks).toBe(0);
+      expect(emits).toBe(0);
+      expect(catalog.current()).toBeUndefined();
     } finally {
       r.releaseAll();
       catalog.stop();
