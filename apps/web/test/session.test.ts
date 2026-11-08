@@ -333,6 +333,54 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
     expect(store.getState()).toMatchObject({ view: "thread", threadId: "b" });
   });
 
+  it("a reply another client's turn saved while this client's first load waits survives the older snapshot", async () => {
+    await boot();
+    const first = b.server.hold("threads.get");
+    session.openThread("t1");
+    const held = await first;
+    // a turn this client never tracked (opened mid-turn) finishes; its reload returns the newer thread
+    b.server.answer("threads.get", () => snapshot([userMsg("m1", "t1", "hi"), asstMsg("m2", "t1", "Theirs")]));
+    chat("turn-5", { type: "done", message: asstMsg("m2", "t1", "Theirs"), stopReason: "stop" });
+    await until(() => store.getState().messages["t1"]?.length === 2, 1000, "the reload after their done");
+    held.respond(snapshot([userMsg("m1", "t1", "hi")]));
+    await tick();
+    expect(store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("a reconnect reload that fails while Settings is open leaves Settings open", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    session.openSettings();
+    const held = await reconnectHeld();
+    held.fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "settings", threadId: "t1" });
+  });
+
+  it("a reconnect reload that fails after Settings opened leaves Settings open", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const held = await reconnectHeld();
+    session.openSettings();
+    held.fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "settings", threadId: "t1" });
+  });
+
+  it("a reload started in Settings that fails after leaving Settings is stale and keeps the thread", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    session.openSettings();
+    const held = await reconnectHeld();
+    session.leaveSettings();
+    held.fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1" });
+  });
+
   it("a load that fails for the thread still open goes to a new thread", async () => {
     await boot();
     b.server.answer("threads.get", refuse("thread-not-found", "no thread a"));

@@ -380,7 +380,7 @@ const stale = new Set<string>();
  */
 const loads = new Set<{ readonly threadId: string; readonly since: Message[] }>();
 
-/** Bumped by each navigation: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
+/** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
 let navGen = 0;
 
 /** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
@@ -409,7 +409,9 @@ async function loadThread(threadId: string, force = false): Promise<void> {
     const messages = req.since.reduce(upsertMessage, snapshot);
     setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}) }));
   } catch (e) {
-    if (codeOf(e) !== "closed" && nav === navGen && getState().threadId === threadId) setState({ view: "new", threadId: null });
+    // only while this load's thread is still on screen and nobody navigated since (Settings over it counts)
+    const s = getState();
+    if (codeOf(e) !== "closed" && nav === navGen && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
   } finally {
     loads.delete(req);
   }
@@ -441,6 +443,7 @@ export function openSettings(section?: Section, addPage = false): void {
 }
 
 export function leaveSettings(): void {
+  navGen++;
   const s = getState();
   setState({ view: s.threadId !== null ? "thread" : "new" });
 }
@@ -574,7 +577,7 @@ async function startTurn(threadId: string, content: string, model: string): Prom
     } else {
       const theirs = early.filter((p) => p.turnId === r.turnId);
       early = early.filter((p) => p.turnId !== r.turnId);
-      for (const p of theirs) if (p.event.type === "done") void loadThread(p.threadId, true);
+      for (const p of theirs) if (p.event.type === "done") untrackedDone(p.threadId, p.event.message);
     }
   } catch (e) {
     const mine = getState().live?.gen === gen;
@@ -771,7 +774,7 @@ function onChatEvent(p: Payload<"chat.event">): void {
  * opened the thread after the start sees the reply when it is saved.
  */
 function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
-  if (event.type === "done") return void loadThread(threadId, true);
+  if (event.type === "done") return untrackedDone(threadId, event.message);
   if (event.type !== "start") return;
   noteMessage(threadId, event.userMessage);
   const s = getState();
@@ -788,6 +791,17 @@ function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
       ? { live: { gen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: start, thinking: "", text: "", tools: [], pendingUser: null } }
       : {}),
   }));
+}
+
+/**
+ * A reply saved by a turn this client does not track: loads in flight for its
+ * thread replay it over their older snapshots (WF-02), then the thread reloads.
+ * A stopped or failed turn saves nothing on the server, so only done has a
+ * message to keep.
+ */
+function untrackedDone(threadId: string, message: Message): void {
+  noteMessage(threadId, message);
+  void loadThread(threadId, true);
 }
 
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
