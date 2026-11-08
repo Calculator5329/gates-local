@@ -3,6 +3,8 @@
 This guide covers Windows 11 on x64. Everything here installs for your user
 account only; no step needs administrator rights.
 
+Rather not do this by hand? [Let Claude Code set it up](with-claude-code.md).
+
 **What was tested:** one Windows 11 Pro machine (Intel Core i5-8500, 16 GB
 RAM, Intel UHD 630 graphics, no NVIDIA GPU), with Node.js 24.18, pnpm
 11.10.0 and Ollama 0.40.15. Models ran on the CPU there. The test ran over

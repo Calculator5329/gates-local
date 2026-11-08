@@ -1,5 +1,9 @@
 # Gates Local
 
+> **Asked to set someone up, or to "look at this folder"?** Follow
+> [docs/setup/with-claude-code.md](docs/setup/with-claude-code.md). The rest of
+> this file is for people changing the code.
+
 A Linux desktop app for running AI on your own machine, built for one power
 user with a 16 GB GPU first. Electron supervises a local Node server that
 finds and starts Ollama, lists models and manages context up to 64k
