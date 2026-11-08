@@ -57,6 +57,12 @@ export function thinkUnavailable(model: ModelInfo | undefined, name: string, dow
   return null;
 }
 
+/** The same answer as plain words for a phone's menu row, which has no tooltip. */
+function thinkNote(model: ModelInfo | undefined, name: string, downloading: boolean): string | null {
+  if (downloading || model === undefined) return "Available when the model finishes downloading";
+  return canThink(model) ? null : `${name} does not reason before answering`;
+}
+
 function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
   const q = modelFacts(m).quant;
   // a tag the catalog does not know is its own name: say it once, and its quant only when the tag does not
@@ -505,20 +511,37 @@ export function OptsMenu() {
   const image = useStore((s) => s.image);
   const used = useStore(usedTokens);
   const numCtx = useStore((s) => s.numCtx);
+  const models = useStore((s) => s.models);
+  const model = useStore((s) => s.model);
+  const catalog = useStore(catalogOf);
+  const first = useStore(firstPull);
+  const ready = useStore(rtOf) === "ready";
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const anchor = document.getElementById("optBtn");
     if (open && ref.current && anchor) place(ref.current, anchor, "end");
   }, [open]);
-  const pct = Math.min(1, used / numCtx);
+  const ctx = ctxFor(numCtx, models, model); // what the model runs at, which a small one holds below what was asked for
+  const pct = Math.min(1, used / ctx);
+  const tag = first ?? model;
+  const thinkNa = ready ? thinkNote(models?.find((m) => m.name === model), tag === undefined ? "No model" : describeModel(tag, catalog).name, first !== undefined) : null;
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="optsMenu" role="menu" aria-label="Chat options" ref={ref}>
       <SheetHead title="Chat options" />
-      <button type="button" className="mi" role="menuitemcheckbox" aria-checked={think} onClick={() => setState({ think: !think })}>
+      <button
+        type="button"
+        className={`mi${thinkNa !== null ? " off" : ""}`}
+        role="menuitemcheckbox"
+        aria-checked={thinkNa !== null ? false : think}
+        aria-disabled={thinkNa !== null ? true : undefined}
+        onClick={() => {
+          if (thinkNa === null) setState({ think: !think });
+        }}
+      >
         <Icon id="bulb" />
         <span>
           <b>Thinking</b>
-          <small>{think ? "The model reasons first, shown as one line" : "Off: a faster first token"}</small>
+          <small>{thinkNa ?? (think ? "The model reasons first, shown as one line" : "Off: a faster first token")}</small>
         </span>
         <span className="switch" aria-hidden="true" />
       </button>
@@ -547,7 +570,7 @@ export function OptsMenu() {
           <span>
             <b>Context {Math.round(pct * 100)}% used</b>
             <small>
-              {(used / 1000).toFixed(1)}k of {k(numCtx)} tokens
+              {(used / 1000).toFixed(1)}k of {k(ctx)} tokens
             </small>
           </span>
         </div>
@@ -869,17 +892,20 @@ export function Picker() {
           return f !== undefined && f !== "error" && verdictOf(f).k !== "no";
         });
         return (
-          <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-m={r.tag} data-tip={tip}>
-            <span className="pk-c" />
-            <Mark name={r.name} />
-            <div className="pk-m">
-              <div className="pk-n">
-                <span className="pk-nm">{r.name}</span>
-                <small>{size}</small>
+          <div key={r.tag} className="pk-r dis" data-m={r.tag} data-tip={tip}>
+            {/* the option alone is disabled: the two buttons beside it work */}
+            <div className="pk-o" role="option" aria-selected={false} aria-disabled="true">
+              <span className="pk-c" />
+              <Mark name={r.name} />
+              <div className="pk-m">
+                <div className="pk-n">
+                  <span className="pk-nm">{r.name}</span>
+                  <small>{size}</small>
+                </div>
+                <small className="pk-est">{`Needs ${gb(r.v.amt)} more`}</small>
               </div>
-              <small className="pk-est">{`Needs ${gb(r.v.amt)} more`}</small>
+              <span className="pk-v no">{fitWord(r.v)}</span>
             </div>
-            <span className="pk-v no">{fitWord(r.v)}</span>
             <div className="pk-acts">
               <button type="button" className="qa" data-memdet={r.tag} onClick={() => openFit(r.tag)}>
                 Memory details

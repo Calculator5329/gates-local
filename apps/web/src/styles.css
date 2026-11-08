@@ -511,7 +511,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .pk-r.dis{cursor:not-allowed}
 .pk-r.dis .pk-n{color:var(--muted-foreground)}
 .pk-r.dis:hover{background:transparent}
-.pk-acts{display:contents}
+.pk-acts,.pk-o{display:contents}
 .pk-sm{display:none}
 .pk-k{display:none;width:20px;height:20px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:12px;color:var(--muted-foreground);align-items:center;justify-content:center;flex:none;font-variant-numeric:tabular-nums}
 #picker.kb .pk-k{display:inline-flex}

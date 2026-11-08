@@ -46,10 +46,12 @@ export function togglePop(id: PopId, kb = false): void {
   setState((s) => ({ pop: s.pop?.id === id ? null : { id, kb } }));
 }
 
-export function closePop(refocus = false): void {
+/** "if-inside" is a resize: a popover that held focus gives it back the way a phone's sheet does, and one that did not leaves focus alone. */
+export function closePop(refocus: boolean | "if-inside" = false): void {
   const p = getState().pop;
   if (p === null) return;
-  const sheet = isPhone() ? document.getElementById(POP_EL[p.id]) : null;
+  const el = document.getElementById(POP_EL[p.id]);
+  const sheet = isPhone() || (refocus === "if-inside" && el?.contains(document.activeElement) === true) ? el : null;
   setState({ pop: null });
   // a thread menu from the sidebar gives focus back to its row
   const target = () =>
@@ -65,7 +67,7 @@ export function closePop(refocus = false): void {
     });
     return;
   }
-  if (refocus) target()?.focus();
+  if (refocus === true) target()?.focus();
 }
 
 /** Up, Down, Home and End move between a menu's items. */

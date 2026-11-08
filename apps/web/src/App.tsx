@@ -347,7 +347,8 @@ function MoreMenu() {
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="moreMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
       <SheetHead title="Thread" />
-      <button type="button" className="mi" role="menuitem" onClick={act(renameFromMenu)}>
+      {/* Rename and GPU memory open on the main surface, which the drawer holds inert */}
+      <button type="button" className="mi" role="menuitem" onClick={act((id) => closeDrawer(() => renameFromMenu(id)))}>
         <Icon id="pencil" />
         <b>Rename</b>
       </button>
@@ -355,7 +356,7 @@ function MoreMenu() {
         <Icon id="download" />
         <b>Export as Markdown</b>
       </button>
-      <button type="button" className="mi" role="menuitem" onClick={act(openGpuPanel)}>
+      <button type="button" className="mi" role="menuitem" onClick={act(() => closeDrawer(openGpuPanel))}>
         <Icon id="cpu" />
         <b>GPU memory</b>
       </button>
@@ -468,7 +469,7 @@ let lastWidth = window.innerWidth;
 function onResize(): void {
   if (window.innerWidth === lastWidth && isTouch()) return;
   lastWidth = window.innerWidth;
-  closePop();
+  closePop("if-inside");
   if (window.innerWidth >= 1024) closeDrawer();
 }
 

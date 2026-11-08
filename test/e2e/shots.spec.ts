@@ -211,9 +211,8 @@ test.describe("models page", () => {
       test("shot", async ({ page, open, seededThread }) => {
         await page.clock.setFixedTime(NOW);
         await open(`#thread=${seededThread ?? ""}`);
-        // with no models the composer stays disabled, so only the runtime dot says ready
+        // with no models the composer stays disabled: the shot's own locators wait instead
         if (shot.scenario === undefined) await waitReady(page);
-        else await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
         await shot.act(page);
         await page.evaluate(() => document.fonts.ready.then(() => undefined));
         await page.waitForTimeout(400);

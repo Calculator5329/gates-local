@@ -39,6 +39,14 @@ async function openDrawer(page: Page): Promise<void> {
   await expect(page.locator(".sb .sb-row").first()).toBeInViewport({ ratio: 1 });
 }
 
+/** A thread's menu from its row in the drawer, by the keyboard; a long press opens the same menu. */
+async function drawerRowMenu(page: Page): Promise<void> {
+  await openDrawer(page);
+  await page.locator(".sb .sb-row").first().focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(page.locator("#moreMenu")).toHaveClass(/\bopen\b/);
+}
+
 // ------------------------------------------------------------- sheets (MB-01, ML-11)
 
 for (const [name, use] of [["412 touch", PHONE], ["915 touch", LANDSCAPE], ["600 mouse", MOUSE_600]] as const) {
@@ -472,10 +480,87 @@ test.describe("sheet content on a phone", () => {
     const twelve = page.locator('#picker .pk-r.dis[data-m="gemma4:12b"]');
     const smaller = twelve.getByRole("button", { name: "Use 32k" });
     await expect(smaller).toBeVisible();
-    // force: the row is aria-disabled, which Playwright applies to the buttons inside it. A finger is not stopped by that.
-    await smaller.tap({ force: true });
+    // a screen reader hears the model as unavailable and these two as working buttons, so they sit outside the disabled option
+    await expect(smaller).toBeEnabled();
+    await expect(twelve.locator('[role="option"]')).toHaveAttribute("aria-disabled", "true");
+    await expect(twelve.locator('[role="option"] button')).toHaveCount(0);
+    await smaller.tap();
     await expect(page.locator('#picker [data-ctx="32768"]')).toHaveAttribute("aria-checked", "true");
     await expect(page.locator('#picker .pk-r[data-m="gemma4:12b"]:not(.dis)')).toBeVisible();
+  });
+});
+
+// ------------------------------------------------------------- Sol's phone review (MZ-01, 03, 04, 06)
+
+test.describe("the thread menu from a drawer row", () => {
+  test.use(PHONE);
+
+  test("GPU memory closes the drawer, so its sheet can be used", async ({ page, open, seededThread }) => {
+    await openThread(page, open, seededThread);
+    await drawerRowMenu(page);
+    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
+    await expect(page.locator(".app.drawer")).toHaveCount(0);
+    await expect(page.locator("main.main")).not.toHaveAttribute("inert", /.*/);
+    await expect(page.locator("#fitPanel .fpn-x")).toBeFocused();
+  });
+
+  test("Rename closes the drawer, so its title field can be typed in", async ({ page, open, seededThread }) => {
+    await openThread(page, open, seededThread);
+    await drawerRowMenu(page);
+    await page.locator("#moreMenu").getByRole("menuitem", { name: "Rename" }).click();
+    await expect(page.locator(".app.drawer")).toHaveCount(0);
+    await expect(page.locator("main.main")).not.toHaveAttribute("inert", /.*/);
+    await expect(page.getByRole("textbox", { name: "Thread title" })).toBeFocused();
+  });
+});
+
+test.describe("chat options on a 2,048 model", () => {
+  test.use({ ...PHONE, installed: ["tiny-chat:2k"] });
+
+  test("context is measured against what the model runs at, not what was asked for", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await page.locator("#ta").fill("Say hello");
+    await page.getByRole("button", { name: "Send message" }).tap();
+    await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Say hello");
+    await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 10_000 });
+    await page.locator("#optBtn").tap();
+    const context = page.locator("#optsMenu .mi.st");
+    await expect(context.locator("small")).toHaveText(/ of 2k tokens$/);
+    const kilos = Number.parseFloat((await context.locator("small").textContent()) ?? "");
+    const shown = Number.parseInt(/(\d+)%/.exec((await context.locator("b").textContent()) ?? "")?.[1] ?? "", 10);
+    expect(Math.abs(shown - (kilos * 1000 * 100) / 2048), `${String(shown)}% for ${String(kilos)}k of 2,048`).toBeLessThanOrEqual(3);
+  });
+});
+
+test.describe("chat options on a model that does not think", () => {
+  test.use({ ...PHONE, installed: ["gemma4:12b"] });
+
+  test("Thinking is off and says why, as the desktop pill does", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await page.locator("#optBtn").tap();
+    const think = page.locator("#optsMenu").getByRole("menuitemcheckbox", { name: /Thinking/ });
+    await expect(think).toHaveAttribute("aria-disabled", "true");
+    await expect(think).toHaveAttribute("aria-checked", "false");
+    await expect(think).toContainText("Gemma 4 12B does not reason before answering");
+    // Playwright will not tap an aria-disabled control; a finger still can, and nothing may change
+    await think.tap({ force: true });
+    await expect(think).toHaveAttribute("aria-checked", "false");
+  });
+});
+
+test.describe("a resize out of phone width with a sheet open", () => {
+  test.use(MOUSE_600);
+
+  test("gives focus back instead of losing it with the sheet", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await page.keyboard.press("Control+m");
+    await expect(page.locator("#pkSearch")).toBeFocused();
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await expect(page.locator("#picker")).not.toHaveClass(/\bopen\b/);
+    await expect.poll(() => focusVisible(page)).toBe(true);
   });
 });
 
