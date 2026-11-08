@@ -142,3 +142,43 @@ it manually that'd be kind of cool and then work on any device even if it
 doesn't have a GPU like it gets whatever is the best that your device can
 handle.”
 
+## 2026-11-07 · Models settings: installed, default, download
+
+**Decided:** the Models page does three jobs and no others: the models on
+this computer, the default model for new chats, and downloading new
+models. No per-model character, system prompt or temperature there; system
+prompts get their own home later, if wanted. The Milo character mode is
+not supported for now. The layout starts from option A of the three shown
+(tabs for "on this computer" and "download", a table of installed models)
+and is refined for simplicity by one or two design council rounds before
+the settings lane builds it.
+**Agent calls, with a veto:** the context window leaves the Models page.
+The model picker already sets it per chat; the default for new chats sits
+under Advanced beside the GPU memory details.
+**Owner text (voice-to-text, in chat):** “I would say remove the character
+and system prompt stuff from models. Models should only be what models you
+have installed, what's your default, and your ability to install new
+models . I think that should be it. And then we can have somewhere else if
+we want to do system prompts and stuff. And I was wrong to bring up the
+Milo thing. We don't need to support that quite yet.” and “A ios closest
+for models tabm but still needs refinement. simplicity and best UX are
+priority. council session or two may help.”
+
+## 2026-11-07 · Public repository: MIT, full history, as soon as possible
+
+**Decided:** Gates Local becomes a public GitHub repository under
+Calculator5329, MIT licensed ("Copyright (c) 2026 Ethan Gates", as in his
+other MIT repositories), pushed with its full history rather than a fresh
+snapshot. It goes up as soon as the publication audit has no open blocker
+and the README with setup steps and screenshots has landed; Windows setup
+follows from the Windows lane. This replaces the "no remote" part of the
+promotion entry.
+**Why full history is safe to consider:** the author address in the commit
+metadata is already public through his other public repositories. The
+audit reads every blob in every branch for secrets and private details
+first; a finding that lives only in history comes back to Ethan before any
+push.
+**Owner text (voice-to-text, in chat):** “Let's do MIT for the license, and
+I think we can push all 189 commits. And timing, let's just do it as soon
+as possible.”
+
