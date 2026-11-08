@@ -53,7 +53,7 @@ test.describe("while the server is down", () => {
     await waitReady(page);
     await section(page, "General");
     const theme = page.getByRole("group", { name: "Theme" });
-    await expect(theme.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+    await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
 
     const restart = stack.restart(4000);
     // Settings has no banner; the sidebar footer says it
@@ -62,7 +62,7 @@ test.describe("while the server is down", () => {
     const saved = page.getByRole("alert");
     await expect(saved).toHaveText("Couldn't save the theme because Gates Local isn't connected; try again once it reconnects.");
     calm(await saved.textContent());
-    await expect(theme.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
+    await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
 
     await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
     // Gemma: a tag without dots, so calm() can count one sentence
