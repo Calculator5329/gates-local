@@ -72,8 +72,8 @@ test.describe("while the server is down", () => {
     await expect(removed).toHaveText(/^Couldn't remove \S+ because Gates Local isn't connected; try again once it reconnects\.$/);
     calm(await removed.textContent());
     await restart;
-    // back online, the model is still there
-    await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+    // back online (a healthy runtime has no footer row, and only the runtime row has a dot), the model is still there
+    await expect(page.locator(".sb-foot .rt .dot")).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByRole("button", { name: label })).toHaveCount(1);
   });
 });

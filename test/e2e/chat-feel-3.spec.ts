@@ -184,6 +184,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     const t = await tap(page);
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
+    // the open thread has loaded, so a load the tap fails or holds below is only the export's
+    await expect(page.locator(".tl .turn").first()).toBeVisible();
     t.late.set("threads.get", 1000);
     const got = page.waitForEvent("download");
     await exportRow(page, OTHER);
@@ -199,6 +201,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     const t = await tap(page);
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
+    // the open thread has loaded, so a load the tap fails or holds below is only the export's
+    await expect(page.locator(".tl .turn").first()).toBeVisible();
     const files = downloads(page);
     t.fail.add("threads.get");
     await exportRow(page, OTHER);
@@ -211,6 +215,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     const t = await tap(page);
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
+    // the open thread has loaded, so a load the tap fails or holds below is only the export's
+    await expect(page.locator(".tl .turn").first()).toBeVisible();
     const files = downloads(page);
     t.late.set("threads.get", 12_000);
     await exportRow(page, OTHER);
@@ -223,6 +229,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     const t = await tap(page);
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
+    // the open thread has loaded, so a load the tap fails or holds below is only the export's
+    await expect(page.locator(".tl .turn").first()).toBeVisible();
     const files = downloads(page);
     t.late.set("threads.get", 1500);
     await exportRow(page, OTHER);
