@@ -28,6 +28,24 @@ export function originOf(url: string): string | null {
   return `${parsed.protocol}//${parsed.host}`;
 }
 
+/**
+ * The URL to open in the system browser for a link the client follows, or
+ * null. Only http and https pages with a host and no credentials go out:
+ * a reply is model output, and file:, javascript:, custom OS schemes and
+ * user:pass@ links must never reach the shell.
+ */
+export function externalUrl(target: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.hostname === "" || url.username !== "" || url.password !== "") return null;
+  return url.href;
+}
+
 /** True when target is a page of the client at clientUrl (a file client must match its path). */
 export function sameClient(clientUrl: string, target: string): boolean {
   let client: URL;

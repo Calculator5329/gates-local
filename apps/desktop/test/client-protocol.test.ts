@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CLIENT_ORIGIN, clientFile, originOf, sameClient } from "../src/client-protocol.ts";
+import { CLIENT_ORIGIN, clientFile, externalUrl, originOf, sameClient } from "../src/client-protocol.ts";
 
 describe("clientFile", () => {
   const root = path.resolve("/srv/web");
@@ -63,5 +63,30 @@ describe("sameClient", () => {
   it("matches a file client by exact path only", () => {
     expect(sameClient("file:///srv/web/index.html", "file:///srv/web/index.html#x")).toBe(true);
     expect(sameClient("file:///srv/web/index.html", "file:///etc/passwd")).toBe(false);
+  });
+});
+
+describe("externalUrl", () => {
+  it("passes http and https pages through, normalised", () => {
+    expect(externalUrl("https://ollama.com/library")).toBe("https://ollama.com/library");
+    expect(externalUrl("HTTP://Example.COM/a b?q=1#x")).toBe("http://example.com/a%20b?q=1#x");
+  });
+
+  it("refuses every other scheme, credentials, and junk", () => {
+    for (const url of [
+      `${CLIENT_ORIGIN}/index.html`,
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+      "data:text/html,<b>x</b>",
+      "mailto:a@b.c",
+      "smb://host/share",
+      "ms-settings:privacy",
+      "https://user:pass@example.com/",
+      "https://user@example.com/",
+      "not a url",
+      "",
+    ]) {
+      expect(externalUrl(url), url).toBeNull();
+    }
   });
 });
