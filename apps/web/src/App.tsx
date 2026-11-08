@@ -5,19 +5,20 @@
 // Global keys follow the design's Escape order: popover, GPU panel, the
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useLayoutEffect, useRef } from "react";
-import { Banner, rtOf } from "./Banner.tsx";
-import { Composer, Picker, PlusMenu } from "./Composer.tsx";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { Banner, type Rt, rtOf } from "./Banner.tsx";
+import { Composer, OptsMenu, Picker, PlusMenu } from "./Composer.tsx";
 import { GpuPanel, closeGpuPanel, openGpuPanel } from "./FitPanel.tsx";
 import { FirstRun, NoServer } from "./FirstRun.tsx";
+import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { SettingsView } from "./Settings.tsx";
-import { Sidebar, focusComposer, goNew, openSearch } from "./Sidebar.tsx";
+import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
 import { call, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
-import { POP_ANCHOR, Tip, closePop, place, togglePop } from "./ui.tsx";
+import { PHONE, POP_ANCHOR, POP_EL, SheetHead, Tip, closePop, isPhone, isTouch, menuKeys, place, togglePop, useMedia } from "./ui.tsx";
 
 interface Card {
   readonly icon: IconId;
@@ -39,6 +40,7 @@ function Cards() {
   const img = useStore(imageGenOf);
   const imgLink = useStore(imageSetupOf);
   const blocked = useStore((s) => rtOf(s) !== "ready");
+  const phone = useMedia(PHONE);
   const cards: Card[] = [
     { icon: "chat", t: "Explain something", d: "Plain answers, step by step.", q: "Explain how cron decides which programs it can find." },
     { icon: "pencil", t: "Draft or rewrite", d: "Emails, notes and READMEs, written here.", q: "Rewrite this paragraph so it is shorter and clearer: " },
@@ -58,7 +60,7 @@ function Cards() {
             className="card"
             onClick={() => {
               setState({ draft: c.q, ...(c.img ? { image: true } : {}) });
-              focusComposer();
+              focusComposer(true);
             }}
           >
             <Icon id={c.icon} />
@@ -70,11 +72,24 @@ function Cards() {
         ))}
       </div>
       <div className="card-links">
-        {links.map(([go, label]) => (
-          <button key={go} type="button" className="link" data-go={go} onClick={() => openSettings(go)}>
-            {label}
+        {phone && links.length === 2 ? (
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setState({ setList: true });
+              openSettings();
+            }}
+          >
+            Set up library and images…
           </button>
-        ))}
+        ) : (
+          links.map(([go, label]) => (
+            <button key={go} type="button" className="link" data-go={go} onClick={() => openSettings(go)}>
+              {label}
+            </button>
+          ))
+        )}
       </div>
     </>
   );
@@ -85,7 +100,7 @@ function Draft() {
     <div className="draft">
       <div className="draft-in">
         <h1 className="hero">What would you like help with?</h1>
-        <p className="hero-sub">Runs locally on your computer. Nothing you type leaves it.</p>
+        <p className="hero-sub">Runs on your computer. Nothing leaves your own network.</p>
         <div className="banner-slot">
           <UpdateNote />
           <Banner />
@@ -99,8 +114,111 @@ function Draft() {
   );
 }
 
-function Header({ isNew }: { isNew: boolean }) {
+/** Below 1024 px: opens the thread drawer. Hidden on the desktop, where the sidebar is always there. */
+function MenuButton() {
+  const open = useStore((s) => s.drawer);
+  return (
+    <button type="button" className="ibtn hb" id="menuBtn" aria-label="Open threads" aria-expanded={open} onClick={openDrawer}>
+      <Icon id="menu" cls="s18" />
+    </button>
+  );
+}
+
+/** A phone's Settings Back: every section goes to the list, and the Models page's two tabs are one section. */
+function settingsBack(): void {
+  document.querySelector(".set")?.scrollTo(0, 0);
+  setState({ setList: true });
+}
+
+/** Settings' top bar below 1024 px: the drawer button on a tablet; on a phone the page's name, a Back that says where it goes, and Done on the list. */
+function SettingsBar() {
+  const phone = useMedia(PHONE);
+  const root = useStore((s) => s.setList);
+  const section = useStore((s) => s.section);
+  const title = !phone || root ? "Settings" : (SECTIONS.find(([id]) => id === section)?.[1] ?? "Settings");
+  return (
+    <header className="hdr set-bar">
+      <MenuButton />
+      {root ? (
+        <span className="hb sp" />
+      ) : (
+        <button type="button" className="bk" aria-label="Back to Settings" onClick={settingsBack}>
+          <Icon id="left" cls="s18" />
+          Settings
+        </button>
+      )}
+      <h2>{title}</h2>
+      {root ? (
+        <button type="button" className="set-done" onClick={leaveSettings}>
+          Done
+        </button>
+      ) : (
+        <span className="hb sp" />
+      )}
+    </header>
+  );
+}
+
+const RT_WORD: Record<Rt, string> = { ready: "Running", installing: "Installing", starting: "Starting", missing: "Not installed", wrong: "Port busy", stopped: "Stopped", error: "Didn't start", offline: "Reconnecting" };
+
+/** What a section is set to, at the end of its row in a phone's Settings list. */
+function listValue(s: State, id: Section): string {
+  const settings = s.settings === NA ? undefined : s.settings;
+  switch (id) {
+    case "general":
+      return settings === undefined ? "" : settings.theme.charAt(0).toUpperCase() + settings.theme.slice(1);
+    case "models": {
+      const tag = settings?.defaultModel ?? s.model;
+      return tag === undefined ? "" : describeModel(tag, s.catalog === NA ? undefined : s.catalog).name;
+    }
+    case "runtime":
+      return RT_WORD[rtOf(s)];
+    case "tools":
+      return settings === undefined ? "" : settings.tools ? "On" : "Off";
+    case "images":
+      return settings === undefined ? "" : settings.imageGen ? "On" : "Off";
+    case "library":
+      return Array.isArray(s.sources) ? `${s.sources.length} ${s.sources.length === 1 ? "source" : "sources"}` : "";
+    default:
+      return "";
+  }
+}
+
+function ListValue({ id }: { id: Section }) {
+  const v = useStore((s) => listValue(s, id));
+  return v === "" ? null : <span className="val">{v}</span>;
+}
+
+/** A phone's Settings home: the sections as one list; a tap opens one with Back to here. */
+function SettingsList() {
+  return (
+    <nav className="set-list" aria-label="Settings sections">
+      <div className="box">
+        {SECTIONS.map(([id, label, icon]) => (
+          <button
+            key={id}
+            type="button"
+            className="sl-r"
+            onClick={() => {
+              document.querySelector(".set")?.scrollTo(0, 0);
+              setState({ setList: false });
+              openSettings(id);
+            }}
+          >
+            <Icon id={icon} />
+            <span className="mn">{label}</span>
+            <ListValue id={id} />
+            <Icon id="right" cls="s14" />
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function Header({ isNew, inert }: { isNew: boolean; inert: boolean }) {
   const threadId = useStore((s) => s.threadId);
+  const emptyDraft = useStore((s) => s.draft === "");
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
   const moreOpen = useStore((s) => s.pop?.id === "more" && s.pop.thread === undefined);
@@ -114,7 +232,8 @@ function Header({ isNew }: { isNew: boolean }) {
     setState({ renaming: false });
   };
   return (
-    <header className="hdr">
+    <header className="hdr" inert={inert}>
+      <MenuButton />
       {renaming && !isNew ? (
         <input
           ref={input}
@@ -131,8 +250,20 @@ function Header({ isNew }: { isNew: boolean }) {
           }}
         />
       ) : (
-        <h2 className={isNew ? "muted" : ""}>{isNew ? "New thread" : title}</h2>
+        <>
+          <h2 className={isNew ? "muted" : "tt"}>{isNew ? "New thread" : title}</h2>
+          {/* a phone has no room for the actions button: the title opens the thread menu */}
+          {isNew ? null : (
+            <button type="button" className="hdr-t" data-anchor="more" aria-label={`Thread actions: ${title}`} aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => togglePop("more")}>
+              <span className="t">{title}</span>
+              <Icon id="down" cls="chev" />
+            </button>
+          )}
+        </>
       )}
+      <button type="button" className="ibtn hb nb" aria-label="New thread" disabled={isNew && emptyDraft} onClick={goNew}>
+        <Icon id="pen" cls="s18" />
+      </button>
       {isNew ? null : (
         <button type="button" className="ibtn" id="moreBtn" data-tip="Thread actions" aria-label="Thread actions" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => togglePop("more")}>
           <Icon id="more" />
@@ -201,16 +332,6 @@ function placeAt(pop: HTMLElement, at: { x: number; y: number }): void {
   pop.style.left = `${Math.max(8, Math.min(at.x, window.innerWidth - pw - 8))}px`;
 }
 
-/** Up, Down, Home and End move between the menu's items. */
-function menuKeys(e: ReactKeyboardEvent<HTMLDivElement>): void {
-  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  const at = items.indexOf(document.activeElement as HTMLElement);
-  const to = e.key === "ArrowDown" ? at + 1 : e.key === "ArrowUp" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
-  if (to === null || items.length === 0) return;
-  e.preventDefault();
-  items[(to + items.length) % items.length]?.focus();
-}
-
 function MoreMenu() {
   const pop = useStore((s) => (s.pop?.id === "more" ? s.pop : null));
   const open = pop !== null;
@@ -225,6 +346,7 @@ function MoreMenu() {
   }, [pop]);
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="moreMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
+      <SheetHead title="Thread" />
       <button type="button" className="mi" role="menuitem" onClick={act(renameFromMenu)}>
         <Icon id="pencil" />
         <b>Rename</b>
@@ -239,19 +361,71 @@ function MoreMenu() {
       </button>
       <div className="msep" />
       <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
-        <Icon id="x" />
+        <Icon id="trash" />
         <b>Delete thread</b>
       </button>
     </div>
   );
 }
 
+/** What Tab must stay inside right now: a phone's sheet, the drawer, or a phone's GPU sheet. */
+function modalBox(s: State): HTMLElement | null {
+  if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
+  if (s.drawer) return document.querySelector<HTMLElement>(".sb");
+  if (s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun" && isPhone()) return document.getElementById("fitPanel");
+  return null;
+}
+
+function trapTab(e: KeyboardEvent, box: HTMLElement): void {
+  const items = [...box.querySelectorAll<HTMLElement>("button:not(:disabled),a[href],input:not(:disabled),textarea,select,[tabindex]")].filter((el) => el.getClientRects().length > 0 && el.tabIndex >= 0);
+  const first = items[0];
+  const last = items.at(-1);
+  const at = document.activeElement;
+  if (first === undefined || last === undefined) return e.preventDefault();
+  if (at === null || !box.contains(at)) {
+    e.preventDefault();
+    first.focus();
+  } else if (e.shiftKey ? at === first : at === last) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+}
+
+/** Where a swipe started, when it started on a sheet's title row. */
+let swipeFrom: number | null = null;
+
+function onTouchStart(e: TouchEvent): void {
+  swipeFrom = null;
+  const t = e.target instanceof Element ? e.target : null;
+  if (t === null || !isPhone() || t.closest("button") !== null || t.closest(".sh-h, .fpanel .fpn-h") === null) return;
+  swipeFrom = e.touches[0]?.clientY ?? null;
+}
+
+/** A swipe of 48 px or more down a sheet's title row closes the sheet. */
+function onTouchEnd(e: TouchEvent): void {
+  const from = swipeFrom;
+  swipeFrom = null;
+  const to = e.changedTouches[0]?.clientY;
+  if (from === null || to === undefined || to - from < 48) return;
+  if (getState().pop !== null) closePop(true);
+  else closeGpuPanel(true);
+}
+
 function onKey(e: KeyboardEvent): void {
   const s = getState();
+  if (e.key === "Tab") {
+    const box = modalBox(s);
+    if (box !== null) trapTab(e, box);
+    return;
+  }
   if (e.key === "Escape") {
     if (s.pop !== null) {
       e.preventDefault();
       return closePop(true);
+    }
+    if (s.drawer) {
+      e.preventDefault();
+      return closeDrawer();
     }
     if (s.fitPanel.open && s.view !== "settings") {
       e.preventDefault();
@@ -282,13 +456,21 @@ function onKey(e: KeyboardEvent): void {
 function onMouseDown(e: MouseEvent): void {
   const p = getState().pop;
   if (p === null || !(e.target instanceof Node)) return;
-  const pop = document.getElementById(p.id === "plus" ? "plusMenu" : p.id === "more" ? "moreMenu" : "picker");
+  const pop = document.getElementById(POP_EL[p.id]);
   const anchor = document.getElementById(POP_ANCHOR[p.id]);
   if (pop?.contains(e.target) || anchor?.contains(e.target)) return;
+  if (e.target instanceof Element && e.target.closest(`[data-anchor="${p.id}"]`)) return;
   closePop();
 }
 
-const onResize = () => closePop();
+let lastWidth = window.innerWidth;
+/** A resize closes popovers (they would sit in the wrong place), except a touch keyboard opening: it changes only the height, and sheets sit on the bottom edge. */
+function onResize(): void {
+  if (window.innerWidth === lastWidth && isTouch()) return;
+  lastWidth = window.innerWidth;
+  closePop();
+  if (window.innerWidth >= 1024) closeDrawer();
+}
 
 function onHash(): void {
   const id = threadFromHash();
@@ -300,40 +482,67 @@ export function App() {
   const view = useStore((s) => s.view);
   const threadId = useStore((s) => s.threadId);
   const noServer = useStore((s) => s.conn.kind === "no-server");
+  const drawer = useStore((s) => s.drawer);
+  const popOpen = useStore((s) => s.pop !== null);
+  const setList = useStore((s) => s.setList);
+  const popId = useStore((s) => s.pop?.id ?? null);
+  const gpuOpen = useStore((s) => s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun");
+  const phone = useMedia(PHONE);
+  const gpuSheet = gpuOpen && phone;
+  // a phone's sheet is modal: focus moves in, except Ctrl+M's search field, which focuses itself
+  useEffect(() => {
+    if (popId === null || !isPhone()) return;
+    if (popId === "picker" && getState().pop?.kb === true) return;
+    const sheet = document.getElementById(POP_EL[popId]);
+    if (sheet === null || sheet.contains(document.activeElement)) return;
+    sheet.querySelector<HTMLElement>(".sh-h .ibtn")?.focus({ preventScroll: true });
+  }, [popId]);
   useEffect(() => {
     document.addEventListener("keydown", onKey);
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("mousedown", onMouseDown);
     window.addEventListener("resize", onResize);
     window.addEventListener("hashchange", onHash);
+    window.addEventListener("popstate", onDrawerPop);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("popstate", onDrawerPop);
     };
   }, []);
   const isSet = view === "settings";
+  // the section list is a phone's Settings home; leaving Settings forgets it
+  useEffect(() => {
+    if (!isSet && getState().setList) setState({ setList: false });
+  }, [isSet]);
   const isNew = view === "new" || threadId === null;
   // first run covers the app; what is underneath takes no focus or clicks
   const covered = noServer || view === "firstrun";
   return (
     <>
       <Sprite />
-      <div className="app" id="app">
-        <div style={{ display: "contents" }} inert={covered}>
+      <div className={`app${drawer ? " drawer" : ""}`} id="app" inert={popOpen && phone}>
+        <div style={{ display: "contents" }} inert={covered || gpuSheet}>
           <Sidebar />
         </div>
-        <main className="main" inert={covered}>
-          {isSet ? null : <Header isNew={isNew} />}
+        {drawer ? <div className="scrim" aria-hidden="true" onClick={() => closeDrawer()} /> : null}
+        <main className="main" inert={covered || drawer}>
+          {isSet ? <SettingsBar /> : <Header isNew={isNew} inert={gpuSheet} />}
           <div className="work">
             {isSet ? (
-              <div className="set">
+              <div className={`set${setList ? " listing" : ""}`}>
                 <div className="set-in">
+                  <SettingsList />
                   <SettingsView />
                 </div>
               </div>
             ) : (
-              <div className="stage">
+              <div className="stage" inert={gpuSheet}>
                 {isNew || threadId === null ? (
                   <Draft />
                 ) : (
@@ -363,8 +572,11 @@ export function App() {
           </div>
         ) : null}
       </div>
+      {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
+      {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
       <Picker />
       <PlusMenu />
+      <OptsMenu />
       <MoreMenu />
       <Tip />
     </>

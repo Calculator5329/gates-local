@@ -2,13 +2,43 @@
 // Tooltips follow the design: any element with data-tip (HTML built by the
 // client, data always escaped with esc) or data-tipt (plain text, shown only
 // when the row's .t is truncated).
-import { useEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { Verdict } from "./format.ts";
+import { Icon } from "./icons.tsx";
 import { type State, getState, setState } from "./store.ts";
 
 type PopId = NonNullable<State["pop"]>["id"];
 /** The control each popover opens from; Escape and outside clicks return focus there. */
-export const POP_ANCHOR: Record<PopId, string> = { picker: "modelBtn", plus: "plusBtn", more: "moreBtn" };
+export const POP_ANCHOR: Record<PopId, string> = { picker: "modelBtn", plus: "plusBtn", more: "moreBtn", opts: "optBtn" };
+/** The popover each element is drawn as. */
+export const POP_EL: Record<PopId, string> = { picker: "picker", plus: "plusMenu", more: "moreMenu", opts: "optsMenu" };
+
+/** A phone-width window (styles.css: 640 px and below), where popovers are bottom sheets. */
+export const PHONE = "(max-width: 640px)";
+export const isPhone = () => matchMedia(PHONE).matches;
+/** A device with no hover (a phone or tablet): tooltips open by tap, and focus never pops the keyboard on its own. */
+export const isTouch = () => matchMedia("(hover: none)").matches;
+
+/** A media query as render state, for markup that differs by width and not only by style. */
+export function useMedia(query: string): boolean {
+  const subscribe = useCallback(
+    (changed: () => void) => {
+      const m = matchMedia(query);
+      m.addEventListener("change", changed);
+      return () => m.removeEventListener("change", changed);
+    },
+    [query],
+  );
+  return useSyncExternalStore(subscribe, () => matchMedia(query).matches, () => false);
+}
+
+/** The control a popover opened from: its desktop anchor, or another opener (data-anchor) when that one is hidden. */
+export function anchorOf(id: PopId): HTMLElement | null {
+  const main = document.getElementById(POP_ANCHOR[id]);
+  if (main && main.getClientRects().length > 0) return main;
+  for (const el of document.querySelectorAll<HTMLElement>(`[data-anchor="${id}"]`)) if (el.getClientRects().length > 0) return el;
+  return main;
+}
 
 /** Open a popover, or close it when it is already open from the same control. */
 export function togglePop(id: PopId, kb = false): void {
@@ -19,10 +49,33 @@ export function togglePop(id: PopId, kb = false): void {
 export function closePop(refocus = false): void {
   const p = getState().pop;
   if (p === null) return;
+  const sheet = isPhone() ? document.getElementById(POP_EL[p.id]) : null;
   setState({ pop: null });
   // a thread menu from the sidebar gives focus back to its row
-  const row = p.thread === undefined ? null : document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"]`);
-  if (refocus) (row ?? document.getElementById(POP_ANCHOR[p.id]))?.focus();
+  const target = () =>
+    (p.thread !== undefined ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"]`) : null) ??
+    anchorOf(p.id) ??
+    document.querySelector<HTMLElement>(".set-bar .bk") ??
+    document.getElementById("menuBtn");
+  if (sheet !== null) {
+    // the app stays inert until this close has rendered, and focus must not stay in a hidden sheet
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (a === null || a === document.body || sheet.contains(a)) target()?.focus();
+    });
+    return;
+  }
+  if (refocus) target()?.focus();
+}
+
+/** Up, Down, Home and End move between a menu's items. */
+export function menuKeys(e: ReactKeyboardEvent<HTMLDivElement>): void {
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const to = e.key === "ArrowDown" ? at + 1 : e.key === "ArrowUp" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
+  if (to === null || items.length === 0) return;
+  e.preventDefault();
+  items[(to + items.length) % items.length]?.focus();
 }
 
 /** Escape text for a data-tip string. Every server or model value passes through it. */
@@ -41,6 +94,24 @@ export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hi
     </span>
   );
 }
+
+/** A bottom sheet's title row with its close button. Drawn only on a phone (styles.css .sh-h). */
+export function SheetHead({ title, sub }: { title: string; sub?: string }) {
+  return (
+    <div className="fpn-h sh-h">
+      <span className="fp-h fp-t">
+        {title}
+        {sub === undefined ? null : <span className="fp-gpu">{sub}</span>}
+      </span>
+      <button type="button" className="ibtn" aria-label="Close" onClick={() => closePop(true)}>
+        <Icon id="x" />
+      </button>
+    </div>
+  );
+}
+
+/** What counts as a control for tap-to-explain: its tap is its own action. */
+const CONTROL = "button, a, input, textarea, [role=button], [role=switch], [role=menuitem]";
 
 let hideTip: () => void = () => undefined;
 /** Hide the open tooltip (after a click that changes what it described). */
@@ -61,6 +132,8 @@ export function Tip() {
     };
     hideTip = hide;
     const over = (e: Event) => {
+      // with no hover (touch), a tap on a control is its action; tap() below opens tooltips instead
+      if (isTouch()) return;
       const target = e.target instanceof Element ? e.target : null;
       const t = target?.closest("[data-tip],[data-tipt]") ?? null;
       if (!t) {
@@ -68,6 +141,9 @@ export function Tip() {
         return;
       }
       if (t === tipFor) return;
+      show(t);
+    };
+    const show = (t: Element) => {
       if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return;
       let html = t.getAttribute("data-tip");
       if (!html) {
@@ -107,15 +183,31 @@ export function Tip() {
       const t = target.closest("[data-tip]");
       if (t) t.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     };
+    // touch: a tap on text that only explains (a legend row, a dotted term, a row that can't be
+    // picked) opens its tooltip; a tap on a control does what the control does
+    const tap = (e: MouseEvent) => {
+      if (!isTouch()) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const t = target?.closest("[data-tip]") ?? null;
+      if (!t || t.matches(CONTROL) || target?.closest(CONTROL)?.contains(t) === false) return;
+      show(t);
+    };
+    const scrolled = () => {
+      if (isTouch()) hide();
+    };
     document.addEventListener("mouseover", over);
     document.addEventListener("focusin", focusIn);
     document.addEventListener("focusout", hide);
     document.addEventListener("mousedown", hide);
+    document.addEventListener("click", tap);
+    document.addEventListener("scroll", scrolled, true);
     return () => {
       document.removeEventListener("mouseover", over);
       document.removeEventListener("focusin", focusIn);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("mousedown", hide);
+      document.removeEventListener("click", tap);
+      document.removeEventListener("scroll", scrolled, true);
     };
   }, []);
   return <div className="tip" id="tip" ref={ref} />;

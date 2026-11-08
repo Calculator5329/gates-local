@@ -67,8 +67,10 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function ActRow({ text, meta, regen }: { text: string; meta: string; regen: boolean }) {
+  // no hover on touch: the model and speed wait behind a tap so the row stays one line of icons
+  const [details, setDetails] = useState(false);
   return (
-    <div className="a-act">
+    <div className={details ? "a-act det" : "a-act"}>
       <CopyButton text={text} />
       {regen ? (
         <button
@@ -85,6 +87,9 @@ function ActRow({ text, meta, regen }: { text: string; meta: string; regen: bool
           <Icon id="redo" />
         </button>
       ) : null}
+      <button type="button" className="ibtn xs a-det" aria-label="Reply details" aria-expanded={details} onClick={() => setDetails(!details)}>
+        <Icon id="more" />
+      </button>
       <span className="meta">{meta}</span>
     </div>
   );
@@ -104,7 +109,7 @@ function UserBubble({ text, time }: { text: string; time: string }) {
             aria-label="Edit"
             onClick={() => {
               setState({ draft: text });
-              focusComposer();
+              focusComposer(true);
             }}
           >
             <Icon id="pencil" />
@@ -146,8 +151,9 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const label = toolLabel(step.name);
   // the contract has no read-only flag yet; a `-readonly` flag in the call is the evidence the design's word rests on
   const ro = /(^|\s)-readonly(\s|$)/.test(step.detail ?? "") ? "read-only" : "";
-  const meta =
-    st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : [label, ro, duration(step.durationMs)].filter((x) => x !== "").join(" · ");
+  const lead = ro === "" ? label : `${label} · ${ro}`;
+  const dur = duration(step.durationMs);
+  const meta = st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : dur === "" ? lead : null;
   const [cmd = "", ...rest] = (step.detail ?? "").split("\n");
   const out = rest.join("\n").trim();
   const toggle = () => setOpen(!open);
@@ -173,12 +179,21 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
           {st === "run" ? <Icon id="spin" cls="spin" /> : <Icon id={st === "rej" ? "xc" : "checkc"} />}
         </span>
         <span className="wr-h">{step.summary}</span>
-        <span className="wr-m">{meta}</span>
+        {/* a phone's collapsed line keeps the time; the tool's name moves into the details */}
+        <span className="wr-m">
+          {meta ?? (
+            <>
+              <span className="wr-tool">{lead} · </span>
+              {dur}
+            </>
+          )}
+        </span>
         <span className="wr-x">
           <Icon id="down" />
         </span>
       </div>
       <div className="wr-body">
+        {meta === null ? <p className="wr-who">{lead}</p> : null}
         {cmd !== "" ? (
           <p className="cmd">
             <span>$ </span>

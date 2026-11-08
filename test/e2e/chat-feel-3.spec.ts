@@ -164,7 +164,7 @@ test.describe("picker download rows at the picker's context", () => {
     const downloading = page.locator("#picker .pk-r.dis", { hasText: "Qwen 3.5 4B" });
     await expect(downloading).toContainText("Downloading");
     await expect(downloading).toHaveAttribute("data-tip", /at 16k fits on the GPU/);
-    const need = async () => /est\. ([\d.]+ GB)/.exec((await downloading.getAttribute("data-tip")) ?? "")?.[1];
+    const need = async () => /est\. ([\d.]+\sGB)/.exec((await downloading.getAttribute("data-tip")) ?? "")?.[1];
     const at16 = await need();
     expect(at16).toBeDefined();
     await ctx(page, "64k").click();

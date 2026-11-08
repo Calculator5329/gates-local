@@ -209,7 +209,13 @@ for (const width of [1280, 360] as const) {
       await waitReady(page);
       await page.keyboard.press("Control+Comma");
       for (const label of SECTIONS) {
-        await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+        if (width === 360) {
+          // a phone has no section nav: back to the list, then the section
+          await page.getByRole("button", { name: "Back to Settings" }).click();
+          await page.locator(".set-list").getByRole("button", { name: label }).click();
+        } else {
+          await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+        }
         await expect(page.locator(".set h1").first()).toHaveText(label);
         const over = await page.evaluate(() => {
           const set = document.querySelector(".set");

@@ -29,7 +29,7 @@ function Shell({ st, title, sub, children }: { st: ReactNode; title: string; sub
       {children}
       <div className="fr-foot">
         <Icon id="lock" cls="s14" />
-        Runs locally on your computer. Nothing you type leaves it.
+        Runs on your computer. Nothing leaves your own network.
       </div>
     </div>
   );
@@ -79,7 +79,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
       <div className="fr-m">
         <span className="nm">{d.name}</span>
         <span className="rec">
-          ·{" "}
+          <span className="sep">· </span>
           <span className="tipd" tabIndex={0} data-tip={tip}>
             Recommended
           </span>

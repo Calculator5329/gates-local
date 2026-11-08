@@ -33,8 +33,9 @@ const BUDGET = {
   keyP95Ms: 50,
   // re-measured with the T3-style picker, paragraph streaming, the memory menu and Settings › Models: JS 135.1, CSS 10.5
   // 2026-11-08, with the rebuilt Settings pages and the queue: JS 140.22. Every .js in the build counts, so loading a page on demand would not change it.
-  jsGzipKb: 142, // measured 120.6 KB at first
-  cssGzipKb: 11, // measured 8.1 KB at first
+  // 2026-11-08, with the phone layout: JS 143.7, CSS 12.6; about 3.4 KB and 1.9 KB of that is the layout.
+  jsGzipKb: 144, // measured 120.6 KB at first
+  cssGzipKb: 13, // measured 8.1 KB at first
 };
 
 /** Tries per timing gate: the gate passes when one try is inside the budget. */

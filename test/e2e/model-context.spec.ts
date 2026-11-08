@@ -39,6 +39,19 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("data-tip", /system memory/);
 });
 
+test("memory no process claims is called Other in the panel, in words and in its tooltip", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const panel = await openGpuMemory(page);
+  await panel.locator("summary", { hasText: "Details" }).click();
+  const other = panel.locator(".lg-r").filter({ hasText: /^Other/ });
+  await expect(other).toHaveCount(1);
+  await expect(panel).not.toContainText("Not attributed");
+  await other.hover();
+  await expect(page.locator("#tip")).toContainText("can't name");
+  await expect(page.locator("#tip")).not.toContainText("Not attributed");
+});
+
 test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {
   await open();
   await waitReady(page);

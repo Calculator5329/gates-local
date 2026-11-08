@@ -6,9 +6,27 @@ export const CONTEXT_SIZES: readonly ContextSize[] = [8192, 16384, 32768, 65536]
 
 const GIB = 1024 ** 3;
 
-/** "6.6 GB": one decimal everywhere. The design's sizes are GiB (16303 MiB reads 15.9 GB). */
+/** The no-break space between a number and its unit. */
+export const NBSP = String.fromCharCode(160);
+
+/** "6.6 GB": one decimal everywhere, and a no-break space so the unit never wraps away. The design's sizes are GiB (16303 MiB reads 15.9 GB). */
 export function gb(bytes: number): string {
-  return `${(bytes / GIB).toFixed(1)} GB`;
+  return `${(bytes / GIB).toFixed(1)}${NBSP}GB`;
+}
+
+/** The drawer's one time format: "now", "5m", "3h", "2d", "3w", "5mo", "2y". */
+export function shortAge(ms: number, now: number): string {
+  const s = Math.floor((now - ms) / 1000);
+  if (s < 60) return "now";
+  const min = Math.floor(s / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  if (d < 30) return `${Math.floor(d / 7)}w`;
+  if (d < 365) return `${Math.floor(d / 30)}mo`;
+  return `${Math.floor(d / 365)}y`;
 }
 
 /** A Library file's size: "223 bytes", "39 KB", "5 MB", "3.0 GB". */

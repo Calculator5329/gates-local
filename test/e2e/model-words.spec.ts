@@ -50,7 +50,7 @@ test("the fit panel names what this model can use apart from what is free, on se
   await open();
   await waitReady(page);
   const panel = await openGpuMemory(page);
-  await expect(panel.locator(".fp-n").first()).toHaveText(/^Estimated [\d.]+ GB of [\d.]+ GB available to this model · /);
+  await expect(panel.locator(".fp-n").first()).toHaveText(/^Estimated [\d.]+\sGB of [\d.]+\sGB available to this model · /);
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 

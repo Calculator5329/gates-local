@@ -441,6 +441,10 @@ No design switchers remain in the drawer. What is left picks a screen or a
 state (View, Runtime state, First-run state, Settings section, Library),
 the theme, the live contrast readout and the locked list.
 
+The approval dock is designed here in `shell.html` and nowhere else for now.
+The client's stylesheet leaves its rules out, because no screen renders the
+dock yet. Bring them over from `shell.html` when something does.
+
 ## Token contract
 
 Every color is a custom property on `:root`. The light values are the base.
@@ -463,11 +467,11 @@ under `:root[data-theme="dark"]`. The `<html>` element starts with
 | `--message-surface` / `--code-bg` / `--track` | `#1d1d1d` / `#1a1a1a` / `#2e2e2e` | `#e4e4e7` (F39) / `#f1f1f1` / `#e2e2e2` | bubbles, code, bars |
 | `--green` / `--green-fg` / `--on-green` | `hsl(150 58% 48%)` / `hsl(150 62% 58%)` / `#03140b` | `hsl(150 62% 38%)` / `hsl(152 72% 26%)` / `#03140b` | ready, runs on GPU, send, approve |
 | `--amber` / `--amber-fg` | `#f59e0b` / `#fbbf24` | `#d97706` / `#854000` (F74) | pending, not ready, uses system memory |
-| `--red` / `--red-fg` | `#ef4444` / `#f87171` | `#dc2626` / `#b91c1c` | not enough memory, wrong service, deletions |
+| `--red` / `--red-fg` | `#e03131` | `#e03131` | not enough memory, wrong service, deletions (one red in both themes) |
 | `--send-off-bg` / `--send-off-fg` | `#262626` / `#666` | `#e4e4e4` / `#a3a3a3` | disabled send |
 | `--stop-bg` / `--stop-fg` | `#e6e6e6` / `#0a0a0a` | `#262626` / `#fafafa` | stop |
 | `--primary-bg` / `--primary-fg` | `#ededed` / `#0a0a0a` | `#171717` / `#fafafa` | primary buttons (neutral) |
-| `--seg-whisper` / `--seg-occupant` | `#c8c8c8` / `#5a5a5a` | `#575757` / `#c4c4c4` | GPU bar: Whisper, other apps (F48, F68: a clear step apart in both themes) |
+| `--seg-whisper` / `--seg-occupant` | `#575757` / `#b3b3b3` | `#666666` / `#bdbdbd` | GPU bar: Whisper, other apps (F48, F68: a clear step apart in both themes; Whisper is the darker one in both) |
 | `--turn-gap` | 44 px | | the gap after every turn (F40) |
 | `--font-sans` | `"Adwaita Sans", system-ui, sans-serif` | | UI |
 | `--font-mono` | `"JetBrainsMono Nerd Font", "JetBrainsMono NF", "JetBrains Mono", ui-monospace, monospace` | | code, paths, diffs, tags |

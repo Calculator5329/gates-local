@@ -29,7 +29,7 @@ import {
   splitTail,
 } from "./models-rules.ts";
 import { canChat, notForChat } from "./pick.ts";
-import { ensureFit, leaveSettings, pull } from "./session.ts";
+import { ensureFit, pull } from "./session.ts";
 import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
@@ -124,13 +124,6 @@ export function ModelsPage() {
   };
   return (
     <div className="mp">
-      <div className="mp-ptop">
-        <button type="button" className="mp-back" onClick={leaveSettings}>
-          <Icon id="left" />
-          Back to chat
-        </button>
-        <b>Models</b>
-      </div>
       <div className="mp-head">
         <h1>Models</h1>
         <div className="mp-tabs" role="tablist" aria-label="Models" onKeyDown={onKey}>

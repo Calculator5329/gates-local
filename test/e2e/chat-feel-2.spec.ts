@@ -26,7 +26,8 @@ async function footer(page: Page) {
     const comp = document.querySelector(".composer");
     const cf = document.querySelector(".composer .cf");
     if (!comp || !cf) throw new Error("no composer");
-    const controls = [...cf.querySelectorAll(".cf-l > *, .cf-r > *")].map((el) => ({ id: el.id || el.getAttribute("aria-label") || el.className, ...box(el) }));
+    // only what is on screen: each width hides the controls that belong to the other layout
+    const controls = [...cf.querySelectorAll(".cf-l > *, .cf-r > *")].filter((el) => el.getClientRects().length > 0).map((el) => ({ id: el.id || el.getAttribute("aria-label") || el.className, ...box(el) }));
     const send = document.querySelector(".composer .send");
     return { comp: box(comp), overflow: cf.scrollWidth - cf.clientWidth, height: cf.getBoundingClientRect().height, controls, send: send ? box(send) : null };
   });

@@ -1,14 +1,14 @@
 // GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
 // verdict for a model at a context, the context control, and where the memory
 // goes, from fit.check plus gpu.status when the server has it.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
 import { Fail, useAct } from "./settings-ui.tsx";
-import { VLabel, closeTip, esc } from "./ui.tsx";
+import { PHONE, VLabel, anchorOf, closeTip, esc, isPhone, useMedia } from "./ui.tsx";
 
 /** Open GPU memory in Settings › Advanced for a model (none: the chat's own model). */
 export function openFit(model?: string): void {
@@ -29,7 +29,14 @@ export function closeGpuPanel(refocus: boolean): void {
   if (!getState().fitPanel.open) return;
   closeTip();
   setState({ fitPanel: { open: false, model: null } });
-  if (refocus) (document.getElementById("moreBtn") ?? document.getElementById("ta"))?.focus();
+  if (!refocus) return;
+  // a phone's sheet keeps the header inert until this close has rendered
+  if (isPhone()) requestAnimationFrame(focusAfterClose);
+  else focusAfterClose();
+}
+
+function focusAfterClose(): void {
+  (anchorOf("more") ?? document.getElementById("ta"))?.focus();
 }
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
@@ -45,6 +52,9 @@ export function GpuPanel() {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const title = noGpu(gpu) ? "System memory" : "GPU memory";
   return (
+    <>
+    {/* a phone's GPU sheet sits over a scrim; the docked desktop panel draws none */}
+    <div className="scrim fp-scrim" aria-hidden="true" onClick={() => closeGpuPanel(true)} />
     <aside className="fpanel" id="fitPanel" aria-label={title}>
       <div className="fpn-h">
         <div className="fp-h">
@@ -59,6 +69,7 @@ export function GpuPanel() {
         {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
       </div>
     </aside>
+    </>
   );
 }
 
@@ -124,6 +135,8 @@ function occName(o: GpuOccupant): { nm: string; small: string; tip: string } {
       return { nm: o.label, small: "image generation", tip: `<b>${esc(o.label)}</b> holds this memory for image generation.` };
     case "other-app":
       return { nm: o.label, small: "other app", tip: "<b>Another app</b> holds this memory right now. Measured, never stopped." };
+    case "unknown":
+      return { nm: "Other", small: "", tip: "Held by something Gates Local can't name. Measured, never stopped." };
     default:
       return { nm: o.label, small: /^other$/i.test(o.label) ? "" : "other", tip: `<b>${esc(o.label)}</b> holds this memory right now. Measured, never stopped.` };
   }
@@ -244,7 +257,7 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
         </div>
       ) : (
         <div className="fp-n" style={{ margin: 0 }}>
-          Not measured yet. Gates Local measures it the first time {name} loads at {k(numCtx)}.
+          Not measured yet.<span className="ph-hide"> Gates Local measures it the first time {name} loads at {k(numCtx)}.</span>
         </div>
       )}
     </>
@@ -417,15 +430,17 @@ function pickChatCtx(c: ContextSize): void {
 function Body({ model }: { model: string }) {
   const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
   const report = useStore((s) => s.fits[fitKey(model, numCtx)]);
+  // a phone's GPU sheet leads with the verdict and the context; the numbers wait under Details
+  const sheet = useMedia(PHONE);
+  const [details, setDetails] = useState(false);
   useEffect(() => ensureFit(model, numCtx), [model, numCtx, report]);
   if (report === undefined) return <div className="fp-n">Checking GPU memory…</div>;
   if (report === "error") return <div className="fp-n">Gates Local couldn't check GPU memory for {name} right now.</div>;
   const v = verdictOf(report);
-  return (
+  const verdict = <FitLine v={v} ctx={ctx} />;
+  const numbers = <Numbers r={report} v={v} name={name} gpu={gpu} loaded={loaded} />;
+  const context = (
     <>
-      <FitLine v={v} ctx={ctx} />
-      <Numbers r={report} v={v} name={name} gpu={gpu} loaded={loaded} />
-      <div className="fp-sep" />
       <div className="fp-row">
         <span className="k">Context for this chat</span>
         <span className="mini-seg" role="group" aria-label="Context for this chat">
@@ -439,7 +454,35 @@ function Body({ model }: { model: string }) {
       <div className="ctx-line">
         <CtxLine model={model} numCtx={numCtx} />
       </div>
-      <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
+    </>
+  );
+  const memory = <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />;
+  if (sheet) {
+    return (
+      <>
+        {verdict}
+        <div className="fp-sep" />
+        {context}
+        <button type="button" className="think fp-det" aria-expanded={details} onClick={() => setDetails(!details)}>
+          <span className="th-l">Details</span>
+          <span className="th-x">
+            <Icon id="down" />
+          </span>
+        </button>
+        <div hidden={!details}>
+          {numbers}
+          {memory}
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      {verdict}
+      {numbers}
+      <div className="fp-sep" />
+      {context}
+      {memory}
     </>
   );
 }

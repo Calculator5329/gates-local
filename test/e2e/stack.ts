@@ -143,7 +143,8 @@ async function startServer(): Promise<void> {
 type Seed =
   | { readonly kind: "none" }
   | { readonly kind: "long"; readonly messages: number; readonly at: number }
-  | { readonly kind: "design" | "readme"; readonly at: number };
+  | { readonly kind: "design"; readonly at: number; readonly code?: boolean }
+  | { readonly kind: "readme"; readonly at: number };
 
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
 async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string): Promise<string | null> {
@@ -158,7 +159,7 @@ async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings
   }
   const threadId =
     seed.kind === "long" ? seedLong(db, seed.messages, seed.at, "A long thread")
-    : seed.kind === "design" ? seedDesign(db, seed.at)
+    : seed.kind === "design" ? seedDesign(db, seed.at, seed.code)
     : seed.kind === "readme" ? seedReadme(db, seed.at)
     : null;
   await startServer();
@@ -168,6 +169,7 @@ async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings
 function seedOf(body: Record<string, unknown>): Seed {
   const at = typeof body["seedAt"] === "number" ? body["seedAt"] : Date.now();
   if (body["seed"] === "design" || body["seed"] === "readme") return { kind: body["seed"], at };
+  if (body["seed"] === "design-code") return { kind: "design", at, code: true };
   if (typeof body["seed"] === "number" && body["seed"] > 0) return { kind: "long", messages: body["seed"], at };
   return { kind: "none" };
 }

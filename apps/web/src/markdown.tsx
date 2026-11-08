@@ -3,7 +3,7 @@
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
 // as whole blocks (reveal.ts); half-written input still renders as far as it goes.
-import { type ReactNode, memo, useEffect, useState } from "react";
+import { type ReactNode, memo, useEffect, useRef, useState } from "react";
 import { Icon } from "./icons.tsx";
 
 type Block =
@@ -91,9 +91,14 @@ function parse(src: string): Block[] {
   return out;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))/g;
+const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)/g;
 
-/** Inline spans: code, bold, italics, links. Anything else is text. */
+/** A URL with a break offered after each / and - (and inside a run too long to fit), so a line never ends mid-word. */
+function wrapUrl(url: string): ReactNode[] {
+  return (url.match(/[^/-]{1,32}[/-]?|[/-]/g) ?? [url]).flatMap((part, i) => (i === 0 ? [part] : [<wbr key={i} />, part]));
+}
+
+/** Inline spans: code, bold, italics, links and bare URLs. Anything else is text. */
 export function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -107,11 +112,22 @@ export function inline(text: string): ReactNode[] {
     else if (m[3]) out.push(<em key={n++}>{s.slice(1, -1)}</em>);
     else if (m[4]) {
       const label = s.slice(1, s.indexOf("]("));
+      const isUrl = /^https?:\/\//.test(label);
       out.push(
-        <a key={n++} href={m[5]} target="_blank" rel="noreferrer noopener">
-          {label}
+        <a key={n++} href={m[5]} className={isUrl ? "url" : undefined} target="_blank" rel="noreferrer noopener">
+          {isUrl ? wrapUrl(label) : label}
         </a>,
       );
+    } else {
+      // a sentence's closing punctuation stays outside the link
+      const url = s.replace(/[.,;:!?]+$/, "");
+      out.push(
+        <a key={n++} href={url} className="url" target="_blank" rel="noreferrer noopener">
+          {wrapUrl(url)}
+        </a>,
+      );
+      last = at + url.length;
+      continue;
     }
     last = at + s.length;
   }
@@ -119,9 +135,33 @@ export function inline(text: string): ReactNode[] {
   return out;
 }
 
+/** Marks which sides of a sideways-scrolling block have more to show (`data-more`), for the edge fade on small screens. */
+function useEdges<T extends HTMLElement>(content: unknown) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    // only below 1024 px, and measured from the observer: a read here would lay out every block of a long thread at once
+    if (el === null || !window.matchMedia("(max-width: 1023px)").matches) return;
+    const mark = () => {
+      const sides = [el.scrollLeft > 1 ? "start" : "", el.scrollLeft < el.scrollWidth - el.clientWidth - 1 ? "end" : ""].filter((x) => x !== "").join(" ");
+      if (sides === "") delete el.dataset.more;
+      else el.dataset.more = sides;
+    };
+    el.addEventListener("scroll", mark, { passive: true });
+    const seen = new ResizeObserver(mark);
+    seen.observe(el);
+    return () => {
+      el.removeEventListener("scroll", mark);
+      seen.disconnect();
+    };
+  }, [content]);
+  return ref;
+}
+
 /** A fenced code block: the fence's language at the top left, its own copy button at the top right (shown on hover or focus). */
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  const pre = useEdges<HTMLPreElement>(code);
   useEffect(() => {
     if (!copied) return;
     const t = setTimeout(() => setCopied(false), 1500);
@@ -145,10 +185,38 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           {copied ? <span aria-live="polite">Copied</span> : null}
         </button>
       </div>
-      <pre>
+      <pre ref={pre}>
         <code>{code}</code>
       </pre>
     </div>
+  );
+}
+
+function Table({ b }: { b: Extract<Block, { t: "table" }> }) {
+  const ref = useEdges<HTMLTableElement>(b.rows.length);
+  return (
+    <table ref={ref}>
+      <thead>
+        <tr>
+          {b.head.map((cell, j) => (
+            <th key={j} className={b.num[j] ? "n" : undefined}>
+              {inline(cell)}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {b.rows.map((r, j) => (
+          <tr key={j}>
+            {b.head.map((_, col) => (
+              <td key={col} className={b.num[col] ? "n" : undefined}>
+                {inline(r[col] ?? "")}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -176,30 +244,7 @@ function renderBlock(b: Block, key: number): ReactNode {
     case "quote":
       return <blockquote key={key}>{inline(b.text)}</blockquote>;
     case "table":
-      return (
-        <table key={key}>
-          <thead>
-            <tr>
-              {b.head.map((cell, j) => (
-                <th key={j} className={b.num[j] ? "n" : undefined}>
-                  {inline(cell)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {b.rows.map((r, j) => (
-              <tr key={j}>
-                {b.head.map((_, col) => (
-                  <td key={col} className={b.num[col] ? "n" : undefined}>
-                    {inline(r[col] ?? "")}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
+      return <Table key={key} b={b} />;
   }
 }
 

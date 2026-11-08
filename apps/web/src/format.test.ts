@@ -1,6 +1,33 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, k, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, gb, k, otherCtxWords, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
+
+const SP = String.fromCharCode(160);
+
+describe("gb", () => {
+  it("keeps the number and its unit on one line", () => {
+    expect(gb(5.1 * 1024 ** 3)).toBe(`5.1${SP}GB`);
+  });
+});
+
+describe("shortAge, the drawer's one time format", () => {
+  const now = Date.UTC(2026, 10, 12, 20);
+  const ago = (ms: number) => shortAge(now - ms, now);
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+  it.each([
+    [10_000, "now"],
+    [5 * MIN, "5m"],
+    [3 * HOUR, "3h"],
+    [2 * DAY, "2d"],
+    [21 * DAY, "3w"],
+    [150 * DAY, "5mo"],
+    [800 * DAY, "2y"],
+  ])("%d ms ago is %s", (ms, want) => {
+    expect(ago(ms)).toBe(want);
+  });
+});
 
 const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
 describe("a Library source's size", () => {
@@ -10,7 +37,7 @@ describe("a Library source's size", () => {
     expect(size(1)).toBe("1 byte");
     expect(size(40_000)).toBe("39 KB");
     expect(size(5 * 1024 ** 2)).toBe("5 MB");
-    expect(size(3 * 1024 ** 3)).toBe("3.0 GB");
+    expect(size(3 * 1024 ** 3)).toBe(`3.0${SP}GB`);
   });
 });
 
@@ -58,7 +85,7 @@ describe("verdictOf", () => {
     const v = verdictOf({ ...base, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB });
     expect(v.word).toBe("Not enough memory at 16k");
     expect(v.chip).toBe("not enough memory");
-    expect(v.detail).toBe("needs 3.0 GB more");
+    expect(v.detail).toBe(`needs 3.0${SP}GB more`);
   });
 });
 
@@ -68,8 +95,8 @@ const fits = (numCtx: number, need: number): FitReport => ({ ...base, numCtx, ve
 
 describe("the other context size's words (F36b)", () => {
   it("keeps the memory and GPU words otherwise", () => {
-    expect(otherCtxWords(fits(16384, 6), fits(32768, 8.5))).toBe("still runs on GPU; uses 2.5 GB more");
-    expect(otherCtxWords(fits(16384, 6), { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB })).toBe("not enough memory; needs 3.0 GB more");
+    expect(otherCtxWords(fits(16384, 6), fits(32768, 8.5))).toBe(`still runs on GPU; uses 2.5${SP}GB more`);
+    expect(otherCtxWords(fits(16384, 6), { ...base, numCtx: 32768, needVramBytes: 20 * GIB, shortfallBytes: 3 * GIB })).toBe(`not enough memory; needs 3.0${SP}GB more`);
   });
 
 });
@@ -91,7 +118,7 @@ describe("decode speed", () => {
 describe("fileSize", () => {
   it("moves up a unit when rounding reaches 1024 (LS-01)", () => {
     expect(fileSize(1_048_064)).toBe("1 MB");
-    expect(fileSize(1_073_217_536)).toBe("1.0 GB");
+    expect(fileSize(1_073_217_536)).toBe(`1.0${SP}GB`);
   });
 
   it("stays in the unit below that", () => {

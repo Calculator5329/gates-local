@@ -114,7 +114,11 @@ export interface State {
   readonly ownerConfirm: boolean;
   readonly fitPanel: { readonly open: boolean; readonly model: string | null };
   /** The open popover; kb is the picker opened from the keyboard (Ctrl M), which shows digit keys. A thread menu from a sidebar row has the row's thread and opens at a point. */
-  readonly pop: { readonly id: "picker" | "plus" | "more"; readonly kb: boolean; readonly thread?: string; readonly at?: { readonly x: number; readonly y: number } } | null;
+  readonly pop: { readonly id: "picker" | "plus" | "more" | "opts"; readonly kb: boolean; readonly thread?: string; readonly at?: { readonly x: number; readonly y: number } } | null;
+  /** Below 1024 px the sidebar is a drawer over the page; this is whether it is open. */
+  readonly drawer: boolean;
+  /** On a phone, Settings shows its section list as its own screen instead of a section. */
+  readonly setList: boolean;
   readonly draft: string;
   /** The header title is an input (thread menu › Rename). */
   readonly renaming: boolean;
@@ -175,6 +179,8 @@ const initial: State = {
   ownerConfirm: false,
   fitPanel: { open: false, model: null },
   pop: null,
+  drawer: false,
+  setList: false,
   draft: "",
   renaming: false,
   searchOpen: false,

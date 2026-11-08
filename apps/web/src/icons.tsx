@@ -8,7 +8,7 @@ export type IconId =
   | "mark" | "pen" | "search" | "gear" | "down" | "left" | "arrow" | "check" | "checkc"
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
-  | "pencil" | "trash" | "box" | "wrench" | "keyboard";
+  | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right";
 
 export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   return (
@@ -69,6 +69,10 @@ export function Sprite() {
         <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" /></symbol>
         <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M20 7h-9" /><path d="M14 17H5" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></symbol>
         <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></symbol>
+        {/* client addition: the phone top bar's drawer button, two lines like T3's and Claude's */}
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 8h16" /><path d="M4 16h10" /></symbol>
+        <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+        <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4" /><path d="M3.3 19a10 10 0 1 1 17.4 0" /></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15" /></symbol>
         <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" /></symbol>
       </defs>

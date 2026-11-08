@@ -33,6 +33,12 @@ interface Shot {
 
 const settings = (label: string) => async (page: Page) => {
   await page.keyboard.press("Control+Comma");
+  if ((page.viewportSize()?.width ?? 1440) <= 640) {
+    // a phone has no section nav: back to the list, then the section
+    await page.getByRole("button", { name: "Back to Settings" }).click();
+    await page.locator(".set-list").getByRole("button", { name: label }).click();
+    return;
+  }
   await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
 };
 
@@ -303,5 +309,114 @@ for (const shot of SHOTS) {
         await page.screenshot({ path: path.join(SHOTS_DIR, `${file}.png`), animations: "disabled", caret: "hide" });
       });
     });
+  }
+}
+
+// ---------------------------------------------------------------- the phone
+// <SHOTS_DIR>/mobile/M-NN-<state>.png at 412x915, scale 2, touch, dark and light
+// (M-NN-light-<state>); also at 360x780 (M-NN-narrow-<state>) and at 768x1024 (M-NN-tablet-<state>),
+// except the states only a phone has.
+
+interface MobileShot extends Omit<Shot, "light" | "seed"> {
+  readonly seed?: "design-code";
+  readonly phoneOnly?: boolean;
+}
+
+const tap = (sel: string) => (p: Page) => p.locator(sel).first().tap();
+const isPhoneWidth = (p: Page) => (p.viewportSize()?.width ?? 0) <= 640;
+const threadMenu = (p: Page) => p.locator(isPhoneWidth(p) ? ".hdr-t" : "#moreBtn").first().tap();
+const drawer = async (p: Page) => {
+  await p.getByRole("button", { name: "Open threads" }).tap();
+  await expect(p.locator(".sb .sb-row").first()).toBeInViewport({ ratio: 1 });
+};
+const phoneSettings = (section?: string) => async (p: Page) => {
+  await drawer(p);
+  await p.locator(".sb").getByRole("button", { name: "Settings" }).tap();
+  if (section === undefined) return;
+  if (isPhoneWidth(p)) {
+    await p.locator(".set-list").getByRole("button", { name: section }).tap();
+    return;
+  }
+  // a tablet's sections are in the drawer
+  await p.getByRole("button", { name: "Open threads" }).tap();
+  await p.locator(".snav").getByRole("button", { name: section }).tap();
+};
+
+const MOBILE: readonly MobileShot[] = [
+  { name: "M-01-thread" },
+  { name: "M-02-drawer", act: drawer },
+  { name: "M-03-new", start: "new" },
+  { name: "M-04-picker", start: "new", act: tap("#modelBtn") },
+  {
+    name: "M-05-gpu",
+    act: async (p) => {
+      await threadMenu(p);
+      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).tap();
+      await expect(p.locator("#fitPanel")).toContainText("Context for this chat");
+    },
+  },
+  { name: "M-06-settings-list", act: phoneSettings() },
+  { name: "M-07-settings-models", act: phoneSettings("Models") },
+  { name: "M-08-settings-runtime", act: phoneSettings("Runtime") },
+  { name: "M-09-firstrun-found", start: "firstrun" },
+  { name: "M-10-firstrun-nomodels", scenario: "no-models", start: "firstrun" },
+  { name: "M-11-actions-tap", act: tap(".turn.a .md") },
+  { name: "M-12-code", seed: "design-code" },
+  { name: "M-13-chat-options", act: tap("#optBtn"), phoneOnly: true },
+  { name: "M-14-thread-menu", act: threadMenu },
+  {
+    name: "M-15-model-actions",
+    phoneOnly: true,
+    act: async (p) => {
+      await phoneSettings("Models")(p);
+      await p.locator(".mp-kebab").first().tap();
+      await expect(p.locator(".mp-menu")).toBeVisible();
+    },
+  },
+  {
+    name: "M-16-advanced",
+    phoneOnly: true,
+    act: async (p) => {
+      await phoneSettings("Advanced")(p);
+      await expect(p.locator("#gpuMemory .fp-v")).toBeVisible();
+    },
+  },
+  { name: "M-17-settings-list", phoneOnly: true, act: phoneSettings() },
+  { name: "M-18-models", phoneOnly: true, act: phoneSettings("Models") },
+  { name: "M-19-general", phoneOnly: true, act: phoneSettings("General") },
+];
+
+const NARROW = { width: 360, height: 780 };
+const TABLET = { width: 768, height: 1024 };
+
+for (const shot of MOBILE) {
+  for (const [size, vp] of [["", PHONE], ["narrow-", NARROW], ["tablet-", TABLET]] as const) {
+    if (size === "tablet-" && shot.phoneOnly === true) continue;
+    for (const theme of ["dark", "light"] as const) {
+      const file = shot.name.replace(/^(M-\d+)-/, `$1-${size}${theme === "light" ? "light-" : ""}`);
+      test.describe(file, () => {
+        test.use({
+          viewport: vp,
+          deviceScaleFactor: 2,
+          isMobile: true,
+          hasTouch: true,
+          scenario: shot.scenario ?? "models",
+          skipFirstRun: shot.start !== "firstrun",
+          colorScheme: theme,
+          ...(shot.start === "firstrun" ? { seed: 0 } : shot.seed === undefined ? {} : { seed: shot.seed }),
+        });
+        test("shot", async ({ page, open, seededThread }) => {
+          await page.clock.setFixedTime(NOW);
+          await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
+          if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
+          else await waitReady(page);
+          await shot.act?.(page);
+          await page.evaluate(() => document.fonts.ready.then(() => undefined));
+          await page.waitForTimeout(400);
+          mkdirSync(path.join(SHOTS_DIR, "mobile"), { recursive: true });
+          await page.screenshot({ path: path.join(SHOTS_DIR, "mobile", `${file}.png`), animations: "disabled", caret: "hide" });
+        });
+      });
+    }
   }
 }

@@ -28,7 +28,7 @@ import {
   stop,
 } from "./session.ts";
 import { NA, type Queued, type State, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
-import { closePop, closeTip, esc, place, togglePop } from "./ui.tsx";
+import { PHONE, SheetHead, closePop, closeTip, esc, isPhone, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
@@ -96,13 +96,6 @@ export function Composer() {
     if (ready) ensureFit(model, numCtx);
   }, [ready, model, numCtx, fit]);
 
-  useLayoutEffect(() => {
-    const el = ta.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [draft]);
-
   const blocked = !ready;
   const queueable = wait !== null;
   const shownTag = first ?? model;
@@ -141,6 +134,14 @@ export function Composer() {
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
   const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
+
+  // the placeholder counts: a long one wraps on a phone, and it changes as the runtime comes up
+  useLayoutEffect(() => {
+    const el = ta.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [draft, placeholder]);
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
@@ -188,7 +189,8 @@ export function Composer() {
           // the warning is about the words it was raised for
           onChange={(e) => setState({ draft: e.target.value, notice: null, stopAsk: null })}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // a touch keyboard's Enter is a new line; the send button sends
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) {
               e.preventDefault();
               submit();
             }
@@ -276,6 +278,10 @@ export function Composer() {
             )}
           </div>
           <div className="cf-r">
+            {/* a phone has no room for the pills and the meter: they live in this sheet */}
+            <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
+              <Icon id="sliders" />
+            </button>
             {isStreaming ? (
               <button type="button" className="send stop" aria-label="Stop" data-tip="Stop" onClick={stop}>
                 <span className="sqr" />
@@ -424,6 +430,7 @@ export function PlusMenu() {
   }, [open]);
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="plusMenu" role="menu" ref={ref}>
+      <SheetHead title="Add" />
       <button type="button" className="mi" role="menuitem" aria-disabled="true" data-attach>
         <Icon id="clip" />
         <span>
@@ -485,6 +492,66 @@ export function PlusMenu() {
           </span>
         </button>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- chat options (a phone's overflow)
+
+export function OptsMenu() {
+  const open = useStore((s) => s.pop?.id === "opts");
+  const imageGen = useStore(imageGenOf);
+  const think = useStore((s) => s.think);
+  const image = useStore((s) => s.image);
+  const used = useStore(usedTokens);
+  const numCtx = useStore((s) => s.numCtx);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const anchor = document.getElementById("optBtn");
+    if (open && ref.current && anchor) place(ref.current, anchor, "end");
+  }, [open]);
+  const pct = Math.min(1, used / numCtx);
+  return (
+    <div className={`pop menu${open ? " open" : ""}`} id="optsMenu" role="menu" aria-label="Chat options" ref={ref}>
+      <SheetHead title="Chat options" />
+      <button type="button" className="mi" role="menuitemcheckbox" aria-checked={think} onClick={() => setState({ think: !think })}>
+        <Icon id="bulb" />
+        <span>
+          <b>Thinking</b>
+          <small>{think ? "The model reasons first, shown as one line" : "Off: a faster first token"}</small>
+        </span>
+        <span className="switch" aria-hidden="true" />
+      </button>
+      {imageGen ? (
+        <button type="button" className="mi" role="menuitemcheckbox" aria-checked={image} onClick={() => setState({ image: !image })}>
+          <Icon id="image" />
+          <span>
+            <b>Image</b>
+            <small>{image ? "The model may queue a ComfyUI job" : "Off: no image jobs in this chat"}</small>
+          </span>
+          <span className="switch" aria-hidden="true" />
+        </button>
+      ) : (
+        <button type="button" className="mi off" role="menuitemcheckbox" aria-checked={false} aria-disabled="true" data-image-off>
+          <Icon id="image" />
+          <span>
+            <b>Image</b>
+            <small>Set it up in Settings to use it</small>
+          </span>
+          <span className="switch" aria-hidden="true" />
+        </button>
+      )}
+      {used > 0 ? (
+        <div className="mi st">
+          <Icon id="gauge" />
+          <span>
+            <b>Context {Math.round(pct * 100)}% used</b>
+            <small>
+              {(used / 1000).toFixed(1)}k of {k(numCtx)} tokens
+            </small>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -676,6 +743,7 @@ function choose(tag: string): void {
 export function Picker() {
   const pop = useStore((s) => (s.pop?.id === "picker" ? s.pop : null));
   const open = pop !== null;
+  const phone = useMedia(PHONE);
   const [q, setQ] = useState("");
   const [fam, setFam] = useState<string | null>(null);
   const [hl, setHl] = useState(-1);
@@ -701,6 +769,8 @@ export function Picker() {
     setFam(null);
     setHl(-1);
     setKb(pop?.kb ?? false);
+    // on a phone or touch screen the search waits for a tap unless Ctrl+M asked for it: focus would cover the sheet with the keyboard
+    if ((isTouch() || isPhone()) && pop?.kb !== true) return;
     const t = setTimeout(() => input.current?.focus(), 0);
     return () => clearTimeout(t);
   }, [open, pop?.kb]);
@@ -709,7 +779,13 @@ export function Picker() {
   useEffect(() => {
     if (!open) return;
     const installed = chatModels(getState().models ?? []);
-    for (const m of installed) ensureFit(m.name, numCtx);
+    for (const m of installed) {
+      ensureFit(m.name, numCtx);
+      // a phone's blocked row offers the largest smaller context that fits, so it needs those verdicts too
+      if (isPhone() && verdictFor({ fits, numCtx }, m.name)?.k === "no") {
+        for (const c of CONTEXT_SIZES) if (c < numCtx && (m.maxContext === undefined || c <= m.maxContext)) ensureFit(m.name, c);
+      }
+    }
     // download and downloading rows too: the fit check gives a model not installed yet the pre-download estimate
     for (const c of catalog ?? []) if (!c.installed && !installed.some((m) => m.name === c.name)) ensureFit(c.name, numCtx);
   }, [open, numCtx, fits, catalog]);
@@ -786,6 +862,12 @@ export function Picker() {
       }
       const tip = `${rowTip(r, sys)}${loaded ? "<br>Loaded now" : ""}`;
       if (r.v?.k === "no" && !r.frees) {
+        // a phone offers the largest smaller context that fits, right on the row
+        const smaller = CONTEXT_SIZES.findLast((c) => {
+          if (c >= numCtx || (r.info?.maxContext !== undefined && c > r.info.maxContext)) return false;
+          const f = fits[fitKey(r.tag, c)];
+          return f !== undefined && f !== "error" && verdictOf(f).k !== "no";
+        });
         return (
           <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-m={r.tag} data-tip={tip}>
             <span className="pk-c" />
@@ -795,11 +877,19 @@ export function Picker() {
                 <span className="pk-nm">{r.name}</span>
                 <small>{size}</small>
               </div>
+              <small className="pk-est">{`Needs ${gb(r.v.amt)} more`}</small>
             </div>
             <span className="pk-v no">{fitWord(r.v)}</span>
-            <button type="button" className="qa" data-memdet={r.tag} onClick={() => openFit(r.tag)}>
-              Memory details
-            </button>
+            <div className="pk-acts">
+              <button type="button" className="qa" data-memdet={r.tag} onClick={() => openFit(r.tag)}>
+                Memory details
+              </button>
+              {smaller !== undefined ? (
+                <button type="button" className="qa pk-sm" onClick={() => pickCtx(smaller)}>
+                  Use {k(smaller)}
+                </button>
+              ) : null}
+            </div>
           </div>
         );
       }
@@ -826,8 +916,15 @@ export function Picker() {
             <div className="pk-n">
               <span className="pk-nm">{r.name}</span>
               <small>{size}</small>
-              {r.tag === picked ? rec : null}
+              {r.tag === picked && !phone ? rec : null}
             </div>
+            {/* a phone's first line has no room for the label beside the name */}
+            {r.v !== undefined ? (
+              <small className="pk-est">
+                {`Est. ${gb(r.v.need)}`}
+                {r.tag === picked && phone ? rec : null}
+              </small>
+            ) : null}
           </div>
           {r.frees ? <span className="pk-v spill">Stops another chat</span> : <span className={`pk-v ${r.v?.k ?? ""}`}>{fitWord(r.v)}</span>}
         </button>
@@ -864,6 +961,7 @@ export function Picker() {
 
   return (
     <div className={`pop${open ? " open" : ""}${kb ? " kb" : ""}`} id="picker" role="dialog" aria-label="Choose a model" ref={ref}>
+      <SheetHead title="Model" sub={`Sizes at ${k(numCtx)} context`} />
       <div className="pk-h">
         <div className="pk-hin">
           <Icon id="search" />

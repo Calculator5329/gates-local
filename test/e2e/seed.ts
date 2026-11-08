@@ -69,8 +69,25 @@ const BOOKS_REPLY = [
 const START_REPLY =
   "Start with **Effect Schema in Practice** (2025). It assumes the least Effect background and its examples use the current `Schema` API. The 2026 book builds on it and goes further into services and layers.";
 
-/** The design's sidebar (S-01): titles and ages relative to `now`; returns the open thread's id. */
-export function seedDesign(dbPath: string, now: number): string {
+/** Content that must scroll in its own box or wrap on a phone (the mobile shots' long code block). */
+const CODE_REPLY = [
+  "Run this from the library folder. Every flag is spelled out so cron can run it unchanged:",
+  "",
+  "```sh",
+  'sqlite3 -readonly -header -column library.db "select title, year, isbn, publisher from books where title like \'%Effect%\' order by year desc, title asc limit 20;"',
+  "PATH=/usr/local/bin:/usr/bin:/bin node /srv/library/scripts/export-effect-books.mjs --format=markdown --out=/srv/library/notes/effect-books.md",
+  "```",
+  "",
+  "| Title | Year | Publisher | Pages |",
+  "| --- | --- | --- | --- |",
+  "| Effect: Schema, Services and Layers | 2026 | Northwind Technical Press | 412 |",
+  "| Effect Schema in Practice | 2025 | Independent | 288 |",
+  "",
+  "The schema docs are at https://effect.website/docs/schema/introduction/getting-started-with-effect-schema-and-the-current-api.",
+].join("\n");
+
+/** The design's sidebar (S-01): titles and ages relative to `now`; returns the open thread's id. With `code`, one more turn ends the thread (CODE_REPLY). */
+export function seedDesign(dbPath: string, now: number, code = false): string {
   const at = dayClock(now);
   const older: [string, number][] = [
     ["Draft the drive-sync README", zoned(wallClock(now).y, 9, 21, 11, 0)],
@@ -95,6 +112,12 @@ export function seedDesign(dbPath: string, now: number): string {
     { role: "user", content: "Which one should I start with?", at: now - 2 * MIN - 3000 },
     { role: "assistant", content: START_REPLY, thinking: "Pick the most introductory one.", model, stats: { promptTokens: 2010, completionTokens: 58, durationMs: 1900 }, at: now - 2 * MIN },
   ];
+  if (code) {
+    turns.push(
+      { role: "user", content: "Give me a command that exports them.", at: now - MIN },
+      { role: "assistant", content: CODE_REPLY, model, stats: { promptTokens: 2120, completionTokens: 180, durationMs: 3100 }, at: now - MIN + 4000 },
+    );
+  }
   return writeThreads(dbPath, now, older, "Library: Effect Schema books", turns);
 }
 

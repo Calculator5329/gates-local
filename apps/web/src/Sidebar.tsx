@@ -3,11 +3,11 @@
 // the Settings section nav, and the footer with the download and runtime rows.
 import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState } from "react";
 import { rtInfo, rtOf } from "./Banner.tsx";
-import { describeModel, gb, when } from "./format.ts";
+import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { leaveSettings, newThread, openSettings, openThread } from "./session.ts";
 import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
-import { closeTip, esc } from "./ui.tsx";
+import { closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "sliders"],
@@ -30,13 +30,74 @@ function useNow(ms: number): number {
   return now;
 }
 
-export function focusComposer(): void {
+/** Put the cursor in the message box. On touch only when asked (force): focus there pops the keyboard. */
+export function focusComposer(force = false): void {
+  if (!force && isTouch()) return;
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("#ta")?.focus());
 }
 
 export function goNew(): void {
-  newThread();
-  focusComposer();
+  closeDrawer(() => {
+    newThread();
+    focusComposer();
+  }, true);
+}
+
+// ---------------------------------------------------------------- the drawer (below 1024 px)
+// Opening pushes one history entry, so the back gesture closes it. Every other close pops that
+// entry first and acts once it is gone: an action that rewrites the hash (openThread) must not
+// rewrite the drawer's entry, or going back would land on the old thread.
+
+const DRAWER_ENTRY = "gl-drawer";
+let afterClose: (() => void) | null = null;
+let closeTimer: ReturnType<typeof setTimeout> | undefined;
+
+const onDrawerEntry = () => (history.state as { [DRAWER_ENTRY]?: boolean } | null)?.[DRAWER_ENTRY] === true;
+
+export function openDrawer(): void {
+  if (getState().drawer) return;
+  setState({ drawer: true, pop: null, searchOpen: false, search: "" });
+  if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
+  requestAnimationFrame(() => document.querySelector<HTMLElement>(".sb .sb-act, .sb button")?.focus());
+}
+
+/** After the drawer closes, focus goes to the top bar's first visible control: never a row sliding off screen. */
+function focusShell(): void {
+  requestAnimationFrame(() => {
+    for (const el of document.querySelectorAll<HTMLElement>(".hdr .bk, #menuBtn, .set-bar .set-done")) {
+      if (el.getClientRects().length > 0) return el.focus();
+    }
+  });
+}
+
+function drawerClosed(refocus: boolean): void {
+  clearTimeout(closeTimer);
+  setState({ drawer: false });
+  const then = afterClose;
+  afterClose = null;
+  if (refocus) focusShell();
+  then?.();
+}
+
+/** Close the drawer (when open), then run then(). With no drawer open, then() runs at once. */
+export function closeDrawer(then?: () => void, refocus = then === undefined): void {
+  if (!getState().drawer) return then?.();
+  if (!onDrawerEntry()) {
+    afterClose = then ?? null;
+    return drawerClosed(refocus);
+  }
+  afterClose = () => {
+    if (refocus) focusShell();
+    then?.();
+  };
+  history.back();
+  // a browser that never answers the back (none seen) still closes
+  closeTimer = setTimeout(() => drawerClosed(false), 400);
+}
+
+/** The back gesture or a history.back() left the drawer's entry. */
+export function onDrawerPop(): void {
+  if (getState().drawer && !onDrawerEntry()) drawerClosed(afterClose === null);
 }
 
 /** Ctrl K and the Search button: show the search field (leaving Settings first). */
@@ -44,6 +105,8 @@ export function openSearch(): void {
   const s = getState();
   if (s.view === "firstrun") return;
   if (s.view === "settings") leaveSettings();
+  // below 1024 px the search field lives in the drawer
+  if (window.innerWidth < 1024) openDrawer();
   setState({ searchOpen: true });
   requestAnimationFrame(() => document.querySelector<HTMLInputElement>("#searchIn")?.focus());
 }
@@ -80,6 +143,7 @@ function ThreadList() {
   // the row whose thread menu is open stays marked while the menu acts on it
   const menuFor = useStore((s) => (s.pop?.id === "more" ? (s.pop.thread ?? null) : null));
   const now = useNow(30_000);
+  const drawerWidth = useMedia("(max-width: 1023px)");
   const shown = q === "" ? threads : threads.filter((t) => t.title.toLowerCase().includes(q));
   if (shown.length === 0) {
     return <nav className="sb-list">{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
@@ -102,12 +166,12 @@ function ThreadList() {
               data-tipt={t.title}
               aria-haspopup="menu"
               aria-expanded={menuFor === t.id}
-              onClick={() => openThread(t.id)}
+              onClick={() => closeDrawer(() => openThread(t.id), true)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
               onKeyDown={(e) => rowMenuKey(e, t.id)}
             >
               <span className="t">{t.title}</span>
-              {live === t.id ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{w.ago}</span>}
+              {live === t.id ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
             </button>
           </Fragment>
         );
@@ -165,13 +229,13 @@ function SettingsNav() {
   return (
     <nav className="sb-body">
       <div className="snav">
-        <button type="button" className="sb-act back" onClick={leaveSettings}>
+        <button type="button" className="sb-act back" onClick={() => closeDrawer(leaveSettings, true)}>
           <Icon id="left" />
           <span className="grow">Back to chat</span>
           <span className="ks">Esc</span>
         </button>
         {SECTIONS.map(([id, label, icon]) => (
-          <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => openSettings(id)}>
+          <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
             <Icon id={icon} />
             <span className="grow">{label}</span>
           </button>
@@ -192,9 +256,9 @@ function DownloadRow() {
   if (!p) return null;
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
   const name = describeModel(p.name, catalog).name;
-  const tip = `<b>${esc(name)}</b> · ${p.totalBytes ? `${gb(p.completedBytes).replace(" GB", "")} of ${gb(p.totalBytes)}` : "starting"}. Opens the downloads in Settings.`;
+  const tip = `<b>${esc(name)}</b> · ${p.totalBytes ? `${gb(p.completedBytes).replace(`${NBSP}GB`, "")} of ${gb(p.totalBytes)}` : "starting"}. Opens the downloads in Settings.`;
   return (
-    <button type="button" className="rt" data-tip={tip} onClick={() => openSettings("models", true)}>
+    <button type="button" className="rt" data-tip={tip} onClick={() => closeDrawer(() => openSettings("models", true), true)}>
       <Icon id="download" />
       <span className="grow">
         <b>Downloading</b> · {pct}%
@@ -212,7 +276,7 @@ function RuntimeRow() {
   if (rtOf({ conn, runtime, settings }) === "ready") return null;
   const info = rtInfo({ conn, runtime, settings });
   return (
-    <button type="button" className="rt" data-tip={info.tip} onClick={() => openSettings("runtime")}>
+    <button type="button" className="rt" data-tip={info.tip} onClick={() => closeDrawer(() => openSettings("runtime"), true)}>
       <span className={`dot ${info.dot}`} />
       <span className="grow">{info.text}</span>
       <span className="pct" />
@@ -230,6 +294,9 @@ export function Sidebar() {
             <use href="#i-mark" />
           </svg>
           <span className="wordmark">Gates Local</span>
+          <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => closeDrawer()}>
+            <Icon id="x" />
+          </button>
         </div>
       )}
       {inSettings ? <SettingsNav /> : <ChatNav />}
@@ -237,7 +304,17 @@ export function Sidebar() {
         <DownloadRow />
         <RuntimeRow />
         {inSettings ? null : (
-          <button type="button" className="sb-set" onClick={() => openSettings()}>
+          <button
+            type="button"
+            className="sb-set"
+            onClick={() =>
+              closeDrawer(() => {
+                // a phone opens Settings on its section list
+                setState({ setList: true });
+                openSettings();
+              }, true)
+            }
+          >
             <Icon id="gear" />
             Settings
             <span className="ks" aria-label="Ctrl comma">

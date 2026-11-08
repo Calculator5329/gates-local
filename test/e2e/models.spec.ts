@@ -8,6 +8,12 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 const openModels = async (page: Page) => {
   await page.keyboard.press("Control+Comma");
+  if ((page.viewportSize()?.width ?? 1440) <= 640) {
+    // a phone has no section nav: back to the list, then the section
+    await page.getByRole("button", { name: "Back to Settings" }).click();
+    await page.locator(".set-list").getByRole("button", { name: "Models" }).click();
+    return;
+  }
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
 };
 
@@ -149,7 +155,8 @@ test("a running download shows its detail in the row and on Installed, and Cance
 
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
   await row.getByRole("button", { name: "Download", exact: true }).click();
-  const line = /^[\d.]+ of [\d.]+ GB · \d+ MB\/s · about .+ left$/;
+  // \s: a number stays on the line with its unit (a no-break space)
+  const line = /^[\d.]+ of [\d.]+\sGB · \d+\sMB\/s · about .+ left$/;
   await expect(row.locator(".prog-l span")).toHaveText(line, { timeout: 15_000 });
   await expect(row.getByRole("progressbar", { name: "Qwen 3.5 4B download" })).toBeVisible();
 
