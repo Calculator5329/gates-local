@@ -293,11 +293,20 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .qa:hover,.qa:focus-visible{color:var(--foreground);text-decoration-color:currentColor}
 .qa:disabled,.qa:disabled:hover{opacity:.4;cursor:not-allowed;color:var(--muted-foreground);text-decoration-color:var(--border-strong)}
 .prog-l .qa{margin-left:auto}
-/* F43b: a message waiting for setup: a muted clock line under the bubble, right-aligned.
-   F61: the line carries its own quiet "Cancel send", 12 px after the status like Retry on a stopped reply */
-.u-q{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
-.u-qs{display:inline-flex;align-items:center;gap:6px}
-.turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+/* why a reply stopped, under what it saved */
+.stop-note{font-size:13px;line-height:24px;color:var(--muted-foreground);margin-top:-12px}
+/* messages waiting in this chat, above the composer; one line each */
+.qt{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:2px}
+.qt-r{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;color:var(--muted-foreground)}
+.qt-r .qa{margin:0;flex:none}
+.qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
+.qt-s{flex:none}
+@media (max-width:640px){.qt-s{display:none}}
+/* the warning before a send stops another chat's reply */
+.stopask{margin:0 0 8px;padding:10px 12px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font-size:13.5px}
+.stopask p{margin:0 0 8px}
+.stopask-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stopask-n{display:inline-flex;align-items:center;gap:6px;margin-right:auto;font-size:13px;color:var(--muted-foreground)}
 /* a streaming reply shows whole blocks (reveal.ts): each fades in as it finishes, opacity only,
    and a quiet "Writing" sits under the last block until the turn ends */
 .md.live>:not(ul):not(ol),.md.live li{animation:fadein .12s ease-out}
