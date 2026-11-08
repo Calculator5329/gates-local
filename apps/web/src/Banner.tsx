@@ -4,17 +4,35 @@
 import type { ReactNode } from "react";
 import { Icon } from "./icons.tsx";
 import { recheckRuntime } from "./session.ts";
-import { type State, useStore } from "./store.ts";
+import { NA, type State, useStore } from "./store.ts";
 
 export type Rt = "ready" | "installing" | "starting" | "missing" | "wrong" | "stopped" | "error" | "offline";
 
-type RtSource = Pick<State, "conn" | "runtime">;
+/** settings, when given, lets the words say Gates Local runs its own copy. */
+type RtSource = Pick<State, "conn" | "runtime"> & Partial<Pick<State, "settings">>;
 
 export function rtOf(s: RtSource): Rt {
   if (s.conn.kind !== "open") return "offline";
   const st = s.runtime?.state;
   if (st === undefined) return "starting";
   return st === "wrong-service" ? "wrong" : st;
+}
+
+/**
+ * When Gates Local runs its own Ollama (Settings' runtimeMode "app"), the one
+ * sentence that says so and names any port it routed around; the ports come
+ * from the server's runtime status (busyPorts, never parsed from the detail). "" otherwise, and in
+ * the system-Ollama "wrong" state, which has its own words.
+ */
+export function ownCopyNote(s: RtSource): string {
+  const rt = rtOf(s);
+  if (rt === "wrong" || rt === "ready" || rt === "offline") return "";
+  const port = portOf(s.runtime?.baseUrl);
+  const busy = (s.runtime?.busyPorts ?? []).filter((p) => p !== port);
+  if (busy.length > 0) {
+    return `Something other than Ollama answers on ${busy.length === 1 ? "port" : "ports"} ${busy.join(" and ")}, so Gates Local uses its own Ollama on port ${port}.`;
+  }
+  return s.settings !== NA && s.settings?.runtimeMode === "app" ? `Gates Local uses its own Ollama on port ${port}.` : "";
 }
 
 export function portOf(baseUrl: string | undefined): string {
@@ -42,6 +60,7 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
   const rt = rtOf(s);
   const port = portOf(s.runtime?.baseUrl);
   const v = s.runtime?.version;
+  const own = ownCopyNote(s);
   switch (rt) {
     case "ready":
       return s.runtime?.owner === "app"
@@ -52,11 +71,11 @@ export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string
     case "starting":
       return { dot: "run", text: <b>Starting Ollama</b>, tip: `Waiting for the server on port ${port}.` };
     case "missing":
-      return { dot: "warn", text: <b>Ollama not installed</b>, tip: "No Ollama install found. Gates Local can install its own copy." };
+      return { dot: "warn", text: <b>Ollama not installed</b>, tip: own === "" ? "No Ollama install found. Gates Local can install its own copy." : `No Ollama install found. ${own}` };
     case "wrong":
       return { dot: "err", text: <><b>Port {port}</b> · busy</>, tip: `Something other than Ollama answers on port ${port}.` };
     case "stopped":
-      return { dot: "warn", text: <b>Ollama stopped</b>, tip: `Nothing answers on port ${port}. Start Ollama, then retry.` };
+      return { dot: "warn", text: <b>Ollama stopped</b>, tip: own === "" ? `Nothing answers on port ${port}. Start Ollama, then retry.` : `${own} It starts when Gates Local opens.` };
     case "error":
       return { dot: "err", text: <b>Ollama didn't start</b>, tip: "Ollama failed to start. Open Settings › Runtime for details." };
     case "offline":
@@ -87,6 +106,7 @@ export function Banner() {
   const rt = useStore(rtOf);
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
+  const own = useStore(ownCopyNote);
   // first run tells the runtime story itself; the banner under it stays quiet
   const firstRun = useStore((s) => s.view === "firstrun");
   const port = portOf(baseUrl);
@@ -128,7 +148,9 @@ export function Banner() {
     case "missing":
       return (
         <Shell icon={<Icon id="alert" cls="warn" />} role="alert" title="Ollama isn't installed">
-          <div className="bm">Install Ollama system-wide, then retry. Installing Gates Local's own copy is not available in this build.</div>
+          <div className="bm">
+            {own === "" ? "Install Ollama system-wide, then retry. Installing Gates Local's own copy is not available in this build." : `${own} Install Ollama from ollama.com, then retry.`}
+          </div>
           <div className="ba">
             <RetryButton primary />
           </div>
@@ -137,9 +159,13 @@ export function Banner() {
     case "stopped":
       return (
         <Shell icon={<Icon id="alert" cls="warn" />} role="alert" title="Ollama isn't running">
-          <div className="bm">
-            Nothing answers on <span className="mono">localhost:{port}</span>. Start Ollama, then retry.
-          </div>
+          {own === "" ? (
+            <div className="bm">
+              Nothing answers on <span className="mono">localhost:{port}</span>. Start Ollama, then retry.
+            </div>
+          ) : (
+            <div className="bm">{own} It starts when Gates Local opens; retry to check again.</div>
+          )}
           <div className="ba">
             <RetryButton primary />
           </div>

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
 import { startFakeOllama, type FakeOllama } from "./fake-ollama.ts";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -116,6 +117,8 @@ const run = (args: string[], env: Record<string, string> = {}) =>
 describe("fake nvidia-smi", () => {
   it("prints totals and the resident apps, plus ollama once a model is loaded", async () => {
     expect(await run(["--query-gpu=memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"])).toBe("16303, 4182, 12121\n");
+    // gpu.status's form (GPU_STATUS_ARGS): the card name, then the same totals
+    expect(await run([...GPU_STATUS_ARGS])).toBe("NVIDIA GeForce RTX 5070 Ti, 16303, 4182, 12121\n");
     const dir = path.join(homedir(), ".cache", "gates-local-lanes", "build-web", "unit");
     mkdirSync(dir, { recursive: true });
     const stateFile = path.join(mkdtempSync(path.join(dir, "gpu-")), "gpu.json");

@@ -3,22 +3,29 @@
 // control endpoint the specs call between journeys.
 //
 //   GET  /health            200 once the fake and the server are up
-//   POST /reset {scenario?, seed?, seedAt?, ...fakeOptions}
+//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, ...fakeOptions}
 //                           set the fake's scenario, then restart the server
 //                           on a fresh data dir (rediscovers Ollama). seed: N
 //                           writes one thread of N messages, seed: "design" the
 //                           design's sidebar (test/e2e/seed.ts), both pinned to
-//                           seedAt; the reply carries the open thread's id
+//                           seedAt; runtimeMode ("system" | "app") writes saved
+//                           settings in that mode, else first run picks it; the
+//                           reply carries the open thread's id
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
 //
 // The server exits on stdin EOF, so each child keeps a stdin pipe open for
-// its whole life. Nothing here talks to a real Ollama, GPU or nvidia-smi.
+// its whole life. Nothing here talks to a real Ollama, GPU or nvidia-smi, and
+// the server never looks for an Ollama binary (GATES_LOCAL_OLLAMA_BINARY=none)
+// or at this user's app data (XDG_DATA_HOME is the run's own), so the runtime
+// states are the same on every machine.
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage } from "node:http";
 import path from "node:path";
 import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
+import type { Settings } from "@gates-local/contracts";
+import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
 import { seedDesign, seedLong } from "./seed.ts";
 
 const runDir = path.join(DATA_ROOT, new Date().toISOString().replaceAll(/[:.]/g, "-"));
@@ -69,6 +76,8 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_SERVER_TOKEN: TOKEN,
     GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN,
     GATES_LOCAL_RUNTIME: "discover-only",
+    GATES_LOCAL_OLLAMA_BINARY: "none",
+    XDG_DATA_HOME: path.join(runDir, "xdg"),
   };
 }
 
@@ -79,13 +88,16 @@ async function startServer(): Promise<void> {
 /** What /reset may write before the server starts. */
 type Seed = { readonly kind: "none" } | { readonly kind: "long"; readonly messages: number; readonly at: number } | { readonly kind: "design"; readonly at: number };
 
-/** Restart on a fresh data dir, seeding threads first when asked; returns the seeded thread's id. */
-async function freshServer(seed: Seed = { kind: "none" }): Promise<string | null> {
+/** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
+async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"]): Promise<string | null> {
   await stopChild(server);
   resets += 1;
   dataDir = path.join(runDir, `data-${resets}`);
   mkdirSync(dataDir, { recursive: true });
   const db = path.join(dataDir, "threads.sqlite");
+  if (runtimeMode !== undefined) {
+    writeFileSync(path.join(dataDir, SETTINGS_FILE_NAME), JSON.stringify({ version: SETTINGS_FILE_VERSION, settings: defaultSettings(runtimeMode) }));
+  }
   const threadId = seed.kind === "long" ? seedLong(db, seed.messages, seed.at, "A long thread") : seed.kind === "design" ? seedDesign(db, seed.at) : null;
   await startServer();
   return threadId;
@@ -130,9 +142,9 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, ...fakeBody } = body;
         await fakeScenario({ scenario: "models", ...fakeBody });
-        const threadId = await freshServer(seedOf(body));
+        const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined);
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ dataDir, threadId }));
       } else if (route === "POST /restart") {
         const body = await readJson(req);

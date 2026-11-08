@@ -135,7 +135,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   const handlers = {
     ...createSettingsHandlers({ settings, push: options.push }),
     ...createGpuHandlers({ gpu }),
-    ...createRuntimeHandlers({ baseUrl: () => runtime.baseUrl(), catalog, settings, pulls, loader, log }),
+    // The catalog's fit survey reads the same injected GPU and memory as every other fit.
+    ...createRuntimeHandlers({ baseUrl: () => runtime.baseUrl(), catalog, settings, pulls, loader, log, ...(options.fit ? { fit: options.fit } : {}) }),
   } satisfies Partial<Handlers>;
 
   return {

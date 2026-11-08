@@ -171,7 +171,8 @@ function DownloadRow() {
 function RuntimeRow() {
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
-  const info = rtInfo({ conn, runtime });
+  const settings = useStore((s) => s.settings);
+  const info = rtInfo({ conn, runtime, settings });
   return (
     <button type="button" className="rt" data-tip={info.tip} onClick={() => openSettings("runtime")}>
       <span className={`dot ${info.dot}`} />

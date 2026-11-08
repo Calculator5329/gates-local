@@ -421,7 +421,7 @@ function Runtime() {
   const settings = useStore((s) => s.settings);
   const models = useStore((s) => s.models);
   const rt = rtOf({ conn, runtime });
-  const info = rtInfo({ conn, runtime });
+  const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
   const v = runtime?.version ? ` · Ollama ${runtime.version}` : "";

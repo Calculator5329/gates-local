@@ -290,6 +290,9 @@ function LiveTurnView({ threadId }: { threadId: string }) {
 
 const QUEUED_NONE: readonly Queued[] = [];
 
+/** From this many messages, turns out of view skip rendering work (styles.css `.col.long`). */
+const LONG_THREAD = 50;
+
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
@@ -328,7 +331,7 @@ export function Timeline({ threadId }: { threadId: string }) {
 
   return (
     <div className="tl" ref={tl}>
-      <div className="col" ref={col}>
+      <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {messages.map((m, i) => (m.role === "user" ? <UserTurn key={m.id} msg={m} /> : <AsstTurn key={m.id} msg={m} last={i === lastAsst && i === messages.length - 1} />))}
         {queued.map((q) => (
           <UserBubble key={q.id} text={q.text} time={turnTime(q.at)} queued={q} />
