@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-08: Switch runtimes while Ollama is down
+
+- Settings › Runtime offers the switch whenever Ollama is not usable, not
+  only when it runs. The direction comes from the runtime chosen, so a
+  system Ollama that is missing, stopped or has its port taken can be left
+  for the app's own copy.
+- Thinking's no-GPU start reads the GPU after held pushes replay, so a newer
+  GPU answer decides it (R-02).
+- Windows: `killNow` reaches a copy of Ollama that is still starting (R-04).
+
 ## 2026-11-08: A new default model takes effect while another is loaded
 
 - The app's model pick now counts a model that happens to be loaded as

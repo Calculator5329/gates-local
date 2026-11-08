@@ -449,11 +449,14 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
     const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
+    // Kept from the first moment: a shutdown that runs out of time during the start must still reach it (killNow).
+    spawned = child;
     child.on("error", (e) => {
       exited = e.message;
     });
     child.on("exit", (code, sig) => {
       exited = `exited with ${sig ?? `code ${code}`}`;
+      if (spawned === child) spawned = undefined;
     });
     child.unref();
 
@@ -509,10 +512,6 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       startedAt: Date.now(),
     });
     startedPid = proc.pid;
-    spawned = child;
-    child.once("exit", () => {
-      if (spawned === child) spawned = undefined;
-    });
     const modelsNote =
       (models ? ` Models from ${models.path}.` : "") +
       (readOnly ? ` Models in ${readOnly.path} belong to another user and are not writable here, so they are not shared.` : "");

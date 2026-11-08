@@ -335,6 +335,22 @@ describe("Thinking at the start", () => {
     expect(store.getState().think).toBe(true);
   });
 
+  it.each([
+    { answer: "nvidia", pushed: "none", think: false },
+    { answer: "none", pushed: "nvidia", think: true },
+  ])("a GPU push held behind a $answer answer ($pushed) decides it (R-02)", async ({ answer, pushed, think }) => {
+    const catalog = defer<unknown>();
+    const { store, push, calls, hydrated } = await boot({ "gpu.status": async () => ({ vendor: answer }), "models.catalog": () => catalog.promise });
+    await hydrated();
+    await vi.waitFor(() => expect(calls).toContain("models.catalog"));
+    await settled();
+    push("gpu.changed", { vendor: pushed });
+    catalog.resolve(methodSamples["models.catalog"].result);
+    await vi.waitFor(() => expect(store.getState().gpu).toEqual({ vendor: pushed }));
+    await settled();
+    expect(store.getState().think).toBe(think);
+  });
+
   it("keeps the person's choice across a reconnect", async () => {
     const dropped = defer<void>();
     const { store, calls, hydrated } = await boot(noGpuAnswer, [dropped.promise]);

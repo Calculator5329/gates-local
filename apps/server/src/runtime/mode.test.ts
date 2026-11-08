@@ -29,6 +29,7 @@ import {
 } from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
+const startDir = process.cwd();
 let work: string;
 let appDataDir: string;
 let home: string;
@@ -39,12 +40,15 @@ beforeEach(() => {
   work = tmpDir("mode");
   appDataDir = path.join(work, "data");
   home = path.join(work, "home");
+  // A faked win32 joins the models path with backslashes: on POSIX that is one odd folder name relative to here.
+  process.chdir(work);
 });
 
 afterEach(async () => {
   for (const rt of runtimes.splice(0)) await rt.stop();
   await system?.close();
   system = undefined;
+  process.chdir(startDir);
   removeDir(work);
 });
 
@@ -610,6 +614,20 @@ describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
     const { rt, pid } = await started("win32", cimFake([]));
     rt.killNow();
     await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+  });
+
+  it("reaches a copy still starting, before it has answered (R-04)", async () => {
+    const pidFile = path.join(work, "started-pid");
+    const neverAnswers = `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => undefined, 1000);\n`;
+    writeFakeBinary(installedBinary(appDataDir, VERSION), neverAnswers);
+    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake([]), externalBaseUrl: await nothingAt(), startTimeoutMs: 3000 });
+    const starting = rt.ensure();
+    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 2500 });
+    rt.killNow();
+    const end = await starting;
+    expect(end.state).toBe("error");
+    expect(end.detail).toContain("before it answered");
+    expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
   });
 
   it("leaves it running elsewhere, where the next run adopts it", async () => {
