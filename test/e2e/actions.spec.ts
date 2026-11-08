@@ -65,12 +65,17 @@ test.describe("while the server is down", () => {
     await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
 
     await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
-    const remove = page.getByRole("button", { name: /^Remove / }).first();
-    const label = (await remove.getAttribute("aria-label")) ?? "";
-    await remove.click();
-    const removed = page.getByRole("alert");
+    // Gemma: a tag without dots, so calm() can count one sentence
+    const more = page.getByRole("button", { name: "More for Gemma 4 12B" });
+    const label = (await more.getAttribute("aria-label")) ?? "";
+    await more.click();
+    await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+    const removed = dialog.getByRole("alert");
     await expect(removed).toHaveText(/^Couldn't remove \S+ because Gates Local isn't connected; try again once it reconnects\.$/);
     calm(await removed.textContent());
+    await dialog.getByRole("button", { name: "Cancel" }).click();
     await restart;
     // back online (a healthy runtime has no footer row, and only the runtime row has a dot), the model is still there
     await expect(page.locator(".sb-foot .rt .dot")).toHaveCount(0, { timeout: 10_000 });

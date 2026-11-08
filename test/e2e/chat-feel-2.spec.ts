@@ -188,11 +188,14 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
   expect(state.requests.findLast((r) => r.path === "/api/chat")?.body.options?.num_ctx).toBe(8192);
 });
 
-test("Settings > Models offers 8k as the default context", async ({ page, open }) => {
+test("Settings > Advanced offers 8k as the default context, and Settings > Models has no context control", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await expect(page.locator(".mp-row").first()).toBeVisible();
+  await expect(page.locator(".set").getByRole("group", { name: "Context window" })).toHaveCount(0);
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   const seg = page.locator(".set").getByRole("group", { name: "Context window" });
   await expect(seg.getByRole("button")).toHaveText(["8k", "16k", "32k", "64k"]);
   await seg.getByRole("button", { name: "8k" }).click();
@@ -201,7 +204,7 @@ test("Settings > Models offers 8k as the default context", async ({ page, open }
   await page.reload();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await expect(page.locator(".set").getByRole("group", { name: "Context window" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
 });
 

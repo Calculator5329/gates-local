@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-08: A Models page that is only models
+
+- Settings › Models holds what is installed, the default for new chats, and
+  a Download tab for new models. Each model's actions, Remove among them,
+  sit in the row's ⋯ menu at every width. The default context size moved
+  to Settings › Advanced. Character and system prompt settings left this
+  page.
+
 ## 2026-11-08: Dark by default
 
 - A new install starts dark, as the design always said (`docs/design/shell.md`),

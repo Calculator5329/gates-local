@@ -124,6 +124,98 @@ const SHOTS: readonly Shot[] = [
 
 const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-");
 
+// Settings › Models in the states of the models-a4 design (its a4-NN shot is
+// named in the comment): one theme each, some at phone size.
+const models = settings("Models");
+const kebab = (tag: string) => async (p: Page) => {
+  await models(p);
+  await p.locator(`.mp-row[data-dm="${tag}"]`).getByRole("button", { name: /^More for / }).click();
+};
+/** Slow the fake's pulls so a download is still running when the shot is taken. */
+const slowPulls = () => stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 400 * 1024 ** 2 });
+const downloadTab = async (p: Page) => {
+  await models(p);
+  await p.getByRole("tab", { name: /^Download/ }).click();
+};
+const runningDownload = async (p: Page) => {
+  await slowPulls();
+  await downloadTab(p);
+  await p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: "Download", exact: true }).click();
+  await expect(p.locator(".dlrow.dlg .prog-l")).toBeVisible();
+  await p.mouse.move(0, 0); // no tooltip left over from the click
+  await p.waitForTimeout(2500);
+};
+const PHONE = { width: 412, height: 915 };
+
+interface ModelsShot {
+  readonly name: string;
+  readonly theme: "dark" | "light";
+  readonly scenario?: Scenario;
+  readonly viewport?: { width: number; height: number };
+  readonly act: (page: Page) => Promise<void>;
+}
+
+const MODELS_SHOTS: readonly ModelsShot[] = [
+  // a4-01, a4-11
+  { name: "M-01-installed-dark", theme: "dark", act: models },
+  { name: "M-02-installed-light", theme: "light", act: models },
+  // a4-02
+  { name: "M-03-row-menu-dark", theme: "dark", act: kebab("gemma4:12b") },
+  // a4-04
+  {
+    name: "M-04-remove-default-dark",
+    theme: "dark",
+    act: async (p) => {
+      await kebab("qwen3.5:9b")(p);
+      await p.getByRole("menuitem", { name: /^Remove…/ }).click();
+      await expect(p.getByRole("dialog")).toBeVisible();
+    },
+  },
+  // a4-05, a4-12
+  { name: "M-05-download-running-dark", theme: "dark", act: runningDownload },
+  { name: "M-06-download-running-light", theme: "light", act: runningDownload },
+  // a4-09
+  { name: "M-10-zero-models-dark", theme: "dark", scenario: "no-models", act: models },
+  // a4-15, a4-16
+  { name: "M-11-phone-installed-dark", theme: "dark", viewport: PHONE, act: models },
+  { name: "M-12-phone-download-dark", theme: "dark", viewport: PHONE, act: runningDownload },
+  // every row's actions control inside its row, at the two widths the e2e pins
+  { name: "M-14-installed-1280-dark", theme: "dark", viewport: { width: 1280, height: 800 }, act: models },
+  { name: "M-15-installed-360-dark", theme: "dark", viewport: { width: 360, height: 800 }, act: models },
+  // a4-14
+  {
+    name: "M-13-default-dropdown-dark",
+    theme: "dark",
+    act: async (p) => {
+      await models(p);
+      await p.getByRole("button", { name: /^Default for new chats:/ }).click();
+    },
+  },
+];
+
+test.describe("models page", () => {
+  for (const shot of MODELS_SHOTS) {
+    test.describe(shot.name, () => {
+      test.use({
+        scenario: shot.scenario ?? "models",
+        colorScheme: shot.theme,
+        ...(shot.viewport ? { viewport: shot.viewport } : {}),
+      });
+      test("shot", async ({ page, open, seededThread }) => {
+        await page.clock.setFixedTime(NOW);
+        await open(`#thread=${seededThread ?? ""}`);
+        // with no models the composer stays disabled, so only the runtime dot says ready
+        if (shot.scenario === undefined) await waitReady(page);
+        else await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+        await shot.act(page);
+        await page.evaluate(() => document.fonts.ready.then(() => undefined));
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: path.join(SHOTS_DIR, `${shot.name}.png`), animations: "disabled", caret: "hide" });
+      });
+    });
+  }
+});
+
 test.use({ seed: "design", seedAt: NOW, timezoneId: "America/Chicago", locale: "en-US" });
 
 test.beforeAll(() => mkdirSync(SHOTS_DIR, { recursive: true }));
