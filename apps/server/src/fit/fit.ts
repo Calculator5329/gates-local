@@ -16,7 +16,7 @@ import {
 } from "./constants.ts";
 import { checkNumCtx, estimateNeed, parseArchInfo, type EstimateOptions } from "./estimate.ts";
 import { formatBytes, formatGb } from "./format.ts";
-import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemAvailable } from "./gpu.ts";
+import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemAvailable, untilAborted } from "./gpu.ts";
 import { fetchPs, fetchShow, fetchTags, findLoaded, sameModel, type PsEntry, type PsResponse, type TagsResponse } from "./ollama.ts";
 import {
   FitError,
@@ -143,6 +143,8 @@ export interface FitDeps {
   now?: () => number;
   margins?: Margins;
   estimate?: EstimateOptions;
+  /** Ends the check early: every Ollama request, both nvidia-smi runs and the meminfo read. */
+  signal?: AbortSignal;
 }
 
 export interface FitCheck {
@@ -162,12 +164,16 @@ interface Readings {
 
 async function takeReadings(deps: FitDeps): Promise<Readings> {
   const now = deps.now ?? Date.now;
-  const [gpu, memAvailableBytes, ps, tags] = await Promise.all([
-    readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, now),
-    readMemAvailable(deps.readMeminfo ?? defaultMeminfo),
-    fetchPs(deps.baseUrl),
-    fetchTags(deps.baseUrl),
-  ]);
+  const { signal } = deps;
+  const [gpu, memAvailableBytes, ps, tags] = await untilAborted(
+    Promise.all([
+      readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, now, signal),
+      readMemAvailable(deps.readMeminfo ?? defaultMeminfo, signal),
+      fetchPs(deps.baseUrl, signal),
+      fetchTags(deps.baseUrl, signal),
+    ]),
+    signal,
+  );
   return { gpu, memAvailableBytes, ps, tags };
 }
 
@@ -182,7 +188,7 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
 
   const tag = r.tags.models.find((m) => sameModel(m.name, model));
   if (!tag) throw new FitError("model-not-found", `${model} is not in /api/tags`);
-  const show = await fetchShow(deps.baseUrl, model);
+  const show = await untilAborted(fetchShow(deps.baseUrl, model, deps.signal), deps.signal);
   const arch = parseArchInfo(model, show.model_info);
   const ctx = checkNumCtx(model, numCtx, arch.contextLength);
   if (!ctx.ok) {
@@ -221,10 +227,10 @@ export async function checkFit(deps: FitDeps & { model: string; numCtx: number }
 
 /** After a real load: the /api/ps size vs size_vram replaces the estimate. */
 export async function measuredFit(deps: FitDeps & { model: string; numCtx: number }): Promise<FitCheck> {
-  const [ps, gpu] = await Promise.all([
-    fetchPs(deps.baseUrl),
-    readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, deps.now ?? Date.now),
-  ]);
+  const [ps, gpu] = await untilAborted(
+    Promise.all([fetchPs(deps.baseUrl, deps.signal), readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, deps.now ?? Date.now, deps.signal)]),
+    deps.signal,
+  );
   const loaded = findLoaded(ps, deps.model);
   if (!loaded) throw new FitError("not-loaded", `${deps.model} is not in /api/ps; nothing to measure`);
   return { report: measuredReport(loaded, deps.numCtx, gpu, ps.models.length), gpu };
@@ -250,7 +256,7 @@ export async function checkModels(deps: FitDeps & { numCtx: number; models?: rea
   const checks: FitCheck[] = [];
   for (const name of names) {
     if (deps.models === undefined) {
-      const show = await fetchShow(deps.baseUrl, name);
+      const show = await untilAborted(fetchShow(deps.baseUrl, name, deps.signal), deps.signal);
       if (show.capabilities && !show.capabilities.includes("completion")) continue;
     }
     const floor = checkNumCtx(name, deps.numCtx);

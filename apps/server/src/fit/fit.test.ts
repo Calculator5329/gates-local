@@ -218,6 +218,30 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     expect(check.report.spillRamBytes).toBe(need - (9468 * MIB - VRAM_SAFETY_MARGIN_BYTES));
   });
 
+  it("R2-02: an abort ends the check while nvidia-smi and meminfo never answer, and reaches both", async () => {
+    const s = await fakeOllama();
+    const seen: (AbortSignal | undefined)[] = [];
+    const never = <T,>(signal: AbortSignal | undefined) => (seen.push(signal), new Promise<T>(() => {}));
+    const controller = new AbortController();
+    const reason = new Error("shutting down");
+    const check = checkFit({
+      baseUrl: s.baseUrl,
+      model: "qwen3.5:9b",
+      numCtx: 16384,
+      runNvidiaSmi: (_args, signal) => never<string>(signal),
+      readMeminfo: (signal) => never<string>(signal),
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const started = Date.now();
+    controller.abort(reason);
+    await expect(check).rejects.toBe(reason);
+    expect(Date.now() - started).toBeLessThan(500);
+    // Two nvidia-smi runs and one meminfo read, each handed the check's signal.
+    expect(seen).toHaveLength(3);
+    expect(seen.every((sig) => sig?.aborted === true)).toBe(true);
+  });
+
   it("refuses below the floor before any request or nvidia-smi run", async () => {
     const s = await fakeOllama();
     const run = smi(MACHINE_GPU, MACHINE_APPS);

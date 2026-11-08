@@ -108,9 +108,10 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   loader = createModelLoader({
     baseUrl: () => runtime.baseUrl(),
     push: (load) => options.push("models.load", load),
-    listLoaded: (url) => listLoaded(url),
+    listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
-    fit: async (model, numCtx, baseUrl) => (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report,
+    // `signal` (shutdown, a switch) ends every request and child process of the check.
+    fit: async (model, numCtx, baseUrl, signal) => (await checkFit({ ...options.fit, baseUrl, model, numCtx, signal })).report,
     onLoaded: () => gpu.poke(),
     ...(options.lease ? { lease: options.lease } : {}),
     log,

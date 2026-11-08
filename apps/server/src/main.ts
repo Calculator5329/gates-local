@@ -101,13 +101,14 @@ async function main(): Promise<void> {
   const fit = {
     ...(smiCommand
       ? {
-          runNvidiaSmi: (args: readonly string[]) =>
+          // A called-off fit (shutdown, a runtime switch) kills the child.
+          runNvidiaSmi: (args: readonly string[], signal?: AbortSignal) =>
             new Promise<string>((resolve, reject) =>
-              execFile(smiCommand, [...args], { timeout: 10_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+              execFile(smiCommand, [...args], { timeout: 10_000, ...(signal ? { signal } : {}) }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
             ),
         }
       : {}),
-    ...(meminfoPath ? { readMeminfo: () => readFile(meminfoPath, "utf8") } : {}),
+    ...(meminfoPath ? { readMeminfo: (signal?: AbortSignal) => readFile(meminfoPath, { encoding: "utf8", ...(signal ? { signal } : {}) }) } : {}),
   };
 
   let server: WsServer | undefined;

@@ -90,8 +90,12 @@ export interface TurnLoad {
 }
 
 export interface AdmitOptions {
-  /** The fit check for this turn; default the loader's own `fit` against `baseUrl`. */
-  readonly fit?: () => Promise<FitReport>;
+  /**
+   * The fit check for this turn; default the loader's own `fit` against
+   * `baseUrl`. `signal` aborts when the turn stops waiting, the runtime
+   * switches or the loader closes.
+   */
+  readonly fit?: (signal: AbortSignal) => Promise<FitReport>;
   /** Abort stops waiting for the gate; admit rejects with AdmitCancelled. */
   readonly signal?: AbortSignal;
 }
@@ -144,9 +148,14 @@ export interface ModelLoader {
 export interface ModelLoaderDeps {
   readonly baseUrl: () => string | undefined;
   readonly push: (load: ModelLoad) => void;
-  readonly listLoaded: (baseUrl: string) => Promise<readonly LoadedModel[]>;
-  /** The fit check for models.load (and a turn's admit unless it brings its own), against the captured runtime. */
-  readonly fit: (model: string, numCtx: number, baseUrl: string) => Promise<FitReport>;
+  /** /api/ps; `signal` ends the read (shutdown, a runtime switch). */
+  readonly listLoaded: (baseUrl: string, signal: AbortSignal) => Promise<readonly LoadedModel[]>;
+  /**
+   * The fit check for models.load (and a turn's admit unless it brings its
+   * own), against the captured runtime; `signal` ends every request and
+   * child process it runs.
+   */
+  readonly fit: (model: string, numCtx: number, baseUrl: string, signal: AbortSignal) => Promise<FitReport>;
   /** The load gate; default an in-process FIFO mutex (see LoadGate). */
   readonly gate?: LoadGate;
   /** models.load holds a shared chat claim, so it never loads beside an image job. */
@@ -246,9 +255,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   };
 
   /** /api/ps by tag, pruning the owned list on the way when `gen` is still current. */
-  const residency = async (baseUrl: string, gen: number): Promise<Residency> => {
+  const residency = async (baseUrl: string, gen: number, signal: AbortSignal): Promise<Residency> => {
     try {
-      const loaded = await deps.listLoaded(baseUrl);
+      const loaded = await deps.listLoaded(baseUrl, signal);
       // A reading of the old runtime says nothing about what the app owns now.
       if (gen === generation) prune(loaded.map((m) => m.name));
       return { ok: true, models: new Map(loaded.map((m) => [canonicalTag(m.name), m])) };
@@ -283,7 +292,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const before = stopped();
       if (before) return finish(before);
       if (removing.has(tag)) return finish({ model, numCtx, state: "error", message: removingMessage(model) });
-      const here = await residency(baseUrl, gen);
+      const here = await residency(baseUrl, gen, signal);
       const afterPs = stopped();
       if (afterPs) return finish(afterPs);
       if (!here.ok) return finish({ model, numCtx, state: "error", message: PS_UNREADABLE_MESSAGE });
@@ -291,7 +300,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
         // Someone else's: say it is ready, never preload it, never claim it.
         return finish({ model, numCtx, state: "ready", message: `${model} is already in memory, loaded by another program; the app leaves it to that program.` });
       }
-      const report = await deps.fit(model, numCtx, baseUrl);
+      const report = await deps.fit(model, numCtx, baseUrl, signal);
       const afterFit = stopped();
       if (afterFit) return finish(afterFit);
       if (report.verdict === "refuse") return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.` });
@@ -395,13 +404,15 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
             }
             signal?.addEventListener("abort", onAbort, { once: true });
             runtimeGone.addEventListener("abort", onRuntimeGone, { once: true });
-            const fit = options.fit ?? (() => deps.fit(model, ctx, baseUrl));
+            // One signal ends the residency read and the fit: the turn's own abort or the runtime's.
+            const reads = signal === undefined ? runtimeGone : AbortSignal.any([signal, runtimeGone]);
+            const fit = options.fit ?? ((s: AbortSignal) => deps.fit(model, ctx, baseUrl, s));
             gate(async () => {
               if (gone) return;
               try {
-                const here = await residency(baseUrl, gen);
+                const here = await residency(baseUrl, gen, reads);
                 if (gone) return;
-                const report = await fit();
+                const report = await fit(reads);
                 if (gone) return;
                 done();
                 if (ended) return reject(new AdmitCancelled(`the turn on ${model} ended before it was admitted`));
@@ -447,7 +458,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           const open = notice;
           if (answered || open === undefined || baseUrl === undefined || gen !== generation) return;
           // Ended before a token (an error or a cancel mid-load): report what is true now.
-          void residency(baseUrl, gen).then((here) => {
+          void residency(baseUrl, gen, current.signal).then((here) => {
             if (gen !== generation) return;
             if (here.ok && here.models.has(tag)) loaded(model, numCtx, open);
             else closeNotice(open, { model, numCtx, state: "unloaded" });

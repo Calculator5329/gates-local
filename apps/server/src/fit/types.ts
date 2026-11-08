@@ -74,7 +74,10 @@ export class FitError extends Error {
   }
 }
 
-/** Runs nvidia-smi with the given args and resolves its stdout. */
-export type NvidiaSmiRunner = (args: readonly string[]) => Promise<string>;
-/** Resolves the text of /proc/meminfo. */
-export type MeminfoReader = () => Promise<string>;
+/**
+ * Runs nvidia-smi with the given args and resolves its stdout. `signal`
+ * (when given) kills the child: a fit that is called off never waits on it.
+ */
+export type NvidiaSmiRunner = (args: readonly string[], signal?: AbortSignal) => Promise<string>;
+/** Resolves the text of /proc/meminfo; `signal` ends the read early. */
+export type MeminfoReader = (signal?: AbortSignal) => Promise<string>;
