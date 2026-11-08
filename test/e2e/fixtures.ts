@@ -32,8 +32,8 @@ export const stack = {
   },
   /** Stop the server, wait downMs, start it again on the same data. */
   restart: (downMs = 0) => control("/restart", { downMs }),
-  /** Switch the fake's behaviour mid-test (options such as tokenDelayMs). */
-  scenario: (scenario: Scenario, options: Record<string, number> = {}) => control("/scenario", { scenario, ...options }),
+  /** Switch the fake's behaviour mid-test (options such as tokenDelayMs; without `installed` the scenario's own models return). */
+  scenario: (scenario: Scenario, options: Record<string, number | readonly string[]> = {}) => control("/scenario", { scenario, ...options }),
 };
 
 interface Fixtures {

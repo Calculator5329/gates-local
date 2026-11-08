@@ -3,7 +3,7 @@
 // reports. One that reports no maximum runs at the safe fallback.
 import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
-import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 const stopButton = (page: Page) => page.getByRole("button", { name: "Stop" });
 
@@ -63,9 +63,11 @@ test.describe("a model with a 2,048 context window", () => {
 });
 
 test.describe("a 2,048 model when a reply ends while Settings is open", () => {
-  test.use({ scenario: "slow-drip", installed: ["tiny-chat:2k"] });
+  test.use({ installed: ["tiny-chat:2k"] });
 
   test("Settings › Advanced gets its answer again rather than checking forever", async ({ page, open }) => {
+    // about 10 s of reply, so Settings is open well before it ends even on a busy machine
+    await stack.scenario("slow-drip", { tokenDelayMs: 100, firstTokenDelayMs: 0, installed: ["tiny-chat:2k"] });
     let ended = false;
     const replyEnded = new Promise<void>((resolve) => {
       page.on("websocket", (ws) => {
