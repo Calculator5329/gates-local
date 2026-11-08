@@ -25,7 +25,7 @@ import { createRuntimeSwitch, type RuntimeSwitch } from "./switch.ts";
 export const MODELS_REFRESH_MIN_MS = 2000;
 /** whisper-server's MainPID changes only on a restart; re-read it this often. */
 const WHISPER_PID_TTL_MS = 60_000;
-/** How long a switch waits for the old runtime's turns to end before it stops that runtime. */
+/** How long a switch waits for the old runtime's turns to end before it fails and keeps that runtime. */
 const TURN_DRAIN_MS = 10_000;
 
 type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
@@ -53,6 +53,8 @@ export interface ModelServicesOptions {
   readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
   /** The app's one GPU lease: models.load takes a shared chat claim on it. */
   readonly lease?: GpuLease;
+  /** How long a switch waits for the old runtime's turns to end before it fails (default 10 s). */
+  readonly turnDrainMs?: number;
 }
 
 export async function createModelServices(options: ModelServicesOptions): Promise<ModelServices> {
@@ -80,19 +82,21 @@ export async function createModelServices(options: ModelServicesOptions): Promis
       // Before the old runtime stops: what the app owned in it is not its own any more, and
       // loads and turns are refused until the new runtime's ensure settles (afterSwitch).
       loader?.runtimeChanged();
-      // Every turn reserved against the old runtime was told to end; wait for them, so none
-      // sends another request to a runtime being stopped. Bounded: a stuck turn cannot wedge
-      // the switch (and every ensure queued behind it).
+      // Every turn reserved against the old runtime was told to end, and a turn ends at once
+      // (app.ts drops whatever it waits on); wait for them, so none sends another request to a
+      // runtime being stopped. Bounded: a turn still running after the bound fails the switch,
+      // which keeps the old runtime (never stops it under a running turn).
       if (loader === undefined) return;
       const drained = loader.turnsEnded();
+      const drainMs = options.turnDrainMs ?? TURN_DRAIN_MS;
       const ended = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), TURN_DRAIN_MS);
+        const timer = setTimeout(() => resolve(false), drainMs);
         void drained.then(() => {
           clearTimeout(timer);
           resolve(true);
         });
       });
-      if (!ended) log(`runtime switch: turns on the old runtime still running after ${TURN_DRAIN_MS} ms; stopping it anyway`);
+      if (!ended) throw new Error(`turns on the old runtime still running after ${drainMs} ms`);
     },
     afterSwitch: () => loader?.runtimeSettled(),
     log,

@@ -42,7 +42,7 @@ async function models(url: string): Promise<string | undefined> {
   return r.kind === "response" ? (JSON.parse(r.body) as { OLLAMA_MODELS: string }).OLLAMA_MODELS : undefined;
 }
 
-async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease): Promise<ModelServices> {
+async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number): Promise<ModelServices> {
   const home = path.join(work, "home");
   const s = await createModelServices({
     dataDir,
@@ -51,6 +51,7 @@ async function services(dataDir: string, runtime: Record<string, unknown>, lease
     fit,
     log: () => undefined,
     ...(lease ? { lease } : {}),
+    ...(turnDrainMs === undefined ? {} : { turnDrainMs }),
   });
   s.gpu.stop();
   open.push(s);
@@ -183,6 +184,7 @@ interface RigOptions {
   readonly lease?: GpuLease;
   /** The fit readings the app's turns use (default: plenty of free VRAM). */
   readonly fit?: AppDeps["fit"];
+  readonly turnDrainMs?: number;
 }
 
 /**
@@ -202,11 +204,11 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     ...routes,
   });
   servers.push(old);
-  const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease);
+  const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease, options.turnDrainMs);
   expect(s.runtime.mode()).toBe("system");
   expect((await s.runtime.ensure()).state).toBe("ready");
   const store = openThreadStore(path.join(work, "threads.sqlite"));
-  const events: { type: string; code?: string; message?: string; partial?: { id: string; content: string; thinking?: string } }[] = [];
+  const events: { type: string; code?: string; message?: string; text?: string; neededBy?: string; partial?: { id: string; content: string; thinking?: string } }[] = [];
   const app = createApp({
     store,
     runtime: s.runtime,
@@ -298,6 +300,99 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     await r.done();
   });
 
+  it("a tool that never lets go: the switch ends the turn now (one runtime-changed, GPU claim released) and completes; the tool's late result is dropped", async () => {
+    const tool = signalled();
+    const queuedOnce = signalled();
+    const cancelled: string[] = [];
+    const image = {
+      current: () => ({ state: "off", owner: "none" }),
+      generate: async () => {
+        queuedOnce.resolve();
+        await tool.promise;
+        return { jobId: "job-late" };
+      },
+      cancel: (jobId: string) => {
+        cancelled.push(jobId);
+        return { cancelled: true };
+      },
+    } as unknown as ImageModule;
+    const lease = createGpuLease();
+    const r = await rig(
+      {
+        "POST /api/show": (_b, res) => json(res, 200, { ...(SHOW as object), capabilities: ["completion", "tools"] }),
+        "POST /api/chat": (_b, res) => {
+          res.writeHead(200, { "content-type": "application/x-ndjson" });
+          res.end(line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true, done_reason: "stop" }));
+        },
+      },
+      { image, lease },
+    );
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
+    expect(await settledWithin(queuedOnce.promise, 1000)).toEqual({ resolved: undefined });
+    expect(lease.status().holders).toBe(1);
+    const started = Date.now();
+    // The tool is still held: the switch must not wait on it (nor time out and go on).
+    expect(await settledWithin(r.s.runtime.setMode("app"), 2000)).toMatchObject({ resolved: { owner: expect.any(String) } });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(r.s.runtime.mode()).toBe("app");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toHaveLength(1);
+    expectRuntimeChangedEnd(r.events);
+    const seen = r.events.length;
+    // The stuck operation finishes in the background: its result is dropped, its job taken back.
+    tool.resolve();
+    await sleep(100);
+    expect(r.events).toHaveLength(seen);
+    expect(r.chats()).toBe(1);
+    expect(cancelled).toEqual(["job-late"]);
+    await r.done();
+  });
+
+  it("a reservation that never ends: the drain bound fails the switch (status error) and keeps the old runtime", async () => {
+    const r = await rig({}, { turnDrainMs: 200 });
+    const before = r.s.runtime.baseUrl();
+    // A turn the switch cannot end early (here a bare reservation nobody ends).
+    const stuck = r.s.loader.reserve(MODEL);
+    const failed = await settledWithin(r.s.runtime.setMode("app"), 2000);
+    expect(failed).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
+    expect(r.s.runtime.mode()).toBe("system");
+    expect(r.s.runtime.baseUrl()).toBe(before);
+    expect(r.s.runtime.status()).toMatchObject({ state: "error", detail: expect.stringMatching(/still running/) });
+    stuck.end();
+    await r.done();
+  });
+});
+
+describe("R3-02: a switch saves the reply streamed so far", () => {
+  it("text and thinking already sent are saved, marked stopped, with one runtime-changed event", async () => {
+    const streaming = signalled();
+    const r = await rig({
+      "POST /api/chat": (_b, res) => {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.write(line({ model: MODEL, message: { role: "assistant", content: "", thinking: "Let me see. " }, done: false }));
+        res.write(line({ model: MODEL, message: { role: "assistant", content: "Already " }, done: false }));
+        res.write(line({ model: MODEL, message: { role: "assistant", content: "streamed" }, done: false }));
+        streaming.resolve();
+        // Never a done line: the reply is mid-stream when the switch lands.
+        return new Promise<void>(() => undefined);
+      },
+    });
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    expect(await settledWithin(streaming.promise, 1000)).toEqual({ resolved: undefined });
+    for (let i = 0; i < 200 && r.events.filter((e) => e.type === "delta").length < 2; i++) await sleep(5);
+    const sent = r.events.filter((e) => e.type === "delta").map((e) => e.text).join("");
+    expect(sent).toBe("Already streamed");
+    await r.s.runtime.setMode("app");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toHaveLength(1);
+    expectRuntimeChangedEnd(r.events);
+    const messages = r.store.getThread(r.thread.id).messages;
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages[1]).toMatchObject({ content: sent, thinking: "Let me see. ", model: MODEL });
+    expect(r.events.at(-1)?.partial).toEqual(messages[1]);
+    await r.done();
+  });
 });
 
 describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {

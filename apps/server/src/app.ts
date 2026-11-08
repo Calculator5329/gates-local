@@ -6,7 +6,7 @@
 // other than refuse; then the user message persists, the reply streams on
 // chat.event and only the finished assistant message reaches the store.
 import { randomUUID } from "node:crypto";
-import type { Channel, Payload } from "@gates-local/contracts";
+import type { Channel, Message, Payload } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -16,7 +16,7 @@ import { checkFit, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow } from "./fit/ollama.ts";
 import type { FitReport } from "./fit/types.ts";
-import { AdmitCancelled, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
+import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
@@ -50,7 +50,7 @@ export type AppErrorCode =
   | "runtime-not-ready" // no ready Ollama to talk to
   | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
-  | "runtime-changed" // a runtime switch ended the turn; the client sends the message again
+  | "runtime-changed" // a runtime switch ended the turn (any text sent is saved, event.partial); the client sends the message again
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -58,18 +58,20 @@ export class AppError extends Error {
   readonly code: AppErrorCode;
   /** The refusing report, for wont-fit. Not on the wire (the message carries it). */
   readonly report?: FitReport;
-  constructor(code: AppErrorCode, message: string, report?: FitReport) {
+  /** For preempted: the model whose load needed the GPU (the terminal event's neededBy). */
+  readonly neededBy?: string;
+  constructor(code: AppErrorCode, message: string, report?: FitReport, neededBy?: string) {
     super(message);
     this.code = code;
     if (report !== undefined) this.report = report;
+    if (neededBy !== undefined) this.neededBy = neededBy;
   }
 }
 
-/** A runtime switch ended the turn; like a cancel, the reply is not saved. */
+/** A runtime switch ended the turn; the reply streamed so far is saved as a stopped reply. */
 export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
 const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
-/** The turn's controller was aborted by a runtime switch, not by chat.cancel or shutdown. */
-const endedByRuntime = (signal: AbortSignal): boolean => signal.reason instanceof AppError && signal.reason.code === "runtime-changed";
+const HALTED = Symbol("halted");
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
@@ -115,9 +117,18 @@ export interface App {
 interface Turn {
   readonly turnId: string;
   readonly threadId: string;
+  readonly model: string;
   readonly controller: AbortController;
   /** Resolves once the turn has pushed its last event and left the registry. */
   readonly ended: Promise<void>;
+  /**
+   * Set by halt(): a runtime switch ended this turn now, whatever it waits on. Its one terminal
+   * event carries this error's code; the reply sent so far is saved.
+   */
+  halted: AppError | undefined;
+  /** Resolves with halted. */
+  readonly onHalt: Promise<typeof HALTED>;
+  halt(reason: AppError): void;
 }
 
 /**
@@ -163,10 +174,27 @@ export function createApp(deps: AppDeps): App {
   const offSources = deps.sources?.onChange(sources => push("sources.changed", sources));
 
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
-  const reserve = (threadId: string): { turn: Turn; end: () => void } => {
+  const reserve = (threadId: string, model: string): { turn: Turn; end: () => void } => {
     let end!: () => void;
     const ended = new Promise<void>((resolve) => (end = resolve));
-    const turn: Turn = { turnId: newId(), threadId, controller: new AbortController(), ended };
+    let wake!: (h: typeof HALTED) => void;
+    const onHalt = new Promise<typeof HALTED>((resolve) => (wake = resolve));
+    const turn: Turn = {
+      turnId: newId(),
+      threadId,
+      model,
+      controller: new AbortController(),
+      ended,
+      halted: undefined,
+      onHalt,
+      halt(reason) {
+        if (turn.halted !== undefined) return;
+        turn.halted = reason;
+        // A turn chat.cancel already aborted keeps that reason on its signal; halted still wins.
+        turn.controller.abort(reason);
+        wake(HALTED);
+      },
+    };
     turns.set(turn.turnId, turn);
     byThread.set(threadId, turn);
     return {
@@ -195,12 +223,33 @@ export function createApp(deps: AppDeps): App {
 
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
     const { turnId, threadId, controller } = turn;
-    const emit = (raw: WireEvent) => {
+    // Exactly the text that reached the client: the reply a halted turn saves.
+    let sentText = "";
+    let sentThinking = "";
+    const emit = (event: WireEvent) => {
       // Only text means the model answered; an error, cancel or end goes through end() below.
-      if (raw.type === "delta" || raw.type === "thinking") load?.firstToken();
-      // A runtime switch ends the turn the way a cancel does, with its own words.
-      const event: WireEvent = raw.type === "error" && endedByRuntime(controller.signal) ? { type: "error", code: "runtime-changed", message: RUNTIME_CHANGED_TURN_MESSAGE } : raw;
+      if (event.type === "delta" || event.type === "thinking") load?.firstToken();
+      if (event.type === "delta") sentText += event.text;
+      if (event.type === "thinking") sentThinking += event.text;
       push("chat.event", { turnId, threadId, event });
+    };
+    /** halt() ended the turn: save what was sent as a stopped reply, then its one terminal event. */
+    const endHalted = (reason: AppError) => {
+      let partial: Message | undefined;
+      if (sentText !== "" || sentThinking !== "") {
+        try {
+          partial = store.appendMessage({ threadId, role: "assistant", content: sentText, ...(sentThinking === "" ? {} : { thinking: sentThinking }), model, stats: { numCtx } });
+        } catch (e) {
+          log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
+        }
+      }
+      emit({ type: "error", code: reason.code, message: reason.message, ...(partial ? { partial } : {}), ...(reason.neededBy === undefined ? {} : { neededBy: reason.neededBy }) });
+      if (partial) push("threads.changed", { threadId });
+    };
+    /** `work`, or HALTED as soon as halt() runs; the dropped work finishes in the background. */
+    const untilHalted = <T>(work: Promise<T>): Promise<T | typeof HALTED> => {
+      work.catch(() => undefined);
+      return Promise.race([work, turn.onHalt]);
     };
     try {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
@@ -209,7 +258,11 @@ export function createApp(deps: AppDeps): App {
       const image = options.image === true && deps.image !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
-      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal);
+      const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
+      if (think === HALTED || turn.halted) {
+        endHalted(turn.halted!);
+        return;
+      }
       const input = {
         baseUrl,
         model,
@@ -220,7 +273,18 @@ export function createApp(deps: AppDeps): App {
         ...(think === undefined ? {} : { think }),
       };
       const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);
-      for await (const event of events) {
+      const iterator = events[Symbol.asyncIterator]();
+      for (;;) {
+        const step = await untilHalted(iterator.next());
+        if (step === HALTED || turn.halted) {
+          // Whatever the stream or a tool waits on is dropped, not awaited: the generator's own
+          // cleanup (its finally, a queued image's take-back) runs when that step settles.
+          void iterator.return(undefined).catch(() => undefined);
+          endHalted(turn.halted!);
+          return;
+        }
+        if (step.done === true) return;
+        const event = step.value;
         if (event.type !== "done") {
           emit(event);
           continue;
@@ -243,8 +307,11 @@ export function createApp(deps: AppDeps): App {
         return;
       }
     } catch (e) {
-      log(`turn ${turnId} failed: ${(e as Error).message}`);
-      emit({ type: "error", code: "internal", message: (e as Error).message });
+      if (turn.halted) endHalted(turn.halted);
+      else {
+        log(`turn ${turnId} failed: ${(e as Error).message}`);
+        emit({ type: "error", code: "internal", message: (e as Error).message });
+      }
     } finally {
       load?.end();
       end();
@@ -297,7 +364,7 @@ export function createApp(deps: AppDeps): App {
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
-      const { turn, end: endTurn } = reserve(threadId);
+      const { turn, end: endTurn } = reserve(threadId, model);
       let releaseGpu: (() => void) | undefined;
       // Every way a turn ends goes through end(): the GPU claim goes with it.
       const end = () => {
@@ -309,15 +376,20 @@ export function createApp(deps: AppDeps): App {
       try {
         // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
         load = deps.models?.loader?.reserve(model);
-        // A runtime switch ends this turn at every phase; the switch waits for its end().
+        // A runtime switch ends this turn now, at every phase; the switch waits for its end().
+        // The loader's close (shutdown) cancels it the way chat.cancel does.
         const reservation = load;
         if (reservation !== undefined) {
-          const runtimeGone = () => turn.controller.abort(runtimeChangedTurn());
+          const runtimeGone = () => {
+            const reason: unknown = reservation.signal.reason;
+            if (reason instanceof ModelActionError && reason.code === "shutting-down") turn.controller.abort(reason);
+            else turn.halt(runtimeChangedTurn());
+          };
           if (reservation.signal.aborted) runtimeGone();
           else reservation.signal.addEventListener("abort", runtimeGone, { once: true });
         }
         // Before it started: a cancel, or the runtime switch above.
-        const stoppedEarly = () => (endedByRuntime(turn.controller.signal) ? runtimeChangedTurn() : new AppError("cancelled", "the turn was cancelled before it started"));
+        const stoppedEarly = () => turn.halted ?? new AppError("cancelled", "the turn was cancelled before it started");
         // The runtime the reservation captured: fit, admit and chat all talk to it.
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
@@ -346,7 +418,7 @@ export function createApp(deps: AppDeps): App {
         try {
           report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit(turn.controller.signal);
         } catch (e) {
-          if (e instanceof AdmitCancelled || endedByRuntime(turn.controller.signal)) throw stoppedEarly();
+          if (e instanceof AdmitCancelled || turn.halted) throw stoppedEarly();
           throw e;
         }
         if (report.verdict === "refuse") {

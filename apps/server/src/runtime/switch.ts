@@ -46,10 +46,16 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
    * new one that is not ready yet).
    */
   let switching = false;
+  /**
+   * A switch beforeSwitch refused (turns on the old runtime would not end): the old runtime
+   * stays and serves, and status() says error with the reason until it next changes.
+   */
+  let refused: RuntimeStatus | undefined;
   // A ready the new runtime announces mid-switch would reach listeners while baseUrl() still
   // says undefined (app.ts refreshes the model list on it, and would empty it). It waits:
   // setMode sends the settled status once baseUrl() is the new URL and the loader settled.
   const forward = (s: RuntimeStatus) => {
+    refused = undefined;
     if (switching && s.state === "ready") return;
     send(s);
   };
@@ -71,7 +77,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   };
 
   return {
-    status: () => inner.status(),
+    status: () => refused ?? inner.status(),
     baseUrl: () => (switching ? undefined : inner.baseUrl()),
     ensure: () => serial(() => inner.ensure()),
     discover: () => serial(() => inner.discover()),
@@ -85,8 +91,14 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
       return serial(async () => {
         if (next === mode) return inner.status();
         switching = true;
+        refused = undefined;
         try {
-          await options.beforeSwitch?.();
+          try {
+            await options.beforeSwitch?.();
+          } catch (e) {
+            refused = { ...inner.status(), state: "error", detail: `Switching to the ${next} runtime failed: ${(e as Error).message}. Still on the ${mode} runtime.` };
+            throw e;
+          }
           const old = inner;
           off();
           await stopIfStartedHere(old);
@@ -98,7 +110,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
           switching = false;
           options.afterSwitch?.();
           // The settled status, ready included; a fresh runtime that lands on its initial status emits nothing itself.
-          send(inner.status());
+          send(refused ?? inner.status());
         }
       });
     },

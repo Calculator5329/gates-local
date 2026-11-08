@@ -115,7 +115,18 @@ export const ChatEvent = S.Union([
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
   // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
   S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
-  S.Struct({ type: S.Literal("error"), code: S.String, message: S.String }),
+  S.Struct({
+    type: S.Literal("error"),
+    code: S.String,
+    message: S.String,
+    /**
+     * code "runtime-changed" or "preempted": the reply streamed so far (exactly the delta and
+     * thinking text sent), saved to the thread as a stopped reply. Absent when nothing was sent.
+     */
+    partial: S.optional(Message),
+    /** code "preempted": the model whose load needed the GPU this turn's model held. */
+    neededBy: S.optional(S.String),
+  }),
   // A tool call started, finished or failed; the same callId updates one step row.
   S.Struct({ type: S.Literal("tool"), step: ToolStep }),
 ]);
