@@ -233,7 +233,11 @@ export function createApp(deps: AppDeps): App {
     // Exactly the text that reached the client: the reply a halted turn saves.
     let sentText = "";
     let sentThinking = "";
+    // The one terminal event (error or done) went out: nothing follows it, a halt included.
+    let over = false;
     const emit = (event: WireEvent) => {
+      if (over) return;
+      if (event.type === "error" || event.type === "done") over = true;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") load?.firstToken();
       if (event.type === "delta") sentText += event.text;
@@ -241,7 +245,9 @@ export function createApp(deps: AppDeps): App {
       push("chat.event", { turnId, threadId, event });
     };
     /** halt() ended the turn: save what was sent as a stopped reply, then its one terminal event. */
+    // TODO(turns-queue): R3-02, R4-06: nothing marks the saved reply stopped, and its tool steps are not saved.
     const endHalted = (reason: AppError) => {
+      if (over) return;
       let partial: Message | undefined;
       if (sentText !== "" || sentThinking !== "") {
         try {
@@ -281,37 +287,44 @@ export function createApp(deps: AppDeps): App {
       };
       const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);
       const iterator = events[Symbol.asyncIterator]();
-      for (;;) {
-        const step = await untilHalted(iterator.next());
-        if (step === HALTED || turn.halted) {
-          // Whatever the stream or a tool waits on is dropped, not awaited: the generator's own
-          // cleanup (its finally, a queued image's take-back) runs when that step settles.
-          void iterator.return(undefined).catch(() => undefined);
-          endHalted(turn.halted!);
+      let dropped = false;
+      try {
+        for (;;) {
+          const step = await untilHalted(iterator.next());
+          if (step === HALTED || turn.halted) {
+            dropped = step === HALTED;
+            endHalted(turn.halted!);
+            return;
+          }
+          if (step.done === true) return;
+          const event = step.value;
+          if (event.type !== "done") {
+            emit(event);
+            if (over) return;
+            continue;
+          }
+          // A cancel that lands with the done line still wins: nothing persists.
+          if (controller.signal.aborted) {
+            emit({ type: "error", code: "cancelled", message: "cancelled as the reply finished; not saved" });
+            return;
+          }
+          let saved;
+          try {
+            saved = store.appendMessage(event.message);
+          } catch (e) {
+            const code = (e as { code?: unknown }).code;
+            emit({ type: "error", code: typeof code === "string" ? code : "internal", message: `reply not saved: ${(e as Error).message}` });
+            return;
+          }
+          emit({ type: "done", message: saved, stopReason: event.stopReason });
+          push("threads.changed", { threadId });
           return;
         }
-        if (step.done === true) return;
-        const event = step.value;
-        if (event.type !== "done") {
-          emit(event);
-          continue;
-        }
-        // A cancel that lands with the done line still wins: nothing persists.
-        if (controller.signal.aborted) {
-          emit({ type: "error", code: "cancelled", message: "cancelled as the reply finished; not saved" });
-          return;
-        }
-        let saved;
-        try {
-          saved = store.appendMessage(event.message);
-        } catch (e) {
-          const code = (e as { code?: unknown }).code;
-          emit({ type: "error", code: typeof code === "string" ? code : "internal", message: `reply not saved: ${(e as Error).message}` });
-          return;
-        }
-        emit({ type: "done", message: saved, stopReason: event.stopReason });
-        push("threads.changed", { threadId });
-        return;
+      } finally {
+        // The generator's own cleanup (its finally: the socket, a queued image's take-back) runs on
+        // every exit. A step a halt dropped is still pending, so that cleanup runs when it settles.
+        const cleanup = iterator.return(undefined).catch(() => undefined);
+        if (!dropped) await cleanup;
       }
     } catch (e) {
       if (turn.halted) endHalted(turn.halted);

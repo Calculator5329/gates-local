@@ -187,6 +187,8 @@ interface RigOptions {
   /** The fit readings the app's turns use (default: plenty of free VRAM). */
   readonly fit?: AppDeps["fit"];
   readonly turnDrainMs?: number;
+  /** Runs inside the app's push of each chat event, before the turn takes its next step. */
+  readonly onEvent?: (event: { type: string }) => void;
 }
 
 /**
@@ -219,6 +221,7 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
       if (channel === "chat.event") {
         const { turnId, event } = payload as { turnId: string; event: { type: string } };
         events.push({ ...event, turnId });
+        options.onEvent?.(event);
       }
     },
     models: { handlers: s.handlers, loader: s.loader },
@@ -370,6 +373,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
 });
 
 describe("R3-02: a switch saves the reply streamed so far", () => {
+  // TODO(turns-queue): R3-02: "marked stopped" is the event's code only; no stopped marker is stored yet.
   it("text and thinking already sent are saved, marked stopped, with one runtime-changed event", async () => {
     const streaming = signalled();
     const r = await rig({
@@ -396,6 +400,41 @@ describe("R3-02: a switch saves the reply streamed so far", () => {
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(messages[1]).toMatchObject({ content: sent, thinking: "Let me see. ", model: MODEL });
     expect(r.events.at(-1)?.partial).toEqual(messages[1]);
+    await r.done();
+  });
+});
+
+describe("a turn's stream ends once", () => {
+  it("R4-02: a switch right after an error event sends no second terminal event", async () => {
+    let switchNow: (() => void) | undefined;
+    const r = await rig(
+      { "POST /api/chat": (_b, res) => void res.writeHead(200, { "content-type": "application/x-ndjson" }).end(line({ error: "model runner crashed" })) },
+      { onEvent: (e) => e.type === "error" && switchNow?.() },
+    );
+    // A switch's first step, landing while the turn handles its error event.
+    switchNow = () => r.s.loader.runtimeChanged();
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "stream-error" }]);
+    r.s.loader.runtimeSettled();
+    await r.done();
+  });
+
+  it("R4-03: a done line on a body that stays open: the turn closes the connection", async () => {
+    const closed = signalled();
+    const r = await rig({
+      "POST /api/chat": (_b, res) => {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.write(line({ model: MODEL, message: { role: "assistant", content: "hi" }, done: false }) + line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
+        res.on("close", () => closed.resolve());
+        return new Promise<void>(() => undefined);
+      },
+    });
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "done" }]);
+    expect(await settledWithin(closed.promise, 1000)).toEqual({ resolved: undefined });
     await r.done();
   });
 });
