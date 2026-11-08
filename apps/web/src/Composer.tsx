@@ -93,9 +93,12 @@ export function Composer() {
   // The verdict holds still: between an invalidation and the fresh answer the last one for this
   // model and context stays, and while the model loads it keeps the one from before the load
   // (its own memory filling the GPU, not yet listed by Ollama, is no reason to refuse it).
+  // A failed check ends the hold: the old verdict no longer says anything about memory now.
   const fitAt = model === undefined ? "" : fitKey(model, numCtx);
-  const fresh = fit === undefined || fit === "error" ? undefined : verdictOf(fit);
+  const failed = fit === "error";
+  const fresh = fit === undefined || failed ? undefined : verdictOf(fit);
   const held = useRef<{ at: string; v: Verdict } | undefined>(undefined);
+  if (failed) held.current = undefined;
   const kept = held.current?.at === fitAt ? held.current.v : undefined;
   const v = loading ? (kept ?? fresh) : (fresh ?? kept);
   if (!loading && fresh !== undefined) held.current = { at: fitAt, v: fresh };
