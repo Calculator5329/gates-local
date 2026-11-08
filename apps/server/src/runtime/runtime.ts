@@ -415,12 +415,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         }
       }
       const logTail = tail(logFile, 600);
-      return setStatus({
-        state: "error",
-        owner: "none",
-        baseUrl: appBaseUrl,
-        detail: `${why}${logTail ? ` Last log lines: ${logTail}` : ""} Log: ${logFile}`,
-      });
+      // The ports measured before the start are still held by what holds them.
+      return setStatus(
+        noted(
+          {
+            state: "error",
+            owner: "none",
+            baseUrl: appBaseUrl,
+            detail: `${why}${logTail ? ` Last log lines: ${logTail}` : ""} Log: ${logFile}`,
+          },
+          note,
+        ),
+      );
     };
 
     const deadline = Date.now() + startTimeoutMs;
@@ -489,7 +495,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         binary = { path: r.binary, origin: "app-install" };
       } catch (e) {
         const message = e instanceof InstallError ? e.message : `Installing Ollama failed: ${(e as Error).message}`;
-        return setStatus({ state: "error", owner: "none", baseUrl: appBaseUrl, detail: message });
+        return setStatus(noted({ state: "error", owner: "none", baseUrl: appBaseUrl, detail: message }, c.note));
       }
     }
     return start(binary, c.note);

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { json, startFakeServer } from "../fit/fake-http.ts";
 import { httpGet } from "./http.ts";
 import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
-import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
+import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installDir, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
 import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch } from "./switch.ts";
 import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, startWrongService, tmpDir, writeFakeBinary } from "./test-fakes.ts";
@@ -284,6 +284,26 @@ describe("runtime switch", () => {
         expect(await first.stop()).toMatchObject({ stopped: true });
       }
       expect(await isUp(started.baseUrl)).toBe(false);
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("busyPorts audit (R3-04): a start that fails and an install that fails keep the system port's busyPorts", async () => {
+    const other = await startWrongService();
+    try {
+      const busy = [String(other.port)];
+      // An executable that exits at once: the start fails.
+      writeFakeBinary(installedBinary(appDataDir, VERSION), "#!/bin/sh\nexit 3\n");
+      const failedStart = await (await runtime({ externalBaseUrl: other.baseUrl })).ensure();
+      expect(failedStart).toMatchObject({ state: "error", owner: "none" });
+      expect(failedStart.busyPorts).toEqual(busy);
+      // No install and a release URL that never answers: the install fails.
+      removeDir(installDir(appDataDir, VERSION));
+      expect(existsSync(installedBinary(appDataDir, VERSION))).toBe(false);
+      const failedInstall = await (await runtime({ externalBaseUrl: other.baseUrl, allowInstall: true })).ensure();
+      expect(failedInstall).toMatchObject({ state: "error", owner: "none" });
+      expect(failedInstall.busyPorts).toEqual(busy);
     } finally {
       await other.close();
     }
