@@ -205,4 +205,6 @@ never shows a whisper stop, start or restart.
       Ethan. Packaging does not authorize a release or publication.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
+      Prepared on lane/readme: README, `docs/setup/linux.md` and the
+      `pnpm shots:readme` images; the license is still open.
 - [ ] <!-- workspace:id=work:fbd76a2b-2cb1-5aeb-8864-bfc67cb7bf45 --> Finetuning: scoped once benchmarks show a gap a finetune can close.
