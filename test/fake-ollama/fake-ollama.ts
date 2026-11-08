@@ -13,14 +13,16 @@
 //   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
 //                     a code block, a table) over about 2 s; holdAfterTokens > 0
 //                     pauses the reply there until the request is cancelled
+//   long-name         the three models plus a long Hugging Face GGUF tag
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-const installedFor = (s: string): readonly string[] => (s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : DEFAULT_INSTALLED);
+const installedFor = (s: string): readonly string[] =>
+  s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : s === "long-name" ? LONG_NAME_INSTALLED : DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "slow-drip"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "slow-drip", "long-name"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {

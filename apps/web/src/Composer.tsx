@@ -613,7 +613,9 @@ export function Picker() {
             <span className="pk-c" />
             <Mark name={r.name} />
             <div className="pk-m">
-              <div className="pk-n">{r.name}</div>
+              <div className="pk-n">
+                <span className="pk-nm">{r.name}</span>
+              </div>
             </div>
             <span className="pk-v">Downloading · {r.downloading}%</span>
           </div>
@@ -627,7 +629,7 @@ export function Picker() {
             <Mark name={r.name} />
             <div className="pk-m">
               <div className="pk-n">
-                {r.name}
+                <span className="pk-nm">{r.name}</span>
                 <small>{size}</small>
               </div>
             </div>
@@ -659,7 +661,7 @@ export function Picker() {
           <Mark name={r.name} />
           <div className="pk-m">
             <div className="pk-n">
-              {r.name}
+              <span className="pk-nm">{r.name}</span>
               <small>{size}</small>
               {r.tag === picked ? rec : null}
             </div>
@@ -676,7 +678,7 @@ export function Picker() {
         <Mark name={c.label} />
         <div className="pk-m">
           <div className="pk-n">
-            {c.label}
+            <span className="pk-nm">{c.label}</span>
             <small>{gb(c.downloadBytes)}</small>
             {c.recommended ? <span className="pk-rec" data-tip={`Runs on your GPU with room for ${k(numCtx)} of context.`}>Recommended</span> : null}
           </div>
