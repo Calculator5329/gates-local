@@ -1,7 +1,7 @@
 // Ports, paths and the per-run token the E2E stack, config and specs share.
 // The token is made once in the Playwright main process and inherited by the
 // stack and every worker through the environment, so it never lands on disk.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,15 +18,18 @@ export const CONTROL_URL = `http://127.0.0.1:${CONTROL_PORT}`;
 
 /**
  * This checkout's own folder under ~/.cache/gates-local-e2e, named from its path
- * (~/projects/ai/gates-local gives "projects-ai-gates-local"), so two checkouts
- * never share E2E data or results.
+ * (~/projects/ai/gates-local gives "projects-ai-gates-local-<hash>"), so two
+ * checkouts never share E2E data or results. The readable part folds
+ * separators together; the hash of the whole path keeps ~/a/b-wt and ~/a-b/wt apart.
  */
 export const CHECKOUT_CACHE = path.join(homedir(), ".cache", "gates-local-e2e", checkoutKey(ROOT));
 
 export function checkoutKey(root: string): string {
-  const rel = path.relative(homedir(), root);
+  const abs = path.resolve(root);
+  const rel = path.relative(homedir(), abs);
   const inHome = rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
-  return (inHome ? rel : root).replaceAll(/[^A-Za-z0-9]+/g, "-").replaceAll(/^-+|-+$/g, "") || "root";
+  const readable = (inHome ? rel : abs).replaceAll(/[^A-Za-z0-9]+/g, "-").replaceAll(/^-+|-+$/g, "") || "root";
+  return `${readable}-${createHash("sha256").update(abs).digest("hex").slice(0, 8)}`;
 }
 
 /** Fresh data dirs go under here, one per stack reset. */
