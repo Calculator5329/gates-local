@@ -280,18 +280,18 @@ function listenerChild(host: string, port: number): Promise<ChildProcess> {
 }
 
 describe("listenerPid matches the probed address (R2-06)", () => {
-  it("a recorded pid on 127.0.0.2:p beside a foreign pid on 127.0.0.1:p is not ours; 0.0.0.0, [::] and mapped addresses are", async () => {
+  it("a recorded pid on 127.0.0.2:p beside a foreign pid on 127.0.0.1:p is not ours; 0.0.0.0 and mapped addresses are, [::] only for IPv6", async () => {
     const fs = addrFs();
     // The probed endpoint is 127.0.0.1:11435; the recorded pid holds 127.0.0.2:11435 only.
     expect(readLinuxListenerPid(11435, [300], fs, "127.0.0.1")).toBeUndefined();
     expect(await listenerPid(11435, { platform: "linux", fs, pids: [300], host: "127.0.0.1" })).toBeUndefined();
     expect(readLinuxListenerPid(11435, undefined, fs, "127.0.0.1")).toBe(400);
     expect(readLinuxListenerPid(11435, [300], fs, "127.0.0.2")).toBe(300);
-    // Wildcards: 0.0.0.0 for IPv4; [::] for IPv6, and for IPv4 while dual-stack.
+    // Wildcards: 0.0.0.0 for IPv4; [::] for IPv6 only, whatever bindv6only says (no per-socket evidence).
     expect(readLinuxListenerPid(11438, [300], fs, "127.0.0.1")).toBe(300);
     expect(readLinuxListenerPid(11438, [300], fs, "::1")).toBeUndefined();
     expect(readLinuxListenerPid(11439, [300], fs, "::1")).toBe(300);
-    expect(readLinuxListenerPid(11439, [300], fs, "127.0.0.1")).toBe(300);
+    expect(readLinuxListenerPid(11439, [300], addrFs("0\n"), "127.0.0.1")).toBeUndefined();
     expect(readLinuxListenerPid(11439, [300], addrFs("1\n"), "127.0.0.1")).toBeUndefined();
     // [::ffff:127.0.0.1] serves 127.0.0.1; [::1] serves only ::1.
     expect(readLinuxListenerPid(11440, [300], fs, "127.0.0.1")).toBe(300);
@@ -310,6 +310,21 @@ describe("listenerPid matches the probed address (R2-06)", () => {
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBeUndefined();
       expect(await listenerPid(port, { platform: "linux", pids: [child.pid!], host: "127.0.0.1" })).toBe(child.pid);
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.2" })).toBe(process.pid);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it("Linux, this machine: this process on [::]:p with ipv6Only and a child on 127.0.0.1:p; probing 127.0.0.1 is never this process's", async () => {
+    // The kernel default (bindv6only 0) says nothing about one socket: this one is IPv6-only.
+    const server = createServer();
+    await new Promise<void>((r) => server.listen({ port: 0, host: "::", ipv6Only: true }, r));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const child = await listenerChild("127.0.0.1", port);
+      expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBeUndefined();
+      expect(await listenerPid(port, { platform: "linux", pids: [child.pid!], host: "127.0.0.1" })).toBe(child.pid);
+      expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "::1" })).toBe(process.pid);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }

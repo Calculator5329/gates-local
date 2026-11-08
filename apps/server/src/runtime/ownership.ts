@@ -122,13 +122,14 @@ const MAPPED_PREFIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
 
 /**
  * A listener bound to `local` serves `probed`: the same address, or a
- * wildcard in the probed family. tcp6 [::] also serves IPv4 while sockets are
- * dual-stack, and [::ffff:a.b.c.d] serves a.b.c.d.
+ * wildcard in the probed family, and [::ffff:a.b.c.d] serves a.b.c.d. A tcp6
+ * [::] never counts for IPv4: whether that one socket is dual-stack is its
+ * own IPV6_V6ONLY, which /proc does not show (bindv6only is only the
+ * default), so an IPv6-only listener could be taken for the IPv4 one.
  */
-function serves(local: number[], probed: { family: 4 | 6; bytes: number[] }, dualStack: boolean): boolean {
+function serves(local: number[], probed: { family: 4 | 6; bytes: number[] }): boolean {
   if (local.length === 4) return probed.family === 4 && (same(local, probed.bytes) || local.every((b) => b === 0));
   if (probed.family === 6) return same(local, probed.bytes) || local.every((b) => b === 0);
-  if (local.every((b) => b === 0)) return dualStack;
   return same(local.slice(0, 12), MAPPED_PREFIX) && same(local.slice(12), probed.bytes);
 }
 
@@ -136,7 +137,7 @@ function serves(local: number[], probed: { family: 4 | 6; bytes: number[] }, dua
  * Linux: the inodes of LISTEN sockets on `port` in /proc/net/tcp or
  * /proc/net/tcp6 text; with `host`, only those bound to it or a wildcard.
  */
-export function listenInodes(text: string, port: number, host?: string, dualStack = true): string[] {
+export function listenInodes(text: string, port: number, host?: string): string[] {
   const probed = host === undefined ? undefined : hostBytes(host);
   if (host !== undefined && probed === undefined) return [];
   const inodes: string[] = [];
@@ -151,7 +152,7 @@ export function listenInodes(text: string, port: number, host?: string, dualStac
     if (Number.parseInt(local.slice(colon + 1), 16) !== port) continue;
     if (probed !== undefined) {
       const bytes = procAddressBytes(local.slice(0, colon));
-      if (bytes === undefined || !serves(bytes, probed, dualStack)) continue;
+      if (bytes === undefined || !serves(bytes, probed)) continue;
     }
     inodes.push(inode);
   }
@@ -164,12 +165,6 @@ export function listenInodes(text: string, port: number, host?: string, dualStac
  * loopback address with the same port is not it).
  */
 export function readLinuxListenerPid(port: number, pids?: readonly number[], fs: ListenerFs = realFs, host = "127.0.0.1"): number | undefined {
-  let dualStack = true; // the kernel default, net.ipv6.bindv6only = 0
-  try {
-    dualStack = fs.readFile("/proc/sys/net/ipv6/bindv6only").trim() !== "1";
-  } catch {
-    // keep the default
-  }
   const inodes = new Set<string>();
   for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
     let text: string;
@@ -178,7 +173,7 @@ export function readLinuxListenerPid(port: number, pids?: readonly number[], fs:
     } catch {
       continue;
     }
-    for (const inode of listenInodes(text, port, host, dualStack)) inodes.add(inode);
+    for (const inode of listenInodes(text, port, host)) inodes.add(inode);
   }
   if (inodes.size === 0) return undefined;
   const candidates = pids ?? fs.readdir("/proc").filter((n) => /^\d+$/.test(n)).map(Number);
