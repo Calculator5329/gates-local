@@ -228,6 +228,9 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const started = Date.now();
 
     await sleep(options.firstTokenDelayMs, abort.signal);
+    // A timer can fire a millisecond early by Date.now; the wait is at least the delay.
+    const short = started + options.firstTokenDelayMs - Date.now();
+    if (short > 0) await sleep(short, abort.signal);
     // Everything before the first token is load and prompt time; decode starts here.
     const decodeFrom = Date.now();
     let sent = 0;
