@@ -180,7 +180,9 @@ describe("listenerPid (S-04)", () => {
       200: { "0": "/dev/null", "7": "socket:[5551]", "8": "socket:[6661]" },
     });
     expect(readLinuxListenerPid(11435, undefined, fs)).toBe(200);
-    expect(readLinuxListenerPid(11436, undefined, fs)).toBe(200);
+    // [::1]:11436 serves an IPv6 probe of ::1, not the default 127.0.0.1 (R2-06).
+    expect(readLinuxListenerPid(11436, undefined, fs, "::1")).toBe(200);
+    expect(readLinuxListenerPid(11436, undefined, fs)).toBeUndefined();
     // Only the recorded pid is searched: a listener held by someone else reads as undefined.
     expect(readLinuxListenerPid(11435, [100], fs)).toBeUndefined();
     expect(readLinuxListenerPid(11435, [300], fs)).toBeUndefined();
@@ -222,5 +224,105 @@ describe("listenerPid (S-04)", () => {
 
   it("any other platform is undefined", async () => {
     expect(await listenerPid(11435, { platform: "darwin" })).toBeUndefined();
+  });
+});
+
+// R2-06. Port 11435 (0x2CAB): the recorded pid 300 listens on 127.0.0.2,
+// a foreign pid 400 on 127.0.0.1. 11438 (0x2CAE): 300 on 0.0.0.0.
+// tcp6: 11439 (0x2CAF) 300 on [::]; 11440 (0x2CB0) 300 on [::ffff:127.0.0.1];
+// 11441 (0x2CB1) 300 on [::1].
+const ADDR_TCP = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0200007F:2CAB 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8001 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:2CAB 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8002 1 0000000000000000 100 0 0 10 0
+   2: 00000000:2CAE 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8003 1 0000000000000000 100 0 0 10 0
+`;
+const ADDR_TCP6 = `  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:2CAF 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8004 1 0000000000000000 100 0 0 10 0
+   1: 0000000000000000FFFF00000100007F:2CB0 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8005 1 0000000000000000 100 0 0 10 0
+   2: 00000000000000000000000001000000:2CB1 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 8006 1 0000000000000000 100 0 0 10 0
+`;
+
+function addrFs(bindv6only?: string): ListenerFs {
+  const links: Record<number, Record<string, string>> = {
+    300: { "3": "socket:[8001]", "4": "socket:[8003]", "5": "socket:[8004]", "6": "socket:[8005]", "7": "socket:[8006]" },
+    400: { "3": "socket:[8002]" },
+  };
+  return {
+    readFile: (f) => {
+      if (f === "/proc/net/tcp") return ADDR_TCP;
+      if (f === "/proc/net/tcp6") return ADDR_TCP6;
+      if (f === "/proc/sys/net/ipv6/bindv6only" && bindv6only !== undefined) return bindv6only;
+      throw new Error(`ENOENT ${f}`);
+    },
+    readdir: (d) => {
+      if (d === "/proc") return Object.keys(links);
+      const fds = links[Number(/^\/proc\/(\d+)\/fd$/.exec(d)?.[1])];
+      if (!fds) throw new Error(`EACCES ${d}`);
+      return Object.keys(fds);
+    },
+    readlink: (f) => {
+      const m = /^\/proc\/(\d+)\/fd\/(\d+)$/.exec(f);
+      const link = m ? links[Number(m[1])]?.[m[2]!] : undefined;
+      if (link === undefined) throw new Error(`ENOENT ${f}`);
+      return link;
+    },
+  };
+}
+
+/** A child process listening on host:port; resolves once it is listening. */
+function listenerChild(host: string, port: number): Promise<ChildProcess> {
+  const c = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${port}, ${JSON.stringify(host)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "ignore"] });
+  children.push(c);
+  return new Promise((resolve, reject) => {
+    c.stdout!.once("data", () => resolve(c));
+    c.once("exit", (code) => reject(new Error(`listener child exited ${code}`)));
+  });
+}
+
+describe("listenerPid matches the probed address (R2-06)", () => {
+  it("a recorded pid on 127.0.0.2:p beside a foreign pid on 127.0.0.1:p is not ours; 0.0.0.0, [::] and mapped addresses are", async () => {
+    const fs = addrFs();
+    // The probed endpoint is 127.0.0.1:11435; the recorded pid holds 127.0.0.2:11435 only.
+    expect(readLinuxListenerPid(11435, [300], fs, "127.0.0.1")).toBeUndefined();
+    expect(await listenerPid(11435, { platform: "linux", fs, pids: [300], host: "127.0.0.1" })).toBeUndefined();
+    expect(readLinuxListenerPid(11435, undefined, fs, "127.0.0.1")).toBe(400);
+    expect(readLinuxListenerPid(11435, [300], fs, "127.0.0.2")).toBe(300);
+    // Wildcards: 0.0.0.0 for IPv4; [::] for IPv6, and for IPv4 while dual-stack.
+    expect(readLinuxListenerPid(11438, [300], fs, "127.0.0.1")).toBe(300);
+    expect(readLinuxListenerPid(11438, [300], fs, "::1")).toBeUndefined();
+    expect(readLinuxListenerPid(11439, [300], fs, "::1")).toBe(300);
+    expect(readLinuxListenerPid(11439, [300], fs, "127.0.0.1")).toBe(300);
+    expect(readLinuxListenerPid(11439, [300], addrFs("1\n"), "127.0.0.1")).toBeUndefined();
+    // [::ffff:127.0.0.1] serves 127.0.0.1; [::1] serves only ::1.
+    expect(readLinuxListenerPid(11440, [300], fs, "127.0.0.1")).toBe(300);
+    expect(readLinuxListenerPid(11441, [300], fs, "127.0.0.1")).toBeUndefined();
+    expect(readLinuxListenerPid(11441, [300], fs, "::1")).toBe(300);
+    // Not an address literal: nothing matches (never "ours").
+    expect(readLinuxListenerPid(11438, [300], fs, "localhost")).toBeUndefined();
+  });
+
+  it("Linux, this machine: this process on 127.0.0.2:p and a child on 127.0.0.1:p; probing 127.0.0.1 is the child's", async () => {
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.2", r));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const child = await listenerChild("127.0.0.1", port);
+      expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBeUndefined();
+      expect(await listenerPid(port, { platform: "linux", pids: [child.pid!], host: "127.0.0.1" })).toBe(child.pid);
+      expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.2" })).toBe(process.pid);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it("Linux, this machine: a listener on 0.0.0.0:p is still ours when 127.0.0.1:p is probed", async () => {
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, "0.0.0.0", r));
+    try {
+      const { port } = server.address() as AddressInfo;
+      expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBe(process.pid);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
   });
 });

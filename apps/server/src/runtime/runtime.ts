@@ -239,8 +239,13 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
    * the first port in the span with no listener. Never the system port, and
    * never an Ollama the app did not start.
    */
-  /** `pid` holds the listening socket on `port` (false when that cannot be read). */
-  const holdsPort = async (port: number, pid: number) => (await listenerPid(port, { ...on, pids: [pid] })) === pid;
+  /**
+   * `pid` holds the listening socket that serves `baseUrl` (false when that
+   * cannot be read): on its address or a wildcard, never another loopback
+   * address with the same port.
+   */
+  const holdsPort = async (baseUrl: string, pid: number) =>
+    (await listenerPid(Number(portOf(baseUrl)), { ...on, pids: [pid], host: new URL(baseUrl).hostname })) === pid;
 
   /**
    * The recorded copy's version when it is ours to adopt: identity matches,
@@ -248,13 +253,12 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
    * listener are checked again once the probe returns.
    */
   async function adoptable(record: OwnedRecord): Promise<string | undefined> {
-    const port = Number(portOf(record.baseUrl));
-    if (!(await holdsPort(port, record.pid))) return undefined;
+    if (!(await holdsPort(record.baseUrl, record.pid))) return undefined;
     const there = await probe(record.baseUrl, probeTimeoutMs);
     if (there.kind !== "ollama") return undefined;
     const again = checkOwnership(stateFile, on);
     if (again.kind !== "ours" || again.record.pid !== record.pid || again.record.startTime !== record.startTime) return undefined;
-    if (!(await holdsPort(port, record.pid))) return undefined;
+    if (!(await holdsPort(record.baseUrl, record.pid))) return undefined;
     return there.version;
   }
 
@@ -430,7 +434,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     // The answer must come from our child, not something that grabbed the port.
     const proc = child.pid ? readProc(child.pid, on) : undefined;
     if (exited !== undefined || !proc) return fail(`Ollama (${binary.path}) ${exited ?? "vanished"} while another process answered on port ${appPort}.`);
-    if (!(await holdsPort(appPort, proc.pid)) || exited !== undefined) {
+    if (!(await holdsPort(appBaseUrl, proc.pid)) || exited !== undefined) {
       return fail(`Another program answered on port ${appPort}, not the Ollama the app started (${binary.path}).`);
     }
     writeRecord(stateFile, {
