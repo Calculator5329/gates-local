@@ -1,12 +1,14 @@
 // Runtime modes (system / app), the switch between them, and the Windows
 // paths with the platform injected. Fakes only: a fake Ollama server, a
 // fake `ollama` binary, a fake PowerShell runner.
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeStatus } from "@gates-local/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { json, startFakeServer } from "../fit/fake-http.ts";
 import { httpGet } from "./http.ts";
-import { readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
+import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
 import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
 import { ADOPTED_WINDOWS_DETAIL, createOllamaRuntime, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch } from "./switch.ts";
@@ -52,10 +54,19 @@ async function runtime(over: Partial<RuntimeOptions>): Promise<OllamaRuntime> {
 const nothingAt = async () => `http://127.0.0.1:${await freePort()}`;
 const isUp = async (baseUrl: string) => (await httpGet(`${baseUrl}/api/version`, 500)).kind === "response";
 
-/** PowerShell CIM answers for whatever PID is asked, from this machine's process table; every call is logged. */
+/**
+ * PowerShell answers from this machine's process table and /proc/net: CIM
+ * identity for whatever PID is asked, Get-NetTCPConnection's OwningProcess
+ * for a listening port. Every call is logged.
+ */
 function cimFake(calls: string[]): SyncRunner {
   return (file_, args) => {
     calls.push(file_);
+    const listen = /-LocalPort (\d+)/.exec(args.at(-1) ?? "")?.[1];
+    if (listen !== undefined) {
+      const owner = readLinuxListenerPid(Number(listen));
+      return owner === undefined ? "" : JSON.stringify({ OwningProcess: owner });
+    }
     const pid = Number(/ProcessId=(\d+)/.exec(args.at(-1) ?? "")?.[1]);
     try {
       process.kill(pid, 0);
@@ -133,6 +144,56 @@ describe("runtimeMode app", () => {
       expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
     } finally {
       await Promise.all(others.map((o) => o.close()));
+    }
+  });
+
+  it("S-04: a recorded copy that is alive but no longer holds its port is not adopted; the foreign Ollama there is skipped", async () => {
+    const base = await freePortRun(2);
+    const foreign = await startFakeOllama({ port: base });
+    const recorded = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    try {
+      const p = readProc(recorded.pid ?? 0);
+      if (!p) throw new Error("no /proc entry for the recorded process");
+      writeRecord(ownedStateFile(appDataDir), { pid: p.pid, startTime: p.startTime, command: p.command, baseUrl: foreign.baseUrl, binary: "/fake/ollama", startedAt: 1 });
+      const app = await runtime({ mode: "app", appPort: base, externalBaseUrl: await nothingAt() });
+      expect(await app.discover()).toMatchObject({ owner: "none", baseUrl: `http://127.0.0.1:${base + 1}` });
+      const full = await runtime({ appPort: base, externalBaseUrl: await nothingAt() });
+      expect(await full.discover()).toMatchObject({ state: "ready", owner: "external", baseUrl: foreign.baseUrl });
+    } finally {
+      recorded.kill("SIGKILL");
+      clearRecord(ownedStateFile(appDataDir));
+      await foreign.close();
+    }
+  });
+
+  it("S-04: a recorded process that is gone once the probe returns is not adopted", async () => {
+    let alive = true;
+    const foreign = await startFakeServer({
+      "GET /api/version": (_b, res) => {
+        // The recorded Ollama exits while this answer is on its way.
+        alive = false;
+        json(res, 200, { version: "0.0.1-foreign" });
+      },
+      "GET /": (_b, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("Ollama is running");
+      },
+    });
+    try {
+      const rec = { pid: 4242, startTime: "/Date(1)/", command: "C:\\Tools\\ollama.exe serve", baseUrl: foreign.baseUrl, binary: "C:\\Tools\\ollama.exe", startedAt: 1 };
+      writeRecord(ownedStateFile(appDataDir), rec);
+      const run: SyncRunner = (_file, args) => {
+        const command = args.at(-1) ?? "";
+        if (command.includes("Get-NetTCPConnection")) return JSON.stringify({ OwningProcess: 4242 });
+        return alive ? JSON.stringify({ ProcessId: 4242, CreationDate: rec.startTime, CommandLine: rec.command }) : "";
+      };
+      const port = Number(new URL(foreign.baseUrl).port);
+      const rt = await runtime({ mode: "app", platform: "win32", procRun: run, appPort: port, externalBaseUrl: await nothingAt() });
+      const s = await rt.discover();
+      expect(s.owner).not.toBe("app");
+      expect(s.baseUrl).not.toBe(foreign.baseUrl);
+    } finally {
+      await foreign.close();
     }
   });
 

@@ -36,7 +36,7 @@ import type { RuntimeMode } from "@gates-local/contracts";
 import { PINNED_OLLAMA } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
-import { checkOwnership, clearRecord, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
+import { checkOwnership, clearRecord, listenerPid, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
 import {
   type Env,
   appModelsDir,
@@ -49,8 +49,8 @@ import {
   runtimeDir,
   serveLogFile,
 } from "./paths.ts";
-import { DEFAULT_PROBE_TIMEOUT_MS, type ProbeResult, probe } from "./probe.ts";
-import type { InstallManifest } from "./schemas.ts";
+import { DEFAULT_PROBE_TIMEOUT_MS, type ProbeResult, portOf, probe } from "./probe.ts";
+import type { InstallManifest, OwnedRecord } from "./schemas.ts";
 import type { InstallProgress, Listener, RuntimeStatus } from "./types.ts";
 
 export const DEFAULT_EXTERNAL_BASE_URL = "http://127.0.0.1:11434";
@@ -210,14 +210,34 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
    * the first port in the span with no listener. Never the system port, and
    * never an Ollama the app did not start.
    */
+  /** `pid` holds the listening socket on `port` (false when that cannot be read). */
+  const holdsPort = async (port: number, pid: number) => (await listenerPid(port, { ...on, pids: [pid] })) === pid;
+
+  /**
+   * The recorded copy's version when it is ours to adopt: identity matches,
+   * it holds the recorded port, and an Ollama answers there; identity and
+   * listener are checked again once the probe returns.
+   */
+  async function adoptable(record: OwnedRecord): Promise<string | undefined> {
+    const port = Number(portOf(record.baseUrl));
+    if (!(await holdsPort(port, record.pid))) return undefined;
+    const there = await probe(record.baseUrl, probeTimeoutMs);
+    if (there.kind !== "ollama") return undefined;
+    const again = checkOwnership(stateFile, on);
+    if (again.kind !== "ours" || again.record.pid !== record.pid || again.record.startTime !== record.startTime) return undefined;
+    if (!(await holdsPort(port, record.pid))) return undefined;
+    return there.version;
+  }
+
   async function classifyApp(): Promise<Classified> {
     const own = checkOwnership(stateFile, on);
     if (own.kind === "ours") {
-      const there = await probe(own.record.baseUrl, probeTimeoutMs);
-      if (there.kind === "ollama") {
+      const version = await adoptable(own.record);
+      if (version !== undefined) {
         useAppPort(own.record.baseUrl);
-        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version: there.version } };
+        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version } };
       }
+      // Otherwise its port counts as another program's; the scan below moves past it.
     }
     const last = firstAppPort + APP_PORT_SPAN - 1;
     const taken: { port: number; result: ProbeResult }[] = [];
@@ -272,8 +292,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const app = await probe(appBaseUrl, probeTimeoutMs);
       if (app.kind === "ollama") {
         const own = checkOwnership(stateFile, on);
-        if (own.kind === "ours" && own.record.baseUrl === appBaseUrl) {
-          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version: app.version } };
+        const version = own.kind === "ours" && own.record.baseUrl === appBaseUrl ? await adoptable(own.record) : undefined;
+        if (version !== undefined) {
+          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version } };
         }
         return {
           kind: "ready",
@@ -370,6 +391,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     // The answer must come from our child, not something that grabbed the port.
     const proc = child.pid ? readProc(child.pid, on) : undefined;
     if (exited !== undefined || !proc) return fail(`Ollama (${binary.path}) ${exited ?? "vanished"} while another process answered on port ${appPort}.`);
+    if (!(await holdsPort(appPort, proc.pid)) || exited !== undefined) {
+      return fail(`Another program answered on port ${appPort}, not the Ollama the app started (${binary.path}).`);
+    }
     writeRecord(stateFile, {
       pid: proc.pid,
       startTime: proc.startTime,

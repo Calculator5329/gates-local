@@ -8,8 +8,12 @@
 // runtime.ts stops the child it spawned through its handle, and a record
 // from an earlier run is "adopted" and left running. The platform and the
 // command runner are injectable so both paths are tested on Linux.
+//
+// A live identity is not enough to adopt a port: the recorded process may
+// have let go of it (shutting down, cleaning up runners) and another Ollama
+// taken it. listenerPid() names the process that holds a listening port.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { OwnedRecord, decode, parseJson } from "./schemas.ts";
 
@@ -59,6 +63,118 @@ export function readProc(pid: number, on: ProcPlatform = {}): ProcIdentity | und
     if (!startTime || state === "Z" || state === "X") return undefined;
     const command = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
     return { pid, startTime, command, state };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The file reads behind the Linux listener lookup (tests inject fixtures). */
+export interface ListenerFs {
+  readFile(file: string): string;
+  readdir(dir: string): string[];
+  readlink(file: string): string;
+}
+
+const realFs: ListenerFs = {
+  readFile: (file) => readFileSync(file, "utf8"),
+  readdir: (dir) => readdirSync(dir),
+  readlink: (file) => readlinkSync(file),
+};
+
+export interface ListenerOptions extends ProcPlatform {
+  /** Linux: search only these processes' fds (the recorded or spawned pid); default every /proc/<pid>. */
+  readonly pids?: readonly number[];
+  readonly fs?: ListenerFs;
+}
+
+/** Linux: the inodes of LISTEN sockets on `port` in /proc/net/tcp or /proc/net/tcp6 text. */
+export function listenInodes(text: string, port: number): string[] {
+  const inodes: string[] = [];
+  for (const line of text.split("\n").slice(1)) {
+    // sl local_address rem_address st tx:rx tr:when retrnsmt uid timeout inode ...
+    const f = line.trim().split(/\s+/);
+    const local = f[1];
+    if (f.length < 10 || local === undefined || f[3] !== "0A") continue;
+    const inode = f[9];
+    if (inode === undefined || inode === "0") continue;
+    if (Number.parseInt(local.slice(local.lastIndexOf(":") + 1), 16) === port) inodes.push(inode);
+  }
+  return inodes;
+}
+
+/** Linux, synchronous: the process among `pids` (default all) holding a LISTEN socket on `port`. */
+export function readLinuxListenerPid(port: number, pids?: readonly number[], fs: ListenerFs = realFs): number | undefined {
+  const inodes = new Set<string>();
+  for (const file of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+    let text: string;
+    try {
+      text = fs.readFile(file);
+    } catch {
+      continue;
+    }
+    for (const inode of listenInodes(text, port)) inodes.add(inode);
+  }
+  if (inodes.size === 0) return undefined;
+  const candidates = pids ?? fs.readdir("/proc").filter((n) => /^\d+$/.test(n)).map(Number);
+  for (const pid of candidates) {
+    let fds: string[];
+    try {
+      fds = fs.readdir(`/proc/${pid}/fd`);
+    } catch {
+      continue;
+    }
+    for (const fd of fds) {
+      let link: string;
+      try {
+        link = fs.readlink(`/proc/${pid}/fd/${fd}`);
+      } catch {
+        continue;
+      }
+      const m = /^socket:\[(\d+)\]$/.exec(link);
+      if (m?.[1] !== undefined && inodes.has(m[1])) return pid;
+    }
+  }
+  return undefined;
+}
+
+/** The PowerShell query behind a Windows listener read. */
+export const windowsListenerQuery = (port: number) =>
+  `Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction Stop | Select-Object OwningProcess | ConvertTo-Json -Compress`;
+
+/** Windows: the one OwningProcess in the query's answer; undefined when empty, malformed or several differ. */
+export function parseWindowsListener(out: string): number | undefined {
+  const text = out.trim();
+  if (text === "") return undefined;
+  let v: unknown;
+  try {
+    v = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const rows = Array.isArray(v) ? (v as unknown[]) : [v];
+  const pids = new Set<number>();
+  for (const row of rows) {
+    const pid = typeof row === "object" && row !== null ? (row as Record<string, unknown>).OwningProcess : undefined;
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
+    pids.add(pid);
+  }
+  return pids.size === 1 ? [...pids][0] : undefined;
+}
+
+/**
+ * The process listening on loopback `port`: Linux matches the LISTEN
+ * socket's inode in /proc/net/tcp{,6} against /proc/<pid>/fd links, Windows
+ * asks Get-NetTCPConnection. Any other platform, or any failed read, is
+ * undefined (never "ours").
+ */
+export async function listenerPid(port: number, options: ListenerOptions = {}): Promise<number | undefined> {
+  const platform = options.platform ?? process.platform;
+  try {
+    if (platform === "win32") {
+      return parseWindowsListener((options.run ?? runSync)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsListenerQuery(port)]));
+    }
+    if (platform === "linux") return readLinuxListenerPid(port, options.pids, options.fs);
+    return undefined;
   } catch {
     return undefined;
   }
