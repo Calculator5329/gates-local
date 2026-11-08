@@ -1,8 +1,8 @@
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DESKTOP_ID, renderDesktopEntry } from "../src/desktop-entry.ts";
 import { BACKUP_DIR, installLinux, linuxDataHome } from "../src/linux-install.ts";
 
@@ -62,6 +62,14 @@ const { installLinux } = await import(source);
 installLinux({ dataHome, exec: ["/opt/" + name + "/run"], assets, now: new Date("2026-11-07T12:00:00Z"), log: () => {} });
 `;
 
+/** Workers that have not exited yet; afterEach stops them so a failed assertion leaves no process behind. */
+const live = new Set<{ child: ChildProcess; done: Promise<unknown> }>();
+afterEach(async () => {
+  const left = [...live];
+  for (const w of left) w.child.kill("SIGKILL");
+  await Promise.all(left.map((w) => w.done));
+});
+
 function worker(dir: string, dataHome: string, name: string, mode: "pause" | "intruder") {
   const script = path.join(dir, "worker.mjs");
   writeFileSync(script, WORKER);
@@ -69,7 +77,10 @@ function worker(dir: string, dataHome: string, name: string, mode: "pause" | "in
   let stderr = "";
   child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const done = new Promise<{ code: number | null; stderr: string }>((resolve) => child.once("exit", (code) => resolve({ code, stderr })));
-  return { done };
+  const handle = { child, done };
+  live.add(handle);
+  void done.then(() => live.delete(handle));
+  return handle;
 }
 
 async function waitFor(file: string): Promise<void> {
