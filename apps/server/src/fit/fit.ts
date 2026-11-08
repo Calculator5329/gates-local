@@ -174,7 +174,9 @@ async function takeReadings(deps: FitDeps): Promise<Readings> {
 async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: Readings): Promise<FitCheck> {
   const now = deps.now ?? Date.now;
   const loaded = findLoaded(r.ps, model);
-  if (loaded && (loaded.context_length === undefined || loaded.context_length === numCtx)) {
+  // Measured only when /api/ps proves the resident copy runs at this num_ctx. An Ollama that
+  // leaves context_length out may hold it at a smaller one, so that copy is estimated like a cold one.
+  if (loaded && loaded.context_length === numCtx) {
     return { report: measuredReport(loaded, numCtx, r.gpu, r.ps.models.length), gpu: r.gpu, memAvailableBytes: r.memAvailableBytes };
   }
 
@@ -189,8 +191,11 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const estimate = estimateNeed(model, numCtx, tag.size, arch, deps.estimate);
 
   // A copy loaded at another num_ctx is replaced by Ollama on the next
-  // request, so the VRAM it holds counts as free for this plan.
+  // request, so the VRAM it holds counts as free for this plan. At an unknown
+  // context it is either replaced or reused as is; either way the question is
+  // whether the model at this num_ctx fits in what it holds plus what is free.
   const reclaim = loaded ? loaded.size_vram : 0;
+  const atCtx = loaded?.context_length === undefined ? "an unknown num_ctx (Ollama did not say)" : `num_ctx ${loaded.context_length}`;
   const report = decideFit({
     model,
     numCtx,
@@ -200,7 +205,7 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
     ...(deps.margins ? { margins: deps.margins } : {}),
     measuredAt: r.gpu.measuredAt,
     ...(loaded
-      ? { note: `free VRAM counts ${formatGb(reclaim)} held by the copy loaded at num_ctx ${loaded.context_length}, which Ollama replaces` }
+      ? { note: `free VRAM counts ${formatGb(reclaim)} held by the copy loaded at ${atCtx}, which Ollama replaces or reuses` }
       : {}),
   });
   return { report, gpu: r.gpu, memAvailableBytes: r.memAvailableBytes, estimate };

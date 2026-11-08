@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import type { FitReport, ModelLoad } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
+import { checkFit } from "../fit/fit.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
@@ -496,6 +498,44 @@ describe("S-03: the gate stays held unless residency and context are proven", ()
     expect(started).toEqual(["b"]);
     a.end();
     b.end();
+  });
+});
+
+describe("R2-01: a resident model's measured memory counts only at its proven context", () => {
+  const SHOW_9B = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8")) as unknown;
+  /** The real loader and the real fit check over a fake Ollama, a full GPU and no free RAM. */
+  async function fullMachine(contextLength: number | undefined) {
+    const entry = { name: "qwen3.5:9b", size: GB, size_vram: GB, ...(contextLength === undefined ? {} : { context_length: contextLength }) };
+    const s = await startFakeServer({
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [entry] }),
+      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 6594474711, digest: "a", modified_at: "2026-11-01T00:00:00Z" }] }),
+      "POST /api/show": (_b, res) => json(res, 200, SHOW_9B),
+      "POST /api/generate": (b, res) => json(res, 200, { model: (b as { model: string }).model, response: "", done: true }),
+    });
+    servers.push(s);
+    const machine = {
+      runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 16303, 0\n" : ""),
+      readMeminfo: async () => "MemAvailable: 0 kB\n",
+    };
+    const loader = loaderFor(s, [], "fits", { fit: async (model, numCtx, baseUrl) => (await checkFit({ ...machine, baseUrl, model, numCtx })).report });
+    return { s, loader };
+  }
+
+  it("an /api/ps without context_length (older Ollama) is estimated at the requested num_ctx, so 64k refuses", async () => {
+    const { loader } = await fullMachine(undefined);
+    const turn = loader.reserve("qwen3.5:9b");
+    const r = await turn.admit(65536);
+    expect(r).toMatchObject({ verdict: "refuse", source: "estimate", numCtx: 65536 });
+    expect(loader.inUse("qwen3.5:9b")).toBe(false);
+  });
+
+  it("a resident model at another context is estimated too; the same context keeps its measured fit", async () => {
+    const other = await fullMachine(4096);
+    expect(await other.loader.reserve("qwen3.5:9b").admit(65536)).toMatchObject({ verdict: "refuse", source: "estimate" });
+    const same = await fullMachine(65536);
+    const turn = same.loader.reserve("qwen3.5:9b");
+    expect(await turn.admit(65536)).toMatchObject({ verdict: "fits", source: "measured" });
+    turn.end();
   });
 });
 
