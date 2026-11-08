@@ -66,6 +66,8 @@ test("the fit panel names what this model can use apart from what is free, on se
 
   // once a reply has loaded the model, the leftover segment is what is free right now
   await sendMessage(page, "Load it");
+  // the reply first: the send opens its new thread, which would leave Settings if it were already open
+  await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Load it");
   await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
   await openGpuMemory(page);
   await expect(panel.locator(".legend")).toContainText("Currently free");
