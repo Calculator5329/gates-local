@@ -91,7 +91,12 @@
     the owner. If that number has gone to an unrelated program, the refusal
     names the lock file to delete.
   - A change made in the moment between the check and `git reset --keep`
-    is not seen.
+    is not seen. `git reset --keep` also has no way to refuse writing over
+    an ignored file, as the merge does.
+  - An updater killed in the moment between starting a command and saving
+    its process leaves nothing to wait for, so the next run does not know
+    about that command.
+  - A lock file that cannot be read as an owner counts as ended after 60 s.
   - A merge cut off after writing only brand-new files leaves nothing
     git calls changed. The retry then names those files as in the way, so
     they have to be moved or deleted by hand.
