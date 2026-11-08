@@ -90,9 +90,9 @@ never shows a whisper stop, start or restart.
       *Accept:* picking gemma3 greys the pill; picking qwen3.5 lights it.
 - [ ] Tools default reaches the turn (439a230): an E2E that sets Tools off
       in Settings and sees a turn with no tool definitions in the request.
-- [ ] `think` on a model without thinking: Ollama's 400 was read from its
-      source, not run. Send `think: true` to gemma3 on the real runtime and
-      record the answer in the evidence log.
+- [x] `think` on a model without thinking: run 2026-11-07 on the real
+      runtime, HTTP 400 `"gemma3-abliterated:12b-q4" does not support
+      thinking` in 18 ms, nothing loaded (evidence log).
 
 ## Next: slices 2 to 4
 
