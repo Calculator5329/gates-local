@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
 import { startFakeOllama, type FakeOllama } from "./fake-ollama.ts";
 
@@ -70,10 +70,29 @@ describe("fake ollama", () => {
     const last = (await hello()).at(-1) ?? {};
     const total = Number(last["total_duration"]);
     const evalNs = Number(last["eval_duration"]);
+    const promptNs = Number(last["prompt_eval_duration"]);
     expect(evalNs).toBeGreaterThan(0);
-    expect(Number(last["prompt_eval_duration"])).toBeGreaterThan(0);
-    // The first-token wait is load and prompt time, not decode.
-    expect(total - evalNs).toBeGreaterThanOrEqual(40e6);
+    expect(promptNs).toBeGreaterThan(0);
+    // The first-token wait is load and prompt time, not decode: total splits into the two.
+    expect(total).toBe(promptNs + evalNs);
+  });
+
+  it("reads one end time, so total_duration splits exactly even when the clock ticks between reads (MP3-03)", async () => {
+    fake.setScenario("models", { tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    // The fake's own clock: start 1000, first token 1040, then a millisecond boundary between any two end reads.
+    const clock = [1000, 1040, 1200, 1201];
+    let reads = 0;
+    const realNow = Date.now.bind(Date);
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ((new Error().stack ?? "").includes("fake-ollama.ts") ? (clock[reads++] ?? 1201) : realNow()));
+    let last: Record<string, unknown>;
+    try {
+      last = (await hello()).at(-1) ?? {};
+    } finally {
+      spy.mockRestore();
+    }
+    expect(Number(last["prompt_eval_duration"])).toBe(40e6);
+    expect(Number(last["eval_duration"])).toBe(160e6);
+    expect(Number(last["total_duration"])).toBe(200e6);
   });
 
   it("embed-smallest: an embedding model is installed and smallest, lists embedding only, and refuses chat", async () => {

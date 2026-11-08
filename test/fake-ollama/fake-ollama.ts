@@ -229,14 +229,18 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       await sleep(options.tokenDelayMs, abort.signal);
     }
     if (abort.signal.aborted) return;
+    // One end time for both durations, so total is exactly prompt plus decode (MP3-03).
+    const ended = Date.now();
+    const promptMs = Math.max(1, decodeFrom - started);
+    const evalMs = Math.max(1, ended - decodeFrom);
     line({
       ...base(),
       message: { role: "assistant", content: "" },
       done: true,
       done_reason: "stop",
-      total_duration: (Date.now() - started) * 1e6,
-      prompt_eval_duration: Math.max(1, decodeFrom - started) * 1e6,
-      eval_duration: Math.max(1, Date.now() - decodeFrom) * 1e6,
+      total_duration: (promptMs + evalMs) * 1e6,
+      prompt_eval_duration: promptMs * 1e6,
+      eval_duration: evalMs * 1e6,
       prompt_eval_count: 24 + prompt.length,
       eval_count: sent,
     });
