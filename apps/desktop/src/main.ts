@@ -7,7 +7,7 @@ import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
 import { serverDataDir } from "./data-dir.ts";
-import { hidesMenu, zoomAfter } from "./keys.ts";
+import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
@@ -164,14 +164,9 @@ function run(): void {
       if (!isMainFrame || errorCode === -3 || !showingClient) return;
       showStatus({ kind: "client-load-failed", url: validatedUrl, error: `${errorDescription} (${errorCode})` });
     });
-    if (hidesMenu(process.platform)) {
-      contents.on("before-input-event", (event, input) => {
-        const level = zoomAfter(input, contents.getZoomLevel(), process.platform);
-        if (level === null) return;
-        event.preventDefault();
-        contents.setZoomLevel(level);
-      });
-    }
+    // No menu on Linux and Windows, so reload, close, quit, full screen,
+    // dev tools and zoom keys come from here (keys.ts).
+    installWindowKeys(window, contents, { platform: process.platform, devTools: !app.isPackaged, quit: () => app.quit() });
     contents.on("render-process-gone", (_event, details) => {
       console.error(`[desktop] renderer gone: ${details.reason}`);
       route(supervisor.state);
