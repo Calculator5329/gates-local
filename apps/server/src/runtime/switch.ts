@@ -19,8 +19,11 @@ export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" 
 export interface RuntimeSwitchOptions {
   readonly initialMode: RuntimeMode;
   readonly make: (mode: RuntimeMode) => OllamaRuntime;
-  /** Before a switch takes effect (abort downloads bound to the old runtime). */
-  readonly beforeSwitch?: () => void;
+  /**
+   * Before a switch takes effect (abort downloads and turns bound to the old
+   * runtime). The old runtime stops only after its promise settles.
+   */
+  readonly beforeSwitch?: () => void | Promise<void>;
   /** Once the new runtime's ensure settled, however it went (always paired with beforeSwitch). */
   readonly afterSwitch?: () => void;
   readonly log?: (line: string) => void;
@@ -68,8 +71,8 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     setMode(next) {
       return serial(async () => {
         if (next === mode) return inner.status();
-        options.beforeSwitch?.();
         try {
+          await options.beforeSwitch?.();
           const old = inner;
           off();
           await stopIfStartedHere(old);

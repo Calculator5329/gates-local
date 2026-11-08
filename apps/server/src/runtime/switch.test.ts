@@ -77,7 +77,7 @@ it("S-02: afterSwitch follows beforeSwitch once the new ensure settles, even whe
       };
       return rt;
     },
-    beforeSwitch: () => events.push("before"),
+    beforeSwitch: () => void events.push("before"),
     afterSwitch: () => events.push("after"),
   });
   await sw.setMode("app");
@@ -86,4 +86,27 @@ it("S-02: afterSwitch follows beforeSwitch once the new ensure settles, even whe
   await expect(sw.setMode("system")).rejects.toThrow("install failed");
   // Without "after" here the loader would refuse every load for good.
   expect(events.slice(3)).toEqual(["before", "ensure system", "after"]);
+});
+
+it("R2-03: the old runtime stops only after beforeSwitch's turns have ended", async () => {
+  const made: Fake[] = [];
+  let turnsEnd!: () => void;
+  const turns = new Promise<void>((r) => (turnsEnd = r));
+  const sw = createRuntimeSwitch({
+    initialMode: "app",
+    make: (mode) => {
+      const rt = fakeRuntime(mode, Promise.resolve());
+      made.push(rt);
+      return rt;
+    },
+    beforeSwitch: () => turns,
+  });
+  await sw.ensure();
+  expect(made[0]!.startedByThisProcess()).toBe(true);
+  const switched = sw.setMode("system");
+  await new Promise((r) => setTimeout(r, 20));
+  expect(made[0]!.stops).toBe(0);
+  turnsEnd();
+  expect(await switched).toMatchObject({ state: "ready", owner: "external" });
+  expect(made[0]!.stops).toBe(1);
 });

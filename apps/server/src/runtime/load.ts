@@ -105,6 +105,12 @@ export interface TurnReservation extends TurnLoad {
   /** The runtime captured at reserve(): the turn's fit and chat go here (undefined: none ready). */
   readonly baseUrl: string | undefined;
   /**
+   * Aborts once that runtime is gone (a switch began, or the loader closed)
+   * and stays aborted until end(): at admission, the capability lookup,
+   * streaming and tool rounds alike. chat.send ties it to the turn.
+   */
+  readonly signal: AbortSignal;
+  /**
    * Inside the load gate: read /api/ps (is this a cold load?), then fit.
    * Resolves with the fit report once the residency decision is made, before
    * any chat request. A refused or failed admit releases the reservation.
@@ -135,6 +141,12 @@ export interface ModelLoader {
    * owned, drop the old runtime's work, refuse new work until runtimeSettled().
    */
   runtimeChanged(): void;
+  /**
+   * Resolves once every turn whose runtime is gone (aborted by
+   * runtimeChanged() or close()) has called end(). A switch waits on this
+   * before it stops the old runtime.
+   */
+  turnsEnded(): Promise<void>;
   /** The new runtime's ensure settled: loads and turns may start again. */
   runtimeSettled(): void;
   /** Shutdown: refuse new work, abort every preload, resolve once all have settled. */
@@ -214,6 +226,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   let closed = false;
   /** Aborted when the current generation ends (switch) or the loader closes. */
   let current = new AbortController();
+  /** Turns from reserve() to end(): `gone` aborts with their runtime; `ended` settles at end(). */
+  const turns = new Set<{ readonly gone: AbortController; readonly ended: Promise<void> }>();
 
   const send = (load: ModelLoad) => {
     try {
@@ -358,7 +372,12 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const tag = canonicalTag(model);
       const baseUrl = deps.baseUrl();
       const gen = generation;
-      const runtimeGone = current.signal;
+      // The turn's own: aborted by runtimeChanged() or close(), and never re-armed.
+      const turnGone = new AbortController();
+      let markEnded: (() => void) | undefined;
+      const live = { gone: turnGone, ended: new Promise<void>((r) => (markEnded = r)) };
+      turns.add(live);
+      const runtimeGone = turnGone.signal;
       hold(tag);
       let numCtx = 0;
       let admitting = false;
@@ -373,6 +392,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       };
       const reservation: TurnReservation = {
         baseUrl,
+        signal: runtimeGone,
         admit(ctx, options = {}) {
           if (admitting) return Promise.reject(new Error("admit runs once per reservation"));
           admitting = true;
@@ -455,6 +475,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           ended = true;
           letGo();
           letGoOf(tag);
+          turns.delete(live);
+          markEnded?.();
           const open = notice;
           if (answered || open === undefined || baseUrl === undefined || gen !== generation) return;
           // Ended before a token (an error or a cancel mid-load): report what is true now.
@@ -486,8 +508,13 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       switching = true;
       current.abort(switched());
       if (!closed) current = new AbortController();
+      for (const turn of turns) turn.gone.abort(switched());
       // Deleting the visited entry while iterating a Set is safe.
       for (const notice of notices) closeNotice(notice, { model: notice.model, numCtx: notice.numCtx, state: "error", message: RUNTIME_CHANGED_MESSAGE });
+    },
+
+    async turnsEnded() {
+      await Promise.all([...turns].filter((t) => t.gone.signal.aborted).map((t) => t.ended));
     },
 
     runtimeSettled() {
@@ -497,6 +524,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     async close() {
       closed = true;
       current.abort(new ModelActionError("shutting-down", SHUTTING_DOWN_MESSAGE));
+      for (const turn of turns) turn.gone.abort(new ModelActionError("shutting-down", SHUTTING_DOWN_MESSAGE));
       await Promise.allSettled(pendingLoads);
     },
 

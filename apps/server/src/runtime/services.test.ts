@@ -4,7 +4,10 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createApp } from "../app.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
+import type { ImageModule } from "../image/module.ts";
+import { openThreadStore } from "../threads/store.ts";
 import { httpGet } from "./http.ts";
 import { appModelsDir, installedBinary } from "./paths.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
@@ -163,4 +166,123 @@ describe("R2-02: shutdown aborts a preload in its residency read or its fit", ()
       comfy.close();
     });
   }
+});
+
+const line = (v: unknown) => `${JSON.stringify(v)}\n`;
+const expectRuntimeChangedEnd = (events: { type: string; code?: string; message?: string }[]) => {
+  const last = events.at(-1);
+  expect(last).toMatchObject({ type: "error", code: "runtime-changed" });
+  expect(last?.message).toMatch(/runtime changed/i);
+  expect(last?.message).toMatch(/send (the|your) message again/i);
+};
+
+describe("R2-03: a runtime switch ends every turn reserved against the old runtime", () => {
+  const MODEL = "qwen3.5:9b";
+
+  /** A system Ollama with MODEL resident at 16k (the fit is measured, no /api/show), the services and the app around it. */
+  async function rig(routes: Record<string, Route>, image?: ImageModule) {
+    const old = await startFakeServer({
+      "GET /": (_b, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("Ollama is running");
+      },
+      "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
+      "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
+      "POST /api/show": (_b, res) => json(res, 200, SHOW),
+      ...routes,
+    });
+    servers.push(old);
+    const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl });
+    expect(s.runtime.mode()).toBe("system");
+    expect((await s.runtime.ensure()).state).toBe("ready");
+    const store = openThreadStore(path.join(work, "threads.sqlite"));
+    const events: { type: string; code?: string; message?: string }[] = [];
+    const app = createApp({
+      store,
+      runtime: s.runtime,
+      catalog: s.catalog,
+      push: (channel, payload) => {
+        if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
+      },
+      models: { handlers: s.handlers, loader: s.loader },
+      fit,
+      ...(image ? { image } : {}),
+      log: () => undefined,
+    });
+    const thread = store.createThread({});
+    const chats = () => old.requests.filter((r) => r.method === "POST" && r.path === "/api/chat").length;
+    const done = async () => {
+      await app.shutdown();
+      store.close();
+    };
+    return { old, s, app, store, thread, events, chats, done };
+  }
+
+  it("held capability lookup: switch, release it, and no /api/chat reaches the old runtime", async () => {
+    const show = signalled();
+    const asked = signalled();
+    const r = await rig({
+      "POST /api/show": async (_b, res) => {
+        asked.resolve();
+        await show.promise;
+        json(res, 200, SHOW);
+      },
+    });
+    const { turnId } = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
+    expect(turnId).toBeTruthy();
+    expect(await settledWithin(asked.promise, 1000)).toEqual({ resolved: undefined });
+    const switching = r.s.runtime.setMode("app");
+    await sleep(50);
+    show.resolve();
+    await switching;
+    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    await sleep(50);
+    expect(r.chats()).toBe(0);
+    expect(r.app.activeTurns()).toBe(0);
+    expectRuntimeChangedEnd(r.events);
+    // Only the user message: the reply never started.
+    expect(r.store.getThread(r.thread.id).messages.map((m) => m.role)).toEqual(["user"]);
+    await r.done();
+  });
+
+  it("tool round: switch while the tool runs, release it, and the next /api/chat never reaches the old runtime", async () => {
+    const tool = signalled();
+    const queuedOnce = signalled();
+    let queued = 0;
+    const image = {
+      current: () => ({ state: "off", owner: "none" }),
+      generate: async () => {
+        queued++;
+        queuedOnce.resolve();
+        await tool.promise;
+        return { jobId: "job-1" };
+      },
+      cancel: () => ({ cancelled: true }),
+    } as unknown as ImageModule;
+    const r = await rig(
+      {
+        "POST /api/show": (_b, res) => json(res, 200, { ...(SHOW as object), capabilities: ["completion", "tools"] }),
+        "POST /api/chat": (_b, res) => {
+          res.writeHead(200, { "content-type": "application/x-ndjson" });
+          res.end(line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true, done_reason: "stop" }));
+        },
+      },
+      image,
+    );
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
+    expect(await settledWithin(queuedOnce.promise, 1000)).toEqual({ resolved: undefined });
+    expect([queued, r.chats()]).toEqual([1, 1]);
+    const switching = r.s.runtime.setMode("app");
+    await sleep(50);
+    tool.resolve();
+    await switching;
+    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    await sleep(50);
+    expect(r.chats()).toBe(1);
+    expect(r.app.activeTurns()).toBe(0);
+    expectRuntimeChangedEnd(r.events);
+    expect(r.store.getThread(r.thread.id).messages.map((m) => m.role)).toEqual(["user"]);
+    await r.done();
+  });
 });

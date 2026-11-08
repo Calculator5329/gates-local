@@ -49,6 +49,7 @@ export type AppErrorCode =
   | "runtime-not-ready" // no ready Ollama to talk to
   | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
+  | "runtime-changed" // a runtime switch ended the turn; the client sends the message again
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -62,6 +63,12 @@ export class AppError extends Error {
     if (report !== undefined) this.report = report;
   }
 }
+
+/** A runtime switch ended the turn; like a cancel, the reply is not saved. */
+export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
+const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
+/** The turn's controller was aborted by a runtime switch, not by chat.cancel or shutdown. */
+const endedByRuntime = (signal: AbortSignal): boolean => signal.reason instanceof AppError && signal.reason.code === "runtime-changed";
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
@@ -117,11 +124,11 @@ interface Turn {
  * capabilities without "thinking". An Ollama that lists none, or a show that
  * fails, keeps the request as asked; the chat request reports a real error.
  */
-async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined): Promise<boolean | undefined> {
+async function thinkFlag(baseUrl: string, model: string, requested: boolean | undefined, signal: AbortSignal): Promise<boolean | undefined> {
   if (requested === undefined) return undefined;
   let capabilities: readonly string[] | undefined;
   try {
-    ({ capabilities } = await fetchShow(baseUrl, model));
+    ({ capabilities } = await fetchShow(baseUrl, model, signal));
   } catch {
     return requested;
   }
@@ -187,9 +194,11 @@ export function createApp(deps: AppDeps): App {
 
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
     const { turnId, threadId, controller } = turn;
-    const emit = (event: WireEvent) => {
+    const emit = (raw: WireEvent) => {
       // Only text means the model answered; an error, cancel or end goes through end() below.
-      if (event.type === "delta" || event.type === "thinking") load?.firstToken();
+      if (raw.type === "delta" || raw.type === "thinking") load?.firstToken();
+      // A runtime switch ends the turn the way a cancel does, with its own words.
+      const event: WireEvent = raw.type === "error" && endedByRuntime(controller.signal) ? { type: "error", code: "runtime-changed", message: RUNTIME_CHANGED_TURN_MESSAGE } : raw;
       push("chat.event", { turnId, threadId, event });
     };
     try {
@@ -199,7 +208,7 @@ export function createApp(deps: AppDeps): App {
       const image = options.image === true && deps.image !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
-      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think);
+      const think = await thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal);
       const input = {
         baseUrl,
         model,
@@ -299,6 +308,15 @@ export function createApp(deps: AppDeps): App {
       try {
         // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
         load = deps.models?.loader?.reserve(model);
+        // A runtime switch ends this turn at every phase; the switch waits for its end().
+        const reservation = load;
+        if (reservation !== undefined) {
+          const runtimeGone = () => turn.controller.abort(runtimeChangedTurn());
+          if (reservation.signal.aborted) runtimeGone();
+          else reservation.signal.addEventListener("abort", runtimeGone, { once: true });
+        }
+        // Before it started: a cancel, or the runtime switch above.
+        const stoppedEarly = () => (endedByRuntime(turn.controller.signal) ? runtimeChangedTurn() : new AppError("cancelled", "the turn was cancelled before it started"));
         // The runtime the reservation captured: fit, admit and chat all talk to it.
         const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
@@ -310,19 +328,19 @@ export function createApp(deps: AppDeps): App {
         try {
           releaseGpu = await deps.lease?.acquire("chat", turn.controller.signal);
         } catch {
-          throw new AppError("cancelled", "the turn was cancelled before it started");
+          throw stoppedEarly();
         }
         let report: FitReport;
         try {
           report = load ? await load.admit(numCtx, { fit, signal: turn.controller.signal }) : await fit();
         } catch (e) {
-          if (e instanceof AdmitCancelled) throw new AppError("cancelled", "the turn was cancelled before it started");
+          if (e instanceof AdmitCancelled || endedByRuntime(turn.controller.signal)) throw stoppedEarly();
           throw e;
         }
         if (report.verdict === "refuse") {
           throw new AppError("wont-fit", report.message ?? `${model} at num_ctx ${numCtx} does not fit (fit check refused).`, report);
         }
-        if (turn.controller.signal.aborted) throw new AppError("cancelled", "the turn was cancelled before it started");
+        if (turn.controller.signal.aborted) throw stoppedEarly();
         const userMessage = store.appendMessage({ threadId, role: "user", content });
         push("threads.changed", { threadId });
         const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
