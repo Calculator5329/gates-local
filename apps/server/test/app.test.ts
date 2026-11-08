@@ -446,6 +446,13 @@ function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
  */
 async function stalledThinkTurn() {
   const r = await rig({ image: idleComfy("external", () => undefined).build });
+  // The catalog reads each model's capabilities with /api/show too (runtime/models.ts), on the
+  // runtime's ready event. Wait until it lists the model: its capabilities are then cached by
+  // digest, so the stall below meets only the turn's own calls (fit check, then think probe).
+  for (let i = 0; !(await r.client.call("models.list", {})).some((m) => m.name === MODEL); i += 1) {
+    if (i > 100) throw new Error("the catalog never listed the model");
+    await sleep(20);
+  }
   let shows = 0;
   r.setShow((res) => {
     shows += 1;
