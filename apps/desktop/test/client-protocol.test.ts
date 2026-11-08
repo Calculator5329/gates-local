@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLIENT_ORIGIN, clientFile, externalUrl, originOf, sameClient, servedFile } from "../src/client-protocol.ts";
@@ -113,7 +113,10 @@ describe("servedFile (on disk)", () => {
   });
 
   function layout() {
-    dir = mkdtempSync(path.join(tmpdir(), "gates-desktop-served-"));
+    // Under ~/.cache, never the environment's temp dir (which can be /tmp).
+    const cache = path.join(homedir(), ".cache");
+    mkdirSync(cache, { recursive: true });
+    dir = mkdtempSync(path.join(cache, "gates-desktop-served-"));
     const root = path.join(dir, "dist");
     const outside = path.join(dir, "outside");
     mkdirSync(path.join(root, "assets"), { recursive: true });
