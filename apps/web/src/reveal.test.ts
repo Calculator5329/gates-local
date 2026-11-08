@@ -83,6 +83,26 @@ describe("reveal while streaming: whole blocks only", () => {
     expect(live(`Intro\n\n\`\`\`\n${line.repeat(3)}half`)).toBe("Intro\n");
   });
 
+  it("never shrinks: every one-character split of a mixed reply reveals a growing prefix", () => {
+    const fence = "```";
+    const replies = [
+      // a table right under its paragraph, with no blank line between
+      `Here is how they compare.\n| Model | Size |\n| :--- | ---: |\n| Gemma | 8.1 GB |\n\n${fence}sh\nollama list\n${fence}\n\n- One\n- Two\n  more of two\n\nDone.\n`,
+      `Intro.\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter the table.\n\n1. First\n2. Second\n${fence}\nx\n${fence}\nEnd`,
+    ];
+    for (const text of replies) {
+      const final = live(text);
+      let shown = "";
+      for (let n = 0; n <= text.length; n++) {
+        const now = live(text.slice(0, n));
+        expect(now.startsWith(shown), `shrank at ${JSON.stringify(text.slice(0, n))}`).toBe(true);
+        expect(final.startsWith(now)).toBe(true);
+        shown = now;
+      }
+      expect(reveal(text, false).startsWith(final)).toBe(true);
+    }
+  });
+
   it("shows all the text once the stream has ended", () => {
     for (const text of ["Here is a plain", "```sh\nunclosed", "- a\n- b", "| a | b |\n| --- | --- |\n| 1 | 2 |", "## Head", ""]) expect(reveal(text, false)).toBe(text);
   });

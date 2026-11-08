@@ -44,7 +44,11 @@ export function reveal(text: string, streaming: boolean): string {
   if (!streaming) return text;
   const ls = lines(text);
   const at = (j: number): Line | undefined => ls[j];
-  const tableAt = (j: number) => (at(j)?.text.includes("|") ?? false) && RULE.test(at(j + 1)?.text ?? "");
+  // a table starts only once its separator line is complete: "| --- | -" fails RULE where "| --- | " passed, so a half line would flip the decision
+  const tableAt = (j: number) => {
+    const sep = at(j + 1);
+    return (at(j)?.text.includes("|") ?? false) && sep !== undefined && sep.ended && RULE.test(sep.text);
+  };
   const startsBlock = (j: number) => {
     const t = at(j)?.text ?? "";
     return FENCE.test(t) || HEADING.test(t) || ITEM.test(t) || QUOTE.test(t) || tableAt(j);
