@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, utimesSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -129,7 +129,7 @@ describe("Library registry", () => {
     });
   }
   for (const registry of ["missing", "decoded"] as const) {
-    it(`a ${registry} registry: an _archive that is a symlink is set aside as the link itself; its target is never read, changed or moved (T3-01)`, async () => {
+    it(`a ${registry} registry: an _archive that is a symlink is refused and left in place; its target is never read, changed or moved (T3-01)`, async () => {
       const { root, dataDir, sources } = setup();
       const snapshots = path.join(dataDir, "snapshots");
       let id: string = randomUUID();
@@ -147,14 +147,13 @@ describe("Library registry", () => {
       symlinkSync(external, path.join(snapshots, "_archive"));
       const before = tree(external);
       const log = vi.fn();
-      createSources({ dataDir, now: () => 1234, log });
+      const reopened = createSources({ dataDir, now: () => 1234, log });
+      if (registry === "decoded") reopened.remove(id);
       expect(tree(external)).toEqual(before);
-      const unclaimed = path.join(snapshots, "_archive-unclaimed-1234");
-      expect(lstatSync(unclaimed).isSymbolicLink()).toBe(true);
-      expect(readlinkSync(unclaimed)).toBe(external);
-      expect(readdirSync(snapshots)).not.toContain("_archive");
+      expect(readlinkSync(path.join(snapshots, "_archive"))).toBe(external);
+      expect(readdirSync(snapshots).filter(name => name.startsWith("_archive-unclaimed"))).toEqual([]);
       expect(existsSync(path.join(snapshots, `${id}.db`))).toBe(false);
-      expect(log).toHaveBeenCalledWith(expect.stringMatching(/_archive was a link.*_archive-unclaimed-1234.*left as it is/));
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/refused snapshots\/_archive: it is a link.*left in place/));
     });
   }
   it("a missing registry: making a real _archive private never chmods through a link inside it (T3-01)", () => {
@@ -352,5 +351,149 @@ describe("Library registry", () => {
       }
       expect(db.prepare("SELECT gen FROM rows LIMIT 1").get()?.gen).toBeGreaterThan(0);
     } finally { db.close(); child.kill(); }
+  });
+});
+
+// `beforeStep` is a test-only seam: main.ts never passes it, and nothing from sources.json, the
+// wire or the model can reach it. Each test below swaps a real entry for a link at one step.
+const withDatabase = async () => {
+  const { root, dataDir, sources } = setup();
+  const file = path.join(root, "live.db");
+  const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n); INSERT INTO t VALUES(1)"); live.close();
+  const { id } = await sources.add({ kind: "sqlite", path: file });
+  return { root, dataDir, sources, id, snapshots: path.join(dataDir, "snapshots") };
+};
+/** A folder outside the data dir (0755) holding 0644 files with these names. */
+const outside = (root: string, names: string[]) => {
+  const dir = path.join(root, "external"); mkdirSync(dir); chmodSync(dir, 0o755);
+  for (const name of names) { writeFileSync(path.join(dir, name), "outside"); chmodSync(path.join(dir, name), 0o644); }
+  return dir;
+};
+describe("a link swapped in mid-operation is never followed out of the data dir (T3-01)", () => {
+  it("remove: _archive swapped for a link after its copies are listed deletes nothing outside, and the link stays", async () => {
+    const { root, dataDir, id, snapshots } = await withDatabase();
+    const archive = path.join(snapshots, "_archive");
+    const sources = createSources({ dataDir, beforeStep: step => {
+      if (step === "archive-listed") { renameSync(archive, `${archive}-moved`); symlinkSync(external, archive); }
+    } });
+    // Left by a start-up cleanup that could not finish.
+    mkdirSync(archive);
+    const name = `${id}.${randomUUID()}.db`; writeFileSync(path.join(archive, name), "old copy");
+    const external = outside(root, [name]);
+    const before = tree(external);
+    sources.remove(id);
+    expect(tree(external)).toEqual(before);
+    expect(readlinkSync(archive)).toBe(external);
+    // The listed folder is no longer _archive, so nothing in it was deleted either.
+    expect(readdirSync(`${archive}-moved`)).toEqual([name]);
+  });
+  it("start: an archived copy swapped for a link after it was chosen is never chmodded or made the snapshot", async () => {
+    const { root, dataDir, id, snapshots } = await withDatabase();
+    rmSync(path.join(snapshots, `${id}.db`));
+    const archive = path.join(snapshots, "_archive"); mkdirSync(archive);
+    const name = `${id}.${randomUUID()}.db`; const copy = path.join(archive, name); writeFileSync(copy, "old copy");
+    const target = path.join(root, "target.db"); writeFileSync(target, "outside"); chmodSync(target, 0o644);
+    createSources({ dataDir, now: () => 1234, beforeStep: step => { if (step === "copy-chosen") { rmSync(copy); symlinkSync(target, copy); } } });
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readFileSync(target, "utf8")).toBe("outside");
+    expect(readdirSync(snapshots)).not.toContain(`${id}.db`);
+    expect(readlinkSync(path.join(snapshots, "_archive-unclaimed-1234", name))).toBe(target);
+  });
+  it("start: an archived copy swapped for a link after it was checked is never left as the snapshot; the link is set aside", async () => {
+    const { root, dataDir, id, snapshots } = await withDatabase();
+    rmSync(path.join(snapshots, `${id}.db`));
+    const archive = path.join(snapshots, "_archive"); mkdirSync(archive);
+    const copy = path.join(archive, `${id}.${randomUUID()}.db`); writeFileSync(copy, "old copy");
+    const target = path.join(root, "target.db"); writeFileSync(target, "outside"); chmodSync(target, 0o644);
+    const log = vi.fn();
+    createSources({ dataDir, now: () => 1234, log, beforeStep: step => { if (step === "copy-promoting") { rmSync(copy); symlinkSync(target, copy); } } });
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readFileSync(target, "utf8")).toBe("outside");
+    expect(readdirSync(snapshots)).not.toContain(`${id}.db`);
+    const links = readdirSync(snapshots).filter(n => n.startsWith("_archive-unclaimed-")).map(n => path.join(snapshots, n)).filter(f => lstatSync(f).isSymbolicLink());
+    expect(links.map(f => readlinkSync(f))).toEqual([target]);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/was not the copy it checked.*_archive-unclaimed-1234/));
+  });
+  it("start, registry missing: a folder inside _archive swapped for a link after its parent is listed is never made private", () => {
+    const { root, dataDir } = setup();
+    const snapshots = path.join(dataDir, "snapshots");
+    mkdirSync(path.join(snapshots, "_archive", "sub"), { recursive: true }); writeFileSync(path.join(snapshots, "_archive", "sub", "copy.db"), "copy");
+    const external = outside(root, ["note.txt"]);
+    const before = tree(external);
+    createSources({ dataDir, now: () => 1234, beforeStep: (step, name) => {
+      if (step !== "dir-listed" || name !== "_archive-unclaimed-1234") return;
+      const sub = path.join(snapshots, name, "sub"); renameSync(sub, `${sub}-moved`); symlinkSync(external, sub);
+    } });
+    expect(tree(external)).toEqual(before);
+    expect(readlinkSync(path.join(snapshots, "_archive-unclaimed-1234", "sub"))).toBe(external);
+  });
+  it("start, registry missing: a folder swapped for a link after its last check is chmodded through its handle, never through the link", () => {
+    const { root, dataDir } = setup();
+    const snapshots = path.join(dataDir, "snapshots");
+    mkdirSync(path.join(snapshots, "_archive", "sub"), { recursive: true });
+    const external = outside(root, ["note.txt"]);
+    const before = tree(external);
+    createSources({ dataDir, now: () => 1234, beforeStep: (step, name) => {
+      if (step !== "dir-chmod" || name !== "sub") return;
+      const sub = path.join(snapshots, "_archive-unclaimed-1234", "sub"); renameSync(sub, `${sub}-moved`); symlinkSync(external, sub);
+    } });
+    expect(tree(external)).toEqual(before);
+    // The folder that was checked is the one made private, where it now is.
+    expect(statSync(path.join(snapshots, "_archive-unclaimed-1234", "sub-moved")).mode & 0o777).toBe(0o700);
+  });
+  it("start, registry missing: a file in _archive that also has a name outside the data dir is never chmodded", () => {
+    const { root, dataDir } = setup();
+    const archive = path.join(dataDir, "snapshots", "_archive"); mkdirSync(archive);
+    const target = path.join(root, "target.db"); writeFileSync(target, "outside"); chmodSync(target, 0o644);
+    linkSync(target, path.join(archive, `${randomUUID()}.${randomUUID()}.db`));
+    createSources({ dataDir, now: () => 1234 });
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+  });
+  it("start: a snapshots folder that is a link is refused with an error naming it, and left in place", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "gl-sources-"));
+    const dataDir = path.join(root, "app"); mkdirSync(dataDir);
+    const external = outside(root, ["note.txt"]);
+    const before = tree(external);
+    symlinkSync(external, path.join(dataDir, "snapshots"));
+    let error: Error | undefined;
+    try { createSources({ dataDir }); } catch (e) { error = e as Error; }
+    expect(tree(external)).toEqual(before);
+    expect(readlinkSync(path.join(dataDir, "snapshots"))).toBe(external);
+    expect(error?.message).toContain(path.join(dataDir, "snapshots"));
+    expect(error?.message).toMatch(/is a link.*left in place/);
+  });
+  it("running: a snapshots folder swapped for a link refuses refresh and remove; nothing outside is written, chmodded or deleted", async () => {
+    const { root, sources, id, snapshots } = await withDatabase();
+    const external = outside(root, [`${id}.db`]);
+    const before = tree(external);
+    renameSync(snapshots, `${snapshots}-moved`); symlinkSync(external, snapshots);
+    const refreshed = await sources.refresh(id);
+    sources.remove(id);
+    expect(tree(external)).toEqual(before);
+    expect(refreshed).toMatchObject({ state: "error", detail: expect.stringMatching(/snapshots.*moved or replaced/) });
+    expect(readlinkSync(snapshots)).toBe(external);
+    // The real snapshot was not deleted through the swapped path either: it is where it was moved.
+    expect(readdirSync(`${snapshots}-moved`)).toEqual([`${id}.db`]);
+  });
+  it("the path fallback (Windows, or a Linux with no /proc) keeps working and still refuses a link that is there", async () => {
+    const { root, dataDir } = setup();
+    const file = path.join(root, "live.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n); INSERT INTO t VALUES(1)"); live.close();
+    const sources = createSources({ dataDir, platform: "win32" });
+    const source = await sources.add({ kind: "sqlite", path: file });
+    await sources.refresh(source.id);
+    const snapshots = path.join(dataDir, "snapshots");
+    expect(readdirSync(snapshots)).toEqual([`${source.id}.db`]);
+    expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
+    sources.remove(source.id);
+    expect(readdirSync(snapshots)).toEqual([]);
+    const external = outside(root, ["note.txt"]);
+    const before = tree(external);
+    symlinkSync(external, path.join(snapshots, "_archive"));
+    createSources({ dataDir, platform: "win32" });
+    expect(readlinkSync(path.join(snapshots, "_archive"))).toBe(external);
+    const other = path.join(root, "other"); mkdirSync(other); symlinkSync(external, path.join(other, "snapshots"));
+    expect(() => createSources({ dataDir: other, platform: "win32" })).toThrow(/is a link/);
+    expect(tree(external)).toEqual(before);
   });
 });
