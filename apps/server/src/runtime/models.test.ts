@@ -235,6 +235,24 @@ describe("capabilities and the chat pick", () => {
     }
   });
 
+  it("an Ollama too old to list capabilities is told apart from one that failed to answer", async () => {
+    tags = [qwen, gemma];
+    const s = await startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      // Old Ollama: /api/show answers, with no capabilities field. Gemma's show fails.
+      "POST /api/show": (b, res) => ((b as { model: string }).model === "qwen3:8b" ? json(res, 200, { details: {} }) : json(res, 503, { error: "busy" })),
+    });
+    try {
+      const models = await listModels(s.baseUrl);
+      expect(models.map((m) => [m.name, m.capabilities])).toEqual([
+        ["gemma3:4b", ["unknown"]],
+        ["qwen3:8b", ["unknown", "unreported"]],
+      ]);
+    } finally {
+      await s.close();
+    }
+  });
+
   it("MP-01: discovery retries on its own until the unknown model's capabilities are read", async () => {
     tags = [{ ...embedTag, name: "search:latest", digest: "sha-search" }];
     let failures = 2;

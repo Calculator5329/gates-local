@@ -38,6 +38,8 @@ export type CapabilityCache = Map<string, readonly string[]>;
  * catalog asks /api/show again until it answers.
  */
 export const UNKNOWN_CAPABILITIES: readonly string[] = ["unknown"];
+/** /api/show answered without a capabilities field: an Ollama too old to report them. The UI says so instead of offering a download. */
+export const UNREPORTED_CAPABILITIES: readonly string[] = ["unknown", "unreported"];
 export const capabilitiesUnknown = (m: { readonly capabilities: readonly string[] }): boolean => m.capabilities.includes("unknown");
 
 async function capabilitiesOf(baseUrl: string, m: ModelInfo, timeoutMs: number, cache: CapabilityCache | undefined): Promise<readonly string[]> {
@@ -45,7 +47,7 @@ async function capabilitiesOf(baseUrl: string, m: ModelInfo, timeoutMs: number, 
   if (known) return known;
   try {
     const show = await fetchShow(baseUrl, m.name, AbortSignal.timeout(timeoutMs));
-    if (show.capabilities === undefined) return UNKNOWN_CAPABILITIES;
+    if (show.capabilities === undefined) return UNREPORTED_CAPABILITIES;
     cache?.set(m.digest, show.capabilities);
     return show.capabilities;
   } catch {

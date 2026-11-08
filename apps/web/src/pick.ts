@@ -57,6 +57,21 @@ export function newestOnly(): { next(): number; current(ticket: number): boolean
 export const sendableModel = (models: readonly ModelInfo[] | undefined, current: string | undefined): string | undefined =>
   models !== undefined && canChatAs(models, current) ? current : undefined;
 
+const unreported = (m: Caps): boolean => m.capabilities.includes("unreported");
+
+/**
+ * Why sends are held when a download would not help, in one line; undefined
+ * otherwise. An Ollama too old to report capabilities (server
+ * UNREPORTED_CAPABILITIES) leaves every model unknown, and another download
+ * would be unknown too.
+ */
+export function chatBlockedReason(models: readonly ModelInfo[] | undefined, current: string | undefined): string | undefined {
+  if (models === undefined || sendableModel(models, current) !== undefined) return undefined;
+  if (!models.some(canChat) && models.some(unreported)) return "Your Ollama is too old to say what its models can do, so none can chat. Update Ollama.";
+  if (models.some((m) => m.name === current && m.capabilities.includes("unknown"))) return "Checking what this model can do; you can send once Ollama answers.";
+  return undefined;
+}
+
 /** The download that will become the first chat model, while no installed model can chat. */
 export function firstChatPull(models: readonly ModelInfo[] | undefined, pulls: Readonly<Record<string, { name: string; state: string }>>): string | undefined {
   if ((models ?? []).some(canChat)) return undefined;
@@ -65,9 +80,11 @@ export function firstChatPull(models: readonly ModelInfo[] | undefined, pulls: R
 
 /** Why an installed model is not a chat choice, for its Settings row: an embedding model, or one Ollama has not described yet. */
 export const notForChat = (m: Caps | undefined): { label: string; tip: string } =>
-  m?.capabilities.includes("unknown")
-    ? { label: "Checking what this model can do", tip: "Ollama has not said what this model can do yet; Gates Local asks again and offers it for chat once it knows." }
-    : { label: "Embedding model, not for chat", tip: "Turns text into vectors for search; it cannot answer a chat." };
+  m !== undefined && unreported(m)
+    ? { label: "Ollama too old to say", tip: "This Ollama does not report what a model can do, so Gates Local cannot tell a chat model from an embedding model. Update Ollama." }
+    : m?.capabilities.includes("unknown")
+      ? { label: "Checking what this model can do", tip: "Ollama has not said what this model can do yet; Gates Local asks again and offers it for chat once it knows." }
+      : { label: "Embedding model, not for chat", tip: "Turns text into vectors for search; it cannot answer a chat." };
 
 /** The rule in words, for the Recommended tooltip. It says what pick.ts does. */
 export function pickRuleText(numCtx: number): string {

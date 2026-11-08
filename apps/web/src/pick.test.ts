@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModelInfo } from "@gates-local/contracts";
-import { canChat, canThink, chatModels, firstChatPull, modelChoice, newestOnly, notForChat, sendableModel } from "./pick.ts";
+import { canChat, canThink, chatBlockedReason, chatModels, firstChatPull, modelChoice, newestOnly, notForChat, sendableModel } from "./pick.ts";
 
 const m = (name: string, sizeBytes: number, capabilities: string[], pick?: ModelInfo["pick"]): ModelInfo => ({
   name,
@@ -88,6 +88,18 @@ describe("client model choice", () => {
     const inFlight = order.next();
     order.next(); // models.changed arrived while it was in flight
     expect(order.current(inFlight)).toBe(false);
+  });
+
+  it("an Ollama too old to report capabilities is the reason nothing can chat, not a missing download", () => {
+    const old = [m("qwen3.5:9b", 1, ["unknown", "unreported"]), m("gemma4:12b", 1, ["unknown", "unreported"])];
+    expect(chatBlockedReason(old, undefined)).toBe("Your Ollama is too old to say what its models can do, so none can chat. Update Ollama.");
+    expect(notForChat(old[0]).label).toBe("Ollama too old to say");
+    // A chosen model not described yet: sends wait for it.
+    expect(chatBlockedReason([m("gemma4:12b", 1, ["unknown"]), small], "gemma4:12b")).toBe("Checking what this model can do; you can send once Ollama answers.");
+    // Otherwise the existing words stand: a model that can chat, or nothing installed.
+    expect(chatBlockedReason([small], "qwen3.5:4b")).toBeUndefined();
+    expect(chatBlockedReason([], undefined)).toBeUndefined();
+    expect(chatBlockedReason(undefined, undefined)).toBeUndefined();
   });
 
   it("MP-01: Settings says an unknown model is being checked, not that it is an embedding model", () => {
