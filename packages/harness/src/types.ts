@@ -30,5 +30,9 @@ export type ModelEvent =
 export type LoopEvent = Exclude<ModelEvent, { type: "complete" }>
   | { type: "tool"; step: ToolStep }
   | { type: "complete"; content: string; thinking?: string; stopReason: string; tools: ToolStep[]; stats?: TurnStats };
-/** `tools: false` is the final-answer request after a budget ran out: send no tool definitions. */
-export type ModelStream = (messages: readonly ModelMessage[], options?: { tools: boolean }) => AsyncIterable<ModelEvent>;
+/**
+ * `tools: false` is the final-answer request after a budget ran out: send no tool definitions.
+ * `signal` covers this one request (the turn's cancel, the tool-phase deadline, the stall guard):
+ * pass it to the HTTP request so an abort closes the connection.
+ */
+export type ModelStream = (messages: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) => AsyncIterable<ModelEvent>;

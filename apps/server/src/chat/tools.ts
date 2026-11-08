@@ -49,7 +49,8 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
     const windowed = fitToWindow(input.messages, input.numCtx, overhead);
     if (!windowed.ok) { yield { type: "error", code: "context-too-small", message: windowed.message }; return; }
     const messages: ModelMessage[] = [{ role: "system", content: system }, ...windowed.messages];
-    const stream = (history: readonly ModelMessage[], options?: { tools: boolean }) => ollamaStep({ input, fetcher, signal, messages: history, definitions: native && options?.tools !== false ? tools.definitions : undefined });
+    // Each request gets the loop's own signal: the turn's cancel, the tool-phase deadline and the stall guard.
+    const stream = (history: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) => ollamaStep({ input, fetcher, signal: options?.signal ?? signal, messages: history, definitions: native && options?.tools !== false ? tools.definitions : undefined });
     for await (const event of runLoop({ messages, stream, execute: input.execute ?? tools.execute, signal, native, numCtx: input.numCtx })) {
       if (event.type !== "complete") { yield event; continue; }
       signal.throwIfAborted();

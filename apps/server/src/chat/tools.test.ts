@@ -98,6 +98,25 @@ describe("tool chat transport", () => {
     expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
   });
+  it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let chatSignal: AbortSignal | undefined;
+      const fetcher = vi.fn(async (url, init) => {
+        if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+        chatSignal = init?.signal ?? undefined;
+        return hang(chatSignal);
+      });
+      const run = (async () => {
+        const events = [];
+        for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "hi" }], numCtx: 16384, sources: [], fetch: fetcher })) events.push(e);
+        return events;
+      })();
+      await vi.advanceTimersByTimeAsync(120_000 + 1); // the default stall guard, STREAM_STALL_MS
+      expect(chatSignal?.aborted).toBe(true);
+      expect((await run).at(-1)).toMatchObject({ type: "error", code: "stream-error", message: "The model stopped sending for 120 s; the reply was stopped." });
+    } finally { vi.useRealTimers(); }
+  });
   it("names a SQLite source the way the offered tool takes it: a source id for sql on Windows, a /data path for the shell on Linux", async () => {
     const windows = await system("win32");
     expect(windows).not.toContain("/data/");
