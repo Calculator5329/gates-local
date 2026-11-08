@@ -29,6 +29,8 @@ export const PsResponse = Schema.Struct({
       size: Schema.Number,
       size_vram: Schema.Number,
       expires_at: Schema.optionalKey(Schema.String),
+      /** The num_ctx the model is loaded at; absent (older Ollama) means unknown. */
+      context_length: Schema.optionalKey(Schema.Number),
     }),
   ),
 });
@@ -54,7 +56,8 @@ export const InstallManifest = Schema.Struct({
   url: Schema.String,
   sha256: Schema.String,
   sizeBytes: Schema.Number,
-  format: Schema.Literals(["tar.zst", "tar.gz"]),
+  /** tar.zst and tar.gz: the Linux releases. zip: the Windows release. */
+  format: Schema.Literals(["tar.zst", "tar.gz", "zip"]),
   verified: Schema.Boolean,
   source: Schema.String,
 });

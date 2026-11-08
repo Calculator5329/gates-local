@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ImageEvent, ImageStatus, Params } from "@gates-local/contracts";
 import type { Push } from "../app.ts";
-import { readGpu } from "../fit/gpu.ts";
+import { readGpu, untilAborted } from "../fit/gpu.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
@@ -43,7 +43,13 @@ export interface ImageModule {
   cancel(jobId: string): { cancelled: boolean };
   /** Test/CLI completion seam; errors are reported on image.event. */
   wait(jobId: string): Promise<void>;
-  stopIdle(): Promise<void>;
+  /**
+   * `signal` (a turn's reclaim) ends the wait for the GPU claim and every read under it, so the
+   * claim goes back at once; a cancelled call never starts a stop. A stop already begun runs to its end.
+   */
+  stopIdle(signal?: AbortSignal): Promise<void>;
+  /** The MainPID of the ComfyUI this app started while no image job runs (what stopIdle would stop), else undefined. */
+  reclaimable(): number | undefined;
   close(): Promise<void>;
 }
 
@@ -113,18 +119,6 @@ export async function isLocalHost(hostname: string, own: readonly string[] = loc
   }
 }
 
-/** The promise's result, or the signal's reason as soon as it aborts; the listener goes either way. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return promise;
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
-      (error: unknown) => { signal.removeEventListener("abort", onAbort); reject(error); },
-    );
-  });
-}
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
@@ -355,28 +349,37 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       job.controller.abort(new Error("Image cancelled.")); return { cancelled: true };
     },
     async wait(jobId) { await jobs.get(jobId)?.ended; },
-    async stopIdle() {
+    async stopIdle(signal) {
       clearIdle();
       if (!owned || jobs.size > 0) return;
-      await deps.lease.run("image", undefined, async () => {
+      await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
-        const unit = await service.inspect();
+        // The reads end at the signal, so a cancel gives the claim back at once; the stop does not.
+        const unit = await untilAborted(service.inspect(), signal);
         // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
         // the next job at this address or a stop clears it.
         const mine = stuck.get(owned.baseUrl);
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
         // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
-        if (!await client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined)) { armIdle(); return; }
-        const latest = await service.inspect();
+        signal?.throwIfAborted();
+        if (!await untilAborted(client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined), signal)) { armIdle(); return; }
+        signal?.throwIfAborted();
+        const latest = await untilAborted(service.inspect(), signal);
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
+        signal?.throwIfAborted();
         await service.stop();
         const baseUrl = owned.baseUrl; owned = undefined;
         stuck.delete(baseUrl);
         update({ state: "stopped", owner: "none", baseUrl });
+      }).catch((error: unknown) => {
+        // A cancelled reclaim leaves ComfyUI to its idle timer.
+        if (signal?.aborted) armIdle();
+        throw error;
       });
     },
+    reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
     async close() {
       closed = true; clearIdle();
       const pending = [...jobs.values()];

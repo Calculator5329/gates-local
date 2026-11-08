@@ -14,6 +14,7 @@ dies, and gives the web client a small typed bridge (`window.gatesLocal`).
 | `src/launch.ts` | Pure launch decisions: background mode, window at start, quit on last window, second-launch action, the server child's env. |
 | `src/preload.ts` | Sandboxed preload: `contextBridge.exposeInMainWorld("gatesLocal", …)`. |
 | `src/window.ts` | The window's options: the gate-mark icon (`assets/icon.png`) and the sandboxed, isolated renderer. |
+| `src/update-launch.ts`, `src/running.ts` | "Update and restart": the detached updater's command line, and the pid file that tells the updater the app is open. |
 | `src/keys.ts` | No menu on Linux and Windows, so the window keys live here: Ctrl+R / Ctrl+Shift+R reload, Ctrl+W close, Ctrl+Q quit (Linux), F11 full screen, Ctrl+Shift+I dev tools (unpackaged), Ctrl +/-/0 zoom. |
 | `src/desktop-entry.ts`, `src/linux-install.ts` | The Linux desktop entry (Exec in the spec's two escape layers) and its per-user install; old files move to `$XDG_DATA_HOME/gates-local-install-backups/<time>-<random>/`. |
 | `scripts/build.ts` | esbuild: `src/main.ts` -> `out/main.cjs`, `src/preload.ts` -> `out/preload.cjs`. |
@@ -186,6 +187,16 @@ refuses to start with `LISTEN` set.
   - `onState(listener): () => void`
   - `restart(): Promise<RestartResult>`
   - `reloadClient(): Promise<void>`
+  - `updateAndRestart(): Promise<UpdateAndRestartResult>`: Settings ›
+    Updates. Main starts `node scripts/update.ts --wait-pid <its pid>
+    --restart …` detached (`src/update-launch.ts`) and quits; the updater
+    waits for that pid to exit, updates, leaves the result in the data
+    folder for the next start and opens the app again with the same
+    working folder and arguments. `{ ok: false, message }` when this copy
+    is packaged or not a git clone, or node could not be started.
+- `<data dir>/desktop.pid.json` (`src/running.ts`): written once main holds
+  the single-instance lock, removed on exit. `pnpm run app-update` refuses
+  while it names a live process.
 
 ## What the web client must do (reconnect duties)
 

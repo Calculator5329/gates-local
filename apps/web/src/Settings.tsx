@@ -1,73 +1,19 @@
 // Settings (shell.md F20, F27, F36, F45, F46, F59, F62-F66): six sections
 // wired to settings.get/update and the v2 methods. A section whose method the
 // server answers "not-implemented" says so in one calm line; nothing crashes.
-import { type ReactNode, useCallback, useEffect, useState } from "react";
-import type { ContextSize, PullProgress, Source } from "@gates-local/contracts";
+import { useEffect, useState } from "react";
+import type { ContextSize, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, describeModel, etaText, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, describeModel, folderWords, gb, k, sourceDetail, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
-import { type ActionResult, addSource, cancelPull, ensureFit, refreshSource, removeSource, setContext, updateSettings } from "./session.ts";
+import { addSource, ensureFit, refreshSource, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
-import { VLabel, closeTip } from "./ui.tsx";
-
-const NOT_HERE = "Not available in this build.";
-
-function Head({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="set-h">
-      <h1>{title}</h1>
-      <p>{children}</p>
-    </div>
-  );
-}
-
-function Grp({ title, children }: { title?: string; children: ReactNode }) {
-  return (
-    <div className="grp">
-      {title ? <div className="grp-t">{title}</div> : null}
-      <div className="box">{children}</div>
-    </div>
-  );
-}
-
-/**
- * The failure of the last action a control ran (W-07): null until one fails,
- * cleared when the next try starts. run resolves true on success.
- */
-function useAct(): [string | null, (action: Promise<ActionResult>) => Promise<boolean>] {
-  const [err, setErr] = useState<string | null>(null);
-  const run = useCallback(async (action: Promise<ActionResult>) => {
-    setErr(null);
-    const r = await action;
-    setErr(r);
-    return r === null;
-  }, []);
-  return [err, run];
-}
-
-/** One calm sentence beside the control that failed. */
-const Fail = ({ err, line = false }: { err: string | null; line?: boolean }) =>
-  err === null ? null : (
-    <span className={line ? "act-err line" : "act-err"} role="alert">
-      {err}
-    </span>
-  );
-
-function Row({ label, desc, err = null, children }: { label: ReactNode; desc?: ReactNode; err?: string | null; children?: ReactNode }) {
-  return (
-    <div className="srow">
-      <div className="sl">
-        <b>{label}</b>
-        {desc !== undefined ? <span className="d">{desc}</span> : null}
-        <Fail err={err} />
-      </div>
-      <div className="sv">{children}</div>
-    </div>
-  );
-}
+import { VLabel } from "./ui.tsx";
+import { Fail, Grp, Head, NOT_HERE, Na, Row, useAct } from "./settings-ui.tsx";
+import { Updates } from "./Updates.tsx";
 
 function Seg2<T extends string | number>({ value, options, onPick, label }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string }) {
   return (
@@ -80,8 +26,6 @@ function Seg2<T extends string | number>({ value, options, onPick, label }: { va
     </span>
   );
 }
-
-const Na = ({ children = NOT_HERE }: { children?: ReactNode }) => <span className="na">{children}</span>;
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
@@ -140,40 +84,12 @@ function General() {
           </tbody>
         </table>
       </Grp>
+      <Updates />
     </>
   );
 }
 
 // ---------------------------------------------------------------- Models
-
-/** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
-export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
-  const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
-  const [err, run] = useAct();
-  return (
-    <>
-      <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
-        <i style={{ width: `${pct}%` }} />
-      </div>
-      <div className="prog-l">
-        <span>{etaText(p)}</span>
-        {cancel ? (
-          <button
-            type="button"
-            className="qa"
-            onClick={() => {
-              closeTip();
-              void run(cancelPull(p.name));
-            }}
-          >
-            Cancel download
-          </button>
-        ) : null}
-      </div>
-      <Fail err={err} />
-    </>
-  );
-}
 
 function useFit(model: string, numCtx: number): Verdict | undefined {
   const r = useStore((s) => s.fits[fitKey(model, numCtx)]);
@@ -236,9 +152,8 @@ function Runtime() {
   const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
-  const v = runtime?.version ? ` · Ollama ${runtime.version}` : "";
   const stat =
-    rt === "ready" ? `Running${v}` : rt === "installing" ? "Installing" : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : "Didn't start";
+    rt === "ready" ? "Running" : rt === "installing" ? "Installing" : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : "Didn't start";
   const statD =
     rt === "ready"
       ? app
@@ -256,6 +171,7 @@ function Runtime() {
   const canSwitch = settings !== NA && settings !== undefined;
   const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
+  const folders = folderWords();
   return (
     <>
       <Head title="Runtime">Gates Local finds Ollama on its own.</Head>
@@ -288,10 +204,10 @@ function Runtime() {
                     <ul>
                       <li>Gates Local stops its copy and connects to the system one on port 11434.</li>
                       <li>
-                        Both read the same models folder, <span className="mono">~/.ollama/models</span>, so nothing downloads again.
+                        The system one reads its own models folder, <span className="mono">{folders.models}</span>. Models downloaded into Gates Local's copy stay in <span className="mono">{folders.appModels}</span>.
                       </li>
                       <li>
-                        Its copy stays in <span className="mono">~/.local/share/gates-local/ollama</span> until you remove it.
+                        Its copy stays in <span className="mono">{folders.appCopy}</span> until you remove it.
                       </li>
                       <li>Chats pause for a few seconds while it reconnects.</li>
                     </ul>
@@ -301,10 +217,11 @@ function Runtime() {
                     <b>Switch to Gates Local's own copy of Ollama?</b>
                     <ul>
                       <li>
-                        Downloads Ollama into <span className="mono">~/.local/share/gates-local/ollama</span>.
+                        Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
                       <li>
-                        It reads the same models folder, <span className="mono">~/.ollama/models</span>, so your {models?.length ?? 0} models don't download again.
+                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
+                        <span className="mono">{folders.models}</span> stay where they are.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
                       <li>Chats pause for about a minute while it installs and starts.</li>
@@ -335,8 +252,8 @@ function Runtime() {
         </Row>
       </Grp>
       <Grp title="Storage">
-        <Row label="Models folder" desc={models ? `${models.length} models · ${gb(total)} on disk` : undefined}>
-          <span className="path">~/.ollama/models</span>
+        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
+          <span className="path">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>
@@ -422,19 +339,10 @@ function Images() {
   );
 }
 
-function fresh(src: Source): string {
-  if (src.state === "refreshing") return "Refreshing…";
-  if (src.state === "error") return src.detail ?? "Couldn't read it.";
-  const parts: string[] = [];
-  if (src.sizeBytes !== undefined) parts.push(src.sizeBytes > 1024 ** 3 ? gb(src.sizeBytes) : `${Math.max(1, Math.round(src.sizeBytes / 1024 ** 2))} MB`);
-  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Read-only";
-}
-
 function SourceRow({ src }: { src: Source }) {
   const [err, run] = useAct();
   return (
-    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${fresh(src)}`} err={err}>
+    <Row label={src.label || src.path} desc={`${src.kind === "sqlite" ? "SQLite · " : ""}${sourceDetail(src)}`} err={err}>
       <span className="badge">read-only</span>
       <button type="button" className="qa" onClick={() => void run(refreshSource(src.id))}>
         Refresh

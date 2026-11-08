@@ -22,8 +22,8 @@ function localAppData(env: Env, home: string): string {
 export function defaultAppDataDir(env: Env = process.env, home = os.homedir(), platform: NodeJS.Platform = process.platform): string {
   if (platform === "win32") return path.win32.join(localAppData(env, home), "GatesLocal");
   const xdg = env.XDG_DATA_HOME;
-  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(home, ".local", "share");
-  return path.join(base, "gates-local");
+  const base = xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(home, ".local", "share");
+  return path.posix.join(base, "gates-local");
 }
 
 export const ollamaBinaryName = (platform: NodeJS.Platform = process.platform) => (platform === "win32" ? "ollama.exe" : "ollama");
@@ -50,8 +50,18 @@ export function installDir(appDataDir: string, version: string): string {
   return path.join(installRoot(appDataDir), version);
 }
 
-export function installedBinary(appDataDir: string, version: string): string {
-  return path.join(installDir(appDataDir, version), "bin", "ollama");
+/**
+ * The release archives differ: Linux's tarball has bin/ollama, Windows' ZIP
+ * has ollama.exe at its top level (lib\ollama\ beside it). The layout is
+ * the host's: what installPinned unpacked on this machine.
+ */
+export function installedBinary(appDataDir: string, version: string, platform: NodeJS.Platform = process.platform): string {
+  return binaryIn(installDir(appDataDir, version), platform);
+}
+
+/** The Ollama binary inside an unpacked release tree. */
+export function binaryIn(tree: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? path.join(tree, "ollama.exe") : path.join(tree, "bin", "ollama");
 }
 
 export function ownedStateFile(appDataDir: string): string {

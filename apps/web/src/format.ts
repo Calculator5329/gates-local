@@ -1,6 +1,6 @@
 // Words and numbers the design fixes (shell.md F16, F34, F35, F62): one
 // decimal for GB, three verdict labels, the friendly model name first.
-import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress } from "@gates-local/contracts";
+import type { CatalogEntry, ContextSize, FitReport, Message, ModelInfo, PullProgress, Source } from "@gates-local/contracts";
 
 export const CONTEXT_SIZES: readonly ContextSize[] = [16384, 32768, 65536];
 
@@ -11,10 +11,54 @@ export function gb(bytes: number): string {
   return `${(bytes / GIB).toFixed(1)} GB`;
 }
 
+/** A Library file's size: "223 bytes", "39 KB", "5 MB", "3.0 GB". */
+export function fileSize(bytes: number): string {
+  if (bytes >= GIB) return gb(bytes);
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+}
+
+/** A Library row's detail: "Refreshing…", the error, or "223 bytes · read Nov 7". */
+export function sourceDetail(src: Source): string {
+  if (src.state === "refreshing") return "Refreshing…";
+  if (src.state === "error") return src.detail ?? "Couldn't read it.";
+  const parts: string[] = [];
+  if (src.sizeBytes !== undefined) parts.push(fileSize(src.sizeBytes));
+  if (src.snapshotAt !== undefined) parts.push(`read ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
+  return parts.join(" · ") || "Read-only";
+}
+
 /** 16384 → "16k". */
 export function k(numCtx: number): string {
   return `${Math.round(numCtx / 1024)}k`;
 }
+
+/**
+ * The GPU status says there is no GPU the app can read (no nvidia-smi, as on
+ * a Windows or Linux machine with only Intel or AMD graphics): every model
+ * is planned in system memory, and the words must not promise a GPU.
+ */
+export function noGpu(gpu: { readonly vendor: string } | undefined | "na"): boolean {
+  return gpu !== undefined && gpu !== "na" && gpu.vendor === "none";
+}
+
+/**
+ * Folder names as this machine spells them. The server listens on loopback
+ * only, so the client's OS is the server's; the desktop window's user agent
+ * names Windows there.
+ */
+export function folderWords(userAgent: string = typeof navigator === "undefined" ? "" : navigator.userAgent): { models: string; appCopy: string; appModels: string } {
+  return /\bWindows\b/.test(userAgent)
+    ? { models: "%USERPROFILE%\\.ollama\\models", appCopy: "%LOCALAPPDATA%\\GatesLocal\\runtime\\ollama", appModels: "%LOCALAPPDATA%\\GatesLocal\\models" }
+    : { models: "~/.ollama/models", appCopy: "~/.local/share/gates-local/runtime/ollama", appModels: "~/.local/share/gates-local/models" };
+}
+
+/** "1 model", "3 models". */
+export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What the app says when noGpu() holds. */
+export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards), so models run in system memory. Replies are slower than on a GPU.";
 
 export type VerdictKind = "gpu" | "spill" | "no";
 

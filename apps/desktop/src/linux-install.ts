@@ -22,7 +22,7 @@ export const BACKUP_DIR = "gates-local-install-backups";
 /** $XDG_DATA_HOME when it is absolute; the spec says a relative one is invalid and ignored. */
 export function linuxDataHome(env: Readonly<Record<string, string | undefined>>, home: string): string {
   const xdg = env["XDG_DATA_HOME"];
-  return xdg && path.isAbsolute(xdg) ? xdg : path.join(home, ".local", "share");
+  return xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(home, ".local", "share");
 }
 
 export interface InstallOptions {

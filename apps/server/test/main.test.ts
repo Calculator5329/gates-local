@@ -186,7 +186,9 @@ describe("server CLI", () => {
     expect(s.stderr.some((l) => l.includes("runtime discover-only"))).toBe(true);
   });
 
-  it("exits on SIGTERM within 3 s", async () => {
+  // Windows cannot deliver SIGTERM (kill() there is TerminateProcess); the
+  // desktop app stops the server through stdin EOF, tested above.
+  it.skipIf(process.platform === "win32")("exits on SIGTERM within 3 s", async () => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
     const s = launch(

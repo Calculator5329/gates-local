@@ -177,6 +177,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
     result: { turnId: "turn-1", userMessage },
   },
   "chat.cancel": { params: { turnId: "turn-1" }, result: { cancelled: true } },
+  "turns.blocking": { params: { model: "qwen3:14b", numCtx: 16384 }, result: [{ threadId: "t1", title: "First", model: "qwen3.5:9b" }] },
   "settings.get": { params: {}, result: settings },
   "settings.update": { params: { thinking: false, defaultModel: null }, result: { ...settings, thinking: false } },
   "gpu.status": { params: {}, result: gpu },
@@ -214,6 +215,27 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       totalBytes: 0,
     },
   },
+  "update.status": {
+    params: {},
+    result: {
+      version: { kind: "release", tag: "v0.1.0", commit: "85507ce", date: 1_762_500_000_000 },
+      result: { at: 1_762_500_005_000, outcome: "updated", line: "Updated to v0.1.0, 12 changes." },
+      lastCheck: null,
+    },
+  },
+  "update.check": {
+    params: {},
+    result: {
+      state: "available",
+      checkedAt: 1_762_500_006_000,
+      channel: "release",
+      current: "v0.1.0",
+      target: "v0.2.0",
+      total: 23,
+      changes: ["Settings: an Updates group", "Fix the model picker on phones"],
+    },
+  },
+  "update.dismissResult": { params: {}, result: { dismissed: true } },
 };
 
 /** One sample per channel; chat.event gets one per ChatEvent variant. */
@@ -224,6 +246,11 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
     { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "error", code: "runtime-gone", message: "Ollama stopped" } },
+    {
+      turnId: "turn-1",
+      threadId: "t1",
+      event: { type: "error", code: "preempted", message: "qwen3:14b needed the GPU this reply was using, so it stopped.", partial: assistantMessage, neededBy: "qwen3:14b" },
+    },
     { turnId: "turn-1", threadId: "t1", event: { type: "tool", step: { ...toolStep, state: "running" } } },
     {
       turnId: "turn-1",

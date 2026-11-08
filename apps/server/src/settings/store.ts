@@ -101,6 +101,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(patch.runtimeMode === undefined ? {} : { runtimeMode: patch.runtimeMode }),
     ...(patch.tools === undefined ? {} : { tools: patch.tools }),
     ...(patch.imageGen === undefined ? {} : { imageGen: patch.imageGen }),
+    ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
   };
 }
 

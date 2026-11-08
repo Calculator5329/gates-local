@@ -4,6 +4,7 @@
 // imports a fresh copy. Kept apart from session.test.ts, whose discovery
 // tests need the real createClient this file mocks.
 import type { ModelInfo } from "@gates-local/contracts";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ client: undefined as unknown }));
@@ -101,6 +102,25 @@ it("hydration answers older than a runtime change keep neither the old list nor 
   expect(store.getState().runtime).toMatchObject({ state: "ready", baseUrl: "http://runtime-b", version: "0.40.4" });
 });
 
+it("a catalog asked before a later models.changed never lands over the newer one", async () => {
+  const sample = methodSamples["models.catalog"].result;
+  const stale = sample.map((c) => ({ ...c, installed: true }));
+  const fresh = sample.map((c) => ({ ...c, installed: false }));
+  const answers = [defer<unknown>(), defer<unknown>()];
+  let asked = 0;
+  const { store, push, calls, hydrated } = await boot({ "models.catalog": () => answers[asked++]?.promise ?? Promise.resolve(fresh) });
+  await hydrated();
+  // hydration's catalog probe is in flight; a removal pushes a new list, which asks again
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(1));
+  push("models.changed", [info(LLAMA, true)]);
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(2));
+  answers[1]?.resolve(fresh);
+  await vi.waitFor(() => expect(store.getState().catalog).toEqual(fresh));
+  answers[0]?.resolve(stale);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(store.getState().catalog).toEqual(fresh);
+});
+
 it("a thread keeps its model when the pick changes; only a new empty chat follows the pick (MP-02)", async () => {
   const { session, store, push, hydrated } = await boot();
   await hydrated();
@@ -167,4 +187,93 @@ it("a deleted thread, or one a refresh no longer lists, leaves no threadModels e
   answers["threads.list"] = async () => [];
   push("threads.changed", {});
   await vi.waitFor(() => expect(store.getState().threadModels).toEqual({}));
+});
+
+const thread = (id: string) => ({ id, title: id, createdAt: 1, updatedAt: 1 });
+const settle = () => new Promise((r) => setTimeout(r, 20));
+const failing = async () => {
+  throw new Error("discovery pending");
+};
+
+describe("a threads.list answer older than a newer list or a local change is dropped (MP5-01)", () => {
+  it("an older list that lacks the thread neither drops it nor its unsent pick", async () => {
+    const old = defer<unknown>();
+    const answers: Record<string, () => Promise<unknown>> = {};
+    const { session, store, push, hydrated } = await boot(answers);
+    await hydrated();
+    answers["threads.list"] = () => old.promise;
+    push("threads.changed", {});
+    answers["threads.list"] = async () => [thread("S")];
+    push("threads.changed", {});
+    await vi.waitFor(() => expect(store.getState().threads.map((t) => t.id)).toEqual(["S"]));
+    session.openThread("S");
+    session.pickModel(QWEN);
+    old.resolve([]);
+    await settle();
+    expect(store.getState().threads.map((t) => t.id)).toEqual(["S"]);
+    expect(store.getState().threadModels["S"]).toBe(QWEN);
+    // the saved history (a Gemma reply) loads again: the unsent pick still wins
+    answers["threads.get"] = async () => savedReply(GEMMA);
+    session.reloadThread("S");
+    await vi.waitFor(() => expect(store.getState().messages["S"]?.[0]?.model).toBe(GEMMA));
+    session.openThread("S");
+    expect(store.getState().model).toBe(QWEN);
+  });
+
+  it("a list asked before a local delete does not bring the thread back", async () => {
+    const old = defer<unknown>();
+    const answers: Record<string, () => Promise<unknown>> = {};
+    const { session, store, push, hydrated } = await boot(answers);
+    await hydrated();
+    answers["threads.list"] = () => old.promise;
+    push("threads.changed", {});
+    await session.deleteThread("A");
+    old.resolve([thread("A")]);
+    await settle();
+    expect(store.getState().threads).toEqual([]);
+  });
+});
+
+describe("a saved model is restored once a model list arrives after the history (MP5-02)", () => {
+
+  it("restores it when the first list lands", async () => {
+    const { session, store, push, hydrated } = await boot({ "models.list": failing, "threads.get": async () => savedReply(GEMMA) });
+    await hydrated();
+    session.openThread("S");
+    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+    push("models.changed", qwenPicked);
+    expect(store.getState().model).toBe(GEMMA);
+    expect(store.getState().threadModels["S"]).toBe(GEMMA);
+  });
+
+  it("an in-session pick made before the list lands still wins", async () => {
+    const { session, store, push, hydrated } = await boot({ "models.list": failing, "threads.get": async () => savedReply(GEMMA) });
+    await hydrated();
+    session.openThread("S");
+    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+    session.pickModel(LLAMA);
+    push("models.changed", qwenPicked);
+    expect(store.getState().model).toBe(LLAMA);
+    expect(store.getState().threadModels["S"]).toBe(LLAMA);
+  });
+
+  it("a fallback the person never chose is not recorded as the thread's", async () => {
+    const { session, store, push, hydrated } = await boot({ "models.list": failing, "threads.get": async () => savedReply("gone:1b") });
+    await hydrated();
+    session.openThread("S");
+    await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+    push("models.changed", qwenPicked);
+    expect(store.getState().model).toBe(QWEN);
+    expect(store.getState().threadModels["S"]).toBeUndefined();
+  });
+});
+
+it("a saved model that is installed but now only embeds is not restored (MP5-03)", async () => {
+  const embedding: ModelInfo = { ...info(GEMMA), capabilities: ["embedding"] };
+  const { session, store, hydrated } = await boot({ "models.list": async () => [info(QWEN, true), embedding], "threads.get": async () => savedReply(GEMMA) });
+  await hydrated();
+  session.openThread("S");
+  await vi.waitFor(() => expect(store.getState().messages["S"]).toBeDefined());
+  expect(store.getState().model).toBe(QWEN);
+  expect(store.getState().threadModels["S"]).toBeUndefined();
 });

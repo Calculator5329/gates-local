@@ -18,7 +18,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
-import { type ModelDecision, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
+import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -31,6 +31,8 @@ type BridgeState =
 interface DesktopBridge {
   getServerUrl(): Promise<string | null>;
   onState(listener: (state: BridgeState) => void): () => void;
+  /** Starts `pnpm run app-update` and quits; missing on desktop builds from before it existed. */
+  updateAndRestart?(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 }
 
 declare global {
@@ -240,9 +242,13 @@ async function hydrateWith(
   on("models.changed", (models) => {
     modelsOrder.next();
     setState({ models });
+    restoreSaved();
     chooseModel();
     invalidateFits();
     flushQueued();
+    // The catalog's Installed marks follow the list: a removal or a runtime
+    // switch (the app's own copy has its own models) must not leave them stale.
+    void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
   on("settings.changed", applySettings);
@@ -271,6 +277,7 @@ async function hydrateWith(
   // any other answer, so one that lands after a newer push is dropped (MP2-02).
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
+  const listTicket = threadsOrder.next();
   const [status, listed, threads, settings] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
@@ -281,20 +288,26 @@ async function hydrateWith(
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
+    const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, threads: ordered, fits: {}, ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
+  restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   // the pushes that came during the first batch, in order, in this same task
   release(SECOND_BATCH);
 
-  const [gpu, catalog, sources, imageStatus] = await Promise.all([
+  const catalogTicket = catalogOrder.next();
+  // update.status reads the .git folder and a local file; the check that
+  // fetches runs only from the Check for updates button (checkForUpdates).
+  const [gpu, catalog, sources, imageStatus, update] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("image.status", {}),
+    probe("update.status", {}),
   ]);
-  setState({ gpu, catalog, sources, imageStatus });
+  setState({ gpu, sources, imageStatus, update, ...(catalogOrder.current(catalogTicket) ? { catalog } : {}) });
   release("none");
 
   const s = getState();
@@ -311,8 +324,9 @@ function sortThreads<T extends { updatedAt: number }>(threads: readonly T[]): T[
 }
 
 async function refreshThreads(): Promise<void> {
+  const ticket = threadsOrder.next();
   const threads = await call("threads.list", {}).catch(() => undefined);
-  if (threads === undefined) return;
+  if (threads === undefined || !threadsOrder.current(ticket)) return;
   setState((s) => {
     const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
     const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
@@ -322,12 +336,24 @@ async function refreshThreads(): Promise<void> {
 
 const modelsOrder = newestOnly();
 const runtimeOrder = newestOnly();
+// A catalog asked before a later models.changed describes the list before it: only the newest lands.
+const catalogOrder = newestOnly();
+// A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
+const threadsOrder = newestOnly();
+
+async function refreshCatalog(): Promise<void> {
+  if (getState().catalog === NA) return;
+  const ticket = catalogOrder.next();
+  const catalog = await probe("models.catalog", {});
+  if (catalog !== undefined && catalogOrder.current(ticket)) setState({ catalog });
+}
 
 export async function refreshModels(): Promise<void> {
   const ticket = modelsOrder.next();
   const models = await call("models.refresh", {}).catch(() => undefined);
   if (models === undefined || !modelsOrder.current(ticket)) return;
   setState({ models });
+  restoreSaved();
   chooseModel();
   invalidateFits();
 }
@@ -463,6 +489,7 @@ async function loadThread(threadId: string, force = false): Promise<void> {
       ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
       ...savedModel(s, threadId, messages),
     }));
+    if (getState().models === undefined) unrestored.add(threadId);
     setLoadError(threadId, null);
   } catch (e) {
     if (older()) return;
@@ -480,16 +507,26 @@ async function loadThread(threadId: string, force = false): Promise<void> {
 
 /**
  * A thread restored from storage takes the model of its latest saved reply (MP4-04), unless a
- * pick made in it this session is already recorded. A saved model no longer installed is not
- * taken: an open thread then keeps the composer's model, as before.
+ * pick made in it this session is already recorded. A saved model that is not installed, or is
+ * known not to chat (MP5-03), is not taken, and nothing is recorded: the composer keeps the
+ * app's choice, which the person never made. With no model list yet, unrestored decides later.
  */
 function savedModel(s: State, threadId: string, messages: State["messages"][string]): Partial<State> {
-  if (s.threadModels[threadId] !== undefined) return {};
+  if (s.threadModels[threadId] !== undefined || s.models === undefined) return {};
   const saved = messages.findLast((m) => m.role === "assistant" && m.model !== undefined)?.model;
-  const open = s.threadId === threadId;
-  const model = saved !== undefined && s.models?.some((m) => m.name === saved) === true ? saved : open ? s.model : undefined;
-  if (model === undefined) return {};
-  return { threadModels: { ...s.threadModels, [threadId]: model }, ...(open ? { model } : {}) };
+  const m = s.models.find((x) => x.name === saved);
+  if (m === undefined || !choosable(m)) return {};
+  return { threadModels: { ...s.threadModels, [threadId]: m.name }, ...(s.threadId === threadId ? { model: m.name } : {}) };
+}
+
+/** Threads whose history landed before any model list: their saved model is decided when one lands (MP5-02). */
+const unrestored = new Set<string>();
+
+function restoreSaved(): void {
+  if (unrestored.size === 0 || getState().models === undefined) return;
+  const ids = [...unrestored];
+  unrestored.clear();
+  setState((s) => ids.reduce<Partial<State>>((acc, id) => ({ ...acc, ...savedModel({ ...s, ...acc }, id, s.messages[id] ?? []) }), {}));
 }
 
 /** Retry beside a failed load: fetch the thread again. */
@@ -549,6 +586,7 @@ export async function renameThread(threadId: string, title: string): Promise<voi
 
 export async function deleteThread(threadId: string): Promise<void> {
   await call("threads.delete", { threadId }).catch(() => undefined);
+  threadsOrder.next();
   setState((s) => {
     const { [threadId]: _gone, ...messages } = s.messages;
     const { [threadId]: _model, ...threadModels } = s.threadModels;
@@ -626,6 +664,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
       threadId = t.id;
       // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
       const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
+      threadsOrder.next();
       setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
       openThread(t.id);
     } catch {
@@ -956,6 +995,7 @@ const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
   tools: "save the tools setting",
   imageGen: "save image generation",
   comfyUrl: "save the ComfyUI address",
+  updateEveryChange: "save the update setting",
 };
 
 /** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
@@ -1032,6 +1072,48 @@ export async function recheckRuntime(): Promise<void> {
   const runtime = await call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e))).catch(() => undefined);
   if (runtime !== undefined) setState({ runtime });
   await refreshModels();
+}
+
+// ---------------------------------------------------------------- updates
+
+/**
+ * The Check for updates button, and nothing else, calls this: the server
+ * fetches from the clone's remote. The answer (up to date, the changes, or
+ * why it cannot check) lands in update.lastCheck; a failed call comes back
+ * as the sentence to show.
+ */
+export async function checkForUpdates(): Promise<ActionResult> {
+  if (getState().updateChecking) return null;
+  setState({ updateChecking: true });
+  const r = await act("update.check", {}, "check for updates");
+  setState((s) => ({
+    updateChecking: false,
+    ...(r.ok && s.update !== undefined && s.update !== NA ? { update: { ...s.update, lastCheck: r.value } } : {}),
+  }));
+  return r.ok ? null : r.message;
+}
+
+/** Hide the last update's result; the server forgets it too, so other windows lose it on their next start. */
+export async function dismissUpdateResult(): Promise<void> {
+  setState((s) => (s.update === undefined || s.update === NA ? {} : { update: { ...s.update, result: null } }));
+  await act("update.dismissResult", {}, "hide the update note");
+}
+
+/** True in the desktop app, which can quit, update and open again; phones and browsers only check. */
+export function canUpdateHere(): boolean {
+  return typeof window.gatesLocal?.updateAndRestart === "function";
+}
+
+/** The Update and restart button: the desktop starts the updater and quits; null when it is on its way. */
+export async function updateAndRestart(): Promise<ActionResult> {
+  const bridge = window.gatesLocal;
+  if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
+  try {
+    const r = await bridge.updateAndRestart();
+    return r.ok ? null : r.message;
+  } catch (e) {
+    return `Couldn't start the update (${e instanceof Error ? e.message : String(e)}). Run pnpm run app-update in the Gates Local folder instead.`;
+  }
 }
 
 // ---------------------------------------------------------------- first run

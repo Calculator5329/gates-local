@@ -127,6 +127,11 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_RUNTIME: "discover-only",
     GATES_LOCAL_OLLAMA_BINARY: "none",
     XDG_DATA_HOME: path.join(runDir, "xdg"),
+    // The server runs from this checkout; with the root here, a Check for
+    // updates in a test is refused before any git command runs on it.
+    GATES_LOCAL_UPDATE_TEST_ROOT: runDir,
+    // Windows keeps the app's shared data under %LOCALAPPDATA%, not XDG_DATA_HOME.
+    ...(process.platform === "win32" ? { LOCALAPPDATA: path.join(runDir, "localappdata") } : {}),
   };
 }
 

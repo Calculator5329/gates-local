@@ -9,7 +9,8 @@ import { installedBinary, ownedStateFile } from "./paths.ts";
 import { type OllamaRuntime, type RuntimeOptions, createOllamaRuntime } from "./runtime.ts";
 import type { InstallManifest } from "./schemas.ts";
 import {
-  buildFakeTarball,
+  FAKE_RELEASE_FORMAT,
+  buildFakeRelease,
   freePort,
   removeDir,
   startFakeOllama,
@@ -48,7 +49,7 @@ const manifest = (over: Partial<InstallManifest> = {}): InstallManifest => ({
   url: "http://127.0.0.1:1/never",
   sha256: "0".repeat(64),
   sizeBytes: 1,
-  format: "tar.zst",
+  format: FAKE_RELEASE_FORMAT,
   verified: true,
   source: "test",
   ...over,
@@ -183,7 +184,7 @@ describe("missing", () => {
   });
 
   it("with Ollama off PATH, first launch installs the pinned version and runs it", async () => {
-    const tarball = buildFakeTarball(work);
+    const tarball = buildFakeRelease(work);
     const release = await startReleaseServer(tarball);
     cleanups.push(() => release.close());
     const m = manifest({ url: release.url, sha256: createHash("sha256").update(tarball).digest("hex"), sizeBytes: tarball.length });
@@ -198,10 +199,11 @@ describe("missing", () => {
     expect(seen.map((x) => x.state)).toEqual(["missing", "installing", "starting", "ready"]);
     expect(progress.map((p) => p.phase)).toContain("done");
     expect(existsSync(installedBinary(appDataDir, VERSION))).toBe(true);
-  });
+    // Windows' fake release carries Node itself (about 90 MB) as ollama.exe.
+  }, 30_000);
 
   it("a bad hash on first launch is an error with the install message, nothing installed", async () => {
-    const tarball = buildFakeTarball(work);
+    const tarball = buildFakeRelease(work);
     const release = await startReleaseServer(tarball);
     cleanups.push(() => release.close());
     const m = manifest({ url: release.url, sizeBytes: tarball.length });

@@ -4,7 +4,7 @@
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
 import type { Channel, Payload, RuntimeMode } from "@gates-local/contracts";
-import { checkFit, fitEach, type FitDeps } from "../fit/fit.ts";
+import { fitEach, planLoad, type FitDeps } from "../fit/fit.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
@@ -30,6 +30,8 @@ const noFit = async (_model: string): Promise<FitReport | undefined> => undefine
 export const MODELS_REFRESH_MIN_MS = 2000;
 /** whisper-server's MainPID changes only on a restart; re-read it this often. */
 const WHISPER_PID_TTL_MS = 60_000;
+/** How long a switch waits for the old runtime's turns to end before it fails and keeps that runtime. */
+const TURN_DRAIN_MS = 10_000;
 
 type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 
@@ -56,6 +58,8 @@ export interface ModelServicesOptions {
   readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
   /** The app's one GPU lease: models.load takes a shared chat claim on it. */
   readonly lease?: GpuLease;
+  /** How long a switch waits for the old runtime's turns to end before it fails (default 10 s). */
+  readonly turnDrainMs?: number;
 }
 
 export async function createModelServices(options: ModelServicesOptions): Promise<ModelServices> {
@@ -74,13 +78,32 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   let loader: ModelLoader | undefined;
   const runtime = createRuntimeSwitch({
     initialMode: settings.get().runtimeMode,
-    // The ownership record and serve log follow --data-dir; the install and the models folder stay shared.
-    make: (mode: RuntimeMode) => createOllamaRuntime({ ...options.runtime, mode, stateDir: options.dataDir }),
-    beforeSwitch: () => {
+    // Everything follows --data-dir: the ownership record, the serve log, the
+    // install and the models folder, so two instances never share a mutable
+    // model store. An explicit runtime.appDataDir still wins.
+    make: (mode: RuntimeMode) => createOllamaRuntime({ appDataDir: options.dataDir, ...options.runtime, mode, stateDir: options.dataDir }),
+    beforeSwitch: async () => {
       pulls?.stop();
-      // Before the new runtime's ensure: what the app owned in the old one is not its own any more.
+      // Before the old runtime stops: what the app owned in it is not its own any more, and
+      // loads and turns are refused until the new runtime's ensure settles (afterSwitch).
       loader?.runtimeChanged();
+      // Every turn reserved against the old runtime was told to end, and a turn ends at once
+      // (app.ts drops whatever it waits on); wait for them, so none sends another request to a
+      // runtime being stopped. Bounded: a turn still running after the bound fails the switch,
+      // which keeps the old runtime (never stops it under a running turn).
+      if (loader === undefined) return;
+      const drained = loader.turnsEnded();
+      const drainMs = options.turnDrainMs ?? TURN_DRAIN_MS;
+      const ended = await new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), drainMs);
+        void drained.then(() => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+      if (!ended) throw new Error(`turns on the old runtime still running after ${drainMs} ms`);
     },
+    afterSwitch: () => loader?.runtimeSettled(),
     log,
   });
   const catalog = createModelCatalog(() => runtime.baseUrl(), {
@@ -126,12 +149,13 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   loader = createModelLoader({
     baseUrl: () => runtime.baseUrl(),
     push: (load) => options.push("models.load", load),
-    listLoaded: (url) => listLoaded(url),
-    fit: async (model, numCtx) => {
-      const baseUrl = runtime.baseUrl();
-      if (baseUrl === undefined) throw new Error("Ollama is not running.");
-      return (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report;
-    },
+    listLoaded: (url, signal) => listLoaded(url, undefined, signal),
+    // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
+    // `signal` (shutdown, a switch) ends every request and child process of the check.
+    // The planner chat.send uses (fit/planLoad). A preload stops nothing: models a turn or another
+    // preload holds are busy, and it never reclaims ComfyUI (it runs inside a shared chat claim).
+    fit: async (model, numCtx, baseUrl, signal) =>
+      (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
     onLoaded: () => gpu.poke(),
     ...(options.lease ? { lease: options.lease } : {}),
     log,
@@ -145,15 +169,33 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     log,
   });
 
+  // Each mode choice gets a generation; only the newest one's failure puts Settings back.
+  let requested = 0;
+  let puttingBack = false;
   settings.onChange((next, previous) => {
     // The pick depends on the default model and context; models.changed carries the new one.
     if (next.defaultModel !== previous.defaultModel || next.defaultNumCtx !== previous.defaultNumCtx) {
       catalog.refresh({ force: true }).catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
     }
-    if (next.runtimeMode === previous.runtimeMode) return;
+    if (puttingBack || next.runtimeMode === previous.runtimeMode) return;
+    const generation = ++requested;
     runtime.setMode(next.runtimeMode).then(
       (s) => log(`runtime mode ${next.runtimeMode}: ${s.state} (${s.owner}) at ${s.baseUrl}`),
-      (e: unknown) => log(`runtime switch failed: ${(e as Error).message}`),
+      (e: unknown) => {
+        log(`runtime switch failed: ${(e as Error).message}`);
+        // A newer choice is queued behind this one and decides the mode.
+        if (generation !== requested) return;
+        // The old runtime still serves: Settings says so, and choosing the new mode again retries.
+        // Putting it back schedules no switch.
+        puttingBack = true;
+        try {
+          options.push("settings.changed", settings.update({ runtimeMode: runtime.mode() }));
+        } catch (error) {
+          log(`settings not put back to ${runtime.mode()}: ${(error as Error).message}`);
+        } finally {
+          puttingBack = false;
+        }
+      },
     );
   });
 

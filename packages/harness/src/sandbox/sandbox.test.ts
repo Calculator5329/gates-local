@@ -27,7 +27,9 @@ const markerProcesses = (marker: string) => readdirSync("/proc").filter(pid => /
 });
 
 const probe = await probeSandbox();
-const bwrapAbsent = !probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason);
+// Off by design anywhere but Linux (the shell tool is Linux only); on Linux
+// only a missing bwrap skips, so a broken setup there still fails loudly.
+const bwrapAbsent = process.platform !== "linux" || (!probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason));
 describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [${bwrapAbsent ? "SKIP" : "OFF"}: ${probe.reason}]`}`, () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-bwrap-"));
   const snapshotPath = path.join(root, "test.db");

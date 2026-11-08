@@ -127,7 +127,9 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
         const call = new AbortController();
         const forward = () => call.abort(input.signal.reason);
         input.signal.addEventListener("abort", forward, { once: true });
-        const timer = setTimeout(() => call.abort(new Error(BUDGET.time)), Math.max(0, timeBudget - toolTime));
+        // The timer, not the clock, decides: it can fire a millisecond before Date.now() reaches the budget.
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; call.abort(new Error(BUDGET.time)); }, Math.max(0, timeBudget - toolTime));
         try {
           const result = await input.execute(item.call, call.signal);
           input.signal.throwIfAborted();
@@ -152,7 +154,7 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
           clearTimeout(timer);
           input.signal.removeEventListener("abort", forward);
           toolTime += Date.now() - started;
-          if (toolTime >= timeBudget) spent = "time";
+          if (timedOut || toolTime >= timeBudget) spent = "time";
         }
       }
       tools.push(step); yield { type: "tool", step };
