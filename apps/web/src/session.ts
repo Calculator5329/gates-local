@@ -243,6 +243,9 @@ async function hydrateWith(
     chooseModel();
     invalidateFits();
     flushQueued();
+    // The catalog's Installed marks follow the list: a removal or a runtime
+    // switch (the app's own copy has its own models) must not leave them stale.
+    void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
   on("settings.changed", applySettings);
@@ -289,13 +292,14 @@ async function hydrateWith(
   // the pushes that came during the first batch, in order, in this same task
   release(SECOND_BATCH);
 
+  const catalogTicket = catalogOrder.next();
   const [gpu, catalog, sources, imageStatus] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("image.status", {}),
   ]);
-  setState({ gpu, catalog, sources, imageStatus });
+  setState({ gpu, sources, imageStatus, ...(catalogOrder.current(catalogTicket) ? { catalog } : {}) });
   release("none");
 
   const s = getState();
@@ -323,6 +327,15 @@ async function refreshThreads(): Promise<void> {
 
 const modelsOrder = newestOnly();
 const runtimeOrder = newestOnly();
+// A catalog asked before a later models.changed describes the list before it: only the newest lands.
+const catalogOrder = newestOnly();
+
+async function refreshCatalog(): Promise<void> {
+  if (getState().catalog === NA) return;
+  const ticket = catalogOrder.next();
+  const catalog = await probe("models.catalog", {});
+  if (catalog !== undefined && catalogOrder.current(ticket)) setState({ catalog });
+}
 
 export async function refreshModels(): Promise<void> {
   const ticket = modelsOrder.next();

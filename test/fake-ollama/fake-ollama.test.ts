@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
 import { startFakeOllama, type FakeOllama } from "./fake-ollama.ts";
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+const HERE = import.meta.dirname;
 
 async function ndjson(res: Response): Promise<Record<string, unknown>[]> {
   const text = await res.text();
@@ -193,9 +193,12 @@ describe("fake ollama", () => {
   });
 });
 
+// POSIX runs the script through its #! line; Windows has none, so Node runs it there.
+const smi = path.join(HERE, "nvidia-smi.ts");
+const [smiFile, smiArgs] = process.platform === "win32" ? [process.execPath, [smi]] : [smi, []];
 const run = (args: string[], env: Record<string, string> = {}) =>
   new Promise<string>((resolve, reject) =>
-    execFile(path.join(HERE, "nvidia-smi.ts"), args, { env: { ...process.env, ...env } }, (e, out) => (e ? reject(e) : resolve(out))),
+    execFile(smiFile, [...smiArgs, ...args], { env: { ...process.env, ...env } }, (e, out) => (e ? reject(e) : resolve(out))),
   );
 
 describe("fake nvidia-smi", () => {

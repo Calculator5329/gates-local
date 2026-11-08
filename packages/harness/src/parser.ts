@@ -30,7 +30,8 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
   // Gemma-style models answer in a fence instead. Exactly one ```json or ```tool_code
   // block holding {name, arguments|parameters} is a call; more than one, or JSON of
   // another shape, is ordinary answer text. A fence that does not parse is a bad call.
-  const fences = [...content.matchAll(/```(?:json|tool_code)[ \t]*\n([\s\S]*?)```/gi)];
+  // \r\n too: a model may answer with Windows line endings.
+  const fences = [...content.matchAll(/```(?:json|tool_code)[ \t]*\r?\n([\s\S]*?)```/gi)];
   if (fences.length !== 1) return { calls, errors, items, content: content.trim() };
   const [fence, body] = fences[0]!;
   let value: unknown;

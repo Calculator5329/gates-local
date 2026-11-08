@@ -54,3 +54,20 @@ describe("first run with an Ollama that does not say which models can chat (MP3-
     expect(text(oldOllama([gemma]))).toContain("This Ollama doesn't say which models can chat. Updating Ollama fixes this.");
   });
 });
+
+const cpuOnly = (verdict: "fits" | "spills" | "refuse") => ({
+  ...oldOllama([]),
+  runtime: { state: "ready", owner: "external", version: "0.40.15" },
+  models: [{ name: "qwen3.5:4b", digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["completion"], pick: { numCtx: 16384, verdict } }],
+  gpu: { vendor: "none" },
+});
+
+describe("first run on a computer with no supported GPU", () => {
+  for (const verdict of ["fits", "spills", "refuse"] as const) {
+    it(`never promises a GPU when the pick ${verdict}`, () => {
+      const t = text(cpuOnly(verdict));
+      expect(t).not.toMatch(/your GPU|GPU fit/);
+      expect(t).toContain(verdict === "refuse" ? "No model fits in memory" : "This computer has no supported GPU, so models run in system memory");
+    });
+  }
+});

@@ -3,7 +3,7 @@
 // goes, from fit.check plus gpu.status when the server has it.
 import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
-import { CONTEXT_SIZES, type Verdict, decodeSpeed, describeModel, gb, k, otherCtxWords, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
@@ -32,7 +32,7 @@ export function closeGpuPanel(refocus: boolean): void {
 }
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
-  gpu === undefined ? "" : gpu.vendor === "none" ? "No GPU found" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+  gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
 
 /** GPU memory docked beside the chat (thread menu › GPU memory); Settings › Advanced has the same content. */
 export function GpuPanel() {
@@ -41,14 +41,16 @@ export function GpuPanel() {
   const model = useStore((s) => s.fitPanel.model ?? s.model);
   const gpuRaw = useStore((s) => s.gpu);
   if (!open) return null;
+  const gpu = gpuRaw === NA ? undefined : gpuRaw;
+  const title = noGpu(gpu) ? "Memory" : "GPU memory";
   return (
-    <aside className="fpanel" id="fitPanel" aria-label="GPU memory">
+    <aside className="fpanel" id="fitPanel" aria-label={title}>
       <div className="fpn-h">
         <div className="fp-h">
-          <span className="fp-t">GPU memory</span>
-          <span className="fp-gpu">{gpuHead(gpuRaw === NA ? undefined : gpuRaw)}</span>
+          <span className="fp-t">{title}</span>
+          <span className="fp-gpu">{gpuHead(gpu)}</span>
         </div>
-        <button type="button" className="ibtn xs fpn-x" aria-label="Close GPU memory" data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
+        <button type="button" className="ibtn xs fpn-x" aria-label={noGpu(gpu) ? "Close memory" : "Close GPU memory"} data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
           <Icon id="x" cls="s14" />
         </button>
       </div>
@@ -253,7 +255,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   if (v.k === "spill") {
     return (
       <div className="fp-n">
-        Estimated {gb(r.needVramBytes)}; {gb(r.freeVramBytes)} of GPU memory is available to this model · {r.source === "measured" ? "measured" : `not measured at ${ctx} yet`}
+        Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} of GPU memory is available to this model`} · {r.source === "measured" ? "measured" : `not measured at ${ctx} yet`}
         <br />
         An estimated {gb(v.amt)} runs from system memory, so replies are slower.
       </div>
@@ -322,7 +324,7 @@ function Body({ model }: { model: string }) {
       ) : gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
       ) : gpu.vendor === "none" ? (
-        <div className="fp-n">No graphics card was found, so models run from system memory. Replies are slower than on a GPU.</div>
+        <div className="fp-n">{NO_GPU_TEXT}</div>
       ) : gpu.vendor === "unreadable" ? (
         <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
       ) : (

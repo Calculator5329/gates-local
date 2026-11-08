@@ -16,6 +16,32 @@ export function k(numCtx: number): string {
   return `${Math.round(numCtx / 1024)}k`;
 }
 
+/**
+ * The GPU status says there is no GPU the app can read (no nvidia-smi, as on
+ * a Windows or Linux machine with only Intel or AMD graphics): every model
+ * is planned in system memory, and the words must not promise a GPU.
+ */
+export function noGpu(gpu: { readonly vendor: string } | undefined | "na"): boolean {
+  return gpu !== undefined && gpu !== "na" && gpu.vendor === "none";
+}
+
+/**
+ * Folder names as this machine spells them. The server listens on loopback
+ * only, so the client's OS is the server's; the desktop window's user agent
+ * names Windows there.
+ */
+export function folderWords(userAgent: string = typeof navigator === "undefined" ? "" : navigator.userAgent): { models: string; appCopy: string; appModels: string } {
+  return /\bWindows\b/.test(userAgent)
+    ? { models: "%USERPROFILE%\\.ollama\\models", appCopy: "%LOCALAPPDATA%\\GatesLocal\\runtime\\ollama", appModels: "%LOCALAPPDATA%\\GatesLocal\\models" }
+    : { models: "~/.ollama/models", appCopy: "~/.local/share/gates-local/runtime/ollama", appModels: "~/.local/share/gates-local/models" };
+}
+
+/** "1 model", "3 models". */
+export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What the app says when noGpu() holds. */
+export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards), so models run in system memory. Replies are slower than on a GPU.";
+
 export type VerdictKind = "gpu" | "spill" | "no";
 
 /** A fit report in the design's words: chip (short), word (full label) and detail. */

@@ -1,6 +1,6 @@
 # Gates Local
 
-A desktop chat app for running AI models on your own Linux machine through
+A desktop chat app for running AI models on your own Linux or Windows machine through
 Ollama, for people who want local models without guessing whether they fit.
 
 ![A chat thread in the dark theme, with the thread list on the left and a code answer open](docs/screenshots/chat.png)
@@ -49,15 +49,18 @@ Ollama, for people who want local models without guessing whether they fit.
 
 ## Requirements
 
-- **OS:** Linux on x64, in a graphical desktop session (X11 or Wayland).
-  This is the only platform tested so far.
+- **OS:** Linux on x64, in a graphical desktop session (X11 or Wayland),
+  or Windows 11 on x64. Windows has been tested on one machine without an
+  NVIDIA GPU; see [docs/setup/windows.md](docs/setup/windows.md).
 - **Node.js** 24 or newer.
-- **pnpm** 11.10.0. Corepack picks this version from `package.json`.
+- **pnpm** 11.10.0. Corepack picks this version from `package.json`. On
+  Windows, install it with `npm install -g pnpm@11.10.0` instead.
 - **Ollama.** Install it from <https://ollama.com/download>. If Ollama is
   not on your machine, the app tries to download a pinned Ollama release
-  from GitHub on first launch (Linux x64 only). That path has not been
-  tested on a real machine yet, so installing Ollama yourself is the safer
-  route.
+  from GitHub on first launch (Linux x64 and Windows x64). On Linux that
+  path has not been tested on a real machine yet, so installing Ollama
+  yourself is the safer route there. On Windows it was tested on one
+  machine.
 - **GPU:**
   - *NVIDIA:* the app reads free GPU memory with `nvidia-smi` and plans the
     model around it. If `nvidia-smi` is installed but fails, the app
@@ -97,14 +100,31 @@ goes full screen while it has focus. The full guide, with the other keys,
 adding the app to your app list, updating, uninstalling and fixes for
 common problems, is [docs/setup/linux.md](docs/setup/linux.md).
 
-## Windows
+## Quick start on Windows
 
-Not supported yet. Linux is the tested platform today.
+Install Node.js 24 from <https://nodejs.org>, Git, and Ollama with the
+official installer from <https://ollama.com/download>, and start Ollama.
+Then, in PowerShell:
+
+```powershell
+npm install -g pnpm@11.10.0
+git clone https://github.com/Calculator5329/gates-local.git
+cd gates-local
+pnpm install
+pnpm start
+```
+
+Nothing here needs administrator rights. Without an NVIDIA GPU, models run
+in system memory on the CPU and replies are slower; turning Thinking off
+helps. The shell tool is off on Windows. The full guide, with data folders,
+measured speeds, updating and uninstalling, is
+[docs/setup/windows.md](docs/setup/windows.md).
 
 ## Privacy
 
 Your threads, settings, database copies and images stay in the app's data
-folder (`~/.local/share/gates-local` by default). The app sends no
+folder (`~/.local/share/gates-local` by default, `%LOCALAPPDATA%\GatesLocal`
+on Windows). The app sends no
 telemetry and has no accounts. Its window loads only its own built files.
 
 These are all the network calls the code makes:
@@ -138,7 +158,11 @@ it downloads dictionary files from Google when one is missing.
 The app also runs local commands: `nvidia-smi` to read GPU memory,
 `systemctl --user` to start and stop a `comfyui.service` unit if you have
 one, `systemd-run` and `bwrap` for the shell tool, and `tar` to unpack the
-Ollama download.
+Ollama download. On Windows it runs `nvidia-smi` if it is installed,
+`ollama.exe` when it starts its own copy of Ollama, `powershell.exe` to
+read the start time and command line of that copy, so it never stops a
+process it did not start, and Windows' own `tar.exe` to unpack the Ollama
+download.
 
 ## Development
 
@@ -161,6 +185,9 @@ pnpm exec playwright install --with-deps chromium
 `--with-deps` also installs the system libraries Chromium needs, with
 sudo, on Debian and Ubuntu. On other distributions, leave it out and
 install them from your package manager.
+
+On Windows the browser suite uses Microsoft Edge, which Windows already
+has, unless `GATES_LOCAL_CHROMIUM` names another browser.
 
 The screenshots use demo threads and a pinned clock and time zone, so a
 rerun gives the same images.
