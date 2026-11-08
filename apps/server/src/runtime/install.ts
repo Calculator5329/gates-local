@@ -10,7 +10,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
-import { installDir, installRoot, installedBinary, runtimeDir } from "./paths.ts";
+import { binaryIn, installDir, installRoot, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
 
@@ -119,7 +119,29 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/**
+ * Windows' own bsdtar (System32, Windows 10 1803 and later) reads ZIP and
+ * refuses absolute and `..` entry paths. It is named by full path: a `tar`
+ * earlier on PATH (Git's GNU tar) cannot read ZIP and takes "C:" for a host.
+ */
+export function windowsTar(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return path.win32.join(env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows", "System32", "tar.exe");
+}
+
+function extractZip(archive: string, into: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tar = spawn(windowsTar(), ["-x", "-f", archive, "-C", into], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    let stderr = "";
+    tar.stderr.on("data", (c: Buffer) => {
+      stderr += c.toString("utf8");
+    });
+    tar.on("error", (e) => reject(e));
+    tar.on("close", (code) => (code === 0 ? resolve() : reject(new Error(stderr.trim() || `tar exited ${code}`))));
+  });
+}
+
 function extract(archive: string, format: InstallManifest["format"], into: string): Promise<void> {
+  if (format === "zip") return extractZip(archive, into);
   return new Promise((resolve, reject) => {
     const tar = spawn("tar", ["-x", "-f", "-", "-C", into, "--no-same-owner"], { stdio: ["pipe", "ignore", "pipe"] });
     let stderr = "";
@@ -174,7 +196,7 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     await mkdir(tree);
     try {
       await extract(archive, manifest.format, tree);
-      await access(path.join(tree, "bin", "ollama"), constants.X_OK);
+      await access(binaryIn(tree), constants.X_OK);
     } catch (e) {
       throw new InstallError(
         "extract-failed",

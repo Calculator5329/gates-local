@@ -2,6 +2,7 @@
 // paths with the platform injected. Fakes only: a fake Ollama server, a
 // fake `ollama` binary, a fake PowerShell runner.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeStatus } from "@gates-local/contracts";
@@ -11,8 +12,21 @@ import { httpGet } from "./http.ts";
 import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsProc, stopOwned, windowsProcQuery, writeRecord, type SyncRunner } from "./ownership.ts";
 import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installDir, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
 import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
+import { PINNED_OLLAMA_WINDOWS, pinnedOllamaFor } from "./manifest.ts";
 import { createRuntimeSwitch } from "./switch.ts";
-import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, startWrongService, tmpDir, writeFakeBinary } from "./test-fakes.ts";
+import {
+  type FakeOllama,
+  FAKE_RELEASE_FORMAT,
+  buildFakeRelease,
+  freePort,
+  freePortRun,
+  removeDir,
+  startFakeOllama,
+  startReleaseServer,
+  startWrongService,
+  tmpDir,
+  writeFakeBinary,
+} from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
 let work: string;
@@ -329,6 +343,8 @@ describe("runtime switch", () => {
 
 describe("Windows (platform injected)", () => {
   const winEnv = { LOCALAPPDATA: "C:\\Users\\Ada\\AppData\\Local", PATH: "C:\\Windows\\System32;C:\\Tools", PATHEXT: ".COM;.EXE;.BAT" };
+  /** Windows arm64 with no manifest injected: no build is pinned for it. */
+  const noPin = { arch: "arm64", manifest: undefined } as const;
 
   it("keeps app data in %LOCALAPPDATA%\\GatesLocal and the app's models under it", () => {
     expect(defaultAppDataDir(winEnv, "C:\\Users\\Ada", "win32")).toBe("C:\\Users\\Ada\\AppData\\Local\\GatesLocal");
@@ -344,15 +360,30 @@ describe("Windows (platform injected)", () => {
     expect(findSystemOllama(winEnv, "C:\\Users\\Ada", "win32", () => false)).toBeUndefined();
   });
 
-  it("does not install the Linux build: with no Ollama anywhere it is missing", async () => {
+  it("win32 arm64 (nothing pinned) installs nothing, not even the Linux build, even with allowInstall true: with no Ollama anywhere it is missing", async () => {
     const external = await nothingAt();
-    const rt = createOllamaRuntime({ appDataDir, home, appPort: await freePort(), externalBaseUrl: external, env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500, platform: "win32" });
-    expect(await rt.ensure()).toMatchObject({ state: "missing", detail: windowsAutomaticDetail(external) });
+    for (const allowInstall of [undefined, true] as const) {
+      const rt = createOllamaRuntime({
+        appDataDir,
+        home,
+        appPort: await freePort(),
+        externalBaseUrl: external,
+        env: { PATH: "" },
+        systemModelsDirs: [],
+        probeTimeoutMs: 500,
+        platform: "win32",
+        arch: "arm64",
+        ...(allowInstall === undefined ? {} : { allowInstall }),
+      });
+      runtimes.push(rt);
+      expect(await rt.ensure()).toMatchObject({ state: "missing", detail: windowsAutomaticDetail(external) });
+      expect(existsSync(installDir(appDataDir, PINNED_OLLAMA_WINDOWS.version))).toBe(false);
+    }
   });
 
-  it("R2-05: app mode with no pinned install says in words that the app's own Ollama is not on Windows yet; never a start or an install", async () => {
+  it("R2-05 (win32 arm64, nothing pinned): app mode says in words that the app's own Ollama is not on Windows yet; never a start or an install", async () => {
     for (const allowInstall of [false, true]) {
-      const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake([]), externalBaseUrl: await nothingAt(), allowInstall });
+      const rt = await runtime({ mode: "app", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt(), allowInstall });
       const s = await rt.ensure();
       expect(s).toMatchObject({ state: "missing", owner: "none", detail: WINDOWS_APP_MODE_DETAIL });
       expect(s.detail).toMatch(/not available on Windows yet/);
@@ -362,10 +393,10 @@ describe("Windows (platform injected)", () => {
     }
   });
 
-  it("busyPorts audit: automatic on Windows with a non-Ollama on the system port names the busy port and never claims the app runs its own copy", async () => {
+  it("busyPorts audit (win32 arm64, nothing pinned): automatic with a non-Ollama on the system port names the busy port and never claims the app runs its own copy", async () => {
     const other = await startWrongService();
     try {
-      const rt = await runtime({ platform: "win32", procRun: cimFake([]), externalBaseUrl: other.baseUrl });
+      const rt = await runtime({ platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: other.baseUrl });
       const s = await rt.ensure();
       expect(s).toMatchObject({ state: "missing", owner: "none" });
       expect(s.detail).not.toMatch(/runs its own Ollama/);
@@ -384,14 +415,14 @@ describe("Windows (platform injected)", () => {
     }
   });
 
-  it("S-07: a PATH ollama.exe is never launched on Windows (path.win32 finds it; no older install in the fixture)", async () => {
+  it("S-07 (win32 arm64, nothing pinned): a PATH ollama.exe is never launched (path.win32 finds it; no older install in the fixture)", async () => {
     const exe = "C:\\Tools\\ollama.exe";
     const isExecutable = (file: string) => file === exe;
     // The fixture is not hollow: the Windows PATH search, joining with path.win32, finds this file.
     expect(findSystemOllama(winEnv, "C:\\Users\\Ada", "win32", isExecutable)).toBe(exe);
     const calls: string[] = [];
     for (const mode of ["app", undefined] as const) {
-      const rt = await runtime({ ...(mode ? { mode } : {}), platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt(), env: winEnv, isExecutable });
+      const rt = await runtime({ ...(mode ? { mode } : {}), platform: "win32", ...noPin, procRun: cimFake(calls), externalBaseUrl: await nothingAt(), env: winEnv, isExecutable });
       const s = await rt.ensure();
       expect(s).toMatchObject({ state: "missing", owner: "none" });
       expect(s.detail).not.toContain(exe);
@@ -403,14 +434,76 @@ describe("Windows (platform injected)", () => {
   it("S-07: with the pinned app install present, app mode launches it over an older one (a POSIX fake run on Linux: proves only the selection rule, not a native Windows start)", async () => {
     writeFakeBinary(installedBinary(appDataDir, "0.1.0"));
     const calls: string[] = [];
-    const older = await runtime({ mode: "app", platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt() });
-    expect(await older.ensure()).toMatchObject({ state: "missing", owner: "none", detail: WINDOWS_APP_MODE_DETAIL });
+    const older = await runtime({ mode: "app", platform: "win32", arch: "x64", procRun: cimFake(calls), externalBaseUrl: await nothingAt() });
+    expect(await older.ensure()).toMatchObject({ state: "missing", owner: "none", detail: "No Ollama found on this machine." });
     expect(older.startedByThisProcess()).toBe(false);
     // The pinned build is the one it launches.
     writeFakeBinary(installedBinary(appDataDir, VERSION));
-    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt() });
+    const rt = await runtime({ mode: "app", platform: "win32", arch: "x64", procRun: cimFake(calls), externalBaseUrl: await nothingAt() });
     expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
     expect(readRecord(ownedStateFile(appDataDir))?.binary).toBe(installedBinary(appDataDir, VERSION));
+  });
+
+  it("win32 x64 with a PATH ollama.exe and no pinned install never launches the PATH one (system mode only reads it, to say stopped)", async () => {
+    const exe = "C:\\Tools\\ollama.exe";
+    const isExecutable = (file: string) => file === exe;
+    expect(findSystemOllama(winEnv, "C:\\Users\\Ada", "win32", isExecutable)).toBe(exe);
+    for (const mode of ["app", "system", undefined] as const) {
+      const rt = await runtime({ ...(mode ? { mode } : {}), platform: "win32", arch: "x64", procRun: cimFake([]), externalBaseUrl: await nothingAt(), env: winEnv, isExecutable });
+      const s = await rt.ensure();
+      expect({ mode, state: s.state, owner: s.owner }).toEqual({ mode, state: mode === "system" ? "stopped" : "missing", owner: "none" });
+      if (mode !== "system") expect(s.detail).not.toContain(exe);
+      expect(rt.startedByThisProcess()).toBe(false);
+      expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    }
+  });
+
+  it("win32 x64 with allowInstall true and no PATH Ollama installs the pinned release and launches it (this host's fake release: a real ZIP only on a Windows host)", async () => {
+    // With no manifest injected, the build it would install is the pinned Windows ZIP.
+    const plain = await runtime({ platform: "win32", arch: "x64", manifest: undefined, allowInstall: true, externalBaseUrl: await nothingAt() });
+    expect(await plain.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining(`will install Ollama ${PINNED_OLLAMA_WINDOWS.version}`) });
+    const asset = buildFakeRelease(work);
+    const release = await startReleaseServer(asset);
+    try {
+      const sha256 = createHash("sha256").update(asset).digest("hex");
+      const manifest = { version: VERSION, url: release.url, sha256, sizeBytes: asset.length, format: FAKE_RELEASE_FORMAT, verified: true, source: "test" };
+      const rt = await runtime({ platform: "win32", arch: "x64", manifest, allowInstall: true, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+      const s = await rt.ensure();
+      expect(s).toMatchObject({ state: "ready", owner: "app" });
+      expect(release.hits).toBe(1);
+      expect(rt.startedByThisProcess()).toBe(true);
+      expect(readRecord(ownedStateFile(appDataDir))?.binary).toBe(installedBinary(appDataDir, VERSION));
+      expect(await rt.stop()).toMatchObject({ stopped: true });
+    } finally {
+      await release.close();
+    }
+  });
+
+  it("pins the Windows ZIP, never the Linux build, and installs only on x64", async () => {
+    expect(pinnedOllamaFor("win32", "x64")).toMatchObject({ format: "zip", url: expect.stringMatching(/\/ollama-windows-amd64\.zip$/) });
+    expect(pinnedOllamaFor("linux", "x64")).toMatchObject({ format: "tar.zst", url: expect.stringMatching(/\/ollama-linux-amd64\.tar\.zst$/) });
+    expect(pinnedOllamaFor("win32", "arm64")).toBeUndefined();
+    expect(pinnedOllamaFor("darwin", "x64")).toBeUndefined();
+    const base = { appDataDir, home, externalBaseUrl: await nothingAt(), env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500, platform: "win32" } as const;
+    // discover() only reports; nothing is downloaded here.
+    const x64 = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "x64" });
+    expect(await x64.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining(`will install Ollama ${PINNED_OLLAMA_WINDOWS.version}`) });
+    const arm = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "arm64" });
+    // R2-05's words, which hold only where nothing is pinned.
+    expect(await arm.ensure()).toMatchObject({ state: "missing", detail: windowsAutomaticDetail(base.externalBaseUrl) });
+  });
+
+  it("system mode with nothing answering: installed but quit says stopped, not missing, and starts nothing", async () => {
+    const exe = "C:\\Users\\Ada\\AppData\\Local\\Programs\\Ollama\\ollama.exe";
+    const base = { mode: "system", platform: "win32", home: "C:\\Users\\Ada", env: winEnv, externalBaseUrl: await nothingAt() } as const;
+    const quit = await runtime({ ...base, isExecutable: (f) => f === exe });
+    const s = await quit.ensure();
+    expect(s).toMatchObject({ state: "stopped", owner: "none" });
+    expect(s.detail).toContain(exe);
+    expect(s.detail).toMatch(/Start Ollama from the Start menu/);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    const none = await runtime({ ...base, isExecutable: () => false });
+    expect(await none.ensure()).toMatchObject({ state: "missing" });
   });
 
   it("reads process identity from PowerShell CIM instead of /proc", () => {
@@ -456,11 +549,17 @@ describe("Windows (platform injected)", () => {
     expect(r).toMatchObject({ stopped: true });
     expect(await isUp(s.baseUrl)).toBe(false);
     const log = readFileSync(serveLogFile(appDataDir), "utf8");
-    const term = log.indexOf("got SIGTERM");
-    expect(term).toBeGreaterThan(0);
     expect(log.indexOf("unloaded m:latest")).toBeGreaterThan(0);
-    expect(log.indexOf("unloaded m:latest")).toBeLessThan(term);
-    expect(log.indexOf("unloaded n:7b")).toBeLessThan(term);
+    expect(log.indexOf("unloaded n:7b")).toBeGreaterThan(0);
+    // On a POSIX host the handle kill arrives as SIGTERM, which the fake logs
+    // after the unloads. On real Windows it is TerminateProcess, which runs no
+    // handler: there the unloads logged before the server went down are the evidence.
+    if (process.platform !== "win32") {
+      const term = log.indexOf("got SIGTERM");
+      expect(term).toBeGreaterThan(0);
+      expect(log.indexOf("unloaded m:latest")).toBeLessThan(term);
+      expect(log.indexOf("unloaded n:7b")).toBeLessThan(term);
+    }
     expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
     expect(calls.every((c) => c === "powershell.exe")).toBe(true);
   });

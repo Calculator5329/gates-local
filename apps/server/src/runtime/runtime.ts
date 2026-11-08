@@ -6,7 +6,8 @@
 // external, and a non-Ollama there blocks starting. Only when nothing answers
 // does the app start a server, from its own install, then PATH, then a fresh
 // pinned install. On Windows only the pinned app install is ever launched
-// (its runners die with it); older installs and PATH binaries are skipped.
+// (its runners die with it); older installs and PATH binaries are skipped,
+// and where no build is pinned (arm64) nothing is installed or started.
 // A non-Ollama on the system port never gets a second server
 // on that port; the app-owned server lives on its own port.
 //
@@ -32,8 +33,9 @@
 // left running ("adopted").
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { RuntimeMode } from "@gates-local/contracts";
-import { PINNED_OLLAMA } from "./manifest.ts";
+import { PINNED_OLLAMA, pinnedOllamaFor } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
 import { checkOwnership, clearRecord, listenerPid, readProc, stopOwned, writeRecord, type ProcPlatform, type StopResult, type SyncRunner } from "./ownership.ts";
@@ -82,8 +84,10 @@ export type RuntimeOptions = {
   systemModelsDirs?: readonly string[];
   manifest?: InstallManifest;
   /**
-   * Install the pinned version when no binary is found. Default true on
-   * Linux x64 only: the pinned asset is the Linux amd64 build.
+   * Install the pinned version when no binary is found. Default true where
+   * a release is pinned (manifest.ts): Linux x64 and Windows x64. With no
+   * manifest for the platform (none injected, none pinned) true still never
+   * installs, so another platform's build is never put on this one.
    */
   allowInstall?: boolean;
   /**
@@ -102,17 +106,22 @@ export type RuntimeOptions = {
   arch?: string;
   /** Runs Windows' process queries (tests inject a fake). */
   procRun?: SyncRunner;
-  /** Whether a PATH candidate runs; default executableCheck(platform). Tests inject one so a Windows PATH resolves on Linux. */
+  /**
+   * Whether a file is a runnable binary, for the system Ollama lookup (PATH, then on Windows the
+   * official installer's ollama.exe); default executableCheck(platform). On Windows that lookup only
+   * names an installed-but-quit Ollama in "system" mode: a PATH binary is never launched there.
+   * Tests inject one so a Windows PATH resolves on Linux.
+   */
   isExecutable?: (file: string) => boolean;
 };
 
 /**
- * Windows with no pinned app install, in "app" mode: there is no Windows
- * build of the app's own Ollama yet, so nothing can be installed or started.
+ * Windows where no build is pinned (arm64 today), in "app" mode: there is no
+ * build of the app's own Ollama for it, so nothing can be installed or started.
  */
 export const WINDOWS_APP_MODE_DETAIL =
   "The app's own Ollama is not available on Windows yet. Run Ollama and choose Automatic or System in Settings › Runtime.";
-/** Windows, automatic mode, nothing answering at the system port and no pinned app install. */
+/** Windows where no build is pinned, automatic mode, nothing answering at the system port. */
 export const windowsAutomaticDetail = (externalBaseUrl: string) =>
   `No Ollama answers at ${externalBaseUrl}, and the app's own Ollama is not available on Windows yet. Run Ollama, then check again.`;
 
@@ -205,10 +214,13 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   };
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
-  const manifest = options.manifest ?? PINNED_OLLAMA;
+  const pinned = pinnedOllamaFor(platform, options.arch ?? process.arch);
+  /** What may be installed here: an injected manifest, or this platform's pinned build. Never another platform's. */
+  const installable = options.manifest ?? pinned;
+  const manifest = installable ?? PINNED_OLLAMA;
   const allowStart = options.allowStart ?? true;
-  // Install needs start allowed, and never on Windows, whatever the option says: the pinned asset is a Linux build.
-  const allowInstall = platform !== "win32" && allowStart && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
+  // Install needs start allowed and a build for this platform, whatever allowInstall says.
+  const allowInstall = installable !== undefined && allowStart && (options.allowInstall ?? pinned !== undefined);
   const stateFile = ownedStateFile(stateDir);
   /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;
@@ -230,14 +242,27 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
 
   async function locateBinary(): Promise<Binary | undefined> {
     if (options.searchBinary === false) return undefined;
-    if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     // Windows: only the pinned build puts its runners in a kill-on-close Job Object, so stopping the
     // parent stops them (https://raw.githubusercontent.com/ollama/ollama/v0.40.15/llm/runner_job_windows.go).
+    // Only that install is launched there: never a PATH ollama.exe, an older install, or anything
+    // where no build is pinned for the platform.
+    if (platform === "win32" && installable === undefined) return undefined;
+    if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     if (platform === "win32") return undefined;
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
     const onPath = findSystemOllama(env, options.home, platform, options.isExecutable);
     return onPath ? { path: onPath, origin: "path" } : undefined;
+  }
+
+  /**
+   * Windows, "system" mode, nothing answering: the official installer's
+   * ollama.exe, if present. Then Ollama is installed but quit (from its tray
+   * icon, or not started yet), and the words say so instead of "install it".
+   */
+  function quitWindowsOllama(): string | undefined {
+    if (platform !== "win32" || options.searchBinary === false) return undefined;
+    return findSystemOllama(env, options.home, platform, options.isExecutable);
   }
 
   /**
@@ -317,6 +342,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (ext.kind === "wrong-service") {
         return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
       }
+      const quit = quitWindowsOllama();
+      if (quit !== undefined) {
+        return {
+          kind: "blocked",
+          status: {
+            state: "stopped",
+            owner: "none",
+            baseUrl: externalBaseUrl,
+            detail: `Ollama is installed (${quit}) but nothing answers at ${externalBaseUrl}. Start Ollama from the Start menu, or choose the app's own copy in Settings › Runtime.`,
+          },
+        };
+      }
       return {
         kind: "blocked",
         status: {
@@ -370,9 +407,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const detail = `Ollama at ${c.binary.path} is installed but not running.`;
       return noted({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
     }
-    if (platform === "win32") {
-      // The note's text says which port the app runs its own copy on, which
-      // Windows cannot do yet; its busy ports still hold.
+    if (platform === "win32" && installable === undefined) {
+      // No build pinned for this Windows (arm64 today). The note's text says which port the app runs
+      // its own copy on, which it cannot do here; its busy ports still hold.
       const detail = mode === "app" ? WINDOWS_APP_MODE_DETAIL : windowsAutomaticDetail(externalBaseUrl);
       return { state: "missing", owner: "none", baseUrl: appBaseUrl, detail, ...withBusy(c.note?.busy ?? []) };
     }
@@ -400,7 +437,11 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     const readOnly =
       mode === "app" ? undefined : findModelsDirs(env, options.home, options.systemModelsDirs).find((d) => d.hasModels && !d.writable && !models?.hasModels);
     let exited: string | undefined;
-    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv });
+    // Windows: start in the binary's own folder. A process holds its working
+    // folder open there, and an adopted copy can outlive the app, so
+    // inheriting the server's (the clone) would block deleting the clone.
+    const cwd = platform === "win32" ? { cwd: path.dirname(binary.path) } : {};
+    const child = spawn(binary.path, ["serve"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env: childEnv, ...cwd });
     closeSync(log);
     child.on("error", (e) => {
       exited = e.message;

@@ -4,6 +4,7 @@
 // imports a fresh copy. Kept apart from session.test.ts, whose discovery
 // tests need the real createClient this file mocks.
 import type { ModelInfo } from "@gates-local/contracts";
+import { methodSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ client: undefined as unknown }));
@@ -99,6 +100,25 @@ it("hydration answers older than a runtime change keep neither the old list nor 
   await vi.waitFor(() => expect(store.getState().models?.map((m) => m.name)).toEqual([GEMMA]));
   expect(calls).toContain("models.refresh");
   expect(store.getState().runtime).toMatchObject({ state: "ready", baseUrl: "http://runtime-b", version: "0.40.4" });
+});
+
+it("a catalog asked before a later models.changed never lands over the newer one", async () => {
+  const sample = methodSamples["models.catalog"].result;
+  const stale = sample.map((c) => ({ ...c, installed: true }));
+  const fresh = sample.map((c) => ({ ...c, installed: false }));
+  const answers = [defer<unknown>(), defer<unknown>()];
+  let asked = 0;
+  const { store, push, calls, hydrated } = await boot({ "models.catalog": () => answers[asked++]?.promise ?? Promise.resolve(fresh) });
+  await hydrated();
+  // hydration's catalog probe is in flight; a removal pushes a new list, which asks again
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(1));
+  push("models.changed", [info(LLAMA, true)]);
+  await vi.waitFor(() => expect(calls.filter((m) => m === "models.catalog")).toHaveLength(2));
+  answers[1]?.resolve(fresh);
+  await vi.waitFor(() => expect(store.getState().catalog).toEqual(fresh));
+  answers[0]?.resolve(stale);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(store.getState().catalog).toEqual(fresh);
 });
 
 it("a thread keeps its model when the pick changes; only a new empty chat follows the pick (MP-02)", async () => {

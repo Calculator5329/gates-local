@@ -59,9 +59,12 @@ describe("Library registry", () => {
     const snapshots = path.join(dataDir, "snapshots");
     const source = await sources.add({ kind: "sqlite", path: file });
     for (let i = 0; i < 3; i++) await sources.refresh(source.id);
-    expect(statSync(snapshots).mode & 0o777).toBe(0o700);
+    // POSIX modes. Windows has none (Node reports 0o666/0o777); there the
+    // data folder's place in %LOCALAPPDATA% under the user's profile ACL keeps it private.
+    const posix = process.platform !== "win32";
+    if (posix) expect(statSync(snapshots).mode & 0o777).toBe(0o700);
     expect(readdirSync(snapshots, { recursive: true })).toEqual([`${source.id}.db`]);
-    expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
+    if (posix) expect(statSync(path.join(snapshots, `${source.id}.db`)).mode & 0o777).toBe(0o600);
     sources.remove(source.id);
     expect(readdirSync(snapshots, { recursive: true })).toEqual([]);
   });

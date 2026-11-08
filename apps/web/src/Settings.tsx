@@ -5,7 +5,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, describeModel, etaText, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, count, describeModel, etaText, folderWords, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { type ActionResult, addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
@@ -278,9 +278,14 @@ function Models() {
   const [ctxErr, runCtx] = useAct();
   const def = settings?.defaultModel ?? model;
   const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
+  const cpu = useStore((s) => noGpu(s.gpu));
   return (
     <>
-      <Head title="Models">New chats start on your default model if it runs at {k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.</Head>
+      <Head title="Models">
+        {cpu
+          ? `This computer has no supported GPU, so models run in system memory. New chats start on your default model if it fits at ${k(numCtx)}, otherwise on your best model that fits. Change it here; any chat can still switch.`
+          : `New chats start on your default model if it runs at ${k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.`}
+      </Head>
       <div className="grp">
         <div className="grp-t">Default model</div>
         <div className="box">
@@ -346,6 +351,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
   const v = c.fit ? verdictOf(c.fit) : undefined;
+  const cpu = useStore((s) => noGpu(s.gpu));
   const dling = p !== undefined && isActive(p) && !installed;
   const [err, run] = useAct();
   const action = installed ? (
@@ -376,7 +382,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
         <Fail err={err} />
       </div>
       {v ? (
-        <div className="dl-v" data-tip={`Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
+        <div className="dl-v" data-tip={cpu ? `Estimated ${gb(v.need)} at ${k(numCtx)}, all in system memory (no supported GPU). Measured after the first load.` : `Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
           <VLabel v={v} />
           <small>
             est. {gb(v.need)} at {k(numCtx)}
@@ -497,6 +503,7 @@ function Runtime() {
   const canSwitch = settings !== NA && settings !== undefined;
   const [err, run] = useAct();
   const total = (models ?? []).reduce((a, m) => a + m.sizeBytes, 0);
+  const folders = folderWords();
   return (
     <>
       <Head title="Runtime">Gates Local finds Ollama on its own.</Head>
@@ -529,10 +536,10 @@ function Runtime() {
                     <ul>
                       <li>Gates Local stops its copy and connects to the system one on port 11434.</li>
                       <li>
-                        Both read the same models folder, <span className="mono">~/.ollama/models</span>, so nothing downloads again.
+                        The system one reads its own models folder, <span className="mono">{folders.models}</span>. Models downloaded into Gates Local's copy stay in <span className="mono">{folders.appModels}</span>.
                       </li>
                       <li>
-                        Its copy stays in <span className="mono">~/.local/share/gates-local/ollama</span> until you remove it.
+                        Its copy stays in <span className="mono">{folders.appCopy}</span> until you remove it.
                       </li>
                       <li>Chats pause for a few seconds while it reconnects.</li>
                     </ul>
@@ -542,10 +549,11 @@ function Runtime() {
                     <b>Switch to Gates Local's own copy of Ollama?</b>
                     <ul>
                       <li>
-                        Downloads Ollama into <span className="mono">~/.local/share/gates-local/ollama</span>.
+                        Downloads Ollama into <span className="mono">{folders.appCopy}</span>.
                       </li>
                       <li>
-                        It reads the same models folder, <span className="mono">~/.ollama/models</span>, so your {models?.length ?? 0} models don't download again.
+                        It keeps its own models in <span className="mono">{folders.appModels}</span>, apart from the system one, so a model you want there downloads again. The models in{" "}
+                        <span className="mono">{folders.models}</span> stay where they are.
                       </li>
                       <li>It runs on port 11435. The system Ollama keeps running for other apps.</li>
                       <li>Chats pause for about a minute while it installs and starts.</li>
@@ -576,8 +584,8 @@ function Runtime() {
         </Row>
       </Grp>
       <Grp title="Storage">
-        <Row label="Models folder" desc={models ? `${models.length} models · ${gb(total)} on disk` : undefined}>
-          <span className="path">~/.ollama/models</span>
+        <Row label="Models folder" desc={models ? `${count(models.length, "model")} · ${gb(total)} on disk` : undefined}>
+          <span className="path">{app ? folders.appModels : folders.models}</span>
         </Row>
       </Grp>
     </>

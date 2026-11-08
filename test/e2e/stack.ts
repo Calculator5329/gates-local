@@ -127,6 +127,8 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_RUNTIME: "discover-only",
     GATES_LOCAL_OLLAMA_BINARY: "none",
     XDG_DATA_HOME: path.join(runDir, "xdg"),
+    // Windows keeps the app's shared data under %LOCALAPPDATA%, not XDG_DATA_HOME.
+    ...(process.platform === "win32" ? { LOCALAPPDATA: path.join(runDir, "localappdata") } : {}),
   };
 }
 

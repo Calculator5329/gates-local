@@ -12,7 +12,9 @@ describe("E2E env defaults", () => {
     expect(checkoutKey(path.join(homedir(), "projects/ai/gates-local"))).toMatch(/^projects-ai-gates-local-[0-9a-f]{8}$/);
     expect(checkoutKey(path.join(homedir(), ".cache/gates-local-lanes/e2e-fix/wt"))).toMatch(/^cache-gates-local-lanes-e2e-fix-wt-[0-9a-f]{8}$/);
     expect(checkoutKey(path.join(homedir(), "a/wt"))).not.toBe(checkoutKey(path.join(homedir(), "b/wt")));
-    expect(checkoutKey("/srv/gates-local")).toMatch(/^srv-gates-local-[0-9a-f]{8}$/);
+    // Outside home the absolute path names it; on Windows that path starts with a drive.
+    if (process.platform === "win32") expect(checkoutKey("D:\\srv\\gates-local")).toMatch(/^D-srv-gates-local-[0-9a-f]{8}$/);
+    else expect(checkoutKey("/srv/gates-local")).toMatch(/^srv-gates-local-[0-9a-f]{8}$/);
     // the same checkout always gets the same folder
     expect(checkoutKey(path.join(homedir(), "projects/ai/gates-local"))).toBe(checkoutKey(path.join(homedir(), "projects/ai/gates-local/")));
   });

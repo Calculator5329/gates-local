@@ -125,6 +125,9 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     appDataDir: path.join(dir, "appdata"),
     allowInstall: false,
     env: { PATH: "" },
+    // Not this machine's home: on Windows an installed Ollama in its
+    // %LOCALAPPDATA%\Programs would read as "stopped" instead of missing.
+    home: path.join(dir, "home"),
     systemModelsDirs: [],
     probeTimeoutMs: 500,
   });
