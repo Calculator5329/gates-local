@@ -11,6 +11,7 @@ import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
+import { iconFile, windowOptions } from "./window.ts";
 
 const DEV_WEB_URL = "http://127.0.0.1:5187/";
 
@@ -36,11 +37,6 @@ function serverEntry(): string {
 /** The built web files that gates-local://app serves. */
 function webRoot(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(desktopDir, "..", "web", "dist");
-}
-
-/** The window icon (X11, Windows, and Wayland compositors that take one); the desktop entry's icon covers the rest. */
-function iconPath(): string {
-  return app.isPackaged ? path.join(process.resourcesPath, "icon.png") : path.join(desktopDir, "assets", "icon.png");
 }
 
 /** Dist (the default): the built web files on gates-local://app. Dev: the Vite dev server. */
@@ -138,19 +134,12 @@ function run(): void {
   supervisor.subscribe(route);
 
   function createWindow(): BrowserWindow {
-    const window = new BrowserWindow({
-      width: 1200,
-      height: 800,
-      title: "Gates Local",
-      icon: iconPath(),
-      webPreferences: {
+    const window = new BrowserWindow(
+      windowOptions({
+        icon: iconFile({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, desktopDir }),
         preload: path.join(__dirname, "preload.cjs"),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webSecurity: true,
-      },
-    });
+      }),
+    );
     const contents = window.webContents;
     // The window never opens another window or leaves the client. A web
     // link (the Ollama library, a link in a reply) opens in the system browser.
