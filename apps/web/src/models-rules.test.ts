@@ -7,6 +7,7 @@ import {
   type Row,
   about,
   canBeDefault,
+  filterShows,
   fitLabel,
   fitReason,
   fitSymbol,
@@ -118,6 +119,12 @@ describe("installed order and the default", () => {
     expect(canBeDefault(row("big", "refuse"), "mid")).toBe(false);
     expect(canBeDefault(row("embed", undefined, false), "mid")).toBe(false);
     expect(canBeDefault(row("unchecked", undefined), "mid")).toBe(true);
+  });
+
+  it("keeps the filter field while it holds text, even when the list got short (MR-03)", () => {
+    expect(filterShows(9, "")).toBe(true);
+    expect(filterShows(8, "")).toBe(false);
+    expect(filterShows(8, "qwen")).toBe(true);
   });
 
   it("moves the default to the next chat model that can load, skipping won't-run and embeddings", () => {

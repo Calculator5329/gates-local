@@ -7,6 +7,11 @@
   sit in the row's ⋯ menu at every width. The default context size moved
   to Settings › Advanced. Character and system prompt settings left this
   page.
+- When the saved default is gone, the page names the model new chats really
+  start on, and "Use as default" can save it. A removal that worked stays
+  finished when the next default cannot be saved; the page says so instead
+  of offering a retry that cannot work. A filter that still holds text
+  stays on screen after the list gets short.
 
 ## 2026-11-08: Dark by default
 

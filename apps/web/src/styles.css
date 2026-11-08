@@ -733,6 +733,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-tab.on .mp-lbl{font-weight:600}
 .mp-n{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
 .mp-quiet{color:var(--muted-foreground);font-size:13.5px;margin:0 0 16px}
+.mp-note{margin:8px 0 12px}
+.mp-note .act-err{margin:0}
 
 /* default for new chats */
 .mp-defrow{position:relative;display:flex;align-items:center;gap:16px;padding:12px 14px;margin:0 0 12px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}

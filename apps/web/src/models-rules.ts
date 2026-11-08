@@ -112,6 +112,12 @@ export function sortRows<T extends Row>(rows: readonly T[], def: string | undefi
   return top === undefined ? rest : [top, ...rest];
 }
 
+/** The filter field shows once the list is longer than this. */
+const FILTER_FROM = 8;
+
+/** A long list gets the filter, and it stays while it holds text: hiding it would leave a filter nobody can clear. */
+export const filterShows = (rows: number, typed: string): boolean => rows > FILTER_FROM || typed !== "";
+
 /** The row menu offers "Use as default" on any chat model that can load, except the current default. */
 export function canBeDefault(r: Row, def: string | undefined): boolean {
   return r.name !== def && r.chat && r.verdict !== "refuse";

@@ -40,6 +40,41 @@ test("set a default from the row menu, then download a model into the list", asy
   await expect(page.locator('.mp-row[data-dm="qwen3.5:4b"]')).toBeVisible();
 });
 
+test("a removal that worked stays done when the new default cannot be saved", async ({ page, open }) => {
+  let refused = 0;
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => {
+      const f = typeof m === "string" ? (JSON.parse(m) as { type?: string; method?: string; id?: string }) : undefined;
+      if (f?.type === "request" && f.method === "settings.update" && m.toString().includes("defaultModel") && refused++ === 0) {
+        ws.send(JSON.stringify({ type: "response", id: f.id, ok: false, error: { code: "internal", message: "test: refused by the tap" } }));
+        return;
+      }
+      server.send(m);
+    });
+    server.onMessage((m) => ws.send(m));
+  });
+  await open();
+  await waitReady(page);
+  await openModels(page);
+
+  await page.getByRole("button", { name: "More for Qwen 3.5 9B" }).click();
+  await page.getByRole("menuitem", { name: /^Remove…/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
+
+  // the dialog is finished, the row is gone, and the page says what is left to do
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator('.mp-row[data-dm="qwen3.5:9b"]')).toHaveCount(0);
+  const note = page.locator(".mp").getByRole("alert");
+  await expect(note).toContainText("Qwen 3.5 9B was removed");
+
+  // choosing a default settles it
+  await page.getByRole("button", { name: /^Default for new chats:/ }).click();
+  await page.getByRole("option", { name: /Gemma 4 12B/ }).click();
+  await expect(page.locator('.mp-row[data-dm="gemma4:12b"] .mp-l1 .mp-chip')).toHaveText("Default");
+  await expect(note).toHaveCount(0);
+});
+
 test("a running download shows its detail in the row and on Installed, and Cancel download puts it back", async ({ page, open }) => {
   await open();
   await waitReady(page);
