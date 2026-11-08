@@ -1,7 +1,7 @@
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer with the download and runtime rows.
 import { Fragment, useEffect, useState } from "react";
-import { rtInfo } from "./Banner.tsx";
+import { rtInfo, rtOf } from "./Banner.tsx";
 import { describeModel, gb, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { leaveSettings, newThread, openSettings, openThread } from "./session.ts";
@@ -172,6 +172,8 @@ function RuntimeRow() {
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const settings = useStore((s) => s.settings);
+  // a healthy runtime has no row; the version lives in Settings › Runtime
+  if (rtOf({ conn, runtime, settings }) === "ready") return null;
   const info = rtInfo({ conn, runtime, settings });
   return (
     <button type="button" className="rt" data-tip={info.tip} onClick={() => openSettings("runtime")}>

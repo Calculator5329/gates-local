@@ -80,8 +80,8 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
   await ta.press("Enter");
 }
 
-/** The sidebar's runtime row shows a ready dot: connected, and Ollama answers. */
+/** The composer is unblocked: connected, and Ollama answers (a healthy runtime has no sidebar row). */
 export async function waitReady(page: Page): Promise<void> {
-  await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+  await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
   await expect(page.locator("#ta")).toBeEnabled();
 }
