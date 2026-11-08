@@ -48,6 +48,8 @@ export interface ImageModule {
    * claim goes back at once; a cancelled call never starts a stop. A stop already begun runs to its end.
    */
   stopIdle(signal?: AbortSignal): Promise<void>;
+  /** The MainPID of the ComfyUI this app started while no image job runs (what stopIdle would stop), else undefined. */
+  reclaimable(): number | undefined;
   close(): Promise<void>;
 }
 
@@ -377,6 +379,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         throw error;
       });
     },
+    reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
     async close() {
       closed = true; clearIdle();
       const pending = [...jobs.values()];

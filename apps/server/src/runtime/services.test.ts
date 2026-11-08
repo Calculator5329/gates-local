@@ -13,7 +13,7 @@ import { appModelsDir, installedBinary } from "./paths.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { createModelServices, type ModelServices } from "./services.ts";
 import { freePort, freePortRun, removeDir, tmpDir, writeFakeBinary } from "./test-fakes.ts";
-import { ownedIdleComfy } from "./test-image.ts";
+import { ownedIdleComfy, type OwnedComfy } from "./test-image.ts";
 
 const VERSION = "9.9.9-services";
 const manifest = { version: VERSION, url: "http://127.0.0.1:1/never", sha256: "0".repeat(64), sizeBytes: 1, format: "tar.zst", verified: true, source: "test" } as const;
@@ -42,13 +42,13 @@ async function models(url: string): Promise<string | undefined> {
   return r.kind === "response" ? (JSON.parse(r.body) as { OLLAMA_MODELS: string }).OLLAMA_MODELS : undefined;
 }
 
-async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number): Promise<ModelServices> {
+async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number, fitDeps: AppDeps["fit"] = fit): Promise<ModelServices> {
   const home = path.join(work, "home");
   const s = await createModelServices({
     dataDir,
     push: () => undefined,
     runtime: { home, env: { PATH: "", HOME: home }, systemModelsDirs: [], allowInstall: false, probeTimeoutMs: 500, manifest, ...runtime },
-    fit,
+    fit: fitDeps,
     log: () => undefined,
     ...(lease ? { lease } : {}),
     ...(turnDrainMs === undefined ? {} : { turnDrainMs }),
@@ -182,6 +182,23 @@ const MODEL = "qwen3.5:9b";
 const smi = (freeMib: number) => async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - freeMib}, ${freeMib}\n` : "");
 /** An /api/ps entry resident at 16k. */
 const entry = (name: string, vram: number) => ({ name, size: vram, size_vram: vram, context_length: 16384 });
+/**
+ * About 1 GB free, RAM under its margin, and the idle app-owned ComfyUI (MainPID 4242) holding
+ * `comfyMib`, which nvidia-smi gives back once it is stopped.
+ */
+function withComfyToo(comfy: OwnedComfy, comfyMib: number) {
+  return {
+    readMeminfo: async () => "MemAvailable: 1000000 kB\n",
+    runNvidiaSmi: async (args: readonly string[]) => {
+      const up = comfy.stops() === 0;
+      if (args[0]?.startsWith("--query-gpu")) {
+        const free = 1000 + (up ? 0 : comfyMib);
+        return `16303, ${16303 - free}, ${free}\n`;
+      }
+      return up ? `4242, /usr/bin/python3 main.py --port 8188, ${comfyMib}\n` : "";
+    },
+  };
+}
 
 interface RigOptions {
   readonly image?: ImageModule;
@@ -210,7 +227,8 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     ...routes,
   });
   servers.push(old);
-  const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease, options.turnDrainMs);
+  // The preloads (models.load) read the machine the way the turns do.
+  const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: old.baseUrl }, options.lease, options.turnDrainMs, options.fit ?? fit);
   expect(s.runtime.mode()).toBe("system");
   expect((await s.runtime.ensure()).state).toBe("ready");
   const store = openThreadStore(path.join(work, "threads.sqlite"));
@@ -494,8 +512,14 @@ describe("a turn's stream ends once", () => {
 });
 
 describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
-  /** Little free VRAM, so a cold MODEL spills and chat.send reclaims an idle app-owned ComfyUI first. */
-  const tight = { ...fit, runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 15303, 1000\n" : "") };
+  /**
+   * Little free VRAM, so a cold MODEL spills unless chat.send reclaims the idle app-owned ComfyUI
+   * (MainPID 4242, listed holding 8000 MiB) first.
+   */
+  const tight = {
+    ...fit,
+    runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? "16303, 15303, 1000\n" : "4242, /usr/bin/python3 main.py --port 8188, 8000\n"),
+  };
   const cold: Record<string, Route> = { "GET /api/ps": (_b, res) => json(res, 200, { models: [] }) };
 
   it("the reclaim's fit: an /api/show that never answers ends at shutdown", async () => {
@@ -715,9 +739,10 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(t.of(yTurn.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
     const x2Turn = await x2;
-    // Admitted after Y, it streams beside it (the fake's memory is fixed).
-    for (let i = 0; i < 200 && !t.of(x2Turn.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
-    expect(t.terminal(x2Turn.turnId)).toEqual([]);
+    // Y's plan reads the GPU before the load gate (R5-01), so the second X turn was admitted and
+    // streaming meanwhile: the next plan stops it too, before Y's load.
+    expect(t.terminal(x2Turn.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
+    expect(t.r.events.indexOf(t.terminal(x2Turn.turnId)[0]!)).toBeLessThan(t.r.events.findIndex((e) => e.turnId === yTurn.turnId && e.type === "delta"));
     await t.r.done();
   });
 
@@ -764,6 +789,136 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.app.activeTurns()).toBe(1);
     await t.r.done();
+  });
+
+  it("R5-01: a cold X in /api/ps that never sends a token still holds the load gate; Y's stopOthers stops it and Y is admitted", async () => {
+    const lease = createGpuLease();
+    let xResident = false;
+    const xAsked = signalled();
+    const xOpen = new Set<Promise<void>>();
+    let atYChat: { xEnded: boolean; holders: number } | undefined;
+    const r = await rig(
+      {
+        "GET /api/tags": (_b, res) => json(res, 200, { models: [MODEL, Y].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: xResident ? [entry(MODEL, X_VRAM)] : [] }),
+        "POST /api/chat": async (b, res) => {
+          const { model } = b as { model: string };
+          res.writeHead(200, ndjson);
+          if (model === MODEL) {
+            // Loading, or reading the prompt: resident, and no token yet.
+            xResident = true;
+            const closed = new Promise<void>((resolve) => res.on("close", () => resolve()));
+            xOpen.add(closed);
+            xAsked.resolve();
+            await closed;
+            xOpen.delete(closed);
+            return;
+          }
+          while (xOpen.size > 0) await Promise.all(xOpen);
+          atYChat = { xEnded: r.events.some((e) => e.turnId === x.turnId && (e.type === "error" || e.type === "done")), holders: lease.status().holders };
+          res.end(line({ model, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
+        },
+      },
+      { fit: tight, lease },
+    );
+    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
+    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 2000);
+    expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
+    const y = (sent as { resolved: { turnId: string } }).resolved;
+    const terminal = (turnId: string) => r.events.filter((e) => e.turnId === turnId && (e.type === "error" || e.type === "done"));
+    for (let i = 0; i < 400 && terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(terminal(x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
+    expect(r.events.find((e) => e.turnId === y.turnId && e.type === "delta")).toMatchObject({ text: "Y here" });
+    expect(terminal(y.turnId)).toMatchObject([{ type: "done" }]);
+    // X's claim went before Y's request reached Ollama; Y's goes at its end.
+    expect(atYChat).toEqual({ xEnded: true, holders: 1 });
+    for (let i = 0; i < 200 && lease.status().holders > 0; i++) await sleep(5);
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    await r.done();
+  });
+
+  it("R5-02: Y needs X's memory and ComfyUI's together: X is stopped and drained, then ComfyUI, then Y is admitted", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    // Y needs about 7830 MiB plus the 512 MiB margin: 1000 free + X's 1907 + ComfyUI's 6000, and neither alone is enough.
+    const t = await withX(withComfyToo(comfy, 6000), { image: comfy.image, lease }, twoModels(2e9));
+    const sent = await settledWithin(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 2000);
+    expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
+    const y = (sent as { resolved: { turnId: string } }).resolved;
+    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
+    expect(comfy.stops()).toBe(1);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
+    await t.r.done();
+    comfy.close();
+  });
+
+  it("R5-02: when even X's memory and ComfyUI's together are short, the send refuses at once and stops nothing", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const t = await withX(withComfyToo(comfy, 1000), { image: comfy.image, lease }, twoModels(2e9));
+    const sent = await settledWithin(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 1000);
+    expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(comfy.stops()).toBe(0);
+    expect(lease.status()).toMatchObject({ holder: "chat", holders: 1, waiting: [] });
+    await t.r.done();
+    comfy.close();
+  });
+
+  it("R5-02: a cold X holding the load gate, and Y short even with X gone: Y refuses at once and X keeps its load", async () => {
+    const lease = createGpuLease();
+    const xAsked = signalled();
+    let yAsked = false;
+    let xResident = false;
+    const r = await rig(
+      {
+        "GET /api/tags": (_b, res) => json(res, 200, { models: [MODEL, Y].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: xResident ? [entry(MODEL, 2e9)] : [] }),
+        "POST /api/chat": async (b, res) => {
+          res.writeHead(200, ndjson);
+          if ((b as { model: string }).model !== MODEL) yAsked = true;
+          xResident = true;
+          xAsked.resolve();
+          // Cold, and no token: X holds the load gate until it ends.
+          await new Promise<void>((resolve) => res.on("close", () => resolve()));
+        },
+      },
+      // 15000 MiB free until X loads, 1000 beside it: X fits, Y does not even in X's 2 GB.
+      { fit: { runNvidiaSmi: (args) => (xResident ? smi(1000) : smi(15000))(args), readMeminfo: async () => "MemAvailable: 1000000 kB\n" }, lease },
+    );
+    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
+    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 1000);
+    expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
+    expect(r.events.filter((e) => e.turnId === x.turnId && (e.type === "error" || e.type === "done"))).toEqual([]);
+    expect(yAsked).toBe(false);
+    expect(lease.status()).toMatchObject({ holder: "chat", holders: 1, waiting: [] });
+    await r.done();
+  });
+
+  it("R5-03: ~1 GB free, an idle 9 GB model, RAM under its margin: fit.check, a preload and chat.send give one verdict", async () => {
+    const Z = "llama3.1:8b";
+    const r = await rig(
+      {
+        "GET /api/tags": (_b, res) => json(res, 200, { models: [Y, Z].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: [entry(Z, 9e9)] }),
+        "POST /api/generate": (_b, res) => json(res, 200, { model: Y, response: "", done: true }),
+        "POST /api/chat": (_b, res) => {
+          res.writeHead(200, ndjson);
+          res.end(line({ model: Y, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model: Y, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
+        },
+      },
+      { fit: { runNvidiaSmi: smi(1000), readMeminfo: async () => "MemAvailable: 1000000 kB\n" } },
+    );
+    expect(await r.app.handlers["fit.check"]({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ verdict: "fits" });
+    expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
+    const y = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
+    for (let i = 0; i < 400 && !r.events.some((e) => e.turnId === y.turnId && e.type === "done"); i++) await sleep(5);
+    expect(r.events.filter((e) => e.turnId === y.turnId).map((e) => e.type)).toEqual(["delta", "done"]);
+    await r.done();
   });
 
   it("turns on the same model, or on a model that fits beside, are never stopped", async () => {

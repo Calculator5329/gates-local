@@ -146,8 +146,10 @@ export interface FitDeps {
   /** Ends the check early: every Ollama request, both nvidia-smi runs and the meminfo read. */
   signal?: AbortSignal;
   /**
-   * Resident models with no running turn (idle, or just stopped for this load): Ollama unloads an
-   * idle model to make room, so the VRAM /api/ps says they hold counts as free for a cold plan.
+   * Resident models no turn of this app is using (or whose turn was just stopped for this load):
+   * Ollama unloads a model it is not serving to make room, so the VRAM /api/ps says they hold
+   * counts as reclaimable for a cold plan. Their activity is unknown: another client of the same
+   * Ollama may be using one, and Ollama then queues the load until it is done.
    */
   reclaim?: readonly string[];
 }
@@ -182,7 +184,8 @@ async function takeReadings(deps: FitDeps): Promise<Readings> {
   return { gpu, memAvailableBytes, ps, tags };
 }
 
-async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: Readings): Promise<FitCheck> {
+/** `comfyBytes`: the app-owned ComfyUI's GPU memory, counted as reclaimable when the plan stops it. */
+async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: Readings, comfyBytes = 0): Promise<FitCheck> {
   const now = deps.now ?? Date.now;
   const loaded = findLoaded(r.ps, model);
   // Measured only when /api/ps proves the resident copy runs at this num_ctx. An Ollama that
@@ -212,12 +215,13 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const notes = [
     ...(loaded ? [`free VRAM counts ${formatGb(reclaim)} held by the copy loaded at ${atCtx}, which Ollama replaces or reuses`] : []),
     ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, which Ollama unloads to make room`] : []),
+    ...(comfyBytes > 0 ? [`free VRAM counts ${formatGb(comfyBytes)} held by the app's idle ComfyUI, which the app stops to make room`] : []),
   ];
   const report = decideFit({
     model,
     numCtx,
     needBytes: estimate.totalBytes,
-    freeVramBytes: r.gpu.freeBytes + reclaim + freed,
+    freeVramBytes: r.gpu.freeBytes + reclaim + freed + comfyBytes,
     memAvailableBytes: r.memAvailableBytes,
     ...(deps.margins ? { margins: deps.margins } : {}),
     measuredAt: r.gpu.measuredAt,
@@ -235,40 +239,60 @@ export async function checkFit(deps: FitDeps & { model: string; numCtx: number }
 }
 
 export interface LoadPlan {
-  /** The fit with every idle resident model's VRAM counted as free (Ollama unloads those first). */
+  /**
+   * The fit with no busy turn stopped: every other resident model's VRAM counted as reclaimable
+   * (Ollama unloads those first), and the app-owned ComfyUI's too when `comfy`.
+   */
   report: FitReport;
-  /** The busy models whose turns must stop for the load (see planLoad). */
+  /** The busy models whose turns must stop for the load (only chat.send stopOthers stops them). */
   stop: string[];
+  /** The plan stops the app-owned ComfyUI as well: without its memory the load does not fit in VRAM. */
+  comfy: boolean;
 }
 
 /**
- * A load of `model` at `numCtx` beside the `busy` models (each with a running turn), from one
- * reading. Every other resident model is idle: Ollama unloads it to make room, so its VRAM counts
- * as free before any busy one. `stop` is empty when the model is resident at this num_ctx, fits
- * with the idle ones gone, or refuses even with every busy one gone too (stopping them would not
- * help); otherwise the fewest busy ones, largest first, whose VRAM makes it fit, or all of them
- * when it only spills. The same model in `busy` never counts. Reads only; never loads.
+ * The one fit planner for a load of `model` at `numCtx`: the picker's and composer's fit.check,
+ * preloads and chat.send. From one reading, it reclaims in this order: resident models not in
+ * `busy` (no turn of this app uses them; their activity is unknown, see FitDeps.reclaim), then busy
+ * models, the fewest and largest first, then the app-owned ComfyUI with MainPID `comfyPid` (its
+ * nvidia-smi memory; none when unlisted). `busy` models are reclaimable only by stopping their
+ * turns, which only chat.send does, so `report` never counts them. ComfyUI's stop claims the GPU
+ * alone and so waits on every busy turn's chat claim: `report` counts it only when `busy` is empty,
+ * and a plan that needs it with a busy turn running stops every busy turn first.
+ *
+ * `stop` is empty when the model is resident at this num_ctx, fits without any busy model, or
+ * refuses even with every busy one and ComfyUI gone (stopping them would not help, and `comfy` is
+ * false too); otherwise the busy ones whose VRAM makes it fit, or all of them when it needs ComfyUI
+ * or only spills. The same model in `busy` never counts. Reads only; never loads or stops anything.
  */
-export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[] }): Promise<LoadPlan> {
+export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; comfyPid?: number }): Promise<LoadPlan> {
   const floor = checkNumCtx(deps.model, deps.numCtx);
-  if (!floor.ok) return { report: ctxRefusal(deps.model, deps.numCtx, floor.message, undefined, (deps.now ?? Date.now)()), stop: [] };
+  if (!floor.ok) return { report: ctxRefusal(deps.model, deps.numCtx, floor.message, undefined, (deps.now ?? Date.now)()), stop: [], comfy: false };
   const r = await takeReadings(deps);
   const others = r.ps.models.filter((m) => !sameModel(m.name, deps.model));
-  const isBusy = (name: string) => deps.busy.some((b) => sameModel(b, name));
+  const busy = deps.busy.filter((b) => !sameModel(b, deps.model));
+  const isBusy = (name: string) => busy.some((b) => sameModel(b, name));
   const idle = others.filter((m) => !isBusy(m.name)).map((m) => m.name);
-  const plan = async (stop: readonly string[]) => (await fitWithReadings({ ...deps, reclaim: [...idle, ...stop] }, deps.model, deps.numCtx, r)).report;
-  const report = await plan([]);
-  if (report.source === "measured" || report.verdict === "fits") return { report, stop: [] };
+  const comfyBytes = deps.comfyPid === undefined ? 0 : r.gpu.tenants.filter((t) => t.pid === deps.comfyPid).reduce((sum, t) => sum + (t.usedBytes ?? 0), 0);
+  const plan = async (stop: readonly string[], comfy: boolean) =>
+    (await fitWithReadings({ ...deps, reclaim: [...idle, ...stop] }, deps.model, deps.numCtx, r, comfy ? comfyBytes : 0)).report;
+  const alone = await plan([], false);
+  if (alone.source === "measured" || alone.verdict === "fits") return { report: alone, stop: [], comfy: false };
+  const comfy = comfyBytes > 0;
+  const comfyNow = comfy && busy.length === 0;
+  const report = comfyNow ? await plan([], true) : alone;
+  if (report.verdict === "fits") return { report, stop: [], comfy: comfyNow };
   const candidates = others
     .filter((m) => isBusy(m.name))
     .toSorted((a, b) => b.size_vram - a.size_vram)
     .map((m) => m.name);
   for (let n = 1; n <= candidates.length; n++) {
-    const verdict = (await plan(candidates.slice(0, n))).verdict;
-    if (verdict === "fits") return { report, stop: candidates.slice(0, n) };
-    if (n === candidates.length) return { report, stop: verdict === "refuse" ? [] : candidates };
+    if ((await plan(candidates.slice(0, n), false)).verdict === "fits") return { report, stop: candidates.slice(0, n), comfy: false };
   }
-  return { report, stop: [] };
+  // Every busy turn stopped (each holds a chat claim ComfyUI's stop waits on), and ComfyUI too.
+  const last = candidates.length === 0 && !comfyNow ? alone : await plan(candidates, comfy);
+  if (last.verdict === "refuse") return { report, stop: [], comfy: false };
+  return { report, stop: comfy ? busy : candidates, comfy };
 }
 
 /** planLoad's `stop`: the busy models a load would push out. */

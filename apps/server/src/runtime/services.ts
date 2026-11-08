@@ -4,7 +4,7 @@
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
 import type { Channel, Payload, RuntimeMode } from "@gates-local/contracts";
-import { checkFit, type FitDeps } from "../fit/fit.ts";
+import { planLoad, type FitDeps } from "../fit/fit.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
@@ -130,7 +130,10 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
     // `signal` (shutdown, a switch) ends every request and child process of the check.
-    fit: async (model, numCtx, baseUrl, signal) => (await checkFit({ ...options.fit, baseUrl, model, numCtx, signal })).report,
+    // The planner chat.send uses (fit/planLoad). A preload stops nothing: models a turn or another
+    // preload holds are busy, and it never reclaims ComfyUI (it runs inside a shared chat claim).
+    fit: async (model, numCtx, baseUrl, signal) =>
+      (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
     onLoaded: () => gpu.poke(),
     ...(options.lease ? { lease: options.lease } : {}),
     log,

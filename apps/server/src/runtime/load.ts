@@ -131,6 +131,8 @@ export interface ModelLoader {
   reserve(model: string): TurnReservation;
   /** A turn or a preload holds this model (reserved, queued, fitting, loading or streaming). */
   inUse(model: string): boolean;
+  /** Every model inUse() is true for, by tag: the busy ones a preload's fit plan never reclaims. */
+  busyModels(): string[];
   /**
    * models.remove: refuses (model-in-use) while a reservation exists, else
    * marks the model as removing until the returned function is called.
@@ -491,6 +493,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     },
 
     inUse: (model) => (reservations.get(canonicalTag(model)) ?? 0) > 0,
+    busyModels: () => [...reservations.keys()],
 
     beginRemove(model) {
       const tag = canonicalTag(model);
