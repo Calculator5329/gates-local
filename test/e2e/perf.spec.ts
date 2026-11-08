@@ -3,11 +3,19 @@
 // above the number measured on the maintainer's Linux machine (2026-11-07, Chromium,
 // 1440x900, the fake Ollama at 12 ms a token); the measured value is in the
 // comment beside it. Every test also logs what it measured.
+//
+// The two timing gates (cold load, typing during a stream) pass when one of
+// up to TRIES tries is inside the budget. A slower app slows every try; a
+// busy machine slows some. Measured 2026-11-07 at load average 17-25 on 20
+// cores: 3 of 9 timing checks failed, all on the time from the handlers to
+// the paint (input delay at most 1.4 ms, processing at most 0.8 ms), and the
+// next try passed. The handler-time check holds on every try.
 import { readdirSync, readFileSync } from "node:fs";
+import { cpus, loadavg } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import type { Page } from "@playwright/test";
-import { ROOT } from "./env.ts";
+import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 const BUDGET = {
@@ -27,10 +35,16 @@ const BUDGET = {
   cssGzipKb: 9, // measured 8.1 KB
 };
 
+/** Tries per timing gate: the gate passes when one try is inside the budget. */
+const TRIES = 3;
+
 const report = (name: string, value: number, unit: string) => {
   test.info().annotations.push({ type: "measured", description: `${name}: ${value.toFixed(1)} ${unit}` });
   process.stdout.write(`[perf] ${name}: ${value.toFixed(1)} ${unit}\n`);
 };
+
+/** The machine's load when a timing gate starts, so a reader can weigh a slow number. */
+const reportLoad = () => report(`machine load average, 1 min, ${cpus().length} cores`, loadavg()[0] ?? 0, "");
 
 /** Long tasks, slow input events and a frame counter, from the first byte on. */
 function observe(): void {
@@ -182,17 +196,43 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(observe);
 });
 
-test("cold load: first paint and time to a ready composer", async ({ page, open }) => {
-  await open();
+/** First contentful paint and the time the composer is ready, on a page that has just been opened. */
+async function coldTimes(page: Page) {
   await waitReady(page);
-  const t = await page.evaluate(() => ({
+  return page.evaluate(() => ({
     fcp: performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? Number.NaN,
     ready: performance.now(),
   }));
-  report("first contentful paint", t.fcp, "ms");
-  report("ready composer", t.ready, "ms");
-  expect(t.fcp).toBeLessThan(BUDGET.firstPaintMs);
-  expect(t.ready).toBeLessThan(BUDGET.readyMs);
+}
+const coldWithinBudget = (t: { fcp: number; ready: number }) => t.fcp < BUDGET.firstPaintMs && t.ready < BUDGET.readyMs;
+
+test("cold load: first paint and time to a ready composer", async ({ page, open, browser }) => {
+  reportLoad();
+  await open();
+  const tries = [await coldTimes(page)];
+  // each later try is a fresh browser context, so nothing is cached from the try before
+  while (tries.length < TRIES && !coldWithinBudget(tries[tries.length - 1]!)) {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
+    try {
+      const p = await ctx.newPage();
+      const errors: string[] = [];
+      p.on("console", (m) => {
+        if (m.type() === "error") errors.push(m.text());
+      });
+      p.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+      await p.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+      await p.goto(appUrl());
+      tries.push(await coldTimes(p));
+      expect(errors, "console errors").toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  }
+  tries.forEach((t, i) => {
+    report(`first contentful paint (try ${i + 1})`, t.fcp, "ms");
+    report(`ready composer (try ${i + 1})`, t.ready, "ms");
+  });
+  expect(tries.some(coldWithinBudget), JSON.stringify(tries)).toBe(true);
 });
 
 /**
@@ -377,24 +417,43 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   await ta.fill("");
 
   // slow tokens so the stream outlasts the typing and the control after it
+  reportLoad();
   await stack.scenario("models", { tokenDelayMs: 120 });
-  await sendMessage(page, "A slow reply please");
-  await expect(page.locator(".caret")).toBeVisible();
-  await ta.focus();
-  await page.evaluate(clearEvents);
-  await typeFreely(page, TYPED);
-  await expect(page.locator(".caret")).toBeVisible();
-  await expect(ta).toHaveValue(TYPED);
-  const stream = keyStats(await page.evaluate(readKeys));
-  reportKeys("stream", stream);
-  expect(keysWithinBudget(stream), JSON.stringify(stream)).toBe(true);
-  expect(stream.p95Processing).toBeLessThanOrEqual(BUDGET.keyHandlerMs);
+  const caret = page.locator(".caret");
+  /** A reply streaming now: the one already running, else a new one. */
+  const streaming = async () => {
+    if (await caret.isVisible()) return;
+    await sendMessage(page, "A slow reply please");
+    await expect(caret).toBeVisible();
+  };
+  // one try: the burst typed while a reply streams; it counts only if the reply was still streaming at its end
+  const streamTry = async () => {
+    await streaming();
+    await ta.fill("");
+    await ta.focus();
+    await page.evaluate(clearEvents);
+    await typeFreely(page, TYPED);
+    await expect(ta).toHaveValue(TYPED);
+    const live = await caret.isVisible();
+    return { ...keyStats(await page.evaluate(readKeys)), live };
+  };
+  const passes = (s: Awaited<ReturnType<typeof streamTry>>) => s.live && keysWithinBudget(s);
+  const streams = [await streamTry()];
+  while (streams.length < TRIES && !passes(streams[streams.length - 1]!)) streams.push(await streamTry());
+  streams.forEach((s, i) => {
+    reportKeys(`stream (try ${i + 1})`, s);
+    if (!s.live) report(`stream (try ${i + 1}) ended before the burst did`, 1, "");
+  });
+  expect(streams.some(passes), JSON.stringify(streams)).toBe(true);
+  for (const s of streams) expect(s.p95Processing, JSON.stringify(s)).toBeLessThanOrEqual(BUDGET.keyHandlerMs);
 
   // negative control: the main thread busy in back-to-back 100 ms tasks, so
   // each key waits for the task it lands in. The handlers stay as fast as
   // before; the gate must still fail. The slices chain through a
   // MessageChannel, so no timer clamp opens a gap between them, and the
-  // channel hangs on window so nothing can collect it mid-burst.
+  // channel hangs on window so nothing can collect it mid-burst. One try:
+  // the control must fail the gate every time.
+  await streaming();
   await ta.fill("");
   await ta.focus();
   await page.evaluate(clearEvents);
