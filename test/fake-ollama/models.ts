@@ -137,6 +137,21 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 128,
     contextLength: 131_072,
   }),
+  // Not installed by default: takes the picker's 8k, 16k and 32k but not 64k.
+  model({
+    name: "mid-chat:32k",
+    family: "tiny",
+    parameterSize: "1.0B",
+    parameterCount: 1_000_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(0.8 * GIB),
+    capabilities: ["completion"],
+    blockCount: 12,
+    headCount: 8,
+    headCountKv: 8,
+    keyLength: 64,
+    contextLength: 32_768,
+  }),
   // Not installed by default: a chat model whose own window is 2,048 tokens, and one that reports no maximum.
   model({
     name: "tiny-chat:2k",

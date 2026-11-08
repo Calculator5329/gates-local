@@ -135,6 +135,58 @@ describe("reveal while streaming: whole blocks only", () => {
     }
   });
 
+  it("never shrinks past the hold limit, whatever the long block turns into", () => {
+    const words = "word ".repeat(410);
+    const replies = [
+      // the header showed through the safety valve, then its separator made it a table
+      `${words}\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter`,
+      // a complete line with a bar that turns out not to be a header
+      `${words}\n| a | b |\nplain words\n\nAfter`,
+      `${words}\n| a | b |\n-- then words\n\nAfter`,
+      // one very long line with a bar, then a separator
+      `${"word | ".repeat(320)}\n| --- | --- |\n| 1 | 2 |\n\nAfter`,
+      `Intro\n\n${"word | ".repeat(320)}\n| --- | --- |\n`,
+      // a short line with a bar, then one very long line
+      `| a | b |\n${words}\n\nAfter`,
+      // runs with no spaces, alone and after other text
+      `${"x".repeat(2100)} then words. More\n\nAfter`,
+      `Short. ${"x".repeat(2100)}\n\nAfter`,
+      `Line\n${"x".repeat(2100)}\nmore`,
+      `> quote\n${"x".repeat(2100)}\n\nAfter`,
+      `${words}\r\n| a | b |\r\n| --- | --- |\r\n\r\nAfter`,
+    ];
+    for (const text of replies) {
+      let shown = "";
+      for (let n = 0; n <= text.length; n++) {
+        const now = live(text.slice(0, n));
+        expect(now.startsWith(shown), `shrank from ${shown.length} to ${now.length} at ${n}, ending ${JSON.stringify(text.slice(Math.max(0, n - 20), n))}`).toBe(true);
+        shown = now;
+      }
+    }
+  });
+
+  it("holds a line with a bar back until the next line says whether it is a table header", () => {
+    const words = "word ".repeat(410);
+    const header = `${words}\n| a | b |\n`;
+    expect(live(header)).toBe(`${words}\n`);
+    expect(live(`${header}| --- `)).toBe(`${words}\n`);
+    expect(live(`${header}| --- | --- |\n`)).toBe(`${words}\n`);
+    expect(live(`${header}plain`)).toBe(header);
+  });
+
+  it("a run with no spaces past the hold limit shows as it grows", () => {
+    const run = "x".repeat(HOLD_LIMIT + 100);
+    expect(live(run)).toBe(run);
+    expect(live(`${run}xx`)).toBe(`${run}xx`);
+    expect(live("x".repeat(HOLD_LIMIT))).toBe("");
+  });
+
+  it("a run past the hold limit shows even after a sentence or a line that came first", () => {
+    const run = "x".repeat(HOLD_LIMIT + 100);
+    expect(live(`Short. ${run}`)).toBe(`Short. ${run}`);
+    expect(live(`Line\n${run}`)).toBe(`Line\n${run}`);
+  });
+
   it("shows all the text once the stream has ended", () => {
     for (const text of ["Here is a plain", "```sh\nunclosed", "- a\n- b", "| a | b |\n| --- | --- |\n| 1 | 2 |", "## Head", ""]) expect(reveal(text, false)).toBe(text);
   });

@@ -575,6 +575,8 @@ function CtxPick({ model }: { model: string | undefined }) {
   }, [model, fits, max]);
   const name = model === undefined ? "" : describeModel(model, catalog).name;
   const capped = max !== undefined && max < numCtx;
+  // the one Tab lands on: the chosen size, or the largest this model takes when it cannot take that
+  const tabStop = usable.includes(numCtx as ContextSize) ? numCtx : usable.at(-1);
   return (
     <div className="pk-foot">
       <div className="pk-ctx">
@@ -589,7 +591,9 @@ function CtxPick({ model }: { model: string | undefined }) {
             if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
             e.preventDefault();
             const i = usable.indexOf(numCtx as ContextSize);
-            const next = usable[(i + (e.key === "ArrowRight" ? 1 : -1) + usable.length) % usable.length];
+            const right = e.key === "ArrowRight";
+            // nothing chosen among these yet: Right starts at the first, Left at the last
+            const next = i < 0 ? (right ? usable[0] : usable.at(-1)) : usable[(i + (right ? 1 : -1) + usable.length) % usable.length];
             if (next === undefined) return;
             pickCtx(next);
             requestAnimationFrame(() => document.querySelector<HTMLElement>(`#picker [data-ctx="${next}"]`)?.focus());
@@ -604,7 +608,7 @@ function CtxPick({ model }: { model: string | undefined }) {
                 type="button"
                 role="radio"
                 aria-checked={c === numCtx && !capped}
-                tabIndex={c === numCtx && !capped ? 0 : -1}
+                tabIndex={c === tabStop ? 0 : -1}
                 className={c === numCtx && !capped ? "on" : ""}
                 data-ctx={c}
                 disabled={max !== undefined && c > max}

@@ -122,15 +122,36 @@ export function reveal(text: string, streaming: boolean): string {
     i = end;
   }
 
-  // the safety valve: a long unfinished block shows its complete lines, or with
-  // no line break its complete sentences, or with no sentence end its complete words
-  if (text.length - done > HOLD_LIMIT) {
-    const rest = text.slice(done);
-    const line = Math.max(rest.lastIndexOf("\n"), rest.lastIndexOf("\r")) + 1;
-    const cut = line > 0 ? line : lastSentenceEnd(rest) || lastWordEnd(rest);
-    if (cut > 0) return text.slice(0, done + cut);
-  }
+  // the safety valve: a long unfinished block shows what it can of itself
+  if (text.length - done > HOLD_LIMIT) return text.slice(0, done + valveCut(text.slice(done)));
   return text.slice(0, done);
+}
+
+/** What the characters of a separator line can be: a partial line that fits this could still become one. */
+const MAYBE_RULE = /^[\s|:-]*$/;
+
+/**
+ * How much of an unfinished block to show. Each step is taken only while more
+ * than HOLD_LIMIT would stay hidden behind the one before it, so nothing stays
+ * hidden for long and a run with no break at all still shows.
+ *
+ * Never shrinking depends on the hold in the first step: a finished line with a
+ * bar may be a table header until the next line says otherwise, and a table
+ * starts at its header, so showing that line early would take it back.
+ */
+function valveCut(rest: string): number {
+  const ls = lines(rest);
+  const partial = ls.at(-1) as Line;
+  const last = ls.at(-2);
+  const held = last !== undefined && last.text.includes("|") && MAYBE_RULE.test(partial.text);
+  let cut = last === undefined ? 0 : held ? last.start : last.next;
+  // a held header's next line may be its separator: the later steps stop short of it
+  const open = held ? rest.slice(0, last.next) : rest;
+  const hiding = () => rest.length - cut > HOLD_LIMIT;
+  if (hiding()) cut = Math.max(cut, lastSentenceEnd(open));
+  if (hiding()) cut = Math.max(cut, lastWordEnd(open));
+  if (hiding()) cut = open.length;
+  return cut;
 }
 
 /** After the last sentence's closing mark (and any quote or bracket), once whitespace follows it; 0 if none. */

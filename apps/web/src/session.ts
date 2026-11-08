@@ -637,12 +637,12 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (getState().threadId === threadId) newThread();
 }
 
-/** The open thread as Markdown, for "Export as Markdown". */
-export function threadMarkdown(threadId: string): string {
+/** A thread as Markdown, for "Export as Markdown", from the messages the server just gave. */
+export function threadMarkdown(threadId: string, messages: readonly Message[]): string {
   const s = getState();
   const t = s.threads.find((x) => x.id === threadId);
   const lines = [`# ${t?.title ?? "Thread"}`, ""];
-  for (const m of s.messages[threadId] ?? []) {
+  for (const m of messages) {
     lines.push(m.role === "user" ? "## You" : `## ${describeModel(m.model ?? "", catalogOf(s)).name || "Reply"}`, "", m.content, "");
   }
   return lines.join("\n");

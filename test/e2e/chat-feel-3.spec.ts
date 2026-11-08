@@ -17,6 +17,8 @@ interface Tap {
   readonly fail: Set<string>;
   /** Methods whose answer reaches the page this many ms late (the server has already acted). */
   readonly late: Map<string, number>;
+  /** Methods whose result is rewritten on its way to the page: what another client changed since this one last looked. */
+  readonly edit: Map<string, (result: unknown) => unknown>;
   push(channel: string, payload: unknown): void;
 }
 
@@ -24,6 +26,7 @@ async function tap(page: Page): Promise<Tap> {
   const calls = new Map<string, number>();
   const fail = new Set<string>();
   const late = new Map<string, number>();
+  const edit = new Map<string, (result: unknown) => unknown>();
   const methodOf = new Map<unknown, string>();
   let app: WebSocketRoute | undefined;
   await page.routeWebSocket(/.*/, (ws) => {
@@ -44,17 +47,26 @@ async function tap(page: Page): Promise<Tap> {
     });
     server.onMessage((m) => {
       const res = parse(m);
-      const ms = res?.type === "response" ? late.get(methodOf.get(res.id) ?? "") : undefined;
-      if (ms === undefined) ws.send(m);
-      else setTimeout(() => ws.send(m), ms);
+      const method = res?.type === "response" ? (methodOf.get(res.id) ?? "") : "";
+      const change = edit.get(method);
+      const frame = change === undefined ? m : rewritten(m, change);
+      const ms = late.get(method);
+      if (ms === undefined) ws.send(frame);
+      else setTimeout(() => ws.send(frame), ms);
     });
   });
   return {
     calls,
     fail,
     late,
+    edit,
     push: (channel, payload) => app?.send(JSON.stringify({ type: "push", channel, payload })),
   };
+}
+
+function rewritten(m: string | Buffer, change: (result: unknown) => unknown): string {
+  const frame = JSON.parse(String(m)) as { result?: unknown };
+  return JSON.stringify({ ...frame, result: change(frame.result) });
 }
 
 function parse(m: string | Buffer): { type?: unknown; id?: unknown; method?: unknown } | undefined {
@@ -162,6 +174,58 @@ test.describe("picker download rows at the picker's context", () => {
   });
 });
 
+/** Choose this model, then open the picker again. */
+async function pick(page: Page, tag: string): Promise<void> {
+  await page.locator(`#picker .pk-r[data-m="${tag}"]`).click();
+  await expect(page.locator("#picker")).toBeHidden();
+  await page.locator("#modelBtn").click();
+}
+
+/** Tab from the search box until a context size has the focus; undefined if none ever does. */
+async function tabToSize(page: Page): Promise<string | undefined> {
+  await page.locator("#pkSearch").focus();
+  for (let n = 0; n < 40; n++) {
+    await page.keyboard.press("Tab");
+    const size = await page.evaluate(() => document.activeElement?.getAttribute("data-ctx") ?? undefined);
+    if (size !== undefined) return size;
+  }
+  return undefined;
+}
+
+/** 64k chosen on a model that takes it, then a model that stops at 32k, with the picker open. */
+async function cappedAt32k(page: Page): Promise<void> {
+  await page.locator("#modelBtn").click();
+  await pick(page, "qwen3.5:9b");
+  await ctx(page, "64k").click();
+  await expect(ctx(page, "64k")).toHaveAttribute("aria-checked", "true");
+  await pick(page, "mid-chat:32k");
+  await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 32k, the most this model takes.");
+  await expect(ctx(page, "64k")).toBeDisabled();
+}
+
+test.describe("the context sizes when the chosen one is more than the model takes", () => {
+  test.use({ installed: ["qwen3.5:9b", "mid-chat:32k"] });
+
+  test("Tab reaches the largest size the model takes, and Left chooses it", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await cappedAt32k(page);
+    expect(await tabToSize(page)).toBe("32768");
+    await page.keyboard.press("ArrowLeft");
+    await expect(ctx(page, "32k")).toHaveAttribute("aria-checked", "true");
+    await expect(ctx(page, "32k")).toBeFocused();
+  });
+
+  test("Right from there chooses the smallest", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await cappedAt32k(page);
+    expect(await tabToSize(page)).toBe("32768");
+    await page.keyboard.press("ArrowRight");
+    await expect(ctx(page, "8k")).toHaveAttribute("aria-checked", "true");
+  });
+});
+
 const row = (page: Page, title: string) => page.locator(".sb-row", { hasText: title });
 
 /** Every download the page starts, from now on. */
@@ -195,6 +259,25 @@ test.describe("Export as Markdown from the thread menu", () => {
     expect(md.startsWith(`# ${OTHER}\n`)).toBe(true);
     expect(md).toContain("## You");
     await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
+  });
+
+  test("a thread already cached exports what the server says now, not the cached copy", async ({ page, open, seededThread }) => {
+    const OPEN = "Library: Effect Schema books";
+    const t = await tap(page);
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    await expect(page.locator(".tl .turn").first()).toBeVisible();
+    await row(page, OTHER).click();
+    await expect(page.locator(".hdr h2")).toHaveText(OTHER);
+    // another client added a reply this one never heard about
+    t.edit.set("threads.get", (result) => {
+      const answer = result as { messages: { id: string; content: string }[] };
+      return { ...answer, messages: [...answer.messages, { ...answer.messages.at(-1), id: "added-elsewhere", content: "A reply added on the other device" }] };
+    });
+    const got = page.waitForEvent("download");
+    await exportRow(page, OPEN);
+    const md = await readFile(await (await got).path(), "utf8");
+    expect(md).toContain("A reply added on the other device");
   });
 
   test("a load that fails says so and makes no file", async ({ page, open, seededThread }) => {
