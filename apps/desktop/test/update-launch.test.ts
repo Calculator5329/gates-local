@@ -5,8 +5,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { launchMode } from "../src/launch.ts";
 import { RUNNING_FILE, clearRunning, readRunning, writeRunning } from "../src/running.ts";
-import { cannotUpdate, nodeCommand, updaterLaunch } from "../src/update-launch.ts";
+import { cannotUpdate, nodeCommand, onceUntilFailed, relaunchEnv, updaterLaunch } from "../src/update-launch.ts";
 
 const REPO = path.resolve("/srv/gates-local");
 const DATA = path.resolve("/srv/data");
@@ -17,15 +18,77 @@ describe("the updater launch", () => {
     const plan = updaterLaunch({ ...base, argv: ["/x/electron", "."] });
     expect(plan).toEqual({
       command: "node",
-      args: [path.join(REPO, "scripts", "update.ts"), "--wait-pid", "4242", "--restart", "--data-dir", DATA, "--relaunch-cwd", base.cwd, "--relaunch-arg", "."],
+      args: [path.join(REPO, "scripts", "update.ts"), "--wait-pid", "4242", "--restart", "--data-dir", DATA, "--relaunch-cwd", base.cwd, "--relaunch-arg=."],
       cwd: REPO,
     });
   });
 
+  it("keeps each Electron argument in one token, so one starting with -- is a value", () => {
+    const plan = updaterLaunch({ ...base, argv: ["/x/electron", ".", "--disable-gpu"] });
+    expect(plan.args.slice(-2)).toEqual(["--relaunch-arg=.", "--relaunch-arg=--disable-gpu"]);
+  });
+
   it("drops --background, so the app comes back with a window", () => {
     const plan = updaterLaunch({ ...base, argv: ["/x/electron", path.join(REPO, "apps", "desktop"), "--background"] });
-    expect(plan.args.slice(-2)).toEqual(["--relaunch-arg", path.join(REPO, "apps", "desktop")]);
-    expect(plan.args).not.toContain("--background");
+    expect(plan.args.at(-1)).toBe(`--relaunch-arg=${path.join(REPO, "apps", "desktop")}`);
+    expect(plan.args.join(" ")).not.toContain("--background");
+  });
+
+  it("drops the background variable from the relaunch too, and the Electron-as-node one", () => {
+    const env = relaunchEnv({ GATES_LOCAL_BACKGROUND: "1", ELECTRON_RUN_AS_NODE: "1", PATH: "/bin" });
+    expect(env).toEqual({ PATH: "/bin" });
+    expect(launchMode(["/x/electron", "."], env)).toEqual({ background: false });
+  });
+
+  it("leaves the environment it was given alone", () => {
+    const given = { GATES_LOCAL_BACKGROUND: "1" };
+    relaunchEnv(given);
+    expect(given).toEqual({ GATES_LOCAL_BACKGROUND: "1" });
+  });
+});
+
+/** A start that stays open until the test ends it, like a spawn that has not reported yet. */
+function pendingStart() {
+  let starts = 0;
+  const ends: Array<(r: { ok: boolean }) => void> = [];
+  const start = () => {
+    starts++;
+    return new Promise<{ ok: boolean }>((resolve) => ends.push(resolve));
+  };
+  return { start, ends, count: () => starts };
+}
+
+describe("one Update and restart per click", () => {
+  it("starts once when two calls arrive before the first has spawned, and both get its answer", async () => {
+    const p = pendingStart();
+    const click = onceUntilFailed(p.start);
+    const calls = [click(), click()];
+    expect(p.count()).toBe(1);
+    p.ends[0]!({ ok: true });
+    expect(await Promise.all(calls)).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it("stays started after it worked, while the app quits", async () => {
+    const p = pendingStart();
+    const click = onceUntilFailed(p.start);
+    const first = click();
+    p.ends[0]!({ ok: true });
+    await first;
+    void click();
+    expect(p.count()).toBe(1);
+  });
+
+  it("can be tried again after a start that failed or threw", async () => {
+    const p = pendingStart();
+    const click = onceUntilFailed(p.start);
+    const first = click();
+    p.ends[0]!({ ok: false });
+    expect(await first).toEqual({ ok: false });
+    void click();
+    expect(p.count()).toBe(2);
+    const throws = onceUntilFailed<{ ok: boolean }>(() => Promise.reject(new Error("no")));
+    await expect(throws()).rejects.toThrow("no");
+    await expect(throws()).rejects.toThrow("no");
   });
 
   it("uses the node pnpm ran with when it exists, else node on PATH", () => {

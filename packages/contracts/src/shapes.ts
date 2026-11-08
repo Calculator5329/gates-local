@@ -394,7 +394,7 @@ export const UpdateChannel = S.Literals(["main", "release"]);
 export type UpdateChannel = typeof UpdateChannel.Type;
 
 /** Why a check could not say whether there is an update. */
-export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "error"]);
+export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "unfinished", "error"]);
 export type UpdateBlocked = typeof UpdateBlocked.Type;
 
 /** One click of "Check for updates": fetches from the clone's remote, changes nothing. */

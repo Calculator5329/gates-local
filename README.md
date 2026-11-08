@@ -165,7 +165,8 @@ pnpm run app-update
 It says what is new and installs it: it fetches from the clone's git
 remote, moves to the new version, runs `pnpm install` and builds the app.
 If a step fails, it goes back to the version you had, builds that again
-and tells you where it stopped. Add `--check` to only see what is new.
+and tells you where it stopped. If it is cut off, run it again and it
+finishes the job. Add `--check` to only see what is new.
 
 Once the project has releases (`v1.2.3` tags), it follows releases and
 never goes backwards. Until then, and whenever you pass `--channel main`

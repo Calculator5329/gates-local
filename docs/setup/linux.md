@@ -222,6 +222,11 @@ It refuses, and changes nothing, when:
   then `git stash pop` keeps them. Untracked and ignored files do not count.
 - the clone has commits of its own. It never merges or resets over them.
 - the app is still running.
+- another update of the same clone is running. Only one runs at a time.
+
+It stops before moving anything when the new version would put a file where
+you have an untracked or ignored one, and names the file. Move or rename it
+and run the update again.
 
 If a step fails (no network, `pnpm install` or a build stops), it goes back
 with `git reset --keep` to the commit you had, installs and builds that
@@ -229,6 +234,11 @@ again, and prints `The update to <new> stopped at <step>: <reason>. Gates
 Local is still on <old>.` The full output is in `update-logs/` in the data
 folder. If going back fails too, it prints the exact commands to run in
 the clone.
+
+If an update is cut off (a crash, a power cut, Ctrl+C), run
+`pnpm run app-update` again. It finishes the install and builds, or
+finishes going back, before it looks for anything newer. Until then
+`--check` and "Check for updates" say the last update did not finish.
 
 The manual way still works, and is what to use if the command itself
 cannot run:

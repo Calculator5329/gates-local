@@ -44,6 +44,29 @@
   GPU answer decides it (R-02).
 - Windows: `killNow` reaches a copy of Ollama that is still starting (R-04).
 
+## 2026-11-08: The updater holds up when things go wrong
+
+- It no longer overwrites a file of yours. The merge runs with
+  `--no-overwrite-ignore`, so an ignored file the new version starts
+  tracking stops the update with a sentence naming it, and nothing moves.
+- One update per clone at a time, from the first look to the last rollback
+  step. The lock is a file in the clone's git folder (`update/lock.ts`). A
+  crash leaves it behind, and it is cleared when its process is gone or
+  its heartbeat stopped; a run that lost it stops before its next change.
+- A cut-off update is finished by the next one. What is about to happen is
+  saved before the checkout moves (`update/transaction.ts`), so "already
+  on the newest commit" is not taken as done while that file is there.
+  Going by where HEAD is, the next run finishes the install and builds,
+  finishes going back, or, if the clone was moved by hand, leaves it.
+- A timeout ends the whole process tree: SIGTERM to the process group,
+  SIGKILL after 5 s, `taskkill /T /F` on Windows. Going back waits for
+  that to be confirmed, and does not start if it cannot be.
+- Electron arguments such as `--disable-gpu` reach the relaunch, and a
+  background start now comes back with a window.
+- Two "Update and restart" calls at once start one updater.
+- Windows was checked by reading only: `taskkill` was tested through a
+  stand-in that records its arguments, and has not run for real.
+
 ## 2026-11-08: A new default model takes effect while another is loaded
 
 - The app's model pick now counts a model that happens to be loaded as
