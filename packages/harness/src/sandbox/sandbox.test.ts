@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -90,6 +90,21 @@ describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [
     await reader;
     const check = new DatabaseSync(livePath, { readOnly: true });
     try { expect(check.prepare("SELECT count(*) AS n FROM t").get()?.n).toBe(2); } finally { check.close(); }
+  }, 15000);
+  it("never holds a lease on a Library file: the host opens it for writing while the sandbox tries", async () => {
+    const leased = path.join(folder, "lease.txt"); writeFileSync(leased, "data");
+    // F_SETLEASE is 1024, F_RDLCK 0. SIGIO (the lease-break signal) is ignored so a granted
+    // lease is held for the whole sleep instead of killing the holder.
+    const lease = "import fcntl, os, signal, time\nsignal.signal(signal.SIGIO, signal.SIG_IGN)\nfd = os.open('/library/folder/lease.txt', os.O_RDONLY)\nfcntl.fcntl(fd, 1024, 0)\nprint('leased', flush=True)\ntime.sleep(2)";
+    const holder = runSandbox({ command: `python3 -c "${lease}"; s=$?; sleep 2; exit $s`, sources, timeoutMs: 10000 }).then(() => "ran", (e: Error) => e);
+    await new Promise(r => setTimeout(r, 800));
+    let opened: string;
+    try { closeSync(openSync(leased, constants.O_WRONLY | constants.O_NONBLOCK)); opened = "opened"; }
+    catch (e) { opened = (e as NodeJS.ErrnoException).code ?? String(e); }
+    expect(opened).toBe("opened");
+    const result = await holder;
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).not.toContain("leased");
   }, 15000);
   it("kills commands over the time and output limits, and nothing outlives a timeout", async () => {
     const marker = `98${Date.now() % 100000}.5`;

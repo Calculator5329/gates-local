@@ -1,6 +1,6 @@
 // A classic-BPF seccomp program for bwrap's `--seccomp <fd>`. It stops the
-// sandbox from taking file locks, so a shell reading a live database in a
-// folder source can never block the owner's writer. Everything else is
+// sandbox from taking file locks or leases, so a shell reading a live database
+// or file in a folder source can never block the owner's writer. Everything else is
 // allowed; bwrap's namespaces and read-only mounts do the rest.
 //
 // bwrap reads the raw program: an array of `struct sock_filter`
@@ -29,10 +29,12 @@
 //   .  jeq F_SETLKW, DENY, 0          7
 //   .  jeq F_OFD_SETLK, DENY, 0       37
 //   .  jeq F_OFD_SETLKW, DENY, 0      38
+//   .  jeq F_SETLEASE, DENY, 0        1024: a read lease makes the owner's
+//                                     writable open block (or fail EAGAIN)
 //   ALLOW: ret SECCOMP_RET_ALLOW      every other syscall and fcntl cmd
 //   DENY:  ret SECCOMP_RET_ERRNO|EPERM
 //
-// F_GETLK and F_OFD_GETLK stay allowed: they only ask, they take nothing.
+// F_GETLK, F_OFD_GETLK and F_GETLEASE stay allowed: they only ask, they take nothing.
 
 export type SeccompArch = "x64" | "arm64";
 
@@ -44,7 +46,7 @@ const SECCOMP_RET_ALLOW = 0x7fff0000;
 const SECCOMP_RET_ERRNO = 0x00050000;
 const EPERM = 1;
 const X32_SYSCALL_BIT = 0x40000000;
-export const LOCK_COMMANDS = { F_SETLK: 6, F_SETLKW: 7, F_OFD_SETLK: 37, F_OFD_SETLKW: 38 } as const;
+export const LOCK_COMMANDS = { F_SETLK: 6, F_SETLKW: 7, F_OFD_SETLK: 37, F_OFD_SETLKW: 38, F_SETLEASE: 1024 } as const;
 
 export const ARCHES: Record<SeccompArch, { audit: number; flock: number; fcntl: number; x32: boolean }> = {
   x64: { audit: 0xc000003e, flock: 73, fcntl: 72, x32: true }, // AUDIT_ARCH_X86_64, asm/unistd_64.h
