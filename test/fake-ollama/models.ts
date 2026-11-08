@@ -109,6 +109,9 @@ export const DEFAULT_INSTALLED = ["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterat
 /** The embed-smallest scenario: the defaults plus an embedding model smaller than any of them. */
 export const EMBED_SMALLEST_INSTALLED = [...DEFAULT_INSTALLED, "nomic-embed-text:latest"] as const;
 
+/** The embed-only scenario: an embedding model and nothing that can chat (MP-04). */
+export const EMBED_ONLY_INSTALLED = ["nomic-embed-text:latest"] as const;
+
 export function findFakeModel(name: string): FakeModel | undefined {
   const full = name.includes(":") ? name : `${name}:latest`;
   return FAKE_MODELS.find((m) => m.name === full || m.name === name);

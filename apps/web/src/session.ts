@@ -17,7 +17,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
-import { modelChoice as pickChoice } from "./pick.ts";
+import { type ModelDecision, firstChatPull, modelChoice as pickChoice, newChatChoice, sendableModel } from "./pick.ts";
 import { NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -182,8 +182,7 @@ async function hydrate(c: Client): Promise<void> {
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const next: State = { ...s, runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
-    const model = modelChoice(next);
-    return { ...next, ...(model === undefined ? {} : { model }) };
+    return { ...next, ...decided(modelChoice(next)) };
   });
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
 
@@ -245,14 +244,15 @@ function applyTheme(theme: Settings["theme"]): void {
 
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */
 function chooseModel(): void {
-  const model = modelChoice(getState());
-  if (model !== undefined) setState({ model });
+  setState(decided(modelChoice(getState())));
 }
 
-/** The model chooseModel would switch to: the server's pick (pick.ts), or undefined when the current one stays. */
-function modelChoice(s: State): string | undefined {
+/** Keep, switch to the server's pick (pick.ts), or clear when no model can chat. */
+function modelChoice(s: State): ModelDecision {
   return pickChoice(s.models, s.model);
 }
+
+const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
 // ---------------------------------------------------------------- fit checks
 
@@ -306,7 +306,7 @@ export function openThread(threadId: string): void {
 }
 
 export function newThread(): void {
-  setState({ view: "new", threadId: null, notice: null });
+  setState((s) => ({ view: "new", threadId: null, notice: null, ...decided(newChatChoice(s.models, s.model)) }));
   setHash(null);
 }
 
@@ -358,10 +358,9 @@ export function queueReason(s: State): Queued["waitFor"] | null {
   return null;
 }
 
-/** The download that will become the first model, while none is installed. */
+/** The download that will become the first chat model, while none is installed (an embedding model does not count). */
 export function firstPull(s: State): string | undefined {
-  if ((s.models?.length ?? 0) > 0) return undefined;
-  return Object.values(s.pulls).find((p) => p.state === "downloading" || p.state === "queued" || p.state === "verifying")?.name;
+  return firstChatPull(s.models, s.pulls);
 }
 
 let stopWanted = false;
@@ -372,7 +371,7 @@ export async function send(text: string, opts: { reuseThread?: boolean } = {}): 
   if (content === "" || streaming(s)) return;
   const wait = queueReason(s);
   if (!chatReady(s) && wait === null) return;
-  const model = s.model;
+  const model = sendableModel(s.models, s.model);
   if (model === undefined && wait === null) return;
 
   let threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;

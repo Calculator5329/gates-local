@@ -10,7 +10,7 @@ import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
-import { canChat } from "./pick.ts";
+import { canChat, notForChat } from "./pick.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
 const NOT_HERE = "Not available in this build.";
@@ -215,15 +215,16 @@ function EmbedRow({ tag }: { tag: string }) {
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
   const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
   const d = describeModel(tag, catalog);
+  const why = notForChat(info);
   return (
     <div
       className="mrow dis emb"
       data-em={tag}
-      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>Turns text into vectors for search; it cannot answer a chat.${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
+      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>${why.tip}${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
     >
       <span className="rd" />
       <span className="mn">{d.name}</span>
-      <span className="mv na">Embedding model, not for chat</span>
+      <span className="mv na">{why.label}</span>
       {canRemove ? (
         <button type="button" className="qa" aria-label={`Remove ${d.name}`} onClick={() => void removeModel(tag)}>
           Remove

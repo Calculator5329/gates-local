@@ -10,14 +10,16 @@
 //   mid-stream-error  the stream breaks with an error after a few tokens
 //   wrong-service     the port answers, but not as Ollama
 //   embed-smallest    the three models plus nomic-embed-text, the smallest
+//   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-const installedFor = (s: string): readonly string[] => (s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : DEFAULT_INSTALLED);
+const installedFor = (s: string): readonly string[] =>
+  s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : s === "embed-only" ? EMBED_ONLY_INSTALLED : DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {

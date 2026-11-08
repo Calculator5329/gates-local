@@ -137,6 +137,44 @@ test.describe("first download", () => {
   });
 });
 
+test.describe("first download with only an embedding model installed (MP-04)", () => {
+  test.use({ scenario: "embed-only", skipFirstRun: false });
+
+  test("shows the download's progress and Start chatting, and a typed message waits for it", async ({ page, open }) => {
+    await open();
+    await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
+    await expect(page.locator(".fr-st")).toContainText("no chat models yet");
+    await page.getByRole("button", { name: "Download and start" }).click();
+    await expect(page.getByRole("heading", { name: "Downloading your first model" })).toBeVisible();
+    await expect(page.getByRole("progressbar")).toBeVisible();
+    await page.getByRole("button", { name: "Start chatting" }).click();
+    await sendMessage(page, "Hello there");
+    await expect(page.getByText("Sends when the download finishes")).toBeVisible();
+    await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
+    await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
+  });
+});
+
+// The open chat keeping its model when the pick changes is the unit test's (apps/web/src/pick.test.ts):
+// a sent turn would load Qwen and leave no room for Gemma's row to be chosen here.
+test("a new chat starts on the new default model, and the composer keeps its model until then (MP-05)", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const modelBtn = page.locator("#modelBtn");
+  await expect(modelBtn).toContainText("Qwen 3.5 9B");
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await page.locator(`.mrow[data-dm="gemma4:12b"]`).click();
+  await expect(page.locator(`.mrow[data-dm="gemma4:12b"]`)).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(modelBtn).toContainText("Qwen 3.5 9B");
+  // The new pick rides on models.changed a moment after the setting; a new chat made once it lands starts on it.
+  await expect(async () => {
+    await page.keyboard.press("Control+n");
+    await expect(modelBtn).toContainText("Gemma 4 12B", { timeout: 500 });
+  }).toPass({ timeout: 10_000 });
+});
+
 test("Settings lists the embedding model as not for chat, with Remove and no default choice", async ({ page, open }) => {
   await open();
   await waitReady(page);
