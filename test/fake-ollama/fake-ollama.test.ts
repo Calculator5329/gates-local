@@ -79,20 +79,21 @@ describe("fake ollama", () => {
 
   it("reads one end time, so total_duration splits exactly even when the clock ticks between reads (MP3-03)", async () => {
     fake.setScenario("models", { tokenDelayMs: 0, firstTokenDelayMs: 0 });
-    // The fake's own clock: start 1000, first token 1040, then a millisecond boundary between any two end reads.
-    const clock = [1000, 1040, 1200, 1201];
+    // The fake's own clock ticks 40 ms on every read, so any two reads differ, however many the fake makes (MP4-06).
     let reads = 0;
     const realNow = Date.now.bind(Date);
-    const spy = vi.spyOn(Date, "now").mockImplementation(() => ((new Error().stack ?? "").includes("fake-ollama.ts") ? (clock[reads++] ?? 1201) : realNow()));
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ((new Error().stack ?? "").includes("fake-ollama.ts") ? 1000 + 40 * reads++ : realNow()));
     let last: Record<string, unknown>;
     try {
       last = (await hello()).at(-1) ?? {};
     } finally {
       spy.mockRestore();
     }
-    expect(Number(last["prompt_eval_duration"])).toBe(40e6);
-    expect(Number(last["eval_duration"])).toBe(160e6);
-    expect(Number(last["total_duration"])).toBe(200e6);
+    const promptNs = Number(last["prompt_eval_duration"]);
+    const evalNs = Number(last["eval_duration"]);
+    expect(promptNs).toBeGreaterThan(0);
+    expect(evalNs).toBeGreaterThan(0);
+    expect(Number(last["total_duration"])).toBe(promptNs + evalNs);
   });
 
   it("embed-smallest: an embedding model is installed and smallest, lists embedding only, and refuses chat", async () => {
