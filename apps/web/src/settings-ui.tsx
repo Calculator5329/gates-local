@@ -1,23 +1,30 @@
 // The building blocks every Settings section uses: the section head, a
-// group, a row with its failure line, and the not-available note.
-import { type ReactNode, useCallback, useState } from "react";
+// group, a row with its failure line, and the keyboard rules of a popover.
+import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
 import type { ActionResult } from "./session.ts";
 
-export const NOT_HERE = "Not available in this build.";
-
-export function Head({ title, children }: { title: string; children: ReactNode }) {
+export function Head({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="set-h">
       <h1>{title}</h1>
-      <p>{children}</p>
+      {children === undefined ? null : <p>{children}</p>}
     </div>
   );
 }
 
-export function Grp({ title, children }: { title?: string; children: ReactNode }) {
+/** A group: its label above its helper line, any Add buttons on the right. */
+export function Grp({ title, desc, action, children }: { title?: string; desc?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <div className="grp">
-      {title ? <div className="grp-t">{title}</div> : null}
+      {title ? (
+        <div className="grp-h">
+          <div className="grp-l">
+            <div className="grp-t">{title}</div>
+            {desc === undefined ? null : <div className="grp-d">{desc}</div>}
+          </div>
+          {action === undefined ? null : <div className="grp-a">{action}</div>}
+        </div>
+      ) : null}
       <div className="box">{children}</div>
     </div>
   );
@@ -59,4 +66,34 @@ export function Row({ label, desc, err = null, children }: { label: ReactNode; d
   );
 }
 
-export const Na = ({ children = NOT_HERE }: { children?: ReactNode }) => <span className="na">{children}</span>;
+export const Na = ({ children }: { children: ReactNode }) => <span className="na">{children}</span>;
+
+/** Close a popover on a press outside it. */
+export function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void): void {
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener("pointerdown", down);
+    return () => document.removeEventListener("pointerdown", down);
+  }, [ref, open, close]);
+}
+
+/** Arrow keys walk the items of a menu or list, skipping disabled ones; Escape closes it. */
+export function walk(e: KeyboardEvent<HTMLElement>, box: HTMLElement | null, selector: string, close: () => void): void {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    return;
+  }
+  if (e.key === "Tab") return close();
+  const items = [...(box?.querySelectorAll<HTMLElement>(selector) ?? [])].filter((el) => el.getAttribute("aria-disabled") !== "true");
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+  if (step === 0 && e.key !== "Home" && e.key !== "End") return;
+  e.preventDefault();
+  const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + step + items.length) % items.length;
+  items[next]?.focus();
+}

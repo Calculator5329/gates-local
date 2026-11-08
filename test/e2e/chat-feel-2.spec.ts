@@ -188,16 +188,19 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
   expect(state.requests.findLast((r) => r.path === "/api/chat")?.body.options?.num_ctx).toBe(8192);
 });
 
-test("Settings > Advanced offers 8k as the default context, and Settings > Models has no context control", async ({ page, open }) => {
+test("Settings > Advanced has one default-context control with 8k on it, and Settings > Models has none", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
   await expect(page.locator(".mp-row").first()).toBeVisible();
-  await expect(page.locator(".set").getByRole("group", { name: "Context window" })).toHaveCount(0);
+  await expect(page.locator(".set [data-ctx]")).toHaveCount(0);
+  await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(0);
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
-  const seg = page.locator(".set").getByRole("group", { name: "Context window" });
+  // one control: the row inside GPU memory, nothing else on the page sets the default
+  const seg = page.locator("#gpuMemory").getByRole("group", { name: "Default context" });
   await expect(seg.getByRole("button")).toHaveText(["8k", "16k", "32k", "64k"]);
+  await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(1);
   await seg.getByRole("button", { name: "8k" }).click();
   await expect(seg.getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
   // the saved default survives a reload
@@ -205,7 +208,7 @@ test("Settings > Advanced offers 8k as the default context, and Settings > Model
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
-  await expect(page.locator(".set").getByRole("group", { name: "Context window" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#gpuMemory").getByRole("group", { name: "Default context" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
 });
 
 const row = (page: Page, title: string) => page.locator(".sb-row", { hasText: title });

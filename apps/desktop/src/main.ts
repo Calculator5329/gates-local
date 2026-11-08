@@ -156,6 +156,16 @@ function run(): void {
     if (!fromOurWindow(event)) throw new Error("refused");
     if (supervisor.state.status === "ready") showClient();
   });
+  ipcMain.handle(IPC.dataFolder, (event) => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    return dataDir;
+  });
+  ipcMain.handle(IPC.openDataFolder, async (event): Promise<string | null> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    // shell.openPath resolves to an error message, "" when it worked
+    const failed = await shell.openPath(dataDir);
+    return failed === "" ? null : `Couldn't open the data folder: ${failed}`;
+  });
   const startUpdate = onceUntilFailed(async (): Promise<UpdateAndRestartResult> => {
     const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });
     if (refused !== null) return { ok: false, message: refused };

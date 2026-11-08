@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-08: Settings, rebuilt page by page
+
+- A plain nav: General, Models, Library, Tools, Image generation, Runtime,
+  Advanced, Shortcuts. Memory is gone; it held nothing that worked.
+- New: Tools, with a switch that really stops the model using them, and a
+  row for each tool the app has. Shortcuts, listing only keys that work.
+  Text size for messages and the message box. Reset settings, and on the
+  desktop the data folder.
+- Advanced has one Default context control. Each size says in its tooltip
+  how it fits, and the GB numbers sit under Details.
+- Image generation shows only its switch until it is on, then the address,
+  a Test button and what ComfyUI is doing.
+- Library splits files and folders from SQLite databases, says which are
+  read live and which from a copy, and moves Refresh and Remove into a ⋯ menu.
+- Runtime says who started Ollama and what quitting does, with one button
+  to change it and a confirm that states the consequence.
+- Calmer look: 6 px groups, 4 px controls, green only on small marks.
+  A control that cannot work is left out instead of saying so.
+
 ## 2026-11-08: Messages that wait
 
 - A message you typed is never lost and never sent after you removed it. A

@@ -18,13 +18,14 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[]): Promise<string | null> {
+  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string): Promise<string | null> {
     const r = await control("/reset", {
       scenario,
       seed,
       ...(seedAt === undefined ? {} : { seedAt }),
       ...(runtimeMode === undefined ? {} : { runtimeMode }),
       ...(installed === undefined ? {} : { installed }),
+      ...(comfyUrl === undefined ? {} : { comfyUrl }),
     });
     const id = typeof r === "object" && r !== null ? (r as { threadId?: unknown }).threadId : undefined;
     return typeof id === "string" ? id : null;
@@ -46,6 +47,8 @@ interface Fixtures {
   seedAt: number | undefined;
   /** Saved settings in this runtime mode before the server starts; undefined is a first launch (the server picks). */
   runtimeMode: RuntimeMode | undefined;
+  /** Saved ComfyUI address, so a test never reaches the default port; undefined leaves it unset. */
+  comfyUrl: string | undefined;
   /** Console errors this test expects, as patterns; anything else fails it. */
   allowedErrors: RegExp[];
   /** Mark first run done before load, so the app opens on a new thread. */
@@ -61,11 +64,12 @@ export const test = base.extend<Fixtures>({
   seed: [0, { option: true }],
   seedAt: [undefined, { option: true }],
   runtimeMode: [undefined, { option: true }],
+  comfyUrl: [undefined, { option: true }],
   installed: [undefined, { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
-  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed }, use) => {
-    await use(await stack.reset(scenario, seed, seedAt, runtimeMode, installed));
+  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl }, use) => {
+    await use(await stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl));
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens

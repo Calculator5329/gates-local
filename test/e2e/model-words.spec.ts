@@ -54,14 +54,11 @@ test("the fit panel names what this model can use apart from what is free, on se
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 
-  // F76: the definition once, the other size's result on its own line under it
+  // F76: the definition once; the other size's result is apart from it, in that size's tooltip (S1)
   const def = panel.locator(".ctx-line .ctx-def");
-  const alt = panel.locator(".ctx-line .ctx-alt");
   await expect(def).toHaveText("How much conversation the model can keep in view.");
-  await expect(alt).toHaveText(/^At 32k: /);
+  await expect(panel.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /at 32k/);
   await expect(panel.getByText("keep in view")).toHaveCount(1);
-  const [d, a] = [await def.boundingBox(), await alt.boundingBox()];
-  expect(a?.y ?? 0).toBeGreaterThanOrEqual((d?.y ?? 0) + (d?.height ?? 0) - 0.5);
   await page.keyboard.press("Escape");
 
   // once a reply has loaded the model, the leftover segment is what is free right now

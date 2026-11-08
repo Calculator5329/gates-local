@@ -1,0 +1,223 @@
+/// <reference lib="dom" />
+// Journeys: the Settings sections the S1 council asked for. The Tools switch
+// really changes what a chat is offered, the Shortcuts page lists bindings
+// that work, Text size and Theme apply at once and persist, Reset puts the
+// settings back, and no section scrolls sideways at 1280 or 360 px.
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+import type { Page } from "@playwright/test";
+import { CHECKOUT_CACHE, FAKE_URL } from "./env.ts";
+import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+
+const section = async (page: Page, label: string) => {
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+};
+
+const replied = async (page: Page, count: number) => {
+  await expect(page.locator(".turn.a.done")).toHaveCount(count, { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+};
+
+interface ChatRequest {
+  path: string;
+  body: { tools?: unknown[]; messages?: { content?: string }[] };
+}
+
+/** Whether any chat request carrying this text offered the model tools. */
+async function toolsOffered(text: string): Promise<boolean> {
+  const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: ChatRequest[] };
+  const asked = state.requests.filter((r) => r.path === "/api/chat" && r.body.messages?.some((m) => m.content?.includes(text)));
+  expect(asked.length).toBeGreaterThan(0);
+  return asked.some((r) => (r.body.tools?.length ?? 0) > 0);
+}
+
+test("the Tools switch decides whether a chat is offered tools", async ({ page, open }) => {
+  const folder = path.join(CHECKOUT_CACHE, "e2e-library", "tools-notes");
+  mkdirSync(folder, { recursive: true });
+  await open();
+  await waitReady(page);
+  await section(page, "Library");
+  await page.getByRole("button", { name: "Add folder…" }).click();
+  await page.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator(".srow .sl b", { hasText: "tools-notes" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await waitReady(page);
+
+  await sendMessage(page, "first question with tools on");
+  await replied(page, 1);
+  expect(await toolsOffered("first question with tools on")).toBe(true);
+
+  await section(page, "Tools");
+  const master = page.getByRole("switch", { name: "Let the model use tools" });
+  await expect(master).toHaveAttribute("aria-checked", "true");
+  await master.click();
+  await expect(master).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  await waitReady(page);
+
+  await sendMessage(page, "second question with tools off");
+  await replied(page, 2);
+  expect(await toolsOffered("second question with tools off")).toBe(false);
+});
+
+test("Tools names only the tools the app has", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await section(page, "Tools");
+  const set = page.locator(".set");
+  await expect(set.getByRole("heading", { name: "Tools" })).toBeVisible();
+  await expect(set.locator(".srow .sl b")).toHaveText(["Let the model use tools", "Read files", "Run commands", "Make images"]);
+  await expect(set).not.toContainText(/\bnotes?\b/i);
+  // where each permission lives is one click away
+  await set.locator(".srow", { hasText: "Read files" }).getByRole("button", { name: "Library" }).click();
+  await expect(set.getByRole("heading", { name: "Library" })).toBeVisible();
+});
+
+test("the Shortcuts page lists the bindings that work, and nothing else", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await section(page, "Shortcuts");
+  const set = page.locator(".set");
+  const names = (group: string) => set.locator(".grp", { hasText: group }).locator("td:first-child");
+  const keys = (what: string) => set.locator("tr", { hasText: what }).locator("kbd");
+  await expect(names("Navigation")).toHaveText(["New thread", "Search threads", "Choose a model", "Settings", "Close a menu or Settings", "Open a thread's menu"]);
+  await expect(names("Chat")).toHaveText(["Send", "New line"]);
+  await expect(keys("New thread")).toHaveText(["Ctrl", "N"]);
+  await expect(keys("Choose a model")).toHaveText(["Ctrl", "M"]);
+  await expect(set).not.toContainText("Approve a pending note");
+  await expect(page.locator(".snav").getByRole("button").last()).toHaveText("Shortcuts");
+
+  // each listed binding does what its row says
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".set")).toHaveCount(0);
+  await page.keyboard.press("Control+m");
+  await expect(page.locator("#picker")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#picker")).toBeHidden();
+  await page.keyboard.press("Control+k");
+  await expect(page.locator("#searchIn")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Comma");
+  await expect(page.locator(".set")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await waitReady(page);
+
+  const ta = page.locator("#ta");
+  await ta.fill("one");
+  await ta.press("Shift+Enter");
+  await ta.pressSequentially("two");
+  await expect(ta).toHaveValue("one\ntwo");
+  await ta.press("Enter");
+  await replied(page, 1);
+  await expect(ta).toHaveValue("");
+
+  await page.keyboard.press("Control+n");
+  await expect(page.locator(".turn.a")).toHaveCount(0);
+  const row = page.locator(".sb-row").first();
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(page.locator("#moreMenu")).toBeVisible();
+});
+
+test("Text size changes messages and the message box at once, and survives a reload", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await sendMessage(page, "How big is this text?");
+  await replied(page, 1);
+  const fontSize = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontSize);
+  expect(await fontSize(".md")).toBe("15px");
+  expect(await fontSize("#ta")).toBe("15px");
+  expect(await fontSize(".bubble")).toBe("15px");
+
+  await section(page, "General");
+  const size = page.getByRole("group", { name: "Text size" });
+  await expect(size.getByRole("button")).toHaveText(["Small", "Default", "Large"]);
+  await expect(size.getByRole("button", { name: "Default" })).toHaveAttribute("aria-pressed", "true");
+  await size.getByRole("button", { name: "Large" }).click();
+  await expect(size.getByRole("button", { name: "Large" })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await waitReady(page);
+  expect(await fontSize(".md")).toBe("17px");
+  expect(await fontSize("#ta")).toBe("17px");
+  expect(await fontSize(".bubble")).toBe("17px");
+
+  await page.reload();
+  await waitReady(page);
+  expect(await fontSize("#ta")).toBe("17px");
+  await section(page, "General");
+  await expect(page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Large" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Small" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-text", "small");
+  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Default" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-text", /./);
+});
+
+test("Theme applies the moment it is picked, and says only what the choice does", async ({ page, open }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await open();
+  await waitReady(page);
+  await section(page, "General");
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const dark = await bg();
+  const theme = page.getByRole("group", { name: "Theme" });
+  const row = page.locator(".srow", { has: theme });
+  await expect(theme.getByRole("button")).toHaveText(["Dark", "Light", "System"]);
+  await expect(row).toContainText("Always dark.");
+
+  await theme.getByRole("button", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await bg()).not.toBe(dark);
+  await expect(row).toContainText("Always light.");
+
+  await theme.getByRole("button", { name: "System" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
+  expect(await bg()).toBe(dark);
+  await expect(row).toContainText("System matches your desktop's light or dark setting.");
+});
+
+test("Reset settings asks first, then puts the settings back and leaves who runs Ollama alone", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await section(page, "General");
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Large" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-text", "large");
+
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByRole("button", { name: "Reset…" }).click();
+  const confirm = page.getByRole("group", { name: "Confirm reset" });
+  await expect(confirm).toContainText("Your chats, Library and downloaded models stay.");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.getByRole("button", { name: "Reset…" }).click();
+  await page.getByRole("group", { name: "Confirm reset" }).getByRole("button", { name: "Reset", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).not.toHaveAttribute("data-text", /./);
+  await expect(page.getByRole("group", { name: "Confirm reset" })).toHaveCount(0);
+});
+
+const SECTIONS = ["General", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts", "Models"] as const;
+
+for (const width of [1280, 360] as const) {
+  test.describe(`at ${width} px`, () => {
+    test.use({ viewport: { width, height: 800 } });
+    test("no Settings section scrolls sideways", async ({ page, open }) => {
+      await open();
+      await waitReady(page);
+      await page.keyboard.press("Control+Comma");
+      for (const label of SECTIONS) {
+        await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+        await expect(page.locator(".set h1").first()).toHaveText(label);
+        const over = await page.evaluate(() => {
+          const set = document.querySelector(".set");
+          const root = document.documentElement;
+          return { page: root.scrollWidth - root.clientWidth, set: set === null ? -1 : set.scrollWidth - set.clientWidth };
+        });
+        expect(over, label).toEqual({ page: 0, set: 0 });
+      }
+    });
+  });
+}

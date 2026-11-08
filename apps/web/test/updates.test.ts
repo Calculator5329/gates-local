@@ -77,7 +77,7 @@ describe("the Updates group", () => {
     expect(plain).toContain("Not a git clone");
     expect(plain).not.toContain("Check for updates");
     const na = text(view({ status: "na" }));
-    expect(na).toContain("Not available in this build.");
+    expect(na).toContain("To update, run pnpm run app-update in the Gates Local folder.");
     expect(na).not.toContain("Check for updates");
     expect(text(view({ status: undefined }))).toContain("Reading the version.");
   });

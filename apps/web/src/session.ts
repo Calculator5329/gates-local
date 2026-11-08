@@ -34,6 +34,10 @@ interface DesktopBridge {
   onState(listener: (state: BridgeState) => void): () => void;
   /** Starts `pnpm run app-update` and quits; missing on desktop builds from before it existed. */
   updateAndRestart?(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+  /** The folder the app keeps its data in; missing on desktop builds from before it existed. */
+  dataFolder?(): Promise<string>;
+  /** Opens that folder in the file manager; a sentence if it could not. */
+  openDataFolder?(): Promise<string | null>;
 }
 
 declare global {
@@ -296,6 +300,7 @@ async function hydrateWith(
   });
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
+  applyTextSize(settings === NA || settings === undefined ? undefined : settings.textSize);
   // the pushes that came during the first batch, in order, in this same task
   release(SECOND_BATCH);
 
@@ -383,6 +388,14 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
 function applySettings(settings: Settings, first = false): void {
   setState((s) => settingsPatch(s, settings, first));
   applyTheme(settings.theme);
+  applyTextSize(settings.textSize);
+}
+
+/** "small" or "large" on the root; the default has no attribute (styles.css --chat-fs). */
+function applyTextSize(size: Settings["textSize"]): void {
+  const root = document.documentElement;
+  if (size === undefined || size === "default") root.removeAttribute("data-text");
+  else root.setAttribute("data-text", size);
 }
 
 /** Dark or light on the root; "system" removes the attribute so the OS decides (styles.css). */
@@ -1387,6 +1400,7 @@ const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
   imageGen: "save image generation",
   comfyUrl: "save the ComfyUI address",
   updateEveryChange: "save the update setting",
+  textSize: "save the text size",
 };
 
 /** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
@@ -1403,6 +1417,44 @@ export async function updateSettings(patch: SettingsPatch): Promise<ActionResult
     });
   }
   return null;
+}
+
+/** What a new install starts with. Who runs Ollama stays as it is: switching it stops models and can download. */
+const RESET_SETTINGS = {
+  defaultModel: null,
+  defaultNumCtx: 16384,
+  thinking: true,
+  theme: "dark",
+  tools: true,
+  imageGen: false,
+  comfyUrl: null,
+  updateEveryChange: false,
+  textSize: "default",
+} as const satisfies SettingsPatch;
+
+export async function resetSettings(): Promise<ActionResult> {
+  const failed = await updateSettings(RESET_SETTINGS);
+  if (failed !== null) return failed;
+  setContext(RESET_SETTINGS.defaultNumCtx);
+  setState({ think: RESET_SETTINGS.thinking });
+  return null;
+}
+
+/** Ask ComfyUI again, so Settings says what it finds now. */
+export async function checkImageStatus(): Promise<ActionResult> {
+  const r = await act("image.status", {}, "check ComfyUI");
+  if (!r.ok) return r.message;
+  setState({ imageStatus: r.value });
+  return null;
+}
+
+/** The app's data folder, or null outside the desktop window. */
+export async function dataFolder(): Promise<string | null> {
+  return (await window.gatesLocal?.dataFolder?.()) ?? null;
+}
+
+export async function openDataFolder(): Promise<ActionResult> {
+  return (await window.gatesLocal?.openDataFolder?.()) ?? null;
 }
 
 export async function pull(name: string): Promise<ActionResult> {
