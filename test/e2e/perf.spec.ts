@@ -106,19 +106,29 @@ interface Probe {
 }
 
 const readLong = () => (window as unknown as { glLong: number[] }).glLong;
-/** Key events and the longest task since the last clearEvents, read once the observers have delivered the last of them. */
+/**
+ * Key events and the longest task that overlaps the typing (clearEvents to
+ * endKeys), read once the observers have delivered the last of them. A task
+ * after the last key, such as one during the wait below, does not count.
+ */
 const readKeys = async () => {
   // entries arrive after the paint that ends them, in an observer task
   await new Promise((r) => setTimeout(r, 250));
-  const w = window as unknown as { glEvents: SlowEvent[]; glLongAt: [number, number][]; glKeys: number; glSince: number };
-  const longest = Math.max(0, ...w.glLongAt.filter(([s, d]) => s + d >= w.glSince).map(([, d]) => d));
-  return { events: w.glEvents.filter((e) => e.start >= w.glSince), dispatched: w.glKeys, longest };
+  const w = window as unknown as { glEvents: SlowEvent[]; glLongAt: [number, number][]; glKeys: number; glSince: number; glUntil: number };
+  const longest = Math.max(0, ...w.glLongAt.filter(([s, d]) => s <= w.glUntil && s + d >= w.glSince).map(([, d]) => d));
+  return { events: w.glEvents.filter((e) => e.start >= w.glSince && e.start <= w.glUntil), dispatched: w.glKeys, longest };
 };
+/** Start a typing window. */
 const clearEvents = () => {
-  const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number };
+  const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number; glUntil: number };
   w.glEvents = [];
   w.glKeys = 0;
   w.glSince = performance.now();
+  w.glUntil = Number.POSITIVE_INFINITY;
+};
+/** End the typing window: call it as soon as the last key has gone in, before any other wait. */
+const endKeys = () => {
+  (window as unknown as { glUntil: number }).glUntil = performance.now();
 };
 /** Block the main thread for ms in its own task: proves the long-task observer is live before a zero counts. */
 const busy = (ms: number) =>
@@ -191,6 +201,34 @@ async function typeFreely(page: Page, text: string): Promise<void> {
  */
 const keysWithinBudget = (k: ReturnType<typeof keyStats>) =>
   k.dispatched >= 20 && k.p95 <= BUDGET.keyP95Ms && k.longestTask <= BUDGET.longTaskMs;
+
+// The stream test's control fails both legs at once, so it cannot show that
+// each leg works alone; this does.
+test("the key gate fails on slow keys alone, on a long task alone, and on too few keys", () => {
+  const fast = { dispatched: 33, slow: 0, p95: 16, p95Delay: 1, p95Processing: 1, maxDuration: 16, longestTask: 0 };
+  expect(keysWithinBudget(fast)).toBe(true);
+  expect(keysWithinBudget({ ...fast, p95: 80 })).toBe(false);
+  expect(keysWithinBudget({ ...fast, longestTask: 100 })).toBe(false);
+  expect(keysWithinBudget({ ...fast, dispatched: 19 })).toBe(false);
+});
+
+test("the typing window: a long task after the last key does not count, one across the first key does", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await page.evaluate(clearEvents);
+  await page.evaluate(endKeys);
+  // made-up entries through the real readKeys filter; nothing real is that long here
+  await page.evaluate(() => {
+    const w = window as unknown as { glLongAt: [number, number][]; glUntil: number };
+    w.glLongAt.push([w.glUntil + 50, 400]);
+  });
+  expect((await page.evaluate(readKeys)).longest).toBeLessThan(400);
+  await page.evaluate(() => {
+    const w = window as unknown as { glLongAt: [number, number][]; glSince: number };
+    w.glLongAt.push([w.glSince - 10, 400]);
+  });
+  expect((await page.evaluate(readKeys)).longest).toBe(400);
+});
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(observe);
@@ -411,6 +449,7 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   await ta.focus();
   await page.evaluate(clearEvents);
   await typeFreely(page, TYPED);
+  await page.evaluate(endKeys);
   await expect(ta).toHaveValue(TYPED);
   const idle = keyStats(await page.evaluate(readKeys));
   reportKeys("idle", idle);
@@ -433,6 +472,7 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
     await ta.focus();
     await page.evaluate(clearEvents);
     await typeFreely(page, TYPED);
+    await page.evaluate(endKeys);
     await expect(ta).toHaveValue(TYPED);
     const live = await caret.isVisible();
     return { ...keyStats(await page.evaluate(readKeys)), live };
@@ -476,28 +516,34 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
     ch.port1.start();
     ch.port2.postMessage(null);
   });
-  await typeFreely(page, "a shorter burst");
+  const BURST = "a shorter burst";
+  await typeFreely(page, BURST);
   const stamps = await page.evaluate(() => {
-    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][] };
+    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][]; glUntil: number };
+    w.glUntil = performance.now();
     w.glBusy = false;
     return w.glStamps;
   });
-  await expect(ta).toHaveValue("a shorter burst");
+  await expect(ta).toHaveValue(BURST);
   await expect(page.locator(".caret")).toBeVisible();
   const raw = await page.evaluate(readKeys);
   const delayed = keyStats(raw);
   reportKeys("stream + 100 ms delay control", delayed);
   expect(keysWithinBudget(delayed), JSON.stringify(delayed)).toBe(false);
   expect(delayed.longestTask).toBeGreaterThanOrEqual(90);
-  // A key stamped while a slice ran waited behind it, and Event Timing must
-  // count that wait in its duration (8 ms rounding allowed). In the runs
-  // where every key is stamped after its slice there is no such key; the
-  // long-task leg above fails the gate in those.
-  const waited = stamps.filter(([at, ran]) => ran - at >= 50);
-  report("stream + 100 ms delay control keys stamped during a slice", waited.length, "keys");
-  for (const [at, ran] of waited) {
+  // Every key's wait behind a slice must show in its Event Timing duration
+  // (8 ms rounding allowed). Event Timing leaves out events under 16 ms, so a
+  // key may have no entry only if it waited 24 ms or less. In the runs where
+  // every key is stamped after its slice, every wait is that short and the
+  // long-task leg above fails the gate.
+  expect(stamps, "one stamp per key").toHaveLength(BURST.length);
+  report("stream + 100 ms delay control keys that waited over 24 ms", stamps.filter(([at, ran]) => ran - at > 24).length, "keys");
+  for (const [at, ran] of stamps) {
+    const wait = ran - at;
     const ev = raw.events.find((e) => e.name === "keydown" && Math.abs(e.start - at) < 1);
-    expect(ev?.duration ?? 0, `keydown stamped at ${at.toFixed(1)}, handled ${(ran - at).toFixed(1)} ms later`).toBeGreaterThanOrEqual(ran - at - 8);
+    const what = `keydown stamped at ${at.toFixed(1)}, handled ${wait.toFixed(1)} ms later`;
+    if (ev === undefined) expect(wait, `${what}, no Event Timing entry`).toBeLessThanOrEqual(24);
+    else expect(ev.duration, what).toBeGreaterThanOrEqual(wait - 8);
   }
 });
 
