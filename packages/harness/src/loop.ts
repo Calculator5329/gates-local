@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { parseTextCalls, repairCall } from "./parser.ts";
+import { parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";
 
 export function trimOutput(output: string): string {
@@ -117,9 +117,28 @@ export async function* runLoop(input: LoopInput): AsyncGenerator<LoopEvent> {
 async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopEvent> {
   const messages = [...input.messages];
   const tools: ToolStep[] = [];
-  // Every step's visible text, in order: the saved message is what the user saw.
-  const visible: string[] = [];
-  const answer = (fallback = "") => visible.join("\n\n") || fallback;
+  /**
+   * The saved message is exactly what the user saw: every delta the loop yields goes through
+   * `show`, and `shown` is their concatenation. A reply part's leading whitespace is held
+   * until text arrives, so a whitespace-only part is never shown; parts are joined by a
+   * "\n\n" delta of their own (a client concatenates deltas, tool events add nothing).
+   */
+  let shown = "";
+  let held = "";
+  let partOpen = false;
+  function* show(text: string): Generator<LoopEvent> {
+    if (!partOpen) {
+      held += text;
+      if (!held.trim()) return;
+      text = held; held = ""; partOpen = true;
+      if (shown) { shown += "\n\n"; yield { type: "delta", text: "\n\n" }; }
+    }
+    shown += text;
+    yield { type: "delta", text };
+  }
+  const endPart = () => { partOpen = false; held = ""; };
+  /** A whole part at once: a text-mode answer, a reply that streamed no deltas, the loop's own notices. */
+  function* say(text: string): Generator<LoopEvent> { endPart(); yield* show(text); endPart(); }
   const stallMs = input.stallMs ?? STREAM_STALL_MS;
   const finalMs = input.finalAnswerMs ?? FINAL_ANSWER_MS;
   const outputBudget = toolOutputBudget(input.numCtx ?? 16384);
@@ -128,8 +147,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
   let final = false;
   let badCalls = 0;
   let thinking = "";
-  const finish = (content: string, stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content, stopReason, tools, ...(thinking ? { thinking } : {}) });
-  const say = (text: string): LoopEvent => { visible.push(text); return { type: "delta", text }; };
+  const finish = (stopReason = "stop"): Extract<LoopEvent, { type: "complete" }> => ({ type: "complete", content: shown, stopReason, tools, ...(thinking ? { thinking } : {}) });
   /**
    * The one path every observation takes (results, errors, invalid calls, "not run"):
    * counted against the output budget and cut to what is left of it, keeping `reserve`
@@ -151,8 +169,6 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     if (cut) messages.push({ role: "assistant", content: cut });
     messages.push({ role: "user", content: FINAL_ANSWER(spent, cut !== undefined) });
   };
-  // Set when native deltas of a cut reply are on screen: the final answer starts after a break.
-  let breakBeforeFinal = false;
   for (let round = 0; round < (input.maxTurns ?? 24); round++) {
     input.signal.throwIfAborted();
     if (!final && phase.aborted) askFinal("time");
@@ -165,26 +181,22 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       // Tool rounds live inside the tool phase; the final answer has its own cap instead.
       for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs)) {
         if (event.type === "complete") complete = event;
+        else if (event.type === "thinking") yield event;
         else {
-          if (event.type === "delta") arrived.push(event.text);
-          // Text-mode call syntax must not leak into the answer. Emit its visible answer after parsing.
-          if (event.type === "thinking" || input.native) {
-            // The same break answer() puts between the cut text and the final answer when saving.
-            if (event.type === "delta" && breakBeforeFinal) { breakBeforeFinal = false; yield { type: "delta", text: "\n\n" }; }
-            yield event;
-          }
+          arrived.push(event.text);
+          // Text-mode call syntax must not leak into the answer: its visible part is shown after parsing.
+          if (input.native) yield* show(event.text);
         }
       }
     } catch (e) {
       input.signal.throwIfAborted();
       if (final || !phase.aborted) throw e;
-      // Cut by the deadline. Native deltas are already on screen, so they are saved as shown and
-      // the final answer streams after a break. Text mode showed nothing: its answer part (call
-      // syntax parsed away, as for a whole reply) goes to the model only.
-      const partial = input.native ? arrived.join("") : parseTextCalls(arrived.join("")).content;
-      const cut = partial.trim() ? partial : undefined;
-      if (cut && input.native) { visible.push(cut); breakBeforeFinal = true; }
-      askFinal("time", cut);
+      // Cut by the deadline. Native deltas are already shown, and so saved; the final answer is a
+      // new part. Text mode showed nothing: its answer part, with the call syntax the cut left
+      // unfinished stripped too, goes to the model only.
+      endPart();
+      const partial = input.native ? arrived.join("") : partialAnswer(arrived.join(""));
+      askFinal("time", partial.trim() ? partial : undefined);
       continue;
     } finally { clearTimeout(capTimer); }
     input.signal.throwIfAborted();
@@ -196,18 +208,20 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       try { const call = repairCall(item.call); return { call, name: call.name }; }
       catch (e) { return { error: (e as Error).message, name: "invalid" }; }
     });
-    if (!input.native && parsed.content) yield { type: "delta", text: parsed.content };
-    if (parsed.content.trim()) visible.push(parsed.content.trim());
+    // A native reply streamed its text already; one that sent no deltas is shown whole here.
+    if (!input.native || arrived.length === 0) yield* say(parsed.content);
+    endPart();
     if (complete.stopReason === "length") {
       for (const item of pending) {
         const step = notRun(item, "Tool call was cut short", "Output length limit reached; this call was not run.");
         tools.push(step); yield { type: "tool", step };
       }
-      yield { ...finish(answer("The reply reached its length limit. No pending tools were run."), "length"), stats: complete.stats };
+      if (!shown) yield* say("The reply reached its length limit. No pending tools were run.");
+      yield { ...finish("length"), stats: complete.stats };
       return;
     }
     if (pending.length === 0) {
-      yield { ...finish(answer()), stats: complete.stats };
+      yield { ...finish(), stats: complete.stats };
       return;
     }
     if (final) {
@@ -216,8 +230,8 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         const step = notRun(item, "Tool budget ran out", BUDGET[spent!]);
         tools.push(step); yield { type: "tool", step };
       }
-      if (visible.length === 0) yield say("Stopped: this turn's tool budget ran out. Ask a follow-up to continue.");
-      yield { ...finish(answer()), stats: complete.stats };
+      if (!shown) yield* say("Stopped: this turn's tool budget ran out. Ask a follow-up to continue.");
+      yield { ...finish(), stats: complete.stats };
       return;
     }
     messages.push({ role: "assistant", content: complete.content,
@@ -267,15 +281,15 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       const done: ToolStep = { ...step, detail: clipDetail(`${detail}\n${observed}`) };
       tools.push(done); yield { type: "tool", step: done };
       if (badCalls >= 3) {
-        yield say("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
-        yield finish(answer()); return;
+        yield* say("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
+        yield finish(); return;
       }
     }
     if (phase.aborted) spent ??= "time";
     if (spent) askFinal(spent);
   }
-  yield say("Stopped after the tool turn limit. Ask a follow-up to continue.");
-  yield finish(answer());
+  yield* say("Stopped after the tool turn limit. Ask a follow-up to continue.");
+  yield finish();
 }
 
 function runningSummary(name: string): string {

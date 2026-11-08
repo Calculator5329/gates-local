@@ -11,6 +11,39 @@ export function outsideThinking(text: string): string {
   return visible;
 }
 
+/** The text-mode call markers. The parser and the cleanup of a cut reply both use these. */
+export const CALL_OPEN = "<tool_call>";
+export const CALL_CLOSE = "</tool_call>";
+export const FENCE = "```";
+/** A fence in one of these languages, holding {name, arguments|parameters}, is a call. */
+export const CALL_FENCE_LANGUAGES = ["json", "tool_code"] as const;
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const CALL_BLOCK = new RegExp(`${literal(CALL_OPEN)}([\\s\\S]*?)(?:${literal(CALL_CLOSE)}|$)`, "gi");
+const CALL_FENCE = new RegExp(`${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\n([\\s\\S]*?)${literal(FENCE)}`, "gi");
+
+/**
+ * The visible answer part of a reply cut off mid-stream: what parseTextCalls keeps of it,
+ * less the call syntax the cut left unfinished. That is a trailing start of the opening tag
+ * (`<`, `<tool`, `<tool_call` with no `>`) and everything from a call fence that never
+ * closed (its language named, or cut before it was). An unclosed opening tag and everything
+ * after it the parser drops already.
+ */
+export function partialAnswer(text: string): string {
+  let visible = outsideThinking(text);
+  const fences = [...visible.matchAll(new RegExp(literal(FENCE), "g"))];
+  if (fences.length % 2 === 1) {
+    const at = fences.at(-1)!.index;
+    const rest = visible.slice(at + FENCE.length).toLowerCase();
+    const opensCall = CALL_FENCE_LANGUAGES.some(language => rest.startsWith(language) ? /^[ \t]*(?:\n|$)/.test(rest.slice(language.length)) : language.startsWith(rest));
+    if (opensCall) visible = visible.slice(0, at);
+  }
+  const tail = visible.toLowerCase();
+  for (let n = Math.min(CALL_OPEN.length - 1, tail.length); n > 0; n--) {
+    if (CALL_OPEN.startsWith(tail.slice(-n))) { visible = visible.slice(0, -n); break; }
+  }
+  return parseTextCalls(visible).content;
+}
+
 /** Parse complete blocks only, after removing closed and unfinished thoughts. */
 export function parseTextCalls(text: string): { calls: unknown[]; errors: string[]; content: string; items: ({ call: unknown } | { error: string })[] } {
   const visible = outsideThinking(text);
@@ -18,8 +51,8 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
   const errors: string[] = [];
   const items: ({ call: unknown } | { error: string })[] = [];
   const invalid = (message: string) => { errors.push(message); items.push({ error: message }); };
-  const content = visible.replace(/<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/gi, (block: string, json: string) => {
-    if (!block.toLowerCase().endsWith("</tool_call>")) invalid("Unfinished tool call");
+  const content = visible.replace(CALL_BLOCK, (block: string, json: string) => {
+    if (!block.toLowerCase().endsWith(CALL_CLOSE)) invalid("Unfinished tool call");
     else {
       try { const call: unknown = JSON.parse(json.trim()); calls.push(call); items.push({ call }); }
       catch { invalid("Tool call must contain a JSON object with name and arguments"); }
@@ -30,7 +63,7 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
   // Gemma-style models answer in a fence instead. Exactly one ```json or ```tool_code
   // block holding {name, arguments|parameters} is a call; more than one, or JSON of
   // another shape, is ordinary answer text. A fence that does not parse is a bad call.
-  const fences = [...content.matchAll(/```(?:json|tool_code)[ \t]*\n([\s\S]*?)```/gi)];
+  const fences = [...content.matchAll(CALL_FENCE)];
   if (fences.length !== 1) return { calls, errors, items, content: content.trim() };
   const [fence, body] = fences[0]!;
   let value: unknown;
