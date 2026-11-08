@@ -75,7 +75,7 @@ describe("Use as default", () => {
   it("saves the setting and the Default card shows the new model", async () => {
     await boot();
     expect(card()).toBe("alpha:7b");
-    expect(await actions.useAsDefault("gamma:7b")).toBeNull();
+    expect(await actions.makeDefault("gamma:7b")).toBeNull();
     expect(b.server.calls("settings.update").at(-1)?.params).toEqual({ defaultModel: "gamma:7b" });
     expect(saved.defaultModel).toBe("gamma:7b");
     expect(card()).toBe("gamma:7b");

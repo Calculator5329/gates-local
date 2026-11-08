@@ -2,16 +2,16 @@
 // wired to settings.get/update and the v2 methods. A section whose method the
 // server answers "not-implemented" says so in one calm line; nothing crashes.
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
+import type { ContextSize, PullProgress, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
-import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
+import { CtxLine } from "./FitPanel.tsx";
 import { CONTEXT_SIZES, type Verdict, describeModel, etaText, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
+import { ModelsPage } from "./Models.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
-import { type ActionResult, addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
+import { type ActionResult, addSource, cancelPull, ensureFit, refreshSource, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
-import { canChat, notForChat } from "./pick.ts";
-import { VLabel, closeTip, esc } from "./ui.tsx";
+import { VLabel, closeTip } from "./ui.tsx";
 
 const NOT_HERE = "Not available in this build.";
 
@@ -83,7 +83,6 @@ function Seg2<T extends string | number>({ value, options, onPick, label }: { va
 
 const Na = ({ children = NOT_HERE }: { children?: ReactNode }) => <span className="na">{children}</span>;
 
-const settingsOf = (s: State): Settings | undefined => (s.settings === NA ? undefined : s.settings);
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
 // ---------------------------------------------------------------- General
@@ -176,139 +175,22 @@ export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: st
   );
 }
 
-const activePulls = (s: State) => s.pulls;
-const isActive = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
-
 function useFit(model: string, numCtx: number): Verdict | undefined {
   const r = useStore((s) => s.fits[fitKey(model, numCtx)]);
   useEffect(() => ensureFit(model, numCtx), [model, numCtx, r]);
   return r === undefined || r === "error" ? undefined : verdictOf(r);
 }
 
-function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolean }) {
-  const catalog = useStore(catalogOf);
-  const info = useStore((s) => s.models?.find((m) => m.name === tag));
-  const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
-  const v = useFit(tag, numCtx);
-  const d = describeModel(tag, catalog);
-  const [err, run] = useAct();
-  const tip = `<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span>${info?.quantization ? ` · ${esc(info.quantization)}` : ""}<br>${info ? `${gb(info.sizeBytes)} on disk` : ""}${v ? ` · est. ${gb(v.need)} at ${k(numCtx)}` : ""}`;
-  const inner = (
-    <>
-      <span className="rd" />
-      <span className="mn">
-        {d.name}
-        <small>{d.purpose}</small>
-      </span>
-      {v ? <VLabel v={v} cls="mv" /> : <span className="mv na">Checking…</span>}
-    </>
-  );
-  const remove = canRemove ? (
-    <button
-      type="button"
-      className="qa"
-      aria-label={`Remove ${d.name}`}
-      onClick={(e) => {
-        e.stopPropagation();
-        void run(removeModel(tag));
-      }}
-    >
-      Remove
-    </button>
-  ) : null;
-  if (v?.k === "no") {
-    return (
-      <>
-        <div className="mrow dis" data-tip={tip}>
-          {inner}
-          <button type="button" className="qa" data-memdet={tag} onClick={() => openFit(tag)}>
-            Memory details
-          </button>
-          {remove}
-        </div>
-        <Fail err={err} line />
-      </>
-    );
-  }
-  return (
-    <div style={{ display: "contents" }}>
-      <button type="button" className={`mrow${on ? " on" : ""}`} data-dm={tag} data-tip={tip} aria-pressed={on} onClick={() => void run(updateSettings({ defaultModel: tag }))}>
-        {inner}
-      </button>
-      {remove}
-      <Fail err={err} line />
-    </div>
-  );
-}
-
-/** An installed embedding model: listed so it can be removed, never a default (it cannot chat). */
-function EmbedRow({ tag }: { tag: string }) {
-  const catalog = useStore(catalogOf);
-  const info = useStore((s) => s.models?.find((m) => m.name === tag));
-  const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
-  const d = describeModel(tag, catalog);
-  const why = notForChat(info);
-  return (
-    <div
-      className="mrow dis emb"
-      data-em={tag}
-      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>${why.tip}${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
-    >
-      <span className="rd" />
-      <span className="mn">{d.name}</span>
-      <span className="mv na">{why.label}</span>
-      {canRemove ? (
-        <button type="button" className="qa" aria-label={`Remove ${d.name}`} onClick={() => void removeModel(tag)}>
-          Remove
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function Models() {
-  const settings = useStore(settingsOf);
+/** The default context window, kept in this section where it was; the Models page itself (Models.tsx) holds no context control. */
+function DefaultContext() {
   const settingsNA = useStore((s) => s.settings === NA);
-  const models = useStore((s) => s.models);
-  const pulls = useStore(activePulls);
   const catalog = useStore(catalogOf);
   const numCtx = useStore((s) => s.numCtx);
   const model = useStore((s) => s.model);
   const v = useFit(model ?? "", numCtx);
   const [ctxErr, runCtx] = useAct();
-  const def = settings?.defaultModel ?? model;
-  const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
   return (
     <>
-      <Head title="Models">New chats start on your default model if it runs at {k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.</Head>
-      <div className="grp">
-        <div className="grp-t">Default model</div>
-        <div className="box">
-          {(models ?? []).map((m) =>
-            canChat(m) ? <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} /> : <EmbedRow key={m.name} tag={m.name} />,
-          )}
-          {downloading.map((p) => {
-            const d = describeModel(p.name, catalog);
-            return (
-              <div key={p.name} className="mrow dis dlg" aria-disabled="true">
-                <span className="rd dl" />
-                <div className="mdl">
-                  <span className="mn">
-                    {d.name}
-                    <small>{d.purpose}</small>
-                  </span>
-                  <DlDetail p={p} name={d.name} />
-                </div>
-              </div>
-            );
-          })}
-          <button type="button" className="mrow add" onClick={() => setState({ addPage: true })}>
-            <Icon id="plus" />
-            Download another model…
-          </button>
-        </div>
-      </div>
-      {settingsNA ? <p className="na">Saving a default model is not available in this build; each chat uses the one you pick.</p> : null}
       {model !== undefined ? (
         <Grp title="Default context window">
           <div className="srow">
@@ -338,129 +220,6 @@ function Models() {
           </div>
         </Grp>
       ) : null}
-    </>
-  );
-}
-
-function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
-  const p = useStore((s) => s.pulls[c.name]);
-  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
-  const v = c.fit ? verdictOf(c.fit) : undefined;
-  const dling = p !== undefined && isActive(p) && !installed;
-  const [err, run] = useAct();
-  const action = installed ? (
-    <span className="badge">Installed</span>
-  ) : dling ? (
-    <button type="button" className="qa" onClick={() => void run(cancelPull(c.name))}>
-      Cancel download
-    </button>
-  ) : (
-    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
-      Download
-    </button>
-  );
-  return (
-    <div className={`dlrow${dling ? " dlg" : ""}`}>
-      <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>`}>
-        <b>{c.label}</b>
-        {dling ? (
-          <>
-            <span className="d">{c.purpose}</span>
-            <DlDetail p={p} name={c.label} cancel={false} />
-          </>
-        ) : (
-          <span className="d">
-            {c.purpose} · {gb(c.downloadBytes)} download
-          </span>
-        )}
-        <Fail err={err} />
-      </div>
-      {v ? (
-        <div className="dl-v" data-tip={`Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
-          <VLabel v={v} />
-          <small>
-            est. {gb(v.need)} at {k(numCtx)}
-          </small>
-        </div>
-      ) : (
-        <div className="dl-v" />
-      )}
-      <div className="dl-a">{action}</div>
-    </div>
-  );
-}
-
-function CustomPull() {
-  const [name, setName] = useState("");
-  const [err, run] = useAct();
-  return (
-    <Row
-      err={err}
-      label="Any model from the Ollama library"
-      desc={
-        <>
-          Type its name as it appears in the library.
-          <span className="d" style={{ display: "block" }}>
-            <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
-              Browse the Ollama library ↗
-            </a>
-          </span>
-        </>
-      }
-    >
-      <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
-      <button
-        type="button"
-        className="qa"
-        disabled={name.trim() === ""}
-        onClick={() => {
-          // the typed name stays until the download starts (W-07)
-          void run(pull(name)).then((ok) => ok && setName(""));
-        }}
-      >
-        Download
-      </button>
-    </Row>
-  );
-}
-
-function DownloadPage() {
-  const catalog = useStore((s) => s.catalog);
-  const numCtx = useStore((s) => s.numCtx);
-  const gpu = useStore((s) => s.gpu);
-  const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
-  const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
-  const list = catalog === NA || catalog === undefined ? [] : catalog;
-  const rec = list.filter((c) => c.recommended);
-  const more = list.filter((c) => !c.recommended);
-  const allSpill = more.length > 0 && more.every((c) => c.fit?.verdict === "spills");
-  return (
-    <>
-      <button type="button" className="crumb" onClick={() => setState({ addPage: false })}>
-        <Icon id="left" cls="s14" />
-        Models
-      </button>
-      <Head title="Download a model">
-        Picked for your {gpuName}. Estimated at your default context, {k(numCtx)}.
-      </Head>
-      {catalog === NA ? (
-        <p className="na">The model list is not available in this build. You can still type a model name below.</p>
-      ) : null}
-      {rec.length > 0 ? (
-        <Grp title="Recommended">
-          {rec.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} />
-          ))}
-        </Grp>
-      ) : null}
-      {more.length > 0 ? (
-        <Grp title={allSpill ? "Also available · uses system memory" : "Also available"}>
-          {more.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} />
-          ))}
-        </Grp>
-      ) : null}
-      <Grp title="Something else">{pullNA ? <Row label="Any model from the Ollama library" desc="Downloads are not available in this build." /> : <CustomPull />}</Grp>
     </>
   );
 }
@@ -777,12 +536,16 @@ export function SettingsView() {
   const section = useStore((s) => s.section);
   const addPage = useStore((s) => s.addPage);
   void SECTIONS;
-  if (section === "models" && addPage) return <DownloadPage />;
   switch (section) {
     case "general":
       return <General />;
     case "models":
-      return <Models />;
+      return (
+        <>
+          <ModelsPage />
+          {addPage ? null : <DefaultContext />}
+        </>
+      );
     case "runtime":
       return <Runtime />;
     case "memory":

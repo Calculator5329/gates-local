@@ -13,7 +13,7 @@ export function cardDefault(s: State): string | undefined {
 }
 
 /** "Use as default" from the row menu or the Default card. */
-export function useAsDefault(name: string): Promise<ActionResult> {
+export function makeDefault(name: string): Promise<ActionResult> {
   return updateSettings({ defaultModel: name });
 }
 

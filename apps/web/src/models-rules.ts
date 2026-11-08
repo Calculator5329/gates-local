@@ -2,7 +2,8 @@
 // fit words (three label sets, one switch), the installed order, the next
 // default after a removal, the Recommended picks with their backfill, the
 // download cards, the typed-name library check and the name truncation.
-import type { CatalogEntry, FitReport, FitVerdict, ModelInfo, PullProgress } from "@gates-local/contracts";
+import type { CatalogEntry, FitReport, FitVerdict, PullProgress } from "@gates-local/contracts";
+import { k } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
@@ -42,8 +43,12 @@ export const about = (bytes: number) => {
   return `${g < 9.95 ? g.toFixed(1) : Math.round(g)} GB`;
 };
 
+/** A model's size in the Size column: MB under 1 GB, else as `about`. */
+export const sizeText = (bytes: number) => (bytes < GB ? `${Math.round(bytes / 1024 ** 2)} MB` : about(bytes));
+
 /** The reason behind a verdict, outcome first, one number per resource. */
 export function fitReason(r: FitReport): string {
+  if (r.verdict === "refuse" && r.contextLimit !== undefined) return `Supports up to ${k(r.contextLimit)} of context; new chats use ${k(r.numCtx)}.`;
   const head = `Needs about ${about(r.needVramBytes)}.`;
   const gpu = `Your GPU has ${about(r.freeVramBytes)} free`;
   if (r.verdict === "fits") return `${head} ${gpu}, so it runs entirely on the GPU.`;
@@ -52,11 +57,6 @@ export function fitReason(r: FitReport): string {
 }
 
 // ---------------------------------------------------------------- what a model is
-
-/** Embedding models never chat; the server keeps them out of the catalog by the same rule. */
-export function isChatModel(m: Pick<ModelInfo, "name" | "family">): boolean {
-  return !/embed/i.test(m.name) && !/bert/i.test(m.family ?? "");
-}
 
 /** The purpose the server gives an installed model it does not curate (recommended.ts OWN_MODEL_PURPOSE). */
 export const OWN_MODEL_PURPOSE = "Installed by you";

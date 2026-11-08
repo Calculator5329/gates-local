@@ -12,13 +12,13 @@ import {
   fitLabel,
   fitReason,
   fitSymbol,
-  isChatModel,
   lookup,
   nameOf,
   nextDefault,
   progressParts,
   recommendedPicks,
   shortTag,
+  sizeText,
   sortRows,
   splitTail,
 } from "./models-rules.ts";
@@ -82,15 +82,18 @@ describe("fit words", () => {
     expect(about(9.97 * GIB)).toBe("10 GB");
     expect(about(43.2 * GIB)).toBe("43 GB");
   });
+
+  it("gives a model under 1 GB its size in MB", () => {
+    expect(sizeText(274 * 1024 ** 2)).toBe("274 MB");
+    expect(sizeText(6.6 * GIB)).toBe("6.6 GB");
+  });
+
+  it("says a model past its context limit is held back by the limit, not memory", () => {
+    expect(fitReason({ ...fit("refuse"), contextLimit: 8192 })).toBe("Supports up to 8k of context; new chats use 16k.");
+  });
 });
 
 describe("names", () => {
-  it("treats embedding models as not for chat", () => {
-    expect(isChatModel({ name: "nomic-embed-text:latest" })).toBe(false);
-    expect(isChatModel({ name: "mxbai:latest", family: "bert" })).toBe(false);
-    expect(isChatModel({ name: "qwen3.5:9b", family: "qwen3" })).toBe(true);
-  });
-
   it("shows curated models by label and purpose, any other by its tag in mono", () => {
     const cat = [entry("qwen3.5:9b", "fits", { label: "Qwen 3.5 9B", purpose: "Fast everyday answers" }), entry("mine:latest", "fits", { label: "mine", purpose: "Installed by you" })];
     expect(nameOf("qwen3.5:9b", cat)).toEqual({ text: "Qwen 3.5 9B", purpose: "Fast everyday answers", mono: false });
