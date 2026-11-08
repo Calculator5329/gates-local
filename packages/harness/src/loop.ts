@@ -35,7 +35,8 @@ const STOPPED_TIME = "Stopped: this turn's tool time budget ran out.";
 /** The longest fixed notice; each call still to be answered in a reply keeps room for one. */
 const NOTICE_MAX = Math.max(NOT_RUN_PER_REPLY.length, STOPPED_TIME.length, ...Object.values(BUDGET).map(t => t.length));
 const CUT = "\n[cut: this turn's tool output budget ran out]";
-const FINAL_ANSWER = (budget: Budget) => `This turn's tool ${budget} budget ran out. No more tools: answer now with what you have.`;
+const FINAL_ANSWER = (budget: Budget, cut: boolean) => `This turn's tool ${budget} budget ran out. No more tools: answer now with what you have.`
+  + (cut ? " Your previous reply was cut off by the time limit; give your whole answer now." : "");
 const seconds = (ms: number) => `${ms / 1000} s`;
 
 /** Cuts an observation to `room` characters, marking the cut when the mark fits. */
@@ -143,35 +144,47 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     messages.push(input.native ? { role: "tool", tool_name: name, content: text } : { role: "user", content: textToolResult(name, text) });
     return text;
   };
-  const askFinal = (budget: Budget) => {
+  /** `cut` is answer text the deadline interrupted; the final request sees it as the assistant's unfinished reply. */
+  const askFinal = (budget: Budget, cut?: string) => {
     spent ??= budget;
     final = true;
-    messages.push({ role: "user", content: FINAL_ANSWER(spent) });
+    if (cut) messages.push({ role: "assistant", content: cut });
+    messages.push({ role: "user", content: FINAL_ANSWER(spent, cut !== undefined) });
   };
+  // Set when native deltas of a cut reply are on screen: the final answer starts after a break.
+  let breakBeforeFinal = false;
   for (let round = 0; round < (input.maxTurns ?? 24); round++) {
     input.signal.throwIfAborted();
     if (!final && phase.aborted) askFinal("time");
     let complete: Extract<ModelEvent, { type: "complete" }> | undefined;
-    // Native deltas the user has already seen, kept if the deadline cuts this request.
-    const shown: string[] = [];
+    // Answer text as it streamed, kept if the deadline cuts this request.
+    const arrived: string[] = [];
     const cap = new AbortController();
     const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
     try {
       // Tool rounds live inside the tool phase; the final answer has its own cap instead.
       for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs)) {
         if (event.type === "complete") complete = event;
-        // Text-mode call syntax must not leak into the answer. Emit its visible answer after parsing.
-        else if (event.type === "thinking" || input.native) {
-          if (event.type === "delta") shown.push(event.text);
-          yield event;
+        else {
+          if (event.type === "delta") arrived.push(event.text);
+          // Text-mode call syntax must not leak into the answer. Emit its visible answer after parsing.
+          if (event.type === "thinking" || input.native) {
+            // The same break answer() puts between the cut text and the final answer when saving.
+            if (event.type === "delta" && breakBeforeFinal) { breakBeforeFinal = false; yield { type: "delta", text: "\n\n" }; }
+            yield event;
+          }
         }
       }
     } catch (e) {
       input.signal.throwIfAborted();
       if (final || !phase.aborted) throw e;
-      const seen = shown.join("").trim();
-      if (seen) visible.push(seen);
-      askFinal("time");
+      // Cut by the deadline. Native deltas are already on screen, so they are saved as shown and
+      // the final answer streams after a break. Text mode showed nothing: its answer part (call
+      // syntax parsed away, as for a whole reply) goes to the model only.
+      const partial = input.native ? arrived.join("") : parseTextCalls(arrived.join("")).content;
+      const cut = partial.trim() ? partial : undefined;
+      if (cut && input.native) { visible.push(cut); breakBeforeFinal = true; }
+      askFinal("time", cut);
       continue;
     } finally { clearTimeout(capTimer); }
     input.signal.throwIfAborted();

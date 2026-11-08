@@ -132,7 +132,8 @@ describe("turn budgets", () => {
     expect(requests[1]!.messages.filter(m => m.role === "tool").map(m => m.content)).toEqual([
       "Stopped: this turn's tool time budget ran out.", "Not run: this turn's tool time budget ran out.", "Not run: this turn's tool time budget ran out."]);
     expect(requests.map(r => r.options)).toEqual([{ tools: true }, { tools: false }]);
-    expect(requests[1]!.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringContaining("time budget ran out") });
+    // No answer text was cut, so the request asks plainly.
+    expect(requests[1]!.messages.at(-1)).toEqual({ role: "user", content: "This turn's tool time budget ran out. No more tools: answer now with what you have." });
     expect(complete.content).toBe("Here is what I found.");
   });
   it("stops tools past an output budget of num_ctx * 3 / 2 characters", async () => {
@@ -261,6 +262,36 @@ describe("tool-phase deadline and stall guard (T-03)", () => {
     expect(Date.now() - started).toBeGreaterThan(150);
     expect(events.at(-1)).toMatchObject({ type: "complete", content: chunks.join("").trim() });
   });
+  for (const native of [true, false]) {
+    it(`${native ? "native" : "text"} mode: an answer cut mid-word by the deadline is kept for the final request, and what the user saw is what is saved (T2-04)`, async () => {
+      // Text mode streams call syntax too: a whole call, the answer, then a call the cut left unfinished.
+      const cut = native ? ["The answer ", "is par"] : ['<tool_call>{"name":"read","arguments":{"path":"/library/a"}}</tool_call>', "The answer ", "is par", '<tool_call>{"name":"re'];
+      const requests: { messages: ModelMessage[]; tools: boolean | undefined }[] = [];
+      const stream = async function* (messages: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) {
+        requests.push({ messages: structuredClone([...messages]), tools: options?.tools });
+        if (options?.tools === false) {
+          for (const text of ["The answer ", "is complete."]) yield { type: "delta" as const, text };
+          yield { type: "complete" as const, content: "The answer is complete.", calls: [], stopReason: "stop" };
+          return;
+        }
+        for (const text of cut) yield { type: "delta" as const, text };
+        await new Promise((_, reject) => options?.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true }));
+      };
+      const events: LoopEvent[] = [];
+      for await (const event of runLoop({ messages: [], native, signal: new AbortController().signal, stream, execute: vi.fn(), toolTimeBudgetMs: 30 })) events.push(event);
+      const complete = events.at(-1) as Extract<LoopEvent, { type: "complete" }>;
+      const shown = events.flatMap(e => e.type === "delta" ? [e.text] : []).join("");
+      expect(shown).toBe(complete.content);
+      expect(complete.content).toBe(native ? "The answer is par\n\nThe answer is complete." : "The answer is complete.");
+      const last = requests.at(-1)!;
+      expect(last.tools).toBe(false);
+      expect(last.messages.slice(-2)).toEqual([
+        { role: "assistant", content: "The answer is par" },
+        { role: "user", content: expect.stringMatching(/time budget ran out[\s\S]*cut off by the time limit[\s\S]*whole answer now/) },
+      ]);
+      expect(last.messages.some(m => m.content.includes("<tool_call"))).toBe(false);
+    });
+  }
   it("the turn's cancel signal aborts a model request that never answers", async () => {
     const controller = new AbortController();
     const consume = async () => { for await (const _ of runLoop({ messages: [], native: true, signal: controller.signal, stream: neverAnswers, execute: vi.fn() })) { /* drain */ } return "finished"; };
