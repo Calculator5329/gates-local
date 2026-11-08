@@ -73,7 +73,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const v = fit ? verdictOf(fit) : undefined;
   const d = describeModel(tag, catalog);
   const where = cpu ? "fits in system memory" : "runs on your GPU";
-  const tip = have ? pickRuleText(numCtx) : `The first of Gates Local's recommended models that ${where} with room for ${k(numCtx)} of context.`;
+  const tip = have ? pickRuleText(numCtx, cpu) : `The first of Gates Local's recommended models that ${where} with room for ${k(numCtx)} of context.`;
   return (
     <div className="fr-card">
       <div className="fr-m">

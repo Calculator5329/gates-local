@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-08: Thinking off with no GPU, Windows and size fixes
+
+- Thinking starts off on a computer with no supported GPU, where a
+  thought took 394 s on the test machine. The composer's button still
+  turns it on, and a reconnect keeps that choice.
+- Windows: a shutdown that runs out of time kills the app's own Ollama
+  through its handle (`killNow`), since nothing could stop it afterward.
+- The model catalog no longer stays empty when a newer request for it
+  failed, and the next model refresh asks again.
+- The first-run tooltip no longer promises a GPU on a computer with none.
+- File sizes move up a unit when rounding reaches 1024: "1 MB", not
+  "1024 KB".
+
 ## 2026-11-08: no context minimum
 
 - The 16k floor is gone. A model runs at the size chosen, or at the most

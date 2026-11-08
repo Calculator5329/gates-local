@@ -13,8 +13,9 @@ export function gb(bytes: number): string {
 
 /** A Library file's size: "223 bytes", "39 KB", "5 MB", "3.0 GB". */
 export function fileSize(bytes: number): string {
-  if (bytes >= GIB) return gb(bytes);
-  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  // Compared after rounding, so 1023.5 KB reads "1 MB", never "1024 KB" (LS-01).
+  if (Math.round(bytes / 1024 ** 2) >= 1024) return gb(bytes);
+  if (Math.round(bytes / 1024) >= 1024) return `${Math.round(bytes / 1024 ** 2)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
 }

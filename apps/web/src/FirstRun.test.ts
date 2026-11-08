@@ -24,6 +24,10 @@ const text = (state: unknown) => {
     .replaceAll("&#x27;", "'")
     .replaceAll(/\s+/g, " ");
 };
+const raw = (state: unknown) => {
+  store.state = state;
+  return renderToStaticMarkup(createElement(FirstRun));
+};
 const oldOllama = (catalog: unknown[], version?: string) => ({
   conn: { kind: "open" },
   runtime: { state: "ready", owner: "external", ...(version === undefined ? {} : { version }) },
@@ -69,6 +73,8 @@ describe("first run on a computer with no supported GPU", () => {
       const t = text(cpuOnly(verdict));
       expect(t).not.toMatch(/your GPU|GPU fit/);
       expect(t).toContain(verdict === "refuse" ? "No model fits in memory" : "This computer has no supported GPU, so models run in system memory");
+      // the tooltip is an attribute, which text() strips (W1-03)
+      expect(raw(cpuOnly(verdict))).not.toContain("fits your GPU");
     });
   }
 });

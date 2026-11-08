@@ -11,7 +11,7 @@ import { createPullManager, type PullManager } from "./pull.ts";
 import type { OllamaRuntime } from "./runtime.ts";
 import { createRuntimeSwitch } from "./switch.ts";
 
-type Fake = OllamaRuntime & { stops: number };
+type Fake = OllamaRuntime & { stops: number; kills: number };
 
 /** A runtime whose ensure "starts" an app-owned copy once `startup` resolves. */
 function fakeRuntime(mode: RuntimeMode, startup: Promise<void>): Fake {
@@ -19,6 +19,7 @@ function fakeRuntime(mode: RuntimeMode, startup: Promise<void>): Fake {
   let status: RuntimeStatus = { state: "stopped", owner: "none", baseUrl: `http://${mode}.invalid` };
   const fake: Fake = {
     stops: 0,
+    kills: 0,
     status: () => status,
     baseUrl: () => (status.state === "ready" ? status.baseUrl : undefined),
     discover: async () => status,
@@ -35,6 +36,9 @@ function fakeRuntime(mode: RuntimeMode, startup: Promise<void>): Fake {
       return { stopped: true, pid: 1 };
     },
     startedByThisProcess: () => started,
+    killNow() {
+      fake.kills++;
+    },
     mode,
     onChange: () => () => undefined,
     onInstallProgress: () => () => undefined,
@@ -216,4 +220,18 @@ it("R2-03: the old runtime stops only after beforeSwitch's turns have ended", as
   turnsEnd();
   expect(await switched).toMatchObject({ state: "ready", owner: "external" });
   expect(made[0]!.stops).toBe(1);
+});
+
+it("killNow reaches the runtime in use (W1-01)", () => {
+  const made: Fake[] = [];
+  const sw = createRuntimeSwitch({
+    initialMode: "app",
+    make: (mode) => {
+      const rt = fakeRuntime(mode, Promise.resolve());
+      made.push(rt);
+      return rt;
+    },
+  });
+  sw.killNow();
+  expect(made[0]?.kills).toBe(1);
 });

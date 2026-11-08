@@ -116,8 +116,8 @@ pnpm start
 ```
 
 Nothing here needs administrator rights. Without an NVIDIA GPU, models run
-in system memory on the CPU and replies are slower; turning Thinking off
-helps. The shell tool is off on Windows. The full guide, with data folders,
+in system memory on the CPU and replies are slower, so Thinking starts off
+(the button in the message box turns it on). The shell tool is off on Windows. The full guide, with data folders,
 measured speeds, updating and uninstalling, is
 [docs/setup/windows.md](docs/setup/windows.md).
 

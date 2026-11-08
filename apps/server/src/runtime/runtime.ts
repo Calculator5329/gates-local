@@ -137,6 +137,12 @@ export type OllamaRuntime = {
   stop(): Promise<StopResult>;
   /** This runtime object started the app-owned server that is running now (not adopted from an earlier run). */
   startedByThisProcess(): boolean;
+  /**
+   * The last resort when shutdown ran out of time. Windows only: a copy there
+   * is stopped through this process's handle, so it would be left running for
+   * good. Elsewhere the next run adopts it from its record.
+   */
+  killNow(): void;
   readonly mode: RuntimeMode | undefined;
   onChange(listener: Listener<RuntimeStatus>): () => void;
   onInstallProgress(listener: Listener<InstallProgress>): () => void;
@@ -598,6 +604,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (r.stopped || r.reason !== "no-record") startedPid = undefined;
       if (r.stopped) setStatus({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail: `Stopped the app-owned Ollama (pid ${r.pid}).` });
       return r;
+    },
+    killNow() {
+      if (platform === "win32") spawned?.kill();
     },
     startedByThisProcess() {
       if (startedPid === undefined) return false;

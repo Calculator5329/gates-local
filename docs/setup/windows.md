@@ -99,14 +99,14 @@ are not used for the plan.
 Measured on the test machine (i5-8500, CPU only) with `qwen3.5:4b` at 16k
 context, from the app window:
 
-- **Thinking on** (the default): the model thought for 394 s before the
-  first word of the answer. The first reply also includes loading the model.
+- **Thinking on**: the model thought for 394 s before the first word of
+  the answer. The first reply also includes loading the model.
 - **Thinking off**, model already loaded: 2.3 s to the first word, and the
   app showed 4 tok/s for the reply. The same prompt sent straight to Ollama
   generated 5.5 tokens per second by Ollama's own count.
 
-On a computer like this, turn **Thinking** off in the message box for
-everyday questions.
+On a computer with no supported GPU, **Thinking** starts off. The button in
+the message box turns it on for a question worth the wait.
 
 ### The app's own copy of Ollama
 

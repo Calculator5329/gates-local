@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
-import { CONTEXT_SIZES, ctxFor, decodeSpeed, k, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, k, otherCtxWords, replyMeta, sourceDetail, verdictOf } from "./format.ts";
 
 const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
 describe("a Library source's size", () => {
@@ -85,5 +85,18 @@ describe("decode speed", () => {
   it("falls back to the total for a reply saved before decode time was kept", () => {
     expect(decodeSpeed({ completionTokens: 60, durationMs: 2000 })).toBe(30);
     expect(decodeSpeed({ completionTokens: 60 })).toBeUndefined();
+  });
+});
+
+describe("fileSize", () => {
+  it("moves up a unit when rounding reaches 1024 (LS-01)", () => {
+    expect(fileSize(1_048_064)).toBe("1 MB");
+    expect(fileSize(1_073_217_536)).toBe("1.0 GB");
+  });
+
+  it("stays in the unit below that", () => {
+    expect(fileSize(1023)).toBe("1023 bytes");
+    expect(fileSize(1_047_552)).toBe("1023 KB");
+    expect(fileSize(1_072_693_248)).toBe("1023 MB");
   });
 });

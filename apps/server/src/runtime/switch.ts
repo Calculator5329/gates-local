@@ -8,7 +8,7 @@ import type { RuntimeMode, RuntimeStatus } from "@gates-local/contracts";
 import type { OllamaRuntime } from "./runtime.ts";
 import type { Listener } from "./types.ts";
 
-export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure" | "discover" | "startedByThisProcess"> {
+export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure" | "discover" | "startedByThisProcess" | "killNow"> {
   mode(): RuntimeMode;
   /** Switch modes and ensure the new runtime; resolves with its status. Same mode: no-op. */
   setMode(mode: RuntimeMode): Promise<RuntimeStatus>;
@@ -82,6 +82,7 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
     ensure: () => serial(() => inner.ensure()),
     discover: () => serial(() => inner.discover()),
     startedByThisProcess: () => inner.startedByThisProcess(),
+    killNow: () => inner.killNow(),
     mode: () => mode,
     onChange(listener) {
       listeners.add(listener);
