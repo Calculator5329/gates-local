@@ -2,6 +2,7 @@
 // module never signals, stops or reconfigures any process it lists.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import { MIB } from "./constants.ts";
 import { FitError, type GpuSnapshot, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
@@ -23,7 +24,12 @@ export const defaultNvidiaSmi: NvidiaSmiRunner = (args) =>
     });
   });
 
-export const defaultMeminfo: MeminfoReader = () => readFile("/proc/meminfo", "utf8");
+/**
+ * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.freemem()
+ * rendered as a MemAvailable line, so one parser serves every platform.
+ */
+export const defaultMeminfo: MeminfoReader = () =>
+  process.platform === "linux" ? readFile("/proc/meminfo", "utf8") : Promise.resolve(`MemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
 
 function parseMib(field: string | undefined): number | undefined {
   if (field === undefined) return undefined;
@@ -98,6 +104,9 @@ export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () =
   try {
     [totalsText, appsText] = await Promise.all([run(GPU_TOTALS_ARGS), run(GPU_APPS_ARGS)]);
   } catch (error) {
+    // No nvidia-smi at all (for example a Windows machine with no NVIDIA GPU):
+    // zero VRAM, so the fit check plans the whole model in system memory.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, tenants: [], measuredAt: now() };
     throw new FitError("gpu-unreadable", `nvidia-smi failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   const totals = parseGpuTotals(totalsText);

@@ -48,27 +48,58 @@ export async function listLoaded(baseUrl: string, timeoutMs = 5000): Promise<Loa
 
 const key = (models: readonly ModelInfo[]) => JSON.stringify(models);
 
+type Refreshed = { models: readonly ModelInfo[]; changed: boolean };
+
 export type ModelCatalog = {
   /** Last list seen; undefined before the first successful refresh. */
   current(): readonly ModelInfo[] | undefined;
-  /** Fetch from the runtime; emits models.changed only when the list differs. */
-  refresh(): Promise<{ models: readonly ModelInfo[]; changed: boolean }>;
+  /**
+   * Fetch from the runtime; emits models.changed only when the list differs.
+   * Within minIntervalMs of the last real fetch from the same runtime, the
+   * same result comes back without a new /api/tags call, unless forced
+   * (a finished download or removal forces one).
+   */
+  refresh(options?: { force?: boolean }): Promise<Refreshed>;
   onChange(listener: Listener<readonly ModelInfo[]>): () => void;
 };
 
+export type ModelCatalogOptions = { timeoutMs?: number; minIntervalMs?: number; now?: () => number };
+
 /** `baseUrl` is read on each refresh so the catalog follows runtime changes. */
-export function createModelCatalog(baseUrl: () => string | undefined, timeoutMs = 5000): ModelCatalog {
+export function createModelCatalog(baseUrl: () => string | undefined, options: number | ModelCatalogOptions = {}): ModelCatalog {
+  const opts = typeof options === "number" ? { timeoutMs: options } : options;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+  const minIntervalMs = opts.minIntervalMs ?? 0;
+  const now = opts.now ?? Date.now;
   let models: ModelInfo[] | undefined;
+  let last: { at: number; url: string | undefined; result: Promise<Refreshed> } | undefined;
   const listeners = new Set<Listener<readonly ModelInfo[]>>();
+  /** Bumped per fetch started; only the latest one, still for the current base URL, may set `models`. */
+  let latest = 0;
+
+  const fetchNow = async (url: string | undefined): Promise<Refreshed> => {
+    const seq = ++latest;
+    const next = url ? await listModels(url, timeoutMs) : [];
+    // An older fetch (or one from the runtime before a switch) answers its own caller and changes nothing.
+    if (seq !== latest || baseUrl() !== url) return { models: next, changed: false };
+    const changed = models === undefined || key(models) !== key(next);
+    models = next;
+    if (changed) for (const l of listeners) l(next);
+    return { models: next, changed };
+  };
+
   return {
     current: () => models,
-    async refresh() {
+    refresh(how) {
       const url = baseUrl();
-      const next = url ? await listModels(url, timeoutMs) : [];
-      const changed = models === undefined || key(models) !== key(next);
-      models = next;
-      if (changed) for (const l of listeners) l(next);
-      return { models: next, changed };
+      if (how?.force !== true && last !== undefined && last.url === url && now() - last.at < minIntervalMs) return last.result;
+      const result = fetchNow(url);
+      last = { at: now(), url, result };
+      // A failed fetch is not reused.
+      result.catch(() => {
+        if (last?.result === result) last = undefined;
+      });
+      return result;
     },
     onChange(listener) {
       listeners.add(listener);

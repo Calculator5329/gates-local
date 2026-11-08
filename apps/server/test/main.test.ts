@@ -3,7 +3,8 @@
 // mode pointed at a fake Ollama. Every child spawned here is killed in
 // afterEach if a test left it running.
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -11,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { type SocketLike, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { type FakeOllama, startFakeOllama } from "../src/runtime/test-fakes.ts";
+import { type FakeOllama, startFakeOllama, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 
 const ENTRY = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const TOKEN = "a".repeat(64);
@@ -94,6 +95,18 @@ function upgrade(url: string): Promise<number | "open"> {
   });
 }
 
+/** A port nothing listens on (bound once, then released). */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as AddressInfo;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 async function fakeOllama(): Promise<FakeOllama> {
   const fake = await startFakeOllama({
     version: "0.0.7-cli-fake",
@@ -156,6 +169,21 @@ describe("server CLI", () => {
     expect(fake.requests.every((r) => r.startsWith("GET "))).toBe(true);
   });
 
+  it("a pinned URL alone is discover-only: an ollama on PATH is never run", async () => {
+    const tmp = cacheTmp();
+    const binDir = path.join(tmp, "bin");
+    const ran = path.join(tmp, "ran");
+    writeFakeBinary(path.join(binDir, "ollama"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(ran)}, "ran");\n`);
+    const s = launch(
+      { GATES_LOCAL_SERVER_TOKEN: TOKEN, GATES_LOCAL_OLLAMA_URL: `http://127.0.0.1:${await freePort()}`, PATH: `${binDir}:${process.env["PATH"] ?? ""}`, XDG_DATA_HOME: path.join(tmp, "xdg") },
+      path.join(tmp, "data"),
+    );
+    const line = await until("the runtime line", () => s.stderr.find((l) => /runtime (ready|stopped|missing|error|starting|wrong-service) /.test(l)));
+    expect(existsSync(ran)).toBe(false);
+    expect(line).toContain("runtime stopped (none)");
+    expect(s.stderr.some((l) => l.includes("runtime discover-only"))).toBe(true);
+  });
+
   it("exits on SIGTERM within 3 s", async () => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
@@ -171,6 +199,81 @@ describe("server CLI", () => {
     await until("the ready line", () => s.stdout[0]);
     s.child.kill("SIGTERM");
     expect(await withTimeout(s.exited, 3000, "exit after SIGTERM")).toEqual({ code: 0, signal: null });
+  });
+
+  it("GATES_LOCAL_OLLAMA_BINARY=none stops the binary search, so an ollama on PATH no longer reads as stopped", async () => {
+    const tmp = cacheTmp();
+    // a runnable `ollama` on PATH, and nothing listening on the pinned port
+    const bin = path.join(tmp, "bin");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, "ollama"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const port = await freePort();
+    const statusWith = async (extra: Record<string, string>, name: string) => {
+      const s = launch(
+        {
+          GATES_LOCAL_SERVER_TOKEN: TOKEN,
+          GATES_LOCAL_RUNTIME: "discover-only",
+          GATES_LOCAL_OLLAMA_URL: `http://127.0.0.1:${port}`,
+          XDG_DATA_HOME: path.join(tmp, `xdg-${name}`),
+          PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+          ...extra,
+        },
+        path.join(tmp, `data-${name}`),
+      );
+      const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
+      const ws = new WebSocket(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`);
+      cleanups.push(() => ws.terminate());
+      const client = createClient(ws as unknown as SocketLike, { timeoutMs: 5000 });
+      let status = await client.call("runtime.status", {});
+      for (const deadline = Date.now() + 5000; status.state === "starting" && Date.now() < deadline; ) {
+        await new Promise((r) => setTimeout(r, 50));
+        status = await client.call("runtime.status", {});
+      }
+      client.close();
+      return status;
+    };
+    expect((await statusWith({}, "search")).state).toBe("stopped");
+    expect((await statusWith({ GATES_LOCAL_OLLAMA_BINARY: "none" }, "none")).state).toBe("missing");
+  });
+
+  it("discover-only: runtime Retry looks again and never runs the Ollama on PATH, though nothing answers", async () => {
+    const tmp = cacheTmp();
+    // a recording `ollama` on PATH (the real one is never run), and nothing on the pinned port:
+    // the managed runtime would start this binary there
+    const bin = path.join(tmp, "bin");
+    mkdirSync(bin);
+    const record = path.join(tmp, "ollama-runs.txt");
+    writeFileSync(path.join(bin, "ollama"), `#!/bin/sh\necho "$@" >> '${record}'\nexit 1\n`, { mode: 0o755 });
+    const port = await freePort();
+    const s = launch(
+      {
+        GATES_LOCAL_SERVER_TOKEN: TOKEN,
+        GATES_LOCAL_RUNTIME: "discover-only",
+        GATES_LOCAL_OLLAMA_URL: `http://127.0.0.1:${port}`,
+        XDG_DATA_HOME: path.join(tmp, "xdg"),
+        PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+      },
+      path.join(tmp, "data"),
+    );
+    const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
+    const ws = new WebSocket(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`);
+    cleanups.push(() => ws.terminate());
+    const client = createClient(ws as unknown as SocketLike, { timeoutMs: 20_000 });
+    const retried = await client.call("runtime.retry", {});
+    await new Promise((r) => setTimeout(r, 300)); // a start would have written its line by now
+    expect(existsSync(record) ? readFileSync(record, "utf8") : "").toBe("");
+    expect(retried).toMatchObject({ state: "stopped", owner: "none" });
+    client.close();
+  }, 30_000);
+
+  it("refuses an unknown GATES_LOCAL_OLLAMA_BINARY value", async () => {
+    const tmp = cacheTmp();
+    const s = launch({ GATES_LOCAL_SERVER_TOKEN: TOKEN, GATES_LOCAL_OLLAMA_BINARY: "off", XDG_DATA_HOME: path.join(tmp, "xdg") }, path.join(tmp, "data"));
+    const exit = await withTimeout(s.exited, 5000, "exit on a bad knob");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(exit.code).toBe(2);
+    expect(s.stdout).toEqual([]);
+    expect(s.stderr.join("\n")).toContain('GATES_LOCAL_OLLAMA_BINARY must be unset or "none", got "off"');
   });
 
   it("refuses to start without the token env: non-zero exit, one stderr line, no ready line", async () => {

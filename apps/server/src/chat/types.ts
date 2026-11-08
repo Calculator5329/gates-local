@@ -20,6 +20,8 @@ export interface Message {
   model?: string;
   createdAt: number;
   stats?: MessageStats;
+  tools?: import("../../../../packages/harness/src/types.ts").ToolStep[];
+  images?: string[];
 }
 
 /** What the model is sent. Thinking from earlier turns is not resent. */

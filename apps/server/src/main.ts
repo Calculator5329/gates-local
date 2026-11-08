@@ -5,25 +5,39 @@
 // log goes to stderr. Exits on stdin EOF (parent death), SIGTERM and SIGINT.
 //
 // Knobs (environment):
-//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins
-//   GATES_LOCAL_OLLAMA_URL       use this Ollama as the external one
+//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins (the desktop app sets it)
+//   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama, and
+//                                its port as the first of the app's own ports; discover-only
+//                                (never install, start or stop one). Settings › Runtime still
+//                                applies: "app" first tries the copy this data dir's ownership
+//                                record names, at its recorded port, then the pinned port and
+//                                the nine after it, as it does on 11435..11444 without a pin
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
+//   GATES_LOCAL_OLLAMA_BINARY    "none": never look for an Ollama binary (app install, PATH), as on
+//                                a machine with none, so tests do not depend on the host
+//   GATES_LOCAL_NVIDIA_SMI       the nvidia-smi command the fit check runs (tests point it at
+//                                test/fake-ollama/nvidia-smi.ts); default "nvidia-smi"
+//   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
-import { createModelCatalog } from "./runtime/models.ts";
-import { createOllamaRuntime } from "./runtime/runtime.ts";
+import { createModelServices, type ModelServices } from "./runtime/services.ts";
+import { createSources } from "./sources/index.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
+import { createGpuLease } from "./gpu/lease.ts";
+import { createImageModule } from "./image/module.ts";
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
 const HARD_EXIT_MS = 2500;
 
-// The Vite dev client. The packaged renderer loads file://, and what Origin
-// its WebSocket upgrade carries ("file://", "null" or none) is not measured
-// yet; add it here once a real packaged Electron run shows the header.
+// The Vite dev client. The desktop app serves the built client on
+// gates-local://app and adds that origin through GATES_LOCAL_ALLOWED_ORIGINS
+// (apps/desktop/src/main.ts), so a file:// page never gets in.
 const DEFAULT_ORIGINS = ["http://127.0.0.1:5187", "http://localhost:5187"];
 
 const log = (line: string) => process.stderr.write(`[server] ${line}\n`);
@@ -59,8 +73,25 @@ async function main(): Promise<void> {
 
   const mode = process.env["GATES_LOCAL_RUNTIME"] ?? "";
   if (mode !== "" && mode !== "discover-only") die(`GATES_LOCAL_RUNTIME must be unset or "discover-only", got "${mode}"`);
-  const discoverOnly = mode === "discover-only";
+  const binary = process.env["GATES_LOCAL_OLLAMA_BINARY"] ?? "";
+  if (binary !== "" && binary !== "none") die(`GATES_LOCAL_OLLAMA_BINARY must be unset or "none", got "${binary}"`);
+  // A pinned Ollama URL stands in for the system Ollama, and its port is the
+  // first app port. "app" mode still tries the copy this data dir's ownership
+  // record names first, at whatever port it recorded, then scans the pinned
+  // port and the nine after it. So a pin keeps every probe off 11434..11444
+  // only with a fresh data dir and a pinned span clear of them, as the e2e
+  // runs have. It is also discover-only: the app never installs, starts or
+  // stops an Ollama when the URL names the one to use.
   const ollamaUrl = process.env["GATES_LOCAL_OLLAMA_URL"];
+  let pinned: URL | undefined;
+  if (ollamaUrl) {
+    try {
+      pinned = new URL(ollamaUrl);
+    } catch {
+      die(`GATES_LOCAL_OLLAMA_URL is not a URL: ${ollamaUrl}`);
+    }
+  }
+  const discoverOnly = mode === "discover-only" || pinned !== undefined;
   const extraOrigins = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "")
     .split(",")
     .map((o) => o.trim())
@@ -74,18 +105,68 @@ async function main(): Promise<void> {
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 
-  const runtime = createOllamaRuntime({
-    ...(ollamaUrl ? { externalBaseUrl: ollamaUrl } : {}),
-    allowInstall: !discoverOnly,
-  });
-  const catalog = createModelCatalog(() => runtime.baseUrl());
+  const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
+  const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
+  const fit = {
+    ...(smiCommand
+      ? {
+          runNvidiaSmi: (args: readonly string[]) =>
+            new Promise<string>((resolve, reject) =>
+              execFile(smiCommand, [...args], { timeout: 10_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+            ),
+        }
+      : {}),
+    ...(meminfoPath ? { readMeminfo: () => readFile(meminfoPath, "utf8") } : {}),
+  };
 
   let server: WsServer | undefined;
-  const app: App = createApp({
-    store,
-    runtime,
-    catalog,
+  // One lease for the process: chat turns and loads share it, image jobs hold it alone.
+  const gpuLease = createGpuLease();
+  let services: ModelServices;
+  try {
+    services = await createModelServices({
+      dataDir,
+      push: (channel, payload) => server?.push(channel, payload),
+      runtime: {
+        ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
+        ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),
+        ...(binary === "none" ? { searchBinary: false } : {}),
+      },
+      // Tests point the GPU and memory reads at fakes; the GPU status and every fit use them.
+      fit,
+      lease: gpuLease,
+      log,
+    });
+  } catch (e) {
+    store.close();
+    die(`cannot open settings in ${dataDir}: ${(e as Error).message}`, 1);
+  }
+  const { runtime, catalog } = services;
+  const image = createImageModule({
+    dataDir, store, lease: gpuLease,
     push: (channel, payload) => server?.push(channel, payload),
+    settings: () => services.settings.get(),
+    appLoadedModels: () => services.loader.appLoadedModels(),
+    // The loader forgets a model the image module unloaded (keep_alive 0).
+    onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
+    ollamaUrl: () => runtime.baseUrl(),
+  });
+  const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
+  const app: App = createApp({
+    image,
+    lease: gpuLease,
+    store,
+    sources,
+    // A turn that does not say runs tools when Settings has them on.
+    toolsEnabled: () => services.settings.get().tools,
+    // discover-only never starts Ollama: runtime Retry looks again without starting one
+    runtime: discoverOnly
+      ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover() }
+      : runtime,
+    catalog,
+    fit,
+    push: (channel, payload) => server?.push(channel, payload),
+    models: services,
     log,
   });
 
@@ -106,11 +187,12 @@ async function main(): Promise<void> {
       }
     };
     await step("cancel turns", () => app.shutdown());
+    await step("close image module", () => image.close());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());
-    // Only an app-owned Ollama that still matches its record is stopped. In
-    // discover-only mode nothing was started, so nothing is stopped either.
-    if (!discoverOnly) await step("stop runtime", () => runtime.stop());
+    // Only an app-owned Ollama this process started (and that still matches
+    // its record) is stopped. In discover-only mode nothing was started.
+    await step("close models", () => services.close({ stopRuntime: !discoverOnly }));
     process.exit(0);
   };
   process.stdin.on("end", () => void shutdown("stdin closed"));
@@ -124,6 +206,8 @@ async function main(): Promise<void> {
       token,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: app.handlers,
+      onClientCount: (n) => services.gpu.clientsChanged(n),
+      dataDir,
       log: (line) => log(`ws ${line}`),
     });
   } catch (e) {

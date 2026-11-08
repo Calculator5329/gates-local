@@ -2,7 +2,20 @@
 // a new method or channel without a sample a type error, so round-trip
 // tests that walk these tables cover every channel by construction.
 import type { Channel, MethodName, Params, Payload, ResultOf } from "./protocol.ts";
-import type { GpuStatus, ImageStatus, Message, ModelInfo, PullProgress, RuntimeStatus, Settings, Source, Thread, ToolStep } from "./shapes.ts";
+import type {
+  GpuStatus,
+  ImageStatus,
+  Message,
+  ModelInfo,
+  PullProgress,
+  RuntimeStatus,
+  Settings,
+  SetupPlan,
+  SetupProbe,
+  Source,
+  Thread,
+  ToolStep,
+} from "./shapes.ts";
 
 const thread: Thread = { id: "t1", title: "First", createdAt: 1_762_500_000_000, updatedAt: 1_762_500_001_000 };
 
@@ -69,6 +82,32 @@ const gpu: GpuStatus = {
   measuredAt: 1_762_500_005_000,
 };
 
+const probe: SetupProbe = {
+  os: { platform: "linux", release: "7.2.9", arch: "x64" },
+  cpu: { model: "AMD Ryzen 7 7800X3D", threads: 16 },
+  memory: { totalBytes: 33_000_000_000, availableBytes: 17_000_000_000 },
+  gpu,
+  diskFreeBytes: 400_000_000_000,
+  ollama: { baseUrl: "http://127.0.0.1:11434", version: "0.13.0", owner: "external", models: ["qwen3.5:9b"] },
+  comfy: {
+    baseUrl: "http://127.0.0.1:8188",
+    owner: "external",
+    modelsDir: "/home/me/ComfyUI/models",
+    devices: [{ name: "cuda:0 RTX 5070 Ti", type: "cuda", vramTotalBytes: 17_094_934_528, vramFreeBytes: 10_000_000_000 }],
+  },
+  probedAt: 1_762_500_006_000,
+};
+
+const plan: SetupPlan = {
+  text: { tier: "nvidia-16gb", model: "qwen3.5:9b", numCtx: 32768, think: true, reason: "Fits 9.7 GB free with room for 32k" },
+  image: { tier: "nvidia-16gb", model: "sdxl-lightning-4step", enabled: true, secondsPerImage: 4, reason: "Fits beside the text model when it unloads" },
+  downloads: [
+    { what: "qwen3.5:9b", bytes: 6_600_000_000, source: "ollama", installed: true },
+    { what: "sdxl_lightning_4step.safetensors", bytes: 6_940_000_000, source: "https://huggingface.co/ByteDance/SDXL-Lightning", installed: false },
+  ],
+  totalBytes: 6_940_000_000,
+};
+
 const pull: PullProgress = {
   name: "qwen3.5:14b",
   state: "downloading",
@@ -101,6 +140,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
   "runtime.status": { params: {}, result: runtime },
+  "runtime.retry": { params: {}, result: runtime },
   "fit.check": {
     params: { model: "qwen3:14b", numCtx: 32768 },
     result: {
@@ -148,11 +188,22 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "image.status": { params: {}, result: imageReady },
   "image.generate": { params: { prompt: "a gate at dusk", threadId: "t1" }, result: { jobId: "j1" } },
   "image.cancel": { params: { jobId: "j1" }, result: { cancelled: true } },
+  "setup.probe": { params: {}, result: probe },
+  "setup.plan": {
+    params: { images: false },
+    result: {
+      ...plan,
+      image: { tier: null, model: null, enabled: false, reason: "Images are off until you ask" },
+      downloads: plan.downloads.slice(0, 1),
+      totalBytes: 0,
+    },
+  },
 };
 
 /** One sample per channel; chat.event gets one per ChatEvent variant. */
 export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "chat.event": [
+    { turnId: "turn-1", threadId: "t1", event: { type: "start", model: "qwen3:14b", userMessage } },
     { turnId: "turn-1", threadId: "t1", event: { type: "thinking", text: "greet" } },
     { turnId: "turn-1", threadId: "t1", event: { type: "delta", text: "hi " } },
     { turnId: "turn-1", threadId: "t1", event: { type: "done", message: assistantMessage, stopReason: "stop" } },

@@ -1,0 +1,5 @@
+Hand-written fixture based on the Qwen/Hermes tool-call format, not a recorded model run.
+<think>I could use <tool_call>{"name":"shell","arguments":{"command":"bad"}}</tool_call> but should read first.</think>
+<tool_call>
+{"name":"read","arguments":{"path":"/library/docs","limit":"20"}}
+</tool_call>

@@ -62,6 +62,14 @@ describe("findOnPath", () => {
     expect(findOnPath({ PATH: `${a}:${b}` })).toBe(path.join(b, "ollama"));
     expect(findOnPath({ PATH: a })).toBeUndefined();
   });
+
+  it("R-13: on Windows only ollama.exe counts; an ollama.cmd shim is not found", () => {
+    const env = { PATH: "C:\\Shims;C:\\Tools", PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+    const files = new Set(["C:\\Shims\\ollama.cmd", "C:\\Shims\\ollama.bat"]);
+    expect(findOnPath(env, "ollama", "win32", (f) => files.has(f))).toBeUndefined();
+    files.add("C:\\Tools\\ollama.exe");
+    expect(findOnPath(env, "ollama", "win32", (f) => files.has(f))).toBe("C:\\Tools\\ollama.exe");
+  });
 });
 
 describe("probe", () => {

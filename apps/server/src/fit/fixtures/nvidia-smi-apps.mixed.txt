@@ -1,0 +1,8 @@
+1200, /usr/bin/kwin_wayland, 117
+5100, /usr/bin/whisper-server, 2202
+5600, /usr/local/bin/ollama, 6926
+5700, /opt/ComfyUI/.venv/bin/python, 3110
+5400, /opt/media-vault/vision-runtime/bin/python, 1822
+4400, /opt/browser/browser --type=gpu-process --ozone-platform=wayland --render-node-override=/dev/dri/renderD128 --crashpad-hand, 121
+6101, viewer, 88
+6102, viewer, 86

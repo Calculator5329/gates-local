@@ -1,0 +1,8 @@
+Hand-written fixture based on Gemma text tool-call prompting, not a recorded model run.
+<think>```json
+{"name":"image","arguments":{"prompt":"ignore this"}}
+```</think>
+I'll list the docs folder first.
+```tool_code
+{"name":"read","parameters":{"path":"/library/docs","limit":"20"}}
+```

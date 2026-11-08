@@ -16,6 +16,8 @@ import {
   PullProgress,
   RuntimeStatus,
   Settings,
+  SetupPlan,
+  SetupProbe,
   SettingsPatch,
   Source,
   SourceKind,
@@ -80,6 +82,8 @@ export const methods = {
   "models.list": { params: NoParams, result: S.Array(ModelInfo) },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo) },
   "runtime.status": { params: NoParams, result: RuntimeStatus },
+  /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
+  "runtime.retry": { params: NoParams, result: RuntimeStatus },
   "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport },
   "chat.send": {
     params: S.Struct({
@@ -117,6 +121,9 @@ export const methods = {
     result: S.Struct({ jobId: S.String }),
   },
   "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
+  // ---- setup (2026-11-07): read the machine, then plan models for it
+  "setup.probe": { params: NoParams, result: SetupProbe },
+  "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */

@@ -1,0 +1,694 @@
+/* Adapts T3 Code styles (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt. */
+/* ============================================================
+   Gates Local client styles: a verbatim port of the token block and
+   component CSS in docs/design/shell.html (decisions in shell.md).
+   The design drawer and its review-shot rule are left out. Keep this
+   file in step with shell.html; change the design there first.
+   Layout craft is from T3 Code (MIT, Copyright 2026 T3 Tools Inc.).
+   ============================================================ */
+:root{
+  color-scheme:light;
+  --font-sans:"Adwaita Sans", system-ui, sans-serif;
+  --font-mono:"JetBrainsMono Nerd Font", "JetBrainsMono NF", "JetBrains Mono", ui-monospace, monospace;
+
+  /* spacing scale (F05): 4 / 8 / 12 / 16 / 24 / 32 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+
+  /* geometry */
+  --r-sm:6px; --r-md:8px; --r-lg:10px; --r-xl:12px;
+  --r-ctl:8px; --r-composer:20px; --r-bubble:18px;
+  --header-h:52px; --row-h:30px; --sb-w:256px;
+  --col:720px;                              /* prose column (F04) */
+  --composer-w:calc(var(--col) + 32px);     /* composer text lines up with the prose edge */
+
+  /* light */
+  --background:#fcfcfc;
+  --sidebar:#ededed;              /* F39: visibly apart from the pane */
+  --card:#ffffff;
+  --popover:#ffffff;
+  --composer-surface:#ffffff;
+  --foreground:#171717;
+  --prose:#262626;
+  --muted-foreground:#4d4d4d;     /* secondary text, one step darker (F39), ~8.4:1 on background */
+  --placeholder:#737373;
+  --faint:#a6a6a6;                /* decoration only, never text that matters */
+  --hover:rgb(0 0 0 / 5%);
+  --selected:rgb(0 0 0 / 10%);
+  --sb-selected:rgb(0 0 0 / 11%); /* the selected sidebar row reads on the gray sidebar (F39) */
+  --border:rgb(0 0 0 / 9%);
+  --border-strong:rgb(0 0 0 / 15%);
+  --message-surface:#e4e4e7;      /* F39 */
+  --code-bg:#f1f1f1;
+  --track:#e2e2e2;
+  --composer-outline:rgb(0 0 0 / 10%);
+  --composer-shadow:0 12px 28px -18px rgb(0 0 0 / 35%);
+  --popover-border:rgb(0 0 0 / 10%);
+  --popover-shadow:0 16px 40px -18px rgb(0 0 0 / 45%);
+  --scroll-thumb:rgb(0 0 0 / 14%);
+  --scroll-thumb-hover:rgb(0 0 0 / 24%);
+
+  /* green: ready, runs on GPU, send, approve. Nothing else. (F02) */
+  --green:hsl(150 62% 38%);
+  --green-fg:hsl(152 72% 26%);
+  --on-green:#03140b;
+  --green-surface:color-mix(in srgb, var(--green) 12%, transparent);
+  /* amber: pending, not ready yet, uses system memory */
+  --amber:#d97706;
+  --amber-fg:#9a4d00;
+  --amber-surface:color-mix(in srgb, var(--amber) 12%, transparent);
+  /* red: not enough memory, wrong service, deleted diff lines, destructive menu items */
+  --red:#dc2626;
+  --red-fg:#b91c1c;
+  --red-surface:color-mix(in srgb, var(--red) 9%, transparent);
+
+  /* send / stop / primary */
+  --send-off-bg:#e4e4e4; --send-off-fg:#a3a3a3;
+  --stop-bg:#262626; --stop-fg:#fafafa;
+  --primary-bg:#171717; --primary-fg:#fafafa; --primary-hover:#333333;
+
+  /* GPU bar: two grays at least 25% lightness apart for other apps; green is the chat model (F16, F48) */
+  --seg-whisper:#666666;
+  --seg-occupant:#bdbdbd;
+  --seg-chat:var(--green);
+  --turn-gap:44px;                /* F40: 8 px to the action row, 24 px row, 12 px below */
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --background:#0a0a0a; --sidebar:#000000; --card:#111111; --popover:#161616; --composer-surface:#141414;
+    --foreground:#f2f2f2; --prose:#dadada; --muted-foreground:#9a9a9a; --placeholder:#858585; --faint:#5e5e5e;
+    --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%);
+    --border:rgb(255 255 255 / 8%); --border-strong:rgb(255 255 255 / 14%);
+    --message-surface:#1d1d1d; --code-bg:#1a1a1a; --track:#2e2e2e;
+    --composer-outline:rgb(255 255 255 / 8%); --composer-shadow:none;
+    --popover-border:rgb(255 255 255 / 10%); --popover-shadow:0 18px 44px -18px rgb(0 0 0 / 85%);
+    --scroll-thumb:rgb(255 255 255 / 10%); --scroll-thumb-hover:rgb(255 255 255 / 18%);
+    --green:hsl(150 58% 48%); --green-fg:hsl(150 62% 58%); --on-green:#03140b;
+    --green-surface:color-mix(in srgb, var(--green) 15%, transparent);
+    --amber:#f59e0b; --amber-fg:#fbbf24; --amber-surface:color-mix(in srgb, var(--amber) 14%, transparent);
+    --red:#ef4444; --red-fg:#f87171; --red-surface:color-mix(in srgb, var(--red) 15%, transparent);
+    --send-off-bg:#262626; --send-off-fg:#666666;
+    --stop-bg:#e6e6e6; --stop-fg:#0a0a0a;
+    --primary-bg:#ededed; --primary-fg:#0a0a0a; --primary-hover:#ffffff;
+    --seg-whisper:#b3b3b3; --seg-occupant:#575757; --sb-selected:rgb(255 255 255 / 12%);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --background:#0a0a0a; --sidebar:#000000; --card:#111111; --popover:#161616; --composer-surface:#141414;
+  --foreground:#f2f2f2; --prose:#dadada; --muted-foreground:#9a9a9a; --placeholder:#858585; --faint:#5e5e5e;
+  --hover:rgb(255 255 255 / 6%); --selected:rgb(255 255 255 / 12%);
+  --border:rgb(255 255 255 / 8%); --border-strong:rgb(255 255 255 / 14%);
+  --message-surface:#1d1d1d; --code-bg:#1a1a1a; --track:#2e2e2e;
+  --composer-outline:rgb(255 255 255 / 8%); --composer-shadow:none;
+  --popover-border:rgb(255 255 255 / 10%); --popover-shadow:0 18px 44px -18px rgb(0 0 0 / 85%);
+  --scroll-thumb:rgb(255 255 255 / 10%); --scroll-thumb-hover:rgb(255 255 255 / 18%);
+  --green:hsl(150 58% 48%); --green-fg:hsl(150 62% 58%); --on-green:#03140b;
+  --green-surface:color-mix(in srgb, var(--green) 15%, transparent);
+  --amber:#f59e0b; --amber-fg:#fbbf24; --amber-surface:color-mix(in srgb, var(--amber) 14%, transparent);
+  --red:#ef4444; --red-fg:#f87171; --red-surface:color-mix(in srgb, var(--red) 15%, transparent);
+  --send-off-bg:#262626; --send-off-fg:#666666;
+  --stop-bg:#e6e6e6; --stop-fg:#0a0a0a;
+  --primary-bg:#ededed; --primary-fg:#0a0a0a; --primary-hover:#ffffff;
+  --seg-whisper:#b3b3b3; --seg-occupant:#575757; --sb-selected:rgb(255 255 255 / 12%);
+}
+
+/* ---------- base ---------- */
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{height:100%;margin:0}
+body{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input{font:inherit;color:inherit}
+button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid color-mix(in srgb,var(--foreground) 55%,transparent);outline-offset:1px}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover)}
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) transparent}
+.ic{width:16px;height:16px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ic.s14{width:14px;height:14px}.ic.s12{width:12px;height:12px}.ic.s18{width:18px;height:18px}
+.mono{font-family:var(--font-mono)}
+.tab{font-variant-numeric:tabular-nums}
+.spin{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,40%{opacity:1}50%,90%{opacity:.4}100%{opacity:1}}
+@keyframes popin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+
+/* ---------- shell ---------- */
+.app{display:flex;height:100vh}
+.sb{width:var(--sb-w);flex:none;display:flex;flex-direction:column;background:var(--sidebar);border-right:1px solid var(--border);min-height:0}
+.sb-head{height:var(--header-h);flex:none;display:flex;align-items:center;gap:10px;padding:0 16px}
+.mark{width:20px;height:20px;flex:none;color:var(--foreground)}
+.wordmark{font-size:14px;font-weight:600;letter-spacing:-.005em}
+.sb-body{flex:1;min-height:0;display:flex;flex-direction:column}
+.sb-actions{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+.sb-act{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);text-align:left;width:100%;transition:background-color .12s}
+.sb-act .ic{color:var(--muted-foreground)}
+.sb-act:hover,.sb-act.on{background:var(--hover)}
+.sb-act.on{background:var(--selected)}
+.sb-act .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-act .ks{font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.sb-search{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.sb-search .ic{color:var(--muted-foreground)}
+.sb-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:14px}
+.sb-search input::placeholder{color:var(--placeholder)}
+.sb-list{flex:1;overflow-y:auto;padding:0 8px 8px}
+.sb-group{padding:16px 10px 4px;font-size:13px;font-weight:500;color:var(--muted-foreground)}   /* one section-label style: 13 px, 500, muted (sweep) */
+.sb-group:first-child{padding-top:8px}
+.sb-row{width:100%;height:var(--row-h);display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:var(--r-ctl);font-size:13.5px;color:color-mix(in srgb,var(--foreground) 78%,transparent);text-align:left;transition:background-color .12s,color .12s}
+.sb-row:hover{background:var(--hover);color:var(--foreground)}
+.sb-row.on{background:var(--sb-selected);color:var(--foreground);font-weight:500}
+.sb-row .t{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sb-row .ago{font-size:12px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums;flex:none}
+/* one working dot, one color in every phase: it breathes in size, never in opacity (F50) */
+.sb-row .live{width:7px;height:7px;border-radius:50%;background:var(--foreground);animation:breathe 1.4s ease-in-out infinite;flex:none;margin-right:2px}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(.6)}}
+.sb-empty{padding:12px 10px;font-size:13px;color:var(--muted-foreground)}
+.sb-foot{flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.rt{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--muted-foreground);width:100%;text-align:left;transition:background-color .12s}
+.rt:hover{background:var(--hover)}
+.rt .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.rt .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt b{font-weight:500;color:var(--foreground)}
+.rt .pct{font-size:12px;color:var(--foreground);font-variant-numeric:tabular-nums}
+.rt>.ic{width:14px;height:14px;margin:0 -3px 0 -3px;color:var(--muted-foreground)}
+.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.run{background:var(--amber);animation:pulse 1.6s infinite steps(6)}
+.sb-set{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);width:100%;text-align:left;transition:background-color .12s}
+.sb-set .ic{color:var(--muted-foreground)}
+.sb-set:hover{background:var(--hover)}
+.sb-set.on{background:var(--selected)}
+.sb-set .ks{margin-left:auto;font-size:12px;color:var(--muted-foreground);display:inline-flex;align-items:baseline;gap:5px}
+.sb-set .ks b{font-size:14px;font-weight:600;line-height:1}   /* the comma key reads as a key (F52) */
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--background);position:relative}
+.hdr{height:var(--header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 12px 0 24px;border-bottom:1px solid var(--border)}
+.hdr h2{margin:0;font-size:14px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr h2.muted{color:var(--muted-foreground);font-weight:400}
+.hdr .vr{width:1px;height:16px;background:var(--border);margin:0 6px}
+.ibtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-ctl);color:var(--muted-foreground);transition:background-color .12s,color .12s;flex:none}
+.ibtn:hover,.ibtn[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
+.ibtn.xs{width:24px;height:24px;border-radius:var(--r-sm)}   /* 24 px hit targets (F40) */
+.work{flex:1;min-height:0;display:flex}
+.stage{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-direction:column}
+/* fit details docked beside the thread: it narrows the thread, never covers it (F17b) */
+.fpanel{width:360px;flex:none;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--background);animation:fadein .15s ease-out}
+.fpn-h{height:var(--header-h);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;border-bottom:1px solid var(--border)}
+.fpn-h .fp-h{flex:1;min-width:0}
+.fpn-h .fp-gpu{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+.fpn-h .fp-t{line-height:1.3}
+.fpn-b{flex:1;min-height:0;overflow-y:auto;padding:16px}
+.tl{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable both-edges;padding:0 24px;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px);mask-image:linear-gradient(to bottom,transparent 0,#000 20px)}
+.col{max-width:var(--col);margin:0 auto;padding:32px 0 24px}
+
+/* ---------- timeline (F04 F05 F10 F11 F12) ---------- */
+.turn{animation:fadein .18s ease-out}
+/* A long thread (Timeline's LONG_THREAD) opens in one frame: turns out of view skip style, layout
+   and paint until they scroll near it (the 400-message perf spec measured 57-91 ms of style and
+   layout in one task without this). The remembered size (auto) keeps the scrollbar steady once a
+   turn has been seen. Short threads skip it: containment snaps each turn's fractional line
+   positions to whole pixels, which moves text by a pixel against the design. */
+.col.long .turn{content-visibility:auto;contain-intrinsic-size:auto 120px}
+/* F40: the same gap after every turn. A finished reply's action row is the first 32 px of its gap
+   (8 px under the text, a 24 px row), so the next turn adds only the remaining 12 px */
+.turn+.turn{margin-top:var(--turn-gap)}
+.turn.a.done+.turn{margin-top:calc(var(--turn-gap) - var(--s2) - 24px)}
+.u-row{display:flex;justify-content:flex-end;align-items:flex-end;gap:var(--s2)}
+.bubble{max-width:85%;border-radius:var(--r-bubble);background:var(--message-surface);color:var(--foreground);padding:10px 16px;font-size:15px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.u-act{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .15s;padding-bottom:8px}
+.u-act .tm{font-size:12px;color:var(--muted-foreground);margin-right:4px;font-variant-numeric:tabular-nums}
+.turn.u:hover .u-act,.u-act:focus-within{opacity:1}
+/* keyboard focus on a turn shows the same actions as hover (F12b); mouse clicks do not pin them */
+.turn{border-radius:var(--r-md)}
+.turn:focus{outline:none}
+.turn.a:focus-visible{outline:2px solid color-mix(in srgb,var(--foreground) 35%,transparent);outline-offset:8px}
+/* a user turn rings its bubble, not the empty width beside it */
+.turn.u:focus-visible{outline:none}
+.turn.u:focus-visible .bubble{outline:2px solid color-mix(in srgb,var(--foreground) 35%,transparent);outline-offset:3px}
+.turn.u:focus-visible .u-act,.turn.u:has(:focus-visible) .u-act{opacity:1}
+.turn.a:focus-visible .a-act,.turn.a:has(:focus-visible) .a-act{opacity:1}
+.a{min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
+/* F40: 8 px under the reply (the .a gap), 24 px tall, buttons 24 px; metrics in the one meta slot */
+.a-act{display:flex;align-items:center;gap:2px;height:24px;margin:0 0 0 -4px;opacity:0;transition:opacity .15s}
+.turn.a:hover .a-act,.a-act:focus-within{opacity:1}
+.a-act .meta{font-size:12px;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.think{display:inline-flex;align-items:center;gap:8px;font-size:13px;line-height:24px;color:var(--muted-foreground);padding:0 8px 0 2px;border-radius:var(--r-sm);align-self:flex-start;transition:color .12s,background-color .12s}
+.think:hover{color:var(--foreground);background:var(--hover)}
+.think .th-i{width:20px;display:flex;justify-content:center;flex:none}
+/* one disclosure convention for thought and tool rows: leading icon says what, trailing chevron opens (F24) */
+.think .th-i .ic{width:15px;height:15px}
+.think .th-x{display:flex;align-items:center}
+.think .th-x .ic{width:14px;height:14px;transition:transform .2s}
+.think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
+.think-body{display:none;margin:0 0 4px 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground)}
+.think[aria-expanded="true"]+.think-body{display:block}
+
+/* tool step row: status at left, plain summary, meta beside it (F10) */
+/* F52: the row and its expanded card sit exactly on the prose column, no overhang either side */
+.wr{display:flex;flex-direction:column;border-radius:var(--r-md);padding:2px 8px 2px 2px;margin:0;cursor:pointer;transition:background-color .12s;align-self:stretch}
+.wr:hover{background:var(--hover)}
+.wr-line{display:flex;align-items:center;gap:8px;font-size:14px;line-height:24px;user-select:none;min-width:0;flex-wrap:wrap;row-gap:0}
+.wr-st{width:20px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);flex:none}
+.wr-st .ic{width:15px;height:15px}
+.wr-st.wait{color:var(--amber-fg)}
+.wr-h{color:var(--foreground);font-weight:500}
+.wr-m{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
+.wr-m.warn{color:var(--amber-fg)}
+.wr-x{display:flex;align-items:center;color:var(--muted-foreground)}
+.wr-x .ic{width:14px;height:14px;transition:transform .2s}
+.wr[aria-expanded="true"] .wr-x .ic{transform:rotate(180deg)}
+.wr-body{display:none;margin:6px 0 6px 11px;border-left:1px solid var(--border);padding:2px 0 2px 18px;cursor:default}
+.wr[aria-expanded="true"] .wr-body{display:block}
+.cmd{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--foreground);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 10px}
+.cmd span{color:var(--muted-foreground)}
+.res{border-collapse:collapse;font-family:var(--font-mono);font-size:12.5px;line-height:1.7}
+.res th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:0 24px 2px 0}
+.res td{padding:1px 24px 1px 0;color:var(--foreground)}
+.res-note{font-size:12px;color:var(--muted-foreground);margin-top:8px;font-variant-numeric:tabular-nums}
+.out{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--muted-foreground);white-space:pre-wrap;margin:0}
+
+/* the one live status row at the end of a streaming turn (F11) */
+.working{display:flex;align-items:center;gap:8px;font-size:14px;line-height:24px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.working .ic{width:15px;height:15px}
+.working .ph{color:var(--foreground)}
+.working .el{margin-left:-4px}
+.stopped{display:flex;align-items:center;gap:12px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
+/* F56: quiet text actions inside a status line: muted, underline on hover and focus */
+.qa{font-size:13px;padding:0 4px;margin:0 -4px;color:var(--muted-foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px;border-radius:var(--r-sm);white-space:nowrap;transition:color .12s,text-decoration-color .12s}
+.qa:hover,.qa:focus-visible{color:var(--foreground);text-decoration-color:currentColor}
+.prog-l .qa{margin-left:auto}
+/* F43b: a message waiting for setup: a muted clock line under the bubble, right-aligned.
+   F61: the line carries its own quiet "Cancel send", 12 px after the status like Retry on a stopped reply */
+.u-q{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
+.u-qs{display:inline-flex;align-items:center;gap:6px}
+.turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+/* F50: a text caret at the stream head until the turn ends */
+.caret{display:inline-block;width:2px;height:1.05em;margin-left:2px;vertical-align:-.17em;background:var(--foreground);border-radius:1px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* markdown */
+.md{font-size:15px;line-height:1.65;color:var(--prose);overflow-wrap:anywhere;margin-top:var(--s1)}
+.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}
+.md p,.md ul,.md ol,.md pre,.md table{margin:10px 0}
+.md ul,.md ol{padding-left:22px}
+.md li+li{margin-top:4px}
+.md strong{color:var(--foreground);font-weight:600}
+.md em{color:var(--foreground)}
+.md code{font-family:var(--font-mono);font-size:.84em;background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:5px;padding:.1em .38em;color:var(--foreground)}
+.md table{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.md th{text-align:left;font-weight:500;color:var(--foreground);border-bottom:1px solid var(--border);padding:6px 24px 6px 0}
+.md td{border-bottom:1px solid var(--border);padding:6px 24px 6px 0}
+.md td.n,.md th.n{text-align:right}
+
+/* empty state (F09) */
+.draft{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;padding:24px 24px 9vh}
+.draft-in{width:100%;max-width:var(--composer-w);margin:0 auto}
+.hero{font-size:24px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px;text-align:center}
+.hero-sub{font-size:15px;color:var(--muted-foreground);text-align:center;margin:0 0 24px}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:16px}
+.card{text-align:left;border-radius:var(--r-xl);background:transparent;box-shadow:inset 0 0 0 1px var(--border);padding:14px 16px;transition:background-color .12s,box-shadow .12s;display:flex;align-items:flex-start;gap:12px}
+.card:hover{background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.card>.ic{color:var(--muted-foreground);margin-top:2px}
+.card .ct{display:block;font-size:14px;font-weight:500;color:var(--foreground)}
+.card .cd{display:block;font-size:13px;color:var(--muted-foreground);line-height:1.5;margin-top:2px}
+.cards.c3{grid-template-columns:repeat(3,1fr)}        /* three cards sit in one row, never 2 + an orphan */
+/* F43: while chat is blocked the cards are inert: dimmed, no hover, not clickable */
+.cards.off .card{opacity:.42;pointer-events:none}
+/* F47: setup lives in quiet links under the cards, not in cards that can't work yet */
+.card-links{display:flex;justify-content:center;gap:24px;margin-top:16px}
+.card-links:empty{display:none}
+
+/* ---------- composer (F01 F07 F08 F13) ---------- */
+.cw{flex:none;padding:0 24px 16px}
+.draft .cw{padding:0}
+.composer{max-width:var(--composer-w);margin:0 auto;border-radius:var(--r-composer);background:var(--composer-surface);box-shadow:inset 0 0 0 1px var(--composer-outline),var(--composer-shadow);transition:box-shadow .15s;position:relative}
+.composer:focus-within{box-shadow:inset 0 0 0 1px var(--border-strong),var(--composer-shadow)}
+.ta{display:block;width:100%;border:0;outline:0;background:transparent;resize:none;color:var(--foreground);font:inherit;font-size:15px;line-height:24px;padding:14px 16px 6px;min-height:44px;max-height:220px;overflow-y:auto}
+.ta::placeholder{color:var(--placeholder)}
+.att{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 0}
+.att:empty{display:none}
+.chipf{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 4px 0 10px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px}
+.chipf .ic{color:var(--muted-foreground)}
+.chipf small{font-size:12px;color:var(--muted-foreground)}
+.cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
+.cf-l{display:flex;align-items:center;gap:2px;min-width:0}
+.cf-r{display:flex;align-items:center;gap:8px;flex:none}
+.ctl{height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--muted-foreground);white-space:nowrap;transition:background-color .12s,color .12s,opacity .15s}
+.ctl:hover,.ctl[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
+.ctl.sq{width:30px;padding:0;justify-content:center}
+.ctl .chev{width:14px;height:14px;margin:0 -2px;opacity:.8}
+.ctl .vd{width:7px;height:7px;border-radius:50%;flex:none}
+.vd.gpu{background:var(--green)}.vd.spill{background:var(--amber)}.vd.no{background:var(--red)}.vd.off{background:var(--faint)}
+/* F35: the one verdict label: a dot plus the label in its color; detail after it is muted */
+.vl{display:inline-flex;align-items:center;gap:8px;color:var(--green-fg);white-space:nowrap}
+.vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
+.vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
+.vdet{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.ctl .vtxt.spill{color:var(--amber-fg)}.ctl .vtxt.no{color:var(--red-fg)}
+/* Ethan's pick, 2026-11-07 (replaces F38/F38b's two treatments): Thinking and Image are pills.
+   On: a filled pill, label at foreground. Off: the same pill greyed out, with the same label (never
+   "Thinking off"); its outline stays, so it still reads as a button. The tooltip says on or off. */
+.pill{height:30px;display:inline-flex;align-items:center;gap:7px;padding:0 12px 0 10px;border-radius:999px;font-size:14px;color:var(--foreground);margin-left:6px;transition:background-color .12s,color .12s,box-shadow .12s}
+.pill .ic{width:15px;height:15px}
+.pill[aria-pressed="true"]{background:var(--selected)}
+.pill[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--foreground) 16%,transparent)}
+.pill[aria-pressed="false"]{color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.pill[aria-pressed="false"]:hover{color:var(--foreground);background:var(--hover)}
+.mi .chk{display:none}
+.mi[aria-checked="true"] .chk{display:block;margin-left:auto;align-self:center;color:var(--foreground)}
+/* F43: every composer control dims the same while chat is blocked */
+.composer.blocked .gate,.composer.blocked .gate:hover{color:var(--faint);background:transparent}
+.composer.blocked .gate .lead,.composer.blocked .gate .plbl{opacity:1}
+.composer.blocked .pill.gate{box-shadow:inset 0 0 0 1px var(--border)}
+/* F37b: the context meter is a chip in the chip cluster: "Context 60% used", tokens in the tooltip; hidden below half and on a new thread */
+.meter{height:30px;padding:0 10px;margin-left:2px;border-radius:var(--r-ctl);display:inline-flex;align-items:center;gap:5px;font-size:14px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap;transition:background-color .12s,color .12s}
+.meter:hover{background:var(--hover);color:var(--foreground)}
+.meter.hi{color:var(--amber-fg)}
+/* send: gray disabled disc, solid green with a black arrow when ready, neutral stop (F02) */
+.send{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--green);color:var(--on-green);transition:transform .15s,background-color .15s,color .15s}
+.send:hover{transform:scale(1.05)}
+.send:disabled{background:var(--send-off-bg);color:var(--send-off-fg);cursor:default;transform:none}
+.send.stop{background:var(--stop-bg);color:var(--stop-fg)}
+.send .sqr{width:10px;height:10px;border-radius:2px;background:currentColor;display:block}
+
+/* approval dock above a live composer (F13) */
+.dock{display:none;border-bottom:1px solid var(--border);padding:14px 16px 12px;animation:fadein .18s}
+.composer.pending .dock{display:block}
+.dk-h{display:flex;align-items:center;gap:10px;min-width:0}
+/* F41: "Waiting for approval", sentence case, amber dot */
+.dk-k{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:var(--foreground)}
+.dk-k .dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:none}
+.dk-t{font-size:14px;color:var(--muted-foreground)}
+.dk-f{font-family:var(--font-mono);font-size:12.5px;color:var(--muted-foreground);cursor:default}
+.dk-n{margin-left:auto;font-size:12.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
+.diff{margin-top:12px;border-radius:var(--r-lg);background:color-mix(in srgb,var(--background) 70%,transparent);box-shadow:inset 0 0 0 1px var(--border);overflow:hidden}
+.diff pre{margin:0;padding:8px 0;font-family:var(--font-mono);font-size:13px;line-height:1.7;overflow-x:auto}
+.diff .ln{display:block;padding:0 12px;white-space:pre}
+.diff .ln.add{background:var(--green-surface);color:var(--foreground)}
+.diff .ln.del{background:var(--red-surface);color:var(--muted-foreground)}
+.diff .ln .g{display:inline-block;width:18px;color:var(--muted-foreground)}
+.diff .ln.add .g{color:var(--green-fg)}.diff .ln.del .g{color:var(--red-fg)}
+.dk-a{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px}
+/* plain hint text, never an input-looking line: the composer below is the one input (F41) */
+.dk-a .hint{font-size:13px;color:var(--muted-foreground);margin-right:auto}
+
+/* buttons */
+.btn{height:30px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 12px;border-radius:var(--r-ctl);font-size:13.5px;font-weight:500;border:1px solid transparent;transition:background-color .12s,border-color .12s,color .12s;white-space:nowrap}
+.btn.primary{background:var(--primary-bg);color:var(--primary-fg)}
+.btn.primary:hover{background:var(--primary-hover)}
+.btn.primary:disabled{opacity:.45;cursor:default}
+.btn.approve{background:var(--green);color:var(--on-green)}
+.btn.approve:hover{background:color-mix(in srgb,var(--green) 88%,#fff)}
+.btn.outline{border-color:var(--border-strong);color:var(--foreground)}
+.btn.outline:hover{background:var(--hover)}
+/* F59: an outline button with nothing to act on yet: muted, no hover */
+.btn.outline:disabled,.btn.outline:disabled:hover{color:var(--faint);border-color:var(--border);background:transparent;cursor:default}
+.btn.outline.pressed{background:var(--selected);border-color:var(--border-strong)}
+.btn.ghost{color:var(--muted-foreground)}
+.btn.ghost:hover{background:var(--hover);color:var(--foreground)}
+.btn.lg{height:40px;padding:0 18px;font-size:15px;border-radius:var(--r-lg)}
+.link{color:var(--muted-foreground);font-size:14px;text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px;transition:color .12s,text-decoration-color .12s}
+.link:hover{color:var(--foreground);text-decoration-color:currentColor}
+
+/* ---------- runtime banner: neutral box, neutral gray progress (F01, F02b) ---------- */
+.banner-slot{flex:none;padding:0 0 8px}
+.draft-in .banner-slot{padding:0 0 12px}
+.banner-slot:empty{display:none}
+.banner{position:relative;display:flex;align-items:flex-start;gap:12px;max-width:var(--composer-w);margin:0 auto;border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--card);padding:14px 16px;font-size:14px;animation:popin .18s ease-out}
+.banner>.ic{color:var(--muted-foreground);margin-top:2px}
+.banner>.ic.warn{color:var(--amber-fg)}.banner>.ic.err{color:var(--red-fg)}
+.banner .bt{font-weight:500}
+.banner .bm{color:var(--muted-foreground);margin-top:2px}
+.banner .bm .mono{font-size:12.5px;color:var(--foreground)}
+.banner .ba{display:flex;gap:8px;margin-top:12px}
+/* the one tooltip-trigger style: a dotted underline only on text that opens a tooltip on hover and focus (F44) */
+.tipd{text-decoration:underline dotted;text-decoration-color:var(--faint);text-underline-offset:3px;cursor:default}
+.tipd:hover,.tipd:focus-visible{text-decoration-color:currentColor}
+.prog{height:6px;border-radius:999px;background:var(--track);overflow:hidden;margin-top:12px}
+.prog i{display:block;height:100%;background:var(--muted-foreground);border-radius:999px;transition:width .4s ease-out}
+.prog-l{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted-foreground);margin-top:8px;font-variant-numeric:tabular-nums}
+/* F43: setup is two steps with one overall ETA; the active step has neutral progress, the next is muted */
+.steps{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.step-h{display:flex;align-items:baseline;gap:12px;font-size:14px;font-variant-numeric:tabular-nums}
+.step-h .sn{font-weight:500;display:inline-flex;align-items:center;gap:8px}
+.step-h .sz{margin-left:auto;color:var(--muted-foreground);font-size:13px}
+.step .prog{margin-top:8px}
+.step.next .step-h{color:var(--muted-foreground)}
+.step.next .step-h .sn{font-weight:400}
+.steps+.prog-l{margin-top:12px;justify-content:flex-start}
+
+/* ---------- popovers ---------- */
+.pop{position:fixed;z-index:50;display:none;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-xl);box-shadow:var(--popover-shadow)}
+.pop.open{display:block;animation:popin .12s ease-out}
+.menu{min-width:240px;padding:4px}
+.mi{width:100%;display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:var(--r-md);text-align:left;transition:background-color .1s}
+.mi:hover{background:var(--hover)}
+.mi .ic{color:var(--muted-foreground);margin-top:2px}
+.mi b{display:block;font-size:14px;font-weight:500}
+.mi small{display:block;font-size:12.5px;color:var(--muted-foreground);margin-top:1px}
+.mi.danger b,.mi.danger .ic{color:var(--red-fg)}
+.mi .on{margin-left:auto;font-size:12px;color:var(--foreground);align-self:center}
+.msep{height:1px;background:var(--border);margin:4px -4px}
+/* model picker (F15) */
+#picker{width:472px}
+.pk-h{padding:8px 8px 0}
+.pk-hin{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:0 4px 8px}
+.pk-hin .ic{color:var(--muted-foreground)}
+.pk-hin input{flex:1;min-width:0;height:30px;border:0;outline:0;background:transparent;font-size:14px}
+.pk-hin input::placeholder{color:var(--placeholder)}
+/* F36: the picker shows which context the fit is for; the control lives in the GPU panel and Settings */
+.pk-cap{font-size:13px;color:var(--muted-foreground);white-space:nowrap;font-variant-numeric:tabular-nums}
+.mini-seg{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;flex:none;box-shadow:inset 0 0 0 1px var(--border)}
+/* sweep: the panel's context control has the same size as Settings' (seg2): 28 px buttons, 13.5 px text */
+.mini-seg button{height:28px;padding:0 12px;border-radius:var(--r-sm);font-size:13.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;transition:color .12s,background-color .12s}
+.mini-seg button:hover{color:var(--foreground);background:var(--hover)}
+.mini-seg button.on{background:var(--popover);color:var(--foreground);box-shadow:0 0 0 1px var(--border-strong)}
+/* F55: the first view always ends between rows (sizePkList trims max-height to the last whole row),
+   the list keeps 8 px under its last row, and the thumb shows whenever the list overflows */
+/* the thumb is drawn by the page (.pk-sb), so it shows even where the platform hides scrollbars */
+.pk-wrap{position:relative}
+.pk-list{position:relative;max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px 4px 8px;scrollbar-width:none}
+.pk-wrap:has(.pk-sb.on) .pk-list{padding-right:12px}
+.pk-list::-webkit-scrollbar{display:none}
+.pk-sb{position:absolute;top:4px;right:3px;bottom:4px;width:4px;pointer-events:none;display:none}
+.pk-sb.on{display:block}
+.pk-sb i{position:absolute;left:0;right:0;border-radius:2px;background:var(--scroll-thumb-hover)}
+/* F35: group labels are section headers: a rule above, equal space above and below the label, dot + label in its color */
+.pk-g{display:flex;align-items:center;gap:8px;padding:10px 8px;font-size:13px;font-weight:500;color:var(--green-fg)}
+.pk-g+.pk-r,.pk-g:first-child{margin-top:0}
+.pk-r+.pk-g{margin-top:4px;border-top:1px solid var(--border)}
+.pk-g .vd{width:7px;height:7px;border-radius:50%;flex:none}
+.pk-g.spill{color:var(--amber-fg)}.pk-g.no{color:var(--red-fg)}
+.pk-r{width:100%;display:flex;align-items:center;gap:12px;padding:8px;border-radius:var(--r-md);text-align:left;transition:background-color .1s}
+.pk-r:hover,.pk-r.hl{background:var(--hover)}
+.pk-r.sel{background:var(--selected)}
+.pk-r.dis{cursor:not-allowed}
+.pk-r.dis .pk-n{color:var(--muted-foreground)}
+.pk-r.dis:hover{background:transparent}
+.pk-k{display:none;width:20px;height:20px;border-radius:5px;box-shadow:inset 0 0 0 1px var(--border-strong);font-size:12px;color:var(--muted-foreground);align-items:center;justify-content:center;flex:none;font-variant-numeric:tabular-nums}
+#picker.kb .pk-k{display:inline-flex}
+.pk-m{flex:1;min-width:0}
+.pk-n{font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk-n small{font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums}
+.pk-s{font-size:12.5px;line-height:1.4;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
+.pk-v{font-size:13px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted-foreground)}
+/* every row reserves the 16 px check slot so the selected row never shifts (F35) */
+.pk-c{width:16px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
+.pk-c .ic{width:15px;height:15px}
+.pk-empty{padding:24px 8px;text-align:center;font-size:13px;color:var(--muted-foreground)}
+/* GPU details header (F48: the GPU name is a subtitle under the title) */
+.fp-h{display:flex;flex-direction:column;gap:1px}
+.fp-t{font-size:14px;font-weight:500}
+.fp-gpu{font-size:13px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.bar{display:flex;height:8px;overflow:hidden;gap:2px;margin:12px 0 6px}
+.bar i{display:block;height:100%;border-radius:2px;transition:width .35s ease-out}
+.axis{display:flex;justify-content:space-between;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;margin-bottom:8px}
+/* F48: unused memory is an outlined empty segment, not a fill */
+.sw-whisper{background:var(--seg-whisper)}.sw-occ{background:var(--seg-occupant)}.sw-chat{background:var(--seg-chat)}.sw-free{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+.bar i.sw-free{flex:1;min-width:0}
+.legend{display:flex;flex-direction:column}
+.lg-r{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:14px}
+.lg-r .chip{width:10px;height:10px;border-radius:2px;flex:none}
+.lg-r .nm{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;column-gap:6px;row-gap:0;overflow-wrap:anywhere}
+.lg-r .nm small{white-space:nowrap}
+.lg-r .v{flex:none}
+.lg-r .nm small{font-size:12.5px;color:var(--muted-foreground)}
+.lg-r .nm .ic{width:13px;height:13px;color:var(--muted-foreground)}
+.lg-r .v{font-variant-numeric:tabular-nums}
+.lg-r .v.est{color:var(--muted-foreground)}
+.fp-sep{height:1px;background:var(--border);margin:12px -16px}
+.fp-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;min-height:30px}
+.fp-row .k{color:var(--muted-foreground)}
+.fp-v{display:flex;align-items:center;gap:8px;font-size:14px}
+.fp-v b{font-weight:500}
+.fp-v b.gpu{color:var(--green-fg)}.fp-v b.spill{color:var(--amber-fg)}.fp-v b.no{color:var(--red-fg)}
+.fp-v .vd{width:7px;height:7px;border-radius:50%;flex:none}
+.fp-n{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:4px;font-variant-numeric:tabular-nums;text-wrap:pretty}
+.fp-n+.fp-n{margin-top:8px}
+.fp-who{color:var(--foreground);font-weight:500}
+.fp-n+.fp-row{margin-top:8px}
+.fp-mt{font-size:13px;font-weight:500;color:var(--muted-foreground);margin-bottom:8px}
+.fp-mt+.bar{margin-top:0}
+.meas{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+/* F36: the visible line under every context control: what context is, and what the choice costs */
+.ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
+.ctx-k{font-weight:500;color:var(--foreground)}
+.meas div{display:flex;flex-direction:column}
+.meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
+.meas span{font-size:12.5px;color:var(--muted-foreground)}
+/* tooltip */
+.tip{position:fixed;z-index:90;max-width:320px;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-md);box-shadow:var(--popover-shadow);padding:6px 10px;font-size:13px;line-height:1.45;pointer-events:none;display:none}
+.tip.open{display:block}
+.tip b{font-weight:600}
+.tip .mono{font-size:12px}
+
+/* ---------- settings (F20) ---------- */
+.set{flex:1;min-width:0;min-height:0;overflow-y:auto}
+.set-in{max-width:var(--col);margin:0 auto;padding:40px 0 48px}
+.set-h{margin-bottom:24px}
+.set-h h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
+.set-h p{font-size:14px;color:var(--muted-foreground);margin:6px 0 0}
+.grp+.grp{margin-top:24px}
+.grp-t{font-size:13px;font-weight:500;color:var(--muted-foreground);margin:0 0 8px 2px}
+.box{border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border);background:var(--card)}
+.srow{display:flex;align-items:center;gap:16px;padding:14px 16px;min-height:60px}
+.srow+.srow{border-top:1px solid var(--border)}
+.sl{flex:1;min-width:0}
+.sl b{display:block;font-size:14px;font-weight:500}
+.sl .d{display:block;font-size:13px;color:var(--muted-foreground);margin-top:2px;text-wrap:pretty}
+.sv{flex:none;display:flex;align-items:center;gap:8px}
+.sv .mono{font-size:13px}
+.sv .qa{margin:0 0 0 4px}   /* a quiet action after a badge keeps the same 12 px as Memory details after its status */
+.path{font-family:var(--font-mono);font-size:13px;color:var(--foreground);background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:var(--r-sm);padding:4px 8px}
+.seg2{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;box-shadow:inset 0 0 0 1px var(--border)}
+.seg2 button{height:28px;padding:0 12px;border-radius:var(--r-sm);font-size:13.5px;color:var(--muted-foreground);transition:color .12s,background-color .12s}
+.seg2 button:hover{color:var(--foreground);background:var(--hover)}
+.seg2 button.on{background:var(--popover);color:var(--foreground);box-shadow:0 0 0 1px var(--border-strong)}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--track);position:relative;flex:none;transition:background-color .15s;box-shadow:inset 0 0 0 1px var(--border)}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--muted-foreground);transition:transform .15s,background-color .15s}
+.switch:hover{box-shadow:inset 0 0 0 1px var(--border-strong)}
+.switch[aria-checked="true"]{background:var(--foreground)}
+.switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--background)}
+.lockv{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--foreground)}
+.lockv .ic{color:var(--muted-foreground)}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:var(--r-sm);font-size:12.5px;color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong);white-space:nowrap}
+.stat{display:inline-flex;align-items:center;gap:8px;font-size:14px}
+.stat .dot{width:7px;height:7px;border-radius:50%}
+.kl{width:100%;border-collapse:collapse;font-size:14px}
+.kl td{padding:10px 16px;border-top:1px solid var(--border)}
+.kl tr:first-child td{border-top:0}
+.kl td.k{text-align:right;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
+.kl kbd{font-family:var(--font-sans);font-size:12.5px;color:var(--foreground);padding:2px 7px;border-radius:5px;box-shadow:inset 0 0 0 1px var(--border-strong);margin-left:4px}
+.mrow{display:flex;align-items:center;gap:12px;padding:10px 16px;width:100%;text-align:left;transition:background-color .1s}
+.mrow+.mrow{border-top:1px solid var(--border)}
+.mrow:hover{background:var(--hover)}
+/* F57: unselected radios use the secondary-icon tone; a downloading row's radio is dashed and faint */
+.mrow .rd{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--muted-foreground);flex:none;position:relative}
+.mrow .rd.dl{box-shadow:none;border:1.5px dashed var(--faint)}
+.mrow.on .rd{box-shadow:inset 0 0 0 1.5px var(--foreground)}
+.mrow.on .rd::after{content:"";position:absolute;inset:4px;border-radius:50%;background:var(--foreground)}
+.mrow.dis{cursor:not-allowed}.mrow.dis:hover{background:transparent}.mrow.dis .mn{color:var(--muted-foreground)}
+.mrow .mn{flex:1;font-size:14px;font-weight:500}
+.mrow .mn small{font-weight:400;font-size:12.5px;color:var(--muted-foreground);margin-left:8px}
+.mrow .mv{font-size:13px;color:var(--green-fg);display:inline-flex;align-items:center;gap:8px}
+.mrow .mv .vd{width:7px;height:7px;border-radius:50%;flex:none}
+.mrow .mv.spill{color:var(--amber-fg)}.mrow .mv.no{color:var(--red-fg)}
+.mrow .mv.dl{color:var(--muted-foreground)}
+/* F63: Memory details sits 12 px after the verdict on the row that does not fit (the picker does the same) */
+.mrow .qa,.pk-r .qa{flex:none}
+/* F64: a downloading row carries the first-run detail under its name; the radio lines up with the name */
+.mrow.dlg{align-items:flex-start;padding:12px 16px}
+.mrow.dlg .rd{margin-top:2px}
+.mdl{flex:1;min-width:0}
+.mdl .mn{display:block}
+.mdl .prog,.dlrow.dlg .prog{margin-top:10px}
+/* F46: the route to more models is the Default model card's footer row */
+.mrow.add{color:var(--muted-foreground);font-size:14px;gap:10px}
+.mrow.add .ic{width:15px;height:15px;margin:0 1px}
+.mrow.add:hover{color:var(--foreground)}
+.sl .d+.d{margin-top:4px}
+.sl .d .link{font-size:inherit}
+/* W-07: a failed action says so in one line beside its control */
+.act-err{display:block;font-size:13px;color:var(--red-fg);margin-top:4px;text-wrap:pretty}
+.act-err.line{margin:0;padding:0 16px 12px}
+/* download a model (F27) */
+.crumb{display:inline-flex;align-items:center;gap:4px;font-size:13.5px;color:var(--muted-foreground);margin:0 0 12px -2px;padding:2px 6px 2px 2px;border-radius:var(--r-sm);transition:color .12s,background-color .12s}
+.crumb:hover{color:var(--foreground);background:var(--hover)}
+.dlrow{display:flex;align-items:center;gap:16px;padding:12px 16px;min-height:64px}
+.dlrow+.dlrow{border-top:1px solid var(--border)}
+.dlrow .sl b small{font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px}
+.dl-v{flex:none;width:196px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px;font-variant-numeric:tabular-nums}
+.dl-v .w{display:inline-flex;align-items:center;gap:6px;color:var(--green-fg)}
+.dl-v .w.spill{color:var(--amber-fg)}.dl-v .w.no{color:var(--red-fg)}
+.dl-v .w .vd{width:7px;height:7px;border-radius:50%}
+.dl-v small{font-size:12.5px;color:var(--muted-foreground)}
+/* F64: a download in progress replaces its button with a quiet Cancel download; the detail sits under the name */
+.dl-a{flex:none;width:140px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.dlrow.dlg .prog-l{margin-top:6px}
+.inp{height:30px;width:230px;padding:0 10px;border:0;outline:0;border-radius:var(--r-ctl);background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13.5px;font-family:var(--font-mono)}
+.inp::placeholder{color:var(--placeholder);font-family:var(--font-sans)}
+.inp:focus{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 45%,transparent)}
+/* runtime owner switch: an explicit action with a confirm step (F29) */
+.cfm{border-top:1px solid var(--border);padding:14px 16px 16px;background:color-mix(in srgb,var(--foreground) 3%,transparent);animation:fadein .15s}
+.cfm b{display:block;font-size:14px;font-weight:500}
+/* F45: the list uses the full width; paths break only after a slash (<wbr>), never mid-word */
+.cfm ul{margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.6;color:var(--muted-foreground)}
+.cfm li+li{margin-top:2px}
+.cfm .mono{font-size:12.5px;color:var(--foreground);overflow-wrap:normal;word-break:normal}
+.cfm .ca{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.snav{flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+.snav .sb-act{font-size:14px}
+.snav .back{color:var(--muted-foreground);margin-bottom:8px}
+.snav .back:hover{color:var(--foreground)}
+
+/* ---------- first run (F20) ---------- */
+.first{position:fixed;inset:0;z-index:40;background:var(--background);display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto}
+.fr{width:100%;max-width:540px}
+.fr-brand{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin-bottom:32px}
+.fr-brand .mark{width:22px;height:22px}
+.fr-st{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted-foreground);margin-bottom:12px}
+.fr-st .dot{width:7px;height:7px;border-radius:50%}
+.fr h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
+.fr .sub{font-size:15px;color:var(--muted-foreground);margin:8px 0 24px;line-height:1.55;text-wrap:pretty}
+.fr-card{border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--card);padding:16px}
+.fr-m{display:flex;align-items:center;gap:12px}
+.fr-m .nm{font-size:15px;font-weight:500}
+.fr-m{gap:8px}
+.fr-m .rec{font-size:15px;color:var(--muted-foreground)}
+.fr-m .v{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--green-fg)}
+.fr-m .v .vd{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.fr-card .think{margin-top:8px}
+.fr-card .think-body{margin-top:4px}
+.kv{border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
+.kv td{padding:3px 0}
+.kv td:first-child{padding-right:20px;white-space:nowrap}
+.kv td+td{color:var(--foreground)}
+.kv .mono{font-size:12.5px}
+/* F44: the secondary link sits 16 px after the button in every state, never right-aligned */
+.fr-cta{display:flex;align-items:center;gap:16px;margin-top:24px}
+.fr-cta .btn{gap:8px}
+.fr-sub{font-size:13.5px;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
+.fr-note{font-size:13.5px;color:var(--muted-foreground);margin-top:12px}
+.fr .sub .link,.fr-note .link{font-size:inherit}
+.fr-foot{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted-foreground);margin-top:40px;padding-top:16px;border-top:1px solid var(--border)}
+.fr-foot .ic{color:var(--muted-foreground)}
+
+/* ---------- client additions (not in shell.html) ---------- */
+/* a calm line where a feature is not in this build yet (graceful degradation) */
+.na{font-size:13px;color:var(--muted-foreground)}
+/* an image the server serves; the placeholder is quiet when the file is missing */
+.img-out{max-width:100%;border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);display:block}
+.img-miss{display:flex;align-items:center;gap:8px;height:120px;justify-content:center;border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);color:var(--muted-foreground);font-size:13px}
+.md pre{background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:var(--r-md);padding:10px 12px;overflow-x:auto}
+.md pre code{background:none;box-shadow:none;padding:0;font-size:13px}
+.md h1,.md h2,.md h3,.md h4{color:var(--foreground);font-weight:600;line-height:1.35;margin:18px 0 8px}
+.md h1{font-size:20px}.md h2{font-size:18px}.md h3{font-size:16px}.md h4{font-size:15px}
+.md a{color:var(--foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
+.md blockquote{margin:10px 0;padding-left:14px;border-left:2px solid var(--border-strong);color:var(--muted-foreground)}
+/* port additions: the notice under the composer and the header rename field */
+.c-note{margin:8px 4px 0}
+.hdr .hdr-in{flex:1;min-width:0;width:auto;font-family:var(--font-sans);font-size:14px;font-weight:500}
+.err-line{display:flex;align-items:center;gap:8px;font-size:13px;line-height:24px;color:var(--red-fg)}

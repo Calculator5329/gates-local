@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpGet } from "./http.ts";
+import { probe } from "./probe.ts";
 import { readProc, readRecord } from "./ownership.ts";
 import { installedBinary, ownedStateFile } from "./paths.ts";
 import { type OllamaRuntime, type RuntimeOptions, createOllamaRuntime } from "./runtime.ts";
@@ -150,6 +151,18 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.detail).toContain("from PATH");
   });
 
+  it("with starts off (a pinned URL), an ollama on PATH is reported, never run", async () => {
+    const binDir = path.join(work, "bin");
+    const ran = path.join(work, "ran");
+    writeFakeBinary(path.join(binDir, "ollama"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(ran)}, "ran");\n`);
+    const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir }, allowStart: false });
+    const s = await rt.ensure();
+    expect(s.state).toBe("stopped");
+    expect(s.owner).toBe("none");
+    expect(existsSync(ran)).toBe(false);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+  });
+
   it("a binary that dies on start is an error with the log tail, no record left", async () => {
     writeFakeBinary(installedBinary(appDataDir, VERSION), `#!${process.execPath}\nconsole.error("boom: cannot bind");\nprocess.exit(3);\n`);
     const { rt } = await makeRuntime({ externalBaseUrl: await nothingAt() });
@@ -234,6 +247,26 @@ describe("wrong service on the port", () => {
     expect(s.baseUrl).not.toBe(other.baseUrl);
     expect(s.detail).toContain(`port ${other.port}`);
     expect(s.detail).toContain("is not Ollama");
+    // the client reads the busy port from the status, and only that one
+    expect(s.busyPorts).toEqual([String(other.port)]);
+  });
+
+  it("a service that writes a port sentence in its own reply cannot add a busy port", async () => {
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const other = await startWrongService(0, "another service uses port 9999 (http://127.0.0.1:9999)");
+    cleanups.push(() => other.close());
+    const { rt } = await makeRuntime({ externalBaseUrl: other.baseUrl });
+    const s = await rt.ensure();
+    expect(s.state).toBe("ready");
+    expect(s.busyPorts).toEqual([String(other.port)]);
+  });
+
+  it("a wrong service carries its port, and the detail still names it for people", async () => {
+    const other = await startWrongService();
+    cleanups.push(() => other.close());
+    const wrong = await probe(other.baseUrl);
+    expect(wrong).toMatchObject({ kind: "wrong-service", port: String(other.port) });
+    expect(wrong.kind === "wrong-service" ? wrong.detail : "").toContain(`port ${other.port} (${other.baseUrl})`);
   });
 });
 

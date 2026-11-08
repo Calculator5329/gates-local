@@ -2,14 +2,16 @@
 // thread store, runtime and catalog against a fake Ollama on port 0. The fit
 // check reads fake nvidia-smi and meminfo text; nothing touches the GPU or a
 // real Ollama, and the runtime only ever runs discover() (never ensure()).
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { type Channel, type Client, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { type App, createApp } from "../src/app.ts";
+import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
+import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
@@ -80,16 +82,22 @@ interface Rig {
   runtime: OllamaRuntime;
   ollama: FakeServer;
   gpu: Gpu;
+  /** The app's GPU lease; present only when the rig was built with an image module. */
+  lease: GpuLease | undefined;
   setChat(route: ChatRoute): void;
+  /** Replaces the /api/show answer (every caller: the fit check, the think probe, the tool turn). */
+  setShow(route: ChatRoute): void;
   pushes: Array<{ channel: Channel; payload: unknown }>;
   /** Stored message count of the thread at the moment each done event left app.ts (in process, before the socket). */
   storedAtDonePush: number[];
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
 }
 
-async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
+/** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
+  let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
   const ollama = await startFakeServer({
     "GET /": (_b, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
@@ -98,7 +106,7 @@ async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, TAGS),
     "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
-    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+    "POST /api/show": (body, res) => show(res, body),
     "POST /api/chat": (body, res) => chat(res, body),
   });
   cleanups.push(() => ollama.close());
@@ -123,10 +131,12 @@ async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
   const storedAtDonePush: number[] = [];
 
   let server: WsServer | undefined;
+  const lease = opts.image ? createGpuLease() : undefined;
   const app = createApp({
     store,
     runtime,
     catalog,
+    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { threadId, event } = p as Payload<"chat.event">;
@@ -183,7 +193,7 @@ async function rig(opts: { ollamaUp?: boolean } = {}): Promise<Rig> {
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, setChat: (r) => (chat = r), pushes, storedAtDonePush, waitFor };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, waitFor };
 }
 
 const events = (r: Rig, turnId: string) =>
@@ -241,7 +251,8 @@ describe("chat.send", () => {
     const t = await r.client.call("threads.create", {});
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "2+2?", model: MODEL, numCtx: 16384 });
     expect(sent.userMessage).toMatchObject({ threadId: t.id, role: "user", content: "2+2?" });
-    expect(events(r, sent.turnId)).toEqual([]); // returned before any reply byte
+    // returned before any reply byte; the start push came first, for every client (PH-02)
+    expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
     expect(r.app.activeTurns()).toBe(1);
 
     // The store already has the user message; the turn is streaming.
@@ -251,7 +262,7 @@ describe("chat.send", () => {
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
 
-    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["delta", "delta", "done"]);
+    expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
     if (done.event.type !== "done") throw new Error("unreachable");
     expect(done.event.stopReason).toBe("stop");
     expect(done.event.message).toMatchObject({
@@ -360,6 +371,514 @@ describe("chat.send", () => {
   });
 });
 
+/** One turn against a fake whose /api/show is `show`; returns the chat request body. */
+const sendWith = async (show: unknown, think: boolean) => {
+  const r = await rig({ show });
+  const bodies: Array<Record<string, unknown>> = [];
+  r.setChat((res, body) => {
+    bodies.push(body as Record<string, unknown>);
+    return quickReply(res, body);
+  });
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think });
+  await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+  return bodies[0]!;
+};
+/** The qwen3.5 show fixture with these capabilities, or with none listed. */
+const caps = (capabilities: string[] | undefined) => {
+  const { capabilities: _drop, ...rest } = SHOW as Record<string, unknown>;
+  return capabilities === undefined ? rest : { ...rest, capabilities };
+};
+
+describe("chat.send and the think flag", () => {
+  it("sends think as asked to a model that can think", async () => {
+    expect(await sendWith(caps(["completion", "thinking"]), true)).toMatchObject({ think: true });
+    expect(await sendWith(caps(["completion", "thinking"]), false)).toMatchObject({ think: false });
+  });
+
+  it("leaves think off the request for a model whose capabilities lack thinking", async () => {
+    expect(await sendWith(caps(["completion", "tools"]), true)).not.toHaveProperty("think");
+  });
+
+  it("keeps think as asked when Ollama lists no capabilities", async () => {
+    expect(await sendWith(caps(undefined), true)).toMatchObject({ think: true });
+  });
+
+  it("cancel ends a turn whose think probe stalls at once and releases its GPU claim", async () => {
+    const { r, sent } = await stalledThinkTurn();
+    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error", 1000);
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease?.status().holders).toBe(0);
+    expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
+  });
+
+  it("thread delete and shutdown do not wait on a stalled think probe", async () => {
+    const a = await stalledThinkTurn();
+    expect(await within(1000, a.r.client.call("threads.delete", { threadId: a.t.id }), "threads.delete")).toEqual({ threadId: a.t.id });
+    expect(a.r.app.activeTurns()).toBe(0);
+    const b = await stalledThinkTurn();
+    await within(1000, b.r.app.shutdown(), "shutdown");
+    expect(b.r.app.activeTurns()).toBe(0);
+    expect(b.r.lease?.status().holders).toBe(0);
+  });
+});
+
+/** Polls until `ok` holds; throws after `timeoutMs`. */
+async function until(ok: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ok()) {
+    if (Date.now() > deadline) throw new Error(`condition not met within ${timeoutMs} ms`);
+    await sleep(10);
+  }
+}
+
+/** `p`, or a rejection naming `what` once `ms` pass first. */
+function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} still pending after ${ms} ms`)), ms)));
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * A started turn whose think probe never answers: the fit check's /api/show
+ * answers, every later one hangs. The rig has a lease, so the turn holds a claim.
+ */
+async function stalledThinkTurn() {
+  const r = await rig({ image: idleComfy("external", () => undefined).build });
+  let shows = 0;
+  r.setShow((res) => {
+    shows += 1;
+    if (shows === 1) json(res, 200, SHOW);
+  });
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think: true });
+  await until(() => shows === 2);
+  expect(r.app.activeTurns()).toBe(1);
+  expect(r.lease?.status().holders).toBe(1);
+  return { r, t, sent };
+}
+
+/** A fake image module: an idle ComfyUI with this owner; stopIdle claims the GPU alone, as image/module.ts does. */
+function idleComfy(owner: "app" | "external" | "none", onStop: () => void) {
+  let stops = 0;
+  let current = owner;
+  const build = (lease: GpuLease) => ({
+    current: () => ({ state: "ready", owner: current }),
+    stopIdle: () => lease.run("image", undefined, async () => { stops += 1; onStop(); }),
+  }) as unknown as ImageModule;
+  return { build, stops: () => stops, setOwner: (next: typeof owner) => (current = next) };
+}
+
+describe("chat.send frees an idle ComfyUI the app started", () => {
+  it("stops it and measures again when the turn would not fit beside it", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = idleComfy("app", () => { if (gpu) gpu.freeMib = 15000; });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    const t = await r.client.call("threads.create", {});
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(1);
+  });
+
+  it("decides after the turn's claim: a ComfyUI an image job started while the turn waited is stopped, and the turn admitted", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = idleComfy("none", () => { if (gpu) gpu.freeMib = 15000; });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    const t = await r.client.call("threads.create", {});
+    // An image job holds the GPU alone; no ComfyUI the app started is up yet.
+    const releaseImage = await r.lease!.acquire("image");
+    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await until(() => r.lease!.status().waiting.includes("chat"));
+    // The job started ComfyUI and finished; it keeps its weights, so the turn would not fit beside it.
+    comfy.setOwner("app");
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    releaseImage();
+    const sent = await sending;
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(1);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+  });
+
+  it("leaves it running when the turn fits beside it", async () => {
+    const comfy = idleComfy("app", () => undefined);
+    const r = await rig({ image: comfy.build });
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(comfy.stops()).toBe(0);
+  });
+
+  it("never stops a ComfyUI the app did not start, and still refuses", async () => {
+    const comfy = idleComfy("external", () => undefined);
+    const r = await rig({ image: comfy.build });
+    const t = await r.client.call("threads.create", {});
+    r.gpu.freeMib = 3000;
+    r.gpu.memAvailableKb = 1_000_000;
+    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    expect(err.code).toBe("wont-fit");
+    expect(comfy.stops()).toBe(0);
+  });
+});
+
+/**
+ * The real image module against a fake remote ComfyUI (injected fetch and
+ * socket): a remote host skips the VRAM fit, a custom URL never touches the
+ * systemd unit, and no request leaves the process.
+ */
+const refuseUnit = async (): Promise<never> => { throw new Error("a custom ComfyUI URL must not touch the unit"); };
+
+function fakeComfyImage() {
+  const imageEvents: ImageEvent[] = [];
+  const comfyCalls: string[] = [];
+  let module: ImageModule | undefined;
+  let dataDir = "";
+  const build = (lease: GpuLease, store: ThreadStore, dir: string) => {
+    dataDir = path.join(dir, "image-data");
+    let socket: EventTarget | undefined;
+    module = createImageModule({
+      dataDir, lease, store,
+      settings: () => ({ imageGen: true, comfyUrl: "http://remote-comfy:8188" }),
+      lookupHost: async () => ["10.0.0.5"], localAddresses: () => [],
+      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      service: { inspect: refuseUnit, start: refuseUnit, stop: refuseUnit },
+      socket: () => {
+        socket = Object.assign(new EventTarget(), { close() {} });
+        Object.defineProperty(socket, "readyState", { value: 1 });
+        return socket as unknown as globalThis.WebSocket; // the image client's DOM socket, not the ws import above
+      },
+      fetch: async (input) => {
+        const { pathname } = new URL(String(input));
+        comfyCalls.push(pathname);
+        if (pathname === "/system_stats") return Response.json({ system: {}, devices: [] });
+        if (pathname === "/object_info") return Response.json({
+          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
+          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
+        });
+        if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
+        if (pathname === "/prompt") {
+          queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })));
+          return Response.json({ prompt_id: "p1" });
+        }
+        if (pathname === "/history/p1") return Response.json({ p1: { outputs: { "8": { images: [{ filename: "out.png" }] } } } });
+        if (pathname === "/view") return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        throw new Error(`unexpected ComfyUI request ${pathname}`);
+      },
+      push: (channel, payload) => { if (channel === "image.event") imageEvents.push(payload as ImageEvent); },
+    });
+    return module;
+  };
+  return { build, events: imageEvents, comfyCalls, module: () => module!, png: (jobId: string) => path.join(dataDir, "images", `${jobId}.png`) };
+}
+
+/**
+ * The real image module over a managed ComfyUI: the default address with no
+ * comfyUrl setting, so the module starts the user unit itself and owns it.
+ * Fetch, socket and the unit are injected; no request leaves the process.
+ */
+function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {}) {
+  const imageEvents: ImageEvent[] = [];
+  const calls: string[] = [];
+  const unit: Array<"start" | "stop"> = [];
+  let up = false;
+  let module: ImageModule | undefined;
+  let dataDir = "";
+  let prompts = 0;
+  const finished = new Set<string>();
+  const ctl = {
+    /** Another client's prompt sits in ComfyUI's queue: stopIdle declines, and so does a render. */
+    busy: false,
+    /** The next prompt finishes only once this resolves. */
+    holdNext: undefined as Promise<void> | undefined,
+    /** While set, every /system_stats (health) answer waits on it. */
+    health: undefined as Promise<void> | undefined,
+  };
+  const build = (lease: GpuLease, store: ThreadStore, dir: string) => {
+    dataDir = path.join(dir, "image-data");
+    let socket: EventTarget | undefined;
+    module = createImageModule({
+      dataDir, lease, store, requiredBytes: 1, idleMs: 60_000,
+      settings: () => ({ imageGen: true }),
+      localAddresses: () => [], lookupHost: async () => { throw new Error("no DNS in tests"); },
+      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      readGpu: async () => ({ freeBytes: 2 ** 40, holders: "none", tenants: [] }),
+      service: {
+        inspect: async () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: up ? 4242 : 0 }),
+        start: async () => { unit.push("start"); up = true; hooks.onStart?.(); },
+        stop: async () => { unit.push("stop"); up = false; hooks.onStop?.(); },
+      },
+      socket: () => {
+        socket = Object.assign(new EventTarget(), { close() {} });
+        Object.defineProperty(socket, "readyState", { value: 1 });
+        return socket as unknown as globalThis.WebSocket;
+      },
+      fetch: async (input) => {
+        const { pathname } = new URL(String(input));
+        calls.push(pathname);
+        if (pathname === "/system_stats") {
+          if (ctl.health) await ctl.health;
+          return up ? Response.json({ system: {}, devices: [] }) : new Response("down", { status: 503 });
+        }
+        if (pathname === "/object_info") return Response.json({
+          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
+          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
+        });
+        if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.busy ? [[0, "someone-else"]] : [] });
+        if (pathname === "/prompt") {
+          prompts += 1;
+          const id = `p${prompts}`;
+          const hold = ctl.holdNext;
+          ctl.holdNext = undefined;
+          const s = socket;
+          void (async () => {
+            await hold;
+            finished.add(id);
+            s?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: id, node: null } }) }));
+          })();
+          return Response.json({ prompt_id: id });
+        }
+        if (pathname.startsWith("/history/")) {
+          const id = decodeURIComponent(pathname.slice("/history/".length));
+          return Response.json(finished.has(id) ? { [id]: { outputs: { "8": { images: [{ filename: "out.png" }] } } } } : {});
+        }
+        if (pathname === "/view") return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        throw new Error(`unexpected ComfyUI request ${pathname}`);
+      },
+      push: (channel, payload) => { if (channel === "image.event") imageEvents.push(payload as ImageEvent); },
+    });
+    return module;
+  };
+  const states = (jobId: string) => imageEvents.filter((e) => e.jobId === jobId).map((e) => e.state);
+  const pngs = () => (existsSync(path.join(dataDir, "images")) ? readdirSync(path.join(dataDir, "images")) : []);
+  return { build, ctl, events: imageEvents, calls, unit, states, pngs, module: () => module! };
+}
+
+const gate = () => {
+  let open!: () => void;
+  const shut = new Promise<void>((resolve) => (open = resolve));
+  return { shut, open };
+};
+
+describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", () => {
+  it("a second queued image runs in the turn's first reclaim; the turn tries again, stops ComfyUI once and is admitted", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({
+      // Its weights stay resident after a job; stopping it frees them.
+      onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
+      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+    });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    // A first job starts ComfyUI: the app owns it now.
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    // Image A holds the GPU; the turn waits for its claim; image B queues behind the turn.
+    const holdA = gate();
+    comfy.ctl.holdNext = holdA.shut;
+    const a = await image.generate({ prompt: "a" });
+    await until(() => comfy.states(a.jobId).includes("running"));
+    const t = await r.client.call("threads.create", {});
+    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await until(() => r.lease!.status().waiting.includes("chat"));
+    const b = await image.generate({ prompt: "b" });
+    await until(() => r.lease!.status().waiting.length === 2);
+    expect(r.lease!.status().waiting).toEqual(["chat", "image"]);
+
+    holdA.open();
+    const sent = await within(3000, sending, "chat.send");
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    await image.wait(b.jobId);
+    expect(comfy.states(a.jobId).at(-1)).toBe("done");
+    expect(comfy.states(b.jobId).at(-1)).toBe("done");
+    expect(comfy.unit).toEqual(["start", "stop"]);
+    expect(image.current().owner).toBe("none");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+  });
+
+  it("a ComfyUI another client keeps busy: three declined stops, then wont-fit, no claim held", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({ onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } } });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    comfy.ctl.busy = true;
+    const mark = comfy.calls.length;
+    const t = await r.client.call("threads.create", {});
+    const err = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
+    expect(err.code).toBe("wont-fit");
+    // Each stopIdle asks ComfyUI's queue once and declines.
+    expect(comfy.calls.slice(mark).filter((c) => c === "/queue")).toHaveLength(3);
+    expect(comfy.unit).toEqual(["start"]);
+    expect(image.current().owner).toBe("app");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    expect(r.store.getThread(t.id).messages).toEqual([]);
+  });
+
+  it("shutdown during the fit check after ComfyUI stops ends the turn as cancelled and lets the claim go (A2-01)", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({
+      onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
+      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+    });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    // The first fit check (beside ComfyUI) answers; the one after the stop never does until released.
+    const stalled = gate();
+    let shows = 0;
+    r.setShow(async (res) => {
+      shows += 1;
+      if (shows >= 2) {
+        await stalled.shut;
+        return json(res, 503, { error: "late" });
+      }
+      json(res, 200, SHOW);
+    });
+    const t = await r.client.call("threads.create", {});
+    const sending = rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    await until(() => shows === 2);
+    expect(comfy.unit).toEqual(["start", "stop"]);
+    expect(r.lease!.status().holder).toBe("chat");
+
+    await within(1000, r.app.shutdown(), "shutdown");
+    expect((await within(1000, sending, "chat.send")).code).toBe("cancelled");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    // The late answer changes nothing: the turn already ended as cancelled.
+    stalled.open();
+    await sleep(50);
+    expect(r.store.getThread(t.id).messages).toEqual([]);
+  });
+});
+
+describe("threads.delete marks the thread before it waits", () => {
+  it("a send and an image.generate for the thread while an earlier image's cancel is pending are refused; nothing outlives the delete", async () => {
+    const comfy = managedComfy();
+    const r = await rig({ image: comfy.build, show: caps(["completion", "tools"]) });
+    cleanups.push(() => comfy.module().close());
+    r.setChat(async (res, body) => {
+      const last = (body as { messages: Array<{ role: string; content: string }> }).messages.at(-1)!;
+      if (last.role === "tool") return stream(res, [piece("Queued it."), doneLine]);
+      return stream(res, [line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a tree" } } }] }, done: true, done_reason: "stop" })]);
+    });
+    const t = await r.client.call("threads.create", {});
+    // The first turn's image runs and stays running until cancelled.
+    comfy.ctl.holdNext = gate().shut;
+    const first = await r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
+    const jobId = comfy.events.find((e) => e.threadId === t.id && e.state === "queued")?.jobId;
+    if (jobId === undefined) throw new Error(`the turn queued no image; saw ${JSON.stringify(comfy.events)}`);
+    await until(() => comfy.states(jobId).includes("running"));
+
+    // The job's cancel ends in a health check that stalls: the delete waits on it with the GPU already free.
+    const health = gate();
+    comfy.ctl.health = health.shut;
+    cleanups.push(health.open);
+    const deleting = r.client.call("threads.delete", { threadId: t.id });
+    await until(() => comfy.states(jobId).includes("cancelled"));
+    expect(r.lease!.status().holders).toBe(0);
+
+    const send = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true }), "chat.send"));
+    expect(send.code).toBe("thread-not-found");
+    const generate = await rejection(within(3000, r.client.call("image.generate", { prompt: "another", threadId: t.id }), "image.generate"));
+    expect(generate.code).toBe("thread-not-found");
+    expect(r.app.activeTurns()).toBe(0);
+
+    health.open();
+    expect(await within(3000, deleting, "threads.delete")).toEqual({ threadId: t.id });
+    await sleep(300); // room for anything that slipped past the delete to run
+    expect(new Set(comfy.events.map((e) => e.jobId))).toEqual(new Set([jobId]));
+    expect(comfy.states(jobId)).toEqual(["queued", "running", "cancelled"]);
+    expect(comfy.calls.filter((c) => c === "/prompt")).toHaveLength(1);
+    expect(comfy.pngs()).toEqual([]);
+    expect((await rejection(r.client.call("threads.get", { threadId: t.id }))).code).toBe("thread-not-found");
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+  });
+
+  it("an image.generate with a threadId, not from a turn, is taken back by threads.delete", async () => {
+    const comfy = managedComfy();
+    const r = await rig({ image: comfy.build });
+    cleanups.push(() => comfy.module().close());
+    let releaseTalk!: () => void;
+    const talkGate = new Promise<void>((resolve) => (releaseTalk = resolve));
+    r.setChat(async (res) => {
+      await talkGate;
+      return stream(res, [piece("still here"), doneLine]);
+    });
+    const drawing = await r.client.call("threads.create", {});
+    const talking = await r.client.call("threads.create", {});
+    // Another thread's turn holds its shared chat claim, so the image waits in the queue.
+    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const { jobId } = await r.client.call("image.generate", { prompt: "a tree", threadId: drawing.id });
+    await until(() => r.lease!.status().waiting.includes("image"));
+
+    expect(await within(3000, r.client.call("threads.delete", { threadId: drawing.id }), "threads.delete")).toEqual({ threadId: drawing.id });
+    releaseTalk();
+    await r.waitFor("chat.event", (p) => p.turnId === talk.turnId && p.event.type === "done");
+    await comfy.module().wait(jobId);
+    expect(comfy.states(jobId)).toEqual(["queued", "cancelled"]);
+    expect(comfy.calls).not.toContain("/prompt");
+    expect(comfy.pngs()).toEqual([]);
+  });
+});
+
+describe("threads.delete and the image jobs its turns queued", () => {
+  it("cancels a queued tool image whose turn already ended, before the thread goes", async () => {
+    const comfy = fakeComfyImage();
+    const r = await rig({ image: comfy.build, show: caps(["completion", "tools"]) });
+    cleanups.push(() => comfy.module().close());
+    let releaseTalk!: () => void;
+    const talkGate = new Promise<void>((resolve) => (releaseTalk = resolve));
+    r.setChat(async (res, body) => {
+      const last = (body as { messages: Array<{ role: string; content: string }> }).messages.at(-1)!;
+      if (last.role === "tool") return stream(res, [piece("Queued it."), doneLine]);
+      if (last.content === "draw") {
+        return stream(res, [line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a tree" } } }] }, done: true, done_reason: "stop" })]);
+      }
+      await talkGate;
+      return stream(res, [piece("still here"), doneLine]);
+    });
+    const drawing = await r.client.call("threads.create", {});
+    const talking = await r.client.call("threads.create", {});
+    // Another thread's turn streams the whole time and holds its shared chat claim.
+    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const draw = await r.client.call("chat.send", { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    await r.waitFor("chat.event", (p) => p.turnId === draw.turnId && p.event.type === "done");
+    const jobId = comfy.events.find((e) => e.threadId === drawing.id && e.state === "queued")?.jobId;
+    if (jobId === undefined) throw new Error(`the drawing turn queued no image; saw ${JSON.stringify(comfy.events)}`);
+    expect(r.lease?.status().waiting).toEqual(["image"]);
+
+    // The drawing turn is over; deleting its thread still takes its image back.
+    expect(await r.client.call("threads.delete", { threadId: drawing.id })).toEqual({ threadId: drawing.id });
+    releaseTalk();
+    await r.waitFor("chat.event", (p) => p.turnId === talk.turnId && p.event.type === "done");
+    await comfy.module().wait(jobId);
+    expect(comfy.events.filter((e) => e.jobId === jobId).map((e) => e.state)).toEqual(["queued", "cancelled"]);
+    expect(comfy.comfyCalls).not.toContain("/prompt");
+    expect(existsSync(comfy.png(jobId))).toBe(false);
+    expect((await rejection(r.client.call("threads.get", { threadId: drawing.id }))).code).toBe("thread-not-found");
+  });
+});
+
 describe("chat.cancel and threads.delete during a turn", () => {
   it("cancel mid-stream ends the turn with a cancelled error and persists nothing of the reply", async () => {
     const r = await rig();
@@ -408,6 +927,30 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("shutting-down");
+  });
+});
+
+describe("runtime.retry (W-06)", () => {
+  it("looks for Ollama again instead of answering the cached status", async () => {
+    const store = openThreadStore(path.join(cacheTmp(), "threads.sqlite"));
+    cleanups.push(() => store.close());
+    let ensured = 0;
+    const app = createApp({
+      store,
+      // a stub: the real runtime's ensure() may start Ollama, which these tests never do
+      runtime: {
+        status: () => ({ state: "wrong-service", owner: "none", baseUrl: "http://127.0.0.1:1", detail: "nginx" }),
+        baseUrl: () => undefined,
+        onChange: () => () => undefined,
+        ensure: async () => (ensured++, { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:1" }),
+      },
+      catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined },
+      push: () => undefined,
+    });
+    cleanups.push(() => app.shutdown());
+    expect((await app.handlers["runtime.status"]({}, { clientId: 1 })).state).toBe("wrong-service");
+    expect(await app.handlers["runtime.retry"]?.({}, { clientId: 1 })).toMatchObject({ state: "ready" });
+    expect(ensured).toBe(1);
   });
 });
 

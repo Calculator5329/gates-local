@@ -8,7 +8,16 @@
 //   4. its Restart button brings the client back at the same route (#thread=42)
 //      with a new token;
 //   5. SIGTERM to Electron stops every server it spawned;
-//   6. SIGKILL of Electron main takes the server down too (stdin EOF path).
+//   6. SIGKILL of Electron main takes the server down too (stdin EOF path);
+//   7. no application menu and no menu bar, and Alt does not bring one back;
+//   8. the window keys work without a menu: Ctrl +/-/0 zoom, F11 full
+//      screen, Ctrl+Shift+I dev tools, Ctrl+R and Ctrl+Shift+R reload;
+//   9. Ctrl+A, Ctrl+C, Ctrl+V and Ctrl+Z still edit a textarea;
+//  10. Ctrl+W closes the window and the app quits, servers gone;
+//  11. Ctrl+Q quits, servers gone.
+// Keys 7-11 go in through webContents.sendInputEvent over the main
+// process's inspector (--inspect): it enters where OS keys do, before
+// before-input-event. DevTools-protocol key events skip that hook.
 // Run: pnpm --filter @gates-local/desktop smoke (builds first). Not part of
 // pnpm verify: it needs the downloaded Electron binary.
 
@@ -44,7 +53,7 @@ async function waitGone(pids: number[], ms: number): Promise<boolean> {
   return !pids.some(alive);
 }
 
-function launch(work: string, debugPort: number | null): { electron: ChildProcess; dataDir: string; exited: Promise<number | null> } {
+function launch(work: string, debugPort: number | null, inspectPort: number | null = null): { electron: ChildProcess; dataDir: string; exited: Promise<number | null> } {
   const dataDir = path.join(work, `data-${Date.now()}`);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -59,6 +68,7 @@ function launch(work: string, debugPort: number | null): { electron: ChildProces
   delete env["ELECTRON_RUN_AS_NODE"];
   const args = [root, "--ozone-platform=headless"];
   if (debugPort !== null) args.push(`--remote-debugging-port=${debugPort}`);
+  if (inspectPort !== null) args.push(`--inspect=127.0.0.1:${inspectPort}`);
   const electron = spawn(electronBin, args, { env, stdio: ["ignore", "ignore", "pipe"] });
   const stderr: string[] = [];
   electron.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk.toString()));
@@ -84,11 +94,12 @@ class Cdp {
     });
   }
 
-  static async connect(port: number): Promise<Cdp> {
+  /** The page target of --remote-debugging-port, or with "node" the main process of --inspect. */
+  static async connect(port: number, type: "page" | "node" = "page"): Promise<Cdp> {
     for (let i = 0; i < 150; i++) {
       try {
         const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{ type: string; webSocketDebuggerUrl: string }>;
-        const page = list.find((target) => target.type === "page");
+        const page = list.find((target) => target.type === type);
         if (page !== undefined) {
           const ws = new WebSocket(page.webSocketDebuggerUrl);
           await new Promise((resolve, reject) => {
@@ -102,15 +113,20 @@ class Cdp {
       }
       await sleep(100);
     }
-    return fail("no DevTools page target");
+    return fail(`no DevTools ${type} target`);
   }
 
-  async eval(expression: string): Promise<unknown> {
+  async send(method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = ++this.#id;
     return await new Promise((resolve) => {
       this.#pending.set(id, resolve);
-      this.#ws.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
+      this.#ws.send(JSON.stringify({ id, method, params }));
     });
+  }
+
+  /** includeCommandLineAPI gives the main process's inspector require(). */
+  async eval(expression: string): Promise<unknown> {
+    return await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, includeCommandLineAPI: true });
   }
 
   async until(expression: string, label: string, ms = 15_000): Promise<unknown> {
@@ -184,10 +200,114 @@ async function parentDeath(work: string): Promise<void> {
   }
 }
 
+/** The one window, as main's inspector sees it. */
+const WIN = `require("electron").BrowserWindow.getAllWindows()[0]`;
+
+type Mod = "control" | "shift" | "alt";
+
+/** A key into the window the way the OS delivers one; down only for keys that end the window. */
+async function press(main: Cdp, keyCode: string, modifiers: Mod[] = [], up = true): Promise<void> {
+  const event = (type: string) => `${WIN}.webContents.sendInputEvent(${JSON.stringify({ type, keyCode, modifiers })})`;
+  const sent = await main.eval(`(${event("keyDown")}, ${up ? `${event("keyUp")}, ` : ""}true)`);
+  if (sent !== true) fail(`could not send ${[...modifiers, keyCode].join("+")}`);
+}
+
+async function keys(work: string): Promise<void> {
+  const debugPort = await findFreePort();
+  const inspectPort = await findFreePort();
+  const { electron, dataDir, exited } = launch(work, debugPort, inspectPort);
+  try {
+    const main = await Cdp.connect(inspectPort, "node");
+    const page = await Cdp.connect(debugPort);
+    await page.until(`location.protocol === "file:" && window.__serverUrl`, "client ready");
+    await main.until(`${WIN}.webContents.getURL().startsWith("file:")`, "window on the client");
+
+    const menu = async () => String(await main.eval(`[require("electron").Menu.getApplicationMenu() === null, ${WIN}.isMenuBarVisible()].join(",")`));
+    if ((await menu()) !== "true,false") fail(`menu (none set, bar hidden) expected true,false, got ${await menu()}`);
+    await press(main, "Alt");
+    await press(main, "Alt");
+    if ((await menu()) !== "true,false") fail(`Alt brought a menu back: ${await menu()}`);
+    log("7 no application menu, no menu bar, Alt leaves it so");
+
+    const zoom = async () => Number(await main.eval(`${WIN}.webContents.getZoomLevel()`));
+    const steps: Array<[string, Mod[], number]> = [["=", ["control"], 0.5], ["Plus", ["control", "shift"], 1], ["-", ["control"], 0.5], ["0", ["control"], 0]];
+    for (const [keyCode, mods, want] of steps) {
+      await press(main, keyCode, mods);
+      if ((await zoom()) !== want) fail(`${[...mods, keyCode].join("+")} gave zoom ${await zoom()}, want ${want}`);
+    }
+    // Headless Ozone has no full screen (setFullScreen(true) leaves
+    // isFullScreen() false, measured 2026-11-07), so the window's own
+    // setFullScreen records what F11 asked for, and isFullScreen answers
+    // from that record.
+    await main.eval(`(() => { const w = ${WIN}; const set = w.setFullScreen.bind(w); globalThis.__full = []; w.setFullScreen = (flag) => { __full.push(flag); set(flag); }; w.isFullScreen = () => __full.at(-1) === true; return true; })()`);
+    await press(main, "F11");
+    await press(main, "F11");
+    const full = JSON.stringify(await main.eval(`globalThis.__full`));
+    if (full !== "[true,false]") fail(`F11 twice asked the window for full screen ${full}, want [true,false]`);
+    await press(main, "I", ["control", "shift"]);
+    await main.until(`${WIN}.webContents.isDevToolsOpened()`, "Ctrl+Shift+I dev tools open");
+    await press(main, "I", ["control", "shift"]);
+    await main.until(`!${WIN}.webContents.isDevToolsOpened()`, "Ctrl+Shift+I dev tools closed");
+    for (const [keyCode, mods] of [["R", ["control"]], ["R", ["control", "shift"]]] as Array<[string, Mod[]]>) {
+      await page.eval(`window.__mark = 1`);
+      await press(main, keyCode, mods);
+      await page.until(`window.__mark === undefined && window.__serverUrl`, `${[...mods, keyCode].join("+")} reload`);
+    }
+    log("8 Ctrl +/-/0 zoom 0.5, 1, 0.5, 0; F11 asked for full screen on, then off; Ctrl+Shift+I dev tools on/off; Ctrl+R and Ctrl+Shift+R reload");
+
+    await page.eval(`(() => { const t = document.createElement("textarea"); t.id = "ta"; document.body.append(t); return true; })()`);
+    await main.eval(`${WIN}.webContents.focus()`);
+    await page.eval(`document.getElementById("ta").focus()`);
+    await page.send("Input.insertText", { text: "hello" });
+    const ta = async () => JSON.stringify(await page.eval(`(() => { const t = document.getElementById("ta"); return [t.value, t.selectionStart, t.selectionEnd]; })()`));
+    await press(main, "a", ["control"]);
+    if ((await ta()) !== `["hello",0,5]`) fail(`Ctrl+A did not select all: ${await ta()}`);
+    await press(main, "c", ["control"]);
+    await press(main, "End");
+    await press(main, "v", ["control"]);
+    await page.until(`document.getElementById("ta").value === "hellohello"`, "Ctrl+C then Ctrl+V");
+    await press(main, "z", ["control"]);
+    await page.until(`document.getElementById("ta").value === "hello"`, "Ctrl+Z");
+    log("9 Ctrl+A selected hello, Ctrl+C then Ctrl+V gave hellohello, Ctrl+Z gave hello");
+
+    const pids = serverPids(dataDir);
+    page.close();
+    await press(main, "w", ["control"], false);
+    main.close();
+    const code = await Promise.race([exited, sleep(10_000).then(() => "timeout")]);
+    if (code !== 0) fail(`Ctrl+W: Electron did not quit cleanly (${String(code)})`);
+    if (!(await waitGone(pids, 4_000))) fail(`servers left after Ctrl+W: ${pids.filter(alive).join(" ")}`);
+    log(`10 Ctrl+W closed the window: exit 0, servers ${pids.join(", ")} gone`);
+  } finally {
+    if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
+  }
+}
+
+async function quitKey(work: string): Promise<void> {
+  const inspectPort = await findFreePort();
+  const { electron, dataDir, exited } = launch(work, null, inspectPort);
+  try {
+    const main = await Cdp.connect(inspectPort, "node");
+    await main.until(`${WIN}?.webContents.getURL().startsWith("file:")`, "window on the client");
+    const pids = serverPids(dataDir);
+    if (pids.length === 0) fail("server did not come up");
+    await press(main, "q", ["control"], false);
+    main.close();
+    const code = await Promise.race([exited, sleep(10_000).then(() => "timeout")]);
+    if (code !== 0) fail(`Ctrl+Q: Electron did not quit cleanly (${String(code)})`);
+    if (!(await waitGone(pids, 4_000))) fail(`servers left after Ctrl+Q: ${pids.filter(alive).join(" ")}`);
+    log(`11 Ctrl+Q quit: exit 0, servers ${pids.join(", ")} gone`);
+  } finally {
+    if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
+  }
+}
+
 const work = mkdtempSync(path.join(tmpdir(), "gates-desktop-smoke-"));
 try {
   await lifecycle(work);
   await parentDeath(work);
+  await keys(work);
+  await quitKey(work);
   log("ok");
 } finally {
   rmSync(work, { recursive: true, force: true });
