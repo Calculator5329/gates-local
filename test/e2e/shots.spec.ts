@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { SHOTS_DIR } from "./env.ts";
-import { type RuntimeMode, type Scenario, expect, test, waitReady } from "./fixtures.ts";
+import { type RuntimeMode, type Scenario, expect, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -62,6 +62,152 @@ const SHOTS: readonly Shot[] = [
 ];
 
 const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-");
+
+// Settings › Models in the states of the models-a4 design (its a4-NN shot is
+// named in the comment): one theme each, some at phone size.
+const models = settings("Models");
+const kebab = (tag: string) => async (p: Page) => {
+  await models(p);
+  await p.locator(`.mp-row[data-dm="${tag}"]`).getByRole("button", { name: /^More for / }).click();
+};
+/** Slow the fake's pulls so a download is still running when the shot is taken. */
+const slowPulls = () => stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 400 * 1024 ** 2 });
+const downloadTab = async (p: Page) => {
+  await models(p);
+  await p.getByRole("tab", { name: /^Download/ }).click();
+};
+const typed = (text: string) => async (p: Page) => {
+  await downloadTab(p);
+  await p.getByRole("searchbox").fill(text);
+  await p.getByRole("button", { name: `Download ${text}` }).click();
+};
+const PHONE = { width: 412, height: 915 };
+
+interface ModelsShot {
+  readonly name: string;
+  readonly theme: "dark" | "light";
+  readonly scenario?: Scenario;
+  readonly viewport?: { width: number; height: number };
+  readonly act: (page: Page) => Promise<void>;
+}
+
+const MODELS_SHOTS: readonly ModelsShot[] = [
+  // a4-01, a4-11
+  { name: "M-01-installed-dark", theme: "dark", act: models },
+  { name: "M-02-installed-light", theme: "light", act: models },
+  // a4-02
+  { name: "M-03-row-menu-dark", theme: "dark", act: kebab("gemma4:12b") },
+  // a4-04
+  {
+    name: "M-04-remove-default-dark",
+    theme: "dark",
+    act: async (p) => {
+      await kebab("qwen3.5:9b")(p);
+      await p.getByRole("menuitem", { name: /^Remove…/ }).click();
+      await expect(p.getByRole("dialog")).toBeVisible();
+    },
+  },
+  // a4-05, a4-12
+  {
+    name: "M-05-download-running-dark",
+    theme: "dark",
+    act: async (p) => {
+      await slowPulls();
+      await downloadTab(p);
+      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
+      await expect(p.locator(".mp-pmeta b")).toBeVisible();
+      await p.waitForTimeout(2500);
+    },
+  },
+  {
+    name: "M-06-download-running-light",
+    theme: "light",
+    act: async (p) => {
+      await slowPulls();
+      await downloadTab(p);
+      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
+      await expect(p.locator(".mp-pmeta b")).toBeVisible();
+      await p.waitForTimeout(2500);
+    },
+  },
+  // a4-07: a name outside the curated list that the library has
+  {
+    name: "M-07-typed-found-dark",
+    theme: "dark",
+    act: async (p) => {
+      await stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 20 * 1024 ** 2 });
+      await typed("nomic-embed-text:latest")(p);
+      await expect(p.locator(".mp-lookup")).toContainText("Found");
+    },
+  },
+  // a4-08
+  {
+    name: "M-08-typed-not-found-dark",
+    theme: "dark",
+    act: async (p) => {
+      await typed("mistral-nemox:12b")(p);
+      await expect(p.locator(".mp-miss")).toBeVisible();
+    },
+  },
+  // no a4 twin: the M3 ledger's ready card
+  {
+    name: "M-09-ready-dark",
+    theme: "dark",
+    act: async (p) => {
+      await downloadTab(p);
+      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
+      await expect(p.locator(".mp-ready")).toBeVisible({ timeout: 20_000 });
+    },
+  },
+  // a4-09
+  { name: "M-10-zero-models-dark", theme: "dark", scenario: "no-models", act: models },
+  // a4-15, a4-16
+  { name: "M-11-phone-installed-dark", theme: "dark", viewport: PHONE, act: models },
+  {
+    name: "M-12-phone-download-dark",
+    theme: "dark",
+    viewport: PHONE,
+    act: async (p) => {
+      await slowPulls();
+      await downloadTab(p);
+      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
+      await expect(p.locator(".mp-pmeta b")).toBeVisible();
+      await p.waitForTimeout(2500);
+    },
+  },
+  // a4-14
+  {
+    name: "M-13-default-dropdown-dark",
+    theme: "dark",
+    act: async (p) => {
+      await models(p);
+      await p.getByRole("button", { name: /^Default for new chats:/ }).click();
+    },
+  },
+];
+
+test.describe("models page", () => {
+  for (const shot of MODELS_SHOTS) {
+    test.describe(shot.name, () => {
+      test.use({
+        scenario: shot.scenario ?? "models",
+        colorScheme: shot.theme,
+        ...(shot.viewport ? { viewport: shot.viewport } : {}),
+      });
+      test("shot", async ({ page, open, seededThread }) => {
+        await page.clock.setFixedTime(NOW);
+        await open(`#thread=${seededThread ?? ""}`);
+        // with no models the composer stays disabled, so only the runtime dot says ready
+        if (shot.scenario === undefined) await waitReady(page);
+        else await expect(page.locator(".sb-foot .rt .dot.ok")).toBeVisible();
+        await shot.act(page);
+        await page.evaluate(() => document.fonts.ready.then(() => undefined));
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: path.join(SHOTS_DIR, `${shot.name}.png`), animations: "disabled", caret: "hide" });
+      });
+    });
+  }
+});
 
 test.use({ seed: "design", seedAt: NOW, timezoneId: "America/Chicago", locale: "en-US" });
 

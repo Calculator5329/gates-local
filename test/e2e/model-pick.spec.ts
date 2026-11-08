@@ -169,8 +169,10 @@ test("one Ctrl+N after saving a default starts the new chat on the new pick, eve
   await stack.scenario("embed-smallest", { showDelayMs: 1500 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
-  await page.locator(`.mrow[data-dm="gemma4:12b"]`).click();
-  await expect(page.locator(`.mrow[data-dm="gemma4:12b"]`)).toHaveAttribute("aria-pressed", "true");
+  const gemma = page.locator(`.mp-row[data-dm="gemma4:12b"]`);
+  await gemma.getByRole("button", { name: /^More for / }).click();
+  await page.getByRole("menuitem", { name: "Use as default" }).click();
+  await expect(gemma.locator(".mp-l1 .mp-chip")).toHaveText("Default");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Control+n");
   await expect(modelBtn).toContainText("Qwen 3.5 9B"); // the survey is still held
@@ -182,11 +184,21 @@ test("Settings lists the embedding model as not for chat, with Remove and no def
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
-  const row = page.locator(`.mrow.emb[data-em="${EMBED}"]`);
+  const row = page.locator(`.mp-row.emb[data-em="${EMBED}"]`);
   await expect(row).toBeVisible();
-  await expect(row).toContainText("Embedding model, not for chat");
+  await expect(row.locator(".mp-fitc")).toContainText("Embedding model, not for chat");
   await expect(row.getByRole("button")).toHaveCount(1);
-  await expect(row.getByRole("button", { name: /^Remove / })).toBeVisible();
-  await expect(page.locator(`.mrow[data-dm="${EMBED}"]`)).toHaveCount(0);
-  await expect(page.locator(".mrow[data-dm]")).toHaveCount(2);
+  await row.getByRole("button", { name: /^More for / }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: /^Remove…/ })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Use as default" })).toHaveCount(0);
+  await expect(page.locator(`.mp-row[data-dm="${EMBED}"]`)).toHaveCount(0);
+  // the three chat models are rows, the 27b among them (it won't run here, so it is dimmed)
+  await expect(page.locator(".mp-row[data-dm]")).toHaveCount(3);
+  // nor can the Default card choose it: two choices, and the 27b disabled with its reason
+  await page.getByRole("button", { name: /^Default for new chats:/ }).click();
+  const options = page.getByRole("listbox", { name: "Installed chat models" }).getByRole("option");
+  await expect(options).toHaveCount(3);
+  await expect(options.filter({ hasText: EMBED.split(":")[0] ?? EMBED })).toHaveCount(0);
+  await expect(page.locator('.mp-opt[aria-disabled="true"]')).toHaveCount(1);
 });

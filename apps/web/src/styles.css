@@ -672,7 +672,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-tab:hover{color:var(--foreground)}
 .mp-tab.on{color:var(--foreground);border-bottom-color:var(--foreground)}
 .mp-lbl{display:inline-flex;flex-direction:column}
-.mp-lbl::after{content:attr(data-l);font-weight:600;height:0;visibility:hidden;overflow:hidden}   /* no width jump when bold */
+.mp-lbl::after{content:attr(data-l) / "";font-weight:600;height:0;visibility:hidden;overflow:hidden}   /* no width jump when bold */
 .mp-tab.on .mp-lbl{font-weight:600}
 .mp-n{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
 .mp-live{display:inline-flex;align-items:center;gap:6px;color:var(--muted-foreground);font-size:13px}
