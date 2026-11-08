@@ -18,6 +18,7 @@ describe("text tool calls", () => {
   it("takes exactly one fenced json or tool_code call and leaves other fences as text", () => {
     const call = '{"name":"read","arguments":{"path":"/library/docs"}}';
     expect(parseTextCalls("```json\n" + call + "\n```").calls).toEqual([JSON.parse(call)]);
+    expect(parseTextCalls("```tool_code\r\n" + call + "\r\n```").calls).toEqual([JSON.parse(call)]);
     const two = "```json\n" + call + "\n```\nor\n```tool_code\n" + call + "\n```";
     expect(parseTextCalls(two)).toMatchObject({ calls: [], errors: [], content: two });
     const example = 'Here is the JSON:\n```json\n{"name":"Ada","age":36}\n```';

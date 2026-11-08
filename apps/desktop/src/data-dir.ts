@@ -18,7 +18,7 @@ export function serverDataDir(o: DataDirInput): string {
   const pinned = o.env["GATES_LOCAL_DATA_DIR"];
   if (pinned) return pinned;
   // An isolated profile (smoke runs) keeps its data inside it.
-  if (o.env["GATES_LOCAL_USER_DATA"] || o.platform === "darwin") return path.join(o.userData, "server-data");
+  if (o.env["GATES_LOCAL_USER_DATA"] || o.platform === "darwin") return (o.platform === "win32" ? path.win32 : path.posix).join(o.userData, "server-data");
   if (o.platform === "win32") {
     const local = o.env["LOCALAPPDATA"];
     return path.win32.join(local && path.win32.isAbsolute(local) ? local : path.win32.join(o.home, "AppData", "Local"), "GatesLocal");

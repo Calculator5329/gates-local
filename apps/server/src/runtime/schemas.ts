@@ -54,7 +54,8 @@ export const InstallManifest = Schema.Struct({
   url: Schema.String,
   sha256: Schema.String,
   sizeBytes: Schema.Number,
-  format: Schema.Literals(["tar.zst", "tar.gz"]),
+  /** tar.zst and tar.gz: the Linux releases. zip: the Windows release. */
+  format: Schema.Literals(["tar.zst", "tar.gz", "zip"]),
   verified: Schema.Boolean,
   source: Schema.String,
 });

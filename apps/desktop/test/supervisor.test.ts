@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,8 +10,16 @@ import { Supervisor, TOKEN_ENV, type SupervisorOptions, type SupervisorState } f
 const FAKE = join(import.meta.dirname, "fixtures", "fake-server.ts");
 const HOST = join(import.meta.dirname, "fixtures", "host.ts");
 
-/** 'gone' only when /proc has no entry: a zombie counts as still there. */
+/** 'gone' only when /proc has no entry: a zombie counts as still there. Windows has no /proc and no zombies. */
 function procState(pid: number): "gone" | "zombie" | "alive" {
+  if (process.platform === "win32") {
+    try {
+      process.kill(pid, 0);
+      return "alive";
+    } catch {
+      return "gone";
+    }
+  }
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) === "Z" ? "zombie" : "alive";
@@ -183,7 +191,9 @@ describe("Supervisor", () => {
     const crashing = next(supervisor, "crashed");
     process.kill(first.pid, "SIGKILL");
     const crashed = await crashing;
-    expect(crashed).toMatchObject({ status: "crashed", reason: { kind: "exit", code: null, signal: "SIGKILL" } });
+    // Windows reports a killed process as exit code 1 with no signal.
+    const killed = process.platform === "win32" ? { code: 1, signal: null } : { code: null, signal: "SIGKILL" };
+    expect(crashed).toMatchObject({ status: "crashed", reason: { kind: "exit", ...killed } });
     expect(supervisor.restart().ok).toBe(true);
     expect((await supervisor.settled()).status).toBe("ready");
   });
@@ -198,6 +208,25 @@ describe("Supervisor", () => {
     expect(supervisor.state.status).toBe("stopped");
     expect(logs.some((line) => line.includes("sending SIGKILL"))).toBe(true);
     expect(procState(state.pid)).toBe("gone");
+  });
+
+  it("Windows: a stop closes the server's stdin first, so it shuts down itself, and kills only after the grace", async () => {
+    const polite = setup("ready", { platform: "win32", stopTimeoutMs: 5_000 });
+    const up = await polite.supervisor.start();
+    if (up.status !== "ready") throw new Error(`not ready: ${up.status}`);
+    const began = Date.now();
+    await polite.supervisor.stop();
+    expect(Date.now() - began).toBeLessThan(4_000);
+    expect(existsSync(join(polite.dataDir, `eof-${up.pid}`))).toBe(true);
+    expect(polite.logs.some((line) => line.includes("sending SIGKILL"))).toBe(false);
+    expect(procState(up.pid)).toBe("gone");
+
+    const stubborn = setup("ignore-term", { platform: "win32", stopTimeoutMs: 400 });
+    const on = await stubborn.supervisor.start();
+    if (on.status !== "ready") throw new Error(`not ready: ${on.status}`);
+    await stubborn.supervisor.stop();
+    expect(stubborn.logs.some((line) => line.includes("kept running after its stdin closed for 400 ms; sending SIGKILL"))).toBe(true);
+    expect(procState(on.pid)).toBe("gone");
   });
 
   it("stops cleanly while still waiting for ready, without reporting a crash", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,9 +71,15 @@ describe("Library tools", () => {
     const parent = spawn(process.execPath, ["--input-type=module", "-e",
       `import { runSnapshotQuery } from ${JSON.stringify(sql)}; runSnapshotQuery({ file: ${JSON.stringify(snapshotPath)}, query: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c", limit: 1, signal: new AbortController().signal, timeoutMs: ${timeoutMs} }).catch(() => {}); setTimeout(() => process.exit(0), 400);`], { stdio: "ignore" });
     await once(parent, "exit");
-    const children = () => readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
-      try { const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8"); return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}`); } catch { return false; }
-    });
+    // Linux: /proc. Windows has none: one CIM query for the same command line.
+    // (On Windows libuv's kill-on-close job for spawned children also ends it.)
+    const children = () => process.platform === "win32"
+      ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*node:sqlite*' -and $_.CommandLine -like '* ${timeoutMs}' } | ForEach-Object { $_.ProcessId }`],
+      { encoding: "utf8", windowsHide: true }).split(/\r?\n/).filter(Boolean)
+      : readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
+        try { const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8"); return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}`); } catch { return false; }
+      });
     await vi.waitFor(() => expect(children()).toEqual([]), { timeout: 1500, interval: 100 });
   });
   it("says 10 s by default", async () => {

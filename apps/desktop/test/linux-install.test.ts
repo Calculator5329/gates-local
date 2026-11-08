@@ -97,7 +97,11 @@ const PNG = path.join("icons", "hicolor", "512x512", "apps", `${DESKTOP_ID}.png`
 const FIXED = new Date("2026-11-07T12:00:00.000Z");
 const quiet = { log: () => {} };
 
-describe("installLinux", () => {
+// The launcher install writes XDG .desktop files with POSIX modes: a Linux
+// feature that never runs on Windows. linuxDataHome (pure) runs everywhere.
+const linuxOnly = process.platform === "win32";
+
+describe.skipIf(linuxOnly)("installLinux", () => {
   it("writes the entry and both icons, mode 0644, and makes no backup on a fresh install", () => {
     const dataHome = fresh();
     installLinux({ dataHome, exec: ["/opt/gates/run"], assets, now: FIXED, ...quiet });
@@ -209,7 +213,7 @@ describe("linuxDataHome", () => {
 const run = (cwd: string, env: NodeJS.ProcessEnv, args: string[]) =>
   spawnSync(process.execPath, [path.join(desktopDir, "scripts", "install-linux.ts"), ...args], { cwd, env, encoding: "utf8" });
 
-describe("scripts/install-linux.ts", () => {
+describe.skipIf(linuxOnly)("scripts/install-linux.ts", () => {
   it("installs under a temp HOME when XDG_DATA_HOME is relative, never under the working folder", () => {
     const home = fresh();
     const cwd = fresh();

@@ -18,7 +18,8 @@ export const GPU_APPS_ARGS = [
 
 export const defaultNvidiaSmi: NvidiaSmiRunner = (args) =>
   new Promise((resolve, reject) => {
-    execFile("nvidia-smi", [...args], { timeout: 10_000, maxBuffer: 4 * MIB }, (error, stdout) => {
+    // windowsHide: the server has no console on Windows, so each run would flash one.
+    execFile("nvidia-smi", [...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });
