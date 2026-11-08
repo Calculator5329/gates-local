@@ -27,7 +27,8 @@ Ollama, for people who want local models without guessing whether they fit.
   network.
 - Optional image generation through ComfyUI. It is off until you turn it
   on.
-- Dark and light themes. It follows your system setting until you pick one.
+- Dark and light themes. A new install starts dark, and Settings › General
+  also offers Light and System.
 
 <table>
   <tr>
@@ -165,7 +166,8 @@ pnpm run app-update
 It says what is new and installs it: it fetches from the clone's git
 remote, moves to the new version, runs `pnpm install` and builds the app.
 If a step fails, it goes back to the version you had, builds that again
-and tells you where it stopped. Add `--check` to only see what is new.
+and tells you where it stopped. If it is cut off, run it again and it
+finishes the job. Add `--check` to only see what is new.
 
 Once the project has releases (`v1.2.3` tags), it follows releases and
 never goes backwards. Until then, and whenever you pass `--channel main`

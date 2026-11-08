@@ -10,7 +10,7 @@
 // app-menu launcher), found again after the install so a new Electron
 // version's path is used.
 import path from "node:path";
-import { BACKGROUND_FLAG } from "./launch.ts";
+import { BACKGROUND_ENV, BACKGROUND_FLAG } from "./launch.ts";
 
 export interface UpdaterLaunchInput {
   /** The clone: apps/desktop/../.. */
@@ -54,9 +54,44 @@ export function updaterLaunch(o: UpdaterLaunchInput): UpdaterLaunch {
       o.dataDir,
       "--relaunch-cwd",
       o.cwd,
-      ...appArgs.flatMap((a) => ["--relaunch-arg", a]),
+      // One token each: as a separate word, a value like --disable-gpu reads as an option and stops the updater.
+      ...appArgs.map((a) => `--relaunch-arg=${a}`),
     ],
     cwd: o.repoRoot,
+  };
+}
+
+/**
+ * The environment of the reopened app. A background start's variable would
+ * bring it back with no window, the same as the flag above; a parent running
+ * as Node must not turn Electron into Node.
+ */
+export function relaunchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const next = { ...env };
+  delete next[BACKGROUND_ENV];
+  delete next["ELECTRON_RUN_AS_NODE"];
+  return next;
+}
+
+/**
+ * Wraps a start so overlapping calls share it, decided before the first await
+ * (two IPC calls can both arrive before a spawn reports). A success stays, as
+ * the app is quitting; a failure or a throw lets the next click try again.
+ */
+export function onceUntilFailed<R extends { readonly ok: boolean }>(start: () => Promise<R>): () => Promise<R> {
+  let current: Promise<R> | null = null;
+  return () => {
+    current ??= start().then(
+      (r) => {
+        if (!r.ok) current = null;
+        return r;
+      },
+      (e: unknown) => {
+        current = null;
+        throw e;
+      },
+    );
+    return current;
   };
 }
 

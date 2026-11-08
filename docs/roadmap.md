@@ -144,7 +144,9 @@ never shows a whisper stop, start or restart.
       backwards; the tests run on temporary repositories only, behind a
       guard that refuses any other folder.
       *Done 2026-11-07:* lane/update; checked on Linux, Windows by reading
-      only (changelog).
+      only (changelog). *Hardened 2026-11-08* after review: ignored files
+      are never overwritten, one update per clone, a cut-off update is
+      finished by the next, a timeout ends the whole process tree.
 
 ## Next: slices 2 to 4
 

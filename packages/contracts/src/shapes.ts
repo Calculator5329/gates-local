@@ -119,7 +119,7 @@ export const RuntimeStatus = S.Struct({
   detail: S.optional(S.String),
   /** Ports that something other than Ollama holds, which the detail talks about, in order, once each. */
   busyPorts: S.optional(S.Array(S.String)),
-  /** True where the app has no build of Ollama to install (Windows ARM today), so no client offers one. */
+  /** True where the app has no build of Ollama to install and no copy to run (Windows ARM today), so no client offers one. */
   noAppCopy: S.optional(S.Boolean),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
@@ -401,7 +401,7 @@ export const UpdateChannel = S.Literals(["main", "release"]);
 export type UpdateChannel = typeof UpdateChannel.Type;
 
 /** Why a check could not say whether there is an update. */
-export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "error"]);
+export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "unfinished", "error"]);
 export type UpdateBlocked = typeof UpdateBlocked.Type;
 
 /** One click of "Check for updates": fetches from the clone's remote, changes nothing. */

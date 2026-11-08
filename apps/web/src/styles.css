@@ -283,7 +283,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .res{border-collapse:collapse;font-family:var(--font-mono);font-size:12.5px;line-height:1.7}
 .res th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:0 24px 2px 0}
 .res td{padding:1px 24px 1px 0;color:var(--foreground)}
-.res-note{font-size:12px;color:var(--muted-foreground);margin-top:8px;font-variant-numeric:tabular-nums}
 .out{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--muted-foreground);white-space:pre-wrap;margin:0}
 
 /* the one live status row at the end of a streaming turn (F11) */
@@ -297,11 +296,20 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .qa:hover,.qa:focus-visible{color:var(--foreground);text-decoration-color:currentColor}
 .qa:disabled,.qa:disabled:hover{opacity:.4;cursor:not-allowed;color:var(--muted-foreground);text-decoration-color:var(--border-strong)}
 .prog-l .qa{margin-left:auto}
-/* F43b: a message waiting for setup: a muted clock line under the bubble, right-aligned.
-   F61: the line carries its own quiet "Cancel send", 12 px after the status like Retry on a stopped reply */
-.u-q{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
-.u-qs{display:inline-flex;align-items:center;gap:6px}
-.turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
+/* why a reply stopped, under what it saved */
+.stop-note{font-size:13px;line-height:24px;color:var(--muted-foreground);margin-top:-12px}
+/* messages waiting in this chat, above the composer; one line each */
+.qt{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:2px}
+.qt-r{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;color:var(--muted-foreground)}
+.qt-r .qa{margin:0;flex:none}
+.qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
+.qt-s{flex:none}
+@media (max-width:640px){.qt-s{display:none}}
+/* the warning before a send stops another chat's reply */
+.stopask{margin:0 0 8px;padding:10px 12px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font-size:13.5px}
+.stopask p{margin:0 0 8px}
+.stopask-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.stopask-n{display:inline-flex;align-items:center;gap:6px;margin-right:auto;font-size:13px;color:var(--muted-foreground)}
 /* a streaming reply shows whole blocks (reveal.ts): each fades in as it finishes, opacity only,
    and a quiet "Writing" sits under the last block until the turn ends */
 .md.live>:not(ul):not(ol),.md.live li{animation:fadein .12s ease-out}
@@ -350,9 +358,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ta::placeholder{color:var(--placeholder)}
 .att{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 0}
 .att:empty{display:none}
-.chipf{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 4px 0 10px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px}
-.chipf .ic{color:var(--muted-foreground)}
-.chipf small{font-size:12px;color:var(--muted-foreground)}
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
 .cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto}
 .cf-l>*{flex:none}
@@ -370,7 +375,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .vl{display:inline-flex;align-items:center;gap:8px;color:var(--green-fg);white-space:nowrap}
 .vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
-.vdet{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 /* Ethan's pick, 2026-11-07 (replaces F38/F38b's two treatments): Thinking and Image are pills.
    On: a filled pill, label at foreground. Off: the same pill greyed out, with the same label (never
    "Thinking off"); its outline stays, so it still reads as a button. The tooltip says on or off. */
@@ -457,12 +461,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .prog-l{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted-foreground);margin-top:8px;font-variant-numeric:tabular-nums}
 /* F43: setup is two steps with one overall ETA; the active step has neutral progress, the next is muted */
 .steps{display:flex;flex-direction:column;gap:12px;margin-top:12px}
-.step-h{display:flex;align-items:baseline;gap:12px;font-size:14px;font-variant-numeric:tabular-nums}
-.step-h .sn{font-weight:500;display:inline-flex;align-items:center;gap:8px}
-.step-h .sz{margin-left:auto;color:var(--muted-foreground);font-size:13px}
 .step .prog{margin-top:8px}
-.step.next .step-h{color:var(--muted-foreground)}
-.step.next .step-h .sn{font-weight:400}
 .steps+.prog-l{margin-top:12px;justify-content:flex-start}
 
 /* ---------- popovers ---------- */
@@ -753,6 +752,8 @@ a.btn{text-decoration:none}
 .mp-tab.on .mp-lbl{font-weight:600}
 .mp-n{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
 .mp-quiet{color:var(--muted-foreground);font-size:13.5px;margin:0 0 16px}
+.mp-note{margin:8px 0 12px}
+.mp-note .act-err{margin:0}
 
 /* default for new chats */
 .mp-defrow{position:relative;display:flex;align-items:center;gap:16px;padding:12px 14px;margin:0 0 12px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
@@ -843,6 +844,7 @@ a.btn{text-decoration:none}
 /* dialog */
 .mp-scrim{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--scrim)}
 .mp-dlg{width:420px;max-width:100%;padding:20px;background:var(--popover);border:1px solid var(--popover-border);border-radius:var(--r-xl);box-shadow:var(--popover-shadow)}
+.mp-dlg:focus{outline:none}
 .mp-dlg h3{margin:0 0 8px;font-size:16px;font-weight:600}
 .mp-dlg p{margin:0 0 8px;color:var(--muted-foreground);text-wrap:pretty}
 .mp-dlg p b{color:var(--foreground);font-weight:600}

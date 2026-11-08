@@ -90,7 +90,7 @@ describe("Remove", () => {
     );
     const next = rules.nextDefault(rows, "alpha:7b", card());
     expect(next).toBe("beta:7b");
-    expect(await actions.removeModelAndMoveDefault("alpha:7b", next)).toBeNull();
+    expect(await actions.removeModelAndMoveDefault("alpha:7b", next)).toEqual({ removeErr: null, defaultErr: null });
     expect(store.getState().models?.map((m) => m.name)).toEqual(["beta:7b", "gamma:7b"]);
     expect(saved.defaultModel).toBe("beta:7b");
     expect(card()).toBe("beta:7b");
@@ -103,7 +103,8 @@ describe("Remove", () => {
       throw { code: "internal", message: "model is busy" };
     });
     const r = await actions.removeModelAndMoveDefault("alpha:7b", "beta:7b");
-    expect(r).toMatch(/^Couldn't remove alpha:7b because/);
+    expect(r.removeErr).toMatch(/^Couldn't remove alpha:7b because/);
+    expect(r.defaultErr).toBeNull();
     expect(b.server.calls("settings.update")).toHaveLength(0);
     expect(card()).toBe("alpha:7b");
   });

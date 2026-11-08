@@ -49,6 +49,7 @@ test("the panel's memory bar names whisper and the other resident app", async ({
   await expect(whisper).toContainText("speech-to-text");
   await expect(panel.locator(".lg-r").filter({ hasText: "other app" })).toContainText("Media Vault vision");
   // the reassurance is the legend row's tooltip; the panel's own sentence says it only when the model does not fit
+  await panel.locator("summary", { hasText: "Details" }).click();
   await whisper.hover();
   await expect(page.locator("#tip")).toContainText("never stops it");
 });

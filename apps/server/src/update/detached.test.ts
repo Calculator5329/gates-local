@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { updaterLaunch } from "../../../desktop/src/update-launch.ts";
 import { runCli } from "./cli.ts";
 import { RECORD_FILE } from "./record.ts";
 import type { Runner } from "./run.ts";
@@ -59,6 +60,38 @@ describe("the detached updater", () => {
     expect(head(r.clone)).toBe(target);
     expect(relaunch).toHaveBeenCalledWith({ cwd: r.base, args: ["."] });
     expect(JSON.parse(readFileSync(path.join(r.data, RECORD_FILE), "utf8"))).toMatchObject({ outcome: "updated" });
+  });
+
+  it("carries Electron arguments that start with -- through the launch plan to the relaunch", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const app = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    await new Promise<void>((resolve) => app.once("exit", () => resolve()));
+    const plan = updaterLaunch({
+      repoRoot: r.clone,
+      pid: app.pid!,
+      dataDir: r.data,
+      argv: ["/x/electron", ".", "--disable-gpu", "--ozone-platform=x11"],
+      cwd: r.base,
+      env: {},
+      exists: () => false,
+    });
+    const fake = fakePnpm();
+    const relaunch = vi.fn();
+    const code = await runCli({
+      root: r.clone,
+      // What the updater's own process.argv.slice(2) holds: everything after scripts/update.ts.
+      argv: plan.args.slice(1),
+      defaultDataDir: r.data,
+      pnpm: fake.pnpm,
+      runner: fake.runner,
+      appRunning: () => null,
+      relaunch,
+      print: () => undefined,
+      platform: "linux",
+    });
+    expect(code).toBe(0);
+    expect(relaunch).toHaveBeenCalledWith({ cwd: r.base, args: [".", "--disable-gpu", "--ozone-platform=x11"] });
   });
 
   it("gives up without touching the clone when the app does not close, and leaves a result saying so", async () => {

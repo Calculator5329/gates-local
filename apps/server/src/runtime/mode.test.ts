@@ -392,6 +392,25 @@ describe("Windows (platform injected)", () => {
     expect((await pinned.discover()).noAppCopy).toBeUndefined();
   });
 
+  it("TS-01: with no build to install, a copy already on this computer still counts as the app's own", async () => {
+    const bare = { mode: "system", platform: "linux", ...noPin, externalBaseUrl: await nothingAt() } as const;
+    expect((await (await runtime(bare)).discover()).noAppCopy).toBe(true);
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const found = await (await runtime(bare)).discover();
+    expect(found.noAppCopy).toBeUndefined();
+    expect(found.detail).toMatch(/choose the app's own copy/);
+  });
+
+  it("TS-02: the recovery text offers the app's own copy only where there is one", async () => {
+    const missing = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt() });
+    const none = await missing.discover();
+    expect(none.detail).toMatch(/Start your Ollama\.$/);
+    const exe = "C:\\Users\\Ada\\AppData\\Local\\Programs\\Ollama\\ollama.exe";
+    const stopped = await runtime({ mode: "system", platform: "win32", ...noPin, procRun: cimFake([]), home: "C:\\Users\\Ada", env: winEnv, isExecutable: (f) => f === exe, externalBaseUrl: await nothingAt() });
+    const quit = await stopped.discover();
+    expect(quit.detail).toMatch(/Start Ollama from the Start menu\.$/);
+  });
+
   it("R2-05 (win32 arm64, nothing pinned): app mode says in words that the app's own Ollama is not on Windows yet; never a start or an install", async () => {
     for (const allowInstall of [false, true]) {
       const rt = await runtime({ mode: "app", platform: "win32", ...noPin, procRun: cimFake([]), externalBaseUrl: await nothingAt(), allowInstall });

@@ -34,6 +34,7 @@ const defaults: Record<string, unknown> = {
   "models.list": [info(QWEN), info(GEMMA), info(LLAMA, true)],
   "threads.list": [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }],
   "threads.get": { messages: [] },
+  "turns.blocking": [],
   "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
 };
 

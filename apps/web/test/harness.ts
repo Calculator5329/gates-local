@@ -76,7 +76,8 @@ export class FakeServer {
   readonly sockets: FakeSocket[] = [];
   /** False refuses new connections (they close at once). */
   accepting = true;
-  private readonly answers = new Map<MethodName, Answer>();
+  // no turn is in the way of a send unless a test says so
+  private readonly answers = new Map<MethodName, Answer>([["turns.blocking", () => []]]);
   private readonly holds = new Map<MethodName, Array<(h: Held<never>) => void>>();
   readonly log: Request[] = [];
 

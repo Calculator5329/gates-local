@@ -7,6 +7,7 @@ import {
   type Client,
   type ContextSize,
   type Message,
+  type BlockingTurn,
   type MethodName,
   type Params,
   type Payload,
@@ -19,7 +20,7 @@ import {
 } from "@gates-local/contracts";
 import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
-import { type LiveTurn, NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
+import { type LiveTurn, NA, type Queued, type Section, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
 // The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
@@ -440,7 +441,14 @@ const FIT_RETRY_MAX_MS = 30_000;
 function checkFit(model: string, numCtx: number, key: string, failures: number): void {
   inflight.add(key);
   call("fit.check", { model, numCtx })
-    .then((r) => setState((st) => ({ fits: { ...st.fits, [key]: r } })))
+    .then(async (r) => {
+      // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
+      const frees = r.verdict === "refuse" && (await blockingFor(model, numCtx)).length > 0;
+      setState((st) => {
+        const { [key]: _old, ...stopFrees } = st.stopFrees;
+        return { fits: { ...st.fits, [key]: r }, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
+      });
+    })
     .catch(() => {
       setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } }));
       // "error" is shown, not kept: an invalidation clears it, and otherwise the check is retried
@@ -586,8 +594,9 @@ export function openThread(threadId: string): void {
   setState((s) => {
     // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
     const model = s.threadModels[threadId] ?? s.model;
-    return { view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false, ...(model === undefined ? {} : { model }) };
+    return { view: "thread", threadId, addPage: false, ownerConfirm: false, ...leavingChat(s), ...(model === undefined ? {} : { model }) };
   });
+  bringBack(threadId);
   chooseModel();
   setHash(threadId);
   void loadThread(threadId);
@@ -596,8 +605,13 @@ export function openThread(threadId: string): void {
 export function newThread(): void {
   navGen++;
   // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
-  setState((s) => ({ view: "new", threadId: null, notice: null, chosen: undefined, ...decided(pickChoice(s.models, s.model, undefined)) }));
+  setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...decided(pickChoice(s.models, s.model, undefined)) }));
   setHash(null);
+}
+
+/** What belongs to the chat being left: its notice, its warning, and a queued message open for editing. */
+function leavingChat(s: State): Partial<State> {
+  return { notice: null, stopAsk: null, ...(s.editingQueued === null ? {} : { editingQueued: null, draft: "" }) };
 }
 
 export function openSettings(section?: Section, addPage = false): void {
@@ -636,12 +650,12 @@ export async function deleteThread(threadId: string): Promise<void> {
   if (getState().threadId === threadId) newThread();
 }
 
-/** The open thread as Markdown, for "Export as Markdown". */
-export function threadMarkdown(threadId: string): string {
+/** A thread as Markdown, for "Export as Markdown", from the messages the server just gave. */
+export function threadMarkdown(threadId: string, messages: readonly Message[]): string {
   const s = getState();
   const t = s.threads.find((x) => x.id === threadId);
   const lines = [`# ${t?.title ?? "Thread"}`, ""];
-  for (const m of s.messages[threadId] ?? []) {
+  for (const m of messages) {
     lines.push(m.role === "user" ? "## You" : `## ${describeModel(m.model ?? "", catalogOf(s)).name || "Reply"}`, "", m.content, "");
   }
   return lines.join("\n");
@@ -651,8 +665,8 @@ const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
 // ---------------------------------------------------------------- chat
 
-/** Whether a message typed now would wait in the thread instead of sending. */
-export function queueReason(s: State): Queued["waitFor"] | null {
+/** Whether a message typed now would wait for setup or the first download instead of sending. */
+export function queueReason(s: State): "setup" | "download" | null {
   if (s.conn.kind !== "open") return null;
   if (s.runtime?.state === "installing") return "setup";
   const first = firstPull(s);
@@ -686,43 +700,164 @@ function retire(live: LiveTurn | null): void {
 /** Events that came while the live turn waited for chat.send to give its id; the answer replays them (WF-01). */
 let early: Array<Payload<"chat.event">> = [];
 
+let queueSeq = 0;
+
 export async function send(text: string, opts: { reuseThread?: boolean } = {}): Promise<void> {
   const content = text.trim();
   const s = getState();
-  if (content === "" || streaming(s)) return;
-  const wait = queueReason(s);
+  if (content === "" || asking) return;
+  if (s.editingQueued !== null) {
+    const id = s.editingQueued;
+    setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content } : q)), editingQueued: null, draft: "", notice: null }));
+    return;
+  }
+  const wait = queueReason(s) ?? (streamingHere(s) ? "reply" : null);
   if (!chatReady(s) && wait === null) return;
   const model = sendableModel(s.models, s.model);
   if (model === undefined && wait === null) return;
 
-  let threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
-  retire(s.live);
-  setState({ draft: "", notice: null, live: null });
-  if (threadId === null) {
-    try {
-      const t = await call("threads.create", { title: titleFrom(content) });
-      threadId = t.id;
-      // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
-      const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
-      threadsOrder.next();
-      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
-      openThread(t.id);
-    } catch {
-      setState({ draft: content, notice: "The message didn't send. Gates Local isn't answering; try again in a moment." });
-      return;
-    }
-  }
-  if (wait !== null) {
-    const q: Queued = { id: `q${Date.now()}`, threadId, text: content, at: Date.now(), waitFor: wait };
-    setState((st) => ({ queued: [...st.queued, q] }));
-    return;
-  }
-  await startTurn(threadId, content, model ?? "");
+  const threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
+  if (wait === null) return admit({ content, model: model ?? "", threadId, keepDraft: false });
+  setState({ ...settled(), draft: "", notice: null, stopAsk: null });
+  const queueIn = threadId ?? (await createThread(content, model));
+  if (queueIn === null) return;
+  const q: Queued = { id: `q${++queueSeq}`, threadId: queueIn, text: content, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }) };
+  setState((st) => ({ queued: [...st.queued, q] }));
 }
 
-async function startTurn(threadId: string, content: string, model: string): Promise<void> {
+/** The live slot, cleared of a turn that has ended; a reply still being written keeps it until another turn needs it. */
+function settled(): Partial<State> {
   const s = getState();
+  if (streaming(s)) return {};
   retire(s.live);
+  return { live: null };
+}
+
+/** A new chat for this message; null, with the text back in the box, when the server does not answer. */
+async function createThread(content: string, model: string | undefined): Promise<string | null> {
+  try {
+    const t = await call("threads.create", { title: titleFrom(content) });
+    // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
+    const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
+    threadsOrder.next();
+    setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
+    openThread(t.id);
+    return t.id;
+  } catch {
+    setState({ draft: content, notice: "The message didn't send. Gates Local isn't answering; try again in a moment." });
+    return null;
+  }
+}
+
+const STOP_OTHERS_KEY = "gates-local.stop-others-ok";
+
+function stopOthersOk(): boolean {
+  try {
+    return localStorage.getItem(STOP_OTHERS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The running turns this load would have to stop; none when the server cannot say, and the send goes as it always did. */
+async function blockingFor(model: string, numCtx: number): Promise<readonly BlockingTurn[]> {
+  return call("turns.blocking", { model, numCtx }).catch(() => []);
+}
+
+/** The server is being asked what a send would stop; a second Enter in that moment is the same send. */
+let asking = false;
+
+type Outgoing = Omit<StopAsk, "blocking">;
+
+/** Every send from the person goes through here: the server says whether it would stop another chat, and the warning asks once. */
+async function admit(out: Outgoing): Promise<void> {
+  if (asking) return;
+  asking = true;
+  const blocking = await blockingFor(out.model, getState().numCtx);
+  asking = false;
+  if (blocking.length > 0 && !stopOthersOk()) {
+    setState({ stopAsk: { ...out, blocking }, notice: null });
+    return;
+  }
+  await launch(out, blocking.length > 0);
+}
+
+async function launch(out: Outgoing, stopOthers: boolean): Promise<void> {
+  if (out.threadId !== null && out.regenerate !== true) keepStoppedWords(out.threadId);
+  setState((s) => ({
+    ...settled(),
+    notice: null,
+    stopAsk: null,
+    ...(out.keepDraft ? {} : { draft: "" }),
+    ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((q) => q.id !== out.queuedId) }),
+  }));
+  const threadId = out.threadId ?? (await createThread(out.content, out.model));
+  if (threadId !== null) await startTurn(threadId, out.content, out.model, { stopOthers });
+}
+
+/** The warning's action. `dontShowAgain` is saved only here, so a Cancel with the box ticked changes nothing. */
+export function confirmStopAsk(dontShowAgain: boolean): void {
+  const ask = getState().stopAsk;
+  if (ask === null) return;
+  if (dontShowAgain) {
+    try {
+      localStorage.setItem(STOP_OTHERS_KEY, "1");
+    } catch {
+      // private windows may refuse storage; the warning shows again next time
+    }
+  }
+  void launch(ask, true);
+}
+
+export function cancelStopAsk(): void {
+  setState({ stopAsk: null });
+}
+
+/**
+ * Turns still running on the server for chats not on screen, kept out of the
+ * store so their words cost no render. openThread puts one back in the live
+ * slot with everything it wrote meanwhile.
+ */
+let parked: LiveTurn[] = [];
+
+/** The live slot is about to hold a turn in `threadId`: a reply running in another chat keeps running behind it. */
+function setAside(threadId: string): void {
+  const live = getState().live;
+  if (live !== null && live.end === undefined && live.threadId !== threadId) {
+    // its waiting words are its own, not the next turn's
+    flushDeltas();
+    const now = getState().live;
+    if (now !== null) parked.push(now);
+    return;
+  }
+  retire(live);
+}
+
+function bringBack(threadId: string): void {
+  const i = parked.findIndex((t) => t.threadId === threadId);
+  const back = parked[i];
+  if (back === undefined) return;
+  flushDeltas();
+  parked.splice(i, 1);
+  const s = getState();
+  if (streaming(s) && s.live !== null) parked.push(s.live);
+  else retire(s.live);
+  setState({ live: back });
+}
+
+/** The server saves nothing for a reply the person stopped: its words live only in the live turn, and the next turn there would wipe them off the screen. */
+function keepStoppedWords(threadId: string): void {
+  const l = getState().live;
+  if (l === null || l.threadId !== threadId || l.end?.kind !== "stopped" || l.text === "") return;
+  const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), model: l.model, createdAt: Date.now() };
+  const note = `Stopped after ${l.end.secs} s.`;
+  setState((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
+}
+
+async function startTurn(threadId: string, content: string, model: string, opts: { stopOthers?: boolean; from?: Queued } = {}): Promise<void> {
+  setAside(threadId);
+  keepStoppedWords(threadId); // a Retry cleared the live turn before it got here
+  const s = getState();
   const gen = ++turnGen;
   setState({ live: { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content } });
   try {
@@ -733,7 +868,19 @@ async function startTurn(threadId: string, content: string, model: string): Prom
       numCtx: s.numCtx,
       think: s.think,
       ...(s.image ? { image: true } : {}),
+      ...(opts.stopOthers ? { stopOthers: true } : {}),
     });
+    const away = parked.findIndex((t) => t.gen === gen);
+    if (away >= 0) {
+      // the person moved on before the id came, and another chat's turn took the slot: this one runs on behind it
+      parked[away] = { ...(parked[away] as LiveTurn), turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null };
+      noteMessage(threadId, r.userMessage);
+      setState((st) => ({ messages: withMessage(st, threadId, r.userMessage) }));
+      const theirs = early.filter((p) => p.turnId === r.turnId);
+      early = early.filter((p) => p.turnId !== r.turnId);
+      for (const p of theirs) onChatEvent(p);
+      return;
+    }
     const now = getState().live;
     const mine = now !== null && now.gen === gen;
     noteMessage(threadId, r.userMessage);
@@ -756,10 +903,17 @@ async function startTurn(threadId: string, content: string, model: string): Prom
     }
   } catch (e) {
     const mine = getState().live?.gen === gen;
+    parked = parked.filter((t) => t.gen !== gen);
     setState((st) => {
       if (st.live === null || st.live.gen !== gen) return {};
       // a stopped turn that never started has nothing left to wait for
       if (st.live.end !== undefined) return { live: { ...st.live, pendingUser: null, ending: undefined } };
+      const { from } = opts;
+      // a queued message goes back where it was, on hold: what is in the box is something else
+      if (from !== undefined) {
+        const { now: _now, ...rest } = from;
+        return { live: null, queued: [{ ...rest, held: true }, ...st.queued], notice: refusal(codeOf(e), model) };
+      }
       return { live: null, draft: content, notice: refusal(codeOf(e), model) };
     });
     // a turn another client started meanwhile (turn-active) now streams here
@@ -807,7 +961,7 @@ export function stop(): void {
 
 /** Retry stays off while a stopped turn has not ended on the server: the server refuses a second turn in a thread, and the old turn's events must not land on the new one. */
 export function canRetry(s: State): boolean {
-  return s.threadId !== null && !streaming(s) && s.live?.ending !== true;
+  return s.threadId !== null && !streamingHere(s) && !(s.live?.threadId === s.threadId && s.live.ending === true);
 }
 
 /** Retry or Regenerate: send the thread's last user message again. The server keeps both copies (no regenerate method yet). */
@@ -816,14 +970,14 @@ export function retry(): void {
   if (s.threadId === null || !canRetry(s)) return;
   const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "user");
   if (!last) return;
-  retire(s.live);
-  setState({ live: null });
-  void startTurn(s.threadId, last.content, s.model ?? last.model ?? "");
+  void admit({ content: last.content, model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true });
 }
 
 /** A dropped connection loses the live turn's stream; the server may still save it. */
 function lostTurn(): void {
   flushDeltas();
+  // the words of a turn behind another chat stop too; the next visit to its thread reloads what was saved
+  parked = [];
   // the old socket's terminal events will not come; a stopped turn stops waiting for them
   setState((s) =>
     s.live === null
@@ -892,6 +1046,8 @@ function onChatEvent(p: Payload<"chat.event">): void {
   const terminal = event.type === "done" || event.type === "error";
   const ours = live !== null && live.threadId === threadId && live.turnId === turnId;
   if (terminal) oldTurns.delete(turnId);
+  const away = parked.findIndex((t) => t.turnId === turnId);
+  if (away >= 0) return parkedEvent(away, event);
   if (!ours) return otherTurn(p);
   // the stopped turn has ended on the server: Retry may send again
   if (terminal && live.ending) setState((s) => (s.live?.gen === live.gen ? { live: { ...s.live, ending: undefined } } : {}));
@@ -931,15 +1087,84 @@ function onChatEvent(p: Payload<"chat.event">): void {
       flushQueued();
       return;
     }
-    case "error":
+    case "error": {
       flushDeltas();
+      holdQueue(threadId);
+      const why = stopReason(event);
       if (event.code === "cancelled") {
-        return setState((s) =>
+        setState((s) =>
           s.live && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs: Math.round((Date.now() - s.live.startedAt) / 1000) } } } : {},
         );
+      } else if (event.partial !== undefined) {
+        // the saved partial has every word the live turn showed: it takes the live turn's place
+        dropDeltas();
+        const { partial } = event;
+        noteMessage(threadId, partial);
+        setState((s) => ({ messages: withMessage(s, threadId, partial), live: null, ...(why === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: why } }) }));
+      } else {
+        setState((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: why ?? event.message } } } : {}));
       }
-      return setState((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: event.message } } } : {}));
+      flushQueued();
+      return;
+    }
   }
+}
+
+/** One plain sentence for a reply the server stopped to make way for something else. */
+function stopReason(event: { readonly code: string; readonly neededBy?: string | undefined }): string | undefined {
+  if (event.code === "runtime-changed") return "Stopped when the Ollama runtime changed.";
+  if (event.code !== "preempted") return undefined;
+  const by = event.neededBy === undefined ? "another model" : describeModel(event.neededBy, catalogOf(getState())).name;
+  return `Stopped so ${by} could load.`;
+}
+
+/** The reply these messages waited for stopped or failed: they wait for Send now instead of going out on their own. */
+function holdQueue(threadId: string): void {
+  const waiting = (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
+  setState((s) => (s.queued.some(waiting) ? { queued: s.queued.map((q) => (waiting(q) ? { ...q, held: true as const } : q)) } : {}));
+}
+
+type ChatEvent = Payload<"chat.event">["event"];
+
+/** An event of a turn running behind another chat: its words wait outside the store for openThread. */
+function parkedEvent(i: number, event: ChatEvent): void {
+  const t = parked[i] as LiveTurn;
+  const first = t.firstTokenAt === undefined ? { firstTokenAt: Date.now() } : {};
+  switch (event.type) {
+    case "delta":
+      parked[i] = { ...t, ...first, text: t.text + event.text };
+      return;
+    case "thinking":
+      parked[i] = { ...t, thinking: t.thinking + event.text };
+      return;
+    case "tool":
+      parked[i] = { ...t, tools: upsertStep(t.tools, event.step) };
+      return;
+    case "done":
+      parked.splice(i, 1);
+      untrackedDone(t.threadId, event.message);
+      invalidateFits();
+      flushQueued();
+      return;
+    case "error":
+      parked.splice(i, 1);
+      holdQueue(t.threadId);
+      if (event.code !== "cancelled") keepStopped(t.threadId, t.userMessageId, event);
+      flushQueued();
+      return;
+  }
+}
+
+/** A turn that ended without being on screen: what it saved goes into its thread, with why it stopped under it. */
+function keepStopped(threadId: string, userMessageId: string | undefined, event: Extract<ChatEvent, { type: "error" }>): void {
+  const { partial } = event;
+  if (partial !== undefined) noteMessage(threadId, partial);
+  const why = stopReason(event) ?? "The reply didn't finish.";
+  const on = partial?.id ?? userMessageId;
+  setState((s) => ({
+    ...(partial !== undefined && s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),
+    ...(on === undefined ? {} : { stopNotes: { ...s.stopNotes, [on]: why } }),
+  }));
 }
 
 /**
@@ -950,6 +1175,8 @@ function onChatEvent(p: Payload<"chat.event">): void {
  */
 function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
   if (event.type === "done") return untrackedDone(threadId, event.message);
+  // a partial saved by a turn stopped elsewhere; a turn this client stopped itself reloads on its next visit
+  if (event.type === "error" && event.partial !== undefined) return keepStopped(threadId, undefined, event);
   if (event.type !== "start") return;
   noteMessage(threadId, event.userMessage);
   const s = getState();
@@ -971,8 +1198,7 @@ function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
 /**
  * A reply saved by a turn this client does not track: loads in flight for its
  * thread replay it over their older snapshots (WF-02), then the thread reloads.
- * A stopped or failed turn saves nothing on the server, so only done has a
- * message to keep.
+ * A turn the server halted saves a partial instead; keepStopped takes that one.
  */
 function untrackedDone(threadId: string, message: Message): void {
   noteMessage(threadId, message);
@@ -995,23 +1221,55 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
   return i < 0 ? [...steps, step] : steps.map((x, j) => (j === i ? step : x));
 }
 
-/** Send what waited for setup or a download, oldest first, once chat is ready. */
+/**
+ * Send the next waiting message, oldest first, once nothing is in its way: one
+ * at a time for this client, never past a message on hold or being edited
+ * unless Send now asked for it.
+ */
 function flushQueued(): void {
   const s = getState();
-  if (!chatReady(s) || queueReason(s) !== null || s.model === undefined || streaming(s)) return;
-  const next = s.queued[0];
-  if (!next) return;
-  setState((st) => ({ queued: st.queued.slice(1) }));
-  if (getState().threadId !== next.threadId) openThread(next.threadId);
-  void startTurn(next.threadId, next.text, s.model);
+  if (!chatReady(s) || queueReason(s) !== null || streaming(s) || s.live?.ending === true || parked.length > 0) return;
+  const next = s.queued.find((q) => q.id !== s.editingQueued && (q.now === true || q.held !== true));
+  const model = next?.model ?? s.model;
+  if (next === undefined || model === undefined) return;
+  setState((st) => ({ queued: st.queued.filter((q) => q.id !== next.id) }));
+  // setup and the first download are the whole app waiting; a queue behind a reply stays out of the way
+  if (next.waitFor !== "reply" && getState().threadId !== next.threadId) openThread(next.threadId);
+  void startTurn(next.threadId, next.text, model, { from: next });
 }
 
-/** Cancel send: the waiting text goes back into the composer. */
-export function unqueue(id: string): void {
+/**
+ * Send now, T3 Code's interrupt: a reply running in this message's chat stops,
+ * and the message goes first once that has ended. With nothing running there
+ * it goes at once, through the same warning as any other send.
+ */
+export function sendQueuedNow(id: string): void {
   const s = getState();
   const q = s.queued.find((x) => x.id === id);
-  if (!q) return;
-  setState({ queued: s.queued.filter((x) => x.id !== id), draft: q.text });
+  if (!q || q.waitFor !== "reply") return;
+  const here = s.live?.threadId === q.threadId;
+  if (here && (streaming(s) || s.live?.ending === true)) {
+    const { held: _held, ...rest } = q;
+    setState({ queued: [{ ...rest, now: true }, ...s.queued.filter((x) => x.id !== id)] });
+    stop();
+    return;
+  }
+  void admit({ content: q.text, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id });
+}
+
+/** Remove: the message is gone. Edit is the way to get its words back. */
+export function removeQueued(id: string): void {
+  setState((s) => ({ queued: s.queued.filter((q) => q.id !== id), ...(s.editingQueued === id ? { editingQueued: null, draft: "" } : {}) }));
+}
+
+/** Edit: the words go in the composer and the message keeps its place until the next Send updates it. */
+export function editQueued(id: string): void {
+  const q = getState().queued.find((x) => x.id === id);
+  if (q) setState({ editingQueued: id, draft: q.text, notice: null, stopAsk: null });
+}
+
+export function cancelQueuedEdit(): void {
+  setState({ editingQueued: null, draft: "" });
 }
 
 // ---------------------------------------------------------------- composer and models
@@ -1019,7 +1277,17 @@ export function unqueue(id: string): void {
 export function pickModel(model: string): void {
   setState((st) => ({ model, chosen: model, ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }) }));
   const s = getState();
-  if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx }, `load ${model}`);
+  if (!s.unavailable["models.load"] && chatReady(s)) void preload(model, s.numCtx);
+}
+
+/**
+ * Load the picked model ahead of the first message, unless a running reply is
+ * holding the memory it needs. Then models.load would wait behind that reply
+ * (Ollama queues it), and only a send may stop someone's answer: the load
+ * happens at the send, behind its warning.
+ */
+async function preload(model: string, numCtx: number): Promise<void> {
+  if ((await blockingFor(model, numCtx)).length === 0 && getState().model === model) void act("models.load", { model, numCtx }, `load ${model}`);
 }
 
 export function setContext(numCtx: ContextSize): void {

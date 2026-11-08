@@ -4,6 +4,7 @@
 // Settings, the docked GPU panel, first run, popovers and the tooltip layer.
 // Global keys follow the design's Escape order: popover, GPU panel, the
 // runtime confirm, the download page, then Settings itself.
+import type { Message } from "@gates-local/contracts";
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, rtOf } from "./Banner.tsx";
 import { Composer, Picker, PlusMenu } from "./Composer.tsx";
@@ -141,10 +142,10 @@ function Header({ isNew }: { isNew: boolean }) {
   );
 }
 
-function exportThread(threadId: string): void {
+function exportThread(threadId: string, messages: readonly Message[]): void {
   const s = getState();
   const title = s.threads.find((t) => t.id === threadId)?.title ?? "thread";
-  const url = URL.createObjectURL(new Blob([threadMarkdown(threadId)], { type: "text/markdown" }));
+  const url = URL.createObjectURL(new Blob([threadMarkdown(threadId, messages)], { type: "text/markdown" }));
   const a = document.createElement("a");
   a.href = url;
   a.download = `${title.replace(/[^\w\- ]+/g, "").trim() || "thread"}.md`;
@@ -171,8 +172,9 @@ function renameFromMenu(id: string): void {
 const EXPORT_WAIT_MS = 8000;
 
 /**
- * Export loads the thread it was asked for (cached or not) and makes a file only from a
- * successful load of it; a failed or slow load, or a thread deleted meanwhile, says so instead.
+ * Export loads the thread it was asked for and makes the file from that load, even when a copy
+ * is cached: another client may have added to it. A failed or slow load, or a thread deleted
+ * meanwhile, says so instead.
  */
 async function exportFromMenu(id: string): Promise<void> {
   const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
@@ -187,8 +189,7 @@ async function exportFromMenu(id: string): Promise<void> {
   if (!getState().threads.some((t) => t.id === id)) return fail("it was deleted.");
   if (got === "late") return fail("it took too long to load. Try again.");
   if (got === "failed") return fail("it didn't load. Try again.");
-  if (getState().messages[id] === undefined) setState((s) => ({ messages: { ...s.messages, [id]: got.messages } }));
-  exportThread(id);
+  exportThread(id, got.messages);
 }
 
 /** Opened at a point (a right-click or a row's menu key): below it, or above when it would leave the window. */

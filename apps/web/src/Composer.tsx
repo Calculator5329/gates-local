@@ -10,8 +10,24 @@ import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, 
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { ensureFit, firstPull, openSettings, pickModel, pull, queueReason, send, setContext, stop } from "./session.ts";
-import { NA, type State, fitKey, getState, setState, streaming, useStore } from "./store.ts";
+import {
+  cancelQueuedEdit,
+  cancelStopAsk,
+  confirmStopAsk,
+  editQueued,
+  ensureFit,
+  firstPull,
+  openSettings,
+  pickModel,
+  pull,
+  queueReason,
+  removeQueued,
+  send,
+  sendQueuedNow,
+  setContext,
+  stop,
+} from "./session.ts";
+import { NA, type Queued, type State, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
 import { closePop, closeTip, esc, place, togglePop } from "./ui.tsx";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
@@ -60,7 +76,9 @@ export function Composer() {
   const models = useStore((s) => s.models);
   const catalog = useStore(catalogOf);
   const imageGen = useStore(imageGenOf);
-  const isStreaming = useStore(streaming);
+  const isStreaming = useStore(streamingHere);
+  const editing = useStore((s) => s.editingQueued !== null);
+  const freed = useStore((s) => s.model !== undefined && s.stopFrees[fitKey(s.model, s.numCtx)] === true);
   const wait = useStore(queueReason);
   const first = useStore(firstPull);
   const firstProgress = useStore((s) => {
@@ -124,24 +142,32 @@ export function Composer() {
 
   const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
 
+  // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
+  const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
   let sendTip = "Send (Enter)";
-  if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
+  if (editing) sendTip = text ? "Update the queued message (Enter)" : "Type the message to queue";
+  else if (isStreaming && !blocked) sendTip = text ? "Queue (Enter). It sends when this reply finishes" : "Type now; it sends when this reply finishes";
+  else if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
   else if (noModel) sendTip = why ?? "Download a model to start chatting";
-  else if (v?.k === "no") sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
+  else if (memNo) sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
   else if (!text) sendTip = "Type a message to send";
-  const sendDisabled = (blocked && !queueable) || (!blocked && v?.k === "no") || noModel || !text;
+  else if (freed) sendTip = "Send (Enter). Another chat's reply is using this memory, so it stops first";
+  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
-  const memRefused = !blocked && !queueable && !noModel && v?.k === "no";
+  const memRefused = !blocked && !queueable && !noModel && memNo;
+  // T3 Code's composer: Enter never stops a reply; the words queue behind it.
+  const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
 
   const submit = () => {
-    if (isStreaming) return stop();
     if (sendDisabled) return;
     void send(draft);
   };
 
   return (
     <>
+      <QueueTray />
+      <StopWarning />
       <form
         className={`composer${blocked ? " blocked" : ""}`}
         autoComplete="off"
@@ -159,11 +185,12 @@ export function Composer() {
           placeholder={placeholder}
           aria-label="Message"
           value={draft}
-          onChange={(e) => setState({ draft: e.target.value, notice: null })}
+          // the warning is about the words it was raised for
+          onChange={(e) => setState({ draft: e.target.value, notice: null, stopAsk: null })}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              if (!isStreaming) submit();
+              submit();
             }
           }}
         />
@@ -250,26 +277,25 @@ export function Composer() {
           </div>
           <div className="cf-r">
             {isStreaming ? (
-              <button type="submit" className="send stop" aria-label="Stop" data-tip="Stop">
+              <button type="button" className="send stop" aria-label="Stop" data-tip="Stop" onClick={stop}>
                 <span className="sqr" />
               </button>
-            ) : (
-              <button
-                type="submit"
-                className="send"
-                aria-label="Send message"
-                data-tip={sendTip}
-                disabled={sendDisabled && !memRefused}
-                aria-disabled={memRefused ? true : undefined}
-                onClick={(e) => {
-                  if (!memRefused) return;
-                  e.preventDefault();
-                  openFit();
-                }}
-              >
-                <SendArrow />
-              </button>
-            )}
+            ) : null}
+            <button
+              type="submit"
+              className="send"
+              aria-label={sendLabel}
+              data-tip={sendTip}
+              disabled={sendDisabled && !memRefused}
+              aria-disabled={memRefused ? true : undefined}
+              onClick={(e) => {
+                if (!memRefused) return;
+                e.preventDefault();
+                openFit();
+              }}
+            >
+              <SendArrow />
+            </button>
           </div>
         </div>
       </form>
@@ -279,6 +305,109 @@ export function Composer() {
         </p>
       ) : null}
     </>
+  );
+}
+
+// ---------------------------------------------------------------- queue and warning
+
+function queueWords(q: Queued, editing: boolean): string {
+  if (editing) return "Editing in the composer";
+  if (q.waitFor === "download") return "Sends when the download finishes";
+  if (q.waitFor === "setup") return "Sends when setup finishes";
+  return q.held ? "On hold" : "Sends after this reply";
+}
+
+/** A click handler that leaves the typing cursor in the composer, where the next words go. */
+const andFocus = (act: () => void) => () => {
+  closeTip();
+  act();
+  focusComposer();
+};
+
+/** Messages waiting in this chat, above the composer as in T3 Code: each can go now, be edited in place, or be removed. */
+function QueueTray() {
+  const queued = useStore((s) => s.queued);
+  const threadId = useStore((s) => s.threadId);
+  const editingId = useStore((s) => s.editingQueued);
+  const mine = queued.filter((q) => q.threadId === threadId);
+  if (mine.length === 0) return null;
+  const n = mine.length;
+  return (
+    <ul className="qt" aria-label={`${n} queued message${n === 1 ? "" : "s"}`}>
+      {mine.map((q, i) => {
+        const editing = q.id === editingId;
+        return (
+          <li key={q.id} className="qt-r" aria-label={`Queued message ${i + 1} of ${n}, not sent`}>
+            <Icon id="clock" cls="s14" />
+            <span className="qt-t">{q.text}</span>
+            <span className="qt-s" role="status">
+              {queueWords(q, editing)}
+            </span>
+            {q.waitFor === "reply" && !editing ? (
+              <button type="button" className="qa" data-send-now data-tip={q.held ? "Send this now" : "Stop this reply and send this now"} onClick={andFocus(() => sendQueuedNow(q.id))}>
+                Send now
+              </button>
+            ) : null}
+            {editing ? (
+              <button type="button" className="qa" onClick={andFocus(cancelQueuedEdit)}>
+                Cancel editing
+              </button>
+            ) : (
+              <button type="button" className="qa" data-edit-queued onClick={andFocus(() => editQueued(q.id))}>
+                Edit
+              </button>
+            )}
+            <button type="button" className="qa" data-unqueue data-tip="Remove from queue" onClick={andFocus(() => removeQueued(q.id))}>
+              Remove
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** "Qwen 3.5 9B in “Trip plans”", the one thing the warning has to name for each chat it would stop. */
+function stopNames(blocking: NonNullable<State["stopAsk"]>["blocking"], catalog: ReturnType<typeof catalogOf>): string[] {
+  return blocking.map((t) => `${describeModel(t.model, catalog).name} in ${t.title === "" ? "another chat" : `“${t.title}”`}`);
+}
+
+/** Shown once: a send needs a load that stops another chat's reply. */
+function StopWarning() {
+  const ask = useStore((s) => s.stopAsk);
+  const catalog = useStore(catalogOf);
+  const [never, setNever] = useState(false);
+  useEffect(() => setNever(false), [ask]);
+  if (ask === null) return null;
+  const names = stopNames(ask.blocking, catalog);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  return (
+    <div
+      className="stopask"
+      role="alertdialog"
+      aria-label="Stop the other reply?"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") andFocus(cancelStopAsk)();
+        // a held Enter from the message box must not answer the warning
+        else if (e.key === "Enter" && e.repeat) e.preventDefault();
+      }}
+    >
+      <p>
+        This stops {list}. {names.length > 1 ? "Their replies so far are kept." : "Its reply so far is kept."}
+      </p>
+      <div className="stopask-f">
+        <label className="stopask-n">
+          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />
+          Don't show this again
+        </label>
+        <button type="button" className="btn ghost" onClick={andFocus(cancelStopAsk)}>
+          Cancel
+        </button>
+        <button type="button" className="btn primary" autoFocus onClick={andFocus(() => confirmStopAsk(never))}>
+          Stop and send
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -369,12 +498,14 @@ interface Row {
   readonly v: Verdict | undefined;
   readonly downloading?: number;
   readonly info: ModelInfo | undefined;
+  /** Refused only because another chat's reply holds the memory: pickable, and the send asks first. */
+  readonly frees?: boolean;
 }
 
 const GROUPS = ["gpu", "spill", "no", "unknown"] as const;
 type GroupKey = (typeof GROUPS)[number];
 
-function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "catalog">, q: string): Record<GroupKey, Row[]> {
+function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "catalog" | "stopFrees">, q: string): Record<GroupKey, Row[]> {
   const catalog = catalogOf(s);
   const groups: Record<GroupKey, Row[]> = { gpu: [], spill: [], no: [], unknown: [] };
   const hit = (tag: string, name: string, purpose: string) =>
@@ -384,7 +515,8 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
     const d = describeModel(m.name, catalog);
     if (!hit(m.name, d.name, d.purpose)) continue;
     const v = verdictFor(s, m.name);
-    groups[v?.k ?? "unknown"].push({ tag: m.name, name: d.name, purpose: d.purpose, v, info: m });
+    const frees = v?.k === "no" && s.stopFrees[fitKey(m.name, s.numCtx)] === true;
+    groups[frees ? "spill" : (v?.k ?? "unknown")].push({ tag: m.name, name: d.name, purpose: d.purpose, v, info: m, frees });
   }
   for (const p of Object.values(s.pulls)) {
     if (p.state !== "downloading" && p.state !== "queued" && p.state !== "verifying") continue;
@@ -443,6 +575,8 @@ function CtxPick({ model }: { model: string | undefined }) {
   }, [model, fits, max]);
   const name = model === undefined ? "" : describeModel(model, catalog).name;
   const capped = max !== undefined && max < numCtx;
+  // the one Tab lands on: the chosen size, or the largest this model takes when it cannot take that
+  const tabStop = usable.includes(numCtx as ContextSize) ? numCtx : usable.at(-1);
   return (
     <div className="pk-foot">
       <div className="pk-ctx">
@@ -457,7 +591,9 @@ function CtxPick({ model }: { model: string | undefined }) {
             if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
             e.preventDefault();
             const i = usable.indexOf(numCtx as ContextSize);
-            const next = usable[(i + (e.key === "ArrowRight" ? 1 : -1) + usable.length) % usable.length];
+            const right = e.key === "ArrowRight";
+            // nothing chosen among these yet: Right starts at the first, Left at the last
+            const next = i < 0 ? (right ? usable[0] : usable.at(-1)) : usable[(i + (right ? 1 : -1) + usable.length) % usable.length];
             if (next === undefined) return;
             pickCtx(next);
             requestAnimationFrame(() => document.querySelector<HTMLElement>(`#picker [data-ctx="${next}"]`)?.focus());
@@ -472,7 +608,7 @@ function CtxPick({ model }: { model: string | undefined }) {
                 type="button"
                 role="radio"
                 aria-checked={c === numCtx && !capped}
-                tabIndex={c === numCtx && !capped ? 0 : -1}
+                tabIndex={c === tabStop ? 0 : -1}
                 className={c === numCtx && !capped ? "on" : ""}
                 data-ctx={c}
                 disabled={max !== undefined && c > max}
@@ -493,7 +629,8 @@ function CtxPick({ model }: { model: string | undefined }) {
 
 function rowTip(r: Row, sysBytes: number | undefined): string {
   let tip = tagTip(r.name, r.info, r.tag);
-  if (r.v) {
+  if (r.frees) tip += "<br>Another chat's reply is using this memory. Sending here stops that reply and keeps what it wrote.";
+  else if (r.v) {
     tip += "<br>";
     if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available to this model: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
     else if (r.v.k === "spill") tip += `An estimated ${gb(r.v.amt)} runs from system memory, so replies are slower.`;
@@ -577,11 +714,12 @@ export function Picker() {
     for (const c of catalog ?? []) if (!c.installed && !installed.some((m) => m.name === c.name)) ensureFit(c.name, numCtx);
   }, [open, numCtx, fits, catalog]);
   const query = q.trim().toLowerCase();
-  const all = pickerRows({ models, pulls, fits, numCtx, catalog: catalogRaw }, query);
+  const stopFrees = useStore((s) => s.stopFrees);
+  const all = pickerRows({ models, pulls, fits, numCtx, catalog: catalogRaw, stopFrees }, query);
   const inFam = (name: string) => fam === null || familyOf(name) === fam;
   const groups = Object.fromEntries(GROUPS.map((g) => [g, all[g].filter((r) => inFam(r.name))])) as Record<GroupKey, Row[]>;
   const sys = gpu === NA || gpu === undefined ? undefined : gpu.systemMemoryAvailableBytes;
-  const selectable = GROUPS.flatMap((g) => groups[g].filter((r) => r.downloading === undefined && r.v?.k !== "no"));
+  const selectable = GROUPS.flatMap((g) => groups[g].filter((r) => r.downloading === undefined && (r.v?.k !== "no" || r.frees)));
   // the rail: every family among installed and downloadable models, "All" first
   const listed = chatModels(models ?? []).map((m) => describeModel(m.name, catalog).name);
   const offered = (catalog ?? []).filter((c) => !c.installed && !(models ?? []).some((m) => m.name === c.name));
@@ -647,7 +785,7 @@ export function Picker() {
         );
       }
       const tip = `${rowTip(r, sys)}${loaded ? "<br>Loaded now" : ""}`;
-      if (r.v?.k === "no") {
+      if (r.v?.k === "no" && !r.frees) {
         return (
           <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-m={r.tag} data-tip={tip}>
             <span className="pk-c" />
@@ -691,7 +829,7 @@ export function Picker() {
               {r.tag === picked ? rec : null}
             </div>
           </div>
-          <span className={`pk-v ${r.v?.k ?? ""}`}>{fitWord(r.v)}</span>
+          {r.frees ? <span className="pk-v spill">Stops another chat</span> : <span className={`pk-v ${r.v?.k ?? ""}`}>{fitWord(r.v)}</span>}
         </button>
       );
     }),

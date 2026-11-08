@@ -10,12 +10,14 @@ import type { FitReport, ModelInfo } from "@gates-local/contracts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
-import { cardDefault, makeDefault, removeModelAndMoveDefault } from "./models-actions.ts";
+import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
   type ModelName,
   type Row,
   about,
   canBeDefault,
+  filterShows,
+  noteSettled,
   fitLabel,
   fitReason,
   fitSymbol,
@@ -31,9 +33,6 @@ import { ensureFit, leaveSettings, pull } from "./session.ts";
 import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
-
-/** The filter field shows once the list is longer than this. */
-const FILTER_FROM = 8;
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
@@ -181,16 +180,34 @@ function Installed() {
   const [filter, setFilter] = useState("");
   const [removing, setRemoving] = useState<{ row: InstalledRow; back: HTMLElement | null } | null>(null);
   const settingsNA = useStore((s) => s.settings === NA);
+  const saved = useStore(savedDefault);
+  // A removal that worked but could not save the next default. Ends for good once a default is saved.
+  const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
+  if (note !== null && noteSettled(note.removed, saved)) setNote(null);
+  const notice =
+    note !== null && saved === undefined ? (
+      <div className="mp-note">
+        <Fail err={note.text} />
+      </div>
+    ) : null;
   if (models === undefined) return <p className="mp-quiet">Checking which models are installed…</p>;
-  if (models.length === 0) return <NoModels />;
+  if (models.length === 0) {
+    return (
+      <>
+        {notice}
+        <NoModels />
+      </>
+    );
+  }
   const q = filter.trim().toLowerCase();
   const shown = q === "" ? rows : rows.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
   const total = models.reduce((sum, m) => sum + m.sizeBytes, 0);
-  const savedDef = settingsNA ? undefined : def;
+  const shownDef = settingsNA ? undefined : def;
   return (
     <>
       {rows.some((r) => r.chat) ? <DefaultCard rows={rows} def={def} disabled={settingsNA} /> : null}
-      {rows.length > FILTER_FROM ? (
+      {notice}
+      {filterShows(rows.length, filter) ? (
         <Field value={filter} onChange={setFilter} placeholder="Filter installed models" label="Filter installed models" cls="mp-filter" />
       ) : null}
       <div className="mp-card">
@@ -201,7 +218,7 @@ function Installed() {
           <span />
         </div>
         {shown.map((r) => (
-          <ModelRowView key={r.name} r={r} def={savedDef} onRemove={(back) => setRemoving({ row: r, back })} />
+          <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />
         ))}
         <DownloadingRows />
         {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
@@ -212,6 +229,7 @@ function Installed() {
           row={removing.row}
           next={settingsNA ? undefined : nextDefault(rows, removing.row.name, def)}
           rows={rows}
+          onDefaultFailed={(text) => setNote({ removed: removing.row.name, text })}
           onClose={() => {
             removing.back?.focus();
             setRemoving(null);
@@ -222,7 +240,7 @@ function Installed() {
   );
 }
 
-function ModelRowView({ r, def, onRemove }: { r: InstalledRow; def: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
+function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: string | undefined; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const isDef = r.name === def;
   const why = r.chat ? undefined : notForChat(r.info);
   const fit = why ? (
@@ -259,7 +277,7 @@ function ModelRowView({ r, def, onRemove }: { r: InstalledRow; def: string | und
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>
       <span className="mp-fitc">{fit}</span>
-      <RowMenu r={r} def={def} onRemove={onRemove} />
+      <RowMenu r={r} saved={saved} onRemove={onRemove} />
     </div>
   );
 }
@@ -285,7 +303,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function RowMenu({ r, def, onRemove }: { r: InstalledRow; def: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
+function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   const [err, run] = useAct();
@@ -322,7 +340,7 @@ function RowMenu({ r, def, onRemove }: { r: InstalledRow; def: string | undefine
       </button>
       {open ? (
         <div className="mp-menu" role="menu" aria-label={r.label.text}>
-          {!settingsNA && canBeDefault(r, def) ? (
+          {!settingsNA && canBeDefault(r, saved) ? (
             <button
               type="button"
               role="menuitem"
@@ -377,19 +395,22 @@ function RowMenu({ r, def, onRemove }: { r: InstalledRow; def: string | undefine
 
 // ---------------------------------------------------------------- remove dialog
 
-function RemoveDialog({ row, next, rows, onClose }: { row: InstalledRow; next: string | null | undefined; rows: readonly InstalledRow[]; onClose: () => void }) {
+function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: InstalledRow; next: string | null | undefined; rows: readonly InstalledRow[]; onDefaultFailed: (note: string) => void; onClose: () => void }) {
   const [err, run] = useAct();
   const [busy, setBusy] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
+  // On open, and after a removal that failed. While one runs both buttons are disabled and the dialog holds focus.
+  useEffect(() => {
+    if (!busy) cancel.current?.focus();
+  }, [busy]);
   const name = row.label.text;
   const nextName = next ? (rows.find((r) => r.name === next)?.label.text ?? next) : null;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      if (!busy) onClose();
     } else if (e.key === "Tab") {
       // keep focus inside the dialog
       const els = [...(box.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
@@ -400,7 +421,7 @@ function RemoveDialog({ row, next, rows, onClose }: { row: InstalledRow; next: s
   };
   return (
     <div className="mp-scrim" onPointerDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" ref={box} onKeyDown={onKey}>
+      <div className="mp-dlg" role="dialog" aria-modal="true" aria-labelledby="mp-dlg-t" ref={box} tabIndex={-1} onKeyDown={onKey}>
         <h3 id="mp-dlg-t">Remove {name}?</h3>
         <p>
           Frees {sizeText(row.info.sizeBytes)}. Chats you made with {name} stay, and you can download it again later.
@@ -414,7 +435,7 @@ function RemoveDialog({ row, next, rows, onClose }: { row: InstalledRow; next: s
         )}
         <Fail err={err} />
         <div className="mp-r2">
-          <button ref={cancel} type="button" className="btn outline" onClick={onClose}>
+          <button ref={cancel} type="button" className="btn outline" disabled={busy} onClick={onClose}>
             Cancel
           </button>
           <button
@@ -423,9 +444,14 @@ function RemoveDialog({ row, next, rows, onClose }: { row: InstalledRow; next: s
             disabled={busy}
             onClick={() => {
               setBusy(true);
-              void run(removeModelAndMoveDefault(row.name, next)).then((ok) => {
+              box.current?.focus();
+              const done = removeModelAndMoveDefault(row.name, next);
+              void run(done.then((d) => d.removeErr)).then(async (removed) => {
                 setBusy(false);
-                if (ok) onClose();
+                if (!removed) return;
+                const { defaultErr } = await done;
+                if (defaultErr !== null) onDefaultFailed(`${name} was removed. ${defaultErr}${nextName ? " Choose the default above." : ""}`);
+                onClose();
               });
             }}
           >

@@ -3,6 +3,7 @@
 // identity, so a token arriving re-renders the live turn and nothing else.
 import { useSyncExternalStore } from "react";
 import type {
+  BlockingTurn,
   CatalogEntry,
   ContextSize,
   FitReport,
@@ -56,13 +57,34 @@ export interface LiveTurn {
   readonly ending?: true;
 }
 
-/** A message typed during setup or the first download; it sends once chat is ready. */
+/** A message typed during setup, the first download or a reply being written; it sends when that is over. */
 export interface Queued {
   readonly id: string;
   readonly threadId: string;
   readonly text: string;
   readonly at: number;
-  readonly waitFor: "setup" | "download";
+  readonly waitFor: "setup" | "download" | "reply";
+  /** The model it was typed for; a queue from before any model was installed has none and takes the one chosen then. */
+  readonly model?: string;
+  /** Its reply was stopped or failed: it waits for Send now, like a queue after an interrupt in T3 Code. */
+  readonly held?: true;
+  /** Send now: it goes as soon as the reply in its way has ended. */
+  readonly now?: true;
+}
+
+/** A send waiting for a yes, because the load it needs would stop these chats' replies. */
+export interface StopAsk {
+  readonly blocking: readonly BlockingTurn[];
+  readonly content: string;
+  readonly model: string;
+  /** null: it starts a new chat. */
+  readonly threadId: string | null;
+  /** Regenerate or Send now: what is in the composer is not this message. */
+  readonly keepDraft: boolean;
+  /** Send now: the queued message this is, which leaves the queue only when it goes. */
+  readonly queuedId?: string;
+  /** Retry or Regenerate: this answer replaces a stopped reply instead of following it. */
+  readonly regenerate?: true;
 }
 
 export interface State {
@@ -77,6 +99,12 @@ export interface State {
   readonly firstToken: Readonly<Record<string, number>>;
   readonly live: LiveTurn | null;
   readonly queued: readonly Queued[];
+  /** The queued message being changed in the composer; the next Send updates it instead of sending. */
+  readonly editingQueued: string | null;
+  /** The warning before a send stops another chat's reply. */
+  readonly stopAsk: StopAsk | null;
+  /** Why a reply stopped, by the message it hangs on: the saved partial, or the question when no word came. This session only: the server saves the words, not the reason. */
+  readonly stopNotes: Readonly<Record<string, string>>;
 
   readonly view: View;
   readonly threadId: string | null;
@@ -102,6 +130,8 @@ export interface State {
   readonly think: boolean;
   readonly image: boolean;
   readonly fits: Readonly<Record<string, FitReport | "error">>;
+  /** By fitKey: refused only because another chat's reply holds the memory, so a send may stop it. */
+  readonly stopFrees: Readonly<Record<string, true>>;
   readonly loads: Readonly<Record<string, ModelLoad>>;
 
   readonly settings: Maybe<Settings>;
@@ -135,6 +165,9 @@ const initial: State = {
   firstToken: {},
   live: null,
   queued: [],
+  editingQueued: null,
+  stopAsk: null,
+  stopNotes: {},
   view: "new",
   threadId: null,
   section: "general",
@@ -153,6 +186,7 @@ const initial: State = {
   think: true,
   image: false,
   fits: {},
+  stopFrees: {},
   loads: {},
   settings: undefined,
   gpu: undefined,
@@ -199,4 +233,9 @@ export function chatReady(s: State): boolean {
 /** True while a reply is being written (a stopped or failed turn no longer counts). */
 export function streaming(s: State): boolean {
   return s.live !== null && s.live.end === undefined;
+}
+
+/** True while a reply is being written in the chat on screen: Stop and queueing belong to that chat, not to one running behind it. */
+export function streamingHere(s: State): boolean {
+  return streaming(s) && s.live?.threadId === s.threadId;
 }
