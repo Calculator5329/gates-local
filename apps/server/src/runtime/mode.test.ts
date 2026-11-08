@@ -461,7 +461,7 @@ describe("Windows (platform injected)", () => {
   it("win32 x64 with allowInstall true and no PATH Ollama installs the pinned release and launches it (this host's fake release: a real ZIP only on a Windows host)", async () => {
     // With no manifest injected, the build it would install is the pinned Windows ZIP.
     const plain = await runtime({ platform: "win32", arch: "x64", manifest: undefined, allowInstall: true, externalBaseUrl: await nothingAt() });
-    expect(await plain.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining(`will install Ollama ${PINNED_OLLAMA_WINDOWS.version}`) });
+    expect(await plain.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining("will install Ollama into") });
     const asset = buildFakeRelease(work);
     const release = await startReleaseServer(asset);
     try {
@@ -487,7 +487,7 @@ describe("Windows (platform injected)", () => {
     const base = { appDataDir, home, externalBaseUrl: await nothingAt(), env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500, platform: "win32" } as const;
     // discover() only reports; nothing is downloaded here.
     const x64 = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "x64" });
-    expect(await x64.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining(`will install Ollama ${PINNED_OLLAMA_WINDOWS.version}`) });
+    expect(await x64.discover()).toMatchObject({ state: "missing", detail: expect.stringContaining("will install Ollama into") });
     const arm = createOllamaRuntime({ ...base, appPort: await freePort(), arch: "arm64" });
     // R2-05's words, which hold only where nothing is pinned.
     expect(await arm.ensure()).toMatchObject({ state: "missing", detail: windowsAutomaticDetail(base.externalBaseUrl) });

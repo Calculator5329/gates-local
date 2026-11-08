@@ -7,7 +7,7 @@ test.use({ skipFirstRun: false });
 test("first run finds Ollama and its models, then a streamed reply shows thinking", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();
-  await expect(page.locator(".fr-st")).toContainText("Ollama 0.40.4 · 3 chat models");
+  await expect(page.locator(".fr-st")).toHaveText("Ollama · 3 chat models");
   await expect(page.locator(".fr-card .nm")).toHaveText("Qwen 3.5 9B");
   await page.getByRole("button", { name: "Start chatting" }).click();
 

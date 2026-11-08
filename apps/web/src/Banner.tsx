@@ -60,13 +60,12 @@ export const PLACEHOLDER: Record<Rt, string> = {
 export function rtInfo(s: RtSource): { dot: string; text: ReactNode; tip: string } {
   const rt = rtOf(s);
   const port = portOf(s.runtime?.baseUrl);
-  const v = s.runtime?.version;
   const own = ownCopyNote(s);
   switch (rt) {
     case "ready":
       return s.runtime?.owner === "app"
-        ? { dot: "ok", text: <><b>Ollama{v ? ` ${v}` : ""}</b> · Gates Local</>, tip: "<b>Ready.</b> Gates Local's own copy. It starts with the app and stops when the app quits." }
-        : { dot: "ok", text: <><b>Ollama{v ? ` ${v}` : ""}</b> · system</>, tip: "<b>Ready.</b> System install, started outside Gates Local. Gates Local uses it and never stops it." };
+        ? { dot: "ok", text: <><b>Ollama</b> · Gates Local</>, tip: "<b>Ready.</b> Gates Local's own copy. It starts with the app and stops when the app quits." }
+        : { dot: "ok", text: <><b>Ollama</b> · system</>, tip: "<b>Ready.</b> System install, started outside Gates Local. Gates Local uses it and never stops it." };
     case "installing":
       return { dot: "run", text: <b>Installing Ollama</b>, tip: "Downloading Ollama into the Gates Local app folder. Your first model downloads next." };
     case "starting":
