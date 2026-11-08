@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DESKTOP_ID, renderDesktopEntry } from "../src/desktop-entry.ts";
-import { installLinux, linuxDataHome } from "../src/linux-install.ts";
+import { BACKUP_DIR, installLinux, linuxDataHome } from "../src/linux-install.ts";
 
 const desktopDir = path.resolve(import.meta.dirname, "..");
 const assets = path.join(desktopDir, "assets");
@@ -18,15 +18,66 @@ const fresh = (): string => {
   return dir;
 };
 
-/** Every file under dir, as path (relative to dir) -> contents. */
+/** Every regular file under dir (symlinks not followed), as path (relative to dir) -> contents. */
 function files(dir: string): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir, { recursive: true, encoding: "utf8" })) {
     const file = path.join(dir, name);
-    if (statSync(file).isFile()) out.set(name, readFileSync(file));
+    if (lstatSync(file).isFile()) out.set(name, readFileSync(file));
   }
   return out;
+}
+
+/**
+ * An installer process whose launcher write waits at a barrier: it touches
+ * <work>/ready-<name> and holds until <work>/go-<name> exists. With
+ * "intruder" it instead writes a competing launcher at the target right
+ * before each of its own launcher writes, as a second install would.
+ */
+const WORKER = `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const [work, dataHome, source, assets, name, mode] = process.argv.slice(2);
+const launcher = dataHome + "/applications/gates-local.desktop";
+const write = fs.writeFileSync;
+const nap = new Int32Array(new SharedArrayBuffer(4));
+let paused = false;
+let intrusions = 0;
+fs.writeFileSync = (file, ...args) => {
+  if (String(file) === launcher && mode === "pause" && !paused) {
+    paused = true;
+    write(work + "/ready-" + name, "");
+    const end = Date.now() + 20000;
+    while (!fs.existsSync(work + "/go-" + name)) {
+      if (Date.now() > end) throw new Error("barrier timed out");
+      Atomics.wait(nap, 0, 0, 10);
+    }
+  }
+  if (String(file) === launcher && mode === "intruder") write(launcher, "intruder " + ++intrusions + "\\n");
+  return write(file, ...args);
+};
+syncBuiltinESMExports();
+const { installLinux } = await import(source);
+installLinux({ dataHome, exec: ["/opt/" + name + "/run"], assets, now: new Date("2026-11-07T12:00:00Z"), log: () => {} });
+`;
+
+function worker(dir: string, dataHome: string, name: string, mode: "pause" | "intruder") {
+  const script = path.join(dir, "worker.mjs");
+  writeFileSync(script, WORKER);
+  const child = spawn(process.execPath, [script, dir, dataHome, path.join(desktopDir, "src", "linux-install.ts"), assets, name, mode], { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  const done = new Promise<{ code: number | null; stderr: string }>((resolve) => child.once("exit", (code) => resolve({ code, stderr })));
+  return { done };
+}
+
+async function waitFor(file: string): Promise<void> {
+  const end = Date.now() + 20_000;
+  while (!existsSync(file)) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${file}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 const ENTRY = path.join("applications", `${DESKTOP_ID}.desktop`);
@@ -76,6 +127,54 @@ describe("installLinux", () => {
     expect([...all.entries()].filter(([rel, b]) => rel !== PNG && b.equals(readFileSync(path.join(assets, "icon.png")))).length).toBe(1);
     const scanned = [...all.keys()].filter((rel) => rel.startsWith(`applications${path.sep}`) || rel.startsWith(`icons${path.sep}`));
     expect(scanned.toSorted()).toEqual([ENTRY, PNG, SVG].toSorted());
+  });
+
+  it("two installs that both saw no launcher keep both: one at the target, the other backed up", async () => {
+    const dir = fresh();
+    const dataHome = path.join(dir, "data");
+    const a = worker(dir, dataHome, "v1", "pause");
+    const b = worker(dir, dataHome, "v2", "pause");
+    // Both are past the occupied check and held at the launcher write.
+    await Promise.all([waitFor(path.join(dir, "ready-v1")), waitFor(path.join(dir, "ready-v2"))]);
+    writeFileSync(path.join(dir, "go-v1"), "");
+    expect(await a.done).toEqual({ code: 0, stderr: "" });
+    writeFileSync(path.join(dir, "go-v2"), "");
+    expect(await b.done).toEqual({ code: 0, stderr: "" });
+    const all = files(dataHome);
+    expect(all.get(ENTRY)?.toString("utf8")).toBe(renderDesktopEntry(["/opt/v2/run"]));
+    const backedUp = [...all.entries()].filter(([rel]) => rel.startsWith(BACKUP_DIR + path.sep)).map(([, bytes]) => bytes.toString("utf8"));
+    expect(backedUp).toEqual([renderDesktopEntry(["/opt/v1/run"])]);
+  }, 30_000);
+
+  it("stops with a clear error, overwriting nothing, when the launcher is taken again after a backup", async () => {
+    const dir = fresh();
+    const dataHome = path.join(dir, "data");
+    const run = await worker(dir, dataHome, "v1", "intruder").done;
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toMatch(/another install/);
+    const texts = [...files(dataHome).values()].map((b) => b.toString("utf8"));
+    expect(texts).toContain("intruder 1\n");
+    expect(texts).toContain("intruder 2\n");
+    expect(texts).not.toContain(renderDesktopEntry(["/opt/v1/run"]));
+  }, 30_000);
+
+  it("a dangling symlink at the target is backed up as the link itself and never followed", () => {
+    const dataHome = fresh();
+    const referent = path.join(dataHome, "elsewhere", "missing.desktop");
+    const target = path.join(dataHome, ENTRY);
+    mkdirSync(path.dirname(target), { recursive: true });
+    mkdirSync(path.dirname(referent));
+    symlinkSync(referent, target);
+    installLinux({ dataHome, exec: ["/opt/gates/run"], assets, now: FIXED, ...quiet });
+    expect(existsSync(referent)).toBe(false);
+    expect(lstatSync(target).isFile()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe(renderDesktopEntry(["/opt/gates/run"]));
+    const backupRoot = path.join(dataHome, BACKUP_DIR);
+    const links = existsSync(backupRoot)
+      ? readdirSync(backupRoot, { recursive: true, encoding: "utf8" }).filter((rel) => lstatSync(path.join(backupRoot, rel)).isSymbolicLink())
+      : [];
+    expect(links).toHaveLength(1);
+    expect(readlinkSync(path.join(backupRoot, links[0] ?? ""))).toBe(referent);
   });
 
   it("a missing icon source writes nothing at all", () => {
