@@ -4,8 +4,13 @@ import { GIB, MIB, NUM_CTX_FLOOR, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTE
 import { checkNumCtx, estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
-import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu } from "./gpu.ts";
+import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
+
+/** Lets queued rejections surface as unhandled before a test looks. */
+const settle = () => new Promise((r) => setTimeout(r, 30));
+/** Work that fails a little after it starts. */
+const late = <T,>() => new Promise<T>((_r, reject) => setTimeout(() => reject(new Error("late failure")), 10));
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
 const showFixture = (name: string) => JSON.parse(fixture(name)) as { model_info: Record<string, unknown>; capabilities: string[] };
@@ -240,6 +245,47 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     // Two nvidia-smi runs and one meminfo read, each handed the check's signal.
     expect(seen).toHaveLength(3);
     expect(seen.every((sig) => sig?.aborted === true)).toBe(true);
+  });
+
+  describe("R3-03: an aborted read leaves no unhandled rejection", () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    const broken = { runs: 0, smi: (async () => {
+      broken.runs++;
+      throw new Error("nvidia-smi broke");
+    }) as NvidiaSmiRunner, meminfo: async () => {
+      broken.runs++;
+      throw new Error("meminfo broke");
+    } };
+    afterEach(() => {
+      process.off("unhandledRejection", onUnhandled);
+      unhandled.length = 0;
+      broken.runs = 0;
+    });
+
+    it("already aborted: both reads reject with the reason, start no work, and leave nothing unobserved", async () => {
+      process.on("unhandledRejection", onUnhandled);
+      const reason = new Error("gone");
+      const signal = AbortSignal.abort(reason);
+      await expect(readGpu(broken.smi, Date.now, signal)).rejects.toBe(reason);
+      await expect(readMemAvailable(broken.meminfo, signal)).rejects.toBe(reason);
+      await settle();
+      expect(unhandled).toEqual([]);
+      expect(broken.runs).toBe(0);
+    });
+
+    it("aborted while the work runs, which then fails: rejects with the reason, nothing unobserved", async () => {
+      process.on("unhandledRejection", onUnhandled);
+      const controller = new AbortController();
+      const reason = new Error("gone");
+      const gpu = readGpu(() => late<string>(), Date.now, controller.signal);
+      const mem = readMemAvailable(() => late<string>(), controller.signal);
+      controller.abort(reason);
+      await expect(gpu).rejects.toBe(reason);
+      await expect(mem).rejects.toBe(reason);
+      await settle();
+      expect(unhandled).toEqual([]);
+    });
   });
 
   it("refuses below the floor before any request or nvidia-smi run", async () => {

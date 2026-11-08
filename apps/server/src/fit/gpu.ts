@@ -36,7 +36,11 @@ export const defaultMeminfo: MeminfoReader = (signal) =>
 /** `work`'s result, or the signal's reason as soon as it aborts (a runner that ignores the signal still lets go). */
 export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return work;
-  if (signal.aborted) return Promise.reject(signal.reason);
+  if (signal.aborted) {
+    // The work is dropped, not left unobserved: its own rejection must not reach the process.
+    work.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener("abort", onAbort, { once: true });
@@ -122,6 +126,7 @@ export function parseComputeApps(text: string): GpuTenant[] {
 
 /** `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
 export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal): Promise<GpuSnapshot> {
+  signal?.throwIfAborted();
   let totalsText: string;
   let appsText: string;
   try {
@@ -145,6 +150,7 @@ export function parseMemAvailable(text: string): number {
 }
 
 export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<number> {
+  signal?.throwIfAborted();
   let text: string;
   try {
     text = await untilAborted(read(signal), signal);
