@@ -70,6 +70,8 @@ export function shortGpu(name: string | undefined): string {
   return (name ?? "GPU").replace(/^NVIDIA\s+/i, "").replace(/^GeForce\s+/i, "");
 }
 
+const runsAtMost = (max: number) => `Runs at ${k(max)}, the most this model takes.`;
+
 /** The line under every context control (F36b): what the other size would do. */
 export function ctxLine(cur: FitReport | undefined, other: FitReport | undefined, otherNumCtx: number): { lead: string; alt: string | null } {
   const lead = "How much conversation the model can keep in view.";
@@ -93,7 +95,7 @@ export function CtxLine({ model, numCtx }: { model: string; numCtx: ContextSize 
   return (
     <>
       <span className="ctx-def">{line.lead}</span>
-      {clamped ? <span className="ctx-alt">Runs at {k(max)}, the most this model takes.</span> : null}
+      {clamped ? <span className="ctx-alt">{runsAtMost(max)}</span> : null}
       {lbl !== undefined ? (
         <span className="ctx-alt">
           <span className="ctx-k">{lbl}</span> {rest}
@@ -320,9 +322,13 @@ function FitLine({ v, ctx }: { v: Verdict; ctx: number }) {
   );
 }
 
-/** What both bodies read about a model: its size limit, the size it runs at, and the GPU. */
-function useFitModel(model: string) {
-  const numCtx = useStore((s) => s.numCtx);
+/**
+ * What both bodies read about a model: its size limit, the size it runs at,
+ * and the GPU. `chosen` is the size asked for when it is not the open chat's.
+ */
+function useFitModel(model: string, chosen?: ContextSize) {
+  const live = useStore((s) => s.numCtx);
+  const numCtx = chosen ?? live;
   const gpuRaw = useStore((s) => s.gpu);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const load = useStore((s) => s.loads[model]);
@@ -337,13 +343,17 @@ function useFitModel(model: string) {
  * segment's fit in its tooltip, and the GB numbers one step away under Details.
  */
 function SettingsBody({ model }: { model: string }) {
-  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model);
+  // the control shows the saved default; this model may run below it
+  const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
+  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, saved);
   const fits = useStore((s) => s.fits);
   const settingsNA = useStore((s) => s.settings === NA);
   const [err, run] = useAct();
   useEffect(() => {
+    // the report shown is keyed by the size asked for, even one over the model's limit; the server clamps it
+    ensureFit(model, numCtx);
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
-  }, [model, max, fits]);
+  }, [model, numCtx, max, fits]);
   const cpu = noGpu(gpu);
   const report = fits[fitKey(model, numCtx)];
   const pick = (c: ContextSize) => {
@@ -370,8 +380,8 @@ function SettingsBody({ model }: { model: string }) {
                 key={c}
                 type="button"
                 data-ctx={c}
-                className={`${ctx === c ? "on" : ""}${f.wont ? " dim" : ""}`}
-                aria-pressed={ctx === c}
+                className={`${numCtx === c ? "on" : ""}${f.wont ? " dim" : ""}`}
+                aria-pressed={numCtx === c}
                 aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
                 disabled={max !== undefined && c > max}
                 data-tip={f.tip}
@@ -385,6 +395,7 @@ function SettingsBody({ model }: { model: string }) {
       </div>
       <div className="ctx-line">
         <span className="ctx-def">How much conversation the model can keep in view.</span>
+        {max !== undefined && numCtx > max ? <span className="ctx-alt">{runsAtMost(max)}</span> : null}
         <Fail err={err} />
       </div>
       {report === undefined || report === "error" ? null : (

@@ -1,8 +1,11 @@
 // Journey: a model that keeps only about 2,000 tokens in view is a normal
 // model. It is offered, it chats, and the app never asks it for more than it
 // reports. One that reports no maximum runs at the safe fallback.
+import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
-import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
+
+const stopButton = (page: Page) => page.getByRole("button", { name: "Stop" });
 
 const loadedCtx = async (name: string): Promise<number | undefined> => {
   const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string; numCtx: number }[] };
@@ -19,7 +22,7 @@ test.describe("a model with a 2,048 context window", () => {
 
     await sendMessage(page, "Say hello");
     await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Say hello");
-    await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
+    await expect(stopButton(page)).toHaveCount(0, { timeout: 10_000 });
     expect(await loadedCtx("tiny-chat:2k")).toBe(2048);
 
     await page.locator("#modelBtn").click();
@@ -46,6 +49,47 @@ test.describe("a model with a 2,048 context window", () => {
     await sendMessage(page, "word ".repeat(2000));
     await expect(page.locator(".err-line")).toContainText("too long for this model");
   });
+
+  test("Settings › Advanced keeps the saved default selected and says what this model runs at", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    const gpu = await openGpuMemory(page);
+    const saved = gpu.getByRole("group", { name: "Default context" }).getByRole("button", { name: "16k" });
+    await expect(saved).toHaveAttribute("aria-pressed", "true");
+    await expect(saved).toBeDisabled();
+    await expect(gpu.locator(".ctx-line")).toContainText("Runs at 2k, the most this model takes.");
+    await expect(gpu.locator(".fp-v")).toContainText("at 2k");
+  });
+});
+
+test.describe("a 2,048 model when a reply ends while Settings is open", () => {
+  test.use({ scenario: "slow-drip", installed: ["tiny-chat:2k"] });
+
+  test("Settings › Advanced gets its answer again rather than checking forever", async ({ page, open }) => {
+    let ended = false;
+    const replyEnded = new Promise<void>((resolve) => {
+      page.on("websocket", (ws) => {
+        ws.on("framereceived", (frame) => {
+          if (typeof frame.payload === "string" && frame.payload.includes('"done"')) {
+            ended = true;
+            resolve();
+          }
+        });
+      });
+    });
+    await open();
+    await waitReady(page);
+    await sendMessage(page, "Say hello");
+    await expect(stopButton(page)).toBeVisible();
+    const gpu = await openGpuMemory(page);
+    expect(ended, "the reply must still be running when Settings opens").toBe(false);
+    // the end of a reply clears every saved memory answer, and the chat box that would ask again is not on this screen
+    await replyEnded;
+    // nothing on this screen marks the push being handled; a slow one can only let the old code pass, never fail the new code
+    await page.waitForTimeout(500);
+    await expect(gpu.locator(".fp-v")).toContainText("at 2k");
+    await expect(gpu).not.toContainText("Checking");
+  });
 });
 
 test.describe("a model that reports no maximum", () => {
@@ -56,7 +100,7 @@ test.describe("a model that reports no maximum", () => {
     await waitReady(page);
     await sendMessage(page, "Say hello");
     await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Say hello");
-    await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
+    await expect(stopButton(page)).toHaveCount(0, { timeout: 10_000 });
     expect(await loadedCtx("no-limit-chat:1b")).toBe(4096);
     await page.locator("#modelBtn").click();
     await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 4k, the most this model takes.");
