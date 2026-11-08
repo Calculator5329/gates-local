@@ -60,3 +60,40 @@ it("models.catalog surveys with the injected nvidia-smi and meminfo, not the mac
   expect(qwen?.fit?.freeVramBytes).toBe(4321 * MIB);
   expect(calls.some((a) => a[0]?.startsWith("--query-gpu"))).toBe(true);
 });
+
+it("a refresh while no installed model can chat (an Ollama too old to say) takes no fit reading", async () => {
+  const ollama = await startFakeServer({
+    "GET /": (_b, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("Ollama is running");
+    },
+    "GET /api/version": (_b, res) => json(res, 200, { version: "0.1.0" }),
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 6594474711, digest: "a", modified_at: "2026-11-01T00:00:00Z" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
+    "POST /api/show": (_b, res) => json(res, 200, {}), // no capabilities field
+  });
+  cleanups.push(() => ollama.close());
+  const dir = mkdtempSync(path.join(os.tmpdir(), "gates-services-"));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  let readings = 0;
+  const runNvidiaSmi: NvidiaSmiRunner = async () => {
+    readings++;
+    return "16000, 11679, 4321\n";
+  };
+  const readMeminfo = async () => {
+    readings++;
+    return MEMINFO;
+  };
+  const services = await createModelServices({
+    dataDir: dir,
+    push: () => undefined,
+    runtime: { externalBaseUrl: ollama.baseUrl, appPort: await freePort(), appDataDir: dir, allowInstall: false, env: { PATH: "" }, systemModelsDirs: [], probeTimeoutMs: 500 },
+    fit: { runNvidiaSmi, readMeminfo },
+  });
+  cleanups.push(() => services.close({ stopRuntime: false }));
+  expect((await services.runtime.discover()).state).toBe("ready");
+  await services.catalog.refresh({ force: true });
+  await services.catalog.refresh({ force: true }); // the retry: still nothing can chat
+  expect(services.catalog.current()?.[0]?.capabilities).toContain("unreported");
+  expect(readings).toBe(0);
+});
