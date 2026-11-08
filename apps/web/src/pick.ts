@@ -67,12 +67,12 @@ const unreported = (m: Caps): boolean => m.capabilities.includes("unreported");
  * otherwise. An Ollama that does not report capabilities (server
  * UNREPORTED_CAPABILITIES: /api/show without the field) leaves every model
  * unknown, and another download would be unknown too. The missing field is
- * all that is known, not the version's age, so the line names the version
- * when the runtime gave one and claims nothing about it.
+ * all that is known, not the version's age, so the line claims nothing about
+ * the version.
  */
-export function chatBlockedReason(models: readonly ModelInfo[] | undefined, current: string | undefined, version?: string): string | undefined {
+export function chatBlockedReason(models: readonly ModelInfo[] | undefined, current: string | undefined): string | undefined {
   if (models === undefined || sendableModel(models, current) !== undefined) return undefined;
-  if (!models.some(canChat) && models.some(unreported)) return `${version ? `Ollama ${version}` : "This Ollama"} doesn't say which models can chat. Updating Ollama fixes this.`;
+  if (!models.some(canChat) && models.some(unreported)) return "This Ollama doesn't say which models can chat. Updating Ollama fixes this.";
   if (models.some((m) => m.name === current && m.capabilities.includes("unknown"))) return "Checking what this model can do; you can send once Ollama answers.";
   return undefined;
 }

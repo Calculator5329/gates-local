@@ -414,7 +414,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       return { state: "missing", owner: "none", baseUrl: appBaseUrl, detail, ...withBusy(c.note?.busy ?? []) };
     }
     const detail = allowInstall
-      ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
+      ? `No Ollama found; the app will install Ollama into ${runtimeDir(appDataDir)}.`
       : "No Ollama found on this machine.";
     return noted({ state: "missing", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
   }
@@ -531,7 +531,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     let binary = c.binary;
     if (!binary) {
       if (!allowInstall) return setStatus(statusFor(c));
-      setStatus(noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: `Installing Ollama ${manifest.version}.` }, c.note));
+      setStatus(noted({ state: "installing", owner: "app", baseUrl: appBaseUrl, detail: "Installing Ollama." }, c.note));
       try {
         const r = await installPinned({
           appDataDir,

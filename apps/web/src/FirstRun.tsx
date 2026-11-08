@@ -148,7 +148,6 @@ function recommendedEntry(s: State): CatalogEntry | undefined {
 
 function NoModels() {
   const [cancelled, setCancelled] = useState(false);
-  const version = useStore((s) => s.runtime?.version);
   const entry = useStore(recommendedEntry);
   const catalogNA = useStore((s) => s.catalog === NA);
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
@@ -161,11 +160,11 @@ function NoModels() {
   const st = (
     <>
       <span className="dot ok" />
-      Ollama{version ? ` ${version}` : ""} · {others > 0 ? "no chat models yet" : "no models yet"}
+      Ollama · {others > 0 ? "no chat models yet" : "no models yet"}
     </>
   );
   // An Ollama that does not report capabilities: a download would not help, so say what would.
-  const tooOld = useStore((s) => chatBlockedReason(s.models, undefined, s.runtime?.version));
+  const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
   const sub =
     tooOld ??
     (cpu
@@ -257,7 +256,6 @@ export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, nu
 }
 
 function Found() {
-  const version = useStore((s) => s.runtime?.version);
   const count = useStore((s) => chatModels(s.models ?? []).length);
   const picked = useStore((s) => pickedModel(s.models));
   // The composer starts on the same model (session.ts reads the same pick).
@@ -270,7 +268,7 @@ function Found() {
       st={
         <>
           <span className={`dot ${picked?.pick?.verdict === "refuse" ? "err" : "ok"}`} />
-          Ollama{version ? ` ${version}` : ""} · {count} chat {count === 1 ? "model" : "models"}
+          Ollama · {count} chat {count === 1 ? "model" : "models"}
         </>
       }
       title={words.title}

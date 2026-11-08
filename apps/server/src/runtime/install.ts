@@ -74,7 +74,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
     throw new InstallError("download-failed", `Could not reach ${manifest.url} (${(e as Error).message}). ${retry}`);
   }
   if (!res.ok || !res.body) {
-    throw new InstallError("download-failed", `Downloading Ollama ${manifest.version} failed: HTTP ${res.status} from ${manifest.url}. ${retry}`);
+    throw new InstallError("download-failed", `Downloading Ollama failed: HTTP ${res.status} from ${manifest.url}. ${retry}`);
   }
   const hash = createHash("sha256");
   const fh = await open(file, "w");
@@ -89,7 +89,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
       if (received > manifest.sizeBytes) {
         throw new InstallError(
           "hash-mismatch",
-          `The Ollama ${manifest.version} download is larger than the pinned ${manifest.sizeBytes} bytes, so it is not the pinned release. Nothing was installed; the pinned manifest needs updating.`,
+          `The Ollama download is larger than the pinned ${manifest.sizeBytes} bytes, so it is not the pinned release. Nothing was installed; the pinned manifest needs updating.`,
         );
       }
       hash.update(buf);
@@ -175,7 +175,7 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
   if (!manifest.verified) {
     throw new InstallError(
       "unverified-manifest",
-      `The pinned Ollama ${manifest.version} has no confirmed checksum, so the app will not install it. Install Ollama yourself or update the pinned manifest.`,
+      `The pinned Ollama has no confirmed checksum, so the app will not install it. Install Ollama yourself or update the pinned manifest.`,
     );
   }
   await mkdir(runtimeDir(appDataDir), { recursive: true });
@@ -188,7 +188,7 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     if (digest !== manifest.sha256.toLowerCase()) {
       throw new InstallError(
         "hash-mismatch",
-        `The Ollama ${manifest.version} download did not match its pinned checksum (expected sha256 ${manifest.sha256}, got ${digest}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`,
+        `The Ollama download did not match its pinned checksum (expected sha256 ${manifest.sha256}, got ${digest}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`,
       );
     }
     onProgress?.({ phase: "extract", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
@@ -200,7 +200,7 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     } catch (e) {
       throw new InstallError(
         "extract-failed",
-        `Unpacking Ollama ${manifest.version} failed (${(e as Error).message}). Nothing was installed; check free disk space in ${appDataDir} and retry.`,
+        `Unpacking Ollama failed (${(e as Error).message}). Nothing was installed; check free disk space in ${appDataDir} and retry.`,
       );
     }
     await mkdir(installRoot(appDataDir), { recursive: true });

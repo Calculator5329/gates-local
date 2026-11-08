@@ -428,9 +428,8 @@ function Runtime() {
   const info = rtInfo({ conn, runtime, settings });
   const port = portOf(runtime?.baseUrl);
   const app = runtime?.owner === "app";
-  const v = runtime?.version ? ` · Ollama ${runtime.version}` : "";
   const stat =
-    rt === "ready" ? `Running${v}` : rt === "installing" ? "Installing" : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : "Didn't start";
+    rt === "ready" ? "Running" : rt === "installing" ? "Installing" : rt === "starting" ? "Starting" : rt === "missing" ? "Not installed" : rt === "wrong" ? `Port ${port} busy` : rt === "offline" ? "Reconnecting" : rt === "stopped" ? "Stopped" : "Didn't start";
   const statD =
     rt === "ready"
       ? app

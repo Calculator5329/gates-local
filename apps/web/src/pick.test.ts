@@ -94,7 +94,6 @@ describe("client model choice", () => {
     const old = [m("qwen3.5:9b", 1, ["unknown", "unreported"]), m("gemma4:12b", 1, ["unknown", "unreported"])];
     // Only the missing field is known, not that the version is old: true either way.
     expect(chatBlockedReason(old, undefined)).toBe("This Ollama doesn't say which models can chat. Updating Ollama fixes this.");
-    expect(chatBlockedReason(old, undefined, "0.1.32")).toBe("Ollama 0.1.32 doesn't say which models can chat. Updating Ollama fixes this.");
     expect(notForChat(old[0]).label).toBe("Ollama doesn't say");
     // A chosen model not described yet: sends wait for it.
     expect(chatBlockedReason([m("gemma4:12b", 1, ["unknown"]), small], "gemma4:12b")).toBe("Checking what this model can do; you can send once Ollama answers.");

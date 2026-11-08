@@ -46,11 +46,12 @@ describe("first run with an Ollama that does not say which models can chat (MP3-
       expect(t).not.toContain("ollama pull");
       expect(t).not.toContain("Download and start");
       expect(t).toContain("Retry");
-      expect(t).toContain("Ollama 0.1.32 doesn't say which models can chat. Updating Ollama fixes this.");
+      expect(t).toContain("This Ollama doesn't say which models can chat. Updating Ollama fixes this.");
+      expect(t).not.toContain("0.1.32");
     });
   }
 
-  it("words the line without a version when the runtime gave none", () => {
+  it("words the line the same when the runtime gave no version", () => {
     expect(text(oldOllama([gemma]))).toContain("This Ollama doesn't say which models can chat. Updating Ollama fixes this.");
   });
 });
