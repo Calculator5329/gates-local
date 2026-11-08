@@ -4,6 +4,7 @@
 // afterEach if a test left it running.
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -258,5 +259,93 @@ describe("server CLI", () => {
     expect(s.stderr).toHaveLength(1);
     expect(s.stderr[0]).toContain("GATES_LOCAL_SERVER_TOKEN");
     expect(fake.requests).toEqual([]);
+  });
+});
+
+/** A built-client stand-in for GATES_LOCAL_WEB_ROOT. */
+function webRoot(tmp: string): string {
+  const root = path.join(tmp, "dist");
+  mkdirSync(root, { recursive: true });
+  writeFileSync(path.join(root, "index.html"), "<!doctype html><html><head><title>Gates Local</title></head><body></body></html>");
+  return root;
+}
+
+/** node:http, not fetch: fetch will not send a Host header of our choosing. */
+function getRoot(port: number, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, path: "/", headers }, (res) => {
+      let body = "";
+      res.on("data", (c: Buffer) => (body += c.toString()));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
+  const ORIGIN = "https://hub.example.ts.net:8456";
+  const USER = "owner@example.com";
+
+  it.each([
+    ["a wildcard host", { GATES_LOCAL_WEB_LISTEN: "0.0.0.0:{port}" }, "GATES_LOCAL_WEB_LISTEN"],
+    ["a LAN host", { GATES_LOCAL_WEB_LISTEN: "192.168.1.5:{port}" }, "GATES_LOCAL_WEB_LISTEN"],
+    ["a host name", { GATES_LOCAL_WEB_LISTEN: "localhost:{port}" }, "GATES_LOCAL_WEB_LISTEN"],
+    ["no port", { GATES_LOCAL_WEB_LISTEN: "127.0.0.1" }, "GATES_LOCAL_WEB_LISTEN"],
+    ["port 0", { GATES_LOCAL_WEB_LISTEN: "127.0.0.1:0" }, "GATES_LOCAL_WEB_LISTEN"],
+    ["an empty origin", { GATES_LOCAL_WEB_ORIGIN: "" }, "GATES_LOCAL_WEB_ORIGIN"],
+    ["an origin with no scheme", { GATES_LOCAL_WEB_ORIGIN: "hub.example.ts.net:8456" }, "GATES_LOCAL_WEB_ORIGIN"],
+    ["an origin with a path", { GATES_LOCAL_WEB_ORIGIN: "https://hub.example.ts.net:8456/app" }, "GATES_LOCAL_WEB_ORIGIN"],
+    ["an origin with credentials", { GATES_LOCAL_WEB_ORIGIN: "https://a:b@hub.example.ts.net:8456" }, "GATES_LOCAL_WEB_ORIGIN"],
+    ["a non-http origin", { GATES_LOCAL_WEB_ORIGIN: "ftp://hub.example.ts.net" }, "GATES_LOCAL_WEB_ORIGIN"],
+    ["an empty user", { GATES_LOCAL_WEB_USER: "" }, "GATES_LOCAL_WEB_USER"],
+    ["a user with spaces", { GATES_LOCAL_WEB_USER: " owner@example.com" }, "GATES_LOCAL_WEB_USER"],
+    ["no web root", { GATES_LOCAL_WEB_ROOT: "" }, "GATES_LOCAL_WEB_ROOT"],
+  ])("refuses to start with %s: exit 2, no ready line, nothing listening", async (_what, override, named) => {
+    const tmp = cacheTmp();
+    const port = await freePort();
+    const env: Record<string, string> = {
+      GATES_LOCAL_SERVER_TOKEN: TOKEN,
+      GATES_LOCAL_RUNTIME: "discover-only",
+      GATES_LOCAL_OLLAMA_BINARY: "none",
+      XDG_DATA_HOME: path.join(tmp, "xdg"),
+      GATES_LOCAL_WEB_LISTEN: `127.0.0.1:${port}`,
+      GATES_LOCAL_WEB_ORIGIN: ORIGIN,
+      GATES_LOCAL_WEB_USER: USER,
+      GATES_LOCAL_WEB_ROOT: webRoot(tmp),
+    };
+    for (const [k, v] of Object.entries(override)) env[k] = v.replace("{port}", String(port));
+    const s = launch(env, path.join(tmp, "data"));
+    const exit = await withTimeout(s.exited, 3000, "exit on a bad phone knob");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(exit.code).toBe(2);
+    expect(s.stdout).toEqual([]);
+    expect(s.stderr.join("\n")).toContain(named);
+    expect(s.stderr.join("\n")).not.toContain(USER);
+  });
+
+  it("with every knob right it opens the phone listener beside the token listener", async () => {
+    const tmp = cacheTmp();
+    const phonePort = await freePort();
+    const s = launch(
+      {
+        GATES_LOCAL_SERVER_TOKEN: TOKEN,
+        GATES_LOCAL_RUNTIME: "discover-only",
+        GATES_LOCAL_OLLAMA_BINARY: "none",
+        XDG_DATA_HOME: path.join(tmp, "xdg"),
+        GATES_LOCAL_WEB_LISTEN: `127.0.0.1:${phonePort}`,
+        GATES_LOCAL_WEB_ORIGIN: ORIGIN,
+        GATES_LOCAL_WEB_USER: USER,
+        GATES_LOCAL_WEB_ROOT: webRoot(tmp),
+      },
+      path.join(tmp, "data"),
+    );
+    const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
+    expect(ready.port).not.toBe(phonePort);
+    const ok = await getRoot(phonePort, { host: "hub.example.ts.net:8456", "tailscale-user-login": USER });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toContain('<meta name="gates-local-server" content="same-origin">');
+    expect((await getRoot(phonePort, { host: "hub.example.ts.net:8456" })).status).toBe(403);
+    expect(await upgrade(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`)).toBe("open");
   });
 });
