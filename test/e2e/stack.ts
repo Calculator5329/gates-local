@@ -7,8 +7,10 @@
 //                           set the fake's scenario, then restart the server
 //                           on a fresh data dir (rediscovers Ollama). seed: N
 //                           writes one thread of N messages, seed: "design" the
-//                           design's sidebar (test/e2e/seed.ts), both pinned to
-//                           seedAt; runtimeMode ("system" | "app") writes saved
+//                           design's sidebar, seed: "readme" the README's demo
+//                           threads (test/e2e/seed.ts), all pinned to
+//                           seedAt; installed: [names] sets the fake's installed
+//                           models; runtimeMode ("system" | "app") writes saved
 //                           settings in that mode, else first run picks it; the
 //                           reply carries the open thread's id
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
@@ -26,7 +28,7 @@ import path from "node:path";
 import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
-import { seedDesign, seedLong } from "./seed.ts";
+import { seedDesign, seedLong, seedReadme } from "./seed.ts";
 
 const runDir = path.join(DATA_ROOT, new Date().toISOString().replaceAll(/[:.]/g, "-"));
 const gpuState = path.join(runDir, "gpu-state.json");
@@ -86,7 +88,10 @@ async function startServer(): Promise<void> {
 }
 
 /** What /reset may write before the server starts. */
-type Seed = { readonly kind: "none" } | { readonly kind: "long"; readonly messages: number; readonly at: number } | { readonly kind: "design"; readonly at: number };
+type Seed =
+  | { readonly kind: "none" }
+  | { readonly kind: "long"; readonly messages: number; readonly at: number }
+  | { readonly kind: "design" | "readme"; readonly at: number };
 
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
 async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"]): Promise<string | null> {
@@ -98,14 +103,18 @@ async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings
   if (runtimeMode !== undefined) {
     writeFileSync(path.join(dataDir, SETTINGS_FILE_NAME), JSON.stringify({ version: SETTINGS_FILE_VERSION, settings: defaultSettings(runtimeMode) }));
   }
-  const threadId = seed.kind === "long" ? seedLong(db, seed.messages, seed.at, "A long thread") : seed.kind === "design" ? seedDesign(db, seed.at) : null;
+  const threadId =
+    seed.kind === "long" ? seedLong(db, seed.messages, seed.at, "A long thread")
+    : seed.kind === "design" ? seedDesign(db, seed.at)
+    : seed.kind === "readme" ? seedReadme(db, seed.at)
+    : null;
   await startServer();
   return threadId;
 }
 
 function seedOf(body: Record<string, unknown>): Seed {
   const at = typeof body["seedAt"] === "number" ? body["seedAt"] : Date.now();
-  if (body["seed"] === "design") return { kind: "design", at };
+  if (body["seed"] === "design" || body["seed"] === "readme") return { kind: body["seed"], at };
   if (typeof body["seed"] === "number" && body["seed"] > 0) return { kind: "long", messages: body["seed"], at };
   return { kind: "none" };
 }

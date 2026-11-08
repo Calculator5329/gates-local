@@ -84,6 +84,21 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 128,
     contextLength: 262_144,
   }),
+  // Not installed by default: the README shots install it as a model too big for the fixture GPU at 16k.
+  model({
+    name: "mistral-small3.2:24b",
+    family: "mistral3",
+    parameterSize: "24.0B",
+    parameterCount: 24_011_361_280,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(14.1 * GIB),
+    capabilities: ["completion", "tools", "vision"],
+    blockCount: 40,
+    headCount: 32,
+    headCountKv: 8,
+    keyLength: 128,
+    contextLength: 131_072,
+  }),
 ];
 
 /** Installed when the scenario has models; qwen3.5:4b stays pullable. */

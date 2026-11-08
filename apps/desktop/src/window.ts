@@ -25,6 +25,8 @@ export function windowOptions(o: { icon: string; preload: string }): BrowserWind
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // On by default; on Linux it downloads dictionaries from Google.
+      spellcheck: false,
     },
   };
 }

@@ -127,6 +127,16 @@ describe("fake ollama", () => {
     expect(await (await fetch(`${fake.url}/`)).text()).not.toContain("Ollama is running");
     expect((await fetch(`${fake.url}/api/version`)).status).toBe(404);
   });
+
+  it("installs the models a scenario names, and refuses a name it does not know", async () => {
+    const tags = async () => ((await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string }[] }).models.map((m) => m.name);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["gemma4:12b", "mistral-small3.2:24b"] })).status).toBe(200);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    expect((await post(fake, "/__fake/scenario", { scenario: "models", installed: ["nope:1b"] })).status).toBe(400);
+    expect(await tags()).toEqual(["gemma4:12b", "mistral-small3.2:24b"]);
+    await post(fake, "/__fake/scenario", { scenario: "models" });
+    expect(await tags()).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b"]);
+  });
 });
 
 const run = (args: string[], env: Record<string, string> = {}) =>

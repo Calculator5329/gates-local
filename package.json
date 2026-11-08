@@ -17,6 +17,7 @@
     "verify:gpu": "vitest run apps/server/src/gpu",
     "e2e": "playwright test -c test/e2e/playwright.config.ts --project=e2e",
     "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots",
+    "shots:readme": "playwright test -c test/e2e/playwright.config.ts --project=readme",
     "verify:tools": "vitest run packages/harness apps/server/src/chat/tools.test.ts --reporter=verbose",
     "verify:sources": "vitest run apps/server/src/sources --reporter=verbose"
   },
