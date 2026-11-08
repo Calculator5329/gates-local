@@ -5,7 +5,7 @@
 // next item or a blank line starts, a fenced code block at its closing fence
 // and a table at a blank line. Display only: the saved reply is untouched.
 
-/** An unfinished block longer than this shows its complete lines. */
+/** An unfinished block longer than this shows its complete lines (or sentences, or words). */
 export const HOLD_LIMIT = 2000;
 
 interface Line {
@@ -122,10 +122,26 @@ export function reveal(text: string, streaming: boolean): string {
     i = end;
   }
 
-  // the safety valve: a long unfinished block shows its complete lines
+  // the safety valve: a long unfinished block shows its complete lines, or with
+  // no line break its complete sentences, or with no sentence end its complete words
   if (text.length - done > HOLD_LIMIT) {
-    const cut = Math.max(text.lastIndexOf("\n"), text.lastIndexOf("\r")) + 1;
-    if (cut > done) return text.slice(0, cut);
+    const rest = text.slice(done);
+    const line = Math.max(rest.lastIndexOf("\n"), rest.lastIndexOf("\r")) + 1;
+    const cut = line > 0 ? line : lastSentenceEnd(rest) || lastWordEnd(rest);
+    if (cut > 0) return text.slice(0, done + cut);
   }
   return text.slice(0, done);
+}
+
+/** After the last sentence's closing mark (and any quote or bracket), once whitespace follows it; 0 if none. */
+function lastSentenceEnd(s: string): number {
+  let end = 0;
+  for (const m of s.matchAll(/[.!?…]+["'”’)\]]*(?=\s)/g)) end = (m.index ?? 0) + m[0].length;
+  return end;
+}
+
+/** After the last whitespace, the end of the last complete word; 0 if none. */
+function lastWordEnd(s: string): number {
+  for (let i = s.length - 1; i >= 0; i--) if (/\s/.test(s[i] ?? "")) return i + 1;
+  return 0;
 }

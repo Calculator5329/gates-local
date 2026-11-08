@@ -83,6 +83,38 @@ describe("reveal while streaming: whole blocks only", () => {
     expect(live(`Intro\n\n\`\`\`\n${line.repeat(3)}half`)).toBe("Intro\n");
   });
 
+  it("past the hold limit, a paragraph with no line break shows its last complete word", () => {
+    const words = "x ".repeat(1100);
+    expect(live(words)).toBe(words);
+    expect(live(`${words}hal`)).toBe(words);
+    expect(live(`${words}half `)).toBe(`${words}half `);
+    // under the limit the same paragraph stays held
+    expect(live("x ".repeat(900))).toBe("");
+  });
+
+  it("past the hold limit, a paragraph with no line break shows its last complete sentence, growing as text arrives", () => {
+    const sentence = `${"word ".repeat(419)}end.`;
+    expect(sentence.length).toBeGreaterThan(2090);
+    // one sentence still arriving: its complete words show
+    const a = live(sentence.slice(0, 2050));
+    const b = live(sentence.slice(0, 2090));
+    expect(a.length).toBeGreaterThan(2000);
+    expect(b.length).toBeGreaterThan(a.length);
+    expect(sentence.startsWith(b)).toBe(true);
+    // a sentence end beats the words after it
+    expect(live(`${sentence} Next one is com`)).toBe(sentence);
+    expect(live(`${sentence} Next one is done! Then`)).toBe(`${sentence} Next one is done!`);
+    // one character at a time across the limit, the reveal only grows
+    const text = `${sentence} Next one is done! Then\nmore\n\nAfter`;
+    let shown = "";
+    for (let n = 1900; n <= text.length; n++) {
+      const now = live(text.slice(0, n));
+      expect(now.startsWith(shown), `shrank at ${n}`).toBe(true);
+      shown = now;
+    }
+    expect(shown).toBe(`${sentence} Next one is done! Then\nmore\n`);
+  });
+
   it("never shrinks: every one-character split of a mixed reply reveals a growing prefix", () => {
     const fence = "```";
     const replies = [
