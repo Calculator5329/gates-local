@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { type SocketLike, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { type FakeOllama, startFakeOllama } from "../src/runtime/test-fakes.ts";
+import { type FakeOllama, startFakeOllama, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 
 const ENTRY = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const TOKEN = "a".repeat(64);
@@ -167,6 +167,21 @@ describe("server CLI", () => {
     expect(Date.now() - t0).toBeLessThan(3000);
     // Nothing on the fake but reads: discover-only never starts or installs.
     expect(fake.requests.every((r) => r.startsWith("GET "))).toBe(true);
+  });
+
+  it("a pinned URL alone is discover-only: an ollama on PATH is never run", async () => {
+    const tmp = cacheTmp();
+    const binDir = path.join(tmp, "bin");
+    const ran = path.join(tmp, "ran");
+    writeFakeBinary(path.join(binDir, "ollama"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(ran)}, "ran");\n`);
+    const s = launch(
+      { GATES_LOCAL_SERVER_TOKEN: TOKEN, GATES_LOCAL_OLLAMA_URL: `http://127.0.0.1:${await freePort()}`, PATH: `${binDir}:${process.env["PATH"] ?? ""}`, XDG_DATA_HOME: path.join(tmp, "xdg") },
+      path.join(tmp, "data"),
+    );
+    const line = await until("the runtime line", () => s.stderr.find((l) => /runtime (ready|stopped|missing|error|starting|wrong-service) /.test(l)));
+    expect(existsSync(ran)).toBe(false);
+    expect(line).toContain("runtime stopped (none)");
+    expect(s.stderr.some((l) => l.includes("runtime discover-only"))).toBe(true);
   });
 
   it("exits on SIGTERM within 3 s", async () => {

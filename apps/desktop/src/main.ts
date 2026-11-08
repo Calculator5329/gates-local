@@ -2,10 +2,12 @@
 // by scripts/build.ts. See README.md for the server contract and the
 // renderer's reconnect duties.
 
-import { app, BrowserWindow, ipcMain, session, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
+import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
+import { serverDataDir } from "./data-dir.ts";
+import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 
@@ -16,6 +18,11 @@ const desktopDir = path.resolve(__dirname, "..");
 
 app.setName("gates-local");
 app.setPath("userData", process.env["GATES_LOCAL_USER_DATA"] ?? path.join(app.getPath("appData"), "gates-local"));
+// Must run before ready. Standard + secure gives the scheme a real origin
+// (gates-local://app) and lets the module scripts and fetch load from it.
+protocol.registerSchemesAsPrivileged([
+  { scheme: CLIENT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
 
 function serverEntry(): string {
   const override = process.env["GATES_LOCAL_SERVER_ENTRY"];
@@ -25,27 +32,29 @@ function serverEntry(): string {
   return path.resolve(desktopDir, "..", "server", "src", "main.ts");
 }
 
-/** Dev: the Vite dev server. Dist: the built web files. */
+/** The built web files that gates-local://app serves. */
+function webRoot(): string {
+  return app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(desktopDir, "..", "web", "dist");
+}
+
+/** Dist (the default): the built web files on gates-local://app. Dev: the Vite dev server. */
 function clientUrl(): string {
   const override = process.env["GATES_LOCAL_WEB_URL"];
   if (override !== undefined && override !== "") return override;
-  const mode = process.env["GATES_LOCAL_WEB"] ?? (app.isPackaged ? "dist" : "dev");
-  if (mode === "dev") return DEV_WEB_URL;
-  const index = app.isPackaged
-    ? path.join(process.resourcesPath, "web", "index.html")
-    : path.resolve(desktopDir, "..", "web", "dist", "index.html");
-  return pathToFileURL(index).toString();
+  if (process.env["GATES_LOCAL_WEB"] === "dev") return DEV_WEB_URL;
+  return `${CLIENT_ORIGIN}/index.html`;
 }
 
 function isClientUrl(url: string): boolean {
-  const client = new URL(clientUrl());
-  try {
-    const target = new URL(url);
-    if (client.protocol === "file:") return target.protocol === "file:" && target.pathname === client.pathname;
-    return target.origin === client.origin;
-  } catch {
-    return false;
-  }
+  return sameClient(clientUrl(), url);
+}
+
+/** The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect. */
+function serverEnv(): NodeJS.ProcessEnv {
+  const origin = originOf(clientUrl());
+  if (origin === null) return process.env;
+  const extra = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "").split(",").filter((o) => o.trim() !== "");
+  return { ...process.env, GATES_LOCAL_ALLOWED_ORIGINS: [...extra, origin].join(",") };
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -55,8 +64,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function run(): void {
-  const dataDir = process.env["GATES_LOCAL_DATA_DIR"] ?? path.join(app.getPath("userData"), "server-data");
-  const supervisor = new Supervisor({ entry: serverEntry(), dataDir });
+  const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData") });
+  const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env: serverEnv() });
   let win: BrowserWindow | null = null;
   /** The client URL (with its route) to restore after a restart. */
   let lastClientUrl: string | null = null;
@@ -136,9 +145,12 @@ function run(): void {
       },
     });
     const contents = window.webContents;
-    contents.setWindowOpenHandler(() => ({ action: "deny" }));
-    contents.on("will-navigate", (event, url) => {
-      if (!isClientUrl(url)) event.preventDefault();
+    // The window never opens another window or leaves the client. A web
+    // link (the Ollama library, a link in a reply) opens in the system browser.
+    guardNavigation(contents, {
+      isClientUrl,
+      openExternal: (url) => shell.openExternal(url),
+      log: (line) => console.error(`[desktop] ${line}`),
     });
     contents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       // -3 is ERR_ABORTED: a newer navigation replaced this one.
@@ -177,6 +189,8 @@ function run(): void {
 
   void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    const root = webRoot();
+    protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
     win = createWindow();
     route(supervisor.state);
     void supervisor.start();
