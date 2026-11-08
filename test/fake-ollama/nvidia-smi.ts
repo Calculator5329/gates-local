@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // A fixture nvidia-smi for tests. The server runs it through GATES_LOCAL_NVIDIA_SMI
-// with the same two query forms it gives the real one:
-//   --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits
+// with the same query forms it gives the real one:
+//   --query-gpu=memory.total,memory.used,memory.free --format=csv,noheader,nounits      (fit)
+//   --query-gpu=name,memory.total,memory.used,memory.free --format=csv,noheader,nounits (gpu.status)
 //   --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits
 // The fixture GPU is 16303 MiB with whisper-server (2150 MiB) and a media-vault
 // vision runtime (1822 MiB) resident. When GATES_LOCAL_FAKE_GPU_STATE names the
@@ -37,12 +38,17 @@ const runner = ollamaMib();
 const apps = [...RESIDENT, ...(runner > 0 ? [{ pid: 4410, name: "/usr/local/bin/ollama", mib: runner }] : [])];
 const used = apps.reduce((s, a) => s + a.mib, 0) + 210;
 
+const NAME = "NVIDIA GeForce RTX 5070 Ti";
+const totals = `${TOTAL}, ${used}, ${Math.max(0, TOTAL - used)}`;
+
 if (query === "--query-gpu=memory.total,memory.used,memory.free") {
-  process.stdout.write(`${TOTAL}, ${used}, ${Math.max(0, TOTAL - used)}\n`);
+  process.stdout.write(`${totals}\n`);
+} else if (query === "--query-gpu=name,memory.total,memory.used,memory.free") {
+  process.stdout.write(`${NAME}, ${totals}\n`);
 } else if (query === "--query-compute-apps=pid,process_name,used_memory") {
   process.stdout.write(apps.map((a) => `${a.pid}, ${a.name}, ${a.mib}`).join("\n") + "\n");
 } else if (query === "--query-gpu=name") {
-  process.stdout.write("NVIDIA GeForce RTX 5070 Ti\n");
+  process.stdout.write(`${NAME}\n`);
 } else {
   process.stderr.write(`fake nvidia-smi: unsupported arguments ${process.argv.slice(2).join(" ")}\n`);
   process.exit(2);
