@@ -10,7 +10,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { SHOTS_DIR } from "./env.ts";
-import { type RuntimeMode, type Scenario, expect, test, waitReady } from "./fixtures.ts";
+import { type RuntimeMode, type Scenario, expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -24,6 +24,8 @@ interface Shot {
   readonly runtimeMode?: RuntimeMode;
   /** Open on the seeded thread (default), a new thread, or first run. */
   readonly start?: "thread" | "new" | "firstrun";
+  /** Seed other than the design's threads (a number seeds one long thread, test/e2e/seed.ts). */
+  readonly seed?: number;
   /** What to do once the page is ready. */
   readonly act?: (page: Page) => Promise<void>;
 }
@@ -59,6 +61,20 @@ const SHOTS: readonly Shot[] = [
   { name: "S-23-thread-hover-actions", act: (p) => p.locator(".turn.a").last().locator(".md").hover() },
   { name: "S-24-tool-expanded", act: (p) => p.locator(".wr").first().click() },
   { name: "S-25-plus-menu", act: (p) => p.locator("#plusBtn").click() },
+  // chat-feel: a reply held mid code block (the fake waits after 46 tokens), a code block hovered, the thinking row hovered
+  {
+    name: "S-130-stream-held",
+    start: "new",
+    act: async (p) => {
+      await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+      await sendMessage(p, "How do I check disk space before a download?");
+      await expect(p.locator(".turn.a").last().getByRole("heading", { name: "Steps" })).toBeVisible();
+      await p.waitForTimeout(600);
+      await p.mouse.move(720, 120);
+    },
+  },
+  { name: "S-131-code-hover", seed: 2, act: (p) => p.locator(".turn.a .md pre").last().hover() },
+  { name: "S-132-think-hover", act: (p) => p.locator(".turn.a .think").last().hover() },
 ];
 
 const lightName = (s: Shot) => s.light ?? s.name.replace(/^(S-\d+)-/, "$1-light-");
@@ -76,7 +92,7 @@ for (const shot of SHOTS) {
         scenario: shot.scenario ?? "models",
         skipFirstRun: shot.start !== "firstrun",
         colorScheme: theme,
-        ...(shot.start === "firstrun" ? { seed: 0 } : {}),
+        ...(shot.start === "firstrun" ? { seed: 0 } : shot.seed === undefined ? {} : { seed: shot.seed }),
         ...(shot.runtimeMode === undefined ? {} : { runtimeMode: shot.runtimeMode }),
       });
       test("shot", async ({ page, open, seededThread }) => {

@@ -151,10 +151,10 @@ test("typing during a stream stays under one frame per key", async ({ page, open
 
   await stack.scenario("models", { tokenDelayMs: 30 });
   await sendMessage(page, "A slow reply please");
-  await expect(page.locator(".caret")).toBeVisible();
+  await expect(page.locator(".writing")).toBeVisible();
   await page.evaluate(clearEvents);
   await ta.pressSequentially("typing while the reply streams in", { delay: 25 });
-  await expect(page.locator(".caret")).toBeVisible();
+  await expect(page.locator(".writing")).toBeVisible();
   const slow = (await page.evaluate(readEvents)).filter(isKey);
   report("stream slowest key, to paint", Math.max(0, ...slow.map((e) => e.duration)), "ms");
   report("stream slowest key, handlers", Math.max(0, ...slow.map((e) => e.processing)), "ms");

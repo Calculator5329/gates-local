@@ -285,9 +285,12 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .u-q{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:6px;font-size:13px;line-height:24px;color:var(--muted-foreground)}
 .u-qs{display:inline-flex;align-items:center;gap:6px}
 .turn.u.queued .bubble{background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong)}
-/* F50: a text caret at the stream head until the turn ends */
-.caret{display:inline-block;width:2px;height:1.05em;margin-left:2px;vertical-align:-.17em;background:var(--foreground);border-radius:1px;animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
+/* a streaming reply shows whole blocks (reveal.ts): each fades in as it finishes, opacity only,
+   and a quiet "Writing" sits under the last block until the turn ends */
+.md.live>:not(ul):not(ol),.md.live li{animation:fadein .12s ease-out}
+.working.writing{margin-top:2px}
+.working.writing .ph{color:var(--muted-foreground);animation:pulse 2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.md.live>:not(ul):not(ol),.md.live li,.working.writing .ph{animation:none}}
 
 /* markdown */
 .md{font-size:15px;line-height:1.65;color:var(--prose);overflow-wrap:anywhere;margin-top:var(--s1)}

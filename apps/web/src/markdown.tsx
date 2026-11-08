@@ -1,8 +1,8 @@
 // A small Markdown renderer for model replies. It builds React elements and
 // never sets HTML, so model text cannot inject markup. It covers what local
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
-// inline code, bold, italics and http(s) links. Half-written input (a reply
-// mid-stream) renders as far as it goes.
+// inline code, bold, italics and http(s) links. A streaming reply arrives here
+// as whole blocks (reveal.ts); half-written input still renders as far as it goes.
 import { type ReactNode, memo } from "react";
 
 type Block =
@@ -117,27 +117,13 @@ export function inline(text: string): ReactNode[] {
   return out;
 }
 
-const CARET = <span className="caret" aria-hidden="true" />;
-
-/** One block; `caret` puts the stream caret right after its last character. */
-function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
-  const c = caret ? CARET : null;
+function renderBlock(b: Block, key: number): ReactNode {
   switch (b.t) {
     case "p":
-      return (
-        <p key={key}>
-          {inline(b.text)}
-          {c}
-        </p>
-      );
+      return <p key={key}>{inline(b.text)}</p>;
     case "h": {
       const H = `h${b.level}` as const;
-      return (
-        <H key={key}>
-          {inline(b.text)}
-          {c}
-        </H>
-      );
+      return <H key={key}>{inline(b.text)}</H>;
     }
     case "ul":
     case "ol": {
@@ -145,10 +131,7 @@ function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
       return (
         <L key={key}>
           {b.items.map((it, j) => (
-            <li key={j}>
-              {inline(it)}
-              {j === b.items.length - 1 ? c : null}
-            </li>
+            <li key={j}>{inline(it)}</li>
           ))}
         </L>
       );
@@ -157,16 +140,10 @@ function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
       return (
         <pre key={key}>
           <code>{b.text}</code>
-          {c}
         </pre>
       );
     case "quote":
-      return (
-        <blockquote key={key}>
-          {inline(b.text)}
-          {c}
-        </blockquote>
-      );
+      return <blockquote key={key}>{inline(b.text)}</blockquote>;
     case "table":
       return (
         <table key={key}>
@@ -195,16 +172,7 @@ function renderBlock(b: Block, key: number, caret: boolean): ReactNode {
   }
 }
 
-/** The reply body. A trailing caret element follows the text while it streams. */
-export const Markdown = memo(function Markdown({ text, caret }: { text: string; caret?: boolean }) {
-  const blocks = parse(text);
-  const last = blocks.at(-1);
-  // a table cannot hold the caret inline, so it follows the table
-  const trailing = caret === true && (last === undefined || last.t === "table");
-  return (
-    <div className="md">
-      {blocks.map((b, i) => renderBlock(b, i, caret === true && i === blocks.length - 1 && b.t !== "table"))}
-      {trailing ? CARET : null}
-    </div>
-  );
+/** The reply body. `live` marks a streaming reply, whose blocks fade in as they finish. */
+export const Markdown = memo(function Markdown({ text, live }: { text: string; live?: boolean }) {
+  return <div className={live === true ? "md live" : "md"}>{parse(text).map((b, i) => renderBlock(b, i))}</div>;
 });

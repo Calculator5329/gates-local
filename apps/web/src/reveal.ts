@@ -1,0 +1,127 @@
+// Streaming display: a reply shows whole blocks, never half a sentence. The
+// live turn renders reveal(text, streaming), the prefix of the text made of
+// finished blocks. A paragraph or quote ends at a blank line (or where the
+// next block visibly starts), a heading at its newline, a list item when the
+// next item or a blank line starts, a fenced code block at its closing fence
+// and a table at a blank line. Display only: the saved reply is untouched.
+
+/** An unfinished block longer than this shows its complete lines. */
+export const HOLD_LIMIT = 2000;
+
+interface Line {
+  readonly text: string;
+  readonly start: number;
+  /** Offset after the line break; the text's length for the last line. */
+  readonly next: number;
+  /** A line break follows: the line is complete. */
+  readonly ended: boolean;
+}
+
+function lines(src: string): Line[] {
+  const out: Line[] = [];
+  let start = 0;
+  for (const m of src.matchAll(/\r\n|\n|\r/g)) {
+    const at = m.index ?? 0;
+    out.push({ text: src.slice(start, at), start, next: at + m[0].length, ended: true });
+    start = at + m[0].length;
+  }
+  out.push({ text: src.slice(start), start, next: src.length, ended: false });
+  return out;
+}
+
+// the same block starts markdown.tsx's parser recognises
+const FENCE = /^\s*```/;
+const HEADING = /^#{1,4}\s/;
+const ITEM = /^\s*([-*+]|\d+[.)])\s+/;
+const QUOTE = /^\s*>/;
+const RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const CONTINUATION = /^\s{2,}/;
+
+const blank = (l: Line) => l.text.trim() === "";
+
+/** The prefix of `text` made of finished blocks while it streams; all of it once the stream has ended. */
+export function reveal(text: string, streaming: boolean): string {
+  if (!streaming) return text;
+  const ls = lines(text);
+  const at = (j: number): Line | undefined => ls[j];
+  const tableAt = (j: number) => (at(j)?.text.includes("|") ?? false) && RULE.test(at(j + 1)?.text ?? "");
+  const startsBlock = (j: number) => {
+    const t = at(j)?.text ?? "";
+    return FENCE.test(t) || HEADING.test(t) || ITEM.test(t) || QUOTE.test(t) || tableAt(j);
+  };
+  /** Where a run of lines (paragraph, quote, table rows) ends: the first line after it, or null while undecided. */
+  const runEnd = (from: number, belongs: (j: number) => boolean, firstBelongs: boolean): number | null => {
+    for (let j = from; j < ls.length; j++) {
+      const l = ls[j] as Line;
+      if (blank(l)) return l.ended ? j : null;
+      if ((j === from && firstBelongs) || belongs(j)) {
+        if (!l.ended) return null;
+        continue;
+      }
+      return l.ended || startsBlock(j) ? j : null;
+    }
+    return null;
+  };
+
+  let done = 0;
+  let i = 0;
+  scan: while (i < ls.length) {
+    const l = ls[i] as Line;
+    if (blank(l)) {
+      if (!l.ended) break;
+      i++;
+      continue;
+    }
+    if (FENCE.test(l.text)) {
+      if (!l.ended) break;
+      for (let j = i + 1; j < ls.length; j++) {
+        const c = ls[j] as Line;
+        if (!FENCE.test(c.text)) continue;
+        if (!c.ended) break scan;
+        done = c.next;
+        i = j + 1;
+        continue scan;
+      }
+      break;
+    }
+    if (HEADING.test(l.text)) {
+      if (!l.ended) break;
+      done = l.next;
+      i++;
+      continue;
+    }
+    if (ITEM.test(l.text)) {
+      for (let j = i + 1; ; j++) {
+        const n = at(j);
+        if (n === undefined) break scan;
+        if (blank(n)) {
+          if (!n.ended) break scan;
+          done = n.start;
+          i = j;
+          continue scan;
+        }
+        if (ITEM.test(n.text)) done = n.start;
+        else if (!CONTINUATION.test(n.text)) {
+          done = n.start;
+          i = j;
+          continue scan;
+        }
+      }
+    }
+    const end = tableAt(i)
+      ? runEnd(i + 2, (j) => (at(j)?.text.includes("|") ?? false), false)
+      : QUOTE.test(l.text)
+        ? runEnd(i, (j) => QUOTE.test(at(j)?.text ?? ""), true)
+        : runEnd(i, (j) => !startsBlock(j), true);
+    if (end === null) break;
+    done = (ls[end] as Line).start;
+    i = end;
+  }
+
+  // the safety valve: a long unfinished block shows its complete lines
+  if (text.length - done > HOLD_LIMIT) {
+    const cut = Math.max(text.lastIndexOf("\n"), text.lastIndexOf("\r")) + 1;
+    if (cut > done) return text.slice(0, cut);
+  }
+  return text.slice(0, done);
+}

@@ -5,6 +5,7 @@ import type { Message, ToolStep } from "@gates-local/contracts";
 import { describeModel, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
+import { reveal } from "./reveal.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { retry, unqueue } from "./session.ts";
 import { NA, type Queued, type State, setState, useStore } from "./store.ts";
@@ -255,6 +256,8 @@ function LiveTurnView({ threadId }: { threadId: string }) {
   const name = describeModel(live.model, catalog).name;
   const running = live.tools.some((t) => t.state === "running");
   const showThink = live.thinking !== "" && (live.text !== "" || live.tools.length > 0 || end !== undefined);
+  // whole blocks while it streams; everything once it ends for any reason
+  const shown = reveal(live.text, end === undefined);
   return (
     <>
       {live.pendingUser !== null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
@@ -263,7 +266,12 @@ function LiveTurnView({ threadId }: { threadId: string }) {
         {live.tools.map((t) => (
           <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
         ))}
-        {live.text !== "" ? <Markdown text={live.text} caret={end === undefined} /> : null}
+        {shown !== "" ? <Markdown text={shown} live /> : null}
+        {end === undefined && live.text !== "" ? (
+          <div className="working writing" role="status">
+            <span className="ph">Writing</span>
+          </div>
+        ) : null}
         {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} /> : null}
         {end?.kind === "stopped" ? (
           <div className="stopped">

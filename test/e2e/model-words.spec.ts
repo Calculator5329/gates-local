@@ -68,7 +68,7 @@ test("the fit panel names what this model can use apart from what is free, on se
 
   // once a reply has loaded the model, the leftover segment is what is free right now
   await sendMessage(page, "Load it");
-  await expect(page.locator(".caret")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator(".writing")).toHaveCount(0, { timeout: 10_000 });
   await page.locator("#fitBtn").click();
   await expect(panel.locator(".legend")).toContainText("Currently free");
 });
@@ -95,7 +95,7 @@ test.describe("decode speed", () => {
     await open();
     await waitReady(page);
     await sendMessage(page, "Count the tokens");
-    await expect(page.locator(".caret")).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator(".writing")).toHaveCount(0, { timeout: 15_000 });
     // The fake decodes a token every 12 ms (about 80 tok/s); over the whole 3+ s turn it would be under 25.
     const meta = await page.locator(".turn.a").last().locator(".meta").textContent();
     const replyTps = Number(/(\d+) tok\/s/.exec(meta ?? "")?.[1]);

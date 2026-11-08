@@ -10,6 +10,9 @@
 //   mid-stream-error  the stream breaks with an error after a few tokens
 //   wrong-service     the port answers, but not as Ollama
 //   embed-smallest    the three models plus nomic-embed-text, the smallest
+//   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
+//                     a code block, a table) over about 2 s; holdAfterTokens > 0
+//                     pauses the reply there until the request is cancelled
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -17,7 +20,7 @@ import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel
 
 const installedFor = (s: string): readonly string[] => (s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : DEFAULT_INSTALLED);
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "slow-drip"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -32,6 +35,8 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
+  /** slow-drip: after this many reply tokens the stream waits until cancelled; 0 never waits. */
+  holdAfterTokens: number;
 }
 
 const DEFAULTS: FakeOptions = {
@@ -41,7 +46,34 @@ const DEFAULTS: FakeOptions = {
   pullTickMs: 100,
   replyWords: 60,
   errorAfterTokens: 8,
+  holdAfterTokens: 0,
 };
+
+/** The slow-drip reply: one of each block kind the reply renderer draws. */
+export const DRIP_REPLY = [
+  "Here is how to check the free disk space before you download a model. It takes a minute.",
+  "",
+  "## Steps",
+  "",
+  "- Open a terminal window.",
+  "- Run the two commands below.",
+  "- Compare the free space with the model size.",
+  "",
+  "```sh",
+  "df -h /",
+  "du -sh ~/.ollama/models",
+  "```",
+  "",
+  "| Model | Download |",
+  "| --- | --- |",
+  "| Gemma 4 12B | 8.1 GB |",
+  "| Qwen 3.5 9B | 6.6 GB |",
+  "",
+  "A model fits when the free space is larger than its download. Keep some room for the context cache.",
+].join("\n");
+
+/** The reply as stream tokens: each word with the whitespace before it, so newlines arrive with the next word. */
+export const dripTokens = (): string[] => DRIP_REPLY.match(/\s*\S+/g) ?? [];
 
 export const FAKE_VERSION = "0.40.4";
 
@@ -153,12 +185,13 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
 
   const setScenario = (next: Scenario, opts: Partial<FakeOptions> = {}) => {
     scenario = next;
-    options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...opts };
+    const preset = next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : next === "slow-drip" ? { tokenDelayMs: 20 } : {};
+    options = { ...DEFAULTS, ...start.options, ...preset, ...opts };
     installed = new Set(installedFor(next));
     loaded = [];
     writeGpu();
   };
-  if (scenario === "slow-first-token") setScenario(scenario, start.options);
+  if (scenario === "slow-first-token" || scenario === "slow-drip") setScenario(scenario, start.options);
 
   const isInstalled = (name: string): FakeModel | undefined => {
     const m = findFakeModel(name);
@@ -213,8 +246,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         done: false,
       });
     }
-    for (const t of tokens(replyWords(prompt, options.replyWords))) {
+    for (const t of scenario === "slow-drip" ? dripTokens() : tokens(replyWords(prompt, options.replyWords))) {
       if (abort.signal.aborted) return;
+      if (scenario === "slow-drip" && options.holdAfterTokens > 0 && sent >= options.holdAfterTokens) {
+        await new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
+        return;
+      }
       if (scenario === "mid-stream-error" && sent >= options.errorAfterTokens) {
         line({ error: "an error was encountered while running the model: unexpected EOF" });
         return void res.end();
