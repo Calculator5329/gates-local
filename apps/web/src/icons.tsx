@@ -1,3 +1,4 @@
+// The send arrow adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The icon sprite from docs/design/shell.html, verbatim, and the two ways the
 // client draws from it. Render <Sprite /> once at the root; <Icon id="pen" />
 // then draws <svg class="ic"><use href="#i-pen"/></svg> like the design does.

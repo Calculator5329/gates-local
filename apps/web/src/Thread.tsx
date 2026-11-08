@@ -1,3 +1,4 @@
+// Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
 // are memoised by message, so a streaming token re-renders only the live turn.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
