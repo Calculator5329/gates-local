@@ -68,6 +68,18 @@ also downloads the Electron binary (about 120 MB) from GitHub into
 If `pnpm start` stops with "No usable sandbox!" before a window opens, see
 [Electron stops with "No usable sandbox!"](#electron-stops-with-no-usable-sandbox).
 
+The window has no menu bar. These keys work while the window has focus:
+
+| Keys | What they do |
+| --- | --- |
+| Ctrl+R | Reload the window |
+| Ctrl+Shift+R | Reload without the cache |
+| Ctrl+W | Close the window |
+| Ctrl+Q | Quit |
+| F11 | Full screen |
+| Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0 | Zoom in, zoom out, back to 100% |
+| Ctrl+Shift+I | Developer tools, when the app runs from a clone as here |
+
 On first run the app looks for Ollama on `127.0.0.1:11434`:
 
 - **Ollama answers:** the app uses it and lists its models. The app never
@@ -78,6 +90,29 @@ On first run the app looks for Ollama on `127.0.0.1:11434`:
   from any system install. The app stops this copy when it quits.
 
 You can switch between the two later in Settings › Runtime.
+
+### Optional: add Gates Local to your app list
+
+`pnpm start` opens the window but does not add the app to your desktop's
+app list. To add a launcher and the app's icon for your user, run this in
+the clone after the first `pnpm start`:
+
+```sh
+cd apps/desktop
+node scripts/install-linux.ts --exec node_modules/electron/dist/electron --exec-arg "$PWD"
+cd ../..
+```
+
+It writes the launcher `gates-local.desktop` and two icon files under
+`~/.local/share`, or `$XDG_DATA_HOME` if you set it; the table in
+[section 5](#5-where-the-app-keeps-its-data) lists them. A file already at
+one of those paths is moved into a `gates-local-install-backups/` folder
+there first, never overwritten. Desktops that match a window to its
+launcher, as most Wayland desktops do, also take the window's icon from it.
+
+The launcher starts Electron from the clone by absolute path, on the build
+the last `pnpm start` made. If you move the clone, run the command again
+from the new place.
 
 ### Optional: the shell tool
 
@@ -136,6 +171,7 @@ data folder under `images/`.
 | Electron's profile (window state and cache) | `~/.config/gates-local`, or `$XDG_CONFIG_HOME/gates-local` |
 | The Electron download | `~/.cache/electron` |
 | Models of the system Ollama | wherever Ollama keeps them, usually `/usr/share/ollama/.ollama/models` or `~/.ollama/models` |
+| The launcher and icons, if you added them | `applications/gates-local.desktop`, `icons/hicolor/scalable/apps/gates-local.svg` and `icons/hicolor/512x512/apps/gates-local.png` in `~/.local/share`, or `$XDG_DATA_HOME`; files they replaced in `gates-local-install-backups/` there |
 
 Inside the data folder, `threads.sqlite` holds your threads,
 `settings.json` your settings, `snapshots/` the database copies and
@@ -143,11 +179,15 @@ Inside the data folder, `threads.sqlite` holds your threads,
 
 To move only the data folder, set `GATES_LOCAL_DATA_DIR` to an absolute
 path before `pnpm start`. The downloaded Ollama and its models stay in
-`~/.local/share/gates-local`. To move everything, including those large
-files, set `XDG_DATA_HOME` to an absolute path instead, for example
+`~/.local/share/gates-local`, or `$XDG_DATA_HOME/gates-local` if that is
+set. To move everything, including those large files, set `XDG_DATA_HOME`
+to an absolute path instead, for example
 `XDG_DATA_HOME=/mnt/big/share pnpm start`. The app then uses
-`/mnt/big/share/gates-local` for both. Move an existing folder there first,
-with the app closed, to keep what is in it.
+`/mnt/big/share/gates-local` for both, as long as `GATES_LOCAL_DATA_DIR`
+and `GATES_LOCAL_USER_DATA` are not set: either of those still decides
+where the data folder goes. Electron's profile follows `XDG_CONFIG_HOME`,
+not `XDG_DATA_HOME`. Move an existing folder there first, with the app
+closed, to keep what is in it.
 
 ## 6. Updating
 
@@ -162,13 +202,16 @@ pnpm start
 Your threads and settings stay where they are. If a newer build changed the
 thread database, an older build refuses to open it rather than change it.
 
+The launcher, if you added one, runs the build the last `pnpm start` made,
+so it picks up the update after that. If you moved the clone, add the
+launcher again from the new place.
+
 If you added the AppArmor profile from the troubleshooting section, check
 its path again after an update: the path names the Electron version.
 
 ## 7. Uninstalling
 
-Close the app. Go to the folder that holds the clone (the clone's parent),
-then delete the clone:
+Close the app. From inside the clone, run:
 
 ```sh
 cd ..
@@ -191,11 +234,20 @@ Also delete these if they apply to you:
   and, unless `GATES_LOCAL_DATA_DIR` is set, the data folder as
   `server-data/`;
 - `~/.cache/electron`, if no other Electron project uses it;
+- the launcher and icons, if you added them:
+  `applications/gates-local.desktop`,
+  `icons/hicolor/scalable/apps/gates-local.svg`,
+  `icons/hicolor/512x512/apps/gates-local.png` and any
+  `gates-local-install-backups/` folder, all in `~/.local/share`, or in
+  `$XDG_DATA_HOME` if you set it;
 - `/etc/apparmor.d/gates-local-electron`, if you added it (with sudo, then
   run `sudo apparmor_parser -R` on it before deleting).
 
-The data folder holds the app's own Ollama copy and the models it
-downloaded in that mode. Models in the system Ollama stay. Remove them with
+The app's own Ollama copy and the models it downloaded in that mode are in
+`~/.local/share/gates-local`, or `$XDG_DATA_HOME/gates-local`, even when
+`GATES_LOCAL_DATA_DIR` or `GATES_LOCAL_USER_DATA` put the rest of the data
+elsewhere, so removing that folder as above removes them too. Models in the
+system Ollama stay. Remove them with
 `ollama rm <model>`, or uninstall Ollama as its documentation describes.
 
 ## 8. Troubleshooting

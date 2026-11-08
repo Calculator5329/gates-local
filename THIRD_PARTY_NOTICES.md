@@ -38,7 +38,8 @@ The root license does not relicense anything listed here.
   copied path for path and some redrawn with rounded coordinates. The gate
   mark (`i-mark`) is this project's own. No Lucide package is a dependency.
 - **Files:** `apps/web/src/icons.tsx`, `docs/design/shell.html`,
-  `docs/design/round-2-t3-faithful.html`. Each carries a one-line header
+  `docs/design/round-2-t3-faithful.html`,
+  `docs/design/round-2-instrument.html`. Each carries a one-line header
   pointing at the notice file.
 
 ## Image workflow

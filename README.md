@@ -91,9 +91,11 @@ pnpm start
 `pnpm start` builds the app and opens its window. On first run it finds
 Ollama and lists your models. With no models installed, it offers some to
 download. On Ubuntu 23.10 and later, Electron may stop with "No usable
-sandbox!" until you add an AppArmor profile; the guide shows how. The full
-guide, with updating, uninstalling and fixes for common problems, is
-[docs/setup/linux.md](docs/setup/linux.md).
+sandbox!" until you add an AppArmor profile; the guide shows how. The
+window has no menu bar: Ctrl+R reloads, Ctrl+W closes, Ctrl+Q quits and F11
+goes full screen while it has focus. The full guide, with the other keys,
+adding the app to your app list, updating, uninstalling and fixes for
+common problems, is [docs/setup/linux.md](docs/setup/linux.md).
 
 ## Windows
 
