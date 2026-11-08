@@ -12,7 +12,7 @@ type Listener = (event: { data?: unknown }) => void;
 export interface Held<M extends MethodName> {
   readonly params: Params<M>;
   respond(result: ResultOf<M>): void;
-  fail(code: string, message?: string): void;
+  fail(code: string, message?: string, blocking?: unknown): void;
 }
 
 interface Request {
@@ -109,7 +109,7 @@ export class FakeServer {
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
     const ok = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
-    const err = (code: string, message = code) => socket.frame({ type: "response", id: req.id, ok: false, error: { code, message } });
+    const err = (code: string, message = code, blocking?: unknown) => socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
     const waiting = this.holds.get(req.method);
     const next = waiting?.shift();
     if (next) {
@@ -120,8 +120,8 @@ export class FakeServer {
     try {
       ok(fn ? fn(req.params as never) : methodSamples[req.method].result);
     } catch (e) {
-      const f = e as { code?: string; message?: string };
-      err(f.code ?? "internal", f.message ?? "failed");
+      const f = e as { code?: string; message?: string; blocking?: unknown };
+      err(f.code ?? "internal", f.message ?? "failed", f.blocking);
     }
   }
 

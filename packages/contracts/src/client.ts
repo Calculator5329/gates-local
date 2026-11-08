@@ -97,7 +97,7 @@ export function createClient(socket: SocketLike, options: ClientOptions = {}): C
     if (call === undefined) return report(new WireError("bad-message", `response for unknown id "${msg.id}"`));
     pending.delete(msg.id);
     clearTimeout(call.timer);
-    if (!msg.ok) return call.reject(new WireError(msg.error.code, msg.error.message));
+    if (!msg.ok) return call.reject(new WireError(msg.error.code, msg.error.message, msg.error.blocking));
     const r = decodeResult(call.method, msg.result);
     if (r.ok) call.resolve(r.value as never);
     else call.reject(r.error);

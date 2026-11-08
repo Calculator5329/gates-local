@@ -694,6 +694,60 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await t.r.done();
   });
 
+  it("CFS-07, askFirst: a blocker comes back in the refusal, X keeps running and nothing is saved", async () => {
+    const t = await withX(tight);
+    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
+    const sent = await settledWithin(Promise.resolve(send), 1000);
+    expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL }] } });
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
+    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    await t.r.done();
+  });
+
+  it("CFS-07, askFirst: a cold X holding the load gate is named at once, not waited behind", async () => {
+    const lease = createGpuLease();
+    let xResident = false;
+    const xAsked = signalled();
+    const r = await rig(
+      {
+        "GET /api/tags": (_b, res) => json(res, 200, { models: [MODEL, Y].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: xResident ? [entry(MODEL, X_VRAM)] : [] }),
+        "POST /api/chat": async (_b, res) => {
+          // Loading, or reading the prompt: resident, and no token yet.
+          res.writeHead(200, ndjson);
+          xResident = true;
+          xAsked.resolve();
+          await new Promise<void>((resolve) => res.on("close", () => resolve()));
+        },
+      },
+      { fit: tight, lease },
+    );
+    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
+    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), 2000);
+    expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
+    r.app.handlers["chat.cancel"]({ turnId: x.turnId }, ctx);
+    await r.done();
+  });
+
+  it("CFS-07, askFirst: with room beside X the turn starts as usual", async () => {
+    const t = await withX(roomy);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
+    expect(y.turnId).toEqual(expect.any(String));
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    await t.r.done();
+  });
+
+  it("CFS-07, askFirst: stopOthers wins, so a confirmed retry is never refused", async () => {
+    const t = await withX(tight);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, askFirst: true }, ctx);
+    for (let i = 0; i < 200 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
+    await t.r.done();
+  });
+
   it("R4-01: with an idle app-owned ComfyUI too, stopOthers ends X before any image claim, then measures again", async () => {
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);

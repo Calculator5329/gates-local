@@ -6,7 +6,7 @@
 // other than refuse; then the user message persists, the reply streams on
 // chat.event and only the finished assistant message reaches the store.
 import { randomUUID } from "node:crypto";
-import type { Channel, Message, Params, Payload } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, Message, Params, Payload } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -54,6 +54,7 @@ export type AppErrorCode =
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
   | "runtime-changed" // a runtime switch ended the turn (any text sent is saved, event.partial); the client sends the message again
   | "preempted" // chat.send stopOthers ended the turn: another model's load needed its GPU (event.neededBy, event.partial)
+  | "would-stop" // chat.send askFirst: running turns are in the way (error.blocking); nothing was saved or stopped
   | "thread-not-found" // the store's code, also thrown while the thread's delete runs
   | "shutting-down"; // the server is stopping and takes no new turns
 
@@ -64,11 +65,14 @@ export class AppError extends Error {
   readonly report?: FitReport;
   /** For preempted: the model whose load needed the GPU (the terminal event's neededBy). */
   readonly neededBy?: string;
-  constructor(code: AppErrorCode, message: string, report?: FitReport, neededBy?: string) {
+  /** For would-stop: the running turns in the way, on the wire as error.blocking. */
+  readonly blocking?: readonly BlockingTurn[];
+  constructor(code: AppErrorCode, message: string, report?: FitReport, neededBy?: string, blocking?: readonly BlockingTurn[]) {
     super(message);
     this.code = code;
     if (report !== undefined) this.report = report;
     if (neededBy !== undefined) this.neededBy = neededBy;
+    if (blocking !== undefined) this.blocking = blocking;
   }
 }
 
@@ -404,6 +408,12 @@ export function createApp(deps: AppDeps): App {
     return { report: plan.report, stop: running.filter((t) => plan.stop.some((n) => sameModel(n, t.model))), comfy: plan.comfy };
   };
 
+  /** Turns as the client names them in its warning. */
+  const blockingTurns = (stop: readonly Turn[]): BlockingTurn[] => {
+    const titles = new Map(store.listThreads().map((t) => [t.id, t.title]));
+    return stop.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model }));
+  };
+
   const cancelThreadTurn = async (threadId: string) => {
     const turn = byThread.get(threadId);
     if (turn === undefined) return;
@@ -480,12 +490,10 @@ export function createApp(deps: AppDeps): App {
       if (![...turns.values()].some((t) => t.started)) return [];
       const baseUrl = runtime.baseUrl();
       if (baseUrl === undefined) throw notReady();
-      const blocking = (await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop;
-      const titles = new Map(store.listThreads().map((t) => [t.id, t.title]));
-      return blocking.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model }));
+      return blockingTurns((await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop);
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, tools, think, image, stopOthers, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       // The thread is going: its delete has already listed what it takes back.
       if (deleting.has(threadId)) throw threadGoing(threadId);
@@ -535,6 +543,9 @@ export function createApp(deps: AppDeps): App {
         const fit = async (signal: AbortSignal, comfyPid?: number): Promise<{ report: FitReport; stop: Turn[]; comfy: boolean }> => {
           for (;;) {
             const plan = await planBeside(baseUrl, model, numCtx, { signal, comfyPid });
+            if (askFirst === true && stopOthers !== true && plan.stop.length > 0) {
+              throw new AppError("would-stop", `${model} at num_ctx ${numCtx} needs the GPU memory of a running reply.`, undefined, undefined, blockingTurns(plan.stop));
+            }
             const victims = stopOthers === true ? plan.stop : [];
             if (victims.length === 0) return plan;
             for (const t of victims) t.halt(preemptedBy(model, plan.report.numCtx, t.model));
@@ -556,6 +567,9 @@ export function createApp(deps: AppDeps): App {
         if (stopOthers === true) {
           const ahead = await planned(reclaimableComfy());
           if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
+        } else if (askFirst === true && [...turns.values()].some((t) => t.started)) {
+          // Before the claim and the gate, where this send would otherwise wait behind that reply; fit refuses it.
+          await planned(reclaimableComfy());
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         const claim = async () => {
