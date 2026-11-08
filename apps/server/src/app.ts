@@ -339,17 +339,17 @@ export function createApp(deps: AppDeps): App {
         // An idle ComfyUI this app started is the one GPU tenant a turn may free. The check runs inside
         // the claim, so a ComfyUI an image job started while this turn waited counts. stopIdle claims
         // the GPU alone: the turn lets its claim go first (a nested claim would wait on itself), then
-        // claims again. Once per turn.
-        let measured: FitReport | undefined;
-        if (deps.image?.current().owner === "app") {
+        // claims again and measures again. An image queued behind the turn runs in that gap and
+        // stopIdle declines while it is registered, so only an owner that is no longer app counts as
+        // stopped: the turn tries again, at most three times, then admission decides as usual.
+        let measured = deps.image?.current().owner === "app" ? await fit() : undefined;
+        for (let attempt = 0; attempt < 3 && measured !== undefined && measured.verdict !== "fits" && deps.image?.current().owner === "app"; attempt += 1) {
+          if (turn.controller.signal.aborted) throw new AppError("cancelled", "the turn was cancelled before it started");
+          releaseGpu?.();
+          releaseGpu = undefined;
+          await deps.image.stopIdle();
+          await claim();
           measured = await fit();
-          if (measured.verdict !== "fits") {
-            measured = undefined;
-            releaseGpu?.();
-            releaseGpu = undefined;
-            await deps.image.stopIdle();
-            await claim();
-          }
         }
         let report: FitReport;
         try {

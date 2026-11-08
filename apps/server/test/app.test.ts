@@ -2,7 +2,7 @@
 // thread store, runtime and catalog against a fake Ollama on port 0. The fit
 // check reads fake nvidia-smi and meminfo text; nothing touches the GPU or a
 // real Ollama, and the runtime only ever runs discover() (never ensure()).
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -575,6 +575,159 @@ function fakeComfyImage() {
   };
   return { build, events: imageEvents, comfyCalls, module: () => module!, png: (jobId: string) => path.join(dataDir, "images", `${jobId}.png`) };
 }
+
+/**
+ * The real image module over a managed ComfyUI: the default address with no
+ * comfyUrl setting, so the module starts the user unit itself and owns it.
+ * Fetch, socket and the unit are injected; no request leaves the process.
+ */
+function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {}) {
+  const imageEvents: ImageEvent[] = [];
+  const calls: string[] = [];
+  const unit: Array<"start" | "stop"> = [];
+  let up = false;
+  let module: ImageModule | undefined;
+  let dataDir = "";
+  let prompts = 0;
+  const finished = new Set<string>();
+  const ctl = {
+    /** Another client's prompt sits in ComfyUI's queue: stopIdle declines, and so does a render. */
+    busy: false,
+    /** The next prompt finishes only once this resolves. */
+    holdNext: undefined as Promise<void> | undefined,
+    /** While set, every /system_stats (health) answer waits on it. */
+    health: undefined as Promise<void> | undefined,
+  };
+  const build = (lease: GpuLease, store: ThreadStore, dir: string) => {
+    dataDir = path.join(dir, "image-data");
+    let socket: EventTarget | undefined;
+    module = createImageModule({
+      dataDir, lease, store, requiredBytes: 1, idleMs: 60_000,
+      settings: () => ({ imageGen: true }),
+      localAddresses: () => [], lookupHost: async () => { throw new Error("no DNS in tests"); },
+      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      readGpu: async () => ({ freeBytes: 2 ** 40, holders: "none", tenants: [] }),
+      service: {
+        inspect: async () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: up ? 4242 : 0 }),
+        start: async () => { unit.push("start"); up = true; hooks.onStart?.(); },
+        stop: async () => { unit.push("stop"); up = false; hooks.onStop?.(); },
+      },
+      socket: () => {
+        socket = Object.assign(new EventTarget(), { close() {} });
+        Object.defineProperty(socket, "readyState", { value: 1 });
+        return socket as unknown as globalThis.WebSocket;
+      },
+      fetch: async (input) => {
+        const { pathname } = new URL(String(input));
+        calls.push(pathname);
+        if (pathname === "/system_stats") {
+          if (ctl.health) await ctl.health;
+          return up ? Response.json({ system: {}, devices: [] }) : new Response("down", { status: 503 });
+        }
+        if (pathname === "/object_info") return Response.json({
+          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
+          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
+        });
+        if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.busy ? [[0, "someone-else"]] : [] });
+        if (pathname === "/prompt") {
+          prompts += 1;
+          const id = `p${prompts}`;
+          const hold = ctl.holdNext;
+          ctl.holdNext = undefined;
+          const s = socket;
+          void (async () => {
+            await hold;
+            finished.add(id);
+            s?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: id, node: null } }) }));
+          })();
+          return Response.json({ prompt_id: id });
+        }
+        if (pathname.startsWith("/history/")) {
+          const id = decodeURIComponent(pathname.slice("/history/".length));
+          return Response.json(finished.has(id) ? { [id]: { outputs: { "8": { images: [{ filename: "out.png" }] } } } } : {});
+        }
+        if (pathname === "/view") return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+        throw new Error(`unexpected ComfyUI request ${pathname}`);
+      },
+      push: (channel, payload) => { if (channel === "image.event") imageEvents.push(payload as ImageEvent); },
+    });
+    return module;
+  };
+  const states = (jobId: string) => imageEvents.filter((e) => e.jobId === jobId).map((e) => e.state);
+  const pngs = () => (existsSync(path.join(dataDir, "images")) ? readdirSync(path.join(dataDir, "images")) : []);
+  return { build, ctl, events: imageEvents, calls, unit, states, pngs, module: () => module! };
+}
+
+const gate = () => {
+  let open!: () => void;
+  const shut = new Promise<void>((resolve) => (open = resolve));
+  return { shut, open };
+};
+
+describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", () => {
+  it("a second queued image runs in the turn's first reclaim; the turn tries again, stops ComfyUI once and is admitted", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({
+      // Its weights stay resident after a job; stopping it frees them.
+      onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } },
+      onStop: () => { if (gpu) gpu.freeMib = 15000; },
+    });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    // A first job starts ComfyUI: the app owns it now.
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    // Image A holds the GPU; the turn waits for its claim; image B queues behind the turn.
+    const holdA = gate();
+    comfy.ctl.holdNext = holdA.shut;
+    const a = await image.generate({ prompt: "a" });
+    await until(() => comfy.states(a.jobId).includes("running"));
+    const t = await r.client.call("threads.create", {});
+    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await until(() => r.lease!.status().waiting.includes("chat"));
+    const b = await image.generate({ prompt: "b" });
+    await until(() => r.lease!.status().waiting.length === 2);
+    expect(r.lease!.status().waiting).toEqual(["chat", "image"]);
+
+    holdA.open();
+    const sent = await within(3000, sending, "chat.send");
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    await image.wait(b.jobId);
+    expect(comfy.states(a.jobId).at(-1)).toBe("done");
+    expect(comfy.states(b.jobId).at(-1)).toBe("done");
+    expect(comfy.unit).toEqual(["start", "stop"]);
+    expect(image.current().owner).toBe("none");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+  });
+
+  it("a ComfyUI another client keeps busy: three declined stops, then wont-fit, no claim held", async () => {
+    let gpu: Gpu | undefined;
+    const comfy = managedComfy({ onStart: () => { if (gpu) { gpu.freeMib = 3000; gpu.memAvailableKb = 1_000_000; } } });
+    const r = await rig({ image: comfy.build });
+    gpu = r.gpu;
+    cleanups.push(() => comfy.module().close());
+    const image = comfy.module();
+    await image.wait((await image.generate({ prompt: "warm up" })).jobId);
+    expect(image.current().owner).toBe("app");
+
+    comfy.ctl.busy = true;
+    const mark = comfy.calls.length;
+    const t = await r.client.call("threads.create", {});
+    const err = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
+    expect(err.code).toBe("wont-fit");
+    // Each stopIdle asks ComfyUI's queue once and declines.
+    expect(comfy.calls.slice(mark).filter((c) => c === "/queue")).toHaveLength(3);
+    expect(comfy.unit).toEqual(["start"]);
+    expect(image.current().owner).toBe("app");
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    expect(r.store.getThread(t.id).messages).toEqual([]);
+  });
+});
 
 describe("threads.delete and the image jobs its turns queued", () => {
   it("cancels a queued tool image whose turn already ended, before the thread goes", async () => {
