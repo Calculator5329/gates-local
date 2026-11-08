@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -25,6 +25,22 @@ describe("sandbox probe", () => {
 const markerProcesses = (marker: string) => readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
   try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(marker); } catch { return false; }
 });
+
+/** A folder source and a SQLite snapshot in a fresh temp dir, for tests that move them. */
+const fresh = () => {
+  const base = mkdtempSync(path.join(tmpdir(), "gl-shell-gone-"));
+  const docs = path.join(base, "docs"); mkdirSync(docs); writeFileSync(path.join(docs, "a.txt"), "a");
+  const snapshots = path.join(base, "app", "snapshots"); mkdirSync(snapshots, { recursive: true });
+  const snapshot = path.join(snapshots, "ledger.db");
+  const ledger = new DatabaseSync(snapshot); ledger.exec("CREATE TABLE t(n); INSERT INTO t VALUES(5)"); ledger.close();
+  const folderSource: LibraryEntry = { id: "docs", label: "Docs", path: docs, kind: "folder" };
+  const sqliteSource: LibraryEntry = { id: "ledger", label: "Ledger", path: path.join(base, "live.db"), snapshotPath: snapshot, kind: "sqlite" };
+  // Every host path the model must never read: the source roots, the data dir, home, the worktree.
+  const hostPaths = [base, docs, snapshots, path.dirname(snapshots), homedir(), process.cwd()];
+  return { base, docs, snapshot, folderSource, sqliteSource, hostPaths };
+};
+const outcome = (input: Parameters<typeof runSandbox>[0]) => runSandbox(input).then(output => `ran: ${output}`, (e: Error) => e.message);
+const noHostPath = (message: string, hostPaths: readonly string[]) => { for (const host of hostPaths) expect(message, host).not.toContain(host); };
 
 const probe = await probeSandbox();
 const bwrapAbsent = !probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason);
@@ -106,6 +122,54 @@ describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [
     expect(result).toBeInstanceOf(Error);
     expect((result as Error).message).not.toContain("leased");
   }, 15000);
+  describe("setup failures name virtual paths, never a host path (T2-02)", () => {
+    it("a folder source renamed between the check and the bind", async () => {
+      const t = fresh();
+      const message = await outcome({ command: "ls /library/docs", sources: [t.folderSource], beforeLaunch: () => renameSync(t.docs, `${t.docs}-moved`) });
+      expect(message).toBe("/library/docs: no longer available (its folder was moved or removed)");
+      noHostPath(message, t.hostPaths);
+    });
+    it("a folder source gone or unreadable when the call starts", async () => {
+      const t = fresh();
+      renameSync(t.docs, `${t.docs}-moved`);
+      const gone = await outcome({ command: "ls /library/docs", sources: [t.folderSource] });
+      expect(gone).toBe("/library/docs: no longer available (its folder was moved or removed)");
+      noHostPath(gone, t.hostPaths);
+      renameSync(`${t.docs}-moved`, t.docs);
+      chmodSync(t.base, 0o000);
+      try {
+        const shut = await outcome({ command: "ls /library/docs", sources: [t.folderSource] });
+        expect(shut).toBe("/library/docs: no longer available (its folder can no longer be read)");
+        noHostPath(shut, t.hostPaths);
+      } finally { chmodSync(t.base, 0o700); }
+    });
+    it("a SQLite snapshot renamed between the check and the bind, or gone when the call starts", async () => {
+      const t = fresh();
+      const raced = await outcome({ command: 'sqlite3 /data/ledger.db "SELECT * FROM t"', sources: [t.folderSource, t.sqliteSource], beforeLaunch: () => renameSync(t.snapshot, `${t.snapshot}.moved`) });
+      expect(raced).toBe("/data/ledger.db: no longer available (the source was removed during this reply)");
+      noHostPath(raced, t.hostPaths);
+      const gone = await outcome({ command: 'sqlite3 /data/ledger.db "SELECT * FROM t"', sources: [t.sqliteSource] });
+      expect(gone).toBe("/data/ledger.db: no longer available (the source was removed during this reply)");
+      noHostPath(gone, t.hostPaths);
+    });
+    it("a bwrap setup error whose raw text holds a host path gives a fixed sentence and the virtual path", async () => {
+      const t = fresh();
+      const launcher = path.join(t.base, "fake-systemd-run");
+      writeFileSync(launcher, `#!/usr/bin/sh\nprintf '%s\\n' "bwrap: Can't bind mount /oldroot${t.docs} on /newroot/library/docs: Permission denied" >&2\nexit 1\n`, { mode: 0o755 });
+      const message = await outcome({ command: "ls /library/docs", sources: [t.folderSource, t.sqliteSource], launcher });
+      expect(message).toBe("The shell sandbox could not start while setting up /library/docs.");
+      noHostPath(message, t.hostPaths);
+      // Text with no host path in it is kept, after the virtual paths involved.
+      writeFileSync(launcher, "#!/usr/bin/sh\necho 'Failed to start transient scope unit: Unit already exists.' >&2\nexit 1\n", { mode: 0o755 });
+      expect(await outcome({ command: "ls /library/docs", sources: [t.folderSource, t.sqliteSource], launcher }))
+        .toBe("The shell sandbox could not start while setting up /library/docs, /data/ledger.db: Failed to start transient scope unit: Unit already exists.");
+    });
+    it("the command's own failure output inside the sandbox is unchanged", async () => {
+      const t = fresh();
+      expect(await outcome({ command: "ls /library/docs/missing", sources: [t.folderSource] }))
+        .toBe("Shell exited 2: ls: cannot access '/library/docs/missing': No such file or directory\n");
+    });
+  });
   it("kills commands over the time and output limits, and nothing outlives a timeout", async () => {
     const marker = `98${Date.now() % 100000}.5`;
     await expect(runSandbox({ command: `sleep ${marker} & sleep ${marker} & wait`, sources, timeoutMs: 500 })).rejects.toThrow(/time limit/);

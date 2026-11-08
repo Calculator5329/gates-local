@@ -157,7 +157,8 @@ describe("Library registry", () => {
       };
       for await (const _ of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream, execute: tools.execute })) { /* drain */ }
       const observation = requests[1]!.find(m => m.role === "tool")!.content;
-      expect(observation, platform).toBe("The source Ledger was removed during this reply.");
+      // The shell names the path the model used (T2-02); the Windows sql tool names the source.
+      expect(observation, platform).toBe(platform === "linux" ? `/data/${source.id}.db: no longer available (the source was removed during this reply)` : "The source Ledger was removed during this reply.");
       expect(observation).not.toContain(dataDir);
       expect(observation).not.toContain("snapshots/");
     }
