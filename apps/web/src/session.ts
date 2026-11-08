@@ -140,10 +140,13 @@ async function hydrate(c: Client): Promise<void> {
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) => c.subscribe(channel, handler);
   on("chat.event", onChatEvent);
   on("runtime.changed", (runtime) => {
+    // A list asked before the change describes the runtime before it (MP2-02); ask again.
+    modelsOrder.next();
     setState({ runtime });
     if (runtime.state === "ready") {
       invalidateFits();
       flushQueued();
+      void refreshModels();
     }
   });
   on("models.changed", (models) => {
@@ -173,13 +176,16 @@ async function hydrate(c: Client): Promise<void> {
   // settings.get is a local store read and the model choice needs only it and
   // the model list, so the runtime dot and a chosen model land in one render:
   // a message typed the moment the dot turns ready sends. gpu.status and the
-  // catalog can take a few hundred ms and follow.
-  const [runtime, models, threads, settings] = await Promise.all([
+  // catalog can take a few hundred ms and follow. The list takes a ticket like
+  // any other answer, so one that lands after a newer push is dropped (MP2-02).
+  const ticket = modelsOrder.next();
+  const [runtime, listed, threads, settings] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
     probe("settings.get", {}),
   ]);
+  const models = modelsOrder.current(ticket) ? listed : undefined;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const next: State = { ...s, runtime, models: models ?? s.models, threads: sortThreads(threads), fits: {}, ...withSettings };
@@ -251,9 +257,13 @@ function chooseModel(): void {
   setState(decided(modelChoice(getState())));
 }
 
-/** Keep, switch to the server's pick (pick.ts), or clear when no model can chat. */
+/**
+ * Keep, switch to the server's pick (pick.ts), or clear when no model can chat.
+ * An open thread's model counts as chosen, so a recommendation never moves it;
+ * only a new chat the user has not picked for follows the pick (MP-02).
+ */
 function modelChoice(s: State): ModelDecision {
-  return pickChoice(s.models, s.model, s.chosen);
+  return pickChoice(s.models, s.model, s.threadId === null ? s.chosen : (s.threadModels[s.threadId] ?? s.model));
 }
 
 const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
@@ -304,7 +314,13 @@ async function loadThread(threadId: string, force = false): Promise<void> {
 }
 
 export function openThread(threadId: string): void {
-  setState({ view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false });
+  setState((s) => {
+    // Back on the model last used in this thread; a thread new to this session keeps the composer's.
+    const model = s.threadModels[threadId] ?? s.model;
+    const own = model === undefined ? {} : { model, threadModels: { ...s.threadModels, [threadId]: model } };
+    return { view: "thread", threadId, notice: null, addPage: false, ownerConfirm: false, ...own };
+  });
+  chooseModel();
   setHash(threadId);
   void loadThread(threadId);
 }
@@ -575,7 +591,7 @@ export function unqueue(id: string): void {
 // ---------------------------------------------------------------- composer and models
 
 export function pickModel(model: string): void {
-  setState({ model, chosen: model });
+  setState((st) => ({ model, chosen: model, ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }) }));
   const s = getState();
   if (!s.unavailable["models.load"] && chatReady(s)) void act("models.load", { model, numCtx: s.numCtx });
 }
