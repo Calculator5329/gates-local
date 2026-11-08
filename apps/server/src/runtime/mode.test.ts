@@ -233,6 +233,25 @@ describe("Windows (platform injected)", () => {
     expect(await rt.ensure()).toMatchObject({ state: "missing", detail: "No Ollama found on this machine." });
   });
 
+  it("S-07: a managed launch uses only the pinned app install, never a PATH ollama.exe or an older app install", async () => {
+    const bin = path.join(work, "winbin");
+    writeFakeBinary(path.join(bin, "ollama.exe"));
+    writeFakeBinary(installedBinary(appDataDir, "0.1.0"));
+    const calls: string[] = [];
+    for (const mode of ["app", undefined] as const) {
+      const rt = await runtime({ ...(mode ? { mode } : {}), platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt(), env: { PATH: bin } });
+      const s = await rt.ensure();
+      expect(s).toMatchObject({ state: "missing", owner: "none", detail: "No Ollama found on this machine." });
+      expect(rt.startedByThisProcess()).toBe(false);
+      expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    }
+    // The pinned build is the one it launches.
+    writeFakeBinary(installedBinary(appDataDir, VERSION));
+    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake(calls), externalBaseUrl: await nothingAt(), env: { PATH: bin } });
+    expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
+    expect(readRecord(ownedStateFile(appDataDir))?.binary).toBe(installedBinary(appDataDir, VERSION));
+  });
+
   it("reads process identity from PowerShell CIM instead of /proc", () => {
     const calls: string[][] = [];
     const run: SyncRunner = (file, args) => {

@@ -5,7 +5,9 @@
 // matches the ownership record is ours, any other Ollama there is reused as
 // external, and a non-Ollama there blocks starting. Only when nothing answers
 // does the app start a server, from its own install, then PATH, then a fresh
-// pinned install. A non-Ollama on the system port never gets a second server
+// pinned install. On Windows only the pinned app install is ever launched
+// (its runners die with it); older installs and PATH binaries are skipped.
+// A non-Ollama on the system port never gets a second server
 // on that port; the app-owned server lives on its own port.
 //
 // With a runtime mode (Settings › Runtime) the order narrows:
@@ -194,6 +196,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
 
   async function locateBinary(): Promise<Binary | undefined> {
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
+    // Windows: only the pinned build puts its runners in a kill-on-close Job Object, so stopping the
+    // parent stops them (https://raw.githubusercontent.com/ollama/ollama/v0.40.15/llm/runner_job_windows.go).
+    if (platform === "win32") return undefined;
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
     const onPath = findSystemOllama(env, options.home, platform);
