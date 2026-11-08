@@ -9,12 +9,15 @@
 //   slow-first-token  the first token waits firstTokenDelayMs (default 2500)
 //   mid-stream-error  the stream breaks with an error after a few tokens
 //   wrong-service     the port answers, but not as Ollama
+//   embed-smallest    the three models plus nomic-embed-text, the smallest
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { DEFAULT_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { DEFAULT_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, findFakeModel, showBody, type FakeModel } from "./models.ts";
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service"] as const;
+const installedFor = (s: string): readonly string[] => (s === "no-models" ? [] : s === "embed-smallest" ? EMBED_SMALLEST_INSTALLED : DEFAULT_INSTALLED);
+
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -138,7 +141,7 @@ const tagEntry = (m: FakeModel) => ({
 export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOllama> {
   let scenario: Scenario = start.scenario ?? "models";
   let options: FakeOptions = { ...DEFAULTS, ...start.options };
-  let installed = new Set<string>(scenario === "no-models" ? [] : DEFAULT_INSTALLED);
+  let installed = new Set<string>(installedFor(scenario));
   let loaded: LoadedEntry[] = [];
   const requests: FakeRequest[] = [];
 
@@ -151,7 +154,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   const setScenario = (next: Scenario, opts: Partial<FakeOptions> = {}) => {
     scenario = next;
     options = { ...DEFAULTS, ...start.options, ...(next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : {}), ...opts };
-    installed = new Set(next === "no-models" ? [] : DEFAULT_INSTALLED);
+    installed = new Set(installedFor(next));
     loaded = [];
     writeGpu();
   };
@@ -172,12 +175,15 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const name = str(body, "model") ?? "";
     const m = isInstalled(name);
     if (!m) return json(res, 404, { error: `model '${name}' not found` });
+    // Ollama answers both of these with 400 and {"error": "%q does not support ..."} (server/routes.go).
+    if (!m.capabilities.includes("completion")) return json(res, 400, { error: `"${name}" does not support chat` });
+    const think = field(body, "think");
+    if (think === true && !m.capabilities.includes("thinking")) return json(res, 400, { error: `"${name}" does not support thinking` });
     const numCtx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
     load(m, numCtx);
     const messages = field(body, "messages");
     const last = Array.isArray(messages) ? messages.findLast((x) => field(x, "role") === "user") : undefined;
     const prompt = str(last, "content") ?? "";
-    const think = field(body, "think");
     const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
     const tools = field(body, "tools");
 
@@ -189,6 +195,8 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const started = Date.now();
 
     await sleep(options.firstTokenDelayMs, abort.signal);
+    // Everything before the first token is load and prompt time; decode starts here.
+    const decodeFrom = Date.now();
     let sent = 0;
     if (thinks) {
       for (const t of tokens(THINKING)) {
@@ -222,6 +230,8 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       done: true,
       done_reason: "stop",
       total_duration: (Date.now() - started) * 1e6,
+      prompt_eval_duration: Math.max(1, decodeFrom - started) * 1e6,
+      eval_duration: Math.max(1, Date.now() - decodeFrom) * 1e6,
       prompt_eval_count: 24 + prompt.length,
       eval_count: sent,
     });

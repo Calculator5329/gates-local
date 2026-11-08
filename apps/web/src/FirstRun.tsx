@@ -10,6 +10,7 @@ import { describeModel, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
 import { NA, type State, fitKey, useStore } from "./store.ts";
+import { canChat, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
 
@@ -75,7 +76,11 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
         <span className="nm">{d.name}</span>
         <span className="rec">
           ·{" "}
-          <span className="tipd" tabIndex={0} data-tip={have ? `The fastest installed model that runs on your GPU with room for ${k(numCtx)} of context.` : `The best model for your GPU with room for ${k(numCtx)} of context.`}>
+          <span
+            className="tipd"
+            tabIndex={0}
+            data-tip={have ? pickRuleText(numCtx) : `The first of Gates Local's recommended models that runs on your GPU with room for ${k(numCtx)} of context.`}
+          >
             Recommended
           </span>
         </span>
@@ -124,7 +129,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
               <tr>
                 <td>GPU memory</td>
                 <td>
-                  Estimated {gb(v.need)} of {gb(v.avail)} available
+                  Estimated {gb(v.need)} of {gb(v.avail)} available to this model
                 </td>
               </tr>
             ) : null}
@@ -153,10 +158,12 @@ function NoModels() {
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
   const numCtx = useStore((s) => s.numCtx);
+  // Embedding models can be installed and still leave nothing to chat with.
+  const others = useStore((s) => (s.models ?? []).length);
   const st = (
     <>
       <span className="dot ok" />
-      Ollama{version ? ` ${version}` : ""} · no models yet
+      Ollama{version ? ` ${version}` : ""} · {others > 0 ? "no chat models yet" : "no models yet"}
     </>
   );
   const sub = `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`;
@@ -223,23 +230,41 @@ function NoModels() {
   );
 }
 
+/** The title and subtitle for the pick's verdict (pick.ts on the server). One line each in the card column. */
+export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number): { title: string; sub: string } {
+  if (verdict === "refuse") {
+    return { title: "No model fits your GPU", sub: `None of your models runs at ${k(numCtx)} of context. Download a smaller one in Settings.` };
+  }
+  if (verdict === "spills") return { title: "Ready to chat", sub: "Your best fit uses system memory, so it is slower." };
+  if (verdict === "fits") return { title: "Ready to chat", sub: "Your best GPU fit is ready. Switch models in any chat." };
+  return { title: "Ready to chat", sub: "Your best model is ready. Switch models in any chat." };
+}
+
 function Found() {
   const version = useStore((s) => s.runtime?.version);
-  const count = useStore((s) => s.models?.length ?? 0);
-  const tag = useStore((s) => s.model ?? s.models?.[0]?.name);
+  const count = useStore((s) => chatModels(s.models ?? []).length);
+  const picked = useStore((s) => pickedModel(s.models));
+  // The composer starts on the same model (session.ts reads the same pick).
+  const tag = useStore((s) => s.model ?? picked?.name);
+  const numCtx = useStore((s) => s.numCtx);
+  const words = foundWords(picked?.name === tag ? picked?.pick?.verdict : undefined, picked?.pick?.numCtx ?? numCtx);
   return (
     <Shell
       st={
         <>
-          <span className="dot ok" />
-          Ollama{version ? ` ${version}` : ""} · {count} local {count === 1 ? "model" : "models"}
+          <span className={`dot ${picked?.pick?.verdict === "refuse" ? "err" : "ok"}`} />
+          Ollama{version ? ` ${version}` : ""} · {count} chat {count === 1 ? "model" : "models"}
         </>
       }
-      title="Ready to chat"
-      sub="Gates Local picked the best model for your GPU. Switch models in any chat."
+      title={words.title}
+      sub={words.sub}
     >
       {tag !== undefined ? <RecCard tag={tag} have /> : null}
-      <Cta label="Start chatting" onGo={startChat} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />
+      {picked?.pick?.verdict === "refuse" ? (
+        <Cta label="Choose a model" onGo={() => finishFirstRun("models")} link="Start chatting anyway" onLink={startChat} />
+      ) : (
+        <Cta label="Start chatting" onGo={startChat} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />
+      )}
     </Shell>
   );
 }
@@ -302,7 +327,7 @@ function Waiting({ installing }: { installing: boolean }) {
 export function FirstRun() {
   const rt = useStore(rtOfState);
   const models = useStore((s) => s.models);
-  if (rt === "ready" && models !== undefined) return models.length > 0 ? <Found /> : <NoModels />;
+  if (rt === "ready" && models !== undefined) return models.some(canChat) ? <Found /> : <NoModels />;
   if (rt === "missing" || rt === "stopped" || rt === "wrong" || rt === "error") return <NoOllama />;
   return <Waiting installing={rt === "installing"} />;
 }

@@ -15,6 +15,8 @@ export interface FitReport {
   source: "measured" | "estimate";
   measuredAt: number;
   message?: string;
+  /** Set when the refusal is the model's own context ceiling: the most it supports. */
+  contextLimit?: number;
 }
 
 /** Who holds GPU memory. Whisper is the permanent tenant the fit plans around. */

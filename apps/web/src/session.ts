@@ -17,6 +17,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { describeModel, titleFrom } from "./format.ts";
+import { modelChoice as pickChoice } from "./pick.ts";
 import { NA, type Queued, type Section, type State, chatReady, fitKey, getState, setState, streaming } from "./store.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -221,11 +222,11 @@ export async function refreshModels(): Promise<void> {
   invalidateFits();
 }
 
-function settingsPatch(s: State, settings: Settings, first: boolean): Partial<State> {
+// The default model is not applied here: the server's pick (pick.ts) already honours it when it can chat.
+function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
   return {
     settings,
     ...(first ? { numCtx: settings.defaultNumCtx, think: settings.thinking } : {}),
-    ...(first && settings.defaultModel !== undefined && s.model === undefined ? { model: settings.defaultModel } : {}),
     ...(!settings.imageGen ? { image: false } : {}),
   };
 }
@@ -248,13 +249,9 @@ function chooseModel(): void {
   if (model !== undefined) setState({ model });
 }
 
-/** The model chooseModel would switch to, or undefined when the current one stays (or none is installed). */
+/** The model chooseModel would switch to: the server's pick (pick.ts), or undefined when the current one stays. */
 function modelChoice(s: State): string | undefined {
-  const models = s.models ?? [];
-  if (models.length === 0) return undefined;
-  if (s.model !== undefined && models.some((m) => m.name === s.model)) return undefined;
-  const def = s.settings !== NA ? s.settings?.defaultModel : undefined;
-  return (models.find((m) => m.name === def) ?? models.toSorted((a, b) => a.sizeBytes - b.sizeBytes)[0])?.name;
+  return pickChoice(s.models, s.model);
 }
 
 // ---------------------------------------------------------------- fit checks

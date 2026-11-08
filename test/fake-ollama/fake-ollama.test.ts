@@ -55,6 +55,40 @@ describe("fake ollama", () => {
     expect(fake.state().loaded).toMatchObject([{ name: "qwen3.5:9b", numCtx: 32768 }]);
   });
 
+  it("W-10: refuses think true for a model without thinking, with Ollama's status and error body", async () => {
+    const res = await post(fake, "/api/chat", { model: "gemma4:12b", think: true, messages: [{ role: "user", content: "x" }] });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: '"gemma4:12b" does not support thinking' });
+    // think false, or left out, still chats.
+    const ok = await post(fake, "/api/chat", { model: "gemma4:12b", think: false, messages: [{ role: "user", content: "x" }] });
+    expect(ok.status).toBe(200);
+    await ok.text();
+  });
+
+  it("ends a reply with eval_duration that covers decode only, inside total_duration", async () => {
+    fake.setScenario("models", { tokenDelayMs: 2, firstTokenDelayMs: 40 });
+    const last = (await hello()).at(-1) ?? {};
+    const total = Number(last["total_duration"]);
+    const evalNs = Number(last["eval_duration"]);
+    expect(evalNs).toBeGreaterThan(0);
+    expect(Number(last["prompt_eval_duration"])).toBeGreaterThan(0);
+    // The first-token wait is load and prompt time, not decode.
+    expect(total - evalNs).toBeGreaterThanOrEqual(40e6);
+  });
+
+  it("embed-smallest: an embedding model is installed and smallest, lists embedding only, and refuses chat", async () => {
+    fake.setScenario("embed-smallest");
+    const tags = (await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string; size: number }[] };
+    const smallest = tags.models.toSorted((a, b) => a.size - b.size)[0];
+    expect(smallest?.name).toBe("nomic-embed-text:latest");
+    expect(tags.models.map((m) => m.name)).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b", "nomic-embed-text:latest"]);
+    const show = (await (await post(fake, "/api/show", { model: "nomic-embed-text:latest" })).json()) as { capabilities: string[] };
+    expect(show.capabilities).toEqual(["embedding"]);
+    const chat = await post(fake, "/api/chat", { model: "nomic-embed-text:latest", messages: [{ role: "user", content: "x" }] });
+    expect(chat.status).toBe(400);
+    expect(await chat.json()).toEqual({ error: '"nomic-embed-text:latest" does not support chat' });
+  });
+
   it("returns native tool_calls when tools are offered and the prompt asks for one", async () => {
     const lines = await ndjson(
       await post(fake, "/api/chat", {

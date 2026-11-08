@@ -72,12 +72,14 @@ describe("tool chat transport", () => {
     const fetcher = vi.fn(async (url, init) => {
       if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["completion", "tools"] });
       requests.push(JSON.parse(String(init?.body)));
-      return requests.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true, done_reason: "stop" }]) : ndjson([{ message: { content: "All done" }, done: true }]);
+      return requests.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true, done_reason: "stop" }]) : ndjson([{ message: { content: "All done" }, done: true, total_duration: 2_000_000_000, eval_duration: 250_000_000, prompt_eval_duration: 40_000_000, eval_count: 5 }]);
     });
     const events = [];
     for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "read" }], numCtx: 16384, think: false, sources: [], fetch: fetcher, execute: async () => ({ output: "text", summary: "Read your file" }) })) events.push(e);
     expect(requests[0]).toMatchObject({ tools: expect.any(Array), think: false, options: { num_ctx: 16384 } });
     expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "All done", tools: [{ state: "done" }] } });
+    // Decode time rides through the tool loop separately from the wall time.
+    expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
   });
   it("uses text calls for gemma and refuses truncated native calls", async () => {

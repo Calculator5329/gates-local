@@ -25,7 +25,8 @@ describe("listModels", () => {
   it("maps /api/tags to ModelInfo, sorted by name", async () => {
     fake.tags.push(gemma);
     expect(await listModels(fake.baseUrl)).toEqual([
-      { name: "gemma3:4b", digest: "sha-gemma", sizeBytes: 3_300_000_000, modifiedAt: "2026-10-01T10:00:00Z" },
+      // This fake has no /api/show, so capabilities are the name heuristic's guess.
+      { name: "gemma3:4b", digest: "sha-gemma", sizeBytes: 3_300_000_000, modifiedAt: "2026-10-01T10:00:00Z", capabilities: ["completion"] },
       {
         name: "qwen3:8b",
         digest: "sha-qwen",
@@ -34,6 +35,7 @@ describe("listModels", () => {
         family: "qwen3",
         parameterSize: "8.2B",
         quantization: "Q4_K_M",
+        capabilities: ["completion"],
       },
     ]);
   });
@@ -132,5 +134,93 @@ describe("model catalog refresh", () => {
     fake.rawTags = undefined;
     await catalog.refresh();
     expect(tagCalls()).toBe(4);
+  });
+});
+
+/** The models a fake server was asked to show, in order. */
+const show = (s: { requests: { method: string; path: string; body: unknown }[] }) =>
+  s.requests.filter((r) => r.path === "/api/show").map((r) => (r.body as { model: string }).model);
+
+describe("capabilities and the chat pick", () => {
+  const embedTag: FakeTag = { name: "nomic-embed-text:latest", digest: "sha-embed", size: 274_000_000, modified_at: "2026-10-02T10:00:00Z" };
+  const caps: Record<string, string[]> = { "qwen3:8b": ["completion", "thinking"], "nomic-embed-text:latest": ["embedding"] };
+  let tags: FakeTag[];
+  const server = () =>
+    startFakeServer({
+      "GET /api/tags": (_b, res) => json(res, 200, { models: tags }),
+      "POST /api/show": (b, res) => {
+        const c = caps[(b as { model: string }).model];
+        if (c === undefined) json(res, 404, { error: "model not found" });
+        else json(res, 200, { capabilities: c });
+      },
+    });
+
+  it("reads capabilities from /api/show once per digest, and again for a re-pulled model", async () => {
+    tags = [qwen, embedTag];
+    const s = await server();
+    try {
+      const catalog = createModelCatalog(() => s.baseUrl);
+      const first = await catalog.refresh();
+      expect(first.models.map((m) => [m.name, m.capabilities])).toEqual([
+        ["nomic-embed-text:latest", ["embedding"]],
+        ["qwen3:8b", ["completion", "thinking"]],
+      ]);
+      await catalog.refresh({ force: true });
+      expect(show(s).toSorted()).toEqual(["nomic-embed-text:latest", "qwen3:8b"]);
+      tags = [{ ...qwen, digest: "sha-qwen-v2" }, embedTag];
+      await catalog.refresh({ force: true });
+      expect(show(s).toSorted()).toEqual(["nomic-embed-text:latest", "qwen3:8b", "qwen3:8b"]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("guesses from the name when /api/show fails, and asks again next time", async () => {
+    tags = [{ ...embedTag, name: "mxbai-embed-large:latest", digest: "sha-mx" }, gemma];
+    const s = await server();
+    try {
+      const catalog = createModelCatalog(() => s.baseUrl);
+      const r = await catalog.refresh();
+      expect(r.models.map((m) => [m.name, m.capabilities])).toEqual([
+        ["gemma3:4b", ["completion"]],
+        ["mxbai-embed-large:latest", ["embedding"]],
+      ]);
+      await catalog.refresh({ force: true });
+      expect(show(s)).toHaveLength(4);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("stamps the pick on one model and re-runs it only when the list or the pick key changes", async () => {
+    tags = [qwen, embedTag];
+    const s = await server();
+    let key = "a";
+    const calls: string[][] = [];
+    try {
+      const catalog = createModelCatalog(() => s.baseUrl, {
+        pick: async (models) => {
+          calls.push(models.map((m) => m.name));
+          return { name: "qwen3:8b", pick: { numCtx: 16384, verdict: "fits" } };
+        },
+        pickKey: () => key,
+      });
+      const r = await catalog.refresh();
+      expect(r.models.filter((m) => m.pick).map((m) => [m.name, m.pick])).toEqual([["qwen3:8b", { numCtx: 16384, verdict: "fits" }]]);
+      await catalog.refresh({ force: true });
+      expect(calls).toHaveLength(1);
+      key = "b"; // the default model or context changed
+      await catalog.refresh({ force: true });
+      expect(calls).toHaveLength(2);
+      tags = [qwen]; // the embedding model was removed
+      await catalog.refresh({ force: true });
+      expect(calls).toEqual([
+        ["nomic-embed-text:latest", "qwen3:8b"],
+        ["nomic-embed-text:latest", "qwen3:8b"],
+        ["qwen3:8b"],
+      ]);
+    } finally {
+      await s.close();
+    }
   });
 });

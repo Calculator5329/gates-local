@@ -5,11 +5,12 @@ import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry, ContextSize, PullProgress, Settings, Source } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { CtxLine, openFit, shortGpu } from "./FitPanel.tsx";
-import { CONTEXT_SIZES, type Verdict, describeModel, gb, k, verdictOf } from "./format.ts";
+import { CONTEXT_SIZES, type Verdict, describeModel, etaText, gb, k, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { SECTIONS } from "./Sidebar.tsx";
 import { addSource, cancelPull, ensureFit, pull, refreshSource, removeModel, removeSource, setContext, updateSettings } from "./session.ts";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
+import { canChat } from "./pick.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
 const NOT_HERE = "Not available in this build.";
@@ -121,17 +122,6 @@ function General() {
 
 // ---------------------------------------------------------------- Models
 
-function etaText(p: PullProgress): string {
-  const total = p.totalBytes;
-  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : "Starting"];
-  if (p.bytesPerSecond) {
-    parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
-    if (total) parts.push(`about ${Math.max(1, Math.ceil((total - p.completedBytes) / p.bytesPerSecond / 60))} min left`);
-  }
-  if (p.state === "verifying") return "Verifying the download";
-  return parts.join(" · ");
-}
-
 /** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
 export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
@@ -219,6 +209,30 @@ function ModelRow({ tag, numCtx, on }: { tag: string; numCtx: number; on: boolea
   );
 }
 
+/** An installed embedding model: listed so it can be removed, never a default (it cannot chat). */
+function EmbedRow({ tag }: { tag: string }) {
+  const catalog = useStore(catalogOf);
+  const info = useStore((s) => s.models?.find((m) => m.name === tag));
+  const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
+  const d = describeModel(tag, catalog);
+  return (
+    <div
+      className="mrow dis emb"
+      data-em={tag}
+      data-tip={`<b>${esc(d.name)}</b> · <span class="mono">${esc(tag)}</span><br>Turns text into vectors for search; it cannot answer a chat.${info ? `<br>${gb(info.sizeBytes)} on disk` : ""}`}
+    >
+      <span className="rd" />
+      <span className="mn">{d.name}</span>
+      <span className="mv na">Embedding model, not for chat</span>
+      {canRemove ? (
+        <button type="button" className="qa" aria-label={`Remove ${d.name}`} onClick={() => void removeModel(tag)}>
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function Models() {
   const settings = useStore(settingsOf);
   const settingsNA = useStore((s) => s.settings === NA);
@@ -232,13 +246,13 @@ function Models() {
   const downloading = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
   return (
     <>
-      <Head title="Models">Gates Local picks the fastest model that runs on your GPU. Change it here; any chat can still switch.</Head>
+      <Head title="Models">New chats start on your default model if it runs at {k(numCtx)}, otherwise on your best model that fits the GPU. Change it here; any chat can still switch.</Head>
       <div className="grp">
         <div className="grp-t">Default model</div>
         <div className="box">
-          {(models ?? []).map((m) => (
-            <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} />
-          ))}
+          {(models ?? []).map((m) =>
+            canChat(m) ? <ModelRow key={m.name} tag={m.name} numCtx={numCtx} on={m.name === def} /> : <EmbedRow key={m.name} tag={m.name} />,
+          )}
           {downloading.map((p) => {
             const d = describeModel(p.name, catalog);
             return (
@@ -271,7 +285,7 @@ function Models() {
               </span>
               {v ? (
                 <span className="d">
-                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available
+                  {describeModel(model, catalog).name} at {k(numCtx)}: <VLabel v={v} /> · est. {gb(v.need)} of {gb(v.avail)} available to this model
                 </span>
               ) : null}
             </div>
@@ -305,7 +319,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
       Cancel download
     </button>
   ) : (
-    <button type="button" className="btn outline" disabled={v?.k === "no"} onClick={() => void pull(c.name)}>
+    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void pull(c.name)}>
       Download
     </button>
   );
@@ -358,7 +372,7 @@ function CustomPull() {
       <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
       <button
         type="button"
-        className="btn outline"
+        className="qa"
         disabled={name.trim() === ""}
         onClick={() => {
           void pull(name);

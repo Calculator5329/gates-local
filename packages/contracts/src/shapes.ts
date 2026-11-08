@@ -20,8 +20,13 @@ export type Role = typeof Role.Type;
 export const MessageStats = S.Struct({
   promptTokens: S.optional(Count),
   completionTokens: S.optional(Count),
+  /** Wall time for the whole call, load and prompt included. */
   durationMs: S.optional(S.Finite),
   numCtx: S.optional(PositiveInt),
+  /** Ollama's eval_duration: decode time only. Speed is completionTokens over this. */
+  evalDurationMs: S.optional(S.Finite),
+  /** Ollama's prompt_eval_duration: time spent reading the prompt. */
+  promptEvalDurationMs: S.optional(S.Finite),
 });
 export type MessageStats = typeof MessageStats.Type;
 
@@ -55,6 +60,25 @@ export const Message = S.Struct({
 });
 export type Message = typeof Message.Type;
 
+export const FitVerdict = S.Literals(["fits", "spills", "refuse"]);
+export type FitVerdict = typeof FitVerdict.Type;
+
+/** Ollama's capability words from /api/show: completion, embedding, tools, thinking, vision, insert. */
+export const ModelCapability = S.String;
+
+/**
+ * The model chat starts on, chosen by the server's pick rule
+ * (apps/server/src/runtime/pick.ts). It rides on models.list and
+ * models.changed so the first render already knows it.
+ */
+export const ModelPick = S.Struct({
+  /** The context size the pick was fitted at: the settings default. */
+  numCtx: PositiveInt,
+  /** "refuse" means no chat model fits at numCtx; this is the best-ranked one anyway. Absent when the fit check could not run. */
+  verdict: S.optional(FitVerdict),
+});
+export type ModelPick = typeof ModelPick.Type;
+
 export const ModelInfo = S.Struct({
   name: S.String,
   digest: S.String,
@@ -63,6 +87,10 @@ export const ModelInfo = S.Struct({
   parameterSize: S.optional(S.String),
   quantization: S.optional(S.String),
   modifiedAt: S.String,
+  /** From /api/show, cached by digest. A model without "completion" cannot chat. */
+  capabilities: S.Array(ModelCapability),
+  /** Set on exactly one model, the one chat starts on, when any installed model can chat. */
+  pick: S.optional(ModelPick),
 });
 export type ModelInfo = typeof ModelInfo.Type;
 
@@ -92,9 +120,6 @@ export const RuntimeStatus = S.Struct({
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 
-export const FitVerdict = S.Literals(["fits", "spills", "refuse"]);
-export type FitVerdict = typeof FitVerdict.Type;
-
 export const FitReport = S.Struct({
   model: S.String,
   numCtx: PositiveInt,
@@ -107,6 +132,8 @@ export const FitReport = S.Struct({
   measuredAt: Millis,
   /** One sentence that names the numbers behind the verdict. */
   message: S.optional(S.String),
+  /** Set when the refusal is the model's own context ceiling, not memory: the most it supports. */
+  contextLimit: S.optional(PositiveInt),
 });
 export type FitReport = typeof FitReport.Type;
 
@@ -140,7 +167,7 @@ export const RuntimeMode = S.Literals(["system", "app"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
 export const Settings = S.Struct({
-  /** Unset means the server picks the fastest installed model that runs on the GPU. */
+  /** Unset means the server picks: the best installed chat model that fits at defaultNumCtx (apps/server/src/runtime/pick.ts). */
   defaultModel: S.optional(S.String),
   defaultNumCtx: ContextSize,
   thinking: S.Boolean,

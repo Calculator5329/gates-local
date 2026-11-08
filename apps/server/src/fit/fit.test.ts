@@ -224,6 +224,8 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 8192, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
     expect(check.report).toMatchObject({ verdict: "refuse", numCtx: 8192 });
     expect(check.report.message).toContain("below the 16384 floor");
+    // The floor is the product's limit, not the model's: no contextLimit.
+    expect(check.report.contextLimit).toBeUndefined();
     expect(s.requests).toEqual([]);
     expect(run.calls).toEqual([]);
   });
@@ -233,6 +235,8 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 524288, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO });
     expect(check.report.verdict).toBe("refuse");
     expect(check.report.message).toContain("context_length 262144");
+    // The client words this "Supports up to 256k context" from the number, not the message.
+    expect(check.report.contextLimit).toBe(262144);
   });
 
   it("a model missing from /api/tags is an error by code, not a verdict", async () => {

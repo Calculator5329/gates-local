@@ -84,10 +84,30 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 128,
     contextLength: 262_144,
   }),
+  // An embedding model, the smallest when installed (the embed-smallest
+  // scenario): it must never be offered as a chat model. Real tag and
+  // size; geometry from nomic-bert's /api/show.
+  model({
+    name: "nomic-embed-text:latest",
+    family: "nomic-bert",
+    parameterSize: "137M",
+    parameterCount: 136_727_040,
+    quantization: "F16",
+    sizeBytes: 274_302_450,
+    capabilities: ["embedding"],
+    blockCount: 12,
+    headCount: 12,
+    headCountKv: 12,
+    keyLength: 64,
+    contextLength: 2048,
+  }),
 ];
 
 /** Installed when the scenario has models; qwen3.5:4b stays pullable. */
 export const DEFAULT_INSTALLED = ["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b"] as const;
+
+/** The embed-smallest scenario: the defaults plus an embedding model smaller than any of them. */
+export const EMBED_SMALLEST_INSTALLED = [...DEFAULT_INSTALLED, "nomic-embed-text:latest"] as const;
 
 export function findFakeModel(name: string): FakeModel | undefined {
   const full = name.includes(":") ? name : `${name}:latest`;
