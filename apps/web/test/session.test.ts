@@ -291,6 +291,22 @@ describe("action failures come back to the caller (W-07)", () => {
     expect(r).toBe("Couldn't remove gemma3:4b because Gates Local isn't connected; try again once it reconnects.");
   });
 
+  it("turning image generation on reads ComfyUI's status again, so Settings shows what it found (W-12)", async () => {
+    await boot();
+    b.server.answer("image.status", () => ({ state: "missing", owner: "none", baseUrl: "http://127.0.0.1:9", detail: "ComfyUI did not answer." }));
+    const before = b.server.calls("image.status").length;
+    expect(await session.updateSettings({ imageGen: true })).toBeNull();
+    await until(() => {
+      const s = store.getState().imageStatus;
+      return s !== undefined && s !== store.NA && s.state === "missing";
+    }, 1000, "the new image status");
+    expect(b.server.calls("image.status").length).toBe(before + 1);
+    // a save that touches neither imageGen nor comfyUrl does not ask again
+    expect(await session.updateSettings({ theme: "light" })).toBeNull();
+    await tick();
+    expect(b.server.calls("image.status").length).toBe(before + 1);
+  });
+
   it("success returns null", async () => {
     await boot();
     expect(await session.updateSettings({ theme: "light" })).toBeNull();

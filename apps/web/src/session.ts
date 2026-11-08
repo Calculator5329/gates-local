@@ -736,6 +736,12 @@ export async function updateSettings(patch: SettingsPatch): Promise<ActionResult
   const r = await act("settings.update", patch, what);
   if (!r.ok) return r.message;
   applySettings(r.value);
+  // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
+  if ("imageGen" in patch || "comfyUrl" in patch) {
+    void probe("image.status", {}).then((imageStatus) => {
+      if (imageStatus !== undefined) setState({ imageStatus });
+    });
+  }
   return null;
 }
 
