@@ -166,7 +166,13 @@ export const ChatEvent = S.Union([
 export type ChatEvent = typeof ChatEvent.Type;
 
 /** A running turn a load would have to stop (turns.blocking). */
-export const BlockingTurn = S.Struct({ threadId: S.String, title: S.String, model: S.String });
+export const BlockingTurn = S.Struct({
+  threadId: S.String,
+  title: S.String,
+  model: S.String,
+  /** Which turn this is, for chat.send's stopTurns: a thread can be running a different turn by the time the person answers. */
+  turnId: S.optional(S.String),
+});
 export type BlockingTurn = typeof BlockingTurn.Type;
 
 export const NumCtx = PositiveInt;
