@@ -235,6 +235,19 @@ describe("Windows (platform injected)", () => {
     expect(await rt.ensure()).toMatchObject({ state: "missing", detail: "No Ollama found on this machine." });
   });
 
+  it("system mode with nothing answering: installed but quit says stopped, not missing, and starts nothing", async () => {
+    const exe = "C:\\Users\\Ada\\AppData\\Local\\Programs\\Ollama\\ollama.exe";
+    const base = { mode: "system", platform: "win32", home: "C:\\Users\\Ada", env: winEnv, externalBaseUrl: await nothingAt() } as const;
+    const quit = await runtime({ ...base, isExecutable: (f) => f === exe });
+    const s = await quit.ensure();
+    expect(s).toMatchObject({ state: "stopped", owner: "none" });
+    expect(s.detail).toContain(exe);
+    expect(s.detail).toMatch(/Start Ollama from the Start menu/);
+    expect(existsSync(ownedStateFile(appDataDir))).toBe(false);
+    const none = await runtime({ ...base, isExecutable: () => false });
+    expect(await none.ensure()).toMatchObject({ state: "missing" });
+  });
+
   it("reads process identity from PowerShell CIM instead of /proc", () => {
     const calls: string[][] = [];
     const run: SyncRunner = (file, args) => {

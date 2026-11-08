@@ -3,7 +3,7 @@
 // are memoised by message, so a streaming token re-renders only the live turn.
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Message, ToolStep } from "@gates-local/contracts";
-import { describeModel, replyMeta, turnTime } from "./format.ts";
+import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { focusComposer } from "./Sidebar.tsx";
@@ -255,11 +255,12 @@ const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
 /** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. */
 function Working({ startedAt, loading }: { startedAt: number; loading: boolean }) {
   const now = useTicker(250, true);
+  const cpu = useStore((s) => noGpu(s.gpu));
   const secs = Math.floor((now - startedAt) / 1000);
   return (
     <div className="working">
       <Icon id="spin" cls="spin" />
-      <span className="ph">{loading ? "Loading into GPU memory…" : "Thinking"}</span>
+      <span className="ph">{loading ? (cpu ? "Loading into memory…" : "Loading into GPU memory…") : "Thinking"}</span>
       <span className="el">{secs >= 1 ? `· ${secs} s` : ""}</span>
     </div>
   );

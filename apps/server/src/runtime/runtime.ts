@@ -100,6 +100,8 @@ export type RuntimeOptions = {
   arch?: string;
   /** Runs Windows' process queries (tests inject a fake). */
   procRun?: SyncRunner;
+  /** Whether a file is a runnable binary, for the system Ollama lookup (tests inject a fake). */
+  isExecutable?: (file: string) => boolean;
 };
 
 export type OllamaRuntime = {
@@ -218,8 +220,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (isInstalled(appDataDir, manifest.version)) return { path: installedBinary(appDataDir, manifest.version), origin: "app-install" };
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
-    const onPath = findSystemOllama(env, options.home, platform);
+    const onPath = findSystemOllama(env, options.home, platform, options.isExecutable);
     return onPath ? { path: onPath, origin: "path" } : undefined;
+  }
+
+  /**
+   * Windows, "system" mode, nothing answering: the official installer's
+   * ollama.exe, if present. Then Ollama is installed but quit (from its tray
+   * icon, or not started yet), and the words say so instead of "install it".
+   */
+  function quitWindowsOllama(): string | undefined {
+    if (platform !== "win32" || options.searchBinary === false) return undefined;
+    return findSystemOllama(env, options.home, platform, options.isExecutable);
   }
 
   /**
@@ -274,6 +286,18 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (mode === "system") {
       if (ext.kind === "wrong-service") {
         return { kind: "blocked", status: { state: "wrong-service", owner: "none", baseUrl: externalBaseUrl, detail: ext.detail, ...withBusy([ext.port]) } };
+      }
+      const quit = quitWindowsOllama();
+      if (quit !== undefined) {
+        return {
+          kind: "blocked",
+          status: {
+            state: "stopped",
+            owner: "none",
+            baseUrl: externalBaseUrl,
+            detail: `Ollama is installed (${quit}) but nothing answers at ${externalBaseUrl}. Start Ollama from the Start menu, or choose the app's own copy in Settings › Runtime.`,
+          },
+        };
       }
       return {
         kind: "blocked",

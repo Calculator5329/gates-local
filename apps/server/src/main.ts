@@ -112,7 +112,7 @@ async function main(): Promise<void> {
       ? {
           runNvidiaSmi: (args: readonly string[]) =>
             new Promise<string>((resolve, reject) =>
-              execFile(smiCommand, [...args], { timeout: 10_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
+              execFile(smiCommand, [...args], { timeout: 10_000, windowsHide: true }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
             ),
         }
       : {}),

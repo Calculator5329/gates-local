@@ -183,7 +183,7 @@ export function systemdMainPid(unit: string, runner: (cmd: string, args: readonl
 
 function execText(cmd: string, args: readonly string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, [...args], { timeout: 5000 }, (error, stdout) => (error ? reject(error) : resolve(stdout)));
+    execFile(cmd, [...args], { timeout: 5000, windowsHide: true }, (error, stdout) => (error ? reject(error) : resolve(stdout)));
   });
 }
 

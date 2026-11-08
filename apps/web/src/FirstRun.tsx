@@ -6,7 +6,7 @@ import { type ReactNode, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
 import { DlDetail } from "./Settings.tsx";
-import { describeModel, gb, k, verdictOf } from "./format.ts";
+import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
 import { NA, type State, fitKey, useStore } from "./store.ts";
@@ -65,17 +65,20 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
   const report = useStore((s) => s.fits[fitKey(tag, numCtx)]);
+  const cpu = useStore((s) => noGpu(s.gpu));
   if (have) ensureFit(tag, numCtx);
   const fit = entry?.fit ?? (report === undefined || report === "error" ? undefined : report);
   const v = fit ? verdictOf(fit) : undefined;
   const d = describeModel(tag, catalog);
+  const where = cpu ? "fits in system memory" : "runs on your GPU";
+  const tip = have ? `The fastest installed model that ${where} with room for ${k(numCtx)} of context.` : `The best model for your ${cpu ? "computer's memory" : "GPU"} with room for ${k(numCtx)} of context.`;
   return (
     <div className="fr-card">
       <div className="fr-m">
         <span className="nm">{d.name}</span>
         <span className="rec">
           ·{" "}
-          <span className="tipd" tabIndex={0} data-tip={have ? `The fastest installed model that runs on your GPU with room for ${k(numCtx)} of context.` : `The best model for your GPU with room for ${k(numCtx)} of context.`}>
+          <span className="tipd" tabIndex={0} data-tip={tip}>
             Recommended
           </span>
         </span>
@@ -122,10 +125,8 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             </tr>
             {v ? (
               <tr>
-                <td>GPU memory</td>
-                <td>
-                  Estimated {gb(v.need)} of {gb(v.avail)} available
-                </td>
+                <td>{cpu ? "Memory" : "GPU memory"}</td>
+                <td>{cpu ? `Estimated ${gb(v.need)}, all in system memory (no supported GPU)` : `Estimated ${gb(v.need)} of ${gb(v.avail)} available`}</td>
               </tr>
             ) : null}
           </tbody>
@@ -153,13 +154,16 @@ function NoModels() {
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
   const numCtx = useStore((s) => s.numCtx);
+  const cpu = useStore((s) => noGpu(s.gpu));
   const st = (
     <>
       <span className="dot ok" />
       Ollama{version ? ` ${version}` : ""} · no models yet
     </>
   );
-  const sub = `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`;
+  const sub = cpu
+    ? `One model is enough. This computer has no supported GPU, so this one runs in system memory with room for ${k(numCtx)} of context. Replies are slower than on a GPU.`
+    : `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`;
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
@@ -227,6 +231,7 @@ function Found() {
   const version = useStore((s) => s.runtime?.version);
   const count = useStore((s) => s.models?.length ?? 0);
   const tag = useStore((s) => s.model ?? s.models?.[0]?.name);
+  const cpu = useStore((s) => noGpu(s.gpu));
   return (
     <Shell
       st={
@@ -236,7 +241,11 @@ function Found() {
         </>
       }
       title="Ready to chat"
-      sub="Gates Local picked the best model for your GPU. Switch models in any chat."
+      sub={
+        cpu
+          ? "Gates Local picked the best model for this computer. It has no supported GPU, so models run in system memory and replies are slower. Switch models in any chat."
+          : "Gates Local picked the best model for your GPU. Switch models in any chat."
+      }
     >
       {tag !== undefined ? <RecCard tag={tag} have /> : null}
       <Cta label="Start chatting" onGo={startChat} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />
