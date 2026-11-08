@@ -729,6 +729,77 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
   });
 });
 
+describe("threads.delete marks the thread before it waits", () => {
+  it("a send and an image.generate for the thread while an earlier image's cancel is pending are refused; nothing outlives the delete", async () => {
+    const comfy = managedComfy();
+    const r = await rig({ image: comfy.build, show: caps(["completion", "tools"]) });
+    cleanups.push(() => comfy.module().close());
+    r.setChat(async (res, body) => {
+      const last = (body as { messages: Array<{ role: string; content: string }> }).messages.at(-1)!;
+      if (last.role === "tool") return stream(res, [piece("Queued it."), doneLine]);
+      return stream(res, [line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a tree" } } }] }, done: true, done_reason: "stop" })]);
+    });
+    const t = await r.client.call("threads.create", {});
+    // The first turn's image runs and stays running until cancelled.
+    comfy.ctl.holdNext = gate().shut;
+    const first = await r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
+    const jobId = comfy.events.find((e) => e.threadId === t.id && e.state === "queued")?.jobId;
+    if (jobId === undefined) throw new Error(`the turn queued no image; saw ${JSON.stringify(comfy.events)}`);
+    await until(() => comfy.states(jobId).includes("running"));
+
+    // The job's cancel ends in a health check that stalls: the delete waits on it with the GPU already free.
+    const health = gate();
+    comfy.ctl.health = health.shut;
+    cleanups.push(health.open);
+    const deleting = r.client.call("threads.delete", { threadId: t.id });
+    await until(() => comfy.states(jobId).includes("cancelled"));
+    expect(r.lease!.status().holders).toBe(0);
+
+    const send = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true }), "chat.send"));
+    expect(send.code).toBe("thread-not-found");
+    const generate = await rejection(within(3000, r.client.call("image.generate", { prompt: "another", threadId: t.id }), "image.generate"));
+    expect(generate.code).toBe("thread-not-found");
+    expect(r.app.activeTurns()).toBe(0);
+
+    health.open();
+    expect(await within(3000, deleting, "threads.delete")).toEqual({ threadId: t.id });
+    await sleep(300); // room for anything that slipped past the delete to run
+    expect(new Set(comfy.events.map((e) => e.jobId))).toEqual(new Set([jobId]));
+    expect(comfy.states(jobId)).toEqual(["queued", "running", "cancelled"]);
+    expect(comfy.calls.filter((c) => c === "/prompt")).toHaveLength(1);
+    expect(comfy.pngs()).toEqual([]);
+    expect((await rejection(r.client.call("threads.get", { threadId: t.id }))).code).toBe("thread-not-found");
+    expect(r.lease!.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+  });
+
+  it("an image.generate with a threadId, not from a turn, is taken back by threads.delete", async () => {
+    const comfy = managedComfy();
+    const r = await rig({ image: comfy.build });
+    cleanups.push(() => comfy.module().close());
+    let releaseTalk!: () => void;
+    const talkGate = new Promise<void>((resolve) => (releaseTalk = resolve));
+    r.setChat(async (res) => {
+      await talkGate;
+      return stream(res, [piece("still here"), doneLine]);
+    });
+    const drawing = await r.client.call("threads.create", {});
+    const talking = await r.client.call("threads.create", {});
+    // Another thread's turn holds its shared chat claim, so the image waits in the queue.
+    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const { jobId } = await r.client.call("image.generate", { prompt: "a tree", threadId: drawing.id });
+    await until(() => r.lease!.status().waiting.includes("image"));
+
+    expect(await within(3000, r.client.call("threads.delete", { threadId: drawing.id }), "threads.delete")).toEqual({ threadId: drawing.id });
+    releaseTalk();
+    await r.waitFor("chat.event", (p) => p.turnId === talk.turnId && p.event.type === "done");
+    await comfy.module().wait(jobId);
+    expect(comfy.states(jobId)).toEqual(["queued", "cancelled"]);
+    expect(comfy.calls).not.toContain("/prompt");
+    expect(comfy.pngs()).toEqual([]);
+  });
+});
+
 describe("threads.delete and the image jobs its turns queued", () => {
   it("cancels a queued tool image whose turn already ended, before the thread goes", async () => {
     const comfy = fakeComfyImage();

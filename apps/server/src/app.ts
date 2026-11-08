@@ -6,7 +6,7 @@
 // other than refuse; then the user message persists, the reply streams on
 // chat.event and only the finished assistant message reaches the store.
 import { randomUUID } from "node:crypto";
-import type { Channel, Payload } from "@gates-local/contracts";
+import type { Channel, Params, Payload } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -49,6 +49,7 @@ export type AppErrorCode =
   | "runtime-not-ready" // no ready Ollama to talk to
   | "wont-fit" // the fit check refused this model at this num_ctx; the message names the numbers
   | "cancelled" // the turn was cancelled (or its thread deleted) before it started
+  | "thread-not-found" // the store's code, also thrown while the thread's delete runs
   | "shutting-down"; // the server is stopping and takes no new turns
 
 export class AppError extends Error {
@@ -62,6 +63,8 @@ export class AppError extends Error {
     if (report !== undefined) this.report = report;
   }
 }
+
+const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
@@ -173,8 +176,31 @@ export function createApp(deps: AppDeps): App {
     };
   };
 
-  /** Image jobs a turn's tool queued, per thread, until each job's wait settles: threads.delete takes them back. */
-  const imageJobs = new Map<string, Set<string>>();
+  /** Threads whose threads.delete is running: marked before its first await, cleared when it ends. */
+  const deleting = new Set<string>();
+
+  /**
+   * Image jobs queued for a thread (its turns' tool, or image.generate with its
+   * threadId), until each job's wait settles: threads.delete takes them back.
+   * Each entry is the job id as a promise, so a generate still in flight counts.
+   */
+  const imageJobs = new Map<string, Set<Promise<string>>>();
+
+  /** Queues the job and, with a threadId, keeps it for threads.delete. Refuses a thread being deleted. */
+  const queueImage = (image: ImageModule, params: Params<"image.generate">): Promise<{ jobId: string }> => {
+    const { threadId } = params;
+    if (threadId === undefined) return image.generate(params);
+    if (deleting.has(threadId)) return Promise.reject(threadGoing(threadId));
+    const jobs = imageJobs.get(threadId) ?? new Set<Promise<string>>();
+    imageJobs.set(threadId, jobs);
+    const queued = image.generate(params).then((job) => job.jobId);
+    jobs.add(queued);
+    void queued.then((id) => image.wait(id)).catch(() => undefined).finally(() => {
+      jobs.delete(queued);
+      if (jobs.size === 0 && imageJobs.get(threadId) === jobs) imageJobs.delete(threadId);
+    });
+    return queued.then((jobId) => ({ jobId }));
+  };
 
   /**
    * The turn's image tool. It queues the job and returns: the job claims the
@@ -184,15 +210,7 @@ export function createApp(deps: AppDeps): App {
    * deleting the thread after the turn ended.
    */
   const queueImageFor = (threadId: string, turnSignal: AbortSignal) => async (prompt: string): Promise<{ jobId: string }> => {
-    const image = deps.image!;
-    const job = await image.generate({ prompt, threadId });
-    const jobs = imageJobs.get(threadId) ?? new Set<string>();
-    imageJobs.set(threadId, jobs);
-    jobs.add(job.jobId);
-    void image.wait(job.jobId).catch(() => undefined).finally(() => {
-      jobs.delete(job.jobId);
-      if (jobs.size === 0 && imageJobs.get(threadId) === jobs) imageJobs.delete(threadId);
-    });
+    const job = await queueImage(deps.image!, { prompt, threadId });
     const takeBack = () => deps.image?.cancel(job.jobId);
     if (turnSignal.aborted) takeBack();
     else turnSignal.addEventListener("abort", takeBack, { once: true });
@@ -262,11 +280,12 @@ export function createApp(deps: AppDeps): App {
     await turn.ended;
   };
 
-  /** Cancels every image job this thread's turns queued that has not settled, and waits for each to end. */
+  /** Cancels every image job queued for this thread that has not settled, and waits for each to end. */
   const cancelThreadImages = async (threadId: string) => {
     const image = deps.image;
-    const ids = [...(imageJobs.get(threadId) ?? [])];
-    if (image === undefined || ids.length === 0) return;
+    const queued = [...(imageJobs.get(threadId) ?? [])];
+    if (image === undefined || queued.length === 0) return;
+    const ids = (await Promise.all(queued.map((p) => p.catch(() => undefined)))).filter((id) => id !== undefined);
     for (const id of ids) image.cancel(id);
     await Promise.all(ids.map((id) => image.wait(id).catch(() => undefined)));
   };
@@ -274,6 +293,8 @@ export function createApp(deps: AppDeps): App {
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
+    // Kept per thread like the tool's jobs, so threads.delete takes them back too.
+    ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
@@ -288,10 +309,17 @@ export function createApp(deps: AppDeps): App {
       return thread;
     },
     "threads.delete": async ({ threadId }) => {
-      await cancelThreadTurn(threadId);
-      // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
-      await cancelThreadImages(threadId);
-      store.deleteThread(threadId);
+      // Before the first await: no new turn or image job for this thread from here on.
+      const marked = !deleting.has(threadId);
+      deleting.add(threadId);
+      try {
+        await cancelThreadTurn(threadId);
+        // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
+        await cancelThreadImages(threadId);
+        store.deleteThread(threadId);
+      } finally {
+        if (marked) deleting.delete(threadId);
+      }
       push("threads.changed", { threadId });
       return { threadId };
     },
@@ -309,6 +337,8 @@ export function createApp(deps: AppDeps): App {
 
     "chat.send": async ({ threadId, content, model, numCtx, tools, think, image }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
+      // The thread is going: its delete has already listed what it takes back.
+      if (deleting.has(threadId)) throw threadGoing(threadId);
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
