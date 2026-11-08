@@ -180,6 +180,8 @@ const expectRuntimeChangedEnd = (events: { type: string; code?: string; message?
 const MODEL = "qwen3.5:9b";
 /** nvidia-smi on a 16303 MiB GPU with `freeMib` free and no compute apps listed. */
 const smi = (freeMib: number) => async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - freeMib}, ${freeMib}\n` : "");
+/** An /api/ps entry resident at 16k. */
+const entry = (name: string, vram: number) => ({ name, size: vram, size_vram: vram, context_length: 16384 });
 
 interface RigOptions {
   readonly image?: ImageModule;
@@ -556,41 +558,42 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   const ctx = { clientId: 1 };
 
   /**
-   * X (MODEL) resident at 16k. X's reply streams "X so far" and stays open until its connection
-   * closes; Y's request waits for that, as Ollama queues a load that needs a busy model's memory.
+   * X (MODEL) resident at 16k. Each X reply streams "X so far" and stays open until its connection
+   * closes; Y's request waits for every one, as Ollama queues a load that needs a busy model's
+   * memory. With `idle`, that model is resident too, and Y loads at once in what it held.
    */
-  function twoModels() {
+  function twoModels(xVram = X_VRAM, idle?: { name: string; vram: number }) {
     const xStreaming = signalled();
     const xClosed = signalled();
+    const xOpen = new Set<Promise<void>>();
     const routes: Record<string, Route> = {
       "GET /api/tags": (_b, res) =>
         json(res, 200, {
-          models: [
-            { name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" },
-            { name: Y, size: 6_600_000_000, digest: "e", modified_at: "2026-11-01T00:00:00Z" },
-          ],
+          models: [MODEL, Y, ...(idle ? [idle.name] : [])].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })),
         }),
-      "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: X_VRAM, size_vram: X_VRAM, context_length: 16384 }] }),
+      "GET /api/ps": (_b, res) => json(res, 200, { models: [entry(MODEL, xVram), ...(idle ? [entry(idle.name, idle.vram)] : [])] }),
       "POST /api/chat": async (b, res) => {
         const { model } = b as { model: string };
         res.writeHead(200, ndjson);
         if (model === MODEL) {
+          const closed = new Promise<void>((resolve) => res.on("close", () => resolve()));
+          xOpen.add(closed);
           res.write(line({ model, message: { role: "assistant", content: "X so far" }, done: false }));
           xStreaming.resolve();
-          await new Promise<void>((resolve) => res.on("close", () => resolve()));
+          await closed;
+          xOpen.delete(closed);
           xClosed.resolve();
           return;
         }
-        await xClosed.promise;
+        if (idle === undefined) while (xOpen.size > 0) await Promise.all(xOpen);
         res.end(line({ model, message: { role: "assistant", content: "Y here" }, done: false }) + line({ model, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" }));
       },
     };
     return { routes, xStreaming, xClosed };
   }
 
-  async function withX(fitDeps: AppDeps["fit"]) {
-    const m = twoModels();
-    const r = await rig(m.routes, { fit: fitDeps });
+  async function withX(fitDeps: AppDeps["fit"], options: RigOptions = {}, m = twoModels()) {
+    const r = await rig(m.routes, { ...options, fit: fitDeps });
     const xThread = r.store.createThread({ title: "Long answer" });
     const x = await r.app.handlers["chat.send"]({ threadId: xThread.id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settledWithin(m.xStreaming.promise, 1000)).toEqual({ resolved: undefined });
@@ -629,6 +632,18 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "cancelled" }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    await t.r.done();
+  });
+
+  it("R4-04: ~1 GB free, busy X at 4 GB, idle Z at 9 GB: Y loads in Z's memory and X keeps streaming", async () => {
+    const t = await withX(tight, {}, twoModels(4e9, { name: "llama3.1:8b", vram: 9e9 }));
+    expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.r.app.activeTurns()).toBe(1);
     await t.r.done();
   });
 

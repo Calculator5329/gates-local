@@ -352,9 +352,17 @@ describe("blockingModels: which busy resident models a load would push out", () 
     expect(await blockingModels({ ...base, model: QWEN27, busy: [QWEN27], runNvidiaSmi: gpuWith(500) })).toEqual([]);
   });
 
-  it("the fewest, largest first, whose VRAM makes it fit; an idle resident model never counts", async () => {
-    const s = await fakeOllama(resident([{ name: GEMMA, vram: 2e9 }, { name: QWEN27, vram: 12e9 }, { name: "idle:7b", vram: 14e9 }]));
+  it("the fewest, largest first, whose VRAM makes it fit", async () => {
+    const s = await fakeOllama(resident([{ name: GEMMA, vram: 2e9 }, { name: QWEN27, vram: 12e9 }]));
     expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [GEMMA, QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty })).toEqual([QWEN27]);
+  });
+
+  it("R4-04: idle resident models count first: ~1 GB free, busy 4 GB, idle 9 GB stops nothing", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 4e9 }, { name: GEMMA, vram: 9e9 }]));
+    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(1000), readMeminfo: plenty })).toEqual([]);
+    // Not enough idle memory alone: the busy one goes, and the idle one still counts.
+    const t = await fakeOllama(resident([{ name: QWEN27, vram: 4e9 }, { name: GEMMA, vram: 3e9 }]));
+    expect(await blockingModels({ baseUrl: t.baseUrl, model: QWEN9, numCtx: 16384, busy: [QWEN27], runNvidiaSmi: gpuWith(1000), readMeminfo: plenty })).toEqual([QWEN27]);
   });
 
   it("all of them when the model only spills even with them gone; none when it refuses anyway", async () => {
@@ -368,7 +376,7 @@ describe("blockingModels: which busy resident models a load would push out", () 
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 12e9 }]));
     const check = await checkFit({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, reclaim: [QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty });
     expect(check.report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
-    expect(check.report.message).toContain(`held by ${QWEN27}, whose turns stopped for this load`);
+    expect(check.report.message).toContain(`held by ${QWEN27}, which Ollama unloads to make room`);
   });
 });
 

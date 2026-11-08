@@ -146,8 +146,8 @@ export interface FitDeps {
   /** Ends the check early: every Ollama request, both nvidia-smi runs and the meminfo read. */
   signal?: AbortSignal;
   /**
-   * Resident models whose turns were just stopped for this load: Ollama unloads an idle model to
-   * make room, so the VRAM /api/ps says they hold counts as free for a cold plan.
+   * Resident models with no running turn (idle, or just stopped for this load): Ollama unloads an
+   * idle model to make room, so the VRAM /api/ps says they hold counts as free for a cold plan.
    */
   reclaim?: readonly string[];
 }
@@ -211,7 +211,7 @@ async function fitWithReadings(deps: FitDeps, model: string, numCtx: number, r: 
   const freed = freedFrom.reduce((sum, m) => sum + m.size_vram, 0);
   const notes = [
     ...(loaded ? [`free VRAM counts ${formatGb(reclaim)} held by the copy loaded at ${atCtx}, which Ollama replaces or reuses`] : []),
-    ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, whose turns stopped for this load`] : []),
+    ...(freedFrom.length > 0 ? [`free VRAM counts ${formatGb(freed)} held by ${freedFrom.map((m) => m.name).join(", ")}, which Ollama unloads to make room`] : []),
   ];
   const report = decideFit({
     model,
@@ -234,31 +234,45 @@ export async function checkFit(deps: FitDeps & { model: string; numCtx: number }
   return fitWithReadings(deps, deps.model, deps.numCtx, await takeReadings(deps));
 }
 
+export interface LoadPlan {
+  /** The fit with every idle resident model's VRAM counted as free (Ollama unloads those first). */
+  report: FitReport;
+  /** The busy models whose turns must stop for the load (see planLoad). */
+  stop: string[];
+}
+
 /**
- * Of the `busy` models (each with a running turn), the resident ones a load of `model` at
- * `numCtx` would have to push out, as the fit plans it. None when the model is resident at this
- * num_ctx, fits beside everything resident, or refuses even with all of them gone (stopping them
- * would not help). Otherwise the fewest, largest first, whose VRAM makes it fit; all of them when
- * it only spills. The same model in `busy` never counts. Reads only; never loads.
+ * A load of `model` at `numCtx` beside the `busy` models (each with a running turn), from one
+ * reading. Every other resident model is idle: Ollama unloads it to make room, so its VRAM counts
+ * as free before any busy one. `stop` is empty when the model is resident at this num_ctx, fits
+ * with the idle ones gone, or refuses even with every busy one gone too (stopping them would not
+ * help); otherwise the fewest busy ones, largest first, whose VRAM makes it fit, or all of them
+ * when it only spills. The same model in `busy` never counts. Reads only; never loads.
  */
-export async function blockingModels(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[] }): Promise<string[]> {
-  if (!checkNumCtx(deps.model, deps.numCtx).ok) return [];
+export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[] }): Promise<LoadPlan> {
+  const floor = checkNumCtx(deps.model, deps.numCtx);
+  if (!floor.ok) return { report: ctxRefusal(deps.model, deps.numCtx, floor.message, undefined, (deps.now ?? Date.now)()), stop: [] };
   const r = await takeReadings(deps);
-  const plan = async (reclaim: readonly string[]) => (await fitWithReadings({ ...deps, reclaim }, deps.model, deps.numCtx, r)).report;
-  const now = await plan([]);
-  if (now.source === "measured" || now.verdict === "fits") return [];
-  const candidates = r.ps.models
-    .filter((m) => !sameModel(m.name, deps.model) && deps.busy.some((b) => sameModel(b, m.name)))
+  const others = r.ps.models.filter((m) => !sameModel(m.name, deps.model));
+  const isBusy = (name: string) => deps.busy.some((b) => sameModel(b, name));
+  const idle = others.filter((m) => !isBusy(m.name)).map((m) => m.name);
+  const plan = async (stop: readonly string[]) => (await fitWithReadings({ ...deps, reclaim: [...idle, ...stop] }, deps.model, deps.numCtx, r)).report;
+  const report = await plan([]);
+  if (report.source === "measured" || report.verdict === "fits") return { report, stop: [] };
+  const candidates = others
+    .filter((m) => isBusy(m.name))
     .toSorted((a, b) => b.size_vram - a.size_vram)
     .map((m) => m.name);
-  if (candidates.length === 0) return [];
   for (let n = 1; n <= candidates.length; n++) {
     const verdict = (await plan(candidates.slice(0, n))).verdict;
-    if (verdict === "fits") return candidates.slice(0, n);
-    if (n === candidates.length) return verdict === "refuse" ? [] : candidates;
+    if (verdict === "fits") return { report, stop: candidates.slice(0, n) };
+    if (n === candidates.length) return { report, stop: verdict === "refuse" ? [] : candidates };
   }
-  return [];
+  return { report, stop: [] };
 }
+
+/** planLoad's `stop`: the busy models a load would push out. */
+export const blockingModels = async (deps: FitDeps & { model: string; numCtx: number; busy: readonly string[] }): Promise<string[]> => (await planLoad(deps)).stop;
 
 /** After a real load: the /api/ps size vs size_vram replaces the estimate. */
 export async function measuredFit(deps: FitDeps & { model: string; numCtx: number }): Promise<FitCheck> {
