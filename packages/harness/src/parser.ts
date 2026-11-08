@@ -19,24 +19,51 @@ export const FENCE = "```";
 export const CALL_FENCE_LANGUAGES = ["json", "tool_code"] as const;
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const CALL_BLOCK = new RegExp(`${literal(CALL_OPEN)}([\\s\\S]*?)(?:${literal(CALL_CLOSE)}|$)`, "gi");
-const CALL_FENCE = new RegExp(`${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\n([\\s\\S]*?)${literal(FENCE)}`, "gi");
+const CALL_FENCE_HEADER = `${literal(FENCE)}(?:${CALL_FENCE_LANGUAGES.join("|")})[ \\t]*\\n`;
+const CALL_FENCE = new RegExp(`${CALL_FENCE_HEADER}([\\s\\S]*?)${literal(FENCE)}`, "gi");
+const CALL_FENCE_OPEN = new RegExp(CALL_FENCE_HEADER, "i");
+
+/** {name, arguments|parameters}: the shape that makes a fenced JSON block a call. */
+export function isCallShape(value: unknown): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as { name?: unknown }).name === "string"
+    && ("arguments" in value || "parameters" in value);
+}
+
+/**
+ * Where a call fence opens that the cut left unfinished, or undefined. Fences are found as
+ * parseTextCalls finds them, by the same expression: after the last complete call fence, a
+ * call fence header with no closing fence (the parser cannot close it, or it would have
+ * matched), or a trailing fence cut inside its header. A body that is already complete JSON
+ * of another shape is answer text, as the parser would treat it once closed.
+ */
+function unfinishedCallFence(visible: string): number | undefined {
+  let from = 0;
+  for (const match of visible.matchAll(CALL_FENCE)) from = match.index + match[0].length;
+  const rest = visible.slice(from);
+  const open = CALL_FENCE_OPEN.exec(rest);
+  if (open) {
+    let value: unknown;
+    try { value = JSON.parse(rest.slice(open.index + open[0].length).trim()); } catch { return from + open.index; }
+    return isCallShape(value) ? from + open.index : undefined;
+  }
+  const at = rest.lastIndexOf(FENCE);
+  if (at < 0) return undefined;
+  const header = rest.slice(at + FENCE.length).toLowerCase();
+  const cutInHeader = CALL_FENCE_LANGUAGES.some(language => header.startsWith(language) ? /^[ \t]*$/.test(header.slice(language.length)) : language.startsWith(header));
+  return cutInHeader ? from + at : undefined;
+}
 
 /**
  * The visible answer part of a reply cut off mid-stream: what parseTextCalls keeps of it,
  * less the call syntax the cut left unfinished. That is a trailing start of the opening tag
  * (`<`, `<tool`, `<tool_call` with no `>`) and everything from a call fence that never
- * closed (its language named, or cut before it was). An unclosed opening tag and everything
- * after it the parser drops already.
+ * closed (see unfinishedCallFence). An unclosed opening tag and everything after it the
+ * parser drops already.
  */
 export function partialAnswer(text: string): string {
   let visible = outsideThinking(text);
-  const fences = [...visible.matchAll(new RegExp(literal(FENCE), "g"))];
-  if (fences.length % 2 === 1) {
-    const at = fences.at(-1)!.index;
-    const rest = visible.slice(at + FENCE.length).toLowerCase();
-    const opensCall = CALL_FENCE_LANGUAGES.some(language => rest.startsWith(language) ? /^[ \t]*(?:\n|$)/.test(rest.slice(language.length)) : language.startsWith(rest));
-    if (opensCall) visible = visible.slice(0, at);
-  }
+  const fence = unfinishedCallFence(visible);
+  if (fence !== undefined) visible = visible.slice(0, fence);
   const tail = visible.toLowerCase();
   for (let n = Math.min(CALL_OPEN.length - 1, tail.length); n > 0; n--) {
     if (CALL_OPEN.startsWith(tail.slice(-n))) { visible = visible.slice(0, -n); break; }
@@ -72,9 +99,7 @@ export function parseTextCalls(text: string): { calls: unknown[]; errors: string
     invalid("Fenced tool call must contain a JSON object with name and arguments");
     return { calls, errors, items, content: content.replace(fence, "").trim() };
   }
-  const shaped = typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as { name?: unknown }).name === "string"
-    && ("arguments" in value || "parameters" in value);
-  if (!shaped) return { calls, errors, items, content: content.trim() };
+  if (!isCallShape(value)) return { calls, errors, items, content: content.trim() };
   calls.push(value); items.push({ call: value });
   return { calls, errors, items, content: content.replace(fence, "").trim() };
 }

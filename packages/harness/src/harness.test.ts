@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseTextCalls, repairCall, toolBlock, toolDefinitions, trimOutput, runLoop } from "./index.ts";
+import { parseTextCalls, partialAnswer, repairCall, toolBlock, toolDefinitions, trimOutput, runLoop } from "./index.ts";
 import { DETAIL_LIMIT, MAX_CALLS_PER_REPLY, TOOL_TIME_BUDGET_MS, toolOutputBudget } from "./loop.ts";
 import type { LoopEvent, ModelMessage } from "./types.ts";
 
@@ -23,6 +23,21 @@ describe("text tool calls", () => {
     const example = 'Here is the JSON:\n```json\n{"name":"Ada","age":36}\n```';
     expect(parseTextCalls(example)).toMatchObject({ calls: [], errors: [], content: example });
     expect(parseTextCalls("```json\n{bad\n```").errors).toHaveLength(1);
+  });
+  it("a cut reply drops only an unfinished call fence, found the way the parser finds fences (T2-04, T4-01)", () => {
+    const call = '{"name":"read","arguments":{"path":"/library/docs"}}';
+    const prose = "Type ``` then ```json, and close with ```.";
+    // Literal fences in prose do not pair up with the call fence that opens after them.
+    expect(partialAnswer(`${prose}\n\`\`\`json\n${call}`)).toBe(prose);
+    expect(partialAnswer(`${prose}\n\`\`\`json\n{"name":"re`)).toBe(prose);
+    expect(partialAnswer("Use ``` to fence code.")).toBe("Use ``` to fence code.");
+    expect(partialAnswer("A\n```python\nprint(1)\n```\nB")).toBe("A\n```python\nprint(1)\n```\nB");
+    // A complete call fence is the parser's; the unfinished one after it goes.
+    expect(partialAnswer(`\`\`\`json\n${call}\n\`\`\`\nthen\n\`\`\`tool_code\n{`)).toBe("then");
+    // JSON that parses to something other than a call stays; JSON cut too early to tell goes.
+    expect(partialAnswer('Here:\n```json\n{"answer":42}')).toBe('Here:\n```json\n{"answer":42}');
+    expect(partialAnswer("Here:\n```json\n[1, 2]\n")).toBe("Here:\n```json\n[1, 2]");
+    expect(partialAnswer('Here:\n```json\n{"answer":4')).toBe("Here:");
   });
   it("never parses an unclosed thought or silently loses malformed calls", () => {
     expect(parseTextCalls('<think><tool_call>{"name":"shell"}</tool_call>').calls).toEqual([]);
@@ -370,6 +385,16 @@ describe("what the user saw is what is saved: the concatenated deltas are the sa
       for (const message of last.messages) expect(message.content).not.toMatch(/<tool|```/);
     });
   }
+  it("text mode: prose that writes out fence syntax before an interrupted JSON call fence does not hide the call", async () => {
+    const prose = "To open a fence, type ``` and a language, as in ```json, then close it with ```.";
+    const { requests, complete, shown } = await streamed({ native: false, toolTimeBudgetMs: 30, rounds: [{ deltas: [prose, "\n```json\n", '{"name":"read","argum'], hang: true }], final: ["Done."] });
+    expect(shown).toBe(complete.content);
+    expect(requests.at(-1)!.messages.at(-2)).toEqual({ role: "assistant", content: prose });
+  });
+  it("text mode: an interrupted fence holding complete JSON that is not a call is kept (T4-01)", async () => {
+    const { requests } = await streamed({ native: false, toolTimeBudgetMs: 30, rounds: [{ deltas: ["Here is the result:\n", "```json\n", '{"answer":42}'], hang: true }], final: ["Done."] });
+    expect(requests.at(-1)!.messages.at(-2)).toEqual({ role: "assistant", content: 'Here is the result:\n```json\n{"answer":42}' });
+  });
 });
 
 describe("saved reply and observations", () => {
