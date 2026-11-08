@@ -78,8 +78,8 @@ export interface State {
   readonly addPage: boolean;
   readonly ownerConfirm: boolean;
   readonly fitPanel: { readonly open: boolean; readonly model: string | null };
-  /** The open popover; kb is the picker opened from the keyboard (Ctrl M), which shows digit keys. */
-  readonly pop: { readonly id: "picker" | "plus" | "more"; readonly kb: boolean } | null;
+  /** The open popover; kb is the picker opened from the keyboard (Ctrl M), which shows digit keys. A thread menu from a sidebar row has the row's thread and opens at a point. */
+  readonly pop: { readonly id: "picker" | "plus" | "more"; readonly kb: boolean; readonly thread?: string; readonly at?: { readonly x: number; readonly y: number } } | null;
   readonly draft: string;
   /** The header title is an input (thread menu › Rename). */
   readonly renaming: boolean;

@@ -2,7 +2,7 @@
 // Journeys from Ethan's second pass: a long model name never pushes the
 // composer's controls out, an 8k context, a toolbar that holds still while a
 // model loads, and the thread menu on right-click with GPU memory in it.
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -201,4 +201,114 @@ test("Settings > Models offers 8k as the default context", async ({ page, open }
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
   await expect(page.locator(".set").getByRole("group", { name: "Context window" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
+});
+
+const row = (page: Page, title: string) => page.locator(".sb-row", { hasText: title });
+
+/** Waits out a popover's open animation (it rises 4 px) before its box is measured. */
+async function settled(el: Locator): Promise<void> {
+  await el.evaluate((e) => Promise.all(e.getAnimations().map((a) => a.finished)));
+}
+
+test.describe("thread menu", () => {
+  test.use({ seed: "design" });
+  const MENU = ["Rename", "Export as Markdown", "GPU memory", "Delete thread"];
+
+  test("right-click a sidebar thread: the ⋯ menu's items at the pointer; Rename renames that thread", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const menu = page.locator("#moreMenu");
+    // the header's ⋯ menu stays, with the same items
+    await page.locator("#moreBtn").click();
+    await expect(menu.getByRole("menuitem")).toHaveText(MENU);
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+
+    const target = row(page, "Fix the backup cron");
+    const box = await target.boundingBox();
+    if (!box) throw new Error("no row");
+    const at = { x: box.x + 40, y: box.y + box.height / 2 };
+    await page.mouse.click(at.x, at.y, { button: "right" });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem")).toHaveText(MENU);
+    await settled(menu);
+    const mb = await menu.boundingBox();
+    expect(Math.abs((mb?.x ?? 0) - at.x), "menu at the pointer (x)").toBeLessThan(2);
+    expect(Math.abs((mb?.y ?? 0) - at.y), "menu at the pointer (y)").toBeLessThan(2);
+    // the thread under the pointer is not opened by the right-click
+    await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
+
+    await menu.getByRole("menuitem", { name: "Rename" }).click();
+    const input = page.getByRole("textbox", { name: "Thread title" });
+    await expect(input).toHaveValue("Fix the backup cron");
+    await input.fill("Fix the nightly backup");
+    await input.press("Enter");
+    await expect(row(page, "Fix the nightly backup")).toBeVisible();
+    await expect(row(page, "Library: Effect Schema books")).toBeVisible();
+    // the server has it
+    await page.reload();
+    await waitReady(page);
+    await expect(row(page, "Fix the nightly backup")).toBeVisible();
+  });
+
+  test("right-click › Delete thread deletes that thread, not the open one", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const rows = await page.locator(".sb-row").count();
+    await row(page, "Whisper latency check").click({ button: "right" });
+    await page.locator("#moreMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+    await expect(row(page, "Whisper latency check")).toHaveCount(0);
+    await expect(page.locator(".sb-row")).toHaveCount(rows - 1);
+    await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
+    await page.reload();
+    await waitReady(page);
+    await expect(row(page, "Whisper latency check")).toHaveCount(0);
+  });
+
+  for (const key of ["Shift+F10", "ContextMenu"]) {
+    test(`${key} on a focused sidebar row opens the menu there, focus on its first item; Escape gives focus back`, async ({ page, open, seededThread }) => {
+      await open(`#thread=${seededThread ?? ""}`);
+      await waitReady(page);
+      const target = row(page, "Ollama 0.40 release notes");
+      await target.focus();
+      await page.keyboard.press(key);
+      const menu = page.locator("#moreMenu");
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole("menuitem", { name: "Rename" })).toBeFocused();
+      await settled(menu);
+      const [rb, mb] = [await target.boundingBox(), await menu.boundingBox()];
+      expect(Math.abs((mb?.y ?? 0) - ((rb?.y ?? 0) + (rb?.height ?? 0))), "menu under the row").toBeLessThan(2);
+      await page.keyboard.press("ArrowDown");
+      await expect(menu.getByRole("menuitem", { name: "Export as Markdown" })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(menu).toBeHidden();
+      await expect(target).toBeFocused();
+    });
+  }
+
+  test("⋯ › GPU memory opens the panel beside the chat; closed by default, Escape closes it", async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const panel = page.getByRole("complementary", { name: "GPU memory" });
+    await expect(panel).toHaveCount(0);
+    await page.locator("#moreBtn").click();
+    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".fp-gpu")).toContainText("RTX 5070 Ti");
+    await expect(panel.locator(".fp-v")).toBeVisible();
+    // beside the chat, not over it
+    const [stage, side] = [await page.locator(".stage").boundingBox(), await panel.boundingBox()];
+    expect((side?.x ?? 0) + 0.5).toBeGreaterThanOrEqual((stage?.x ?? 0) + (stage?.width ?? 0));
+    // the chat still works beside it
+    await expect(page.locator("#ta")).toBeEnabled();
+    await expect(panel.getByRole("button", { name: "Close GPU memory" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    await expect(page.locator("#moreBtn")).toBeFocused();
+    // Settings › Advanced keeps GPU memory too
+    await expect(page.locator(".set #gpuMemory")).toHaveCount(0);
+    await page.keyboard.press("Control+Comma");
+    await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+    await expect(page.locator(".set #gpuMemory")).toBeVisible();
+  });
 });

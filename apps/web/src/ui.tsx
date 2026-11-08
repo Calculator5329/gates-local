@@ -20,7 +20,9 @@ export function closePop(refocus = false): void {
   const p = getState().pop;
   if (p === null) return;
   setState({ pop: null });
-  if (refocus) document.getElementById(POP_ANCHOR[p.id])?.focus();
+  // a thread menu from the sidebar gives focus back to its row
+  const row = p.thread === undefined ? null : document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"]`);
+  if (refocus) (row ?? document.getElementById(POP_ANCHOR[p.id]))?.focus();
 }
 
 /** Escape text for a data-tip string. Every server or model value passes through it. */

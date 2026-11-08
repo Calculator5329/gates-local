@@ -13,8 +13,50 @@ import { VLabel, closeTip, esc } from "./ui.tsx";
 export function openFit(model?: string): void {
   const s = getState();
   closeTip();
-  setState({ pop: null, fitPanel: { open: false, model: model !== undefined && model !== s.model ? model : null } });
+  setState({ pop: null, fitPanel: { open: s.fitPanel.open, model: model !== undefined && model !== s.model ? model : null } });
   openSettings("advanced");
+}
+
+/** The thread menu's GPU memory: the panel beside the chat, closed until asked for. */
+export function openGpuPanel(): void {
+  closeTip();
+  setState({ pop: null, fitPanel: { open: true, model: null } });
+  requestAnimationFrame(() => document.querySelector<HTMLElement>("#fitPanel .fpn-x")?.focus());
+}
+
+export function closeGpuPanel(refocus: boolean): void {
+  if (!getState().fitPanel.open) return;
+  closeTip();
+  setState({ fitPanel: { open: false, model: null } });
+  if (refocus) (document.getElementById("moreBtn") ?? document.getElementById("ta"))?.focus();
+}
+
+const gpuHead = (gpu: GpuStatus | undefined): string =>
+  gpu === undefined ? "" : gpu.vendor === "none" ? "No GPU found" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+
+/** GPU memory docked beside the chat (thread menu › GPU memory); Settings › Advanced has the same content. */
+export function GpuPanel() {
+  const open = useStore((s) => s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun");
+  const ready = useStore(chatReady);
+  const model = useStore((s) => s.fitPanel.model ?? s.model);
+  const gpuRaw = useStore((s) => s.gpu);
+  if (!open) return null;
+  return (
+    <aside className="fpanel" id="fitPanel" aria-label="GPU memory">
+      <div className="fpn-h">
+        <div className="fp-h">
+          <span className="fp-t">GPU memory</span>
+          <span className="fp-gpu">{gpuHead(gpuRaw === NA ? undefined : gpuRaw)}</span>
+        </div>
+        <button type="button" className="ibtn xs fpn-x" aria-label="Close GPU memory" data-tip="Close (Esc)" onClick={() => closeGpuPanel(true)}>
+          <Icon id="x" cls="s14" />
+        </button>
+      </div>
+      <div className="fpn-b">
+        {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <Body model={model} />}
+      </div>
+    </aside>
+  );
 }
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
@@ -305,15 +347,14 @@ export function GpuMemory() {
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const gpuRaw = useStore((s) => s.gpu);
   const model = shown ?? chat;
-  const gpu = gpuRaw === NA ? undefined : gpuRaw;
-  const head = gpu === undefined ? "" : gpu.vendor === "none" ? "No GPU found" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+  const head = gpuHead(gpuRaw === NA ? undefined : gpuRaw);
   return (
     <div className="fp-set" id="gpuMemory">
       <div className="fp-h">
         <span className="fp-t">{model === undefined ? "No model yet" : describeModel(model, catalog).name}</span>
         <span className="fp-gpu">{head}</span>
         {shown !== null && chat !== undefined ? (
-          <button type="button" className="qa" onClick={() => setState({ fitPanel: { open: false, model: null } })}>
+          <button type="button" className="qa" onClick={() => setState((s) => ({ fitPanel: { open: s.fitPanel.open, model: null } }))}>
             Show {describeModel(chat, catalog).name}
           </button>
         ) : null}
