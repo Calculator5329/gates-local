@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-08: A new default model takes effect while another is loaded
+
+- The app's model pick now counts a model that happens to be loaded as
+  room, the way an actual load does. A loaded idle model could keep a
+  new default from being picked, and a new chat stayed on the old one.
+
 ## 2026-11-08: Thinking off with no GPU, Windows and size fixes
 
 - Thinking starts off on a computer with no supported GPU, where a

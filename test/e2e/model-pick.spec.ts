@@ -164,8 +164,8 @@ test("one Ctrl+N after saving a default starts the new chat on the new pick, eve
   await pickModel(page, "qwen", "qwen3.5:9b");
   await expect(modelBtn).toContainText("Qwen 3.5 9B");
   await expect(modelBtn).not.toContainText("loading");
-  // Forget the load (a loaded Qwen leaves no room for Gemma's row) and hold every /api/show,
-  // so the pick that follows the new default lands only after the new chat exists.
+  // Hold every /api/show, so the pick that follows the new default lands only after the new chat
+  // exists. A Qwen load that lands after this call stays resident, and must not keep the pick on it.
   await stack.scenario("embed-smallest", { showDelayMs: 1500 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
