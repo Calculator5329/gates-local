@@ -20,7 +20,8 @@ const BUDGET = {
   // timestamp to the paint after the handlers, so input delay counts. Three
   // 60 Hz frames. Measured 24 ms in three runs (idle typing 24-40 ms); input
   // delay 0.2-0.3 ms and processing 0.6 ms of that. The rest, handlers to
-  // paint, is not broken down further here.
+  // paint, is not broken down further here. The gate also needs no long
+  // task over longTaskMs while the keys go in (keysWithinBudget).
   keyP95Ms: 50,
   jsGzipKb: 130, // measured 120.6 KB
   cssGzipKb: 9, // measured 8.1 KB
@@ -33,13 +34,17 @@ const report = (name: string, value: number, unit: string) => {
 
 /** Long tasks, slow input events and a frame counter, from the first byte on. */
 function observe(): void {
-  const w = window as unknown as { glLong: number[]; glEvents: SlowEvent[]; glFrames: number; glKeys: number };
+  const w = window as unknown as { glLong: number[]; glLongAt: [number, number][]; glEvents: SlowEvent[]; glFrames: number; glKeys: number };
   w.glLong = [];
+  w.glLongAt = [];
   w.glEvents = [];
   w.glFrames = 0;
   w.glKeys = 0;
   new PerformanceObserver((l) => {
-    for (const e of l.getEntries()) w.glLong.push(e.duration);
+    for (const e of l.getEntries()) {
+      w.glLong.push(e.duration);
+      w.glLongAt.push([e.startTime, e.duration]);
+    }
   }).observe({ type: "longtask", buffered: true });
   new PerformanceObserver((l) => {
     for (const e of l.getEntries() as PerformanceEventTiming[]) {
@@ -87,12 +92,13 @@ interface Probe {
 }
 
 const readLong = () => (window as unknown as { glLong: number[] }).glLong;
-/** Key events since the last clearEvents, read once the observer has delivered the last of them. */
+/** Key events and the longest task since the last clearEvents, read once the observers have delivered the last of them. */
 const readKeys = async () => {
   // entries arrive after the paint that ends them, in an observer task
   await new Promise((r) => setTimeout(r, 250));
-  const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number };
-  return { events: w.glEvents.filter((e) => e.start >= w.glSince), dispatched: w.glKeys };
+  const w = window as unknown as { glEvents: SlowEvent[]; glLongAt: [number, number][]; glKeys: number; glSince: number };
+  const longest = Math.max(0, ...w.glLongAt.filter(([s, d]) => s + d >= w.glSince).map(([, d]) => d));
+  return { events: w.glEvents.filter((e) => e.start >= w.glSince), dispatched: w.glKeys, longest };
 };
 const clearEvents = () => {
   const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number };
@@ -121,7 +127,7 @@ const pct = (xs: number[], p: number) => {
  * report counted as 0: Event Timing leaves out events under 16 ms, so a 0
  * here means "under 16 ms", and a percentile of 0 means the same.
  */
-function keyStats({ events, dispatched }: { events: SlowEvent[]; dispatched: number }) {
+function keyStats({ events, dispatched, longest }: { events: SlowEvent[]; dispatched: number; longest: number }) {
   const keys = events.filter(isKey);
   const pad = (f: (e: SlowEvent) => number) => [...keys.map(f), ...Array.from({ length: Math.max(0, dispatched - keys.length) }, () => 0)];
   return {
@@ -131,6 +137,7 @@ function keyStats({ events, dispatched }: { events: SlowEvent[]; dispatched: num
     p95Delay: pct(pad((e) => e.delay), 0.95),
     p95Processing: pct(pad((e) => e.processing), 0.95),
     maxDuration: Math.max(0, ...keys.map((e) => e.duration)),
+    longestTask: longest,
   };
 }
 
@@ -141,6 +148,7 @@ function reportKeys(label: string, k: ReturnType<typeof keyStats>) {
   report(`${label} p95 input delay`, k.p95Delay, "ms");
   report(`${label} p95 processing`, k.p95Processing, "ms");
   report(`${label} slowest duration`, k.maxDuration, "ms");
+  report(`${label} longest task`, k.longestTask, "ms");
 }
 
 /**
@@ -158,8 +166,17 @@ async function typeFreely(page: Page, text: string): Promise<void> {
   await Promise.all(sent);
 }
 
-/** The W-08 gate: the 95th percentile key event, input to paint, inside the budget. */
-const keysWithinBudget = (k: ReturnType<typeof keyStats>) => k.dispatched >= 20 && k.p95 <= BUDGET.keyP95Ms;
+/**
+ * The W-08 gate: the 95th percentile key event, input to paint, inside the
+ * budget, and no long task over the long-task budget while the keys go in.
+ * Event Timing counts from the key's timestamp. A person's key is stamped
+ * when it is pressed, but Playwright's keys are sometimes stamped only once
+ * the main thread is free: in about one run in five, every key of a burst
+ * sent during back-to-back 100 ms tasks showed 1-2 ms of input delay. The
+ * long-task leg sees the busy main thread in those runs too.
+ */
+const keysWithinBudget = (k: ReturnType<typeof keyStats>) =>
+  k.dispatched >= 20 && k.p95 <= BUDGET.keyP95Ms && k.longestTask <= BUDGET.longTaskMs;
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(observe);
@@ -374,34 +391,55 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   expect(stream.p95Processing).toBeLessThanOrEqual(BUDGET.keyHandlerMs);
 
   // negative control: the main thread busy in back-to-back 100 ms tasks, so
-  // each key waits for the task it lands in before its handlers start. The
-  // handlers stay as fast as before; the gate must still fail.
+  // each key waits for the task it lands in. The handlers stay as fast as
+  // before; the gate must still fail. The slices chain through a
+  // MessageChannel, so no timer clamp opens a gap between them, and the
+  // channel hangs on window so nothing can collect it mid-burst.
   await ta.fill("");
   await ta.focus();
   await page.evaluate(clearEvents);
   await page.evaluate(() => {
-    const w = window as unknown as { glBusy: boolean };
+    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][]; glChan: MessageChannel };
     w.glBusy = true;
-    const slice = () => {
+    w.glStamps = [];
+    // each keydown's timestamp and the time its handlers ran
+    window.addEventListener("keydown", (e) => w.glStamps.push([e.timeStamp, performance.now()]), { capture: true });
+    const ch = new MessageChannel();
+    w.glChan = ch;
+    ch.port1.addEventListener("message", () => {
       if (!w.glBusy) return;
       const end = performance.now() + 100;
       while (performance.now() < end) {
         // spin
       }
-      setTimeout(slice);
-    };
-    setTimeout(slice);
+      ch.port2.postMessage(null);
+    });
+    ch.port1.start();
+    ch.port2.postMessage(null);
   });
   await typeFreely(page, "a shorter burst");
-  await page.evaluate(() => {
-    (window as unknown as { glBusy: boolean }).glBusy = false;
+  const stamps = await page.evaluate(() => {
+    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][] };
+    w.glBusy = false;
+    return w.glStamps;
   });
   await expect(ta).toHaveValue("a shorter burst");
   await expect(page.locator(".caret")).toBeVisible();
-  const delayed = keyStats(await page.evaluate(readKeys));
+  const raw = await page.evaluate(readKeys);
+  const delayed = keyStats(raw);
   reportKeys("stream + 100 ms delay control", delayed);
   expect(keysWithinBudget(delayed), JSON.stringify(delayed)).toBe(false);
-  expect(delayed.p95Delay).toBeGreaterThanOrEqual(50);
+  expect(delayed.longestTask).toBeGreaterThanOrEqual(90);
+  // A key stamped while a slice ran waited behind it, and Event Timing must
+  // count that wait in its duration (8 ms rounding allowed). In the runs
+  // where every key is stamped after its slice there is no such key; the
+  // long-task leg above fails the gate in those.
+  const waited = stamps.filter(([at, ran]) => ran - at >= 50);
+  report("stream + 100 ms delay control keys stamped during a slice", waited.length, "keys");
+  for (const [at, ran] of waited) {
+    const ev = raw.events.find((e) => e.name === "keydown" && Math.abs(e.start - at) < 1);
+    expect(ev?.duration ?? 0, `keydown stamped at ${at.toFixed(1)}, handled ${(ran - at).toFixed(1)} ms later`).toBeGreaterThanOrEqual(ran - at - 8);
+  }
 });
 
 test("bundle size", () => {
