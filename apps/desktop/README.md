@@ -12,8 +12,12 @@ dies, and gives the web client a small typed bridge (`window.gatesLocal`).
 | `src/status-page.ts` | The plain starting / crashed / load-failed page, served as a `data:` URL. |
 | `src/main.ts` | Electron main: single-instance lock, window, IPC, routing between client and status page, quit path. |
 | `src/preload.ts` | Sandboxed preload: `contextBridge.exposeInMainWorld("gatesLocal", …)`. |
+| `src/window.ts` | The window's options: the gate-mark icon (`assets/icon.png`) and the sandboxed, isolated renderer. |
+| `src/keys.ts` | No menu on Linux and Windows, so the window keys live here: Ctrl+R / Ctrl+Shift+R reload, Ctrl+W close, Ctrl+Q quit (Linux), F11 full screen, Ctrl+Shift+I dev tools (unpackaged), Ctrl +/-/0 zoom. |
+| `src/desktop-entry.ts`, `src/linux-install.ts` | The Linux desktop entry (Exec in the spec's two escape layers) and its per-user install; old files move to `$XDG_DATA_HOME/gates-local-install-backups/<time>-<random>/`. |
 | `scripts/build.ts` | esbuild: `src/main.ts` -> `out/main.cjs`, `src/preload.ts` -> `out/preload.cjs`. |
-| `scripts/smoke.ts` | Headless real-Electron smoke of the crash/restart Accept line. |
+| `scripts/install-linux.ts` | `node scripts/install-linux.ts --exec <program> [--exec-arg <arg>]...`: installs the launcher and icons for this user. |
+| `scripts/smoke.ts` | Headless real-Electron smoke of the crash/restart Accept line, the missing menu bar and the window keys. |
 
 ## Scripts
 

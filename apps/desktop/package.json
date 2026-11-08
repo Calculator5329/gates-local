@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "main": "out/main.cjs",
+  "desktopName": "gates-local.desktop",
   "exports": {
     ".": "./src/index.ts"
   },
