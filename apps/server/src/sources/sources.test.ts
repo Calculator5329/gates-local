@@ -7,6 +7,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createSources, SQLITE_FILE_REFUSED } from "./index.ts";
+import { createTools, runLoop, type ModelMessage } from "../../../../packages/harness/src/index.ts";
 const isSqliteFile = (file: string) => statSync(file).isFile() && readFileSync(file).subarray(0, 16).equals(Buffer.from("SQLite format 3\0", "latin1"));
 const children: ChildProcess[] = [];
 // One prerequisite probe; do not mistake an unsupported nested process for a snapshot failure.
@@ -92,6 +93,28 @@ describe("Library registry", () => {
     const kept = new DatabaseSync(copies[0]!, { readOnly: true });
     try { expect(kept.prepare("SELECT n FROM t").get()?.n).toBe(2); } finally { kept.close(); }
     expect(statSync(copies[0]!).mode & 0o777).toBe(0o600);
+  });
+  it("a database removed between source capture and the tool call is named in the observation, with no host path (T-05)", async () => {
+    const { root, dataDir, sources } = setup();
+    const file = path.join(root, "ledger.db");
+    const live = new DatabaseSync(file); live.exec("CREATE TABLE t(n); INSERT INTO t VALUES(1)"); live.close();
+    const source = await sources.add({ kind: "sqlite", path: file, label: "Ledger" });
+    const captured = sources.entries(); // what a turn holds from its start
+    sources.remove(source.id);
+    const calls = { linux: { name: "shell", arguments: { command: `sqlite3 /data/${source.id}.db "SELECT * FROM t"` } }, win32: { name: "sql", arguments: { source: source.id, query: "SELECT * FROM t" } } };
+    for (const platform of ["linux", "win32"] as const) {
+      const tools = createTools({ sources: captured, platform });
+      const requests: ModelMessage[][] = [];
+      const stream = async function* (messages: readonly ModelMessage[]) {
+        requests.push([...messages]);
+        yield { type: "complete" as const, content: requests.length === 1 ? "" : "Done.", calls: requests.length === 1 ? [calls[platform]] : [], stopReason: "stop" };
+      };
+      for await (const _ of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream, execute: tools.execute })) { /* drain */ }
+      const observation = requests[1]!.find(m => m.role === "tool")!.content;
+      expect(observation, platform).toBe("The source Ledger was removed during this reply.");
+      expect(observation).not.toContain(dataDir);
+      expect(observation).not.toContain("snapshots/");
+    }
   });
   it("a failed snapshot leaves no pending file and records the error", async () => {
     const { root, dataDir, sources } = setup();

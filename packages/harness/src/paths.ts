@@ -12,6 +12,16 @@ export const canonicalPathSync = (file: string): string => realpathSync.native(f
 export const canonicalPath = (file: string): Promise<string> => realpath(file);
 export type Realpath = (file: string) => Promise<string>;
 
+/**
+ * What the model reads when a source cannot be resolved: its label, never the host path
+ * (a raw realpath/stat/open error names the app's private snapshots folder).
+ */
+export function sourceUnavailable(source: { label: string; kind: string }, error: unknown): Error {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (source.kind === "sqlite") return new Error(code === "ENOENT" ? `The source ${source.label} was removed during this reply.` : `The source ${source.label} could not be opened; refresh it and try again.`);
+  return new Error(code === "ENOENT" ? `The source ${source.label} is no longer where it was added; reconnect it.` : `The source ${source.label} could not be opened; reconnect it.`);
+}
+
 /** Windows paths compare without case; Linux paths are exact. */
 export function samePath(a: string, b: string, platform: NodeJS.Platform = process.platform): boolean {
   return platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;

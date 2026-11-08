@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { Writable } from "node:stream";
-import { canonicalPathSync } from "../paths.ts";
+import { canonicalPathSync, sourceUnavailable } from "../paths.ts";
 import type { LibraryEntry } from "../types.ts";
 import { isSeccompArch, lockFilter, type SeccompArch } from "./seccomp.ts";
 
@@ -131,18 +131,22 @@ function killScope(pid: number | undefined, unit: string): void {
 
 export async function runSandbox(input: { command: string; sources: readonly LibraryEntry[]; signal?: AbortSignal; timeoutMs?: number; outputCap?: number }): Promise<string> {
   input.signal?.throwIfAborted();
-  const probe = await probeSandbox();
-  if (!probe.available) throw new Error(probe.reason);
-  input.signal?.throwIfAborted();
-  const args = baseArgs();
+  // Sources first: one removed since the turn began is named, never shown as a host path.
+  const binds: string[] = [];
   for (const source of input.sources) {
     if (!/^[\w-]+$/.test(source.id)) throw new Error("Invalid Library source id");
     const expected = source.kind === "sqlite" ? requiredSnapshot(source) : source.path;
-    const host = canonicalPathSync(expected);
+    let host: string;
+    try { host = canonicalPathSync(expected); } catch (e) { throw sourceUnavailable(source, e); }
     if (host !== expected) throw new Error("Library source path changed; reconnect this source before using it");
-    args.push("--ro-bind", host, source.kind === "sqlite" ? `/data/${source.id}.db` : `/library/${source.id}`);
+    binds.push("--ro-bind", host, source.kind === "sqlite" ? `/data/${source.id}.db` : `/library/${source.id}`);
   }
-  args.push(...finalMounts, "--", "/usr/bin/bash", "--noprofile", "--norc", "-c", input.command);
+  const probe = await probeSandbox();
+  if (!probe.available) throw new Error(probe.reason);
+  input.signal?.throwIfAborted();
+  const args = [...baseArgs(), ...binds, ...finalMounts, "--", "/usr/bin/bash", "--noprofile", "--norc", "-c", input.command];
+  // A snapshot removed after the check above makes bwrap's bind fail with the host path in its message.
+  const removed = () => input.sources.find(s => s.kind === "sqlite" && !existsSync(s.snapshotPath!));
   const unit = `gates-shell-${randomUUID()}`;
   return new Promise((resolve, reject) => {
     const child = spawnScoped(SYSTEMD_RUN, [...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch));
@@ -165,7 +169,9 @@ export async function runSandbox(input: { command: string; sources: readonly Lib
     child.on("close", (code, signal) => {
       cleanup();
       const output = Buffer.concat(chunks).toString("utf8");
+      const gone = !failure && (code !== 0 || signal) ? removed() : undefined;
       if (failure) reject(failure);
+      else if (gone) reject(sourceUnavailable(gone, Object.assign(new Error("snapshot removed"), { code: "ENOENT" })));
       else if (signal || code === 137) reject(new Error(`Shell was killed${signal ? ` (${signal})` : ""}; it may have gone over its 512 MB memory cap: ${output}`));
       else if (code !== 0) reject(new Error(`Shell exited ${code}: ${output}`));
       else resolve(output);

@@ -1,7 +1,7 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { open, opendir, stat } from "node:fs/promises";
 import path from "node:path";
-import { canonicalPath, containsPath, samePath, type Realpath } from "./paths.ts";
+import { canonicalPath, containsPath, samePath, sourceUnavailable, type Realpath } from "./paths.ts";
 import { runSandbox } from "./sandbox/index.ts";
 import { runSnapshotQuery } from "./sql.ts";
 import { toolDefinitions } from "./prompt.ts";
@@ -81,7 +81,7 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
     source = sources.find(s => s.kind !== "sqlite" && (s.kind === "folder" ? contains(s.path, candidate) : samePath(s.path, candidate, platform)));
     if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
   }
-  const root = await realpath(source.path);
+  const root = await realpath(source.path).catch((e: unknown) => { throw sourceUnavailable(source, e); });
   if (!samePath(root, source.path, platform)) throw new Error("Library source path changed; reconnect this source before using it");
   const canonical = await realpath(candidate);
   if (source.kind === "file" ? !samePath(canonical, root, platform) : !contains(root, canonical)) throw new Error("Symlink leaves your Library source");
@@ -120,14 +120,21 @@ async function querySnapshot(sources: readonly LibraryEntry[], input: Record<str
   const source = sources.find(s => s.id === id && s.kind === "sqlite");
   if (!source?.snapshotPath) throw new Error("SQLite snapshot was not found in your Library");
   const query = text(input, "query");
-  // The read-only handle stops changes to the snapshot but would still let VACUUM INTO
-  // write a new file; PRAGMA query_only (set in sql.ts) refuses that too. This lexical
-  // check allows one SELECT or WITH statement and nothing after a `;`, which keeps out
-  // ATTACH, PRAGMA and VACUUM, and refuses a second statement that prepare() would
-  // otherwise drop without a word.
+  // The read-only handle and PRAGMA query_only (sql.ts) stop changes to the snapshot, but
+  // neither stops VACUUM INTO from creating its destination file: with both set it still
+  // makes a zero-byte file at any path before it fails. This lexical check is what prevents
+  // that external-file creation. It allows one SELECT or WITH statement and nothing after
+  // a `;`, which keeps out ATTACH, PRAGMA and VACUUM, and refuses a second statement that
+  // prepare() would otherwise drop without a word.
   const syntax = query.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\//g, " ").trim();
   if (!/^(SELECT|WITH)\b/i.test(syntax) || /;\s*\S/.test(syntax)) throw new TypeError("sql accepts one SELECT or WITH query; no PRAGMA, ATTACH or VACUUM");
   const limit = integer(input, "limit", 100, 1000);
-  const rows = await runSnapshotQuery({ file: source.snapshotPath, query, limit, signal, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+  const file = source.snapshotPath;
+  // Removed since the turn began: name the source; SQLite's own error says only "unable to open".
+  const removed = () => sourceUnavailable(source, Object.assign(new Error("snapshot removed"), { code: "ENOENT" }));
+  if (!existsSync(file)) throw removed();
+  let rows: unknown[];
+  try { rows = await runSnapshotQuery({ file, query, limit, signal, ...(timeoutMs === undefined ? {} : { timeoutMs }) }); }
+  catch (e) { throw existsSync(file) ? e : removed(); }
   return { output: JSON.stringify(rows), summary: `Read ${rows.length} ${rows.length === 1 ? "row" : "rows"} from ${source.label}` };
 }
