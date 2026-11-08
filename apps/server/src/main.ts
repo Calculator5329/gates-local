@@ -5,7 +5,7 @@
 // log goes to stderr. Exits on stdin EOF (parent death), SIGTERM and SIGINT.
 //
 // Knobs (environment):
-//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins
+//   GATES_LOCAL_ALLOWED_ORIGINS  comma list added to the dev web origins (the desktop app sets it)
 //   GATES_LOCAL_OLLAMA_URL       treat this URL (http://127.0.0.1:<port>) as the system Ollama:
 //                                never install or start one, and never probe another port
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
@@ -29,9 +29,9 @@ const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
 const HARD_EXIT_MS = 2500;
 
-// The Vite dev client. The packaged renderer loads file://, and what Origin
-// its WebSocket upgrade carries ("file://", "null" or none) is not measured
-// yet; add it here once a real packaged Electron run shows the header.
+// The Vite dev client. The desktop app serves the built client on
+// gates-local://app and adds that origin through GATES_LOCAL_ALLOWED_ORIGINS
+// (apps/desktop/src/main.ts), so a file:// page never gets in.
 const DEFAULT_ORIGINS = ["http://127.0.0.1:5187", "http://localhost:5187"];
 
 const log = (line: string) => process.stderr.write(`[server] ${line}\n`);

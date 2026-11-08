@@ -19,7 +19,8 @@ dies, and gives the web client a small typed bridge (`window.gatesLocal`).
 
 - `pnpm --filter @gates-local/desktop build`: bundle to `out/` (gitignored).
 - `pnpm --filter @gates-local/desktop start`: build, then `electron .`
-  (opens a real window; needs the server entry and, in dev, Vite on 5187).
+  (opens a real window on the built client in `apps/web/dist`; build it
+  first, or run `pnpm start` at the repo root, which builds both).
 - `pnpm --filter @gates-local/desktop smoke`: build, then run Electron with
   `--ozone-platform=headless` and no DISPLAY/WAYLAND_DISPLAY against the
   fake server and fake client in `test/fixtures/`. Not part of `pnpm verify`.
@@ -94,12 +95,17 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
   frame of our window.
 - While the server is starting, crashed or restarting, the window shows the
   local status page (a `data:` URL). On `ready` it loads the client.
-- Client URL: `GATES_LOCAL_WEB_URL` if set; else dev mode (unpackaged
-  default, or `GATES_LOCAL_WEB=dev`) loads `http://127.0.0.1:5187/` (Vite);
-  dist mode (`GATES_LOCAL_WEB=dist`, packaged default) loads
-  `apps/web/dist/index.html` (packaged: `<resources>/web/index.html`). A
-  failed client load shows the status page with "Try again", not a blank
-  window.
+- Client URL: `GATES_LOCAL_WEB_URL` if set; else `GATES_LOCAL_WEB=dev`
+  loads `http://127.0.0.1:5187/` (Vite); else (the default, packaged or not)
+  `gates-local://app/index.html`, a privileged standard scheme that serves
+  `apps/web/dist` (packaged: `<resources>/web`) and refuses any path outside
+  it (`src/client-protocol.ts`). Not `file://`: Electron's security
+  checklist warns a `file://` page can read other local files, and every
+  local file shares the `file://` Origin. Measured 2026-11-07: the
+  `file://` renderer's WebSocket upgrade sent `Origin: file://` and the
+  server refused it (403). Main passes the client's origin to the server in
+  `GATES_LOCAL_ALLOWED_ORIGINS`; a `file:` client gets none. A failed
+  client load shows the status page with "Try again", not a blank window.
 - `window.gatesLocal` (type `GatesLocalBridge`, exported from
   `@gates-local/desktop`):
   - `getState(): Promise<BridgeState>`
@@ -132,7 +138,7 @@ any  -> stopping -> stopped   (app quit; a stop never reports a crash)
 | `GATES_LOCAL_SERVER_ENTRY` | `apps/server/src/main.ts` (packaged: `<resources>/server/main.ts`, provisional) | Server entry passed to the child. |
 | `GATES_LOCAL_DATA_DIR` | `<userData>/server-data` | `--data-dir`. |
 | `GATES_LOCAL_USER_DATA` | `~/.config/gates-local` | Electron userData (smoke runs use a temp dir). |
-| `GATES_LOCAL_WEB` | `dev` unpackaged, `dist` packaged | Which client to load. |
+| `GATES_LOCAL_WEB` | built client on `gates-local://app` | `dev` loads Vite on 5187 (run `pnpm --filter @gates-local/web dev`). |
 | `GATES_LOCAL_WEB_URL` | none | Exact client URL; wins over `GATES_LOCAL_WEB`. |
 
 ## Not done here
