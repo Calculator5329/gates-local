@@ -76,10 +76,12 @@ const downloadTab = async (p: Page) => {
   await models(p);
   await p.getByRole("tab", { name: /^Download/ }).click();
 };
-const typed = (text: string) => async (p: Page) => {
+const runningDownload = async (p: Page) => {
+  await slowPulls();
   await downloadTab(p);
-  await p.getByRole("searchbox").fill(text);
-  await p.getByRole("button", { name: `Download ${text}` }).click();
+  await p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: "Download", exact: true }).click();
+  await expect(p.locator(".dlrow.dlg .prog-l")).toBeVisible();
+  await p.waitForTimeout(2500);
 };
 const PHONE = { width: 412, height: 915 };
 
@@ -108,73 +110,16 @@ const MODELS_SHOTS: readonly ModelsShot[] = [
     },
   },
   // a4-05, a4-12
-  {
-    name: "M-05-download-running-dark",
-    theme: "dark",
-    act: async (p) => {
-      await slowPulls();
-      await downloadTab(p);
-      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
-      await expect(p.locator(".mp-pmeta b")).toBeVisible();
-      await p.waitForTimeout(2500);
-    },
-  },
-  {
-    name: "M-06-download-running-light",
-    theme: "light",
-    act: async (p) => {
-      await slowPulls();
-      await downloadTab(p);
-      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
-      await expect(p.locator(".mp-pmeta b")).toBeVisible();
-      await p.waitForTimeout(2500);
-    },
-  },
-  // a4-07: a name outside the curated list that the library has
-  {
-    name: "M-07-typed-found-dark",
-    theme: "dark",
-    act: async (p) => {
-      await stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 20 * 1024 ** 2 });
-      await typed("nomic-embed-text:latest")(p);
-      await expect(p.locator(".mp-lookup")).toContainText("Found");
-    },
-  },
-  // a4-08
-  {
-    name: "M-08-typed-not-found-dark",
-    theme: "dark",
-    act: async (p) => {
-      await typed("mistral-nemox:12b")(p);
-      await expect(p.locator(".mp-miss")).toBeVisible();
-    },
-  },
-  // no a4 twin: the M3 ledger's ready card
-  {
-    name: "M-09-ready-dark",
-    theme: "dark",
-    act: async (p) => {
-      await downloadTab(p);
-      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
-      await expect(p.locator(".mp-ready")).toBeVisible({ timeout: 20_000 });
-    },
-  },
+  { name: "M-05-download-running-dark", theme: "dark", act: runningDownload },
+  { name: "M-06-download-running-light", theme: "light", act: runningDownload },
   // a4-09
   { name: "M-10-zero-models-dark", theme: "dark", scenario: "no-models", act: models },
   // a4-15, a4-16
   { name: "M-11-phone-installed-dark", theme: "dark", viewport: PHONE, act: models },
-  {
-    name: "M-12-phone-download-dark",
-    theme: "dark",
-    viewport: PHONE,
-    act: async (p) => {
-      await slowPulls();
-      await downloadTab(p);
-      await p.getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
-      await expect(p.locator(".mp-pmeta b")).toBeVisible();
-      await p.waitForTimeout(2500);
-    },
-  },
+  { name: "M-12-phone-download-dark", theme: "dark", viewport: PHONE, act: runningDownload },
+  // every row's actions control inside its row, at the two widths the e2e pins
+  { name: "M-14-installed-1280-dark", theme: "dark", viewport: { width: 1280, height: 800 }, act: models },
+  { name: "M-15-installed-360-dark", theme: "dark", viewport: { width: 360, height: 800 }, act: models },
   // a4-14
   {
     name: "M-13-default-dropdown-dark",

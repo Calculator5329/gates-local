@@ -689,8 +689,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-lbl::after{content:attr(data-l) / "";font-weight:600;height:0;visibility:hidden;overflow:hidden}   /* no width jump when bold */
 .mp-tab.on .mp-lbl{font-weight:600}
 .mp-n{color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
-.mp-live{display:inline-flex;align-items:center;gap:6px;color:var(--muted-foreground);font-size:13px}
-.mp-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
 .mp-quiet{color:var(--muted-foreground);font-size:13.5px;margin:0 0 16px}
 
 /* default for new chats */
@@ -726,14 +724,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-field input::-webkit-search-cancel-button{display:none}
 .mp-x{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);color:var(--muted-foreground);flex:none}
 .mp-x:hover{background:var(--hover);color:var(--foreground)}
-.mp-search{margin-bottom:20px}
 
 /* one table for both tabs: Model takes the rest, Size and fit fixed (M3 row 6) */
 .mp-card{border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
 .mp-th,.mp-row{display:grid;grid-template-columns:var(--mp-cols);align-items:center;padding:0 8px 0 14px}
 .mp-th{height:34px;font-size:12.5px;color:var(--muted-foreground);border-bottom:1px solid var(--border)}
 .mp-row{position:relative;min-height:52px;padding-top:8px;padding-bottom:8px}
-.mp-row+.mp-row,.mp-sub+.mp-row,.mp-row+.mp-sub{border-top:1px solid var(--border)}
+.mp-row+.mp-row{border-top:1px solid var(--border)}
 @media (hover:hover){.mp-card>.mp-row[data-dm]:hover,.mp-card>.mp-row[data-em]:hover{background:var(--hover)}}
 .mp-sz{text-align:right;color:var(--muted-foreground);font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .mp-fitc{padding-left:28px;min-width:0;display:flex}
@@ -745,7 +742,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-t{flex:none}
 .mp-row.cant .mp-nmn,.mp-row.cant .mp-tag{color:var(--muted-foreground)}
 .mp-p{color:var(--muted-foreground);font-size:13px;line-height:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mp-p.mp-wrap{white-space:normal;text-wrap:pretty}
 .mp-meta{display:none}
 .mp-chip{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 7px 0 5px;border-radius:4px;background:var(--selected);font-size:12px;font-weight:600;line-height:18px;color:var(--foreground)}
 .mp-chip .ic{color:var(--green)}
@@ -753,12 +749,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-kebab{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);color:var(--muted-foreground);flex:none}
 .mp-kebab:hover,.mp-kebab.on{background:var(--hover);color:var(--foreground)}
 .mp-kebab.on{background:var(--selected)}
-.mp-sub{height:34px;display:flex;align-items:center;padding:0 14px;font-size:12.5px;color:var(--muted-foreground)}
 .mp-none{padding:16px 14px;color:var(--muted-foreground);font-size:13.5px}
 .mp-foot{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;margin:10px 0 0;padding:0 0 24px;color:var(--muted-foreground);font-size:13px}
-.mp-link{display:inline-flex;align-items:center;gap:5px;color:var(--foreground);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
-.mp-link:hover{text-decoration-color:currentColor}
-.mp-link .ic{color:var(--muted-foreground)}
 
 /* fit, variant (b): the normal case quiet, the exceptions coloured with a symbol and a dotted underline */
 .mp-fit{display:inline-flex;align-items:center;gap:7px;max-width:100%;font-size:13.5px;white-space:nowrap;cursor:default;border-radius:2px}
@@ -797,27 +789,23 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .btn.mp-danger:hover{background:color-mix(in srgb,var(--red) 88%,var(--foreground))}
 .btn.mp-danger:disabled{opacity:.6;cursor:default}
 
-/* download tab */
-.mp-cards{margin:0 0 16px}
-.mp-dlc{padding-top:10px;padding-bottom:12px}
-.mp-dlc,.mp-ready,.mp-failed{grid-template-columns:minmax(0,1fr) auto}
-.mp-prog{grid-column:1/-1;padding-right:6px}
-.mp-bar{height:4px;margin:8px 0 0;border-radius:2px;background:var(--track);overflow:hidden}
-.mp-bar i{display:block;height:100%;background:var(--green);transition:width .4s ease-out}
-.mp-pmeta{display:flex;flex-wrap:wrap;margin-top:6px;color:var(--muted-foreground);font-size:13px;font-variant-numeric:tabular-nums}
-.mp-pmeta b{color:var(--foreground);font-weight:600}
-.mp-g2::before{content:"\00b7";margin:0 .3em}
-.mp-okc{color:var(--green)}
-.mp-errc{color:var(--red-fg)}
-.mp-blk{margin:0 0 8px}
-.mp-gt{margin:0 0 8px}
-.mp-gt b{display:block;font-size:13.5px;font-weight:600}
-.mp-gt span{display:block;color:var(--muted-foreground);font-size:13px}
-.mp-lookup{display:inline-flex;align-items:center;gap:8px;color:var(--muted-foreground);font-size:13.5px;white-space:nowrap}
-.mp-miss{grid-column:1/-1;color:var(--muted-foreground);font-size:13.5px;line-height:1.5}
-.mp-miss .mp-tag{display:inline-flex;vertical-align:bottom;max-width:60%}
-.mp-tag.miss{color:var(--muted-foreground)}
-.mp-phone{display:none}
+/* a running download's detail (first run, Installed) and the Download tab */
+.mdl{flex:1;min-width:0}
+.mdl .mn{display:block;font-size:14px;font-weight:500}
+.mdl .mn small{font-weight:400;font-size:12.5px;color:var(--muted-foreground);margin-left:8px}
+.mdl .prog,.dlrow.dlg .prog{margin-top:10px}
+.dlrow{display:flex;align-items:center;gap:16px;padding:12px 16px;min-height:64px}
+.dlrow+.dlrow{border-top:1px solid var(--border)}
+.dlrow .sl b small{font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px}
+.dl-v{flex:none;width:196px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px;font-variant-numeric:tabular-nums}
+.dl-v .w{display:inline-flex;align-items:center;gap:6px;color:var(--green-fg)}
+.dl-v .w.spill{color:var(--amber-fg)}.dl-v .w.no{color:var(--red-fg)}
+.dl-v .w .vd{width:7px;height:7px;border-radius:50%}
+.dl-v small{font-size:12.5px;color:var(--muted-foreground)}
+.dl-a{flex:none;width:140px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.dlrow.dlg .prog-l{margin-top:6px}
+.mp-row.mp-dling{grid-template-columns:minmax(0,1fr);padding:10px 14px 12px}
+.mp-first .mp-row.mp-dling{padding-left:0;padding-right:0}
 
 /* zero models */
 .mp-empty{padding:40px 32px;text-align:center;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
@@ -826,7 +814,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mp-empty p{max-width:440px;margin:0 auto 18px;color:var(--muted-foreground);text-wrap:balance}
 .mp-empty p b{color:var(--foreground);font-weight:600;white-space:nowrap}
 .mp-empty .mp-r2{justify-content:center;margin:0}
-.mp-empty .mp-cards{margin:16px 0 0;text-align:left}
 .mp-first h2{margin-top:0}
 .mp-first p{margin:0 0 14px;color:var(--muted-foreground)}   /* no outer border while the first model downloads (M3 row 7) */
 
@@ -854,15 +841,18 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
   .mp-meta .mp-fit{font-size:13px}
   .mp-meta .mp-fit.x{padding:13px 0;margin:-13px 0}
   .mp-l1 .mp-chip{display:none}
-  .mp-kebab,.mp-acts .btn{min-width:44px;min-height:44px}
-  .mp-acts .btn{height:44px}
+  .mp-kebab{min-width:44px;min-height:44px}
   .mp-acts{gap:4px}
-  .mp-dlc{padding-right:8px}
-  .mp-dlc .mp-acts{align-self:start}
-  .mp-pmeta{flex-direction:column}
-  .mp-g2::before{content:none}
-  .mp-miss,.mp-lib .mp-fitc{grid-column:1/-1;padding-left:0}
   .mp-menu{width:min(304px,calc(100vw - 32px))}
-  .mp-foot .mp-link{min-height:44px}
   .mp-tabs .mp-tab{min-height:44px}
+  /* the download rows and the typed name, stacked to fit: layout only */
+  .mp .dlrow{flex-wrap:wrap;gap:8px 16px}
+  .mp .dlrow .sl{flex:1 1 100%}
+  .mp .dl-v{flex:1;width:auto;min-width:0;align-items:flex-start}
+  .mp .dl-a{width:auto}
+  .mp .dlrow .qa,.mp .srow .qa,.mp .prog-l .qa{min-height:44px}
+  .mp .srow{flex-wrap:wrap}
+  .mp .srow .sl{flex:1 1 100%}
+  .mp .srow .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}
+  .mp .srow .inp{flex:1;min-width:0;height:44px}
 }

@@ -1,22 +1,17 @@
 // The rules behind Settings › Models (models-rules.ts): fit words per
-// verdict, the installed order, the next default, Recommended with its
-// backfill, the typed-name check and the name truncation.
-import type { CatalogEntry, FitReport, FitVerdict, PullProgress } from "@gates-local/contracts";
+// verdict, the installed order, the next default and the name truncation.
+import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import {
   FIT_LABELS,
   type Row,
   about,
   canBeDefault,
-  downloadCards,
   fitLabel,
   fitReason,
   fitSymbol,
-  lookup,
   nameOf,
   nextDefault,
-  progressParts,
-  recommendedPicks,
   shortTag,
   sizeText,
   sortRows,
@@ -46,8 +41,6 @@ const entry = (name: string, verdict: FitVerdict | undefined, more: Partial<Cata
   ...(verdict === undefined ? {} : { fit: fit(verdict) }),
   ...more,
 });
-
-const p = (name: string, state: PullProgress["state"], more: Partial<PullProgress> = {}): PullProgress => ({ name, state, completedBytes: 0, ...more });
 
 const row = (name: string, verdict: FitVerdict | undefined = "fits", chat = true, display = name): Row => ({ name, display, chat, verdict });
 
@@ -143,80 +136,3 @@ describe("installed order and the default", () => {
   });
 });
 
-describe("Recommended", () => {
-  const cat = [entry("w1", "fits"), entry("w2", "fits"), entry("slow", "spills"), entry("w3", "fits"), entry("w4", "fits"), entry("own", "fits", { purpose: "Installed by you", installed: true })];
-  const none = new Set<string>();
-
-  it("lists only models that run well, in catalog order, three at most", () => {
-    const r = recommendedPicks(cat, none, none);
-    expect(r.picks.map((c) => c.name)).toEqual(["w1", "w2", "w3"]);
-    expect(r).toMatchObject({ allInstalled: false, slower: false });
-  });
-
-  it("backfills the next pick once one is installed or downloading", () => {
-    expect(recommendedPicks(cat, new Set(["w1"]), none).picks.map((c) => c.name)).toEqual(["w2", "w3", "w4"]);
-    expect(recommendedPicks(cat, none, new Set(["w2"])).picks.map((c) => c.name)).toEqual(["w1", "w3", "w4"]);
-  });
-
-  it("says every pick is installed when none is left", () => {
-    const r = recommendedPicks(cat, new Set(["w1", "w2", "w3", "w4"]), none);
-    expect(r.picks).toEqual([]);
-    expect(r.allInstalled).toBe(true);
-  });
-
-  it("on a computer where nothing runs well, offers the lightest slower picks and says so", () => {
-    const slow = [entry("s-big", "spills", { downloadBytes: 9 * GIB }), entry("s-small", "spills", { downloadBytes: 3 * GIB }), entry("never", "refuse")];
-    const r = recommendedPicks(slow, none, none);
-    expect(r.picks.map((c) => c.name)).toEqual(["s-small", "s-big"]);
-    expect(r.slower).toBe(true);
-  });
-});
-
-describe("downloads", () => {
-  it("splits pushes into running, ready and failed cards", () => {
-    const pulls = { a: p("a", "downloading"), b: p("b", "done"), c: p("c", "error"), d: p("d", "cancelled"), e: p("e", "queued") };
-    const c = downloadCards(pulls);
-    expect(c.running.map((x) => x.name)).toEqual(["a", "e"]);
-    expect(c.ready.map((x) => x.name)).toEqual(["b"]);
-    expect(c.failed.map((x) => x.name)).toEqual(["c"]);
-  });
-
-  it("leaves the not-found error of the typed name to the search results", () => {
-    const pulls = { nemox: p("nemox", "error", { reason: "not-found" }) };
-    expect(downloadCards(pulls, "nemox").failed).toEqual([]);
-    expect(downloadCards(pulls, "other").failed).toHaveLength(1);
-  });
-
-  it("words progress as percent, time left, bytes and speed", () => {
-    expect(progressParts(p("a", "downloading", { completedBytes: 3.9 * GIB, totalBytes: 9.3 * GIB, bytesPerSecond: 41e6 }))).toEqual({
-      pct: 41,
-      left: "about 3 min left",
-      got: "3.9 of 9.3 GB",
-      rate: "41 MB/s",
-    });
-    expect(progressParts(p("a", "queued"))).toEqual({ pct: null, left: null, got: null, rate: null });
-  });
-});
-
-describe("typed names", () => {
-  const cat = [entry("qwen3:14b", "fits"), entry("gemma4:12b", "fits", { installed: true })];
-  const none = new Set<string>();
-
-  it("answers a catalog name at once and an installed one as installed", () => {
-    expect(lookup("qwen3:14b", cat, none, {})).toMatchObject({ k: "catalog", entry: { name: "qwen3:14b" } });
-    expect(lookup("gemma4:12b", cat, none, {})).toEqual({ k: "installed" });
-    expect(lookup("phi4", cat, new Set(["phi4:latest"]), {})).toEqual({ k: "installed" });
-  });
-
-  it("leaves any other name unchecked until its download asks the library", () => {
-    expect(lookup("mistral-nemo", cat, none, {})).toEqual({ k: "unchecked" });
-    expect(lookup("mistral-nemo", cat, none, { "mistral-nemo": p("mistral-nemo", "queued") })).toEqual({ k: "checking" });
-    expect(lookup("mistral-nemo", cat, none, { "mistral-nemo": p("mistral-nemo", "downloading", { totalBytes: 7 * GIB }) })).toEqual({ k: "found", totalBytes: 7 * GIB });
-    expect(lookup("mistral-nemox", cat, none, { "mistral-nemox": p("mistral-nemox", "error", { reason: "not-found" }) })).toEqual({ k: "not-found" });
-  });
-
-  it("ignores text that cannot be a model name", () => {
-    expect(lookup("", cat, none, {})).toEqual({ k: "none" });
-    expect(lookup("a model for code", cat, none, {})).toEqual({ k: "none" });
-  });
-});

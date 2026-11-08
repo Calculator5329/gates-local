@@ -48,27 +48,19 @@ interface Job {
   stopped?: boolean;
 }
 
-/** Which known failure Ollama's error text names, if any (PullProgress.reason). */
-export function pullErrorReason(raw: string): PullProgress["reason"] {
-  if (/no space left|disk full|not enough space/i.test(raw)) return "no-space";
-  if (/file does not exist|not found|manifest unknown|invalid model name|invalid reference/i.test(raw)) return "not-found";
-  if (/connection refused|ECONNREFUSED|fetch failed|network|timeout|no such host|dial tcp/i.test(raw)) return "network";
-  return undefined;
-}
-
 /** Ollama's error text, in words a person can act on. */
 export function plainPullError(name: string, raw: string): string {
   const text = raw.trim();
-  switch (pullErrorReason(text)) {
-    case "no-space":
-      return `Not enough disk space to download ${name}. Free some space and download it again; the part already downloaded is kept.`;
-    case "not-found":
-      return `Ollama has no model named "${name}". Check the name in the Ollama library.`;
-    case "network":
-      return `Could not reach the Ollama library to download ${name}. Check the network and download it again; the part already downloaded is kept.`;
-    default:
-      return `Downloading ${name} failed: ${text}`;
+  if (/no space left|disk full|not enough space/i.test(text)) {
+    return `Not enough disk space to download ${name}. Free some space and download it again; the part already downloaded is kept.`;
   }
+  if (/file does not exist|not found|manifest unknown|invalid model name|invalid reference/i.test(text)) {
+    return `Ollama has no model named "${name}". Check the name in the Ollama library.`;
+  }
+  if (/connection refused|ECONNREFUSED|fetch failed|network|timeout|no such host|dial tcp/i.test(text)) {
+    return `Could not reach the Ollama library to download ${name}. Check the network and download it again; the part already downloaded is kept.`;
+  }
+  return `Downloading ${name} failed: ${text}`;
 }
 
 const bytes = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : undefined);
@@ -216,11 +208,8 @@ export function createPullManager(options: PullManagerOptions): PullManager {
           setState(job, { state: "cancelled", completedBytes: job.progress.completedBytes, message: job.stopped ? PULL_STOPPED_MESSAGE : "Download cancelled." });
           return;
         }
-        const raw = e instanceof Error ? e.message : String(e);
-        const plain = e instanceof PullFailure && e.plain;
-        const message = plain ? raw : plainPullError(job.name, raw);
-        const reason = plain ? undefined : pullErrorReason(raw);
-        setState(job, { state: "error", completedBytes: job.progress.completedBytes, message, ...(reason === undefined ? {} : { reason }) });
+        const message = e instanceof PullFailure && e.plain ? e.message : plainPullError(job.name, e instanceof Error ? e.message : String(e));
+        setState(job, { state: "error", completedBytes: job.progress.completedBytes, message });
       })
       .finally(() => {
         running = undefined;

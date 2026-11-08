@@ -1,7 +1,6 @@
 // Settings › Models against the in-memory server (harness.ts): Use as default
-// updates the setting and the Default card, removing the default moves it to
-// the model the dialog named, Cancel takes a download's card away, and the
-// ready card's Start chat opens a new chat on that model.
+// updates the setting and the Default card, and removing the default moves it
+// to the model the dialog named.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelInfo, Settings } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
@@ -107,35 +106,5 @@ describe("Remove", () => {
     expect(r).toMatch(/^Couldn't remove alpha:7b because/);
     expect(b.server.calls("settings.update")).toHaveLength(0);
     expect(card()).toBe("alpha:7b");
-  });
-});
-
-describe("downloads", () => {
-  it("Cancel takes the download's card away", async () => {
-    await boot();
-    void session.pull("qwen3:14b");
-    await until(() => b.server.calls("models.pull").length === 1, 2000, "models.pull");
-    b.server.push("models.pull", { name: "qwen3:14b", state: "downloading", completedBytes: 1e9, totalBytes: 9e9, bytesPerSecond: 4e7 });
-    await until(() => rules.downloadCards(store.getState().pulls).running.length === 1, 2000, "a running card");
-    expect(await actions.cancelDownload("qwen3:14b")).toBeNull();
-    expect(b.server.calls("models.cancelPull").at(-1)?.params).toEqual({ name: "qwen3:14b" });
-    const cards = rules.downloadCards(store.getState().pulls);
-    expect(cards.running).toEqual([]);
-    expect(cards.ready).toEqual([]);
-  });
-
-  it("the ready card's Start chat opens a new chat on that model", async () => {
-    await boot();
-    session.openSettings("models", true);
-    installed = [...installed, info("qwen3:14b")];
-    b.server.push("models.pull", { name: "qwen3:14b", state: "done", completedBytes: 9e9, totalBytes: 9e9 });
-    await until(() => (store.getState().models ?? []).some((m) => m.name === "qwen3:14b"), 2000, "the refreshed list");
-    expect(rules.downloadCards(store.getState().pulls).ready.map((p) => p.name)).toEqual(["qwen3:14b"]);
-    actions.startChatWith("qwen3:14b");
-    const s = store.getState();
-    expect(s.view).toBe("new");
-    expect(s.threadId).toBeNull();
-    expect(s.model).toBe("qwen3:14b");
-    expect(rules.downloadCards(s.pulls).ready).toEqual([]);
   });
 });

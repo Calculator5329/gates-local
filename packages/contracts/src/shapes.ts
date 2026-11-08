@@ -244,12 +244,6 @@ export const PullProgress = S.Struct({
   totalBytes: S.optional(Count),
   bytesPerSecond: S.optional(S.Finite),
   message: S.optional(S.String),
-  /**
-   * On "error", what went wrong when the server could tell: the library has
-   * no such model, the disk is full, or the library could not be reached. A
-   * client words the not-found case beside the typed name. Added 2026-11-07.
-   */
-  reason: S.optional(S.Literals(["not-found", "no-space", "network"])),
 });
 export type PullProgress = typeof PullProgress.Type;
 
