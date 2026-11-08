@@ -73,7 +73,7 @@ const START_REPLY =
 export function seedDesign(dbPath: string, now: number): string {
   const at = dayClock(now);
   const older: [string, number][] = [
-    ["Draft the drive-sync README", new Date(new Date(now).getFullYear(), 9, 21, 11, 0).getTime()],
+    ["Draft the drive-sync README", zoned(wallClock(now).y, 9, 21, 11, 0)],
     ["Whisper latency check", at(5, 10, 30)],
     ["Ollama 0.40 release notes", at(3, 9, 15)],
     ["Benchmark: qwen vs gemma at 32k", at(1, 16, 12)],
@@ -98,10 +98,40 @@ export function seedDesign(dbPath: string, now: number): string {
   return writeThreads(dbPath, now, older, "Library: Effect Schema books", turns);
 }
 
-/** Midnight-relative times for a sidebar: `daysAgo` days before `now`'s day at h:m, local time. */
+/**
+ * The zone the seeded wall-clock times are in: the browser timezoneId of
+ * shots.spec.ts and readme-shots.spec.ts. Never the seeding process's own
+ * zone, so a host in any zone writes the same timestamps (seed.test.ts).
+ */
+const SEED_ZONE = "America/Chicago";
+const zoneParts = new Intl.DateTimeFormat("en-US", {
+  timeZone: SEED_ZONE, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric",
+});
+
+/** SEED_ZONE's wall clock at instant `t`, as UTC fields: year, month (0-11), day, hour, minute, second. */
+function wallClock(t: number) {
+  const p = Object.fromEntries(zoneParts.formatToParts(t).map((x) => [x.type, Number(x.value)]));
+  return { y: p["year"]!, mo: p["month"]! - 1, d: p["day"]!, h: p["hour"]!, mi: p["minute"]!, s: p["second"]! };
+}
+
+/** How far SEED_ZONE's wall clock is ahead of UTC at instant `t`, in ms. */
+function offsetAt(t: number): number {
+  const w = wallClock(t);
+  return Date.UTC(w.y, w.mo, w.d, w.h, w.mi, w.s) - t;
+}
+
+/** The instant SEED_ZONE shows as y-mo-d h:mi; days past the month's end roll over as in Date.UTC. */
+function zoned(y: number, mo: number, d: number, h: number, mi: number): number {
+  const asUtc = Date.UTC(y, mo, d, h, mi);
+  // The offset at the guess can differ across a DST change; one more pass settles it.
+  const first = asUtc - offsetAt(asUtc);
+  return asUtc - offsetAt(first);
+}
+
+/** Midnight-relative times for a sidebar: `daysAgo` days before `now`'s day at h:m, in SEED_ZONE. */
 function dayClock(now: number) {
-  const day = new Date(now);
-  return (daysAgo: number, h: number, m: number) => new Date(day.getFullYear(), day.getMonth(), day.getDate() - daysAgo, h, m).getTime();
+  const day = wallClock(now);
+  return (daysAgo: number, h: number, m: number) => zoned(day.y, day.mo, day.d - daysAgo, h, m);
 }
 
 /** One-message threads for the sidebar, then the open thread with its turns; returns the open thread's id. */
@@ -147,7 +177,7 @@ const CLEAR_REPLY = "Each call cancels the previous keystroke's timer, so only t
 export function seedReadme(dbPath: string, now: number): string {
   const at = dayClock(now);
   const older: [string, number][] = [
-    ["Summarize the CAP theorem", new Date(new Date(now).getFullYear(), 9, 21, 11, 0).getTime()],
+    ["Summarize the CAP theorem", zoned(wallClock(now).y, 9, 21, 11, 0)],
     ["Regex for ISO 8601 dates", at(5, 10, 30)],
     ["Explain HTTP caching headers", at(3, 9, 15)],
     ["What is a B-tree?", at(1, 16, 12)],
