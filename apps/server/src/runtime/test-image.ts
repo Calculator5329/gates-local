@@ -11,6 +11,8 @@ export interface OwnedComfy {
   readonly image: ImageModule;
   /** comfyui.service stop calls so far. */
   stops(): number;
+  /** The next service.inspect() or stop() waits for release(); `asked` resolves when it is called. */
+  hold(call: "inspect" | "stop"): { asked: Promise<void>; release(): void };
   close(): void;
 }
 
@@ -18,6 +20,13 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
   const store = openThreadStore(path.join(dir, "image-threads.sqlite"));
   const calls: string[] = [];
   let active = false;
+  const holds = new Map<string, { ask: () => void; until: Promise<void> }>();
+  const held = async (call: string) => {
+    const h = holds.get(call);
+    holds.delete(call);
+    h?.ask();
+    await h?.until;
+  };
   const image = createImageModule({
     dataDir: dir,
     lease,
@@ -34,12 +43,16 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
     localAddresses: () => [],
     lookupHost: async () => ["127.0.0.1"],
     service: {
-      inspect: async () => ({ present: true, active, activeState: active ? "active" : "inactive", pid: active ? 4242 : 0 }),
+      inspect: async () => {
+        await held("inspect");
+        return { present: true, active, activeState: active ? "active" : "inactive", pid: active ? 4242 : 0 };
+      },
       start: async () => {
         calls.push("start");
         active = true;
       },
       stop: async () => {
+        await held("stop");
         calls.push("stop");
         active = false;
       },
@@ -56,5 +69,12 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
   const { jobId } = await image.generate({ prompt: "a tree" });
   await image.wait(jobId);
   if (image.current().owner !== "app" || !calls.includes("start")) throw new Error(`the fake ComfyUI was not app-owned: ${JSON.stringify(image.current())}`);
-  return { image, stops: () => calls.filter((c) => c === "stop").length, close: () => store.close() };
+  const hold = (call: "inspect" | "stop") => {
+    let ask!: () => void;
+    let release!: () => void;
+    const asked = new Promise<void>((r) => (ask = r));
+    holds.set(call, { ask, until: new Promise<void>((r) => (release = r)) });
+    return { asked, release };
+  };
+  return { image, stops: () => calls.filter((c) => c === "stop").length, hold, close: () => store.close() };
 }

@@ -43,7 +43,10 @@ export interface ImageModule {
   cancel(jobId: string): { cancelled: boolean };
   /** Test/CLI completion seam; errors are reported on image.event. */
   wait(jobId: string): Promise<void>;
-  /** `signal` (a turn's reclaim) cancels the wait for the GPU claim; a cancelled call never stops ComfyUI. */
+  /**
+   * `signal` (a turn's reclaim) ends the wait for the GPU claim and every read under it, so the
+   * claim goes back at once; a cancelled call never starts a stop. A stop already begun runs to its end.
+   */
   stopIdle(signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }
@@ -361,15 +364,16 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!owned || jobs.size > 0) return;
       await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
-        const unit = await service.inspect();
+        // The reads end at the signal, so a cancel gives the claim back at once; the stop does not.
+        const unit = await untilAborted(service.inspect(), signal);
         // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
         // the next job at this address or a stop clears it.
         const mine = stuck.get(owned.baseUrl);
         if (!unit.active || unit.pid !== owned.pid) { owned = undefined; return; }
         // Another Comfy client may have submitted work since ours ended.
         // Our own prompt stuck past its cancel deadline does not keep an app-started ComfyUI up.
-        if (!await client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined)) { armIdle(); return; }
-        const latest = await service.inspect();
+        if (!await untilAborted(client(owned.baseUrl).idle(mine?.pid === owned.pid ? mine.promptId : undefined), signal)) { armIdle(); return; }
+        const latest = await untilAborted(service.inspect(), signal);
         if (!latest.active || latest.pid !== owned.pid) { owned = undefined; return; }
         if (jobs.size > 0) return;
         signal?.throwIfAborted();

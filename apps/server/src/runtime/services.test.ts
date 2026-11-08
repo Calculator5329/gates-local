@@ -505,6 +505,44 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     await r.done();
     comfy.close();
   });
+
+  it("the reclaim holding its claim, in a held service.inspect(): a switch ends the turn and the image claim with it", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const r = await rig(cold, { image: comfy.image, lease, fit: tight });
+    const inspect = comfy.hold("inspect");
+    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    expect(await settledWithin(inspect.asked, 1000)).toEqual({ resolved: undefined });
+    expect(lease.status()).toMatchObject({ holder: "image" });
+    const switched = r.s.runtime.setMode("app");
+    expect(await send).toMatchObject({ code: "runtime-changed" });
+    expect(await settledWithin(r.s.loader.turnsEnded(), 1000)).toEqual({ resolved: undefined });
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    await switched;
+    inspect.release();
+    await sleep(20);
+    expect(comfy.stops()).toBe(0);
+    await r.done();
+    comfy.close();
+  });
+
+  it("a ComfyUI stop already begun: the turn ends when it does, and a stop past the drain bound fails the switch", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const r = await rig(cold, { image: comfy.image, lease, fit: tight, turnDrainMs: 200 });
+    const stop = comfy.hold("stop");
+    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    expect(await settledWithin(stop.asked, 1000)).toEqual({ resolved: undefined });
+    expect(await settledWithin(r.s.runtime.setMode("app"), 2000)).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
+    expect(r.s.runtime.mode()).toBe("system");
+    expect(lease.status()).toMatchObject({ holder: "image" });
+    stop.release();
+    expect(await send).toMatchObject({ code: "runtime-changed" });
+    expect(comfy.stops()).toBe(1);
+    expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
+    await r.done();
+    comfy.close();
+  });
 });
 
 describe("a load that needs a busy model's GPU: turns.blocking and chat.send stopOthers", () => {

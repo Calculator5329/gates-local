@@ -439,12 +439,13 @@ export function createApp(deps: AppDeps): App {
         const fit = async (signal: AbortSignal) => (await checkFit({ ...deps.fit, baseUrl, model, numCtx, signal, reclaim })).report;
         // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the
         // GPU alone, so it runs before this turn's own claim: a nested claim would wait on itself.
-        // A cancel, switch or shutdown ends the reclaim at once; a cancelled stopIdle never stops ComfyUI.
+        // A cancel, switch or shutdown ends the reclaim at once, unless its ComfyUI stop has begun:
+        // the turn then ends with the stop, so a switch's drain waits for it (or fails the switch).
         if (deps.image?.current().owner === "app") {
           const comfy = deps.image;
           const signal = turn.controller.signal;
           try {
-            if ((await fit(signal)).verdict !== "fits") await untilAborted(comfy.stopIdle(signal), signal);
+            if ((await fit(signal)).verdict !== "fits") await comfy.stopIdle(signal);
           } catch (e) {
             if (signal.aborted) throw stoppedEarly();
             throw e;
