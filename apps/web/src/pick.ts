@@ -20,6 +20,9 @@ export const pickedModel = (models: readonly ModelInfo[] | undefined): ModelInfo
 /** What to do with the composer's model: keep it, switch to another, or clear it (nothing can chat). */
 export type ModelDecision = { kind: "keep" } | { kind: "set"; model: string } | { kind: "clear" };
 
+/** A model that may be the selection: it can chat, or it is installed and not described yet. */
+export const choosable = (m: Caps): boolean => canChat(m) || m.capabilities.includes("unknown");
+
 const keep: ModelDecision = { kind: "keep" };
 const canChatAs = (models: readonly ModelInfo[], name: string | undefined) => name !== undefined && models.some((m) => m.name === name && canChat(m));
 
@@ -38,7 +41,7 @@ export function modelChoice(models: readonly ModelInfo[] | undefined, current: s
   if (models === undefined) return keep;
   const mine = models.find((m) => m.name === chosen);
   const appChoice = pickedModel(models)?.name ?? (canChatAs(models, current) ? current : chatModels(models)[0]?.name);
-  const next = mine !== undefined && (canChat(mine) || mine.capabilities.includes("unknown")) ? mine.name : appChoice;
+  const next = mine !== undefined && choosable(mine) ? mine.name : appChoice;
   if (next === undefined) return { kind: "clear" };
   return next === current ? keep : { kind: "set", model: next };
 }
