@@ -42,12 +42,26 @@ declare global {
 const perf = { deltas: 0, flushes: 0 };
 window.glPerf = perf;
 
-/** Where the server is: the desktop bridge, else ?server= or VITE_GATES_LOCAL_SERVER. */
+/**
+ * Where the server is: the desktop bridge, else ?server= or
+ * VITE_GATES_LOCAL_SERVER, else this page's own host when the server served
+ * the page (the phone listener injects the gates-local-server meta).
+ */
 async function serverUrl(): Promise<string | null> {
   if (window.gatesLocal) return window.gatesLocal.getServerUrl();
   const fromQuery = new URLSearchParams(location.search).get("server");
   const fromEnv: unknown = import.meta.env["VITE_GATES_LOCAL_SERVER"];
-  return fromQuery ?? (typeof fromEnv === "string" && fromEnv !== "" ? fromEnv : null);
+  const configured = fromQuery ?? (typeof fromEnv === "string" && fromEnv !== "" ? fromEnv : null);
+  if (configured !== null) return configured;
+  if (document.querySelector('meta[name="gates-local-server"]')?.getAttribute("content") === "same-origin") {
+    return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
+  }
+  return null;
+}
+
+/** A /files/ URL on the server; the token rides along only when the socket URL had one. */
+export function fileUrl(origin: string, token: string | null, path: string): string {
+  return `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
 
 /** Resolves on the bridge's next ready state, or after ms when there is no bridge. */
@@ -83,7 +97,8 @@ async function loop(): Promise<void> {
       continue;
     }
     const parsed = new URL(url);
-    setState({ serverOrigin: `http://${parsed.host}`, fileToken: parsed.searchParams.get("token") });
+    // Image URLs follow the socket's scheme: wss gives https.
+    setState({ serverOrigin: `${parsed.protocol === "wss:" ? "https:" : "http:"}//${parsed.host}`, fileToken: parsed.searchParams.get("token") });
     const ws = new WebSocket(url);
     const c = createClient(ws, { onProtocolError: (e) => console.warn(`[gates-local] ${e.code}`) });
     const opened = await new Promise<boolean>((resolve) => {

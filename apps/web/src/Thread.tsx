@@ -6,7 +6,7 @@ import { describeModel, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { focusComposer } from "./Sidebar.tsx";
-import { retry, unqueue } from "./session.ts";
+import { fileUrl, retry, unqueue } from "./session.ts";
 import { NA, type Queued, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -206,7 +206,7 @@ function ImageOut({ path }: { path: string }) {
       </div>
     );
   }
-  const src = `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const src = fileUrl(origin, token, path);
   return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
 }
 
