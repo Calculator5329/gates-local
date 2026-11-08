@@ -247,8 +247,7 @@ export function createApp(deps: AppDeps): App {
       if (event.type === "thinking") sentThinking += event.text;
       push("chat.event", { turnId, threadId, event });
     };
-    /** halt() ended the turn: save what was sent as a stopped reply, then its one terminal event. */
-    // TODO(turns-queue): R3-02, R4-06: nothing marks the saved reply stopped, and its tool steps are not saved.
+    /** halt() ended the turn: save the text and thinking sent so far, then its one terminal event. */
     const endHalted = (reason: AppError) => {
       if (over) return;
       let partial: Message | undefined;

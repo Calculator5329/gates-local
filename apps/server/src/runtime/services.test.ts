@@ -392,7 +392,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
 });
 
 describe("R3-02: a switch saves the reply streamed so far", () => {
-  // TODO(turns-queue): R3-02: "marked stopped" is the event's code only; no stopped marker is stored yet.
+  // "Marked stopped" is the terminal event's code; the saved message stores no stopped marker.
   it("text and thinking already sent are saved, marked stopped, with one runtime-changed event", async () => {
     const streaming = signalled();
     const r = await rig({

@@ -76,6 +76,21 @@ never shows a whisper stop, start or restart.
       and put the reason in the refusal text.
 - [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
       when 11435 is busy with another service.
+- [ ] Stopped replies (turns/queue lane, from the runtime-fix04 review,
+      R3-02 and R4-06): a reply cut by a runtime switch or a preemption is
+      saved with its text and thinking, but nothing stored marks it stopped
+      (the stopped code is only on the chat event), and its tool steps are
+      not saved. `endHalted` in `apps/server/src/app.ts`.
+      *Accept:* a reloaded thread shows the cut reply as stopped, with the
+      tool steps it had sent.
+- [ ] Shutdown order (turns/queue lane, runtime-fix04 review R2-03):
+      `apps/server/src/main.ts` exits by force after 2.5 s, but
+      `image.close()` can wait up to 15 s for a ComfyUI stop already under
+      way, and the app-owned Ollama is stopped only after it, so a slow
+      ComfyUI stop skips the Ollama cleanup. Run that cleanup first or
+      alongside, behind a shutdown sequence a test can drive.
+      *Accept:* with a ComfyUI stop held, the owned Ollama is still
+      stopped before the forced exit.
 
 ## Next: slices 2 to 4
 
