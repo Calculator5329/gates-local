@@ -1,12 +1,12 @@
 // The checkout's lock and the saved transaction: stale owners, and the race
 // between two runs both clearing one.
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runUpdate } from "./apply.ts";
 import { UpdateGuardError } from "./guard.ts";
-import { HEARTBEAT_MS, LOCK_FILE, STALE_MS, acquireLock, lockHolder, stateDir, takeAway } from "./lock.ts";
+import { LOCK_FILE, acquireLock, lockHolder, stateDir } from "./lock.ts";
 import type { Runner } from "./run.ts";
 import { type Repos, commit, fakePnpm, git, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
 import { TRANSACTION_FILE, clearTransaction, readTransaction, saveTransaction } from "./transaction.ts";
@@ -26,7 +26,8 @@ afterEach(() => {
 });
 
 const DEAD = 999_999_999;
-const owner = (pid: number) => JSON.stringify({ pid, startedAt: 1, token: "someone" });
+const DAY = 24 * 60 * 60_000;
+const owner = (pid: number, start: string | null = null) => JSON.stringify({ pid, start, startedAt: 1, token: "someone" });
 const age = (file: string, ms: number) => {
   const at = new Date(Date.now() - ms);
   utimesSync(file, at, at);
@@ -41,8 +42,8 @@ describe("the checkout's lock", () => {
     const lock = taken(acquireLock(r.clone));
     expect(statSync(lockFile).isFile()).toBe(true);
     expect(git(r.clone, "status", "--porcelain", "--ignored")).toBe("");
-    expect(acquireLock(r.clone)).toEqual({ ok: false, pid: process.pid });
-    expect(lockHolder(r.clone)).toEqual({ pid: process.pid });
+    expect(acquireLock(r.clone)).toEqual({ ok: false, pid: process.pid, file: lockFile });
+    expect(lockHolder(r.clone)).toEqual({ pid: process.pid, file: lockFile });
     lock.release();
     expect(lockHolder(r.clone)).toBeNull();
     taken(acquireLock(r.clone)).release();
@@ -56,32 +57,34 @@ describe("the checkout's lock", () => {
     lock.release();
   });
 
-  it("waits for a live owner, however old its lock, until its heartbeat has stopped", () => {
+  it("never takes over from a live owner, however old its lock or wherever the clock has gone", () => {
     writeFileSync(lockFile, owner(process.pid));
-    age(lockFile, STALE_MS - 60_000);
-    expect(acquireLock(r.clone).ok).toBe(false);
-    // The pid was reused by something else, or the owner hangs.
-    age(lockFile, STALE_MS + 60_000);
-    taken(acquireLock(r.clone)).release();
+    age(lockFile, DAY);
+    expect(acquireLock(r.clone)).toEqual({ ok: false, pid: process.pid, file: lockFile });
+    expect(acquireLock(r.clone, { now: () => Date.now() + 365 * DAY }).ok).toBe(false);
+    expect(lockHolder(r.clone)).toEqual({ pid: process.pid, file: lockFile });
+    expect(readFileSync(lockFile, "utf8")).toBe(owner(process.pid));
+  });
+
+  it("knows a reused pid by its start time, so another program with that number does not hold updates forever", () => {
+    writeFileSync(lockFile, owner(process.pid, "started long ago"));
+    expect(lockHolder(r.clone, { startOf: () => "started just now" })).toBeNull();
+    taken(acquireLock(r.clone, { startOf: () => "started just now" })).release();
+  });
+
+  it("keeps refusing when the same process is still there, or its start time cannot be read", () => {
+    writeFileSync(lockFile, owner(process.pid, "the same start"));
+    expect(acquireLock(r.clone, { startOf: () => "the same start" }).ok).toBe(false);
+    expect(acquireLock(r.clone, { startOf: () => null }).ok).toBe(false);
+    writeFileSync(lockFile, owner(process.pid, null));
+    expect(acquireLock(r.clone, { startOf: () => "anything" }).ok).toBe(false);
   });
 
   it("treats a file with no owner in it as being written, then as stale", () => {
     writeFileSync(lockFile, "");
-    expect(acquireLock(r.clone)).toEqual({ ok: false, pid: null });
+    expect(acquireLock(r.clone)).toEqual({ ok: false, pid: null, file: lockFile });
     age(lockFile, 120_000);
     taken(acquireLock(r.clone)).release();
-  });
-
-  it("two takers of a stale lock: the one that judged an older file puts a live lock back", () => {
-    const judged = owner(DEAD);
-    writeFileSync(lockFile, judged);
-    // The other taker clears it and takes the lock, after this one read the dead owner.
-    expect(takeAway(lockFile, judged)).toBe(true);
-    const live = taken(acquireLock(r.clone));
-    expect(takeAway(lockFile, judged)).toBe(false);
-    expect(live.stillOurs()).toBe(true);
-    expect(acquireLock(r.clone).ok).toBe(false);
-    live.release();
   });
 
   it("does not remove a lock that has become someone else's", () => {
@@ -104,19 +107,6 @@ describe("the checkout's lock", () => {
     lock.release();
   });
 
-  it("keeps a long step's lock fresh, so a slow install does not read as stale", () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    try {
-      const lock = taken(acquireLock(r.clone));
-      age(lockFile, STALE_MS + 60_000);
-      vi.advanceTimersByTime(HEARTBEAT_MS);
-      expect(acquireLock(r.clone).ok).toBe(false);
-      lock.release();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("is refused outside the test root before it writes anything", () => {
     const outside = realpathSync(mkdtempSync(path.join(tmpdir(), "gl-update-outside-")));
     try {
@@ -125,6 +115,65 @@ describe("the checkout's lock", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+const claims = () => readdirSync(path.dirname(lockFile)).filter((f) => f.includes(".takeover."));
+
+describe("taking over from a dead owner", () => {
+  it("A judges a dead lock and pauses, B takes it, C arrives in A's gap: B alone holds it", () => {
+    writeFileSync(lockFile, owner(DEAD));
+    let b: ReturnType<typeof taken> | undefined;
+    let c: ReturnType<typeof acquireLock> | undefined;
+    const a = acquireLock(r.clone, {
+      pauseAt: (at) => {
+        if (at === "judged") b = taken(acquireLock(r.clone));
+        else c = acquireLock(r.clone);
+      },
+    });
+    expect(b?.stillOurs()).toBe(true);
+    expect(a.ok).toBe(false);
+    expect(c?.ok).toBe(false);
+    expect(acquireLock(r.clone).ok).toBe(false);
+    b?.release();
+    expect(claims()).toEqual([]);
+  });
+
+  it("C arriving while A is replacing the lock is refused, and the path is never empty", () => {
+    writeFileSync(lockFile, owner(DEAD));
+    const seen: boolean[] = [];
+    let c: ReturnType<typeof acquireLock> | undefined;
+    const a = taken(acquireLock(r.clone, {
+      pauseAt: (at) => {
+        if (at !== "taking-over") return;
+        seen.push(existsSync(lockFile));
+        c = acquireLock(r.clone);
+      },
+    }));
+    expect(seen).toEqual([true]);
+    expect(c?.ok).toBe(false);
+    expect(a.stillOurs()).toBe(true);
+    expect(claims()).toEqual([]);
+    a.release();
+  });
+
+  it("a takeover whose holder died does not block the next one", () => {
+    writeFileSync(lockFile, owner(DEAD));
+    expect(() => acquireLock(r.clone, { pauseAt: (at) => { if (at === "taking-over") throw new Error("the power went out"); } })).toThrow("the power went out");
+    const [claim] = claims();
+    expect(claim).toBeDefined();
+    writeFileSync(path.join(path.dirname(lockFile), claim!), owner(DEAD));
+    const lock = taken(acquireLock(r.clone));
+    expect(claims()).toEqual([]);
+    lock.release();
+  });
+
+  it("a takeover in progress by a live run is left to finish", () => {
+    writeFileSync(lockFile, owner(DEAD));
+    expect(() => acquireLock(r.clone, { pauseAt: (at) => { if (at === "taking-over") throw new Error("paused"); } })).toThrow("paused");
+    expect(claims()).toHaveLength(1);
+    expect(acquireLock(r.clone).ok).toBe(false);
+    expect(readFileSync(lockFile, "utf8")).toBe(owner(DEAD));
   });
 });
 

@@ -94,6 +94,18 @@ function openLog(dataDir: string, now: number): { file: string; write: (chunk: s
   };
 }
 
+function listed(files: readonly string[]): string[] {
+  return [...files.slice(0, 20).map((f) => `  ${f}`), ...(files.length > 20 ? [`  …and ${files.length - 20} more`] : [])];
+}
+
+const BY_HAND = "close Gates Local, then git pull, pnpm install, pnpm start.";
+
+function changedLines(r: Extract<Refusal, { reason: "changed-during-update" }>): string[] {
+  if (r.changed === "branch") return ["This copy was switched to another branch while the update ran."];
+  if (r.changed === "commit") return ["The commit this copy is on changed while the update ran."];
+  return ["These files changed while the update ran:", ...listed(r.files)];
+}
+
 /** The plain-language lines for a refusal; the last says nothing was changed where that is true. */
 export function refusalLines(r: Refusal): string[] {
   switch (r.reason) {
@@ -106,8 +118,7 @@ export function refusalLines(r: Refusal): string[] {
     case "local-changes":
       return [
         "These files have changes that are not saved in git:",
-        ...r.files.slice(0, 20).map((f) => `  ${f}`),
-        ...(r.files.length > 20 ? [`  …and ${r.files.length - 20} more`] : []),
+        ...listed(r.files),
         "Nothing was changed.",
         "To keep your changes and update: run `git stash`, run the update again, then `git stash pop`.",
       ];
@@ -134,11 +145,39 @@ export function refusalLines(r: Refusal): string[] {
     case "no-pnpm":
       return ["pnpm was not found. Run `corepack enable pnpm`, open a new terminal and try again."];
     case "unfinished":
-      return [`The last update, to ${r.target}, did not finish, so this copy may not run yet.`, "Close Gates Local and run `pnpm run app-update` to finish it."];
+      return [`The last update, to ${r.target}, did not finish, so this copy may not run yet.`, "Close Gates Local and run `pnpm run app-update`: it finishes the update or says what is in the way.", `Or by hand: ${BY_HAND}`];
     case "busy":
-      return [`Another update of this copy is already running${r.pid === null ? "" : ` (process ${r.pid})`}.`, "Nothing was changed. Wait for it to finish, then try again."];
+      return [
+        `Another update of this copy is already running${r.pid === null ? "" : ` (process ${r.pid})`}.`,
+        `Nothing was changed. Wait for it to finish, or end ${r.pid === null ? "it" : "that process"}, then try again.`,
+        `If you are sure no update is running, delete ${r.file} and try again.`,
+      ];
     case "lost-lock":
       return ["Another update took over this copy while this one was held up, so this one stopped.", "Run `pnpm run app-update` once that one has finished, to see where the copy stands."];
+    case "still-running":
+      return [
+        `The update to ${r.target} has a step that ran too long and could not be stopped${r.pid === null ? "" : ` (process ${r.pid})`}.`,
+        `Nothing else will run until it has ended. End ${r.pid === null ? "it" : "that process"}, or restart the computer, then run \`pnpm run app-update\`.`,
+        "Keep Gates Local closed until then: that step may still be replacing its files.",
+        `Or by hand, once it has ended: ${BY_HAND}`,
+      ];
+    case "partial-checkout":
+      return [
+        `The last update, to ${r.target}, was cut off while it was changing files, so this copy is part way between two versions.`,
+        ...(r.files.length > 0 ? ["These tracked files differ from the commit this copy is on:", ...listed(r.files)] : []),
+        ...(r.gitLock === null ? [] : [`Git left its lock behind. If no git command is running, delete ${r.gitLock}.`]),
+        "The updater will not clean this up itself, because any edits of your own would be among those files. Copy those somewhere safe first.",
+        "To get back: run `git reset --hard` (it discards uncommitted edits to tracked files), then `pnpm run app-update`.",
+        "Or by hand: close Gates Local, then git reset --hard, git pull, pnpm install, pnpm start.",
+      ];
+    case "changed-during-update":
+      return [
+        `The update to ${r.target} stopped at ${STEP_WORDS[r.step]}: ${r.stepReason}.`,
+        ...changedLines(r),
+        "It did not go back on its own, so your work is exactly as you left it.",
+        "To finish: save your work with `git stash` or a commit, then run `pnpm run app-update`.",
+        `Or by hand: ${BY_HAND}`,
+      ];
   }
 }
 
@@ -264,8 +303,8 @@ export async function runCli(deps: CliDeps): Promise<number> {
         const lines = refusalLines(run.refusal);
         for (const line of lines) say(line);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
-        // Not while another update is replacing what the app runs from.
-        if (run.refusal.reason !== "busy" && run.refusal.reason !== "lost-lock") reopen();
+        // Not while something may still be replacing what the app runs from.
+        if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason)) reopen();
         return 1;
       }
       case "up-to-date":

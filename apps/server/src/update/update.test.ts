@@ -1,6 +1,7 @@
 // The updater against real git repositories built in a temporary folder
 // (testing.ts), with a fake pnpm. Nothing here runs outside that folder: the
 // guard refuses it, and the last tests prove the guard does.
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,10 +10,12 @@ import { BUILD_DESKTOP_ARGS, BUILD_WEB_ARGS, INSTALL_ARGS, runUpdate } from "./a
 import { runCli } from "./cli.ts";
 import { UpdateGuardError } from "./guard.ts";
 import { RECORD_FILE } from "./record.ts";
-import { realRunner, type Runner } from "./run.ts";
+import { groupExists, realRunner, type Runner } from "./run.ts";
 import { type Repos, commit, fakePnpm, git, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
+import { readTransaction } from "./transaction.ts";
 
 let r: Repos;
+const survivors = new Set<number>();
 
 beforeEach(() => {
   r = makeRepos();
@@ -20,6 +23,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const pid of survivors) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+  survivors.clear();
   vi.unstubAllEnvs();
   removeRepos(r);
 });
@@ -325,7 +336,8 @@ describe("one update of a checkout at a time", () => {
     const run = await cli([], b);
     expect(run.code).toBe(1);
     expect(run.text).toContain(`Another update of this copy is already running (process ${process.pid}).`);
-    expect(run.text).toContain("Nothing was changed.");
+    expect(run.text).toContain("Nothing was changed. Wait for it to finish, or end that process, then try again.");
+    expect(run.text).toContain(path.join(r.clone, ".git", "gates-local-update.lock"));
     expect(b.commands).toEqual([]);
     expect(run.relaunch).not.toHaveBeenCalled();
     expect(head(r.clone)).toBe(old);
@@ -525,34 +537,312 @@ describe("an update that was cut off", () => {
   });
 });
 
-describe("a step that would not stop", () => {
-  it("does not go back while its process tree may still be running", async () => {
+/** A real process in its own group, standing in for a pnpm that outlived its time limit. */
+function survivor(): number {
+  const child = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+  survivors.add(child.pid!);
+  return child.pid!;
+}
+
+async function endSurvivor(pid: number): Promise<void> {
+  process.kill(-pid, "SIGKILL");
+  survivors.delete(pid);
+  await vi.waitFor(() => expect(groupExists(pid)).toBe(false), { timeout: 5000, interval: 25 });
+}
+
+/** The matching command starts and then cannot be stopped. */
+function stuckAt(fake: ReturnType<typeof fakePnpm>, when: (command: string, args: readonly string[]) => boolean, pid: number) {
+  const runner: Runner = async (command, args, options) => {
+    if (!when(command, args)) return fake.runner(command, args, options);
+    options.onStart?.(pid);
+    return { code: null, stdout: "", stderr: "", failure: "timeout", treeStillRunning: true };
+  };
+  return { ...fake, runner };
+}
+
+const isMerge = (command: string, args: readonly string[]) => command === "git" && args[0] === "merge";
+const pnpmWords = (fake: ReturnType<typeof fakePnpm>) => fake.calls.map((c) => c.args.join(" "));
+const resets = (fake: ReturnType<typeof fakePnpm>) => fake.commands.filter((c) => c.startsWith("git reset"));
+
+describe.skipIf(process.platform === "win32")("a step that would not stop", () => {
+  it("keeps refusing until its processes have ended, never goes back beside them and does not reopen the app", async () => {
     const target = commit(r.seed, "Newer");
     publish(r.seed);
+    const pid = survivor();
     const fake = fakePnpm();
-    const runner: Runner = async (command, args, options) => {
-      if (command === "fake-pnpm" && isPnpm(args, INSTALL_ARGS)) return { code: null, stdout: "", stderr: "", failure: "timeout", treeStillRunning: true };
-      return fake.runner(command, args, options);
-    };
-    const run = await update({ ...fake, runner });
-    expect(run).toMatchObject({ outcome: "rollback-failed", step: "install" });
-    expect(run).toMatchObject({ reason: "pnpm took too long and could not be stopped; end it or restart the computer first" });
+    const first = await cli(["--restart"], stuckAt(fake, isCommand(INSTALL_ARGS), pid));
+    expect(first.code).toBe(1);
+    expect(first.relaunch).not.toHaveBeenCalled();
+    expect(first.text).toContain(`(process ${pid})`);
+    expect(first.text).toContain("restart the computer");
+    expect(first.text).toContain("git pull");
+    expect(resets(fake)).toEqual([]);
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "forward", running: { pid } });
+
+    const retry = await cli([]);
+    expect(retry.code).toBe(1);
+    expect(retry.text).toContain(`(process ${pid})`);
+    expect(pnpmWords(retry.fake)).toEqual(["--version"]);
     expect(head(r.clone)).toBe(target);
-    expect(fake.commands.filter((c) => c.startsWith("git reset"))).toEqual([]);
+
+    await endSurvivor(pid);
+    const after = await cli([]);
+    expect(after.code).toBe(0);
+    expect(after.fake.calls.slice(1).map((c) => c.args)).toEqual([INSTALL_ARGS, BUILD_WEB_ARGS, BUILD_DESKTOP_ARGS]);
+    expect(readTransaction(r.clone)).toBeNull();
   });
 
-  it("keeps what it saved when the merge itself may still be running", async () => {
+  it("the merge itself: nothing runs until it has ended", async () => {
     const old = head(r.clone);
     commit(r.seed, "Newer");
     publish(r.seed);
-    const fake = fakePnpm();
-    const runner: Runner = async (command, args, options) => {
-      if (command === "git" && args[0] === "merge") return { code: null, stdout: "", stderr: "", failure: "timeout", treeStillRunning: true };
-      return fake.runner(command, args, options);
-    };
-    expect(await update({ ...fake, runner })).toMatchObject({ outcome: "rollback-failed", step: "switch" });
+    const pid = survivor();
+    const run = await cli(["--restart"], stuckAt(fakePnpm(), isMerge, pid));
+    expect(run.code).toBe(1);
+    expect(run.relaunch).not.toHaveBeenCalled();
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "forward", running: { pid } });
     expect(head(r.clone)).toBe(old);
     expect((await cli(["--check"])).text).toContain("did not finish");
+    await endSurvivor(pid);
+  });
+
+  it("an updater killed outright leaves its command's identity behind, so the next run waits for it", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const pid = survivor();
+    const fake = fakePnpm();
+    const runner: Runner = async (command, args, options) => {
+      if (!isCommand(INSTALL_ARGS)(command, args)) return fake.runner(command, args, options);
+      options.onStart?.(pid);
+      throw new Error("the power went out");
+    };
+    await expect(update({ ...fake, runner })).rejects.toThrow("the power went out");
+    const next = await cli([]);
+    expect(next.code).toBe(1);
+    expect(next.text).toContain(`(process ${pid})`);
+    expect(pnpmWords(next.fake)).toEqual(["--version"]);
+    await endSurvivor(pid);
+  });
+
+  it("a finished step leaves no process in the saved state", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const pid = survivor();
+    const fake = fakePnpm();
+    let during: ReturnType<typeof readTransaction> | undefined;
+    let atBuild: ReturnType<typeof readTransaction> | undefined;
+    const runner: Runner = async (command, args, options) => {
+      if (isCommand(INSTALL_ARGS)(command, args)) {
+        options.onStart?.(pid);
+        during = readTransaction(r.clone);
+      }
+      if (isCommand(BUILD_WEB_ARGS)(command, args)) atBuild = readTransaction(r.clone);
+      return fake.runner(command, args, options);
+    };
+    expect((await update({ ...fake, runner })).outcome).toBe("updated");
+    expect(during).toMatchObject({ running: { pid } });
+    expect(atBuild).not.toHaveProperty("running");
+    await endSurvivor(pid);
+  });
+});
+
+/** The first install fails, after `change` has run: the person editing while it installed. */
+function failsAfter(change: () => void) {
+  const fake = fakePnpm((args, n) => isPnpm(args, INSTALL_ARGS) && n === 2);
+  const runner: Runner = async (command, args, options) => {
+    if (isCommand(INSTALL_ARGS)(command, args) && fake.calls.length === 1) change();
+    return fake.runner(command, args, options);
+  };
+  return { ...fake, runner };
+}
+
+function unrelatedFile(): void {
+  writeFileSync(path.join(r.seed, "other.txt"), "committed\n");
+  git(r.seed, "add", "other.txt");
+  git(r.seed, "commit", "--quiet", "-m", "Add a file the update does not touch");
+  publish(r.seed);
+  git(r.clone, "pull", "--quiet", "--ff-only");
+}
+
+const stageThenEdit = () => {
+  writeFileSync(path.join(r.clone, "other.txt"), "staged\n");
+  git(r.clone, "add", "other.txt");
+  writeFileSync(path.join(r.clone, "other.txt"), "working\n");
+};
+
+describe("the person changes the copy while it installs", () => {
+  it("keeps a staged version and the working copy: no automatic reset, and the steps by hand", async () => {
+    unrelatedFile();
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = failsAfter(stageThenEdit);
+    const run = await cli([], fake);
+    expect(run.code).toBe(1);
+    expect(resets(fake)).toEqual([]);
+    expect(head(r.clone)).toBe(target);
+    expect(git(r.clone, "show", ":other.txt")).toBe("staged");
+    expect(readFileSync(path.join(r.clone, "other.txt"), "utf8")).toBe("working\n");
+    expect(run.text).toContain("other.txt");
+    expect(run.text).toContain("git stash");
+    expect(run.text).toContain("git pull");
+    expect(readTransaction(r.clone)).not.toBeNull();
+  });
+
+  it("leaves a branch switched to during the install", async () => {
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = failsAfter(() => git(r.clone, "switch", "--quiet", "-c", "mine"));
+    expect(await update(fake)).toMatchObject({ outcome: "refused", refusal: { reason: "changed-during-update", changed: "branch" } });
+    expect(resets(fake)).toEqual([]);
+    expect(git(r.clone, "symbolic-ref", "--short", "HEAD")).toBe("mine");
+    expect(head(r.clone)).toBe(target);
+  });
+
+  it("leaves a commit made during the install", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    let mine = "";
+    const fake = failsAfter(() => {
+      git(r.clone, "commit", "--quiet", "--allow-empty", "-m", "Mine");
+      mine = head(r.clone);
+    });
+    expect(await update(fake)).toMatchObject({ outcome: "refused", refusal: { reason: "changed-during-update", changed: "commit" } });
+    expect(resets(fake)).toEqual([]);
+    expect(head(r.clone)).toBe(mine);
+  });
+
+  it("still goes back when nothing was touched", async () => {
+    const old = head(r.clone);
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const fake = failsAfter(() => undefined);
+    expect(await update(fake)).toMatchObject({ outcome: "stopped", step: "install" });
+    expect(head(r.clone)).toBe(old);
+  });
+});
+
+/** The merge writes part of the new version and is then cut off. */
+function cutOffMerge(result: "timeout" | "crash") {
+  const fake = fakePnpm();
+  const runner: Runner = async (command, args, options) => {
+    if (!isMerge(command, args)) return fake.runner(command, args, options);
+    writeFileSync(path.join(r.clone, "app.txt"), "half of the new version\n");
+    if (result === "crash") throw new Error("the power went out");
+    return { code: null, stdout: "", stderr: "", failure: "timeout" };
+  };
+  return { ...fake, runner };
+}
+
+describe("a checkout left part way between two versions", () => {
+  it("a merge cut off with its files half written keeps the saved update and says how to get back", async () => {
+    const old = head(r.clone);
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    const run = await cli([], cutOffMerge("timeout"));
+    expect(run.code).toBe(1);
+    expect(run.text).toContain("part way");
+    expect(run.text).toContain("app.txt");
+    expect(run.text).toContain("git reset --hard");
+    expect(run.text).toContain("git pull");
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "forward" });
+    expect(head(r.clone)).toBe(old);
+    expect(readFileSync(path.join(r.clone, "app.txt"), "utf8")).toBe("half of the new version\n");
+  });
+
+  it("after a crash there: the next run keeps the saved update and changes nothing, as many times as it is asked", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    await expect(update(cutOffMerge("crash"))).rejects.toThrow("the power went out");
+    for (const _ of [1, 2]) {
+      const run = await cli([]);
+      expect(run.code).toBe(1);
+      expect(run.text).toContain("part way");
+      expect(run.fake.commands.filter((c) => c.startsWith("git merge --ff-only") || c.startsWith("git reset"))).toEqual([]);
+      expect(readTransaction(r.clone)).not.toBeNull();
+    }
+  });
+
+  it("names the lock git left behind", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    await expect(update(crashing(fakePnpm(), isMerge))).rejects.toThrow("the power went out");
+    writeFileSync(path.join(r.clone, ".git", "index.lock"), "");
+    const run = await cli([]);
+    expect(run.code).toBe(1);
+    expect(run.text).toContain(path.join(r.clone, ".git", "index.lock"));
+    expect(readTransaction(r.clone)).not.toBeNull();
+  });
+
+  it("sees a merge in progress", async () => {
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    await expect(update(crashing(fakePnpm(), isMerge))).rejects.toThrow("the power went out");
+    writeFileSync(path.join(r.clone, ".git", "MERGE_HEAD"), `${head(r.clone)}\n`);
+    expect(await update()).toMatchObject({ outcome: "refused", refusal: { reason: "partial-checkout" } });
+    expect(readTransaction(r.clone)).not.toBeNull();
+  });
+
+  it("a rollback cut off the same way is not called the person's edits", async () => {
+    const old = head(r.clone);
+    commit(r.seed, "Newer");
+    publish(r.seed);
+    await expect(update(crashing(fakePnpm((args) => isPnpm(args, INSTALL_ARGS)), (c, a) => c === "git" && a[0] === "reset"))).rejects.toThrow("the power went out");
+    writeFileSync(path.join(r.clone, "app.txt"), "half of the old version\n");
+    expect(head(r.clone)).not.toBe(old);
+    expect(await update()).toMatchObject({ outcome: "refused", refusal: { reason: "partial-checkout" } });
+  });
+});
+
+const finishesByHand = async () => {
+  git(r.clone, "pull", "--quiet", "--ff-only");
+  const run = await cli([]);
+  expect(run.code).toBe(0);
+  expect(readTransaction(r.clone)).toBeNull();
+};
+
+describe("the manual path works from every state the updater leaves", () => {
+  it.skipIf(process.platform === "win32")("a step that would not stop, once it has ended", async () => {
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    const pid = survivor();
+    expect((await cli([], stuckAt(fakePnpm(), isCommand(INSTALL_ARGS), pid))).text).toContain("git pull");
+    await endSurvivor(pid);
+    await finishesByHand();
+    expect(head(r.clone)).toBe(target);
+  });
+
+  it("files half written", async () => {
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    expect((await cli([], cutOffMerge("timeout"))).text).toContain("git reset --hard, git pull, pnpm install, pnpm start");
+    git(r.clone, "reset", "--quiet", "--hard");
+    await finishesByHand();
+    expect(head(r.clone)).toBe(target);
+  });
+
+  it("git's own lock left behind", async () => {
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    await expect(update(crashing(fakePnpm(), isMerge))).rejects.toThrow("the power went out");
+    const lock = path.join(r.clone, ".git", "index.lock");
+    writeFileSync(lock, "");
+    expect((await cli([])).text).toContain(`delete ${lock}`);
+    rmSync(lock);
+    await finishesByHand();
+    expect(head(r.clone)).toBe(target);
+  });
+
+  it("work saved while it installed", async () => {
+    unrelatedFile();
+    const target = commit(r.seed, "Newer");
+    publish(r.seed);
+    expect((await cli([], failsAfter(stageThenEdit))).text).toContain("git pull");
+    git(r.clone, "stash", "--quiet");
+    await finishesByHand();
+    expect(head(r.clone)).toBe(target);
+    git(r.clone, "stash", "pop", "--quiet", "--index");
+    expect(git(r.clone, "show", ":other.txt")).toBe("staged");
+    expect(readFileSync(path.join(r.clone, "other.txt"), "utf8")).toBe("working\n");
   });
 });
 
