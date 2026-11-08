@@ -6,14 +6,16 @@ test("switching model and context updates the fit verdict and the panel", async 
   await open();
   await waitReady(page);
   const modelBtn = page.locator("#modelBtn");
-  const fitBtn = page.locator("#fitBtn");
   await expect(modelBtn).toContainText("Qwen 3.5 9B");
-  await expect(fitBtn).toContainText("16k · on GPU");
 
-  // the picker groups by verdict; the 27B cannot load at 16k
+  // the picker orders by verdict; the 27B cannot load at 16k. Its Context control says 16k runs on the GPU.
   await modelBtn.click();
   const picker = page.locator("#picker");
   await expect(picker).toBeVisible();
+  const ctx = picker.getByRole("radiogroup", { name: "Context" });
+  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "true");
+  await expect(ctx.getByRole("radio", { name: "16k" }).locator(".vd.gpu")).toHaveCount(1);
+  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("data-tip", /fits on the GPU/);
   await expect(picker).toContainText("Not enough memory");
   await picker.locator("#pkSearch").fill("gemma");
   await picker.locator('.pk-r[data-m="gemma4:12b"]').click();
@@ -31,7 +33,10 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(panel).not.toContainText("not available in this build");
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
-  await expect(fitBtn).toContainText("32k · system memory");
+  await modelBtn.click();
+  await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("aria-checked", "true");
+  await expect(ctx.getByRole("radio", { name: "32k" }).locator(".vd.spill")).toHaveCount(1);
+  await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("data-tip", /system memory/);
 });
 
 test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {

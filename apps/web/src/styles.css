@@ -347,14 +347,12 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ctl:hover,.ctl[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
 .ctl.sq{width:30px;padding:0;justify-content:center}
 .ctl .chev{width:14px;height:14px;margin:0 -2px;opacity:.8}
-.ctl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vd.gpu{background:var(--green)}.vd.spill{background:var(--amber)}.vd.no{background:var(--red)}.vd.off{background:var(--faint)}
 /* F35: the one verdict label: a dot plus the label in its color; detail after it is muted */
 .vl{display:inline-flex;align-items:center;gap:8px;color:var(--green-fg);white-space:nowrap}
 .vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
 .vdet{color:var(--muted-foreground);font-variant-numeric:tabular-nums}
-.ctl .vtxt.spill{color:var(--amber-fg)}.ctl .vtxt.no{color:var(--red-fg)}
 /* Ethan's pick, 2026-11-07 (replaces F38/F38b's two treatments): Thinking and Image are pills.
    On: a filled pill, label at foreground. Off: the same pill greyed out, with the same label (never
    "Thinking off"); its outline stays, so it still reads as a button. The tooltip says on or off. */
@@ -462,14 +460,33 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mi .on{margin-left:auto;font-size:12px;color:var(--foreground);align-self:center}
 .msep{height:1px;background:var(--border);margin:4px -4px}
 /* model picker (F15) */
-#picker{width:472px}
+#picker{width:min(560px,calc(100vw - 16px))}
+/* chat-feel: a family rail on the left (All first), the list, and the context control at the foot */
+.mmark{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font:600 11px/1 var(--font-mono);font-style:normal;color:var(--foreground)}
+.ctl .mmark{width:18px;height:18px;font-size:10.5px;margin-left:-2px}
+.pk-body{display:flex;min-height:0}
+.pk-rail{flex:none;width:64px;display:flex;flex-direction:column;gap:2px;padding:6px 4px;border-right:1px solid var(--border);max-height:min(440px,calc(100vh - 180px));overflow-y:auto;scrollbar-width:none}
+.pk-fam{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;border-radius:var(--r-md);font-size:11px;line-height:1.2;color:var(--muted-foreground);transition:background-color .1s,color .1s}
+.pk-fam span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-fam .mmark{width:28px;height:28px;font-size:12px}
+.pk-fam:first-child .mmark{font-size:10px}
+.pk-fam:hover{background:var(--hover);color:var(--foreground)}
+.pk-fam.on{background:var(--selected);color:var(--foreground)}
+.pk-rec{margin-left:8px;font-size:12px;font-weight:500;color:var(--green-fg)}
+.pk-gt{margin-top:4px;padding:12px 8px 6px;border-top:1px solid var(--border);font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
+.pk-dr{display:flex;align-items:center;gap:12px;padding:6px 8px 6px 36px}
+.pk-dr .qa{flex:none}
+.pk-foot{border-top:1px solid var(--border);padding:8px 12px 10px}
+.pk-ctx{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pk-ft{font-size:13px;font-weight:500}
+.pk-help{margin:6px 0 0;font-size:12.5px;color:var(--muted-foreground)}
+.pk-foot .mini-seg button{display:inline-flex;align-items:center;gap:6px}
+.pk-foot .vd{width:6px;height:6px;border-radius:50%;flex:none}
 .pk-h{padding:8px 8px 0}
 .pk-hin{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:0 4px 8px}
 .pk-hin .ic{color:var(--muted-foreground)}
 .pk-hin input{flex:1;min-width:0;height:30px;border:0;outline:0;background:transparent;font-size:14px}
 .pk-hin input::placeholder{color:var(--placeholder)}
-/* F36: the picker shows which context the fit is for; the control lives in the GPU panel and Settings */
-.pk-cap{font-size:13px;color:var(--muted-foreground);white-space:nowrap;font-variant-numeric:tabular-nums}
 .mini-seg{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;flex:none;box-shadow:inset 0 0 0 1px var(--border)}
 /* sweep: the panel's context control has the same size as Settings' (seg2): 28 px buttons, 13.5 px text */
 .mini-seg button{height:28px;padding:0 12px;border-radius:var(--r-sm);font-size:13.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;transition:color .12s,background-color .12s}
@@ -478,19 +495,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* F55: the first view always ends between rows (sizePkList trims max-height to the last whole row),
    the list keeps 8 px under its last row, and the thumb shows whenever the list overflows */
 /* the thumb is drawn by the page (.pk-sb), so it shows even where the platform hides scrollbars */
-.pk-wrap{position:relative}
+.pk-wrap{position:relative;flex:1;min-width:0}
 .pk-list{position:relative;max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px 4px 8px;scrollbar-width:none}
 .pk-wrap:has(.pk-sb.on) .pk-list{padding-right:12px}
 .pk-list::-webkit-scrollbar{display:none}
 .pk-sb{position:absolute;top:4px;right:3px;bottom:4px;width:4px;pointer-events:none;display:none}
 .pk-sb.on{display:block}
 .pk-sb i{position:absolute;left:0;right:0;border-radius:2px;background:var(--scroll-thumb-hover)}
-/* F35: group labels are section headers: a rule above, equal space above and below the label, dot + label in its color */
-.pk-g{display:flex;align-items:center;gap:8px;padding:10px 8px;font-size:13px;font-weight:500;color:var(--green-fg)}
-.pk-g+.pk-r,.pk-g:first-child{margin-top:0}
-.pk-r+.pk-g{margin-top:4px;border-top:1px solid var(--border)}
-.pk-g .vd{width:7px;height:7px;border-radius:50%;flex:none}
-.pk-g.spill{color:var(--amber-fg)}.pk-g.no{color:var(--red-fg)}
 .pk-r{width:100%;display:flex;align-items:center;gap:12px;padding:8px;border-radius:var(--r-md);text-align:left;transition:background-color .1s}
 .pk-r:hover,.pk-r.hl{background:var(--hover)}
 .pk-r.sel{background:var(--selected)}
@@ -502,7 +513,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .pk-m{flex:1;min-width:0}
 .pk-n{font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pk-n small{font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums}
-.pk-s{font-size:12.5px;line-height:1.4;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
 .pk-v{font-size:13px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted-foreground)}
 /* every row reserves the 16 px check slot so the selected row never shifts (F35) */
 .pk-c{width:16px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
