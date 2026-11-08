@@ -128,7 +128,7 @@ function ThinkLine({ secs, text }: { secs: number | undefined; text: string }) {
         <span className="th-i">
           <Icon id="bulb" />
         </span>
-        <span>{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
+        <span className="th-l">{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
         <span className="th-x">
           <Icon id="down" />
         </span>
@@ -234,13 +234,13 @@ const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
   return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
 });
 
-/** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. */
-function Working({ startedAt, loading }: { startedAt: number; loading: boolean }) {
+/** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. While the model reasons, its icon is the thinking row's bulb. */
+function Working({ startedAt, loading, thinking }: { startedAt: number; loading: boolean; thinking: boolean }) {
   const now = useTicker(250, true);
   const secs = Math.floor((now - startedAt) / 1000);
   return (
-    <div className="working">
-      <Icon id="spin" cls="spin" />
+    <div className={thinking ? "working thinking" : "working"}>
+      {thinking ? <Icon id="bulb" /> : <Icon id="spin" cls="spin" />}
       <span className="ph">{loading ? "Loading into GPU memory…" : "Thinking"}</span>
       <span className="el">{secs >= 1 ? `· ${secs} s` : ""}</span>
     </div>
@@ -272,7 +272,7 @@ function LiveTurnView({ threadId }: { threadId: string }) {
             <span className="ph">Writing</span>
           </div>
         ) : null}
-        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} /> : null}
+        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={live.thinking !== ""} /> : null}
         {end?.kind === "stopped" ? (
           <div className="stopped">
             <span>Stopped after {end.secs} s</span>

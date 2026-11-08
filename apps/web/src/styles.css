@@ -244,6 +244,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
 .think-body{display:none;margin:0 0 4px 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground)}
 .think[aria-expanded="true"]+.think-body{display:block}
+/* a reply's finished thinking row is its bulb, muted; hover or keyboard focus shows the label in place (it already holds its room, so nothing moves) */
+.turn .think .th-l,.turn .think .th-x{visibility:hidden;opacity:0;transition:opacity .12s,visibility .12s}
+.turn .think:is(:hover,:focus-visible,[aria-expanded="true"]) :is(.th-l,.th-x){visibility:visible;opacity:1}
+.turn .think:not(:hover,:focus-visible,[aria-expanded="true"]) .th-i{color:var(--faint)}
+/* while the model reasons, the status row carries the same bulb with "Thinking · 3 s" */
+.working.thinking>.ic{width:15px;height:15px;margin:0 2px 0 4px;animation:pulse 2s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.working.thinking>.ic{animation:none}}
 
 /* tool step row: status at left, plain summary, meta beside it (F10) */
 /* F52: the row and its expanded card sit exactly on the prose column, no overhang either side */
