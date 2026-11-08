@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- The app icon: the gate mark from the sidebar (apps/web/src/icons.tsx, i-mark) on the dark base. -->
+  <rect width="512" height="512" rx="104" fill="#0a0a0a"/>
+  <rect x="6" y="6" width="500" height="500" rx="98" fill="none" stroke="#262626" stroke-width="12"/>
+  <g transform="translate(256 256) scale(17.5) translate(-10 -10)" fill="none" stroke="#f2f2f2" stroke-width="2">
+    <path d="M3 17V5.5h14V17" stroke-linejoin="round"/>
+    <path d="M1.5 3h17" stroke-linecap="round"/>
+    <path d="M7.5 17V9.5h5V17" stroke-linejoin="round"/>
+  </g>
+</svg>

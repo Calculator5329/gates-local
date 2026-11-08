@@ -2,11 +2,12 @@
 // by scripts/build.ts. See README.md for the server contract and the
 // renderer's reconnect duties.
 
-import { app, BrowserWindow, ipcMain, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
 import { serverDataDir } from "./data-dir.ts";
+import { hidesMenu, zoomAfter } from "./keys.ts";
 import { guardNavigation } from "./links.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
@@ -35,6 +36,11 @@ function serverEntry(): string {
 /** The built web files that gates-local://app serves. */
 function webRoot(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(desktopDir, "..", "web", "dist");
+}
+
+/** The window icon (X11, Windows, and Wayland compositors that take one); the desktop entry's icon covers the rest. */
+function iconPath(): string {
+  return app.isPackaged ? path.join(process.resourcesPath, "icon.png") : path.join(desktopDir, "assets", "icon.png");
 }
 
 /** Dist (the default): the built web files on gates-local://app. Dev: the Vite dev server. */
@@ -136,6 +142,7 @@ function run(): void {
       width: 1200,
       height: 800,
       title: "Gates Local",
+      icon: iconPath(),
       webPreferences: {
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
@@ -157,6 +164,14 @@ function run(): void {
       if (!isMainFrame || errorCode === -3 || !showingClient) return;
       showStatus({ kind: "client-load-failed", url: validatedUrl, error: `${errorDescription} (${errorCode})` });
     });
+    if (hidesMenu(process.platform)) {
+      contents.on("before-input-event", (event, input) => {
+        const level = zoomAfter(input, contents.getZoomLevel(), process.platform);
+        if (level === null) return;
+        event.preventDefault();
+        contents.setZoomLevel(level);
+      });
+    }
     contents.on("render-process-gone", (_event, details) => {
       console.error(`[desktop] renderer gone: ${details.reason}`);
       route(supervisor.state);
@@ -188,6 +203,7 @@ function run(): void {
   }
 
   void app.whenReady().then(() => {
+    if (hidesMenu(process.platform)) Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     const root = webRoot();
     protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
