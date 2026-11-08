@@ -97,7 +97,19 @@ export type RuntimeOptions = {
   arch?: string;
   /** Runs Windows' process queries (tests inject a fake). */
   procRun?: SyncRunner;
+  /** Whether a PATH candidate runs; default executableCheck(platform). Tests inject one so a Windows PATH resolves on Linux. */
+  isExecutable?: (file: string) => boolean;
 };
+
+/**
+ * Windows with no pinned app install, in "app" mode: there is no Windows
+ * build of the app's own Ollama yet, so nothing can be installed or started.
+ */
+export const WINDOWS_APP_MODE_DETAIL =
+  "The app's own Ollama is not available on Windows yet. Run Ollama and choose Automatic or System in Settings › Runtime.";
+/** Windows, automatic mode, nothing answering at the system port and no pinned app install. */
+export const windowsAutomaticDetail = (externalBaseUrl: string) =>
+  `No Ollama answers at ${externalBaseUrl}, and the app's own Ollama is not available on Windows yet. Run Ollama, then check again.`;
 
 export type OllamaRuntime = {
   status(): RuntimeStatus;
@@ -189,7 +201,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
   const probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const startTimeoutMs = options.startTimeoutMs ?? 30_000;
   const manifest = options.manifest ?? PINNED_OLLAMA;
-  const allowInstall = options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64");
+  // Never on Windows, whatever the option says: the pinned asset is a Linux build.
+  const allowInstall = platform !== "win32" && (options.allowInstall ?? (platform === "linux" && (options.arch ?? process.arch) === "x64"));
   const stateFile = ownedStateFile(stateDir);
   /** The pid this object spawned and recorded, while it runs. */
   let startedPid: number | undefined;
@@ -217,7 +230,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     if (platform === "win32") return undefined;
     const any = await findAnyInstalled(appDataDir);
     if (any) return { path: any.binary, origin: "app-install" };
-    const onPath = findSystemOllama(env, options.home, platform);
+    const onPath = findSystemOllama(env, options.home, platform, options.isExecutable);
     return onPath ? { path: onPath, origin: "path" } : undefined;
   }
 
@@ -344,9 +357,14 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const detail = `Ollama at ${c.binary.path} is installed but not running.`;
       return noted({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
     }
-    const detail = allowInstall
-      ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
-      : "No Ollama found on this machine.";
+    const detail =
+      platform === "win32"
+        ? mode === "app"
+          ? WINDOWS_APP_MODE_DETAIL
+          : windowsAutomaticDetail(externalBaseUrl)
+        : allowInstall
+          ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
+          : "No Ollama found on this machine.";
     return noted({ state: "missing", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
   }
 
