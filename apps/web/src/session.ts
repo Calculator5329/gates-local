@@ -378,10 +378,23 @@ const stale = new Set<string>();
  * after it was sent: they are newer than its snapshot and replay over it by
  * id, so a reply saved meanwhile is not lost (WF-02).
  */
-const loads = new Set<{ readonly threadId: string; readonly since: Message[] }>();
+const loads = new Set<{ readonly threadId: string; readonly seq: number; readonly since: Message[] }>();
+
+/** Each thread load's ticket, in the order they were sent. */
+let loadSeq = 0;
+/** Per thread, the ticket of the newest load whose snapshot landed: an older load's answer, snapshot or failure, never replaces it. */
+const landed = new Map<string, number>();
 
 /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
 let navGen = 0;
+
+function setLoadError(threadId: string, message: string | null): void {
+  if ((getState().loadErrors[threadId] ?? null) === message) return;
+  setState((s) => {
+    const { [threadId]: _old, ...rest } = s.loadErrors;
+    return { loadErrors: message === null ? rest : { ...rest, [threadId]: message } };
+  });
+}
 
 /** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
 function noteMessage(threadId: string, msg: Message): void {
@@ -401,20 +414,33 @@ function withMessage(s: State, threadId: string, msg: Message): State["messages"
 async function loadThread(threadId: string, force = false): Promise<void> {
   if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
   const nav = navGen;
-  const req = { threadId, since: [] as Message[] };
+  const req = { threadId, seq: ++loadSeq, since: [] as Message[] };
   loads.add(req);
+  setLoadError(threadId, null);
+  const older = () => req.seq < (landed.get(threadId) ?? 0);
   try {
     const { messages: snapshot } = await call("threads.get", { threadId });
+    if (older()) return;
+    landed.set(threadId, req.seq);
     stale.delete(threadId);
     const messages = req.since.reduce(upsertMessage, snapshot);
     setState((s) => ({ messages: { ...s.messages, [threadId]: messages }, ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}) }));
+    setLoadError(threadId, null);
   } catch (e) {
-    // only while this load's thread is still on screen and nobody navigated since (Settings over it counts)
+    if (older()) return;
+    // a cached thread keeps its content; either way the open thread says why and offers Retry
+    setLoadError(threadId, failure("load this conversation", e));
+    // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts)
     const s = getState();
-    if (codeOf(e) !== "closed" && nav === navGen && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
+    if (codeOf(e) === "thread-not-found" && nav === navGen && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
   } finally {
     loads.delete(req);
   }
+}
+
+/** Retry beside a failed load: fetch the thread again. */
+export function reloadThread(threadId: string): void {
+  void loadThread(threadId, true);
 }
 
 /** An ended live turn whose reply the server saved after all (it finished while the socket was down): showing both would duplicate it. */
@@ -446,6 +472,13 @@ export function leaveSettings(): void {
   navGen++;
   const s = getState();
   setState({ view: s.threadId !== null ? "thread" : "new" });
+  // back to a thread with nothing on screen whose load failed meanwhile: try again
+  const id = s.threadId;
+  if (id !== null && !loading(id)) void loadThread(id);
+}
+
+function loading(threadId: string): boolean {
+  return [...loads].some((l) => l.threadId === threadId);
 }
 
 export async function renameThread(threadId: string, title: string): Promise<void> {
@@ -458,7 +491,8 @@ export async function deleteThread(threadId: string): Promise<void> {
   await call("threads.delete", { threadId }).catch(() => undefined);
   setState((s) => {
     const { [threadId]: _gone, ...messages } = s.messages;
-    return { messages, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
+    const { [threadId]: _error, ...loadErrors } = s.loadErrors;
+    return { messages, loadErrors, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
   });
   if (getState().threadId === threadId) newThread();
 }

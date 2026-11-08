@@ -109,6 +109,8 @@ export interface State {
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
   readonly notice: string | null;
+  /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
+  readonly loadErrors: Readonly<Record<string, string>>;
 }
 
 export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
@@ -149,6 +151,7 @@ const initial: State = {
   imageStatus: undefined,
   unavailable: {},
   notice: null,
+  loadErrors: {},
 };
 
 let state: State = initial;

@@ -388,6 +388,30 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
     await until(() => store.getState().view === "new", 1000, "the new-thread screen");
     expect(store.getState().threadId).toBeNull();
   });
+
+  it("a thread with nothing on screen whose load failed says why, and leaving Settings or Retry loads it again", async () => {
+    await boot();
+    const first = b.server.hold("threads.get");
+    session.openThread("t1");
+    await first;
+    session.openSettings();
+    const held = await reconnectHeld();
+    session.leaveSettings();
+    held.fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1", loadErrors: { t1: expect.stringMatching(/^Couldn't load this conversation because/) } });
+    expect(store.getState().messages["t1"]).toBeUndefined();
+    const again = b.server.hold("threads.get");
+    session.openSettings();
+    session.leaveSettings();
+    (await again).fail("internal", "store busy");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1", loadErrors: { t1: expect.stringMatching(/^Couldn't load/) } });
+    b.server.answer("threads.get", () => snapshot([userMsg("m1", "t1", "hi")]));
+    session.reloadThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined, 1000, "the retried load");
+    expect(store.getState().loadErrors["t1"]).toBeUndefined();
+  });
 });
 
 const others: Array<() => void> = [];
