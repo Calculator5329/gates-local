@@ -52,9 +52,10 @@ pnpm install
 pnpm start
 ```
 
-`pnpm install` downloads the dependencies and the Electron binary.
-`pnpm start` builds the web client and the desktop app, then opens the
-window.
+`pnpm install` downloads the dependencies. `pnpm start` builds the web
+client and the desktop app, then opens the window. The first `pnpm start`
+also downloads the Electron binary (about 120 MB) from GitHub into
+`~/.cache/electron`.
 
 On first run the app looks for Ollama on `127.0.0.1:11434`:
 
@@ -132,7 +133,8 @@ rm -rf ~/.local/share/gates-local ~/.config/gates-local
 ```
 
 This also removes the app's own Ollama copy and the models it downloaded in
-that mode. Models in the system Ollama stay. Remove them with
+that mode. The Electron download stays in `~/.cache/electron`, which other
+Electron projects may share. Models in the system Ollama stay. Remove them with
 `ollama rm <model>`, or uninstall Ollama as its documentation describes.
 
 ## 8. Troubleshooting

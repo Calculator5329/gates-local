@@ -119,7 +119,8 @@ These are all the network calls the code makes:
   loads it itself.
 
 Installing is separate: `pnpm install` downloads packages from the npm
-registry and the Electron binary from GitHub.
+registry, and the first `pnpm start` downloads the Electron binary from
+GitHub.
 
 One thing has not been checked yet: Electron's spellchecker, which the app
 leaves on, may download dictionary files from Google the first time it
