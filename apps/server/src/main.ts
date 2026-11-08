@@ -170,6 +170,8 @@ async function main(): Promise<void> {
       }
     };
     await step("cancel turns", () => app.shutdown());
+    // A cold preload holds a shared GPU claim for minutes; image.close() needs the GPU alone.
+    await step("drain model loads", () => services.loader.close());
     await step("close image module", () => image.close());
     await step("close ws", () => server?.close());
     await step("close store", () => store.close());

@@ -36,6 +36,8 @@ export type LoadedModel = {
   sizeBytes: number;
   sizeVramBytes: number;
   expiresAt?: string;
+  /** /api/ps context_length: the num_ctx it is loaded at; undefined when Ollama does not say. */
+  contextLength?: number;
 };
 
 export type InstallPhase = "download" | "verify" | "extract" | "done";

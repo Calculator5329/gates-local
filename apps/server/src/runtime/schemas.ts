@@ -29,6 +29,8 @@ export const PsResponse = Schema.Struct({
       size: Schema.Number,
       size_vram: Schema.Number,
       expires_at: Schema.optionalKey(Schema.String),
+      /** The num_ctx the model is loaded at; absent (older Ollama) means unknown. */
+      context_length: Schema.optionalKey(Schema.Number),
     }),
   ),
 });

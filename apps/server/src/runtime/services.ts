@@ -75,9 +75,11 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     make: (mode: RuntimeMode) => createOllamaRuntime({ appDataDir: options.dataDir, ...options.runtime, mode, stateDir: options.dataDir }),
     beforeSwitch: () => {
       pulls?.stop();
-      // Before the new runtime's ensure: what the app owned in the old one is not its own any more.
+      // Before the old runtime stops: what the app owned in it is not its own any more, and
+      // loads and turns are refused until the new runtime's ensure settles (afterSwitch).
       loader?.runtimeChanged();
     },
+    afterSwitch: () => loader?.runtimeSettled(),
     log,
   });
   const catalog = createModelCatalog(() => runtime.baseUrl(), { minIntervalMs: MODELS_REFRESH_MIN_MS });
@@ -107,11 +109,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     baseUrl: () => runtime.baseUrl(),
     push: (load) => options.push("models.load", load),
     listLoaded: (url) => listLoaded(url),
-    fit: async (model, numCtx) => {
-      const baseUrl = runtime.baseUrl();
-      if (baseUrl === undefined) throw new Error("Ollama is not running.");
-      return (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report;
-    },
+    // The runtime the load captured, never whatever baseUrl() says by the time the fit runs.
+    fit: async (model, numCtx, baseUrl) => (await checkFit({ ...options.fit, baseUrl, model, numCtx })).report,
     onLoaded: () => gpu.poke(),
     ...(options.lease ? { lease: options.lease } : {}),
     log,

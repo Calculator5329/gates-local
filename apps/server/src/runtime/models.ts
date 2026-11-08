@@ -42,6 +42,7 @@ export async function listLoaded(baseUrl: string, timeoutMs = 5000): Promise<Loa
   return ps.models.map((m): LoadedModel => {
     const l: LoadedModel = { name: m.name, sizeBytes: m.size, sizeVramBytes: m.size_vram };
     if (m.expires_at) l.expiresAt = m.expires_at;
+    if (m.context_length !== undefined) l.contextLength = m.context_length;
     return l;
   });
 }

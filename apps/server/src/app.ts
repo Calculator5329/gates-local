@@ -299,7 +299,8 @@ export function createApp(deps: AppDeps): App {
       try {
         // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
         load = deps.models?.loader?.reserve(model);
-        const baseUrl = runtime.baseUrl();
+        // The runtime the reservation captured: fit, admit and chat all talk to it.
+        const baseUrl = load ? load.baseUrl : runtime.baseUrl();
         if (baseUrl === undefined) throw notReady();
         const fit = async () => (await checkFit({ ...deps.fit, baseUrl, model, numCtx })).report;
         // An idle ComfyUI this app started is the one GPU tenant a turn may free. stopIdle claims the

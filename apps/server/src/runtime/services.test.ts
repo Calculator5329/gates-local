@@ -67,7 +67,7 @@ it("S-08: two services with different data dirs run their own Ollama against the
   expect(await models(rb.baseUrl)).toBe(appModelsDir(b));
 });
 
-it.skip("S-02: a preload's fit reads the URL the load captured, not whatever the runtime says later", async () => {
+it("S-02: a preload's fit reads the URL the load captured, not whatever the runtime says later", async () => {
   // A system Ollama whose root stops answering like Ollama mid-load: the
   // runtime's next discover drops its base URL, but the load already chose it.
   let healthy = true;
@@ -81,7 +81,8 @@ it.skip("S-02: a preload's fit reads the URL the load captured, not whatever the
       res.end("Ollama is running");
     },
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
-    "GET /api/tags": (_b, res) => json(res, 200, { models: [] }),
+    // Installed, so the fit goes on to /api/show (the request this test watches for).
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
     "GET /api/ps": async (_b, res) => {
       if (firstPs) {
         firstPs = false;
@@ -102,6 +103,7 @@ it.skip("S-02: a preload's fit reads the URL the load captured, not whatever the
   await s.runtime.discover();
   expect(s.runtime.baseUrl()).toBeUndefined();
   releasePs();
-  await loading.catch(() => undefined);
-  expect(ollama.requests.some((r) => r.path === "/api/show")).toBe(true);
+  const r = await loading;
+  expect(ollama.requests.some((q) => q.path === "/api/show")).toBe(true);
+  expect(r).toMatchObject({ state: "ready" });
 });

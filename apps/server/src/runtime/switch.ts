@@ -21,6 +21,8 @@ export interface RuntimeSwitchOptions {
   readonly make: (mode: RuntimeMode) => OllamaRuntime;
   /** Before a switch takes effect (abort downloads bound to the old runtime). */
   readonly beforeSwitch?: () => void;
+  /** Once the new runtime's ensure settled, however it went (always paired with beforeSwitch). */
+  readonly afterSwitch?: () => void;
   readonly log?: (line: string) => void;
 }
 
@@ -67,16 +69,20 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
       return serial(async () => {
         if (next === mode) return inner.status();
         options.beforeSwitch?.();
-        const old = inner;
-        off();
-        await stopIfStartedHere(old);
-        mode = next;
-        inner = options.make(next);
-        off = inner.onChange(forward);
-        const status = await inner.ensure();
-        // A fresh runtime that lands on its initial status emits nothing itself.
-        forward(status);
-        return status;
+        try {
+          const old = inner;
+          off();
+          await stopIfStartedHere(old);
+          mode = next;
+          inner = options.make(next);
+          off = inner.onChange(forward);
+          const status = await inner.ensure();
+          // A fresh runtime that lands on its initial status emits nothing itself.
+          forward(status);
+          return status;
+        } finally {
+          options.afterSwitch?.();
+        }
       });
     },
     stopIfStartedHere: () => serial(() => stopIfStartedHere(inner)),

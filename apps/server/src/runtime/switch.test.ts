@@ -61,3 +61,29 @@ it("R-08: a switch during the app copy's startup waits for it, then stops it; no
   await sw.stopIfStartedHere();
   expect(made.map((m) => m.stops)).toEqual([1, 0]);
 });
+
+it("S-02: afterSwitch follows beforeSwitch once the new ensure settles, even when that ensure fails", async () => {
+  const events: string[] = [];
+  let fail = false;
+  const sw = createRuntimeSwitch({
+    initialMode: "system",
+    make: (mode) => {
+      const rt = fakeRuntime(mode, Promise.resolve());
+      const ensure = rt.ensure.bind(rt);
+      rt.ensure = async () => {
+        events.push(`ensure ${mode}`);
+        if (fail) throw new Error("install failed");
+        return ensure();
+      };
+      return rt;
+    },
+    beforeSwitch: () => events.push("before"),
+    afterSwitch: () => events.push("after"),
+  });
+  await sw.setMode("app");
+  expect(events).toEqual(["before", "ensure app", "after"]);
+  fail = true;
+  await expect(sw.setMode("system")).rejects.toThrow("install failed");
+  // Without "after" here the loader would refuse every load for good.
+  expect(events.slice(3)).toEqual(["before", "ensure system", "after"]);
+});
