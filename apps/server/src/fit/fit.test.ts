@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GIB, MIB, NUM_CTX_FLOOR, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { checkNumCtx, estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
-import { checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
+import { blockingModels, checkFit, checkModels, decideFit, measuredFit } from "./fit.ts";
 import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 
@@ -330,6 +330,45 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO });
     expect(check.report).toMatchObject({ source: "estimate", freeVramBytes: 9468 * MIB + 8e9 });
     expect(check.report.message).toContain("Ollama replaces");
+  });
+});
+
+/** A 16303 MiB GPU with `freeMib` free and no compute apps listed. */
+const gpuWith = (freeMib: number) => smi(`16303, ${16303 - freeMib}, ${freeMib}\n`, "");
+const plenty = async () => "MemAvailable: 60000000 kB\n";
+/** /api/ps with each model resident at 16k, wholly in VRAM. */
+const resident = (models: { name: string; vram: number }[]) => ({ models: models.map((m) => ({ name: m.name, size: m.vram, size_vram: m.vram, context_length: 16384 })) });
+
+describe("blockingModels: which busy resident models a load would push out", () => {
+  const GEMMA = "gemma4-abliterated:26b";
+  const QWEN27 = "qwen3.8-abliterated:27b";
+  const QWEN9 = "qwen3.5:9b";
+
+  it("none when the model fits beside them, is resident at this num_ctx, or is the busy model itself", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }, { name: QWEN9, vram: 8e9 }]));
+    const base = { baseUrl: s.baseUrl, numCtx: 16384, readMeminfo: plenty };
+    expect(await blockingModels({ ...base, model: QWEN9, busy: [QWEN27], runNvidiaSmi: gpuWith(15000) })).toEqual([]);
+    expect(await blockingModels({ ...base, model: QWEN9, busy: [QWEN27], runNvidiaSmi: gpuWith(500) })).toEqual([]);
+    expect(await blockingModels({ ...base, model: QWEN27, busy: [QWEN27], runNvidiaSmi: gpuWith(500) })).toEqual([]);
+  });
+
+  it("the fewest, largest first, whose VRAM makes it fit; an idle resident model never counts", async () => {
+    const s = await fakeOllama(resident([{ name: GEMMA, vram: 2e9 }, { name: QWEN27, vram: 12e9 }, { name: "idle:7b", vram: 14e9 }]));
+    expect(await blockingModels({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, busy: [GEMMA, QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty })).toEqual([QWEN27]);
+  });
+
+  it("all of them when the model only spills even with them gone; none when it refuses anyway", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN9, vram: 2e9 }, { name: QWEN27, vram: 3e9 }]));
+    const base = { baseUrl: s.baseUrl, model: GEMMA, numCtx: 16384, busy: [QWEN9, QWEN27], runNvidiaSmi: gpuWith(1000) };
+    expect(await blockingModels({ ...base, readMeminfo: plenty })).toEqual([QWEN27, QWEN9]);
+    expect(await blockingModels({ ...base, readMeminfo: async () => "MemAvailable: 1000000 kB\n" })).toEqual([]);
+  });
+
+  it("the plan with them gone counts their VRAM as free (FitDeps.reclaim)", async () => {
+    const s = await fakeOllama(resident([{ name: QWEN27, vram: 12e9 }]));
+    const check = await checkFit({ baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, reclaim: [QWEN27], runNvidiaSmi: gpuWith(500), readMeminfo: plenty });
+    expect(check.report).toMatchObject({ verdict: "fits", freeVramBytes: 500 * MIB + 12e9 });
+    expect(check.report.message).toContain(`held by ${QWEN27}, whose turns stopped for this load`);
   });
 });
 
