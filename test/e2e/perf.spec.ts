@@ -77,6 +77,10 @@ function observe(): void {
   };
   window.addEventListener("keydown", count, { capture: true });
   window.addEventListener("input", count, { capture: true });
+  // when the latest input finished its handlers (bubble phase, after the app's): endKeys closes the window there
+  window.addEventListener("input", () => {
+    (window as unknown as { glLastInput?: number }).glLastInput = performance.now();
+  });
   // the real rAF, so a test that swaps the page's rAF still counts frames
   const raf = window.requestAnimationFrame.bind(window);
   const tick = () => {
@@ -108,8 +112,9 @@ interface Probe {
 const readLong = () => (window as unknown as { glLong: number[] }).glLong;
 /**
  * Key events and the longest task that overlaps the typing (clearEvents to
- * endKeys), read once the observers have delivered the last of them. A task
- * after the last key, such as one during the wait below, does not count.
+ * the last key's input), read once the observers have delivered the last of
+ * them. A task that starts after the last input, such as one that input
+ * queued or one during the wait below, does not count.
  */
 const readKeys = async () => {
   // entries arrive after the paint that ends them, in an observer task
@@ -120,15 +125,22 @@ const readKeys = async () => {
 };
 /** Start a typing window. */
 const clearEvents = () => {
-  const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number; glUntil: number };
+  const w = window as unknown as { glEvents: SlowEvent[]; glKeys: number; glSince: number; glUntil: number; glLastInput?: number };
   w.glEvents = [];
   w.glKeys = 0;
   w.glSince = performance.now();
   w.glUntil = Number.POSITIVE_INFINITY;
+  w.glLastInput = undefined;
 };
-/** End the typing window: call it as soon as the last key has gone in, before any other wait. */
+/**
+ * End the typing window at the moment the last input so far finished its
+ * handlers (now, if nothing was typed). Call it once every key is in and
+ * before anything else types into the page; when it runs after that does
+ * not matter.
+ */
 const endKeys = () => {
-  (window as unknown as { glUntil: number }).glUntil = performance.now();
+  const w = window as unknown as { glUntil: number; glLastInput?: number };
+  w.glUntil = w.glLastInput ?? performance.now();
 };
 /** Block the main thread for ms in its own task: proves the long-task observer is live before a zero counts. */
 const busy = (ms: number) =>
@@ -183,9 +195,9 @@ function reportKeys(label: string, k: ReturnType<typeof keyStats>) {
  */
 async function typeFreely(page: Page, text: string): Promise<void> {
   const sent: Promise<void>[] = [];
-  for (const ch of text) {
+  for (const [i, ch] of [...text].entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 40));
     sent.push(page.keyboard.press(ch));
-    await new Promise((r) => setTimeout(r, 40));
   }
   await Promise.all(sent);
 }
@@ -228,6 +240,40 @@ test("the typing window: a long task after the last key does not count, one acro
     w.glLongAt.push([w.glSince - 10, 400]);
   });
   expect((await page.evaluate(readKeys)).longest).toBe(400);
+});
+
+// PF2-01: a task the last key's input queues starts after that input and
+// before the test gets control back; it is not the typing's.
+test("the typing window ends at the last key's input, not when the test resumes", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const KEYS = "abc";
+  await page.locator("#ta").focus();
+  await page.evaluate(clearEvents);
+  await page.evaluate((n) => {
+    let seen = 0;
+    window.addEventListener(
+      "input",
+      () => {
+        seen++;
+        if (seen === n)
+          setTimeout(() => {
+            const end = performance.now() + 150;
+            while (performance.now() < end) {
+              // spin
+            }
+          });
+      },
+      { capture: true },
+    );
+  }, KEYS.length);
+  await typeFreely(page, KEYS);
+  await expect(page.locator("#ta")).toHaveValue(KEYS);
+  await page.evaluate(endKeys);
+  const k = await page.evaluate(readKeys);
+  // the observer saw the task, so the zero below is not a dead observer
+  expect(await page.evaluate(() => (window as unknown as { glLongAt: [number, number][] }).glLongAt.some(([, d]) => d >= 140))).toBe(true);
+  expect(k.longest).toBeLessThan(140);
 });
 
 test.beforeEach(async ({ page }) => {
@@ -449,8 +495,8 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   await ta.focus();
   await page.evaluate(clearEvents);
   await typeFreely(page, TYPED);
-  await page.evaluate(endKeys);
   await expect(ta).toHaveValue(TYPED);
+  await page.evaluate(endKeys);
   const idle = keyStats(await page.evaluate(readKeys));
   reportKeys("idle", idle);
   await ta.fill("");
@@ -472,8 +518,8 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
     await ta.focus();
     await page.evaluate(clearEvents);
     await typeFreely(page, TYPED);
-    await page.evaluate(endKeys);
     await expect(ta).toHaveValue(TYPED);
+    await page.evaluate(endKeys);
     const live = await caret.isVisible();
     return { ...keyStats(await page.evaluate(readKeys)), live };
   };
@@ -519,12 +565,12 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   const BURST = "a shorter burst";
   await typeFreely(page, BURST);
   const stamps = await page.evaluate(() => {
-    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][]; glUntil: number };
-    w.glUntil = performance.now();
+    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][] };
     w.glBusy = false;
     return w.glStamps;
   });
   await expect(ta).toHaveValue(BURST);
+  await page.evaluate(endKeys);
   await expect(page.locator(".caret")).toBeVisible();
   const raw = await page.evaluate(readKeys);
   const delayed = keyStats(raw);
