@@ -12,7 +12,7 @@ import { clearRecord, readLinuxListenerPid, readProc, readRecord, readWindowsPro
 import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installedBinary, ownedStateFile, serveLogFile } from "./paths.ts";
 import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch } from "./switch.ts";
-import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, tmpDir, writeFakeBinary } from "./test-fakes.ts";
+import { type FakeOllama, freePort, freePortRun, removeDir, startFakeOllama, startWrongService, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
 let work: string;
@@ -256,6 +256,29 @@ describe("runtime switch", () => {
     expect(seen.length).toBe(count);
   });
 
+  it("busyPorts audit: automatic mode keeps the system port's busyPorts when it adopts or reuses the Ollama on the app port", async () => {
+    const other = await startWrongService();
+    try {
+      writeFakeBinary(installedBinary(appDataDir, VERSION));
+      const appPort = await freePort();
+      const busy = [String(other.port)];
+      const first = await runtime({ appPort, externalBaseUrl: other.baseUrl });
+      const started = await first.ensure();
+      expect(started).toMatchObject({ state: "ready", owner: "app", busyPorts: busy });
+      // A restart adopts the recorded copy: the system port is still held by the same program.
+      const adopted = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
+      expect(adopted).toMatchObject({ state: "ready", owner: "app", baseUrl: started.baseUrl });
+      expect(adopted.busyPorts).toEqual(busy);
+      // Not ours (record cleared): reused as an external Ollama, busy port still named.
+      clearRecord(ownedStateFile(appDataDir));
+      const reused = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
+      expect(reused).toMatchObject({ state: "ready", owner: "external", baseUrl: started.baseUrl });
+      expect(reused.busyPorts).toEqual(busy);
+    } finally {
+      await other.close();
+    }
+  });
+
   it("a copy adopted from an earlier run is not this process's to stop", async () => {
     writeFakeBinary(installedBinary(appDataDir, VERSION));
     const appPort = await freePort();
@@ -306,6 +329,20 @@ describe("Windows (platform injected)", () => {
       expect(s.detail).toMatch(/choose Automatic or System in Settings › Runtime/);
       expect(s.detail).not.toMatch(/install|start/i);
       expect(rt.startedByThisProcess()).toBe(false);
+    }
+  });
+
+  it("busyPorts audit: automatic on Windows with a non-Ollama on the system port names the busy port and never claims the app runs its own copy", async () => {
+    const other = await startWrongService();
+    try {
+      const rt = await runtime({ platform: "win32", procRun: cimFake([]), externalBaseUrl: other.baseUrl });
+      const s = await rt.ensure();
+      expect(s).toMatchObject({ state: "missing", owner: "none" });
+      expect(s.detail).not.toMatch(/runs its own Ollama/);
+      expect(s.detail).toBe(windowsAutomaticDetail(other.baseUrl));
+      expect(s.busyPorts).toEqual([String(other.port)]);
+    } finally {
+      await other.close();
     }
   });
 

@@ -330,8 +330,10 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       if (app.kind === "ollama") {
         const own = checkOwnership(stateFile, on);
         const version = own.kind === "ours" && own.record.baseUrl === appBaseUrl ? await adoptable(own.record) : undefined;
+        // A non-Ollama on the system port is still busy, as on a fresh start.
+        const busy = withBusy(note?.busy ?? []);
         if (version !== undefined) {
-          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version } };
+          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy } };
         }
         return {
           kind: "ready",
@@ -341,6 +343,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
             baseUrl: appBaseUrl,
             version: app.version,
             detail: `An Ollama the app did not start answers on port ${appPort}; reusing it and never stopping it.`,
+            ...busy,
           },
         };
       }
@@ -361,14 +364,15 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const detail = `Ollama at ${c.binary.path} is installed but not running.`;
       return noted({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
     }
-    const detail =
-      platform === "win32"
-        ? mode === "app"
-          ? WINDOWS_APP_MODE_DETAIL
-          : windowsAutomaticDetail(externalBaseUrl)
-        : allowInstall
-          ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
-          : "No Ollama found on this machine.";
+    if (platform === "win32") {
+      // The note's text says which port the app runs its own copy on, which
+      // Windows cannot do yet; its busy ports still hold.
+      const detail = mode === "app" ? WINDOWS_APP_MODE_DETAIL : windowsAutomaticDetail(externalBaseUrl);
+      return { state: "missing", owner: "none", baseUrl: appBaseUrl, detail, ...withBusy(c.note?.busy ?? []) };
+    }
+    const detail = allowInstall
+      ? `No Ollama found; the app will install Ollama ${manifest.version} into ${runtimeDir(appDataDir)}.`
+      : "No Ollama found on this machine.";
     return noted({ state: "missing", owner: "none", baseUrl: appBaseUrl, detail }, c.note);
   }
 
