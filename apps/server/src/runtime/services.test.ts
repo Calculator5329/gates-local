@@ -635,6 +635,90 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await t.r.done();
   });
 
+  it("R4-01: with an idle app-owned ComfyUI too, stopOthers ends X before any image claim, then measures again", async () => {
+    const lease = createGpuLease();
+    const comfy = await ownedIdleComfy(lease, work);
+    const t = await withX(tight, { image: comfy.image, lease });
+    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    const sent = await settledWithin(Promise.resolve(send), 2000);
+    expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
+    const y = (sent as { resolved: { turnId: string } }).resolved;
+    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    // X's memory, idle once its turn ended, was enough: ComfyUI kept running and nothing waits on the lease.
+    expect(comfy.stops()).toBe(0);
+    expect(lease.status().waiting).toEqual([]);
+    await t.r.done();
+    comfy.close();
+  });
+
+  it("R4-05: a second X turn sent while Y's plan reads the GPU is stopped too before Y loads", async () => {
+    let pause: Promise<void> | undefined;
+    const paused = signalled();
+    const resume = signalled();
+    const runNvidiaSmi = async (args: readonly string[]) => {
+      const p = pause;
+      pause = undefined;
+      if (p) {
+        paused.resolve();
+        await p;
+      }
+      return smi(1000)(args);
+    };
+    const t = await withX({ ...fit, runNvidiaSmi });
+    pause = resume.promise;
+    const y = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx));
+    expect(await settledWithin(paused.promise, 1000)).toEqual({ resolved: undefined });
+    const x2Thread = t.r.store.createThread({});
+    const x2 = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: x2Thread.id, content: "more", model: MODEL, numCtx: 16384 }, ctx));
+    // Unless something holds it back, the second X turn is streaming before Y's plan goes on.
+    for (let i = 0; i < 60 && t.r.events.filter((e) => e.text === "X so far").length < 2; i++) await sleep(5);
+    resume.resolve();
+    const yTurn = await y;
+    for (let i = 0; i < 400 && !t.of(yTurn.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    expect(t.of(yTurn.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
+    const x2Turn = await x2;
+    // Admitted after Y, it streams beside it (the fake's memory is fixed).
+    for (let i = 0; i < 200 && !t.of(x2Turn.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    expect(t.terminal(x2Turn.turnId)).toEqual([]);
+    await t.r.done();
+  });
+
+  it("R4-05: two cold sends at once, each with stopOthers: the second one admitted stops the first", async () => {
+    const Z = "llama3.1:8b";
+    const loaded = new Set<string>();
+    const streaming = new Map<string, Promise<void>>();
+    const r = await rig(
+      {
+        "GET /api/tags": (_b, res) => json(res, 200, { models: [Y, Z].map((name) => ({ name, size: 6_600_000_000, digest: name, modified_at: "2026-11-01T00:00:00Z" })) }),
+        "GET /api/ps": (_b, res) => json(res, 200, { models: [...loaded].map((name) => entry(name, X_VRAM)) }),
+        // Each model loads once nothing else streams, then streams until its connection closes.
+        "POST /api/chat": async (b, res) => {
+          const { model } = b as { model: string };
+          res.writeHead(200, ndjson);
+          while ([...streaming.keys()].some((m) => m !== model)) await Promise.all([...streaming].filter(([m]) => m !== model).map(([, p]) => p));
+          loaded.add(model);
+          const closed = new Promise<void>((resolve) => res.on("close", () => resolve()));
+          streaming.set(model, closed);
+          res.write(line({ model, message: { role: "assistant", content: `${model} here` }, done: false }));
+          await closed;
+          streaming.delete(model);
+        },
+      },
+      { fit: tight },
+    );
+    const sendOn = async (model: string) => (await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "hi", model, numCtx: 16384, stopOthers: true }, ctx)).turnId;
+    const ids = await Promise.all([sendOn(Y), sendOn(Z)]);
+    const delta = (id: string) => r.events.some((e) => e.turnId === id && e.type === "delta");
+    for (let i = 0; i < 400 && !ids.every(delta); i++) await sleep(5);
+    expect(ids.filter(delta)).toHaveLength(2);
+    expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "preempted" }]);
+    expect(r.app.activeTurns()).toBe(1);
+    await r.done();
+  });
+
   it("R4-04: ~1 GB free, busy X at 4 GB, idle Z at 9 GB: Y loads in Z's memory and X keeps streaming", async () => {
     const t = await withX(tight, {}, twoModels(4e9, { name: "llama3.1:8b", vram: 9e9 }));
     expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
