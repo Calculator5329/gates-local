@@ -265,6 +265,13 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
     expect(check.report).toMatchObject({ source: "estimate", freeVramBytes: 9468 * MIB + 8e9 });
     expect(check.report.message).toContain("Ollama replaces");
   });
+
+  it("another loaded model's VRAM counts as reclaimable, since Ollama unloads it to make room", async () => {
+    const s = await fakeOllama({ models: [{ name: "gemma4:12b", size: 8e9, size_vram: 8e9, context_length: 16384 }] });
+    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: smi(MACHINE_GPU, MACHINE_APPS), readMeminfo: async () => MACHINE_MEMINFO });
+    expect(check.report).toMatchObject({ source: "estimate", freeVramBytes: 9468 * MIB + 8e9 });
+    expect(check.report.message).toContain("gemma4:12b");
+  });
 });
 
 describe("measuredFit", () => {
