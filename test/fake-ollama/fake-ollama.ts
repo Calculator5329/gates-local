@@ -39,7 +39,15 @@ export interface FakeOptions {
   errorAfterTokens: number;
   /** slow-drip: after this many reply tokens the stream waits until cancelled; 0 never waits. */
   holdAfterTokens: number;
+  /**
+   * A cold load (preload or chat) takes this long; 0 is instant. While it runs the
+   * model's memory fills the fake GPU in LOAD_STEPS steps and /api/ps leaves it out,
+   * as a real runner does until it is ready.
+   */
+  loadDelayMs: number;
 }
+
+const LOAD_STEPS = 6;
 
 const DEFAULTS: FakeOptions = {
   tokenDelayMs: 12,
@@ -49,6 +57,7 @@ const DEFAULTS: FakeOptions = {
   replyWords: 60,
   errorAfterTokens: 8,
   holdAfterTokens: 0,
+  loadDelayMs: 0,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -177,11 +186,13 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   let options: FakeOptions = { ...DEFAULTS, ...start.options };
   let installed = new Set<string>(installedFor(scenario));
   let loaded: LoadedEntry[] = [];
+  /** Loads still filling memory: on the GPU, not yet in /api/ps. */
+  let filling: LoadedEntry[] = [];
   const requests: FakeRequest[] = [];
 
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
-    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded }));
+    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling] }));
   };
   writeGpu();
 
@@ -191,6 +202,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     options = { ...DEFAULTS, ...start.options, ...preset, ...opts };
     installed = new Set(installedFor(next));
     loaded = [];
+    filling = [];
     writeGpu();
   };
   if (scenario === "slow-first-token" || scenario === "slow-drip") setScenario(scenario, start.options);
@@ -200,9 +212,21 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     return m && installed.has(m.name) ? m : undefined;
   };
 
-  const load = (m: FakeModel, numCtx: number) => {
+  const load = async (m: FakeModel, numCtx: number, signal: AbortSignal) => {
     const kv = m.blockCount * m.headCountKv * m.keyLength * 2 * 2 * numCtx;
-    loaded = [...loaded.filter((l) => l.name !== m.name), { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv }];
+    const entry = { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv };
+    const warm = loaded.some((l) => l.name === m.name && l.numCtx === numCtx);
+    if (!warm && options.loadDelayMs > 0) {
+      // the old copy goes first, then the new one fills memory a step at a time
+      loaded = loaded.filter((l) => l.name !== m.name);
+      for (let i = 1; i <= LOAD_STEPS && !signal.aborted; i++) {
+        filling = [...filling.filter((l) => l.name !== m.name), { ...entry, sizeBytes: Math.round((entry.sizeBytes * i) / LOAD_STEPS) }];
+        writeGpu();
+        await sleep(options.loadDelayMs / LOAD_STEPS, signal);
+      }
+      filling = filling.filter((l) => l.name !== m.name);
+    }
+    loaded = [...loaded.filter((l) => l.name !== m.name), entry];
     writeGpu();
   };
 
@@ -215,15 +239,16 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const think = field(body, "think");
     if (think === true && !m.capabilities.includes("thinking")) return json(res, 400, { error: `"${name}" does not support thinking` });
     const numCtx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
-    load(m, numCtx);
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    await load(m, numCtx, abort.signal);
+    if (abort.signal.aborted) return;
     const messages = field(body, "messages");
     const last = Array.isArray(messages) ? messages.findLast((x) => field(x, "role") === "user") : undefined;
     const prompt = str(last, "content") ?? "";
     const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
     const tools = field(body, "tools");
 
-    const abort = new AbortController();
-    res.on("close", () => abort.abort());
     res.writeHead(200, { "content-type": "application/x-ndjson" });
     const line = (v: unknown) => res.write(`${JSON.stringify(v)}\n`);
     const base = () => ({ model: m.name, created_at: new Date().toISOString() });
@@ -359,7 +384,11 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           if (unload) {
             loaded = loaded.filter((l) => l.name !== m.name);
             writeGpu();
-          } else load(m, Number(field(field(body, "options"), "num_ctx") ?? 4096));
+          } else {
+            const abort = new AbortController();
+            res.on("close", () => abort.abort());
+            await load(m, Number(field(field(body, "options"), "num_ctx") ?? 4096), abort.signal);
+          }
           return json(res, 200, { model: m.name, created_at: new Date().toISOString(), response: "", done: true, done_reason: unload ? "unload" : "load" });
         }
         case "POST /api/pull":

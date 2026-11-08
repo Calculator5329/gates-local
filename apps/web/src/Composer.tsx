@@ -87,18 +87,27 @@ export function Composer() {
   const shownTag = first ?? model;
   const info = models?.find((m) => m.name === shownTag);
   const name = shownTag === undefined ? "No model" : describeModel(shownTag, catalog).name;
-  const v = fit === undefined || fit === "error" ? undefined : verdictOf(fit);
+  const loading = loadState === "loading";
+  // The verdict holds still: between an invalidation and the fresh answer the last one for this
+  // model and context stays, and while the model loads it keeps the one from before the load
+  // (its own memory filling the GPU, not yet listed by Ollama, is no reason to refuse it).
+  const fitAt = model === undefined ? "" : fitKey(model, numCtx);
+  const fresh = fit === undefined || fit === "error" ? undefined : verdictOf(fit);
+  const held = useRef<{ at: string; v: Verdict } | undefined>(undefined);
+  const kept = held.current?.at === fitAt ? held.current.v : undefined;
+  const v = loading ? (kept ?? fresh) : (fresh ?? kept);
+  if (!loading && fresh !== undefined) held.current = { at: fitAt, v: fresh };
   const text = draft.trim();
   const noModel = model === undefined && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined);
 
   const modelLbl =
-    rt === "installing" ? `${name} · downloads next` : first !== undefined ? `${name} · downloading ${firstProgress}%` : loadState === "loading" ? `${name} · loading` : name;
+    rt === "installing" ? `${name} · downloads next` : first !== undefined ? `${name} · downloading ${firstProgress}%` : name;
   const modelTip =
     shownTag === undefined
       ? "No model is installed yet. Download one in Settings › Models."
-      : loadState === "loading"
+      : loading
         ? `${tagTip(name, info, shownTag)}<br>Loading into GPU memory…`
         : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
 
@@ -171,10 +180,12 @@ export function Composer() {
               id="modelBtn"
               aria-haspopup="dialog"
               aria-expanded={pop === "picker"}
+              aria-busy={loading ? true : undefined}
               data-tip={modelTip}
               onClick={() => togglePop("picker")}
             >
-              {shownTag === undefined ? null : <Mark name={name} />}
+              {/* loading shows in the tile, never in the label: the trigger keeps its width */}
+              {shownTag === undefined ? null : <Mark name={name} busy={loading && first === undefined} />}
               <span>{modelLbl}</span>
               <Icon id="down" cls="chev" />
             </button>
@@ -391,11 +402,11 @@ function fitWord(v: Verdict | undefined): string {
 /** "Qwen 3.5 9B" → "Qwen": the rail groups models by the first word of their name. */
 const familyOf = (name: string): string => name.split(" ")[0] ?? name;
 
-/** A model's monogram tile: the first letter of its family. */
-function Mark({ name }: { name: string }) {
+/** A model's monogram tile: the first letter of its family, or a spinner in the same tile while it loads. */
+function Mark({ name, busy = false }: { name: string; busy?: boolean }) {
   return (
     <i className="mmark" aria-hidden="true">
-      {familyOf(name).charAt(0).toUpperCase()}
+      {busy ? <Icon id="spin" cls="spin" /> : familyOf(name).charAt(0).toUpperCase()}
     </i>
   );
 }
