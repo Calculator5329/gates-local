@@ -81,6 +81,7 @@ const runningDownload = async (p: Page) => {
   await downloadTab(p);
   await p.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: "Download", exact: true }).click();
   await expect(p.locator(".dlrow.dlg .prog-l")).toBeVisible();
+  await p.mouse.move(0, 0); // no tooltip left over from the click
   await p.waitForTimeout(2500);
 };
 const PHONE = { width: 412, height: 915 };
