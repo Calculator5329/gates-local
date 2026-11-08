@@ -7,10 +7,9 @@ import { describe, expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(store.state), fitKey: (m: string, c: number) => `${m}@${c}` }));
-vi.mock("./session.ts", () => {
-  const noop = () => undefined;
-  return { ensureFit: noop, finishFirstRun: noop, firstPull: noop, openSettings: noop, pull: noop, cancelPull: noop, recheckRuntime: noop };
-});
+vi.mock("./session.ts", () =>
+  Object.fromEntries(["ensureFit", "finishFirstRun", "firstPull", "openSettings", "pull", "cancelPull", "recheckRuntime"].map((name) => [name, () => undefined])),
+);
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./Settings.tsx", () => ({ DlDetail: () => null }));
 vi.mock("./ui.tsx", () => ({ VLabel: () => null }));
