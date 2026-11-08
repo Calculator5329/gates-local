@@ -29,6 +29,14 @@
   takes over. A reply in the way that the first check missed now brings up
   the same warning (`chat.send` `askFirst`, error code `would-stop` with
   `blocking`).
+- Stop means stop, and a chat stops only with your yes. Stopping a message
+  that hasn't started keeps whatever was queued behind it on hold, even if
+  another chat takes over before the server answers. Saying yes to the
+  warning stops only the replies it named; if a different one is in the way
+  by then, you are asked again (`chat.send` `stopTurns`, `BlockingTurn`
+  `turnId`). "Don't show this again" still covers every chat. A message
+  that waited for setup and then couldn't send now reads On hold, with
+  Send now on its row.
 
 ## 2026-11-08: A Models page that is only models
 

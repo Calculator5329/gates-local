@@ -681,7 +681,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("without stopOthers: turns.blocking names X (and loads nothing); Y waits until X ends", async () => {
     const t = await withX(tight);
     const generates = () => t.r.old.requests.filter((q) => q.path === "/api/generate").length;
-    expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([{ threadId: t.xThread.id, title: "Long answer", model: MODEL }]);
+    expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }]);
     expect(generates()).toBe(0);
     const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
     await sleep(300);
@@ -702,6 +702,43 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
     t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    await t.r.done();
+  });
+
+  it("CFT-04, stopTurns: the turn the person agreed to is stopped and Y starts", async () => {
+    const t = await withX(tight);
+    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
+    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
+    expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
+    await t.r.done();
+  });
+
+  it("CFT-04, stopTurns: a turn nobody agreed to is named and left running, and nothing is saved", async () => {
+    const t = await withX(tight);
+    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: ["a-turn-that-has-ended"] }, ctx);
+    const sent = await settledWithin(Promise.resolve(send), 1000);
+    expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }] } });
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
+    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    await t.r.done();
+  });
+
+  it("CFT-04, stopTurns: agreed to one of two turns in the way, nothing is stopped and both are named, so the next yes covers both", async () => {
+    const t = await withX(tight);
+    const second = t.r.store.createThread({ title: "Second answer" });
+    const x2 = await t.r.app.handlers["chat.send"]({ threadId: second.id, content: "more", model: MODEL, numCtx: 16384 }, ctx);
+    for (let i = 0; i < 400 && !t.of(x2.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
+    const sent = await settledWithin(Promise.resolve(send), 1000);
+    expect(sent).toMatchObject({ rejected: { code: "would-stop" } });
+    const named = ((sent as { rejected: { blocking: { turnId: string }[] } }).rejected.blocking).map((b) => b.turnId);
+    expect(named.toSorted()).toEqual([t.x.turnId, x2.turnId].toSorted());
+    expect(t.terminal(t.x.turnId)).toEqual([]);
+    expect(t.terminal(x2.turnId)).toEqual([]);
+    t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
+    t.r.app.handlers["chat.cancel"]({ turnId: x2.turnId }, ctx);
     await t.r.done();
   });
 

@@ -816,10 +816,12 @@ function leaving(queued: readonly Queued[], q: Queued): Leaving {
 function putBack(queued: readonly Queued[], { q, ahead }: Leaving): Queued[] {
   const { now: _now, ...rest } = q;
   const at = queued.findLastIndex((x) => ahead.has(x.id)) + 1;
-  return [...queued.slice(0, at), { ...rest, held: true as const }, ...queued.slice(at)];
+  // reply, even if it waited for setup: that wait is over, and Send now on this row is how it goes
+  return [...queued.slice(0, at), { ...rest, waitFor: "reply" as const, held: true as const }, ...queued.slice(at)];
 }
 
-async function launch(out: Outgoing, stopOthers: boolean): Promise<void> {
+/** `stopTurns`: the turns a warning named and the person agreed to; without it, standing consent. */
+async function launch(out: Outgoing, stopOthers: boolean, stopTurns?: readonly string[]): Promise<void> {
   if (gone(out)) return setState({ stopAsk: null });
   const { queued } = getState();
   const q = queued.find((x) => x.id === out.queuedId);
@@ -833,7 +835,7 @@ async function launch(out: Outgoing, stopOthers: boolean): Promise<void> {
     ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((x) => x.id !== out.queuedId) }),
   }));
   const threadId = out.threadId ?? (await createThread(out.content, out.model));
-  if (threadId !== null) await startTurn(threadId, out.content, out.model, { stopOthers, from, out });
+  if (threadId !== null) await startTurn(threadId, out.content, out.model, { stopOthers, stopTurns, from, out });
 }
 
 /** The warning's action. `dontShowAgain` is saved only here, so a Cancel with the box ticked changes nothing. */
@@ -847,7 +849,7 @@ export function confirmStopAsk(dontShowAgain: boolean): void {
       // private windows may refuse storage; the warning shows again next time
     }
   }
-  void launch(ask, true);
+  void launch(ask, true, stopOthersOk() ? undefined : ask.blocking.flatMap((t) => t.turnId ?? []));
 }
 
 export function cancelStopAsk(): void {
@@ -895,8 +897,12 @@ function keepStoppedWords(l: LiveTurn): void {
   setState((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
 }
 
+/** Sends Stop reached before the server gave them an id: the live slot that showed it may belong to another chat by the time the answer comes. */
+const stoppedAtAdmission = new Set<number>();
+
 interface TurnOptions {
   readonly stopOthers?: boolean;
+  readonly stopTurns?: readonly string[] | undefined;
   /** It left the queue for this send. */
   readonly from?: Leaving | undefined;
   /** The person is waiting on it, so a reply in the way can still get the warning; queued messages that go on their own have none. */
@@ -916,7 +922,7 @@ async function startTurn(threadId: string, content: string, model: string, opts:
       numCtx: s.numCtx,
       think: s.think,
       ...(s.image ? { image: true } : {}),
-      ...(opts.stopOthers ? { stopOthers: true } : opts.out === undefined ? {} : { askFirst: true }),
+      ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
     });
     const away = parked.findIndex((t) => t.gen === gen);
     if (away >= 0) {
@@ -956,6 +962,8 @@ async function startTurn(threadId: string, content: string, model: string, opts:
     // a turn another client started meanwhile (turn-active) now streams here
     if (mine) replayEarly();
     flushQueued();
+  } finally {
+    stoppedAtAdmission.delete(gen);
   }
 }
 
@@ -971,7 +979,7 @@ function notSent(e: unknown, gen: number, threadId: string, content: string, mod
   const st = getState();
   const code = codeOf(e);
   const owner = st.live?.gen === gen ? st.live : null;
-  const halted = owner?.end !== undefined;
+  const halted = owner?.end !== undefined || stoppedAtAdmission.has(gen);
   const here = st.view === "thread" && st.threadId === threadId;
   const where = out?.regenerate === true ? null : from === undefined && here && st.draft === "" ? "box" : "queue";
   const blocking = e instanceof WireError ? e.blocking : undefined;
@@ -1030,11 +1038,15 @@ export function stop(): void {
   // after the flush, on the state it left: the words that were waiting for a frame stay (W-05)
   const secs = Math.round((Date.now() - live.startedAt) / 1000);
   setState((s) => (s.live !== null && s.live.gen === live.gen && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs }, ending: true } } : {}));
-  // without an id yet, startTurn cancels it once chat.send answers
   if (live.turnId !== null) {
     oldTurns.add(live.turnId);
     void call("chat.cancel", { turnId: live.turnId }).catch(() => undefined);
+    return;
   }
+  // without an id yet, startTurn cancels it once chat.send answers; until then another chat's
+  // send can take the slot, and another chat finishing can wake the queue
+  stoppedAtAdmission.add(live.gen);
+  holdQueue(live.threadId);
 }
 
 /** Retry stays off while a stopped turn has not ended on the server: the server refuses a second turn in a thread, and the old turn's events must not land on the new one. */
