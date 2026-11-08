@@ -27,7 +27,8 @@ Ollama, for people who want local models without guessing whether they fit.
   network.
 - Optional image generation through ComfyUI. It is off until you turn it
   on.
-- Dark and light themes. It follows your system setting until you pick one.
+- Dark and light themes. A new install starts dark, and Settings › General
+  also offers Light and System.
 
 <table>
   <tr>
