@@ -265,15 +265,25 @@ describe("runtime switch", () => {
       const first = await runtime({ appPort, externalBaseUrl: other.baseUrl });
       const started = await first.ensure();
       expect(started).toMatchObject({ state: "ready", owner: "app", busyPorts: busy });
-      // A restart adopts the recorded copy: the system port is still held by the same program.
-      const adopted = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
-      expect(adopted).toMatchObject({ state: "ready", owner: "app", baseUrl: started.baseUrl });
-      expect(adopted.busyPorts).toEqual(busy);
-      // Not ours (record cleared): reused as an external Ollama, busy port still named.
-      clearRecord(ownedStateFile(appDataDir));
-      const reused = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
-      expect(reused).toMatchObject({ state: "ready", owner: "external", baseUrl: started.baseUrl });
-      expect(reused.busyPorts).toEqual(busy);
+      const record = readRecord(ownedStateFile(appDataDir));
+      expect(record).toBeDefined();
+      try {
+        // A restart adopts the recorded copy: the system port is still held by the same program.
+        const adopted = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
+        expect(adopted).toMatchObject({ state: "ready", owner: "app", baseUrl: started.baseUrl });
+        expect(adopted.busyPorts).toEqual(busy);
+        // Not ours (record cleared): reused as an external Ollama, busy port still named.
+        clearRecord(ownedStateFile(appDataDir));
+        const reused = await (await runtime({ appPort, externalBaseUrl: other.baseUrl })).ensure();
+        expect(reused).toMatchObject({ state: "ready", owner: "external", baseUrl: started.baseUrl });
+        expect(reused.busyPorts).toEqual(busy);
+      } finally {
+        // The record of the live fake serve comes back, so the first runtime stops it here,
+        // before its fixture folder goes (cleared, every later stop() said no-record).
+        writeRecord(ownedStateFile(appDataDir), record!);
+        expect(await first.stop()).toMatchObject({ stopped: true });
+      }
+      expect(await isUp(started.baseUrl)).toBe(false);
     } finally {
       await other.close();
     }
