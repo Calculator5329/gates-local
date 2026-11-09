@@ -19,10 +19,12 @@ export async function drain(): Promise<void> {
 export class OrderingServer extends FakeServer {
   settings: Settings = { ...methodSamples["settings.get"].result, whisperUrl: SPEECH_URL };
   readonly deliveries = new Map<string, Delivery>();
-  readonly writes: Array<{ socket: FakeSocket; patch: SettingsPatch }> = [];
+  readonly writes: Array<{ socket: FakeSocket; patch: SettingsPatch; key: string }> = [];
+  connectName = "connect";
   readonly messages: Message[] = [];
   readonly turns = new Map<string, Message>();
   readonly admissions = new Map<string, Message>();
+  readonly startTargets = new Map<string, readonly FakeSocket[]>();
   readonly cancelled: string[] = [];
   readonly labels = new Map<FakeSocket, string>();
   holdHydration = false;
@@ -47,11 +49,11 @@ export class OrderingServer extends FakeServer {
       this.log.push(request);
       // The real wire decoder has already checked the outgoing request.
       const patch = request.params as Params<"settings.update">;
-      this.writes.push({ socket, patch });
       const { voiceChange, whisperUrl, theme } = patch;
       if (Object.keys(patch).some((key) => !["voiceChange", "whisperUrl", "theme"].includes(key))) throw new Error("Script a settings result for this patch first");
       this.settings = { ...this.settings, ...(theme ? { theme } : {}), ...("whisperUrl" in patch ? { whisperUrl: whisperUrl ?? undefined } : {}) };
-      const key = `${label}-${"whisperUrl" in patch ? whisperUrl === null ? "disconnect" : "connect" : "theme"}`;
+      const key = `${label}-${"whisperUrl" in patch ? whisperUrl === null ? "disconnect" : this.connectName : "theme"}`;
+      this.writes.push({ socket, patch, key });
       save(key, this.settings);
       // The sender's response and both windows' push deliveries are separate.
       this.deliveries.set(`${key}-push`, { socket, request, result: { ...this.settings, ...(voiceChange ? { voiceChange } : {}) } });
@@ -79,6 +81,8 @@ export class OrderingServer extends FakeServer {
     if (!message) throw new Error(`No pending admission: ${turnId}`);
     this.admissions.delete(turnId);
     this.messages.push(message); this.turns.set(turnId, message);
+    // app.ts broadcasts start at admission, only to sockets open right then.
+    this.startTargets.set(turnId, this.sockets.filter((socket) => socket.readyState === 1));
   }
 
   response(key: string, optional = false): void {
@@ -104,6 +108,11 @@ export class OrderingServer extends FakeServer {
       : { type: "start", model: "gemma3:4b", userMessage };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
   }
+
+  admittedPush(turnId: string, label: string): void {
+    const target = this.startTargets.get(turnId)?.find((socket) => this.labels.get(socket) === label);
+    if (target) this.chatPush(turnId, target);
+  }
 }
 
 function button(node: ReactNode, name: string): (() => unknown) | undefined {
@@ -126,6 +135,8 @@ export class OrderingWorld {
   readonly windows: WindowSession[] = [];
   eligible = false;
   connectStarted = false;
+  intent: "old" | "connect" | "disconnect" | null = null;
+  readonly healthSaves = new Map<string, boolean>();
   expectedCancelled = new Set<string>();
   get a(): WindowSession { const a = this.windows[0]; if (!a) throw new Error("Missing window A"); return a; }
   get b(): WindowSession { const b = this.windows[1]; if (!b) throw new Error("Missing window B"); return b; }

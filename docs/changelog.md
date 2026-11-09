@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-08: Replay pushes before replies while hydration is held
+
+The ordering harness now follows server broadcast-before-return guarantees for
+Connect, Disconnect, foreign settings and chat admission. Each window receives
+independently, with per-socket FIFO and no artificial wait for hydration release.
+Start broadcasts keep their admission-time recipients across socket drops.
+Larger graphs use explicit bounded deterministic sampling rather than claiming
+exhaustive coverage. A planted lost Connect push passed the old schedules and
+failed the widened schedules. Production behavior is unchanged.
+
 ## 2026-11-09: Replay client actions across reconnect and delayed delivery
 
 Ordering probes now enumerate causal interleavings against two real client

@@ -297,13 +297,20 @@ that stage 1 leaves reusable. Manual Dictate stays available separately.
 
 ## Client ordering replay
 
-2026-11-08: in-memory replay now enumerates speech Connect/Disconnect choices
+2026-11-08: in-memory replay now explores speech Connect/Disconnect choices
 across two windows and hydration, a send across disconnect/reconnect, and Stop
 around acknowledgements. It runs the real session and store with fake transport
 and stepped time. Three speech ordering bugs were rediscovered on older commits,
 and all three are fixed. `docs/testing.md` explains
 scenario constraints and replaying a printed order. These are diagnostic probes;
 the existing suite and independent review still determine acceptance.
+
+2026-11-08, SL-01: sender pushes now precede responses independently of hydration;
+other-window deliveries are separate. Per-socket FIFO also covers foreign writes
+and chat start broadcasts, with admission-time recipients retained on disconnect.
+The wider graphs use 64 deterministic samples each, not an exhaustive claim.
+A mutation limited to an own Connect push received during hydration passed the
+old graph and failed the new one.
 
 ## Later: slices 5 to 7
 
