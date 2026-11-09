@@ -5,3 +5,4 @@ out/
 .vite/
 /runtime-cache/
 /.data/
+docs/feedback-inbox.md
