@@ -97,6 +97,8 @@ export interface State {
   readonly draftSendId: string | null;
   readonly draftSendThreadId: string | null;
   readonly conn: Conn;
+  /** The initial read attempt ended, including failure, for this connection. */
+  readonly hydrationSettled: boolean;
   readonly serverOrigin: string | null;
   readonly fileToken: string | null;
   readonly runtime: RuntimeStatus | undefined;
@@ -125,7 +127,8 @@ export interface State {
   readonly fitPanel: { readonly model: string | null };
   /** The open popover. A thread menu belongs to its row and opens at its button or a right-click point. */
   readonly pop:
-    | { readonly id: "picker" | "plus" | "opts"; readonly kb: boolean }
+    | { readonly id: "picker"; readonly kb: boolean; readonly ready?: true }
+    | { readonly id: "plus" | "opts"; readonly kb: boolean }
     | { readonly id: "thread"; readonly kb: boolean; readonly thread: string; readonly at?: { readonly x: number; readonly y: number } }
     | null;
   /** Below 1024 px the sidebar is a drawer over the page; this is whether it is open. */
@@ -188,6 +191,7 @@ const initial: State = {
   draftSendId: null,
   draftSendThreadId: null,
   conn: { kind: "connecting" },
+  hydrationSettled: false,
   serverOrigin: null,
   fileToken: null,
   runtime: undefined,

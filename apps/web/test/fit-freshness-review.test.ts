@@ -48,7 +48,7 @@ beforeEach(async () => {
   disconnect = session.connect();
   await until(() => store.getState().imageStatus !== undefined);
   await tick();
-  store.setState({ models: [installed], model, catalog: [entry], numCtx: 16384, pop: { id: "picker", kb: false }, settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 16384 } });
+  store.setState({ models: [installed], model, catalog: [entry], numCtx: 16384, pop: { id: "picker", kb: false, ready: true }, settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 16384 } });
 });
 afterEach(async () => {
   disconnect?.();
@@ -72,7 +72,7 @@ for (const view of ["settings", "models", "picker"]) {
     b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, freeBytes: 0 });
     const pending = render(view);
     expect(shown(pending)).not.toMatch(positive);
-    expect(shown(pending)).toContain(view === "picker" ? "Checking" : "Rechecking");
+    expect(shown(pending)).toContain(view === "picker" ? "Previous check" : "Rechecking");
     expect(store.getState().fits[store.fitKey(model, 16384)]).toBe(previous);
     (await refresh).fail("unavailable", "cannot measure");
     await tick();

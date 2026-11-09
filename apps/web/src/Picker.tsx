@@ -10,8 +10,8 @@ import { Icon } from "./icons.tsx";
 import { chatModels, pendingDownload } from "./pick.ts";
 import { contextRuler, makerOf, pickerLabel, pickerLabels, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { currentFit, ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
-import { NA, fitKey, getState, useStore } from "./store.ts";
+import { ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
+import { NA, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
 import { PHONE, closePop, closeTip, esc, isTouch, place, tabStops, useMedia } from "./ui.tsx";
 
 const MARGIN = 512 * 1024 ** 2; // Display the server's existing VRAM safety margin; never decide fit here.
@@ -28,18 +28,19 @@ function savedFavorites(): string[] {
 }
 
 /** Swappable presentation only. The verdict and all byte counts come from fit.check. */
-export function ContextMemory({ v, cpu, frees = false, failed = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; failed?: boolean }) {
+export function ContextMemory({ v, cpu, frees = false, failed = false, history = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; failed?: boolean; history?: boolean }) {
   if (!v) return <span className="pk-cost pending">{failed ? "Couldn't check" : "Checking…"}</span>;
   const ruler = contextRuler(v);
-  const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
-  return <span className={`pk-cost ${v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
+  const word = history ? "Previous check" : frees ? "Stops chat" : v.k === "no" ? "Too big" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
+  return <span className={`pk-cost ${history ? "history" : v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
     <span className="pk-cost-caption"><span>{gb(v.need)}</span><small>{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
 }
 
-function contextTip(v: Verdict | undefined, cpu: boolean, frees: boolean): string {
+function contextTip(v: Verdict | undefined, cpu: boolean, frees: boolean, history: boolean): string {
   if (!v) return "Checking memory…";
+  if (history) return `${gb(v.need)} previous check; checking again.`;
   const word = frees ? "sending stops another chat first" : v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : v.k === "gpu" ? "fits on the GPU" : "spills into system memory";
   const room = cpu ? "" : `; ${gb(contextRuler(v).room)} ${v.measured ? "GPU room including this model’s existing allocation; extension is its measured system-memory spill" : "usable after the 512 MiB reserve"}`;
   return `${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${room}.`;
@@ -55,6 +56,7 @@ export function Picker() {
   const numCtx = useStore(s => s.numCtx);
   const selected = useStore(s => s.model);
   const gpu = useStore(s => s.gpu);
+  const settled = useStore(s => s.hydrationSettled), readyForFits = useStore(chatReady);
   const phone = useMedia(PHONE), cpu = noGpu(gpu);
   const catalog = catalogRaw === NA ? undefined : catalogRaw;
   const [query, setQuery] = useState("");
@@ -74,7 +76,7 @@ export function Picker() {
   checks.current = { ...checks.current, ...fits };
   const keyFor = (tag: string, c = numCtx) => fitKey(tag, ctxFor(c, models, tag));
   const checked = (tag: string, c = numCtx) => checks.current[keyFor(tag, c)] ?? catalog?.find(m => m.name === tag && m.fit?.numCtx === ctxFor(c, models, tag))?.fit;
-  const stale = (tag: string, c = numCtx) => currentFit(checked(tag, c)) === undefined;
+  const stale = (tag: string, c = numCtx) => !fitIsCurrent(checked(tag, c));
   const report = (tag: string, c = numCtx) => {
     const r = checked(tag, c);
     return r && r !== "error" ? verdictOf(r) : undefined;
@@ -100,6 +102,14 @@ export function Picker() {
   const actual = active ? ctxFor(numCtx, models, active.tag) : numCtx;
   const present = new Set([...rows.map(r => makerOf(r.tag)), ...(catalog ?? []).map(c => makerOf(c.name))]);
   const rowKey = rows.map(r => r.tag).join("\n");
+  // Prepare the first view with the existing checks. Later refreshes keep
+  // readable history on screen; neither history nor opening authorizes a pick.
+  const prepared = !readyForFits || (models !== undefined || settled) && (gpu !== undefined || settled) &&
+    installed.every(m => checked(m.name) !== undefined) &&
+    (!active || CONTEXT_SIZES.every(c => activeMax !== undefined && c > activeMax || checked(active.tag, c) !== undefined));
+  useLayoutEffect(() => {
+    if (pop && !pop.ready && prepared && getState().pop === pop) setState({ pop: { ...pop, ready: true } });
+  }, [pop, prepared]);
   useEffect(() => {
     if (!pop) return;
     for (const m of chatModels(getState().models ?? [])) ensureFit(m.name, ctxFor(numCtx, models, m.name));
@@ -131,7 +141,7 @@ export function Picker() {
     finish(row);
   }, [fits, models, pop]);
   useLayoutEffect(() => {
-    if (!pop) return;
+    if (!pop?.ready) return;
     if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
     else input.current?.focus({ preventScroll: true });
   }, [pop]);
@@ -224,7 +234,8 @@ export function Picker() {
     : choiceReport === "error" ? `Couldn't check ${k(choice.size)}. Your choice is kept while we retry.`
     : refused.current === choice || choiceReport?.verdict === "refuse" ? `${k(choice.size)} needs more memory. Choose another size.`
     : `Choosing ${k(choice.size)}. Checking memory…`;
-  const tip = (row: Row) => `<b>${esc(row.label)}</b> · <span class="mono">${esc(row.tag)}</span>${row.info ? `<br>${gb(row.info.sizeBytes)} on disk` : ""}${row.v && !stale(row.tag) ? `<br>${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}` : "<br>Checking memory…"}`;
+  const tip = (row: Row) => `<b>${esc(row.label)}</b> · <span class="mono">${esc(row.tag)}</span>${row.info ? `<br>${gb(row.info.sizeBytes)} on disk` : ""}${row.v ? stale(row.tag) ? `<br>${gb(row.v.need)} previous check; checking again.` : `<br>${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}` : "<br>Checking memory…"}`;
+  if (!pop?.ready) return null;
   return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} aria-busy={choosing || undefined} onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Model makers" inert={phone && step === "context"}>
@@ -241,7 +252,7 @@ export function Picker() {
               <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : checked(r.tag) === "error" ? "Couldn't check" : "Checking…"}</span></button>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
-            {visible.length === 0 ? <div className="pk-empty">{group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
+            {visible.length === 0 ? <div className="pk-empty">{models === undefined ? "Couldn't read installed models." : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
           </div>
           <button className="pk-more" disabled={filtered.length <= limit || q !== ""} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show more"}</button>
         </div>
@@ -255,10 +266,10 @@ export function Picker() {
           buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
         }}>
           {CONTEXT_SIZES.map(c => {
-            const v = active && !stale(active.tag, c) ? report(active.tag, c) : undefined, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
+            const v = active ? report(active.tag, c) : undefined, history = active ? stale(active.tag, c) : false, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
             const capped = activeMax !== undefined && c > activeMax;
-            const disabled = !active || active.downloading !== undefined || capped || (v?.k === "no" && !frees);
-            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} failed={active !== undefined && checked(active.tag, c) === "error"} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            const disabled = !active || active.downloading !== undefined || capped || (!history && v?.k === "no" && !frees);
+            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={history || choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees, history)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} history={history} failed={active !== undefined && checked(active.tag, c) === "error"} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {choiceMessage ? <p className="pk-help pk-choice" role="status">{choiceMessage}</p> : null}
@@ -267,6 +278,6 @@ export function Picker() {
         {active?.v?.k === "no" ? <button className="pk-detail" onClick={() => { closePop(); openFit(active.tag); }}>Memory details</button> : null}
       </section>
     </div>
-    <footer className="pk-bottom"><button onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button><span>{cpu ? "Runs in system memory" : free === undefined ? "Checking memory…" : `${gb(free)} free · ${gb(Math.max(0, free - MARGIN))} usable`}</span></footer>
+    <footer className="pk-bottom"><button onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button><span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free · ${gb(Math.max(0, free - MARGIN))} usable`}</span></footer>
   </div>;
 }

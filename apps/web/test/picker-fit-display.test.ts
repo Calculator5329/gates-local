@@ -34,16 +34,22 @@ beforeEach(() => {
     catalog,
     fits: {},
     numCtx: 32768,
-    pop: { id: "picker", kb: false },
+    pop: { id: "picker", kb: false, ready: true },
   });
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("shows the catalog's measured verdict while its fresh check is pending", () => {
+it("does not expose the first picker view before the missing costs arrive", () => {
+  setState({ pop: { id: "picker", kb: false } });
+  expect(html()).not.toContain('id="picker"');
+});
+
+it("shows the catalog's measured cost as history while its fresh check is pending", () => {
   const rendered = context();
   expect(rendered).toBeDefined();
   expect(rendered).not.toContain("Checking…");
-  expect(rendered).toContain("Slower");
+  expect(rendered).toContain("Previous check");
+  expect(rendered).not.toContain("Slower");
   expect(row()).not.toContain("Checking…");
 });
 
@@ -66,6 +72,6 @@ it("a newly opened context column only checks sizes that have never answered", (
   // Each static render is a new Picker instance, as after a close and reopen.
   expect(html()).not.toContain("Checking…");
   setState({ pop: null });
-  setState({ pop: { id: "picker", kb: false } });
+  setState({ pop: { id: "picker", kb: false, ready: true } });
   expect(html()).not.toContain("Checking…");
 });

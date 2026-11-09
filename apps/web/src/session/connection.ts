@@ -109,9 +109,12 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
       }
       if (opened) {
         client = c;
-        applyServerEvent({ conn: { kind: "open" } });
+        applyServerEvent({ conn: { kind: "open" }, hydrationSettled: false });
         // An open socket may still fail negotiation or its startup reads.
-        await hydrate(c).then(() => { delay = 250; }, () => undefined);
+        await hydrate(c).then(() => { delay = 250; }, () => undefined).finally(() => {
+          // Only this still-open, negotiated connection may settle preparation.
+          if (!stopped && client === c && ws.readyState === 1 && c.sync !== undefined) applyServerEvent({ hydrationSettled: true });
+        });
         await c.closed;
         beforeDisconnect();
         client = null;

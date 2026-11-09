@@ -1,5 +1,6 @@
 // Journey: switch model in the picker and the context size in GPU memory
 // (Settings › Advanced); the verdict follows each change.
+import type { GpuStatus } from "@gates-local/contracts";
 import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
 test("switching model and context updates the fit verdict and the panel", async ({ page, open }) => {
@@ -50,6 +51,54 @@ test("memory no process claims is called Other in the panel, in words and in its
   await other.hover();
   await expect(page.locator("#tip")).toContainText("can't name");
   await expect(page.locator("#tip")).not.toContainText("Not attributed");
+});
+
+test("unrelated context answers keep the Other and Whisper tooltips open", async ({ page, open }) => {
+  let refresh: (() => void) | undefined;
+  const held = new Map<number, () => void>();
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+    const server = ws.connectToServer();
+    const requests = new Map<string, number>();
+    let gpu: GpuStatus | undefined, holding = false;
+    refresh = () => {
+      if (!gpu) throw new Error("No GPU reading received");
+      holding = true;
+      ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: { ...gpu, freeBytes: (gpu.freeBytes ?? 0) - 1, measuredAt: gpu.measuredAt + 1 } }));
+    };
+    ws.onMessage(message => {
+      const req = JSON.parse(String(message)) as { id: string; method?: string; params?: { numCtx?: number } };
+      if (req.method === "fit.check" && req.params?.numCtx !== undefined) requests.set(req.id, req.params.numCtx);
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const res = JSON.parse(String(message)) as { type: string; id?: string; channel?: string; result?: GpuStatus; payload?: GpuStatus };
+      if (res.type === "push" && res.channel === "gpu.changed") {
+        if (holding) return;
+        gpu = res.payload;
+      }
+      if (res.type === "response" && res.result?.vendor) gpu = res.result;
+      const ctx = res.id === undefined ? undefined : requests.get(res.id);
+      if (holding && ctx !== undefined) held.set(ctx, () => ws.send(message));
+      else ws.send(message);
+    });
+  });
+  await open(); await waitReady(page);
+  const panel = await openGpuMemory(page);
+  await panel.locator("summary", { hasText: "Details" }).click();
+  for (const ctx of [8192, 16384, 32768, 65536]) {
+    await expect(panel.locator(`[data-ctx="${ctx}"]`)).toHaveAttribute("data-tip", /Runs |Slower |Won't fit/);
+  }
+  refresh!();
+  await expect.poll(() => held.has(8192) && held.has(32768) && held.has(65536)).toBe(true);
+  for (const [label, text, ctx] of [["Other", "can't name", 8192], ["Whisper", "never stops it", 32768]] as const) {
+    await expect(panel.locator(`[data-ctx="${ctx}"]`)).toHaveAttribute("data-tip", "Checking…");
+    await panel.locator(".lg-r").filter({ hasText: new RegExp(`^${label}`) }).hover();
+    await expect(page.locator("#tip")).toContainText(text);
+    held.get(ctx)!();
+    await expect(panel.locator(`[data-ctx="${ctx}"]`)).not.toHaveAttribute("data-tip", /Checking/);
+    await expect(page.locator("#tip")).toHaveClass(/open/);
+    await expect(page.locator("#tip")).toContainText(text);
+  }
 });
 
 test("Memory details follow the chat's 64k choice without changing its saved 16k default", async ({ page, open }) => {

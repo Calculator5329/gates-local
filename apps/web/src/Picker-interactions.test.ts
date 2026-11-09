@@ -22,7 +22,7 @@ vi.mock("react", async original => ({
   },
 }));
 vi.mock("./store.ts", () => ({
-  NA: "na", fitKey: (m: string, c: number) => `${m}@${c}`, getState: () => probe.state,
+  NA: "na", chatReady: () => true, fitKey: (m: string, c: number) => `${m}@${c}`, getState: () => probe.state,
   useStore: (select: (s: unknown) => unknown) => select(probe.state), setState: vi.fn(), streamingHere: () => false,
 }));
 vi.mock("./session.ts", () => ({ ensureFit: probe.ensure, pickModel: probe.pick, setContext: probe.context, currentFit: (r: unknown) => probe.stale.has(r) ? undefined : r,
@@ -61,7 +61,7 @@ beforeEach(() => {
   probe.stale.clear();
   probe.held.clear();
   vi.clearAllMocks(); probe.phone = false; probe.states = []; probe.root = undefined; probe.refValues = [];
-  probe.state = { pop: { id: "picker", kb: true }, model: "other:1b", numCtx: 16384,
+  probe.state = { pop: { id: "picker", kb: true, ready: true }, model: "other:1b", numCtx: 16384,
     models: [{ name: tag, maxContext: 8192, sizeBytes: gib, capabilities: ["completion"] }],
     catalog: [], fits: {}, pulls: {}, stopFrees: {}, gpu: { vendor: "nvidia", freeBytes: 12 * gib } };
 });
@@ -211,7 +211,7 @@ it.each(["refuse", "error", "close"])("a pending row is cancelled by %s before a
   else probe.state.fits = { [`${tag}@8192`]: result === "error" ? "error" : fit("refuse") };
   settle();
   if (result === "refuse") expect(find(render(), p => p["data-m"] === tag).props.className).toContain(" dis");
-  probe.state.pop = { id: "picker", kb: true };
+  probe.state.pop = { id: "picker", kb: true, ready: true };
   probe.state.fits = { [`${tag}@8192`]: fit("fits") };
   settle();
   expect(probe.pick).not.toHaveBeenCalled();
@@ -324,9 +324,9 @@ it("Enter's 8k activation stays visible while its first check is pending, then c
   const radio = find(render(), p => p["data-ctx"] === 8192);
   call(radio, "onClick"); // Native Enter activates this same button handler.
   expect(probe.pick).not.toHaveBeenCalled();
-  const waiting = render();
+  const waiting = find(render(), p => p.id === "picker");
   probe.state.fits = { [`${tag}@8192`]: fit("fits") };
-  const answered = render();
+  const answered = find(render(), p => p.id === "picker");
   expect(answered.props["aria-busy"]).toBe(true); // Protect the choice until its commit effect finishes too.
   for (const effect of probe.effects) effect();
   expect(probe.context).toHaveBeenCalledExactlyOnceWith(8192);
@@ -422,7 +422,7 @@ for (const owner of ["picker", "app"] as const) {
     probe.root = root;
     vi.stubGlobal("document", { activeElement: download, getElementById: () => root });
     const event = { key: "Tab", shiftKey: false, ctrlKey: false, metaKey: false, preventDefault: vi.fn() };
-    if (owner === "picker") call(render(), "onKeyDown", event);
+    if (owner === "picker") call(find(render(), p => p.id === "picker"), "onKeyDown", event);
     else onKey(event);
     expect(back.focus).toHaveBeenCalledTimes(1);
     expect(rail.focus).not.toHaveBeenCalled();

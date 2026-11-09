@@ -1,0 +1,69 @@
+// Drive the actual tooltip listeners and observer; no browser or replacement
+// tooltip implementation. The fixture supplies its DOM boundary only.
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const p = vi.hoisted(() => ({ tip: undefined as unknown, effects: [] as (() => void | (() => void))[] }));
+vi.mock("react", async original => ({
+  ...await original<typeof import("react")>(),
+  useRef: () => ({ current: p.tip }),
+  useEffect: (effect: () => void | (() => void)) => { p.effects.push(effect); },
+}));
+import { Tip } from "./ui.tsx";
+import { setState } from "./store.ts";
+
+class ElementFixture {
+  isConnected = true;
+  text = "Whisper explanation";
+  top = 100;
+  innerHTML = "";
+  offsetWidth = 100;
+  offsetHeight = 20;
+  style: Record<string, string> = {};
+  classes = new Set<string>();
+  classList = { add: (c: string) => void this.classes.add(c), remove: (c: string) => void this.classes.delete(c), contains: (c: string) => this.classes.has(c) };
+  getAttribute(name: string) { return name === "data-tip" ? this.text : null; }
+  closest(selector: string) { return selector === "[data-tip],[data-tipt]" ? this : null; }
+  querySelector() { return null; }
+  contains(target: ElementFixture) { return target === this; }
+  getBoundingClientRect() { return { x: 10, y: this.top, left: 10, top: this.top, right: 130, bottom: this.top + 20, width: 120, height: 20 }; }
+}
+let listeners: Map<string, (event: { target: ElementFixture }) => void>;
+let observers: Set<(records: { target: ElementFixture }[]) => void>;
+let cleanups: (() => void)[];
+let anchor: ElementFixture, tip: ElementFixture;
+beforeEach(() => {
+  vi.useFakeTimers(); listeners = new Map(); observers = new Set(); cleanups = [];
+  anchor = new ElementFixture(); tip = new ElementFixture(); p.tip = tip; p.effects.length = 0;
+  vi.stubGlobal("window", globalThis);
+  vi.stubGlobal("innerWidth", 1440); vi.stubGlobal("innerHeight", 900);
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  vi.stubGlobal("Element", ElementFixture);
+  vi.stubGlobal("MutationObserver", class {
+    readonly changed: (records: { target: ElementFixture }[]) => void;
+    constructor(changed: (records: { target: ElementFixture }[]) => void) { this.changed = changed; }
+    observe() { observers.add(this.changed); }
+    disconnect() { observers.delete(this.changed); }
+  });
+  vi.stubGlobal("document", {
+    body: new ElementFixture(),
+    addEventListener: (name: string, listener: (event: { target: ElementFixture }) => void) => { listeners.set(name, listener); },
+    removeEventListener: (name: string) => { listeners.delete(name); },
+  });
+  setState({ pop: null }); Tip();
+  for (const effect of p.effects.splice(0)) {
+    const cleanup = effect(); if (cleanup) cleanups.push(cleanup);
+  }
+});
+afterEach(() => { for (const cleanup of cleanups) cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it.each(["move", "text", "remove"])("keeps an unchanged tooltip, then closes it on anchor %s", async change => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(true);
+  if (change === "move") anchor.top += 20;
+  else if (change === "text") anchor.text = "Other explanation";
+  else anchor.isConnected = false;
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(false);
+});

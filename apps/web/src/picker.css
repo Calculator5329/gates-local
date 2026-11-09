@@ -46,6 +46,7 @@
 .pk-cost.spill small{color:var(--amber-fg)}
 .pk-cost.no small{color:var(--red-fg)}
 .pk-cost-track{position:relative;display:block;width:104px;height:12px;margin-top:4px}
+.pk-cost.history .pk-cost-track{filter:grayscale(1)}
 .pk-cost-track i{position:absolute;top:0;height:6px;display:block}
 .pk-cost-room{left:0;width:100%;background:var(--track)}
 .pk-cost-fill{left:0;background:var(--green)}

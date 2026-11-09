@@ -69,12 +69,18 @@ function holders(occ: readonly GpuOccupant[]): string | null {
 
 /** A bar segment and its legend swatch: Whisper's gray, and two more so neighbours differ. */
 const swOf = (o: GpuOccupant, i: number) => (o.kind === "whisper" ? "sw-whisper" : i % 2 === 0 ? "sw-occ" : "sw-other");
+const occupantKey = (o: GpuOccupant) => JSON.stringify([o.kind, o.label, o.protected]);
 
 function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: string; v: Verdict; loaded: boolean; numCtx: number }) {
   const tot = r1(gpu.totalBytes ?? 0);
   if (tot <= 0) return null;
   const occ = gpu.occupants.filter((o) => o.kind !== "chat-model");
-  const parts = occ.map((o) => ({ o, gb: r1(o.bytes) }));
+  const counts = new Map<string, number>();
+  const parts = occ.map(o => {
+    const identity = occupantKey(o), n = counts.get(identity) ?? 0;
+    counts.set(identity, n + 1);
+    return { o, gb: r1(o.bytes), key: `${identity}:${n}` };
+  });
   const used = parts.reduce((a, p) => a + p.gb, 0);
   const ch = v.k === "no" ? 0 : Math.min(r1(v.need), Math.max(0, Math.round((tot - used) * 10) / 10));
   const un = Math.max(0, Math.round((tot - used - ch) * 10) / 10);
@@ -83,7 +89,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
     <>
       <div className="bar">
         {parts.map((p, i) => (
-          <i key={i} className={swOf(p.o, i)} style={{ width: w(p.gb) }} />
+          <i key={p.key} className={swOf(p.o, i)} style={{ width: w(p.gb) }} />
         ))}
         {ch > 0 ? <i className="sw-chat" style={{ width: w(ch) }} /> : null}
         {un > 0 ? <i className="sw-free" /> : null}
@@ -96,7 +102,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
         {parts.map((p, i) => {
           const n = occName(p.o);
           return (
-            <div key={i} className="lg-r" data-tip={n.tip}>
+            <div key={p.key} className="lg-r" data-tip={n.tip}>
               <span className={`chip ${swOf(p.o, i)}`} />
               <span className="nm">
                 {n.nm}
@@ -276,7 +282,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const settingsNA = useStore((s) => s.settings === NA);
   const [err, run] = useAct();
   useEffect(() => {
-    if (CONTEXT_SIZES.some(c => stale[fitKey(model, c)] === true)) closeTip();
+    if (CONTEXT_SIZES.some(c => stale[fitKey(model, c)] === true)) closeTip("#gpuMemory .ctx-c");
     // the report shown is keyed by the size asked for, even one over the model's limit; the server clamps it
     ensureFit(model, numCtx);
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);

@@ -9,11 +9,11 @@ import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { fitPendingWord, fitReading } from "./fit-state.ts";
 import { nameOf, shortTag, sizeText, splitTail } from "./models-rules.ts";
-import { awaitingInstall, pendingDownload } from "./pick.ts";
-import { cancelPull, ensureFit, pull } from "./session.ts";
+import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
+import { type ActionResult, cancelPull, ensureFit, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
-import { NA, type State, fitKey, useStore } from "./store.ts";
+import { NA, type State, fitKey, getState, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
@@ -108,9 +108,16 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
   );
 }
 
-function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined }) {
-  const p = useStore((s) => s.pulls[c.name]);
-  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
+const downloadKey = (name: string) => modelNameKey(name.trim().toLowerCase());
+interface DownloadActions {
+  start(name: string): Promise<boolean>;
+  cancel(name: string): void;
+  error(name: string): ActionResult;
+}
+
+function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; actions: DownloadActions }) {
+  const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
+  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
   const phase = useStore(s => fitReading(s, c.name, numCtx).phase);
   const v = report && phase === "fresh" ? verdictOf(report) : undefined;
   const context = report?.numCtx ?? numCtx;
@@ -118,15 +125,15 @@ function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report:
   const note = v?.measured ? "From the current load." : "Measured after the first load.";
   const cpu = useStore((s) => noGpu(s.gpu));
   const dling = p !== undefined && awaitingInstall(p) && !installed;
-  const [err, run] = useAct();
+  const err = installed ? null : actions.error(c.name);
   const action = installed ? (
     <span className="badge">Installed</span>
   ) : dling ? (
-    <button type="button" className="qa" disabled={p.state === "done"} onClick={() => void run(cancelPull(c.name))}>
+    <button type="button" className="qa" disabled={p.state === "done"} onClick={() => actions.cancel(p.name)}>
       Cancel download
     </button>
   ) : (
-    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void run(pull(c.name))}>
+    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void actions.start(c.name)}>
       Download
     </button>
   );
@@ -155,12 +162,11 @@ function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report:
   );
 }
 
-function CustomPull() {
+function CustomPull({ actions }: { actions: DownloadActions }) {
   const [name, setName] = useState("");
-  const [err, run] = useAct();
   return (
     <Row
-      err={err}
+      err={actions.error(name)}
       label="Any model from the Ollama library"
       desc={
         <>
@@ -180,7 +186,7 @@ function CustomPull() {
         disabled={name.trim() === ""}
         onClick={() => {
           // the typed name stays until the download starts (W-07)
-          void run(pull(name)).then((ok) => ok && setName(""));
+          void actions.start(name).then(ok => { if (ok) setName(current => current === name ? "" : current); });
         }}
       >
         Download
@@ -189,9 +195,24 @@ function CustomPull() {
   );
 }
 
+const installation = (s: State, key: string) => (s.models ?? []).find(m => downloadKey(m.name) === key) ??
+  (s.catalog !== NA && s.catalog?.some(c => c.installed && downloadKey(c.name) === key) ? true : undefined);
+
 /** The Download tab. */
 export function DownloadTab() {
+  const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
+  const run = async (name: string, action: Promise<ActionResult>, start = false) => {
+    // A row can change groups while this is pending. Only its newest attempt
+    // may publish an answer, including when Cancel follows an unresolved pull.
+    const key = downloadKey(name), snapshot = getState();
+    const attempt: (typeof attempts)[string] = { error: undefined, pulls: snapshot.pulls, installed: installation(snapshot, key), start };
+    setAttempts(s => ({ ...s, [key]: attempt }));
+    const error = await action;
+    setAttempts(s => s[key] === attempt ? { ...s, [key]: { ...attempt, error, pulls: getState().pulls } } : s);
+    return error === null;
+  };
   const catalog = useStore((s) => s.catalog);
+  const models = useStore(s => s.models), pulls = useStore(s => s.pulls);
   const numCtx = useStore((s) => s.numCtx);
   const gpu = useStore((s) => s.gpu);
   const fits = useStore((s) => s.fits);
@@ -199,6 +220,33 @@ export function DownloadTab() {
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
+  // Only a changed installation or successful progress confirms a start.
+  // Existing files and late terminal/queued pushes do not retire a new error.
+  // A failed cancel still matters while that download continues.
+  const retired = (key: string, attempt: (typeof attempts)[string]) => {
+    if (attempt.error === undefined) return false; // Its RPC still owns the answer; prior progress cannot settle it.
+    const s = getState(), now = installation(s, key), before = attempt.installed;
+    return (now !== undefined && (before === undefined || (now !== true && before !== true && (now.digest !== before.digest || now.modifiedAt !== before.modifiedAt)))) ||
+      (attempt.start && Object.entries(s.pulls).some(([name, p]) => downloadKey(name) === key && attempt.pulls[name] !== p &&
+        (p.state === "downloading" || p.state === "verifying" || p.state === "done")));
+  };
+  useEffect(() => {
+    setAttempts(previous => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([key, attempt]) => !retired(key, attempt)));
+      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+    });
+  }, [models, pulls, catalog]);
+  const actions: DownloadActions = {
+    start: name => {
+      const tag = list.find(c => downloadKey(c.name) === downloadKey(name))?.name ?? name.trim();
+      return run(tag, pull(tag), true);
+    },
+    cancel: name => void run(name, cancelPull(name)),
+    error: name => {
+      const key = downloadKey(name), attempt = attempts[key];
+      return attempt && !retired(key, attempt) ? attempt.error ?? null : null;
+    },
+  };
   const report = (c: CatalogEntry) => {
     const r = fits[fitKey(c.name, numCtx)];
     return r === "error" ? undefined : r ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
@@ -221,18 +269,18 @@ export function DownloadTab() {
       {rec.length > 0 ? (
         <Grp title="Recommended">
           {rec.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
       {more.length > 0 ? (
         <Grp title={allSpill ? "Also available · uses system memory" : "Also available"}>
           {more.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
-      <Grp title="Something else">{pullNA ? <Row label="Any model from the Ollama library" desc="Downloads are not available in this build." /> : <CustomPull />}</Grp>
+      <Grp title="Something else">{pullNA ? <Row label="Any model from the Ollama library" desc="Downloads are not available in this build." /> : <CustomPull actions={actions} />}</Grp>
     </>
   );
 }

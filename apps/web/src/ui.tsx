@@ -127,10 +127,10 @@ const CONTROL = "button, a, input, textarea, [role=button], [role=switch], [role
 const TIP_DELAY_MS = 400;
 const TIP_WARM_MS = 300;
 
-let hideTip: () => void = () => undefined;
-/** Hide the open tooltip (after a click that changes what it described). */
-export function closeTip(): void {
-  hideTip();
+let hideTip: (within?: string) => void = () => undefined;
+/** Hide an open or pending tooltip, optionally only within the changed control. */
+export function closeTip(within?: string): void {
+  hideTip(within);
 }
 
 /** The one tooltip element and its document listeners. Mount once. */
@@ -143,6 +143,11 @@ export function Tip() {
     let waitingFor: Element | null = null;
     let timer: number | undefined;
     let closedAt = -Infinity;
+    let source: string | null = null, at: DOMRect | undefined;
+    const remember = (target: Element) => {
+      source = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
+      at = target.getBoundingClientRect();
+    };
     const cancelWait = () => {
       window.clearTimeout(timer);
       timer = undefined;
@@ -154,7 +159,9 @@ export function Tip() {
       el.classList.remove("open");
       tipFor = null;
     };
-    hideTip = hide;
+    hideTip = within => {
+      if (!within || tipFor?.closest(within) || waitingFor?.closest(within)) hide();
+    };
     const over = (e: Event) => {
       // with no hover (touch), a tap on a control is its action; tap() below opens tooltips instead
       if (isTouch()) return;
@@ -170,6 +177,7 @@ export function Tip() {
       if (warm) show(t);
       else {
         waitingFor = t;
+        remember(t);
         timer = window.setTimeout(() => show(t), TIP_DELAY_MS);
       }
     };
@@ -190,6 +198,7 @@ export function Tip() {
         html = esc(t.getAttribute("data-tipt") ?? "");
       }
       tipFor = t;
+      remember(t);
       el.innerHTML = html;
       el.classList.add("open");
       // a tag inside a picker row places its tip by the row (F72); the picker's foot keeps the default
@@ -234,6 +243,17 @@ export function Tip() {
     const scrolled = () => {
       if (isTouch()) hide();
     };
+    // React may move, replace or rewrite an anchor without a pointer event.
+    // Unrelated mutations leave the same explanation at the same anchor open.
+    const changes = new MutationObserver(records => {
+      const target = tipFor ?? waitingFor;
+      if (!target) return;
+      if (!target.isConnected || source !== (target.getAttribute("data-tip") || target.getAttribute("data-tipt"))) return hide();
+      if (!records.some(record => record.target.contains(target) || target.contains(record.target))) return;
+      const box = target.getBoundingClientRect();
+      if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();
+    });
+    changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt"] });
     document.addEventListener("mouseover", over);
     document.addEventListener("mouseout", out);
     document.addEventListener("focusin", focusIn);
@@ -242,6 +262,7 @@ export function Tip() {
     document.addEventListener("click", tap);
     document.addEventListener("scroll", scrolled, true);
     return () => {
+      changes.disconnect();
       hide();
       hideTip = () => undefined;
       document.removeEventListener("mouseover", over);

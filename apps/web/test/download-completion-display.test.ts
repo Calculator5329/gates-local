@@ -29,7 +29,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ model: fit.model, models: [], pulls, fits: {}, numCtx: 32768, pop: { id: "picker", kb: false }, catalog: [{ name: fit.model, label: "Fixture model", purpose: "Fixture chat model", downloadBytes: model.sizeBytes, installed: false, recommended: false, fit }] });
+  setState({ model: fit.model, models: [], pulls, fits: {}, numCtx: 32768, pop: { id: "picker", kb: false, ready: true }, catalog: [{ name: fit.model, label: "Fixture model", purpose: "Fixture chat model", downloadBytes: model.sizeBytes, installed: false, recommended: false, fit }] });
 });
 afterEach(() => vi.unstubAllGlobals());
 

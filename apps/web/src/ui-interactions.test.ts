@@ -64,6 +64,7 @@ function mountTip() {
   const timers: (() => void)[] = [];
   probe.root = root;
   vi.stubGlobal("Element", Target);
+  vi.stubGlobal("MutationObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("window", { innerWidth: 1440, setTimeout: (fn: () => void) => { timers.push(fn); return timers.length; }, clearTimeout: vi.fn() });
   vi.stubGlobal("document", { addEventListener: (name: string, fn: (e: { target: Target }) => void) => listeners.set(name, fn), removeEventListener: vi.fn() });
   Tip();

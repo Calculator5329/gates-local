@@ -103,6 +103,7 @@ export function Composer() {
   const loadState = useStore((s) => (s.model === undefined ? undefined : s.loads[s.model]?.state));
   const used = useStore(usedTokens);
   const pop = useStore((s) => s.pop?.id ?? null);
+  const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
   const view = useStore((s) => s.view);
   const voiceThread = useStore((s) => s.threadId);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -329,15 +330,15 @@ export function Composer() {
               className="ctl gate"
               id="modelBtn"
               aria-haspopup="dialog"
-              aria-expanded={pop === "picker"}
-              aria-busy={loading ? true : undefined}
+              aria-expanded={pop === "picker" && !pickerPending}
+              aria-busy={loading || pickerPending || undefined}
               data-tip={modelTip}
               onPointerEnter={() => void pickerScreen.load()}
               onFocus={() => void pickerScreen.load()}
               onClick={() => togglePop("picker")}
             >
               {/* loading shows in the tile, never in the label: the trigger keeps its width */}
-              {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={loading && first === undefined} />}
+              {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
               <span>{modelLbl}</span>
               <small className="picker-trigger-ctx">{k(ctx)}</small>
               <Icon id="down" cls="chev" />

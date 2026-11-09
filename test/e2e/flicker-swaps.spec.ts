@@ -280,6 +280,33 @@ for (const width of [1440, 360]) {
       stableSize(frames, "surface", `download-error-${width}`);
     });
 
+    test("an older pull refusal cannot replace a newer cancellation error", async ({ page, open }) => {
+      let refusePull: (() => void) | undefined;
+      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+        const server = ws.connectToServer();
+        ws.onMessage(message => {
+          const req = JSON.parse(String(message)) as { method?: string; id?: string };
+          const refuse = (text: string) => ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: text } }));
+          if (req.method === "models.pull") refusePull = () => refuse("Older pull refused.");
+          else if (req.method === "models.cancelPull") refuse("Newer cancellation refused.");
+          else server.send(message);
+        });
+        server.onMessage(message => ws.send(message));
+      });
+      await open(); await waitReady(page);
+      await section(page, "Models", true);
+      await page.getByRole("tab", { name: /Download/ }).click();
+      const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
+      await expect(row.locator(".vl")).toBeVisible();
+      await row.getByRole("button", { name: "Download", exact: true }).click();
+      await expect.poll(() => refusePull !== undefined).toBe(true);
+      await row.getByRole("button", { name: "Cancel download" }).click();
+      await expect(row.getByRole("alert")).toContainText("Newer cancellation refused");
+      refusePull!();
+      await expect(row.getByRole("button", { name: "Download", exact: true })).toBeVisible();
+      await expect(row.getByRole("alert")).toContainText("Newer cancellation refused");
+    });
+
     test("Download finishes in place without briefly offering Download again", async ({ page, open }) => {
       await open();
       await waitReady(page);
@@ -383,10 +410,12 @@ for (const delay of [0, 150, 600]) {
     await delayedMemory(page, delay);
     let catalogReady = false;
     const requests = new Set<string>();
+    const fitCalls: unknown[] = [];
     page.on("websocket", ws => {
       ws.on("framesent", frame => {
         const request = decodeRequest(frame.payload);
         if (request.ok && request.value.method === "models.catalog") requests.add(request.value.id);
+        if (request.ok && request.value.method === "fit.check") fitCalls.push(request.value.params);
       });
       ws.on("framereceived", frame => {
         const response = decodeServerMessage(frame.payload);
@@ -401,10 +430,24 @@ for (const delay of [0, 150, 600]) {
     // catalog answer containing the fit, before the first opening.
     await expect.poll(() => catalogReady).toBe(true);
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const before = fitCalls.length;
+    let observations: Promise<void> | undefined;
     const frames = await burst(page, `r2-cold-picker-${delay}`, "#picker", async () => {
       await page.locator("#modelBtn").click();
+      // Observe opening without postponing the capture or its visibility guard.
+      observations = page.evaluate(async () => {
+        const start = performance.now(), samples = [];
+        for (const at of [0, 150, 600]) {
+          while (performance.now() - start < at) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          const picker = document.getElementById("picker");
+          samples.push({ at: Math.round(performance.now() - start), open: picker !== null, busy: document.getElementById("modelBtn")?.getAttribute("aria-busy") === "true", costs: [...(picker?.querySelectorAll(".pk-cost") ?? [])].map(el => el.textContent), footer: picker?.querySelector(".pk-bottom")?.textContent });
+        }
+        return samples;
+      }).then(samples => console.log(`PICKER_OPEN ${delay} ${JSON.stringify(samples)}`));
       await expect(page.locator("#picker")).toBeVisible();
     });
+    await observations;
+    console.log(`PICKER_FIT_REQUESTS ${delay} ${JSON.stringify(fitCalls.slice(before))}`);
     const visible = frames.filter((f) => f.boxes["surface"] !== undefined);
     console.log(`STATE_SWAP cold-picker-${delay} ${JSON.stringify(transitionMetrics(visible))}`);
     expect(visible.length, "the cold picker must render enough frames to exercise the guard").toBeGreaterThan(10);

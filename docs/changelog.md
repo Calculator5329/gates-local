@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-09: Pending download replies keep their own errors
+
+A late progress update from an older download cannot discard a pending
+retry's refusal. Progress observed before the reply stays with that earlier
+attempt; a successful retry still clears the error normally.
+
+## 2026-11-09: Fresh download failures survive old installation and cancellation updates
+
+An existing model no longer hides a failed custom download, and a late
+cancellation or error cannot erase a newer restart failure. Errors clear on
+a changed installation or successful download progress. Duplicate GPU
+occupants keep distinct legend rows and matching memory-bar segments.
+
+## 2026-11-09: Memory refreshes preserve actions and picker costs
+
+Download failures remain visible when fresh memory checks move model rows,
+and an older answer cannot replace a newer attempt. The model picker prepares
+missing costs before opening and labels retained costs as a previous check
+during refreshes; every choice still needs a current memory check. Unrelated
+context answers no longer dismiss the Other and Whisper legend tooltips.
+
+The picker also opens with usable unknown or error states when initial
+reads fail or time out. Retrying through a typed model name clears its
+earlier row error, and installation from another window cannot leave that
+error beside Installed. Legend tips close when their entry moves, changes
+text or disappears, while unrelated updates keep a valid tip open.
 ## 2026-11-09: Bundle size targets warn without blocking work
 
 - Gzip overages now report the size, target and amount over in builds and

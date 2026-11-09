@@ -464,7 +464,8 @@ export function App() {
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
   const picker = useScreen(pickerScreen, popId === "picker");
-  const popOpen = popId !== null && (popId !== "picker" || picker.kind !== "pending");
+  const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
+  const popOpen = popId !== null && (popId !== "picker" || picker.kind === "error" || !pickerPending);
   const thread = useScreen(threadScreen, view === "thread");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
