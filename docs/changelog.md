@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-11-09: Keep an unconfirmed Windows clone contained
+
+- Cancel and Timeout check the Windows tree-kill result and worker exit
+  before cleaning staging or releasing capacity. A failed or timed-out stop
+  keeps its files and slot until the worker closes or the app restarts.
+- The import row explains when a clone could not be stopped, while retaining
+  its running state so replacement work cannot bypass the two-import limit.
+
+## 2026-11-08: Preserve completed imports across registry replacement
+
+- Completed Library content survives a corrupt registry, saving a new source
+  and restarting. Empty registries and older entries without import metadata
+  also preserve it. Missing registry membership never authorizes deletion.
+- Remove records a durable intent before changing the registry or content.
+  Startup finishes interrupted removals, including after ownership metadata
+  was already deleted. Unlisted completed copies remain for manual recovery.
+- Proven staging imports are cleaned even after a first-import crash with
+  no registry file. Ambiguous legacy copies with content remain untouched.
+- Cancel and Timeout kill the owned Git process group from the parent and
+  bound settlement, so a stopped worker cannot retain an import slot.
+
+## 2026-11-08: Preserve imports when ownership is unknown
+
+- Startup no longer deletes imports when the source registry is missing,
+  unreadable or corrupt. The retained recovery registry still points at
+  content that exists.
+- At most two Library imports run at once. Job history is bounded at 20,
+  with failed attempts protected for five minutes so Retry remains useful.
+- Ordinary browser tests always use offline import transports. A missing
+  fixture stops test setup before any server starts.
+
+## 2026-11-08: Try Library with a sample database or public repository
+
+- Library can download pinned, checksum-checked Chinook and Northwind samples
+  on a click, then use its existing read-only database snapshots.
+- Public GitHub URLs can become app-owned Library folders. Clones isolate git
+  configuration, disable hooks, symlinks, submodules and LFS smudge, bound time
+  and size, and remove git metadata before Library can read the folder.
+- Progress, cancel and retry use controls of fixed dimensions. Failed and
+  interrupted imports leave no registered source; startup removes partial
+  app-owned imports. Removing a manual folder still only disconnects it.
+
 ## 2026-11-08: Reverted controls no longer overwrite newer settings
 
 - Returning a reply control to its original value removes it from the draft.

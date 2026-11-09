@@ -378,8 +378,20 @@ export const Source = S.Struct({
   sizeBytes: S.optional(Count),
   state: S.Literals(["ready", "refreshing", "error"]),
   detail: S.optional(S.String),
+  managed: S.optional(S.Struct({ kind: S.Literals(["sample", "repository"]), key: S.String })),
 });
 export type Source = typeof Source.Type;
+
+export const SampleDatabase = S.Struct({ id: S.String, label: S.String, description: S.String, sizeBytes: Count, url: S.String, license: S.String, licenseUrl: S.String });
+export type SampleDatabase = typeof SampleDatabase.Type;
+export const SourceImport = S.Struct({
+  id: S.String, key: S.String, label: S.String, kind: S.Literals(["sample", "repository"]),
+  state: S.Literals(["downloading", "cloning", "adding", "ready", "error", "cancelled"]),
+  bytes: Count, total: S.optional(Count), detail: S.optional(S.String), sourceId: S.optional(S.String),
+});
+export type SourceImport = typeof SourceImport.Type;
+export const SourceImports = S.Struct({ samples: S.Array(SampleDatabase), jobs: S.Array(SourceImport) });
+export type SourceImports = typeof SourceImports.Type;
 
 
 export const ImageStatus = S.Struct({

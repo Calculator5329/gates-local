@@ -42,10 +42,12 @@ import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
+import { createLibraryImports, type ImportsDeps } from "./sources/imports.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 import { createGpuLease } from "./gpu/lease.ts";
@@ -92,7 +94,7 @@ function parseFlags(): { port: number; dataDir: string } {
   return { port, dataDir: path.resolve(dataDir) };
 }
 
-async function main(): Promise<void> {
+export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } = {}): Promise<void> {
   const { port, dataDir } = parseFlags();
   const token = process.env[TOKEN_ENV] ?? "";
   if (token === "") die(`${TOKEN_ENV} is not set; refusing to start without a per-launch token`);
@@ -186,6 +188,7 @@ async function main(): Promise<void> {
     ollamaUrl: () => runtime.baseUrl(),
   });
   const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
+  const libraryImports = createLibraryImports({ ...options.imports, sources });
   // Reads the last update's result file and nothing else at start; git runs only on update.check.
   const update = createUpdateModule({
     root: REPO_ROOT,
@@ -195,6 +198,7 @@ async function main(): Promise<void> {
     log: (line) => log(`update ${line}`),
   });
   const app: App = createApp({
+    libraryImports,
     update,
     image,
     lease: gpuLease,
@@ -276,4 +280,4 @@ async function main(): Promise<void> {
   );
 }
 
-void main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();

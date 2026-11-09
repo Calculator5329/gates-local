@@ -41,7 +41,10 @@ import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
 import { seedDesign, seedLong, seedReadme } from "./seed.ts";
 import { type ServeStandIn, startServeStandIn } from "./serve-standin.ts";
+import { e2eServerEntry } from "./server-entry.ts";
 
+// Resolve before starting even the fakes: a missing fixture stops setup outright.
+const SERVER_ENTRY = e2eServerEntry(ROOT);
 const runDir = path.join(DATA_ROOT, new Date().toISOString().replaceAll(/[:.]/g, "-"));
 // One per checkout, reused across runs, and short so the socket path stays
 // under sun_path's 107 bytes. The server makes it 0700; a socket a killed run
@@ -136,7 +139,7 @@ function serverEnv(): NodeJS.ProcessEnv {
 }
 
 async function startServer(): Promise<void> {
-  server = await start("server", ["apps/server/src/main.ts", "--port", String(SERVER_PORT), "--data-dir", dataDir], serverEnv(), /"ready":true/);
+  server = await start("server", [SERVER_ENTRY, "--port", String(SERVER_PORT), "--data-dir", dataDir], serverEnv(), /"ready":true/);
 }
 
 /** What /reset may write before the server starts. */

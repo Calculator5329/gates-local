@@ -7,6 +7,7 @@ import { Source } from "@gates-local/contracts";
 import { canonicalPathSync, containsPath } from "../../../../packages/harness/src/paths.ts";
 import type { LibraryEntry } from "../../../../packages/harness/src/types.ts";
 import { lstatIfAny, openChild, openDir, openEntry, sameFile, unlinkIfAny, type Dir } from "./anchored.ts";
+import { ownedSources, type OwnedSlot } from "./owned.ts";
 
 export interface Sources {
   list(): Source[];
@@ -15,6 +16,9 @@ export interface Sources {
   remove(id: string): void;
   refresh(id: string): Promise<Source>;
   onChange(listener: (sources: Source[]) => void): () => void;
+  allocateOwned(): OwnedSlot;
+  discardOwned(id: string): void;
+  addOwned(slot: OwnedSlot, input: { kind: "sqlite" | "folder"; label: string; sizeBytes?: number; managed: NonNullable<Source["managed"]> }): Promise<Source>;
 }
 
 const decodeRegistry = S.decodeUnknownSync(S.Array(Source));
@@ -76,6 +80,7 @@ export interface SourcesDeps {
 export function createSources(deps: SourcesDeps): Sources {
   mkdirSync(deps.dataDir, { recursive: true });
   const dataDir = canonicalPathSync(deps.dataDir);
+  const owned = ownedSources(dataDir);
   const platform = deps.platform ?? process.platform;
   const step = deps.beforeStep ?? (() => undefined);
   const now = deps.now ?? Date.now;
@@ -113,7 +118,10 @@ export function createSources(deps: SourcesDeps): Sources {
     }
   };
   const loaded = load();
-  let sources = loaded.sources;
+  // Staging is disposable independently of the registry. Completed content is
+  // removed only for an explicit, durable removal decision, never for absence.
+  const removals = owned.recover();
+  let sources = loaded.sources.filter(source => !removals.includes(source.id));
   // The first build moved every replaced snapshot to _archive/<id>.<uuid>.db and kept it for good,
   // removed sources included. Fold that layout into the one-copy-per-source policy: a registered
   // database keeps its newest copy as <id>.db (the current snapshot when there is one), and every
@@ -214,9 +222,10 @@ export function createSources(deps: SourcesDeps): Sources {
     renameSync(pending, registryPath);
     for (const listener of listeners) listener(list());
   };
-  const checkPath = (input: { path: string; kind: Source["kind"] }): string => {
+  const checkPath = (input: { path: string; kind: Source["kind"]; id?: string; managed?: Source["managed"] }): string => {
     const canonical = canonicalPathSync(input.path);
-    if (containsPath(dataDir, canonical) || (input.kind === "folder" && containsPath(canonical, dataDir))) throw new Error("Cannot connect the app's own data directory or a folder containing it");
+    const appOwned = input.id !== undefined && owned.owns({ id: input.id, path: canonical });
+    if (!appOwned && (containsPath(dataDir, canonical) || (input.kind === "folder" && containsPath(canonical, dataDir)))) throw new Error("Cannot connect the app's own data directory or a folder containing it");
     const stat = statSync(canonical);
     if (input.kind === "folder" ? !stat.isDirectory() : !stat.isFile()) throw new Error(`Source path must be a ${input.kind === "folder" ? "folder" : "file"}`);
     accessSync(canonical, constants.R_OK | (input.kind === "folder" ? constants.X_OK : 0));
@@ -259,6 +268,23 @@ export function createSources(deps: SourcesDeps): Sources {
     if (!source) throw new Error(`Library source ${id} was not found`);
     return source;
   };
+  /** Every addition, including verified imports, takes this same snapshot and registry path. */
+  const register = async (input: Source, complete?: () => void): Promise<Source> => {
+    try {
+      const materialized = await materialize(input);
+      const source = input.managed?.kind === "repository" && input.sizeBytes !== undefined ? { ...materialized, sizeBytes: input.sizeBytes } : materialized;
+      complete?.(); // Completion must be durable before registry persistence can expose it.
+      sources = [...sources, source]; save(); return { ...source };
+    } catch (e) { removeSnapshots(input.id); throw e; }
+  };
+  // Keep the intent until both the registry update and physical removal finish.
+  if (removals.length > 0) {
+    if (loaded.registry === "decoded") save();
+    for (const id of removals) {
+      try { removeSnapshots(id); owned.finishRemoval(id); }
+      catch { log("A requested Library removal is still pending and will be retried at the next start."); }
+    }
+  }
   return {
     list,
     entries: () => sources.filter(s => {
@@ -266,14 +292,22 @@ export function createSources(deps: SourcesDeps): Sources {
       try { return checkPath(s) === s.path; } catch { return false; }
     }).map(s => ({ id: s.id, kind: s.kind, label: s.label, path: s.path, ...(s.kind === "sqlite" ? { snapshotPath: snapshotPath(s.id) } : {}) })),
     async add(input) {
-      const canonical = checkPath(input);
-      const id = randomUUID();
-      try {
-        const source = await materialize({ id, kind: input.kind, path: canonical, label: input.label?.trim() || path.basename(canonical), addedAt: now(), state: "refreshing" });
-        sources = [...sources, source]; save(); return { ...source };
-      } catch (e) { removeSnapshots(id); throw e; }
+      const canonical = checkPath({ kind: input.kind, path: input.path });
+      return register({ id: randomUUID(), kind: input.kind, path: canonical, label: input.label?.trim() || path.basename(canonical), addedAt: now(), state: "refreshing" });
     },
-    remove(id) { find(id); sources = sources.filter(s => s.id !== id); save(); removeSnapshots(id); },
+    allocateOwned: () => owned.allocate(),
+    discardOwned: id => owned.discard(id),
+    async addOwned(slot, input) {
+      if (!owned.owns({ id: slot.id, path: slot.path })) throw new Error("This Library import is not owned by the app.");
+      return register({ id: slot.id, path: slot.path, ...input, addedAt: now(), state: "refreshing" }, () => owned.complete(slot.id));
+    },
+    remove(id) {
+      const source = find(id);
+      const appOwned = owned.owns(source);
+      if (appOwned) owned.requestRemoval(id);
+      sources = sources.filter(s => s.id !== id); save(); removeSnapshots(id);
+      if (appOwned) owned.finishRemoval(id);
+    },
     async refresh(id) {
       const old = find(id);
       sources = sources.map(s => s.id === id ? { ...s, state: "refreshing" } : s); save();

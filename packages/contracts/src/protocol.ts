@@ -24,6 +24,8 @@ import {
   ModelSettingsPatch,
   Source,
   SourceKind,
+  SourceImport,
+  SourceImports,
   Thread,
   UpdateCheck,
   UpdateStatus,
@@ -152,6 +154,10 @@ export const methods = {
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source },
   "sources.remove": { params: SourceRef, result: SourceRef },
   "sources.refresh": { params: SourceRef, result: Source },
+  "sources.imports": { params: NoParams, result: SourceImports },
+  "sources.downloadSample": { params: SourceRef, result: SourceImport },
+  "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport },
+  "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }) },
   "image.status": { params: NoParams, result: ImageStatus },
   "image.generate": {
     params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String) }),
@@ -180,6 +186,7 @@ export const pushes = {
   "models.pull": { payload: PullProgress },
   "models.load": { payload: ModelLoad },
   "sources.changed": { payload: S.Array(Source) },
+  "sources.imports": { payload: SourceImports },
   "image.status": { payload: ImageStatus },
   "image.event": { payload: ImageEvent },
 } as const;

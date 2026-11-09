@@ -1550,6 +1550,12 @@ export async function removeModel(name: string): Promise<ActionResult> {
 
 const SOURCE_WORDS = { folder: "folder", file: "file", sqlite: "database" } as const;
 
+/** Library-only RPCs use the same connection as manual additions. */
+export async function libraryRequest<M extends "sources.imports" | "sources.downloadSample" | "sources.clone" | "sources.cancelImport">(method: M, params: import("@gates-local/contracts").Params<M>): Promise<import("@gates-local/contracts").ResultOf<M>> {
+  if (!client) throw new Error("Gates Local isn't connected. Try again once it reconnects.");
+  return client.call(method, params);
+}
+
 export async function addSource(kind: "folder" | "file" | "sqlite", path: string): Promise<ActionResult> {
   if (path.trim() === "") return null;
   const r = await act("sources.add", { kind, path: path.trim() }, `add this ${SOURCE_WORDS[kind]}`, "check it and try again");

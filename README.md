@@ -139,6 +139,42 @@ in system memory on the CPU and replies are slower, so Thinking starts off
 measured speeds, updating and uninstalling, is
 [docs/setup/windows.md](docs/setup/windows.md).
 
+## Try the Library
+
+In Settings → Library, **Sample databases** offers Chinook (music store,
+1,007,616 bytes) from [lerocha/chinook-database](https://github.com/lerocha/chinook-database)
+and Northwind (orders, 24,702,976 bytes) from
+[jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3).
+Both are MIT licensed; [third-party notices](THIRD_PARTY_NOTICES.md) record
+the licences and pinned commits. Nothing downloads until you click Download.
+Each HTTPS download must match its pinned SHA-256 and exact size and open as
+SQLite before it enters the same read-only snapshot path as your own database.
+Download progress, Cancel and Retry stay in the row. Adding a sample again
+keeps one Library entry.
+
+**Clone a repository** accepts a public `https://github.com/owner/repo` URL
+when you click Clone. It makes a shallow copy inside app data, with no
+credentials, prompts, hooks, submodule downloads, LFS smudge or symlinks.
+Imports have a 60-second limit and a 64 MiB / 10,000-file budget; incoming
+disk use is checked while git runs and expanded sizes before checkout.
+The result is a static folder, with git metadata removed, read through the
+same Library tools and limits as a manually added folder. Removing it deletes
+the app-created copy. Removing a folder you added by hand only disconnects it.
+Startup cleans proven staging imports even without a source registry.
+Completed copies survive missing, corrupt, empty or older registries. Only
+Remove writes a durable removal intent; startup finishes that removal after
+a crash. Completed copies absent from the registry remain on disk for manual
+recovery, but are not listed or reclaimed automatically.
+On Windows, Cancel and Timeout keep an import's files and slot until its
+process tree is confirmed stopped. If stopping fails, the job says so and
+keeps its slot until it exits or the app restarts.
+At most two imports run at once; the app retains at most 20 jobs,
+reserving space for running jobs. Failed attempts stay available for Retry
+for at least five minutes unless you retry them; new work is refused while
+all history slots are protected. Git must be installed
+separately, including on Windows. The authenticated phone connection can use
+these controls under the same rule as adding a folder.
+
 ## Updating
 
 In the app, Settings › General › Updates shows the version and has a

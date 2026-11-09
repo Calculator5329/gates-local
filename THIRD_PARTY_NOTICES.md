@@ -3,6 +3,20 @@
 Gates Local is MIT licensed (`LICENSE`, Copyright (c) 2026 Ethan Gates).
 The root license does not relicense anything listed here.
 
+## Optional sample databases
+
+No database is bundled or downloaded at startup. Library downloads the selected
+SQLite file only when the person clicks Download. The pinned URLs, byte counts
+and SHA-256 digests live in `apps/server/src/sources/samples.ts`.
+
+- **Chinook:** MIT, Copyright (c) 2008-2024 Luis Rocha. Reviewed at
+  [upstream commit 7f677725](https://github.com/lerocha/chinook-database/blob/7f67772503d71ba90f19283c38e93923addb43fa/LICENSE.md).
+- **Northwind SQLite:** MIT, Copyright (c) 2016 JP White. Reviewed at
+  [upstream commit 4f56e7f5](https://github.com/jpwhite3/northwind-SQLite3/blob/4f56e7f5906dfd23b25244c5bfe8fb5da6402efd/LICENSE).
+
+Their notices and full MIT permission text are in `SAMPLE_LICENSE` in that
+module, and saved beside each downloaded database as `LICENSE.txt`.
+
 ## T3 Code
 
 - **License:** MIT, Copyright (c) 2026 T3 Tools Inc. Full text in

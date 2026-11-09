@@ -204,6 +204,10 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },
   "sources.refresh": { params: { id: "s1" }, result: source },
+  "sources.imports": { params: {}, result: { samples: [], jobs: [] } },
+  "sources.downloadSample": { params: { id: "chinook" }, result: { id: "i1", key: "chinook", label: "Chinook", kind: "sample", state: "downloading", bytes: 0 } },
+  "sources.clone": { params: { url: "https://github.com/example/docs" }, result: { id: "i2", key: "https://github.com/example/docs", label: "example/docs", kind: "repository", state: "cloning", bytes: 0 } },
+  "sources.cancelImport": { params: { id: "i1" }, result: { cancelled: true } },
   "image.status": { params: {}, result: imageReady },
   "image.generate": { params: { prompt: "a gate at dusk", threadId: "t1" }, result: { jobId: "j1" } },
   "image.cancel": { params: { jobId: "j1" }, result: { cancelled: true } },
@@ -271,6 +275,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },
   ],
   "sources.changed": [[source], []],
+  "sources.imports": [{ samples: [], jobs: [] }],
   "image.status": [imageReady, { state: "off", owner: "none" }],
   "image.event": [
     { jobId: "j1", threadId: "t1", state: "running", progress: 0.4 },

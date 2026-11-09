@@ -11,6 +11,7 @@ import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
+import type { LibraryImports } from "./sources/imports.ts";
 import type { TurnMessage } from "./chat/types.ts";
 import { planLoad, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
@@ -103,6 +104,7 @@ export interface AppDeps {
   readonly think?: boolean;
   readonly settings?: Pick<SettingsReader, "get">;
   readonly sources?: Sources;
+  readonly libraryImports?: LibraryImports;
   readonly toolsEnabled?: () => boolean;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
@@ -197,6 +199,7 @@ export function createApp(deps: AppDeps): App {
   });
   const offCatalog = catalog.onChange((models) => push("models.changed", models));
   const offSources = deps.sources?.onChange(sources => push("sources.changed", sources));
+  const offImports = deps.libraryImports?.onChange(value => push("sources.imports", value));
 
   /** Claims the thread synchronously so a second send cannot slip in during the fit check. */
   const reserve = (threadId: string, model: string): { turn: Turn; end: () => void } => {
@@ -452,6 +455,7 @@ export function createApp(deps: AppDeps): App {
     // Kept per thread like the tool's jobs, so threads.delete takes them back too.
     ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
+    ...deps.libraryImports?.handlers,
     ...(deps.update ? createUpdateHandlers(deps.update) : {}),
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
@@ -677,6 +681,8 @@ export function createApp(deps: AppDeps): App {
       offRuntime();
       offCatalog();
       offSources?.();
+      offImports?.();
+      deps.libraryImports?.close();
       const pending = [...turns.values()];
       for (const t of pending) t.controller.abort();
       await Promise.all(pending.map((t) => t.ended));

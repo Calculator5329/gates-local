@@ -9,6 +9,7 @@ import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, gb, noGpu, sourceDetail } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
+import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { addSource, checkImageStatus, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
@@ -372,7 +373,7 @@ function SourceRow({ src }: { src: Source }) {
       <Icon id={KIND_ICON[src.kind]} cls="src-ic" />
       <div className="sl">
         <b>{name}</b>
-        {src.label && src.label !== src.path ? <span className="d mono">{src.path}</span> : null}
+        {src.managed ? <span className="d">{src.managed.kind === "sample" ? "Sample database" : "Public GitHub repository"}</span> : src.label && src.label !== src.path ? <span className="d mono">{src.path}</span> : null}
         {broken ? <span className="act-err">{sourceDetail(src)}</span> : null}
         <Fail err={err} />
       </div>
@@ -478,6 +479,7 @@ function Library() {
       <Head title="Library">Folders, files and databases the model can read in every chat. Gates Local never changes them.</Head>
       {sources === NA ? null : (
         <>
+          <LibraryImports />
           <SourceGroup title="Files and folders" desc="Read as they are now." none="No folders or files yet. Add one and the model can read it." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
           <SourceGroup title="SQLite databases" desc="Read from a copy made when you add one." none="No databases yet. Add a SQLite file and the model can look things up in it." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
         </>
