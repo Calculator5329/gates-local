@@ -6,7 +6,7 @@ import { rtInfo, rtOf } from "./Banner.tsx";
 import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread, preloadThread } from "./session.ts";
-import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
+import { NA, type Section, type State, getState, runningThreads, setState, useStore } from "./store.ts";
 import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 import { SidebarUpdate } from "./Updates.tsx";
 
@@ -141,16 +141,14 @@ function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
   if (p?.id === "thread" && p.thread === thread && p.kb) return;
   openThreadMenu(thread, { x: e.clientX, y: e.clientY }, false);
 }
-// A pending send is visible before the server reports its start.
-const pendingThreadOf = (s: State) => (streaming(s) && s.live?.turnId === null ? s.live.threadId : null);
 
 function ThreadList() {
   useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
   const on = useStore((s) => (s.view === "thread" ? s.threadId : null));
-  const pending = useStore(pendingThreadOf);
-  const running = useStore((s) => s.runningTurns);
+  // a send waiting for the server's answer counts: its dot shows before the start event
+  const running = useStore(runningThreads);
   // the row whose thread menu is open stays marked while the menu acts on it
   const menuFor = useStore((s) => (s.pop?.id === "thread" ? s.pop.thread : null));
   const now = useNow(30_000);
@@ -183,7 +181,7 @@ function ThreadList() {
               <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}>
                 <span className="t">{t.title}</span>
                 <span className="sb-status">
-                  {pending === t.id || Object.hasOwn(running, t.id) ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
+                  {running.has(t.id) ?<span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
                 </span>
               </button>
               <button

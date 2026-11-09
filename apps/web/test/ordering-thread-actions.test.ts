@@ -63,7 +63,7 @@ it("failed thread actions preserve an open streaming/loading conversation across
       const lastFailure = order.findLast(name => name.endsWith("failure"));
       if (lastFailure) expect(state.notice).toContain(lastFailure === "delete.failure" ? "Couldn't delete this conversation" : "Couldn't rename this conversation");
       if (order.includes("reply.done")) expect(state.messages["t1"]?.find(m => m.id === reply.id)).toEqual(reply);
-      else expect(state.live?.end).toBeUndefined();
+      else expect(state.turns["t1"]?.end).toBeUndefined();
     },
     async dispose(w) {
       w.close();

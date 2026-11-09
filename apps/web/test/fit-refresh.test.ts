@@ -115,7 +115,7 @@ it.each(["own", "rounding", "external", "occupant", "unowned", "busy", "preload"
   const next = b.server.hold("fit.check");
   b.server.push("models.load", { model, numCtx: ctx, state: "ready" });
   const held = await next;
-  if (change === "busy") store.setState({ runningTurns: { active: "turn" } });
+  if (change === "busy") store.setState({ turns: { active: { gen: 1, threadId: "active", turnId: "turn", model: "other", startedAt: 0, thinking: "", text: "", tools: [], pendingUser: null } } });
   if (change === "preload") store.setState({ loads: { other: { model: "other", state: "loading", numCtx: ctx } } });
   b.server.push("gpu.changed", {
     ...base,

@@ -15,7 +15,7 @@ function setHash(threadId: string | null): void {
 
 interface NavigationEffects {
   readonly flushQueued: () => void;
-  readonly bringBack: (threadId: string) => void;
+  readonly catchUp: (threadId: string) => void;
   readonly chooseModel: () => void;
   readonly newChatModel: (s: State) => Partial<State>;
   readonly loadThread: (threadId: string) => Promise<void>;
@@ -28,7 +28,7 @@ function leavingChat(s: State): Partial<State> {
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */
-export function createNavigation({ flushQueued, bringBack, chooseModel, newChatModel, loadThread, loading }: NavigationEffects) {
+export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading }: NavigationEffects) {
   /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
   let navGen = 0;
   let pendingSettings: number | null = null;
@@ -59,7 +59,7 @@ export function createNavigation({ flushQueued, bringBack, chooseModel, newChatM
       const model = s.threadModels[threadId] ?? s.model;
       return { view: "thread", threadId, addPage: false, ownerConfirm: false, ...leavingChat(s), ...(model === undefined ? {} : { model }) };
     });
-    bringBack(threadId);
+    catchUp(threadId);
     chooseModel();
     setHash(threadId);
     void loadThread(threadId);

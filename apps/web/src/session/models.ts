@@ -15,7 +15,6 @@ interface ModelEffects {
   readonly restoreSaved: () => void;
   readonly invalidateFits: (hideOld?: boolean) => void;
   readonly flushQueued: () => void;
-  readonly hasParkedModel: (model: string) => boolean;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
 }
 
@@ -48,7 +47,7 @@ export function modelChoice(s: State): ModelDecision {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
-export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued, hasParkedModel, blockingFor }: ModelEffects) {
+export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued, blockingFor }: ModelEffects) {
   const modelsOrder = newestOnly();
   const runtimeOrder = newestOnly();
   // A catalog asked before a later models.changed describes the list before it: only the newest lands.
@@ -88,8 +87,7 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
    * happens at the send, behind its warning.
    */
   async function preload(model: string, numCtx: number): Promise<void> {
-    const live = getState().live;
-    if ((live?.model === model && live.end === undefined) || hasParkedModel(model)) return;
+    if (Object.values(getState().turns).some((turn) => turn.model === model && turn.end === undefined)) return;
     if ((await blockingFor(model, numCtx)).length === 0 && getState().model === model) void act("models.load", { model, numCtx }, `load ${model}`);
   }
 

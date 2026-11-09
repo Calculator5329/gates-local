@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-09: A running reply is held once, whichever chat is open
+
+- The client kept a reply that was being written in two shapes: one for the
+  open chat and a second copy for chats you had switched away from, with
+  two functions applying the same events. They had drifted. Every running
+  reply now lives in one map keyed by chat, and one function applies every
+  event to it. Switching chats copies nothing.
+- A reply that thought for 5 s while you were in another chat no longer
+  reads "Thought for 65s" when you come back. The time of the first word is
+  when it arrived, not when it was first drawn.
+- After a dropped connection, the words the server sends back replace the
+  words already shown for that reply, so a reply is not doubled.
+- A reply started from another window shows in whichever chat it belongs
+  to, not only the open one. A reply the client knows only from the
+  server's running list marks its chat as running in the sidebar and holds
+  nothing else: it does not block the queue or show an empty reply row.
+- "Is this chat running" is one lookup for the sidebar mark, the Send and
+  Stop buttons, the queue and stop-others.
+- A reply streaming in a chat that is not open still costs the open chat
+  nothing per word.
+
 ## 2026-11-09: Priority performance reports omit duplicate and empty rows
 
 - The older priority journey drops 17 rows: duplicate frame p95s and thread

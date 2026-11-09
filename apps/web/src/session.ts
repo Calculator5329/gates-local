@@ -67,12 +67,12 @@ const chat = createChat({ applyServerEvent,
   untrackedDone,
   openThread: (threadId) => openThread(threadId), blockingFor, invalidateFits,
 });
-export const { send, confirmStopAsk, repliesInProgress, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onChatEvent, lostTurn, bringBack, flushQueued } = chat;
+export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
+const { onChatEvent, lostTurn, catchUp, activeTurns, flushQueued } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued,
-  hasParkedModel: chat.hasParkedModel, blockingFor,
+  blockingFor,
 });
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
@@ -169,7 +169,7 @@ async function hydrateWith(
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, runningTurns: Object.fromEntries(active.map(({ threadId, turnId }) => [threadId, turnId])), fits: { ...s.fits }, staleFits: staleFitReports(s), fitStatus: staleFitStatus(s), ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), fits: { ...s.fits }, staleFits: staleFitReports(s), fitStatus: staleFitStatus(s), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
@@ -208,7 +208,7 @@ async function hydrateWith(
 const imageOrder = newestOnly();
 
 const navigation = createNavigation({
-  flushQueued, bringBack, chooseModel, loadThread, loading,
+  flushQueued, catchUp, chooseModel, loadThread, loading,
   newChatModel: (s) => decided(pickChoice(s.models, s.model, undefined)),
 });
 export const { openThread, newThread, openSettings, leaveSettings, cancelPendingSettings, initialView, finishFirstRun } = navigation;

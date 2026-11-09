@@ -19,12 +19,12 @@ vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), relo
 import { Timeline } from "./Thread.tsx";
 import { setState } from "./store.ts";
 
-afterEach(() => { setState({ messages: {}, live: null, stopNotes: {} }); vi.unstubAllGlobals(); });
+afterEach(() => { setState({ messages: {}, turns: {}, stopNotes: {} }); vi.unstubAllGlobals(); });
 
 it("retains interrupted text and its unfinished label in the shared live-to-saved reply slot", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ live: null, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html).toContain('class="turn a interrupted"');
   expect(html).toContain('aria-label="Interrupted reply"');
@@ -36,7 +36,7 @@ it("retains interrupted text and its unfinished label in the shared live-to-save
 it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime changed."])("shows only the known stop reason: %s", reason => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ live: null, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: reason } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: reason } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html.match(/class="stop-note"/g)).toHaveLength(1);
   expect(html).toContain(`${reason} Its text is kept here and excluded from later model prompts.`);
@@ -67,16 +67,16 @@ it("keeps the live reply's owning-user key when an image card arrives and the re
   const user = { id: "user", threadId: "proof", role: "user" as const, content: "A ship and a report", createdAt: 1 };
   const image = { id: "image", threadId: "proof", role: "assistant" as const, content: "a ship", createdAt: 2, imageJob: { jobId: "image", threadId: "proof", state: "queued" as const } };
   const live = { gen: 1, threadId: "proof", turnId: "turn", userMessageId: "user", model: "model", startedAt: 1, thinking: "Checking the report", text: "The report total is 42.", tools: [], pendingUser: null };
-  setState({ messages: { proof: [user] }, live });
+  setState({ messages: { proof: [user] }, turns: { proof: live } });
   const before = keys().at(-1);
   setState({ messages: { proof: [user, image] } });
   const arrived = keys();
   expect(arrived.at(-1), "image insertion must not change the live reply's reconciliation key").toBe(before);
   expect(new Set(arrived).size).toBe(arrived.length);
   const answer = { id: "answer", threadId: "proof", role: "assistant" as const, content: live.text, createdAt: 3 };
-  setState({ live: null, messages: { proof: [user, image, answer] } });
+  setState({ turns: {}, messages: { proof: [user, image, answer] } });
   expect(keys().at(-1)).toBe(before);
-  setState({ live: { ...live, gen: 2, userMessageId: undefined, pendingUser: "Next report" } });
+  setState({ turns: { proof: { ...live, gen: 2, userMessageId: undefined, pendingUser: "Next report" } } });
   const pending = keys();
   expect(new Set(pending).size, "a new unadmitted send needs its own pending slot").toBe(pending.length);
 });
@@ -86,14 +86,14 @@ it("keeps an unadmitted stopped reply's generation key after its pending user is
   const user = { id: "user1", threadId: "proof", role: "user" as const, content: "First question", createdAt: 1 };
   const answer = { id: "answer1", threadId: "proof", role: "assistant" as const, content: "First answer", createdAt: 2 };
   const live = { gen: 2, threadId: "proof", turnId: null, model: "model", startedAt: 3, thinking: "", text: "", tools: [], pendingUser: "Second question" };
-  setState({ messages: { proof: [user, answer] }, live });
+  setState({ messages: { proof: [user, answer] }, turns: { proof: live } });
   const pending = keys();
   const stopped = { ...live, pendingUser: null, end: { kind: "stopped" as const, secs: 1 } };
-  setState({ live: stopped });
+  setState({ turns: { proof: stopped } });
   const refused = keys();
   expect(refused.at(-1), "admission failure must not reuse the previous user's reply key").toBe(pending.at(-1));
   expect(new Set(refused).size).toBe(refused.length);
   expect(refused.slice(0, 2)).toEqual(pending.slice(0, 2));
-  setState({ live: { ...stopped, gen: 3 } });
+  setState({ turns: { proof: { ...stopped, gen: 3 } } });
   expect(keys().at(-1)).not.toBe(refused.at(-1));
 });

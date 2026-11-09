@@ -31,7 +31,7 @@ import {
   sendQueuedNow,
   stop,
 } from "./session.ts";
-import { NA, type Queued, type State, editDraft, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
+import { NA, type Queued, type State, editDraft, fitKey, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
 import { SheetHead, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 import { Voice } from "./Voice.tsx";
 
@@ -92,7 +92,7 @@ export function Composer() {
   const isStreaming = useStore(streamingHere);
   const editingId = useStore((s) => s.editingQueued);
   const editing = editingId !== null;
-  const running = useStore((s) => streamingHere(s) ? (s.live?.gen ?? null) : null);
+  const running = useStore((s) => runningTurn(s, s.threadId)?.gen ?? null);
   const touch = useMedia("(hover: none)");
   const freed = useStore((s) => s.model !== undefined && s.stopFrees[fitKey(s.model, s.numCtx)] === true);
   const wait = useStore(queueReason);
@@ -206,7 +206,7 @@ export function Composer() {
   };
   const stopThisReply = () => {
     const s = getState();
-    if (streamingHere(s) && s.live?.gen === running) stop();
+    if (runningTurn(s, s.threadId)?.gen === running) stop();
   };
   const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
   useLayoutEffect(() => closeTip(), [action]);

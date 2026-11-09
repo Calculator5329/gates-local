@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { explore, replay, regression, schedules, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "./ordering-replay.ts";
-import { OrderingWorld, SPEECH_URL, drain } from "./ordering-world.ts";
+import { OrderingWorld, SPEECH_URL, drain, runningIds } from "./ordering-world.ts";
 
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -315,7 +315,7 @@ export function sendReconnect(): ReplayScenario<World> {
     check(w, order) {
       const state = w.a.store.getState();
       expect(w.server.calls("chat.send"), "one user action must send once").toHaveLength(1);
-      const visible = state.draft === "one message" || state.live?.pendingUser === "one message" ||
+      const visible = state.draft === "one message" || state.turns["t1"]?.pendingUser === "one message" ||
         state.queued.some((queued) => queued.text === "one message") || (state.messages["t1"] ?? []).some((message) => message.content === "one message");
       expect(visible, "message must remain visible after " + order.at(-1)).toBe(true);
       if (w.server.admissions.has("turn-1") || w.server.turns.has("turn-1")) expect(state.queued.filter((queued) => queued.text === "one message"), "active admission must never return to queue").toEqual([]);
@@ -334,7 +334,7 @@ export function stopSend(): ReplayScenario<World> {
       // Selected input script targets the first admission with Stop, then sends
       // in another chat. Neither press waits for a server acknowledgement.
       event("A.Stop", ["A.first-send.request"], (w) => w.step(() => {
-        const turnId = w.a.store.getState().live?.turnId;
+        const turnId = w.a.store.getState().turns["t1"]?.turnId;
         if (turnId !== null && turnId !== undefined) expect(turnId).toBe("turn-1");
         w.expectedCancelled.add("turn-1"); w.a.session.stop();
       })),
@@ -353,8 +353,8 @@ export function stopSend(): ReplayScenario<World> {
       expect(w.server.cancelled, "the newer reply must not receive an old Stop").not.toContain("turn-2");
       if (complete) {
         expect(w.server.cancelled).toContain("turn-1");
-        expect(w.a.store.getState().live).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
-        expect(w.a.store.getState().live?.end).toBeUndefined();
+        expect(w.a.store.getState().turns["t2"]).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
+        expect(w.a.store.getState().turns["t2"]?.end).toBeUndefined();
       }
     },
   };
@@ -392,8 +392,8 @@ export function stopSavedPartial(): ReplayScenario<World> {
       expect(w.server.cancelled.every((turn) => w.expectedCancelled.has(turn)), "Stop may cancel only the reply it named").toBe(true);
       if (complete) {
         expect(replies).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
-        expect(state.live).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
-        expect(state.live?.end).toBeUndefined();
+        expect(state.turns["t2"]).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
+        expect(state.turns["t2"]?.end).toBeUndefined();
       }
     },
   };
@@ -420,7 +420,7 @@ export function errorSavedPartial(): ReplayScenario<World> {
     check(w, _order, complete) {
       if (!complete) return;
       const state = w.a.store.getState();
-      expect(state.live).toBeNull();
+      expect(state.turns["t1"]).toBeUndefined();
       expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
       expect(state.stopNotes["reply-turn-1"]).toBe("The reply didn't finish. The model runner crashed.");
     },
@@ -557,7 +557,7 @@ it("TL-01: active-turn hydration restores ongoing replies and orders terminal ev
         w.server.answer("turns.active", () => [...w.server.turns].map(([turnId, message]) => ({ turnId, threadId: message.threadId })));
         w.server.turns.set("existing", { id: "user-existing", threadId: "t1", role: "user", content: "hello", createdAt: 1 });
         await w.step(() => w.server.chatPush("existing", w.a.socket));
-        expect(w.a.store.getState().runningTurns).toEqual({ t1: "existing" });
+        expect(runningIds(w.a.store)).toEqual({ t1: "existing" });
         await w.drop();
         if (ending === "offline") w.server.turns.delete("existing");
         return w;
@@ -573,7 +573,7 @@ it("TL-01: active-turn hydration restores ongoing replies and orders terminal ev
       check: (w, prefix) => {
         if (!prefix.includes("hydration.snapshot") || !prefix.includes("hydration.release") ||
           (ending === "during-hydration" && !prefix.includes("server.done"))) return;
-        expect(w.a.store.getState().runningTurns).toEqual(ending === "running" ? { t1: "existing" } : {});
+        expect(runningIds(w.a.store)).toEqual(ending === "running" ? { t1: "existing" } : {});
       },
       dispose,
     });

@@ -16,7 +16,7 @@ import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachmentImages } from "./attachment-images.tsx";
-import { type LiveTurn, NA, type State, setState, useStore } from "./store.ts";
+import { type LiveTurn, NA, type State, setState, turnOf, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
@@ -263,7 +263,7 @@ const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
 function Working({ startedAt, loading, thinking }: { startedAt: number; loading: boolean; thinking: boolean }) {
   const now = useTicker(250, true);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const imageBusy = useStore((s) => s.live?.turnId === null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
+  const imageBusy = useStore((s) => s.threadId !== null && s.turns[s.threadId]?.turnId === null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const secs = Math.floor((now - startedAt) / 1000);
   return (
     <div className={thinking ? "working thinking" : "working"}>
@@ -360,7 +360,7 @@ interface RowProps extends Files {
  * paces text, and only a reply that was live while the timeline was open is one.
  */
 const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }: { threadId: string; msg: Message | undefined; last: boolean } & Files) {
-  const live = useStore((s) => (msg === undefined && s.live?.threadId === threadId ? s.live : null));
+  const live = useStore((s) => (msg === undefined ? turnOf(s, threadId) ?? null : null));
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
   const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
@@ -443,15 +443,16 @@ function whenIdle(fn: (timeLeft: () => number) => void): () => void {
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
-  const loading = useStore((s) => s.messages[threadId] === undefined && s.live?.threadId !== threadId);
+  const loading = useStore((s) => s.messages[threadId] === undefined && turnOf(s, threadId) === undefined);
   const loadError = useStore((s) => s.loadErrors[threadId]);
   const stopNotes = useStore((s) => s.stopNotes);
   // A refused admission can clear pendingUser without assigning a user ID.
-  const liveOwner = useStore((s) => s.live?.threadId === threadId
-    ? s.live.userMessageId ?? `pending:${s.live.gen}`
-    : null);
+  const liveOwner = useStore((s) => {
+    const turn = turnOf(s, threadId);
+    return turn === undefined ? null : turn.userMessageId ?? `pending:${turn.gen}`;
+  });
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
-  const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.live?.text.length ?? 0) : 0));
+  const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.turns[threadId]?.text.length ?? 0) : 0));
   const row = (m: Message) => (bust === 0 ? m : { ...m });
   // what saved rows need from the store, read once here and passed down as props
   const catalog = useStore(catalogOf);

@@ -34,7 +34,7 @@ export type Conn =
 export type View = "thread" | "new" | "settings" | "firstrun";
 export type Section = "general" | "models" | "instructions" | "library" | "tools" | "images" | "runtime" | "advanced" | "shortcuts";
 
-/** The reply being written now, or the last one that stopped before it finished. */
+/** A chat's reply being written now, or its last one that stopped before it finished. */
 export interface LiveTurn {
   readonly contextNotice?: string;
   /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
@@ -57,6 +57,14 @@ export interface LiveTurn {
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
   /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
   readonly ending?: true;
+  /** A turn the server started in this chat while chat.send had not answered, and whether it has ended; whose it is is known at the answer. */
+  readonly early?: { readonly turnId: string; readonly ended: boolean };
+  /**
+   * Known only from turns.active, with no event of its own yet: it shows as
+   * running in the sidebar and nothing more. The server lists a turn before it
+   * saves the question and may drop it with no event, so nothing waits for it.
+   */
+  readonly listed?: true;
 }
 
 /** A message typed during setup, the first download or a reply being written; it sends when that is over. */
@@ -107,9 +115,8 @@ export interface State {
   readonly messages: Readonly<Record<string, readonly Message[]>>;
   /** First-token times measured this session, by message id, for the meta line. */
   readonly firstToken: Readonly<Record<string, number>>;
-  readonly live: LiveTurn | null;
-  /** Active server turn IDs by thread; token updates leave this record unchanged. */
-  readonly runningTurns: Readonly<Record<string, string>>;
+  /** Each chat's reply, by thread id: being written, or ended here and still shown. The open chat shows `turns[threadId]`. */
+  readonly turns: Readonly<Record<string, LiveTurn>>;
   readonly queued: readonly Queued[];
   /** The queued message being changed in the composer; the next Send updates it instead of sending. */
   readonly editingQueued: string | null;
@@ -199,8 +206,7 @@ const initial: State = {
   threads: [],
   messages: {},
   firstToken: {},
-  live: null,
-  runningTurns: {},
+  turns: {},
   queued: [],
   editingQueued: null,
   stopAsk: null,
@@ -309,12 +315,33 @@ export function chatReady(s: State): boolean {
   return s.conn.kind === "open" && s.runtime?.state === "ready";
 }
 
-/** True while a reply is being written (a stopped or failed turn no longer counts). */
-export function streaming(s: State): boolean {
-  return s.live !== null && s.live.end === undefined;
+/** The reply being written in this chat, if one is (a stopped or failed turn no longer counts). */
+export function runningTurn(s: State, threadId: string | null): LiveTurn | undefined {
+  const turn = turnOf(s, threadId);
+  return turn?.end === undefined ? turn : undefined;
+}
+
+/** This chat's turn as its screen, Stop and Retry see it: one known only from turns.active is not there yet. */
+export function turnOf(s: State, threadId: string | null): LiveTurn | undefined {
+  const turn = threadId === null ? undefined : s.turns[threadId];
+  return turn?.listed === true ? undefined : turn;
 }
 
 /** True while a reply is being written in the chat on screen: Stop and queueing belong to that chat, not to one running behind it. */
 export function streamingHere(s: State): boolean {
-  return streaming(s) && s.live?.threadId === s.threadId;
+  return runningTurn(s, s.threadId) !== undefined;
+}
+
+let running: ReadonlySet<string> = new Set();
+
+/**
+ * The chats where a reply is being written: the sidebar's dot. A send still
+ * waiting for its id counts by what the server has said about a turn in its
+ * chat meanwhile, since a Stop pressed then cannot reach that turn yet.
+ * Same set object until that list changes, so a word arriving re-renders no reader of it.
+ */
+export function runningThreads(s: State): ReadonlySet<string> {
+  const now = Object.values(s.turns).filter((t) => (t.early === undefined ? t.end === undefined : !t.early.ended)).map((t) => t.threadId);
+  if (now.length !== running.size || now.some((id) => !running.has(id))) running = new Set(now);
+  return running;
 }

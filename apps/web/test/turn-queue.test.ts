@@ -18,6 +18,8 @@ let store: Store;
 let disconnect: (() => void) | undefined;
 
 const st = () => store.getState();
+/** The open chat's turn (what the old single live slot showed), or null. */
+const live = () => { const s = st(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 const userMsg = (id: string, threadId: string, content = "hello"): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
 const asstMsg = (id: string, threadId: string, content = "hi there"): Message => ({ id, threadId, role: "assistant", content, model: "qwen3:14b", createdAt: 2 });
 const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
@@ -41,7 +43,9 @@ it("CO-06 replay: a refused GPU send shows the server explanation and restores i
       await w.sent;
     } }],
     check(_w, _order, complete) {
-      if (complete) expect(st()).toMatchObject({ draft: "keep these words", queued: [], live: null, notice: `${sentence} Your message is back in the box.` });
+      if (!complete) return;
+      expect(st()).toMatchObject({ draft: "keep these words", queued: [], notice: `${sentence} Your message is back in the box.` });
+      expect(st().turns, "the refused send leaves no turn behind").toEqual({});
     },
     dispose: async () => {},
   });
@@ -247,7 +251,7 @@ it.each([false, true])("late confirmation retires only the matching recovered co
     expect(st().messages["A"]?.filter(m => m.content === "slow admission")).toHaveLength(1);
     expect(sends()).toHaveLength(1);
     expect(b.server.calls("chat.cancel")).toHaveLength(0);
-    expect(st().live?.turnId).toBe("turn-A-1");
+    expect(live()?.turnId).toBe("turn-A-1");
   } finally { timer.mockRestore(); }
 });
 
@@ -307,8 +311,8 @@ it("sends an image-only first message with a usable thread title", async () => {
 async function answering(id: string): Promise<string> {
   session.newThread();
   void session.send(`hello ${id}`);
-  await until(() => st().live?.threadId === id && st().live?.turnId !== null && st().live?.pendingUser === null, 2000, `the turn in ${id}`);
-  return st().live?.turnId ?? "";
+  await until(() => live()?.threadId === id && live()?.turnId !== null && live()?.pendingUser === null, 2000, `the turn in ${id}`);
+  return live()?.turnId ?? "";
 }
 
 const roles = () => (st().messages["A"] ?? []).map((m) => m.role);
@@ -346,14 +350,14 @@ it.each([false, true])("keeps omission notices beside stopped words (notice befo
   if (earlyNotice) {
     chat(turn, "A", { type: "delta", text: "", contextNotice: "Some earlier images are unavailable." });
     await tick();
-    expect(st().live?.firstTokenAt).toBeUndefined();
+    expect(live()?.firstTokenAt).toBeUndefined();
   }
   chat(turn, "A", { type: "delta", text: "Partial answer" });
   await tick();
   session.stop();
   if (!earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", contextNotice: "Some earlier images are unavailable." });
   await tick();
-  expect(st().live).toHaveProperty("contextNotice", "Some earlier images are unavailable.");
+  expect(live()).toHaveProperty("contextNotice", "Some earlier images are unavailable.");
   await answering("B");
   // the terminal of the earlier-notice case comes after the person moved on, with the saved row
   if (earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p-notice", "A", "Partial answer"), contextNotice: "Some earlier images are unavailable.", interrupted: true } });
@@ -394,7 +398,7 @@ describe("a send that would stop another chat", () => {
     expect(sends()).toHaveLength(1); // only chat A's own
     expect(st().stopAsk?.blocking).toEqual(BLOCKING);
     expect(st().draft).toBe("for B");
-    expect(st().live?.threadId).toBe("A");
+    expect(store.runningThreads(st()).has("A")).toBe(true);
   });
 
   it("confirmed, sends with stopOthers and clears the box", async () => {
@@ -418,7 +422,7 @@ describe("a send that would stop another chat", () => {
   it("confirming without the tick asks again next time", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => st().live?.threadId === "B" && st().live?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
     session.newThread();
     await session.send("for C");
     expect(st().stopAsk?.blocking).toEqual(BLOCKING);
@@ -431,7 +435,7 @@ describe("a send that would stop another chat", () => {
     expect(localStorage.getItem("gates-local.stop-others-ok")).toBeNull();
     await session.send("for B");
     session.confirmStopAsk(true);
-    await until(() => st().live?.threadId === "B" && st().live?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
     expect(localStorage.getItem("gates-local.stop-others-ok")).toBe("1");
     session.newThread();
     await session.send("for C");
@@ -443,7 +447,7 @@ describe("a send that would stop another chat", () => {
   it("Regenerate takes the same warning and keeps what is typed", async () => {
     const turn = await answering("A");
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
-    await until(() => st().live === null, 2000, "A done");
+    await until(() => live() === null, 2000, "A done");
     b.server.answer("turns.blocking", () => BLOCKING);
     store.setState({ draft: "half a thought" });
     session.retry();
@@ -493,13 +497,13 @@ describe("the chat that got stopped", () => {
   it("keeps its partial reply and one plain sentence while another chat is open", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => st().live?.threadId === "B" && st().live?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
     chat("turn-A-1", "A", preempted(asstMsg("p1", "A", "so far")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p1");
     expect(st().stopNotes["p1"]).toMatch(/^Stopped so .+ could load\.$/);
-    expect(st().live?.threadId).toBe("B");
-    expect(st().live?.end).toBeUndefined();
+    expect(live()?.threadId).toBe("B");
+    expect(live()?.end).toBeUndefined();
   });
 
   it("when it is the one on screen: the partial becomes the saved message, shown once", async () => {
@@ -508,7 +512,7 @@ describe("the chat that got stopped", () => {
     b.frame();
     chat(turn, "A", preempted(asstMsg("p1", "A", "so far")));
     await tick();
-    expect(st().live).toBeNull();
+    expect(live()).toBeNull();
     expect(st().messages["A"]?.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual(["so far"]);
     expect(st().stopNotes["p1"]).toMatch(/^Stopped so .+ could load\.$/);
   });
@@ -524,7 +528,7 @@ describe("the chat that got stopped", () => {
       expect(h.params).toMatchObject({ retryOf: question, content: "hello A" });
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual([question, "p8"]);
       h.respond({ turnId: "turn-retry", userMessage: userMsg("u-again", "A", "hello A") });
-      await until(() => st().live?.turnId === "turn-retry", 2000, "the retry");
+      await until(() => live()?.turnId === "turn-retry", 2000, "the retry");
       expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual(["u-again"]);
     });
 
@@ -555,7 +559,7 @@ describe("the chat that got stopped", () => {
       session.stop();
       chat(turn, "A", cancelledWith(saved("p4")));
       await tick();
-      expect(st().live).toBeNull();
+      expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
       expect(st().stopNotes["p4"]).toMatch(/^Stopped after \d+ s\.$/);
       expect(st().queued).toMatchObject([{ text: "next", held: true }]);
@@ -571,7 +575,7 @@ describe("the chat that got stopped", () => {
       chat(turn, "A", cancelledWith(saved("p5")));
       await tick();
       expect(replies()).toEqual(["so far"]);
-      expect(st().live?.threadId).toBe("B");
+      expect(live()?.threadId).toBe("B");
     });
 
     it("a Stop that lost the race to the last token leaves the finished reply and still holds the queue", async () => {
@@ -582,7 +586,7 @@ describe("the chat that got stopped", () => {
       session.stop();
       chat(turn, "A", done("whole", "A"));
       await tick();
-      expect(st().live).toBeNull();
+      expect(live()).toBeNull();
       expect(st().stopNotes["whole"]).toBeUndefined();
       expect(st().queued).toMatchObject([{ text: "next", held: true }]);
       expect(sends()).toHaveLength(1);
@@ -594,7 +598,7 @@ describe("the chat that got stopped", () => {
       b.frame();
       chat(turn, "A", { type: "error", code: "runtime-error", message: "the model crashed", partial: saved("p6") });
       await tick();
-      expect(st().live).toBeNull();
+      expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
       expect(st().stopNotes["p6"]).toBe("The reply didn't finish. The model crashed.");
     });
@@ -615,14 +619,14 @@ describe("the chat that got stopped", () => {
     const turn = await answering("A");
     chat(turn, "A", preempted());
     await tick();
-    expect(st().live?.end).toMatchObject({ kind: "error", code: "preempted" });
-    expect(st().live?.end).toHaveProperty("message", expect.stringMatching(/^Stopped so .+ could load\.$/));
+    expect(live()?.end).toMatchObject({ kind: "error", code: "preempted" });
+    expect(live()?.end).toHaveProperty("message", expect.stringMatching(/^Stopped so .+ could load\.$/));
   });
 
   it("stopped before a word behind another chat: the sentence hangs on the question it did not answer", async () => {
     await warned();
     session.confirmStopAsk(false);
-    await until(() => st().live?.threadId === "B" && st().live?.pendingUser === null, 2000, "turn B");
+    await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
     chat("turn-A-1", "A", preempted());
     await tick();
     expect(st().stopNotes["u-A-1"]).toMatch(/^Stopped so .+ could load\.$/);
@@ -633,14 +637,14 @@ describe("the chat that got stopped", () => {
     chat(turn, "A", { type: "delta", text: "so far" });
     chat(turn, "A", { type: "error", code: "runtime-changed", message: "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.", partial: asstMsg("p2", "A", "so far") });
     await tick();
-    expect(st().live).toBeNull();
+    expect(live()).toBeNull();
     expect(st().stopNotes["p2"]).toBe("Stopped when the Ollama runtime changed.");
   });
 
   it("a turn this client never showed still leaves its partial in a thread it has", async () => {
     const turn = await answering("A");
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
-    await until(() => st().live === null, 2000, "A done");
+    await until(() => live() === null, 2000, "A done");
     session.newThread();
     chat("elsewhere", "A", preempted(asstMsg("p3", "A", "from the phone")));
     await tick();
@@ -661,10 +665,10 @@ describe("a turn left running behind another chat", () => {
     chat(c, "B", { type: "delta", text: "beta" });
     b.frame();
     session.openThread("A");
-    expect(st().live).toMatchObject({ threadId: "A", turnId: a, text: "one two" });
+    expect(live()).toMatchObject({ threadId: "A", turnId: a, text: "one two" });
     chat(c, "B", { type: "delta", text: " more" });
     session.openThread("B");
-    expect(st().live).toMatchObject({ threadId: "B", turnId: c, text: "beta more" });
+    expect(live()).toMatchObject({ threadId: "B", turnId: c, text: "beta more" });
   });
 
   it("its reply lands when it finishes, and the queue moves only when nothing is running", async () => {
@@ -687,7 +691,7 @@ describe("a turn left running behind another chat", () => {
     await answering("A");
     expect(store.streamingHere(st())).toBe(true);
     session.newThread();
-    expect(store.streaming(st())).toBe(true);
+    expect(store.runningThreads(st()).has("A")).toBe(true);
     expect(store.streamingHere(st())).toBe(false);
   });
 });
@@ -707,10 +711,10 @@ describe("picking a model while another is answering", () => {
     request.respond({ turnId: `saved-${userMessage.id}`, userMessage, replayed: true });
     await sending;
     if (!finishedFirst) {
-      expect(session.repliesInProgress(st(), "A")).toBe(1);
+      expect(store.runningThreads(st()).has("A")).toBe(true);
       finish();
     }
-    expect.soft(session.repliesInProgress(st(), "A")).toBe(0);
+    expect.soft(store.runningThreads(st()).has("A")).toBe(false);
     chat(second, "B", { type: "done", message: asstMsg("answer-B", "B"), stopReason: "stop" });
     await until(() => sends().some(send => send.content === "after B"), 1000, "queued words after replayed acknowledgement");
     expect(sends().map(send => send.content)).toEqual(["recovered A", "hello B", "after B"]);
@@ -782,7 +786,7 @@ describe("messages typed while a reply is being written", () => {
     expect(st().draft).toBe("");
     expect(sends()).toHaveLength(1);
     expect(b.server.calls("chat.cancel")).toHaveLength(0);
-    expect(st().live?.turnId).toBe(turn);
+    expect(live()?.turnId).toBe(turn);
 
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => sends().length === 2, 2000, "the queued send");
@@ -805,7 +809,7 @@ describe("messages typed while a reply is being written", () => {
     await session.send("two");
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => sends().length === 2, 2000, "the first");
-    await until(() => st().live?.turnId === "turn-A-2" && st().live?.pendingUser === null, 2000, "turn 2");
+    await until(() => live()?.turnId === "turn-A-2" && live()?.pendingUser === null, 2000, "turn 2");
     expect(sends().map((s) => s.content)).toEqual(["hello A", "one"]);
     expect(st().queued.map((q) => q.text)).toEqual(["two"]);
     chat("turn-A-2", "A", { type: "done", message: asstMsg("a2", "A"), stopReason: "stop" });
@@ -837,7 +841,7 @@ describe("messages typed while a reply is being written", () => {
     await tick();
     const other = await answering("B");
     chat(other, "B", { type: "done", message: asstMsg("b1", "B"), stopReason: "stop" });
-    await until(() => st().live === null, 2000, "B done");
+    await until(() => live() === null, 2000, "B done");
     await tick();
     expect(sends().map((s) => s.content)).not.toContain("next");
   });
@@ -997,7 +1001,7 @@ async function editedThroughDone(): Promise<void> {
   await session.send("one");
   session.editQueued(st().queued[0]?.id ?? "");
   chat(turn, "A", done("a1", "A"));
-  await until(() => st().live === null, 2000, "A done");
+  await until(() => live() === null, 2000, "A done");
   await tick();
   expect(sends()).toHaveLength(1);
 }
@@ -1010,7 +1014,9 @@ async function stoppedThenReplaced(): Promise<Held<"chat.send">> {
   session.stop();
   await answering("B");
   session.openThread("A");
-  expect(st().live?.threadId).toBe("B");
+  // B's reply runs in its own chat; A's stopped send no longer has a turn to come back to
+  expect(store.runningThreads(st()).has("B")).toBe(true);
+  expect(st().turns["A"]).toBeUndefined();
   return h;
 }
 
@@ -1066,7 +1072,7 @@ describe("a message the person typed is never lost", () => {
   it("a Regenerate that fails leaves the box alone: its words are already in the chat", async () => {
     const turn = await answering("A");
     chat(turn, "A", done("a1", "A"));
-    await until(() => st().live === null, 2000, "A done");
+    await until(() => live() === null, 2000, "A done");
     store.setState({ draft: "half a thought" });
     const held = b.server.hold("chat.send");
     session.retry();
@@ -1083,8 +1089,8 @@ describe("a message the person typed is never lost", () => {
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
-      expect(st().live?.ending).toBeUndefined();
-      expect(st().live?.pendingUser).toBeNull();
+      expect(live()?.ending).toBeUndefined();
+      expect(live()?.pendingUser).toBeNull();
     });
 
     it("while another chat owns the live slot is back in its own chat's queue, and the notice says where (CFS-03)", async () => {
@@ -1093,7 +1099,7 @@ describe("a message the person typed is never lost", () => {
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().queued).toMatchObject([{ threadId: "A", text: "next", held: true }]);
-      expect(st().live?.turnId).toBe(other);
+      expect(live()?.turnId).toBe(other);
       expect(st().notice).toMatch(/hello A/);
     });
 
@@ -1254,7 +1260,7 @@ describe("a message the person typed is never lost", () => {
       chat(turn, "B", CANCELLED);
       await tick();
       session.openThread("A");
-      expect(st().live?.threadId).toBe("A");
+      expect(live()?.threadId).toBe("A");
       stoppedWords("B");
     });
 
@@ -1262,7 +1268,7 @@ describe("a message the person typed is never lost", () => {
       await stopped("words so far");
       chat("elsewhere", "A", { type: "start", model: MODEL, userMessage: userMsg("u-phone", "A", "from the phone") });
       await tick();
-      expect(st().live?.turnId).toBe("elsewhere");
+      expect(live()?.turnId).toBe("elsewhere");
       stoppedWords();
     });
 
@@ -1420,7 +1426,7 @@ describe("a message the person typed is never lost", () => {
       session.stop();
       const turnB = await answering("B");
       chat(turnB, "B", done("b1", "B"));
-      await until(() => st().live === null, 2000, "B done");
+      await until(() => live() === null, 2000, "B done");
       expect(texts()).toEqual(["behind it"]);
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 2, 2000, "the message back");

@@ -136,14 +136,14 @@ it("keeps the live reply's element when it saves, and asks about reduced motion 
   const thread = longThread("live", 100);
   const user: Message = { id: "ask", threadId: "live", role: "user", content: "Last question", createdAt: 3 };
   const live = { gen: 1, threadId: "live", turnId: "turn", userMessageId: "ask", model: "qwen3.5:9b", startedAt: 1, thinking: "", text: "The answer so far", tools: [], pendingUser: null };
-  act(() => store.setState({ messages: { live: [...thread, user] }, live }));
+  act(() => store.setState({ messages: { live: [...thread, user] }, turns: { live } }));
   media.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "live", key: "live" })));
   const writing = turns().at(-1);
   expect(writing?.getAttribute("aria-label")).toBe("Reply");
-  act(() => store.setState({ live: { ...live, text: "The answer so far, and more" } }));
-  act(() => store.setState({ live: { ...live, text: "The answer so far, and more, then the end" } }));
-  act(() => store.setState({ live: null, messages: { live: [...thread, user, { id: "answer", threadId: "live", role: "assistant", content: "The answer so far, and more, then the end", createdAt: 4, model: "qwen3.5:9b" }] } }));
+  act(() => store.setState({ turns: { live: { ...live, text: "The answer so far, and more" } } }));
+  act(() => store.setState({ turns: { live: { ...live, text: "The answer so far, and more, then the end" } } }));
+  act(() => store.setState({ turns: {}, messages: { live: [...thread, user, { id: "answer", threadId: "live", role: "assistant", content: "The answer so far, and more, then the end", createdAt: 4, model: "qwen3.5:9b" }] } }));
   const saved = turns().at(-1);
   expect(saved, "the save must not remount the reply").toBe(writing);
   expect(saved?.getAttribute("data-received")).toBe(String("The answer so far, and more, then the end".length));
@@ -156,7 +156,7 @@ it("keeps the live reply's element when it saves, and asks about reduced motion 
 it("keeps the turn in view where it was while older turns mount above it", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
   const thread = longThread("anchor", 200);
-  act(() => store.setState({ messages: { anchor: thread }, live: null }));
+  act(() => store.setState({ messages: { anchor: thread }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "anchor", key: "anchor" })));
   const tl = doc.body.querySelector(".tl");
@@ -182,8 +182,10 @@ it("keeps the turn in view where it was while older turns mount above it", async
 async function realChat() {
   const { createChat } = await import("../src/session/chat.ts");
   const { withMessage } = await import("../src/session/threads.ts");
+  const { createServerState } = await import("../src/session/server-state.ts");
   return createChat({
-    applyServerEvent: store.setState,
+    // the session's own, which publishes nothing for an update that returns nothing
+    applyServerEvent: createServerState(store.getState, store.setState),
     call: async () => { throw new Error("unexpected RPC"); },
     codeOf: () => "unexpected",
     createThread: async () => null,
@@ -209,7 +211,7 @@ it("holds back the history that arrives in front of a reply that finished before
   const answer = thread.at(-1);
   if (answer === undefined) throw new Error("no answer");
   // the thread opens on a running reply with no history cached yet
-  act(() => store.setState({ messages: {}, live: liveIn("late-history", "m1998", 30), threadId: "late-history", view: "thread" }));
+  act(() => store.setState({ messages: {}, turns: { "late-history": liveIn("late-history", "m1998", 30) }, threadId: "late-history", view: "thread" }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "late-history", key: "late-history" })));
   expect(turns()).toHaveLength(1);
@@ -231,7 +233,7 @@ it("keeps the reply on screen, the same element in the same place, when the hist
   const [question, answer] = thread.slice(-2);
   if (question === undefined || answer === undefined) throw new Error("no last turn");
   // the admitted question is cached on its own (session/chat.ts), and its reply is running
-  act(() => store.setState({ messages: { partial: [question] }, live: liveIn("partial", question.id, 31), threadId: "partial", view: "thread" }));
+  act(() => store.setState({ messages: { partial: [question] }, turns: { partial: liveIn("partial", question.id, 31) }, threadId: "partial", view: "thread" }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "partial", key: "partial" })));
   const tl = doc.body.querySelector(".tl");
@@ -256,15 +258,15 @@ it("keeps the reply on screen, the same element in the same place, when the hist
 it("keeps one reduced-motion listener for the module, however many replies were live, and none once they are gone", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
   let thread: Message[] = [];
-  act(() => store.setState({ messages: { session: [] }, live: null }));
+  act(() => store.setState({ messages: { session: [] }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "session", key: "session" })));
   for (let i = 0; i < 3; i++) {
     const user: Message = { id: `user-${i}`, threadId: "session", role: "user", content: `Ask ${i}`, createdAt: i };
     thread = [...thread, user];
-    act(() => store.setState({ messages: { session: thread }, live: { ...liveIn("session", user.id, 40 + i), text: "Written" } }));
+    act(() => store.setState({ messages: { session: thread }, turns: { session: { ...liveIn("session", user.id, 40 + i), text: "Written" } } }));
     thread = [...thread, { id: `answer-${i}`, threadId: "session", role: "assistant", content: "Written", createdAt: i }];
-    act(() => store.setState({ messages: { session: thread }, live: null }));
+    act(() => store.setState({ messages: { session: thread }, turns: {} }));
   }
   expect(motionListeners, "one browser listener, shared by every pacing reply").toBe(1);
   act(() => root.render(createElement("div")));
@@ -274,7 +276,7 @@ it("keeps one reduced-motion listener for the module, however many replies were 
 
 it("mounts further slices in one idle callback while its deadline has room", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
-  act(() => store.setState({ messages: { roomy: longThread("roomy", 400) }, live: null }));
+  act(() => store.setState({ messages: { roomy: longThread("roomy", 400) }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "roomy", key: "roomy" })));
   expect(turns()).toHaveLength(40);
@@ -289,7 +291,7 @@ it("mounts further slices in one idle callback while its deadline has room", asy
 it("keeps a fully mounted thread mounted, the same elements, when its first turn is deleted", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
   const thread = longThread("gone-first", 2000);
-  act(() => store.setState({ messages: { "gone-first": thread }, live: null }));
+  act(() => store.setState({ messages: { "gone-first": thread }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "gone-first", key: "gone-first" })));
   while (idle.length > 0) act(() => idle.shift()?.());
@@ -307,7 +309,7 @@ it("keeps a fully mounted thread mounted, the same elements, when its first turn
 it("changes nothing mounted when a turn in front of a part-mounted thread, or its first mounted turn, is deleted", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
   const thread = longThread("gone-early", 2000);
-  act(() => store.setState({ messages: { "gone-early": thread }, live: null }));
+  act(() => store.setState({ messages: { "gone-early": thread }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "gone-early", key: "gone-early" })));
   act(() => idle.shift()?.());

@@ -3,6 +3,7 @@ import type { Message, MethodName, Params, ResultOf } from "@gates-local/contrac
 import { describeModel, titleFrom } from "../format.ts";
 import { choosable, newestOnly } from "../pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../store.ts";
+import { withTurn } from "./turn.ts";
 
 interface ThreadEffects {
   readonly applyServerEvent: typeof setState;
@@ -152,7 +153,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     stale.delete(threadId);
     applyServerEvent((s) => ({
       messages: { ...s.messages, [threadId]: messages },
-      ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
+      ...(savedReplyFor(s.turns[threadId] ?? null, threadId, messages) ? { turns: withTurn(s.turns, threadId, null) } : {}),
       ...savedModel(s, threadId, messages),
     }));
     if (getState().models === undefined) unrestored.add(threadId);

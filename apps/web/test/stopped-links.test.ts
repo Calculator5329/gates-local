@@ -19,7 +19,7 @@ it("keeps rendered link permissions after Stop followed by Send", async () => {
   try {
     await until(() => store.getState().imageStatus !== undefined && store.getState().conn.kind === "open");
     await session.send("Draw a ship and read the report");
-    const live = store.getState().live!;
+    const live = Object.values(store.getState().turns)[0]!;
     const event = (value: import("@gates-local/contracts").Payload<"chat.event">["event"]) => browser.server.push("chat.event", { turnId: live.turnId!, threadId: live.threadId, event: value });
     event({ type: "tool", step: { callId: "image", name: "image", state: "done", summary: "Image queued", links: [] } });
     event({ type: "tool", step: { callId: "read", name: "read", state: "done", summary: "Read report", links: ["https://tool.example/report"] } });

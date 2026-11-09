@@ -14,7 +14,7 @@ vi.mock("./store.ts", async (original) => {
   return { ...actual, useStore: <T,>(selector: (s: State) => T) => selector(actual.getState()) };
 });
 vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/files/image.png" }));
-afterEach(() => { setState({ live: null, messages: {}, threadId: null }); vi.unstubAllGlobals(); });
+afterEach(() => { setState({ turns: {}, messages: {}, threadId: null }); vi.unstubAllGlobals(); });
 beforeEach(() => { vi.stubGlobal("matchMedia", () => ({ matches: true })); });
 
 const FOLLOWUP = "The report total is 42.\n\nYour image is ready: [Download](https://invented.example/ship.png).\n\n![Ship](https://invented.example/ship.png)\n\nhttps://invented.example/raw\n\n[Person](https://person.example/brief) and [Report](https://tool.example/report).\n\n[Echo](https://untrusted.example/from-model)";
@@ -36,8 +36,8 @@ describe("fabricated mixed-image follow-ups", () => {
       expect(html).not.toContain('href="https://invented.example/ship.png"');
       expect(html).not.toContain("data-tool-row");
     };
-    setState({ threadId, messages: { [threadId]: [image] }, live });
-    if (stage !== "streaming") setState({ live: null, messages: { [threadId]: [image, saved] } });
+    setState({ threadId, messages: { [threadId]: [image] }, turns: { [threadId]: live } });
+    if (stage !== "streaming") setState({ turns: {}, messages: { [threadId]: [image, saved] } });
     if (stage === "saved") setState({ messages: { [threadId]: structuredClone([image, saved]) } });
     check();
   });
@@ -115,13 +115,13 @@ describe("fabricated mixed-image follow-ups", () => {
         if (event.type === "tool") { const i = steps.findIndex(s => s.callId === event.step.callId); if (i < 0) steps.push(event.step); else steps[i] = event.step; }
         if (event.type === "delta") {
           text += event.text;
-          setState({ threadId: thread.id, messages: { [thread.id]: store.getThread(thread.id).messages }, live: { gen: 1, threadId: thread.id, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools: [...steps], pendingUser: null } });
+          setState({ threadId: thread.id, messages: { [thread.id]: store.getThread(thread.id).messages }, turns: { [thread.id]: { gen: 1, threadId: thread.id, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools: [...steps], pendingUser: null } } });
           if (text.includes("[Echo]")) { check(); liveChecks++; }
         }
         if (event.type === "complete") store.appendMessage({ threadId: thread.id, role: "assistant", content: event.content, tools: event.tools });
       }
       expect(liveChecks).toBeGreaterThan(0);
-      setState({ live: null, messages: { [thread.id]: store.getThread(thread.id).messages } }); check();
+      setState({ turns: {}, messages: { [thread.id]: store.getThread(thread.id).messages } }); check();
       store.appendMessage({ threadId: thread.id, role: "user", content: "Look up the next report" });
       store.appendMessage({ threadId: thread.id, role: "assistant", content: "The later lookup succeeded.", tools: [
         { callId: "later-read", name: "read", state: "done", summary: "Read the next report", links: ["https://invented.example/ship.png"] },

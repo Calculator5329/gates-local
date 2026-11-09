@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import type { Channel, FitReport, MethodName, Payload, ResultOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Held, type FakeSocket } from "./harness.ts";
-import { drain, OrderingWorld } from "./ordering-world.ts";
+import { drain, openTurn, OrderingWorld, runningIds } from "./ordering-world.ts";
 import { replay, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "./ordering-replay.ts";
 
 vi.mock("react", async (original) => ({
@@ -146,8 +146,8 @@ function offscreenReconnect(): ReplayScenario<World> {
       void w.wire.b.session.send("background reply"); await drain();
       w.wire.server.admittedPush("turn-1", "A"); w.wire.server.admittedPush("turn-1", "B");
       w.wire.server.response("turn-1"); await drain();
-      expect(w.wire.a.store.getState().live).toBeNull();
-      expect(w.wire.a.store.getState().runningTurns).toEqual({ t1: "turn-1" });
+      expect(openTurn(w.wire.a.store)).toBeNull();
+      expect(runningIds(w.wire.a.store)).toEqual({ t1: "turn-1" });
       return w;
     },
     witnesses: [
@@ -174,8 +174,8 @@ function offscreenReconnect(): ReplayScenario<World> {
       event("done.push-B", ["server.done"], (w) => w.wire.step(() => w.wire.server.chatPush("turn-1", w.wire.b.socket, true)), { delivery: true }),
     ],
     check(w, order, complete) {
-      if (order.includes("socket.drop")) expect(w.wire.a.store.getState().runningTurns, "a disconnected off-screen stream cannot remain marked as running").toEqual({});
-      expect(w.wire.b.store.getState().runningTurns).toEqual(order.includes("done.push-B") ? {} : { t1: "turn-1" });
+      if (order.includes("socket.drop")) expect(runningIds(w.wire.a.store), "a disconnected off-screen stream cannot remain marked as running").toEqual({});
+      expect(runningIds(w.wire.b.store)).toEqual(order.includes("done.push-B") ? {} : { t1: "turn-1" });
       if (complete) expect(w.wire.a.store.getState().conn.kind).toBe("open");
     },
   };

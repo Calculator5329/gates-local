@@ -1,6 +1,6 @@
 // Fit report freshness, retained history and retry lifetime.
 import type { BlockingTurn, FitReport, GpuStatus, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
-import { NA, type State, chatReady, fitKey, getState, setState, streaming } from "../store.ts";
+import { NA, type State, chatReady, fitKey, getState, runningThreads, setState } from "../store.ts";
 
 type Request = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
 
@@ -20,7 +20,7 @@ function onlyIdleOwnedModelsChanged(s: State, next: GpuStatus): boolean {
   const before = s.gpu;
   if (!before || before === NA || before.vendor !== "nvidia" || next.vendor !== "nvidia" ||
     before.name !== next.name || before.totalBytes !== next.totalBytes || before.detail !== next.detail ||
-    before.freeBytes === undefined || next.freeBytes === undefined || streaming(s) || Object.keys(s.runningTurns).length > 0 ||
+    before.freeBytes === undefined || next.freeBytes === undefined || runningThreads(s).size > 0 ||
     Object.values(s.loads).some(load => load.state === "loading")) return false;
   if (gpuOccupantKey(before, true) === gpuOccupantKey(next, true) || gpuOccupantKey(before, false) !== gpuOccupantKey(next, false)) return false;
   const beforeOwned = before.occupants.filter(ownedChatModel).reduce((sum, o) => sum + o.bytes, 0);

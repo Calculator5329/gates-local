@@ -3,7 +3,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { State } from "./store.ts";
+import type { LiveTurn, State } from "./store.ts";
 
 const device = vi.hoisted(() => ({ touch: false }));
 vi.mock("./store.ts", async (original) => {
@@ -33,17 +33,18 @@ const ready: State = {
   view: "thread",
   threadId: "thread",
 };
-const live: NonNullable<State["live"]> = { gen: 1, threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [], pendingUser: null };
+const live: LiveTurn = { gen: 1, threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [], pendingUser: null };
+const turns = { thread: live };
 const states: readonly [string, Partial<State>, string, string?][] = [
   ["idle", {}, "Send message"],
   ["typing", { draft: "hello" }, "Send message"],
-  ["running", { live }, "Stop"],
-  ["running with a draft", { live, draft: "next" }, "Stop", "Queue message"],
-  ["editing a queued message", { live, editingQueued: "queued", draft: "edited" }, "Update queued message"],
-  ["editing an empty queued message", { live, editingQueued: "queued" }, "Update queued message"],
-  ["stopped", { live: { ...live, end: { kind: "stopped", secs: 1 } } }, "Send message"],
-  ["failed", { live: { ...live, end: { kind: "error", code: "internal", message: "Failed" } } }, "Send message"],
-  ["another chat running", { live: { ...live, threadId: "other" } }, "Send message"],
+  ["running", { turns }, "Stop"],
+  ["running with a draft", { turns, draft: "next" }, "Stop", "Queue message"],
+  ["editing a queued message", { turns, editingQueued: "queued", draft: "edited" }, "Update queued message"],
+  ["editing an empty queued message", { turns, editingQueued: "queued" }, "Update queued message"],
+  ["stopped", { turns: { thread: { ...live, end: { kind: "stopped", secs: 1 } } } }, "Send message"],
+  ["failed", { turns: { thread: { ...live, end: { kind: "error", code: "internal", message: "Failed" } } } }, "Send message"],
+  ["another chat running", { turns: { other: { ...live, threadId: "other" } } }, "Send message"],
   ["disconnected", { conn: { kind: "down", since: 0 } }, "Send message"],
   ["no model", { models: [], model: undefined }, "Send message"],
   ["installing", { runtime: { state: "installing", owner: "app", baseUrl: "http://127.0.0.1:5288" } }, "Send message"],
@@ -54,7 +55,7 @@ describe("the composer's primary action", () => {
   for (const touch of [false, true]) {
     it(`keeps a separate Stop available without replacing the ${touch ? "touch queue" : "queued edit"} action`, () => {
       device.touch = touch;
-      setState({ ...ready, live, draft: "Keep this draft", editingQueued: touch ? null : "queued" });
+      setState({ ...ready, turns, draft: "Keep this draft", editingQueued: touch ? null : "queued" });
       const html = renderToStaticMarkup(createElement(Composer));
       expect(html.match(/<button\b[^>]*aria-label="Stop reply"[^>]*>/g) ?? []).toHaveLength(1);
     });

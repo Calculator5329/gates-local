@@ -54,7 +54,7 @@ test("an arriving image card preserves the live reply node, thinking and reveal"
   const text = "The report total is 42. ".repeat(20);
   await page.evaluate(content => window.streamingProof.timeline({
     threadId: "proof", view: "thread", messages: { proof: [{ id: "user", threadId: "proof", role: "user", content: "A ship and a report", createdAt: 1 }] },
-    live: { gen: 1, threadId: "proof", turnId: "turn", userMessageId: "user", model: "model", startedAt: Date.now(), thinking: "Checking the report", text: content, tools: [], pendingUser: null },
+    turns: { proof: { gen: 1, threadId: "proof", turnId: "turn", userMessageId: "user", model: "model", startedAt: Date.now(), thinking: "Checking the report", text: content, tools: [], pendingUser: null } },
   }), text);
   const reply = page.locator('.turn.a:not(:has([data-image-job]))');
   await expect(page.locator("[data-image-job]")).toHaveCount(0);

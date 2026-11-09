@@ -25,6 +25,8 @@ let capture = false;
 let selectors: Selector[];
 
 const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
+/** The open chat's turn (what the old single live slot showed), or null. */
+const openTurn = () => { const s = store.getState(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 
 beforeEach(async () => {
   b = installBrowser();
@@ -65,9 +67,9 @@ afterEach(async () => {
 async function answering(id: string): Promise<string> {
   session.openThread(id);
   await session.send(`Question in ${id}`);
-  await until(() => store.getState().live?.threadId === id && store.getState().live?.turnId !== null, 2000, `reply in ${id}`);
+  await until(() => openTurn()?.threadId === id && openTurn()?.turnId !== null, 2000, `reply in ${id}`);
   await tick();
-  return store.getState().live?.turnId ?? "";
+  return openTurn()?.turnId ?? "";
 }
 
 /** Deliver the server's start while its send response is still in flight. */
@@ -231,7 +233,7 @@ describe("sidebar running replies", () => {
     } finally {
       off();
     }
-    expect(store.getState().live?.text).toBe("b".repeat(100));
+    expect(openTurn()?.text).toBe("b".repeat(100));
     expect(changed, "token publishes change no slice read by the sidebar").toBe(0);
   });
 
@@ -252,7 +254,7 @@ describe("sidebar running replies", () => {
     await tick();
     chat("remote-A", "A", { type: "start", model: MODEL, userMessage: user("remote-user", "A") });
     expect(marked()).toEqual(["A"]);
-    expect(store.getState().live).toBeNull();
+    expect(openTurn()).toBeNull();
     b.server.accepting = false;
     b.server.socket.close();
     await until(() => store.getState().conn.kind === "down", 2000, "disconnection");

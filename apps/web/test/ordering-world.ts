@@ -12,6 +12,18 @@ export const SPEECH_URL = "http://speech.invalid";
 type Request = Parameters<FakeServer["handle"]>[1];
 interface Delivery { readonly socket: FakeSocket; readonly request: Request; readonly result: unknown; readonly sync?: SyncMetadata }
 
+/** The chats a window shows a reply being written in, each with its turn id (null while its send waits for the answer). */
+export function runningIds(store: typeof import("../src/store.ts")): Record<string, string | null> {
+  const s = store.getState();
+  return Object.fromEntries([...store.runningThreads(s)].map((threadId) => [threadId, s.turns[threadId]?.turnId ?? null]));
+}
+
+/** The chat on screen's turn in a window, or null. */
+export function openTurn(store: typeof import("../src/store.ts")) {
+  const s = store.getState();
+  return s.threadId === null ? null : s.turns[s.threadId] ?? null;
+}
+
 /** A bounded microtask drain; event preconditions check readiness explicitly. */
 export async function drain(): Promise<void> {
   for (let turn = 0; turn < 64; turn++) await Promise.resolve();
