@@ -21,6 +21,7 @@ import {
 import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
+import { syncTitleBar } from "./titlebar.ts";
 
 // ---------------------------------------------------------------- desktop bridge
 // The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
@@ -30,6 +31,8 @@ type BridgeState =
   | { readonly status: "idle" | "starting" | "restarting" | "crashed" | "stopping" | "stopped" };
 
 interface DesktopBridge {
+  /** Native control colours, resolved from the page's theme tokens. */
+  syncTitleBar?(colors: { color: string; symbolColor: string }): Promise<void>;
   getServerUrl(): Promise<string | null>;
   onState(listener: (state: BridgeState) => void): () => void;
   /** Starts `pnpm run app-update` and quits; missing on desktop builds from before it existed. */
@@ -403,6 +406,7 @@ function applyTheme(theme: Settings["theme"]): void {
   const root = document.documentElement;
   if (theme === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", theme);
+  syncTitleBar();
 }
 
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */

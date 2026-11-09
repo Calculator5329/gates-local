@@ -18,6 +18,7 @@ import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
 import { call, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
+import { windowOverlay } from "./titlebar.ts";
 import { PHONE, POP_ANCHOR, POP_EL, SheetHead, Tip, closePop, isPhone, isTouch, menuKeys, place, togglePop, useMedia } from "./ui.tsx";
 
 interface Card {
@@ -224,8 +225,9 @@ function Header({ isNew, inert }: { isNew: boolean; inert: boolean }) {
   const moreOpen = useStore((s) => s.pop?.id === "more" && s.pop.thread === undefined);
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
+    if (windowOverlay?.visible) document.title = `${isNew ? "" : `${title} · `}Gates Local`;
     if (renaming) input.current?.select();
-  }, [renaming]);
+  }, [renaming, isNew, title]);
   const done = (save: boolean) => {
     const value = input.current?.value.trim() ?? "";
     if (save && threadId !== null && value !== "" && value !== title) void renameThread(threadId, value);

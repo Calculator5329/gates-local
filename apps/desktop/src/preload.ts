@@ -5,6 +5,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { BRIDGE_KEY, IPC, type BridgeState, type GatesLocalBridge, type RestartResult, type UpdateAndRestartResult } from "./bridge.ts";
 
 const bridge: GatesLocalBridge = {
+  syncTitleBar: async (colors) => { await ipcRenderer.invoke(IPC.titleBar, colors); },
   getState: async () => (await ipcRenderer.invoke(IPC.getState)) as BridgeState,
   getServerUrl: async () => {
     const state = (await ipcRenderer.invoke(IPC.getState)) as BridgeState;
