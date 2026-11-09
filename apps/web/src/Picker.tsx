@@ -127,7 +127,7 @@ export function Picker() {
     if (result === "error") { pendingRow.current = null; return; }
     if (!fitIsCurrent(result)) return;
     pendingRow.current = null;
-    if (result?.verdict !== "refuse") finish(row);
+    finish(row);
   }, [fits, models, pop]);
   useLayoutEffect(() => {
     if (!pop) return;

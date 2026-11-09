@@ -355,11 +355,15 @@ test("the typing window's end: a stopped input still counts, an input elsewhere 
   const ta = page.locator("#ta");
   await ta.focus();
   await page.evaluate(clearEvents);
-  // a handler on the field stops the last key's input before it bubbles, and notes its timestamp
+  // Stop the last input before it reaches window's bubble listeners, after
+  // React's root listener has kept the controlled draft in sync.
   await page.evaluate((n) => {
     const w = window as unknown as { glFinalAt?: number };
     let seen = 0;
-    document.querySelector("#ta")?.addEventListener("input", (e) => {
+    const field = document.querySelector("#ta"), root = document.getElementById("root");
+    if (!field || !root) throw new Error("The composer and React root must be mounted");
+    root.addEventListener("input", (e) => {
+      if (e.target !== field) return;
       seen++;
       if (seen !== n) return;
       w.glFinalAt = e.timeStamp;

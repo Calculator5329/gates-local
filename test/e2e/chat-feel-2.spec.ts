@@ -3,6 +3,7 @@
 // composer's controls out, an 8k context, a toolbar that holds still while a
 // model loads, and the thread menu on right-click.
 import type { Locator, Page } from "@playwright/test";
+import { decodePayload, decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -128,15 +129,42 @@ function runs(values: readonly string[]): string[] {
 }
 
 test("the composer toolbar holds still while a picked model loads slowly", async ({ page, open }) => {
+  test.info().annotations.push({ type: "budget", description: "Two cold three-second model loads establish the starting allocation and exercise loading, followed by the post-load GPU reading and its rendered fit answer." });
   // gemma4:12b takes 3 s to load and fills the GPU a step at a time, as a real load does
   await stack.scenario("models", { loadDelayMs: 3000 });
-  let gpuPushes = 0;
-  page.on("websocket", ws => ws.on("framereceived", frame => {
-    if (String(frame.payload).includes('"gpu.changed"')) gpuPushes++;
-  }));
+  let loaded = false, reading = 0, checkedReading = 0;
+  const pending = new Set<string>(), checks = new Map<string, number>();
+  page.on("websocket", ws => {
+    ws.on("framesent", frame => {
+      const request = decodeRequest(frame.payload);
+      if (!request.ok) return;
+      const { id, method, params } = request.value;
+      pending.add(id);
+      if (method === "fit.check" && params.model === "gemma4:12b" && params.numCtx === 16384) checks.set(id, reading);
+    });
+    ws.on("framereceived", frame => {
+      const decoded = decodeServerMessage(frame.payload);
+      if (!decoded.ok) return;
+      const message = decoded.value;
+      if (message.type === "push") {
+        const load = message.channel === "models.load" ? decodeResult("models.load", message.payload) : undefined;
+        if (load?.ok && load.value.model === "gemma4:12b" && load.value.state === "ready") loaded = true;
+        if (message.channel === "gpu.changed" && loaded && decodePayload(message.channel, message.payload).ok) reading++;
+      } else {
+        pending.delete(message.id);
+        const checked = checks.get(message.id);
+        checks.delete(message.id);
+        if (checked === reading && message.ok && decodeResult("fit.check", message.result).ok) checkedReading = checked;
+      }
+    });
+  });
   await open();
   await waitReady(page);
   await expect(page.locator("#modelBtn")).toContainText("Qwen");
+  // A recommended model is selected, but is not preloaded until it is picked.
+  await page.locator("#modelBtn").click();
+  await page.locator('#picker .pk-r[data-m="qwen3.5:9b"]').click();
+  await expect(page.locator("#picker")).toBeHidden();
   await page.locator("#ta").fill("Hello");
   await expect.poll(async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] }).loaded.map(model => model.name)).toContain("qwen3.5:9b");
 
@@ -144,14 +172,19 @@ test("the composer toolbar holds still while a picked model loads slowly", async
   await page.locator("#modelBtn").click();
   await page.locator("#pkSearch").fill("gemma");
   await sampleToolbar(page);
-  const before = gpuPushes;
   await page.locator(`#picker .pk-r[data-m="gemma4:12b"]`).click();
   await expect(page.locator("#picker")).toBeHidden();
   await expect
     .poll(async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] }).loaded.map((l) => l.name), { timeout: 10_000 })
     .toContain("gemma4:12b");
-  // Observe the real GPU invalidation and enough rendered frames, rather than sleeping a polling period.
-  await expect.poll(() => gpuPushes, { timeout: 10_000 }).toBeGreaterThan(before);
+  // Loading frames cannot satisfy this: require a later GPU reading, its own
+  // fit answer (including any blocking-turn lookup), and the resulting render.
+  await expect.poll(async () => {
+    if (reading === 0 || checkedReading !== reading || pending.size > 0) return false;
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    return checkedReading === reading && pending.size === 0;
+  }, { timeout: 10_000 }).toBe(true);
+  console.log(`TOOLBAR_SETTLED ${JSON.stringify({ postLoadGpuReadings: reading, fitReading: checkedReading, pending: pending.size })}`);
   await expect.poll(() => page.evaluate(() => (window as unknown as { glToolbar: Frame[][] }).glToolbar.filter(frame => frame.find(control => control.k === "modelBtn")?.s.includes("Gemma")).length)).toBeGreaterThan(60);
   const frames = await page.evaluate(() => {
     const w = window as unknown as { glToolbar: Frame[][]; glToolbarStop?: boolean };

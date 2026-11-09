@@ -57,8 +57,9 @@ test("Memory details follow the chat's 64k choice without changing its saved 16k
   await waitReady(page);
   await page.locator("#modelBtn").click();
   const picker = page.locator("#picker");
-  await picker.getByRole("radio", { name: "64k", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await picker.getByRole("radio", { name: /^64k\b/ }).click();
+  await expect(picker).toBeHidden();
+  await expect(page.locator("#modelBtn")).toContainText("64k");
   const panel = await openGpuMemory(page);
   await expect(panel).toContainText("Memory at 64k context");
   await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");
@@ -70,7 +71,7 @@ test("Memory details follow the chat's 64k choice without changing its saved 16k
   await page.screenshot({ path: test.info().outputPath("memory-selected-64k-default-16k.png") });
   await page.keyboard.press("Escape");
   await page.locator("#modelBtn").click();
-  await expect(picker.getByRole("radio", { name: "64k", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(picker.getByRole("radio", { name: /^64k\b/ })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await openGpuMemory(page);
   await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");

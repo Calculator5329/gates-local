@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Locator, Page } from "@playwright/test";
+import { decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, type Frame, transitionMetrics } from "./flicker-probe.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -190,28 +191,29 @@ for (const width of [1440, 360]) {
         const refresh = await burst(page, `r2-${width}/gpu-refresh`, "#gpuMemory", async () => {
           if (!invalidate) throw new Error("The app socket must be connected before invalidation");
           invalidate();
-          await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(2);
+          await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(1);
           await expect(verdict).toHaveCount(1);
-          await expect(verdict).toHaveText("Checking GPU memory…");
+          await expect(verdict).toHaveText("Rechecking…");
           await expect(details).toHaveJSProperty("open", true);
-          const placeholder = details.locator(".fp-n:visible");
-          await expect(placeholder).toHaveText("Checking GPU memory…");
-          const retained = gpu.locator('[inert][aria-hidden="true"]');
-          await expect(retained).toHaveCount(2);
-          for (const node of await retained.all()) await expect(node).toBeHidden();
-          const staleWords = /Runs on GPU|Runs entirely on the GPU|Free after loading/;
+          await expect(details.locator("summary")).toHaveText("Details · previous check");
+          await expect(details.locator(".fp-n").first()).toContainText("Previously fit on the GPU.");
+          const history = details.locator(".fp-mt").first();
+          await expect(history).toHaveText("Previous memory check");
+          const staleWords = /Runs entirely on the GPU|Where the memory goes/;
           const accessible = await gpu.ariaSnapshot();
-          expect(accessible).toContain("Checking GPU memory");
+          expect(accessible).toContain("Rechecking");
+          expect(accessible).toContain("Previous memory check");
           expect(accessible).not.toMatch(staleWords);
-          const start = await gpu.locator(".fp-t").boundingBox();
-          const end = await placeholder.boundingBox();
+          const start = await verdict.boundingBox();
+          const end = await history.boundingBox();
           if (!start || !end) throw new Error("Visible text endpoints are required for the selection check");
           await page.mouse.move(start.x + 1, start.y + start.height / 2);
           await page.mouse.down();
           await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 10 });
           await page.mouse.up();
           const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
-          expect(selected).toContain("Checking GPU memory");
+          expect(selected).toContain("Rechecking");
+          expect(selected).toContain("Previous memory check");
           expect(selected).not.toMatch(staleWords);
           await page.evaluate(() => document.getSelection()?.removeAllRanges());
           await page.screenshot({ path: test.info().outputPath("gpu-refresh-open-details.png") });
@@ -230,7 +232,7 @@ for (const width of [1440, 360]) {
       stableSize(frames, "surface", `gpu-spill-${width}`);
       stableSize(frames, "gpu-details", `gpu-details-spill-${width}`);
       await expect(details).toHaveJSProperty("open", true);
-      await expect(verdict).toContainText("Uses system memory");
+      await expect(verdict).toContainText("Should run slower");
     });
 
     test("download progress replaces an equal-sized model row", async ({ page, open }) => {
@@ -341,7 +343,7 @@ for (const width of [1440, 360]) {
       await section(page, "Tools", true);
       const tools = page.getByRole("switch", { name: "Let the model use tools", exact: true });
       await mark(boxFor(page, tools), "body-0");
-      await mark(boxFor(page, page.getByRole("button", { name: "Library", exact: true })), "body-1");
+      await mark(boxFor(page, page.locator(".srow").filter({ has: page.getByText("Read files", { exact: true }) })), "body-1");
       const frames = await burst(page, `r2-${width}/tools-state`, ".set", () => tools.click());
       stableSize(frames, "body-0", `tools-state-${width}`);
       stableSize(frames, "body-1", `tools-permissions-${width}`);
@@ -352,7 +354,9 @@ for (const width of [1440, 360]) {
       await waitReady(page);
       await section(page, "Image generation", true);
       const images = page.getByRole("switch", { name: "Generate images", exact: true });
-      await mark(boxFor(page, images), "body-0");
+      // The group now also contains a separate setup row that collapses on
+      // enable. Keep this trigger-size assertion on the trigger's own row.
+      await mark(page.locator(".srow").filter({ has: images }), "body-0");
       const frames = await burst(page, `r2-${width}/images-trigger`, ".set", () => images.click());
       stableSize(frames, "body-0", `images-trigger-${width}`);
     });
@@ -363,7 +367,7 @@ for (const width of [1440, 360]) {
       await waitReady(page);
       await section(page, "Image generation", true);
       await page.getByRole("switch", { name: "Generate images" }).click();
-      const button = page.getByRole("button", { name: "Test", exact: true });
+      const button = page.getByRole("button", { name: "Test connection", exact: true });
       const input = page.getByRole("textbox", { name: "ComfyUI address" });
       await expect(button).toBeVisible();
       await expect(page.locator(".set")).toContainText("ComfyUI did not answer");
@@ -379,14 +383,33 @@ for (const width of [1440, 360]) {
 for (const delay of [0, 150, 600]) {
   test(`cold picker uses already available fit reports without regrouping at ${delay} ms`, async ({ page, open }) => {
     await delayedMemory(page, delay);
+    let catalogReady = false;
+    const requests = new Set<string>();
+    page.on("websocket", ws => {
+      ws.on("framesent", frame => {
+        const request = decodeRequest(frame.payload);
+        if (request.ok && request.value.method === "models.catalog") requests.add(request.value.id);
+      });
+      ws.on("framereceived", frame => {
+        const response = decodeServerMessage(frame.payload);
+        if (!response.ok || response.value.type !== "response" || !requests.delete(response.value.id) || !response.value.ok) return;
+        const catalog = decodeResult("models.catalog", response.value.result);
+        catalogReady = catalog.ok && catalog.value.some(model => model.name.includes("gpt-oss") && model.fit?.numCtx === 16384);
+      });
+    });
     await open();
     await waitReady(page);
-    // The catalog already contains a fit at this context. Its family rail
-    // confirms arrival even while the picker is closed.
-    await expect(page.locator("#picker .pk-fam").filter({ hasText: "gpt-oss" })).toHaveCount(1);
-    const frames = await burst(page, `r2-cold-picker-${delay}`, "#picker", () => page.locator("#modelBtn").click());
+    // The deferred picker has no closed DOM. Observe delivery of the real
+    // catalog answer containing the fit, before the first opening.
+    await expect.poll(() => catalogReady).toBe(true);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const frames = await burst(page, `r2-cold-picker-${delay}`, "#picker", async () => {
+      await page.locator("#modelBtn").click();
+      await expect(page.locator("#picker")).toBeVisible();
+    });
     const visible = frames.filter((f) => f.boxes["surface"] !== undefined);
     console.log(`STATE_SWAP cold-picker-${delay} ${JSON.stringify(transitionMetrics(visible))}`);
+    expect(visible.length, "the cold picker must render enough frames to exercise the guard").toBeGreaterThan(10);
     expect(visible.filter((f) => f.checking), "already measured catalog fits must not become Checking").toHaveLength(0);
     expect(transitionMetrics(visible).overshootPx, "fit arrivals must not regroup rows back and forth").toBeLessThanOrEqual(0.5);
   });

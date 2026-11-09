@@ -104,6 +104,18 @@ describe("boundary refusals", () => {
     expect(res.ok ? "sent" : res.error.code).toBe("bad-result");
     expect(decodePayload("chat.nope", {}).ok).toBe(false);
   });
+
+  it.each(["threads.nuke", "constructor"])("refuses the unknown request name %s at encode time", method => {
+    // @ts-expect-error exercise an invalid runtime name as an untyped caller could
+    const request = encodeRequest("1", method, {});
+    expect(request.ok ? "sent" : request.error.code).toBe("unknown-method");
+  });
+
+  it("refuses an unknown push name at encode time", () => {
+    // @ts-expect-error exercise an invalid runtime name as an untyped caller could
+    const push = encodePush("nope", {});
+    expect(push.ok ? "sent" : push.error.code).toBe("bad-payload");
+  });
 });
 
 export function compileOnlyContractChecks(): void {

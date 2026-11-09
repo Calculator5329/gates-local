@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-09: Browser checks follow the current controls
+
+Browser journeys use the current picker and Settings controls. Clipboard and
+touch actions wait for readiness, queued-send refusal setups use Settings,
+and the typing observer stops bubbling after React receives the input.
+Memory Details checks require explicit previous-check labels while retaining
+the strict geometry and zero-Checking assertions.
+The Images trigger keeps its size check when the separate setup row collapses.
+
+## 2026-11-09: Keep browser observations and encoder refusals covered
+
+- The toolbar check records through a GPU reading after loading and its fit
+  answer, so changes caused by the final measurement remain covered.
+- The export timeout check waits for a queued response before releasing it.
+- Invalid request and push names retain runtime refusal checks alongside the
+  compile-only contract examples.
+
+## 2026-11-09: Keep model picks that need another reply's memory
+
+Choosing a model while its memory check runs now keeps the pick when stopping
+another reply would make room, just as choosing it after the check does.
+Selecting the model leaves that reply running; sending still asks before
+stopping it unless the warning was explicitly dismissed for future sends.
+
 ## 2026-11-09: Connect without waiting for Settings
 
 - Restoring saved drafts loads independently of Settings, so a slow screen

@@ -130,6 +130,24 @@ it("PK-01: the displayed completed fit waits during a same-key refresh", () => {
   expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
 });
 
+it.each([false, true])("a row can choose a model that fits after stopping another reply (pending %s)", pending => {
+  if (!pending) {
+    probe.state.fits = { [`${tag}@8192`]: fit("refuse") };
+    probe.state.stopFrees = { [`${tag}@8192`]: true };
+  }
+  const row = find(render(), p => p["data-m"] === tag);
+  call(find(row, p => p.className === "pk-select"), "onClick");
+  if (pending) {
+    expect(probe.pick).not.toHaveBeenCalled();
+    probe.state.fits = { [`${tag}@8192`]: fit("refuse") };
+    probe.state.stopFrees = { [`${tag}@8192`]: true };
+    settle();
+  }
+  expect(probe.context).toHaveBeenCalledExactlyOnceWith(8192);
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  expect(probe.close).toHaveBeenCalledTimes(1);
+});
+
 it("a size click waits, then commits when a refresh rerenders between pointer press and click", () => {
   probe.state.models = [{ name: tag, maxContext: 131072, capabilities: ["completion"] }];
   probe.state.fits = { [`${tag}@16384`]: fit("fits", 16384), [`${tag}@65536`]: fit("fits", 65536) };

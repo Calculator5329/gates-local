@@ -117,12 +117,17 @@ test.describe("vision turns", () => {
     await page.locator("#modelBtn").click();
     await page.locator("#pkSearch").fill(VISION);
     await page.locator(`#picker .pk-r[data-m="${VISION}"]`).click();
+    await expect(page.locator("#picker")).toBeHidden();
     await paste(page, { images: 1 });
-    await sendMessage(page, "Notice image fixture");
+    await expect(page.locator(".att img")).toHaveCount(1);
+    await page.locator("#ta").fill("Notice image fixture");
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).not.toHaveAttribute("aria-disabled", "true");
+    await page.locator("#ta").press("Enter");
     await expect(page.locator(".turn.a.done")).toHaveCount(1);
     await page.locator("#modelBtn").click();
     await page.locator("#pkSearch").fill("qwen3.5:4b");
     await page.locator('#picker .pk-r[data-m="qwen3.5:4b"]').click();
+    await expect(page.locator("#picker")).toBeHidden();
     await stack.scenario("slow-drip", { installed: ["qwen3.5:4b", VISION], holdAfterTokens: 46 });
     await sendMessage(page, "Notice follow-up fixture");
     const notice = page.locator('.turn.a [role="status"]').filter({ hasText: "earlier images" });

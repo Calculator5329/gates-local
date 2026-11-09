@@ -51,7 +51,7 @@ async function rowTips(page: Page): Promise<{ tag: string; tip: Box; row: Box; o
     out.push(
       await row.evaluate((el) => {
         // DOMRect's own fields are getters, so copy them into plain objects for the trip back.
-        const [tip, own, ...others] = [document.getElementById("tip") ?? el, el, ...[...document.querySelectorAll("#picker .pk-n, #picker .pk-g")].filter((x) => !el.contains(x))].map((e) => {
+        const [tip, own, ...others] = [document.getElementById("tip") ?? el, el, ...[...document.querySelectorAll("#picker .pk-n, #picker .pk-context-head, #picker .pk-fam")].filter((x) => !el.contains(x))].map((e) => {
           const r = e.getBoundingClientRect();
           return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
         });
@@ -77,7 +77,7 @@ for (const width of [1440, 760]) {
     const before = await picker.boundingBox();
     await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
     reports.release();
-    await expect(picker.locator(".pk-dl")).toBeVisible();
+    await expect(picker.locator(".pk-bottom").getByRole("button", { name: "Download models", exact: true })).toBeVisible();
     await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
     expect(await picker.boundingBox(), "catalog and fit replies keep the picker under the resting pointer").toEqual(before);
     await expect(page.locator("#tip.open")).toBeVisible();

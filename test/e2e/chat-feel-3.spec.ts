@@ -18,6 +18,7 @@ interface Tap {
   /** Methods whose answer reaches the page this many ms late (the server has already acted). */
   readonly late: Map<string, number>;
   readonly hold: Set<string>;
+  queued(method: string): number;
   release(method: string): number;
   readonly pending: Set<unknown>;
   /** Methods whose result is rewritten on its way to the page: what another client changed since this one last looked. */
@@ -75,6 +76,7 @@ async function tap(page: Page): Promise<Tap> {
     late,
     hold,
     pending,
+    queued: method => held.get(method)?.length ?? 0,
     release: method => {
       hold.delete(method);
       const waiting = held.get(method) ?? [];
@@ -350,7 +352,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     await expect.poll(() => t.calls.get("threads.get") ?? 0).toBeGreaterThan(before);
     await page.clock.fastForward(10_001);
     await expect(page.locator('.c-note[role="status"]')).toContainText("took too long");
-    await expect.poll(() => t.release("threads.get")).toBe(1);
+    await expect.poll(() => t.queued("threads.get")).toBe(1);
+    expect(t.release("threads.get")).toBe(1);
     await page.clock.runFor(1000);
     expect(files).toHaveLength(0);
   });

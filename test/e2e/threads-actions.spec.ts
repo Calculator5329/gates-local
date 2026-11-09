@@ -75,7 +75,7 @@ test("runtime switch while two threads run stops both with their partial words a
   await start(page, "beta", SMALL[1]); await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Runtime", exact: true }).click();
-  await page.getByRole("button", { name: "Use Gates Local's own Ollama…", exact: true }).click();
+  await page.getByRole("button", { name: "Use Gates Local's Ollama", exact: true }).click();
   await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText(/model in use/i);
   // The E2E stack pins both runtime addresses to the fake and disables install
   // and start. This changes the real server's runtime mode, never a real service.

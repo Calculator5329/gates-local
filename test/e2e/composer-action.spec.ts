@@ -124,6 +124,7 @@ test.describe("a touch keyboard", () => {
     await expect(action).toHaveAccessibleName("Stop");
     expect(await action.boundingBox()).toEqual(stopBox);
     await page.locator("#ta").fill("Queued from touch");
+    await expect(action).toHaveAccessibleName("Queue message");
     await action.tap();
     await expect(page.locator(".qt-r")).toContainText("Queued from touch");
     await expect(action).toHaveAccessibleName("Stop");
