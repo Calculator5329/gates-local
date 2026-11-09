@@ -14,6 +14,20 @@ beforeEach(async () => {
 afterEach(async () => { disconnect(); b.server.accepting = false; for (const socket of b.server.sockets) socket.close(); await tick(); vi.unstubAllGlobals(); });
 
 describe("Instructions actions", () => {
+  it("RP-01: a model save response cannot undo newer pushed settings", async () => {
+    await until(() => store.getState().imageStatus !== undefined);
+    const saved = { ...methodSamples["settings.get"].result, modelSettings: { "qwen3.5:9b": { seed: 42 } } };
+    const newer = { ...saved, theme: "light" as const };
+    const held = b.server.hold("settings.model.update");
+    const saving = session.updateModelSettings("qwen3.5:9b", { seed: 42 });
+    const call = await held;
+    b.server.push("settings.changed", saved);
+    b.server.push("settings.changed", newer);
+    expect(store.getState().settings).toEqual(newer);
+    call.respond(saved);
+    expect(await saving).toBeNull();
+    expect(store.getState().settings).toEqual(newer);
+  });
   it("Reset all clears shared and per-model settings in one update and preserves the runtime choice", async () => {
     store.setState({ settings: { ...methodSamples["settings.get"].result, systemPrompt: "shared", modelSettings: { "qwen3.5:9b": { systemPrompt: "custom", seed: 42 } } } });
     const held = b.server.hold("settings.update"), reset = session.resetSettings(), call = await held;

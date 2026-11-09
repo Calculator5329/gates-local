@@ -22,6 +22,13 @@ socket, while the other window may receive before or after either. Connect,
 Disconnect and foreign theme saves all follow this rule. Both Connect deliveries
 can happen while hydration is held. There is no dependency on hydration release.
 
+Broadcast emission and response emission are separate events. Installed
+`ws.Receiver` can dispatch two requests from one input buffer before either
+`await handler(...)` continuation runs. Thus two writes may broadcast twice,
+then emit their two responses. The harness models the server continuation queue
+separately from each socket's FIFO; it never queues a response at write time.
+The same separation applies to chat admission and its acknowledgement.
+
 Each producing event declares its emitted frames. The scheduler preserves FIFO
 per socket, including across successive writes. Server completion and response
 delivery are separate events for health checks and the held hydration request.
@@ -37,10 +44,13 @@ frames. Stop and the following Send do not wait for acknowledgements, and two
 chats' admissions may finish in either order.
 
 Graphs with at most 64 legal orders are exhausted. Larger shipping scenarios
-run 64 unique deterministic samples each: a DFS witness, witnesses that delay
-each event in turn, then fixed-seed priority samples. The seven current product
+run 64 unique deterministic schedules each: required regression witnesses, a DFS
+witness, witnesses that delay each event in turn, then fixed-seed priority samples. The seven current product
 scenarios all exceed 64 orders, so their 448 executed schedules are **not
-exhaustive**. The reusable `schedules` utility still defaults to a 256-order
+exhaustive**. Required witnesses count inside that budget and are checked against
+causal constraints and FIFO. A separate RP-01 regression explicitly delivers two
+settings pushes before either response; it adds one executed schedule. The
+reusable `schedules` utility still defaults to a 256-order
 DFS prefix; `explore` selects the sampled policy used by `replay`. Both report
 their coverage honestly and stop on the first invariant failure.
 Bootstrap, preflight and unrelated sample RPCs settle between named events;
@@ -56,6 +66,17 @@ received during hydration passed all 72 old orders but failed on the first new
 order. The production session was not changed. Separate assertions audit both
 admission orders, late acknowledgements and admission before, during and after
 the socket drop/reconnect.
+
+RP-01 found a product bug: after Disconnect and a theme change, an older full
+settings response changed the published theme and `data-theme` back to dark
+after the newer light-theme push. The later response restored light. No extra
+settings write was caused by that acknowledgement. The real session now applies
+a save response only when no full-settings push has arrived since its request;
+newer pushes win, including while hydration buffers them. Responses remain a
+fallback when no push arrives. Both shared and per-model saves follow this rule.
+The theme/attribute witness and the model-save regression were watched failing
+before their fixes and passing twice afterward. These are in-memory observations,
+not browser paint measurements.
 
 A failure prints its completed prefix and the full JSON order. Paste its
 `REPLAY_ORDER='[...]'` before this command to run just that regression:

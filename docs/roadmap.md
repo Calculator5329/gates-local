@@ -312,6 +312,13 @@ The wider graphs use 64 deterministic samples each, not an exhaustive claim.
 A mutation limited to an own Connect push received during hydration passed the
 old graph and failed the new one.
 
+2026-11-08, RP-01: response emission is separate from writes and admission, so
+batched broadcasts can precede both acknowledgements. An explicit witness found
+an older response rolling back newer theme state and its DOM attribute. Shared
+and per-model saves now keep newer pushes authoritative, with no-push response
+fallback preserved. The seven scenarios remain 64 deterministic schedules each,
+plus the explicit batched-write regression; coverage is sampled, not exhaustive.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

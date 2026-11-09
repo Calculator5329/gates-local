@@ -8,6 +8,16 @@ lives in Settings. The sidebar marks every thread with a reply running, includin
 ones you are not looking at, and token updates no longer move row titles or
 buttons. Context choices start at 8k with a 16k default.
 
+## 2026-11-08: Keep newer settings when an older save is acknowledged
+
+Rapid settings changes no longer let an older full-settings response undo a
+newer push, including a theme change or per-model settings save. A response still
+applies when no push has arrived since the request. The replay harness separates
+broadcast emission from the server's later response continuation, covering two
+batched broadcasts before either acknowledgement with an explicit witness.
+The old code was watched publishing dark mode and setting `data-theme` to dark
+after the newer light-mode push; both shared and model-save regressions now pass.
+
 ## 2026-11-08: Replay pushes before replies while hydration is held
 
 The ordering harness now follows server broadcast-before-return guarantees for

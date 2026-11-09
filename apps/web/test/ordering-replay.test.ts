@@ -20,13 +20,18 @@ const LIMIT = 64;
 const before = (order: readonly string[], a: string, b: string) => order.indexOf(a) < order.indexOf(b);
 
 // settings/handlers.ts broadcasts synchronously, then ws/server.ts awaits its
-// return before responding. FIFO applies separately to each recipient socket.
-function settingsFrames(stem: string, sender: "A" | "B"): ReplayFrame[] {
-  return [frame("A", stem + ".push-to-A"), frame("B", stem + ".push-to-B"), frame(sender, stem + ".response")];
+// return before responding. Another buffered request can broadcast before that
+// continuation runs. The server continuation queue is separate from wire FIFO.
+function settingsFrames(stem: string): ReplayFrame[] {
+  return [frame("A", stem + ".push-to-A"), frame("B", stem + ".push-to-B"), frame("server:responses", stem + ".response.ready")];
 }
 
-function settingsDeliveries(stem: string, key: string, write: string, sender: "A" | "B", optional = false, tagged = true): Event[] {
+function settingsDeliveries(stem: string, key: string, write: string, sender: "A" | "B", optional = false, tagged = true, written: (prefix: readonly string[]) => boolean = () => true): Event[] {
   return [
+    // Synchronous settings handlers queue await continuations in dispatch order;
+    // their responses enter the socket only when those continuations resume.
+    event(stem + ".response.ready", [write], noop, { delivery: true, emit: (prefix) =>
+      written(prefix.slice(0, prefix.indexOf(write) + 1)) ? [frame(sender, stem + ".response")] : [] }),
     // Each push follows its producing settings.update; recipients are independent.
     event(stem + ".push-to-A", [write], (w) => w.step(() => {
       if (stem === "B.disconnect" && w.connectStarted) w.eligible = false;
@@ -34,7 +39,7 @@ function settingsDeliveries(stem: string, key: string, write: string, sender: "A
     }), { delivery: true }),
     event(stem + ".push-to-B", [write], (w) => w.step(() => w.server.settingsPush(key, w.b.socket, true, optional)), { delivery: true }),
     // Sender receives broadcast before response on the same WebSocket.
-    event(stem + ".response", [stem + ".push-to-" + sender], (w) => w.step(() => w.server.response(key, optional)), { delivery: true }),
+    event(stem + ".response", [stem + ".response.ready", stem + ".push-to-" + sender], (w) => w.step(() => w.server.response(key, optional)), { delivery: true }),
   ];
 }
 
@@ -81,8 +86,8 @@ function healthEvents(request: string, old = false, foreign = false): Event[] {
       w.server.connectName = old ? "old-connect" : "connect";
       await w.step(() => w.server.response(old ? "health-1" : w.server.deliveries.has("health-2") ? "health-2" : "health-1"));
       w.server.connectName = "connect";
-    }, { delivery: true, emit: (prefix) => valid(prefix) ? settingsFrames(stem, "A") : [] }),
-    ...settingsDeliveries(stem, key, complete, "A", true),
+    }, { delivery: true, emit: (prefix) => valid(prefix) ? settingsFrames(stem) : [] }),
+    ...settingsDeliveries(stem, key, complete, "A", true, true, valid),
   ];
 }
 
@@ -96,8 +101,30 @@ function speechCheck(w: World, _order: readonly string[], complete: boolean): vo
   }
 }
 
+function speechWitnesses(scenario: ReplayScenario<World>): ReplayScenario<World> {
+  // Required SL-01 witnesses stay inside the 64-order budget, so adding a server
+  // phase cannot silently remove them by perturbing the random sample.
+  const lateOtherWindow = [
+    "A.old-connect.request", "A.disconnect.request", "B.disconnect.request",
+    "hydration.snapshot",
+    "A.disconnect.push-to-A", "A.disconnect.push-to-B", "A.disconnect.response.ready", "A.disconnect.response",
+    "B.disconnect.push-to-A", "B.disconnect.push-to-B", "B.disconnect.response.ready", "B.disconnect.response",
+    "B.theme.request", "B.theme.push-to-A", "B.theme.push-to-B", "B.theme.response.ready", "B.theme.response",
+    "A.connect.request", "A.health.ready", "A.health.complete",
+    "A.connect.response.ready", "A.connect.push-to-A", "A.connect.response",
+    "A.old-health.ready", "A.old-health.complete", "A.old-connect.response.ready",
+    "A.old-connect.push-to-A", "A.old-connect.push-to-B", "A.old-connect.response",
+    "server.hydration.complete", "hydration.release", "A.connect.push-to-B",
+  ].filter((name) => scenario.events.some((candidate) => candidate.name === name));
+  const otherWindowFirst = lateOtherWindow.filter((name) => name !== "A.connect.push-to-B");
+  otherWindowFirst.splice(otherWindowFirst.indexOf("A.connect.push-to-A"), 0, "A.connect.push-to-B");
+  const afterHydration = lateOtherWindow.filter((name) => !["server.hydration.complete", "hydration.release"].includes(name));
+  afterHydration.splice(afterHydration.indexOf("A.health.ready"), 0, "server.hydration.complete", "hydration.release");
+  return { ...scenario, witnesses: [lateOtherWindow, otherWindowFirst, afterHydration] };
+}
+
 export function ownSpeech(staleHealth = false): ReplayScenario<World> {
-  return {
+  return speechWitnesses({
     name: staleHealth ? "speech: superseded health" : "speech: own Disconnect during hydration",
     create: speechWorld, dispose, check: speechCheck,
     initialFrames: [frame("A", "hydration.snapshot")],
@@ -107,36 +134,80 @@ export function ownSpeech(staleHealth = false): ReplayScenario<World> {
       // These action edges specify the user's intent, not network guarantees.
       event("A.disconnect.request", staleHealth ? ["A.old-connect.request"] : [], (w) => w.step(() => {
         w.intent = "disconnect"; w.eligible = false; w.a.click("Disconnect");
-      }), { emit: () => settingsFrames("A.disconnect", "A") }),
+      }), { emit: () => settingsFrames("A.disconnect") }),
       connectRequest(["A.disconnect.request"]),
       ...settingsDeliveries("A.disconnect", "A-disconnect", "A.disconnect.request", "A"),
       ...healthEvents("A.connect.request"),
       ...(staleHealth ? healthEvents("A.old-connect.request", true) : []),
       ...hydrationEvents(),
     ],
-  };
+  });
 }
 
 export function foreignSpeech(theme = false, tagged = true): ReplayScenario<World> {
-  return {
+  return speechWitnesses({
     name: "speech: foreign Disconnect" + (theme ? " and theme" : "") + (tagged ? "" : " (legacy push)"),
     create: speechWorld, dispose, check: speechCheck,
     initialFrames: [frame("A", "hydration.snapshot")],
     events: [
       // The two windows' input actions have no cross-window causal edge.
       connectRequest([]),
-      event("B.disconnect.request", [], (w) => w.step(() => { void w.b.session.updateSettings({ whisperUrl: null }); }), { emit: () => settingsFrames("B.disconnect", "B") }),
+      event("B.disconnect.request", [], (w) => w.step(() => { void w.b.session.updateSettings({ whisperUrl: null }); }), { emit: () => settingsFrames("B.disconnect") }),
       ...settingsDeliveries("B.disconnect", "B-disconnect", "B.disconnect.request", "B", false, tagged),
       ...(theme ? [
         // Input script changes appearance after speech, without waiting for its ack.
-        event("B.theme.request", ["B.disconnect.request"], (w) => w.step(() => { void w.b.session.updateSettings({ theme: "light" }); }), { emit: () => settingsFrames("B.theme", "B") }),
+        event("B.theme.request", ["B.disconnect.request"], (w) => w.step(() => { void w.b.session.updateSettings({ theme: "light" }); }), { emit: () => settingsFrames("B.theme") }),
         ...settingsDeliveries("B.theme", "B-theme", "B.theme.request", "B"),
       ] : []),
       ...healthEvents("A.connect.request", false, true),
       ...hydrationEvents(),
     ],
+  });
+}
+
+function batchedSettings(): ReplayScenario<World> {
+  const themes: string[] = [];
+  return {
+    name: "RP-01: two broadcasts before either settings response",
+    create: async () => {
+      const w = await OrderingWorld.create();
+      themes.length = 0;
+      vi.spyOn(document.documentElement, "setAttribute").mockImplementation((name, value) => {
+        if (name === "data-theme") themes.push(value);
+      });
+      return w;
+    }, dispose,
+    events: [
+      event("B.disconnect.request", [], (w) => w.step(() => { void w.b.session.updateSettings({ whisperUrl: null }); }), { emit: () => settingsFrames("B.disconnect") }),
+      // Chosen input: B changes appearance without waiting for Disconnect.
+      event("B.theme.request", ["B.disconnect.request"], (w) => w.step(() => { void w.b.session.updateSettings({ theme: "light" }); }), { emit: () => settingsFrames("B.theme") }),
+      ...settingsDeliveries("B.disconnect", "B-disconnect", "B.disconnect.request", "B"),
+      ...settingsDeliveries("B.theme", "B-theme", "B.theme.request", "B"),
+    ],
+    check(w, order) {
+      if (order.includes("B.theme.push-to-B")) {
+        const settings = w.b.store.getState().settings;
+        expect({ settingsTheme: settings === "na" ? undefined : settings?.theme, themeAttribute: themes.at(-1) },
+          "an older acknowledgement must not roll back the published theme or its DOM attribute").toEqual({ settingsTheme: "light", themeAttribute: "light" });
+      }
+      expect(w.server.writes).toHaveLength(order.includes("B.theme.request") ? 2 : 1);
+    },
   };
 }
+
+it("RP-01: a batched older response never overwrites the newer theme push", async () => {
+  const scenario = batchedSettings();
+  // Installed ws.Receiver dispatches both writes before either await-handler
+  // continuation. This explicit witness is separate from the 64 sampled orders.
+  const order = [
+    "B.disconnect.request", "B.theme.request",
+    "B.disconnect.response.ready", "B.theme.response.ready",
+    "B.disconnect.push-to-A", "B.theme.push-to-A",
+    "B.disconnect.push-to-B", "B.theme.push-to-B",
+    "B.disconnect.response", "B.theme.response",
+  ];
+  await replay(scenario, { order: JSON.stringify(order) });
+});
 
 // app.ts stores the user row and broadcasts start before chat.send returns.
 // Closed sockets receive no broadcast; a reconnect never resends an old start.
@@ -145,18 +216,22 @@ function chatFrames(turn: string, prefix: readonly string[], reconnecting = fals
   return [
     ...(target ? [frame(target, turn + ".push-to-A")] : []),
     frame("B", turn + ".push-to-B"),
-    ...(!reconnecting || !prefix.includes("socket.drop") ? [frame(reconnecting ? "A1" : "A", turn + ".response")] : []),
+    frame("server:responses", turn + ".response.ready"),
   ];
 }
 
-function chatDeliveries(turn: string, admitted: string): Event[] {
+function chatDeliveries(turn: string, admitted: string, reconnecting = false): Event[] {
   return [
+    // app.ts returns after start broadcast; ws/server.ts emits its response
+    // from the await continuation. A later admission may broadcast in between.
+    event(turn + ".response.ready", [admitted], noop, { delivery: true, emit: (prefix) =>
+      !reconnecting || !prefix.includes("socket.drop") ? [frame(reconnecting ? "A1" : "A", turn + ".response")] : [] }),
     // A broadcast is emitted by admission, independently to each open socket.
     event(turn + ".push-to-A", [admitted], (w) => w.step(() => w.server.admittedPush(turn, "A")), { delivery: true }),
     event(turn + ".push-to-B", [admitted], (w) => w.step(() => w.server.admittedPush(turn, "B")), { delivery: true }),
     // app.ts returns after broadcasting start. Per-socket FIFO adds the edge
     // only when A's broadcast and response actually target the same socket.
-    event(turn + ".response", [admitted], (w) => w.step(() => w.server.response(turn)), { delivery: true }),
+    event(turn + ".response", [turn + ".response.ready"], (w) => w.step(() => w.server.response(turn)), { delivery: true }),
   ];
 }
 
@@ -174,7 +249,7 @@ export function sendReconnect(): ReplayScenario<World> {
       event("socket.reconnect", ["socket.drop"], (w) => w.reconnect(), { emit: () => [frame("A2", "hydration.snapshot")] }),
       // app.ts's async admission can complete on either side of the drop.
       event("server.admission.complete", ["A.send.request"], (w) => w.step(() => w.server.admit("turn-1")), { emit: (prefix) => chatFrames("turn-1", prefix, true) }),
-      ...chatDeliveries("turn-1", "server.admission.complete"),
+      ...chatDeliveries("turn-1", "server.admission.complete", true),
       ...hydrationEvents("socket.reconnect", "A2"),
     ],
     check(w, order) {
@@ -252,6 +327,11 @@ it("enumerates causal orders, respects socket FIFO and samples deterministically
   expect(sampled.orders).toHaveLength(16);
   expect(explore(larger, 16)).toEqual(sampled);
   for (const order of sampled.orders) expect(regression(larger, JSON.stringify(order))).toEqual(order);
+  const required = ["e", "d", "c", "b", "a"];
+  expect(explore(larger, 16, [], [required]).orders).toContainEqual(required);
+  expect(explore(larger, 16, [], [required]).orders).toHaveLength(16);
+  expect(() => explore(larger, 1, [], [required, ["a", "b", "c", "d", "e"]])).toThrow("witnesses exceed");
+  expect(() => explore(larger, 16, [], [["missing"]])).toThrow();
   const seen: string[] = [];
   const scenario: ReplayScenario<string[]> = { name: "harness negative control", events: [{ name: "break", run: (w) => { w.push("broken"); } }], create: async () => [], dispose: async () => { seen.push("disposed"); }, check: (w) => { if (w.includes("broken")) throw new Error("planted invariant failure"); } };
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -262,7 +342,7 @@ it("enumerates causal orders, respects socket FIFO and samples deterministically
 
 it("SL-01: explores sender push then response before hydration, with the other window independent", () => {
   for (const scenario of [ownSpeech(), ownSpeech(true), foreignSpeech(), foreignSpeech(false, false), foreignSpeech(true)]) {
-    const { orders } = explore(scenario.events, LIMIT, scenario.initialFrames);
+    const { orders } = explore(scenario.events, LIMIT, scenario.initialFrames, scenario.witnesses);
     const committed = (order: readonly string[]) => !order.includes("B.disconnect.push-to-A") ||
       before(order, "A.health.complete", "B.disconnect.push-to-A") || before(order, "B.disconnect.push-to-A", "A.connect.request");
     expect(orders.some((order) => committed(order) && before(order, "A.connect.push-to-A", "A.connect.response") &&

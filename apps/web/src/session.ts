@@ -238,6 +238,7 @@ async function hydrate(c: Client): Promise<void> {
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
     c.subscribe(channel, (p) => dispatch(channel, () => handler(p)));
   c.subscribe("settings.changed", ({ voiceChange, ...settings }) => {
+    settingsReceipt++;
     // Apply intent ordering at receipt, before a pending health check can
     // finish. Only the settings themselves wait behind hydration snapshots.
     const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
@@ -427,6 +428,9 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
 // reset that baseline and replay restores the newer buffered settings.
 const voiceWrites = new Set<string>();
 let receivedVoiceUrl: string | undefined;
+// Full-settings pushes are authoritative even while hydration buffers them.
+// A response to an earlier request must not replace a newer received snapshot.
+let settingsReceipt = 0;
 
 function applySettings(settings: Settings, first = false, preserveVoiceIntent = false): void {
   setState((s) => ({ ...settingsPatch(s, settings, first),
@@ -1516,11 +1520,12 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
     voiceWrites.add(voiceChange);
   }
   let saved = false;
+  const received = settingsReceipt;
   try {
     const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what);
     if (!r.ok) return r.message;
     saved = true;
-    applySettings(r.value, false, voiceChange !== undefined);
+    if (received === settingsReceipt) applySettings(r.value, false, voiceChange !== undefined);
     // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
     if ("imageGen" in patch || "comfyUrl" in patch) {
       void probe("image.status", {}).then((imageStatus) => {
@@ -1533,9 +1538,10 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
 
 /** Save or reset one model; apply only the settings the server accepted. */
 export async function updateModelSettings(model: string, patch: ModelSettingsPatch | null): Promise<ActionResult> {
+  const received = settingsReceipt;
   const r = await act("settings.model.update", { model, patch }, "save model settings");
   if (!r.ok) return r.message;
-  applySettings(r.value);
+  if (received === settingsReceipt) applySettings(r.value);
   return null;
 }
 

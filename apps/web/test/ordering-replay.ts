@@ -14,6 +14,7 @@ export interface ReplayScenario<World> {
   readonly name: string;
   readonly events: readonly ReplayEvent<World>[];
   readonly initialFrames?: readonly ReplayFrame[];
+  readonly witnesses?: readonly (readonly string[])[];
   create(): Promise<World>;
   check(world: World, order: readonly string[], complete: boolean): void;
   dispose(world: World): Promise<void>;
@@ -62,10 +63,12 @@ function advance<World>(event: ReplayEvent<World>, prefix: readonly string[], fr
 }
 
 /** Exhaust small graphs; otherwise mix a DFS witness with fixed-seed Kahn samples. */
-export function explore<World>(events: readonly ReplayEvent<World>[], limit = 96, initialFrames: readonly ReplayFrame[] = []): { orders: string[][]; exhaustive: boolean } {
+export function explore<World>(events: readonly ReplayEvent<World>[], limit = 96, initialFrames: readonly ReplayFrame[] = [], witnesses: readonly (readonly string[])[] = []): { orders: string[][]; exhaustive: boolean } {
   const coverage = schedules(events, limit, initialFrames);
+  const required = witnesses.map((order) => regression(events, JSON.stringify(order), initialFrames));
   if (coverage.exhaustive) return coverage;
-  const orders = [coverage.orders[0] ?? []];
+  const orders = [...new Map([...required, coverage.orders[0] ?? []].map((order) => [JSON.stringify(order), order])).values()];
+  if (orders.length > limit) throw new Error("Replay witnesses exceed the schedule budget");
   const seen = new Set(orders.map((order) => JSON.stringify(order)));
   let seed = 0x51a01;
   const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 0x1_0000_0000; };
@@ -114,7 +117,7 @@ export function regression<World>(events: readonly ReplayEvent<World>[], value: 
 export async function replay<World>(scenario: ReplayScenario<World>, options: { limit?: number; order?: string } = {}): Promise<number> {
   const coverage = options.order
     ? { orders: [regression(scenario.events, options.order, scenario.initialFrames)], exhaustive: false }
-    : explore(scenario.events, options.limit, scenario.initialFrames);
+    : explore(scenario.events, options.limit, scenario.initialFrames, scenario.witnesses);
   const coverageLabel = coverage.exhaustive ? "exhaustive" : options.order ? "single regression" : "bounded fixed-seed sample; not exhaustive";
   let runs = 0;
   for (const order of coverage.orders) {
