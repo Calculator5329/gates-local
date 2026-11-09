@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, symlink, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile, mkdir } from "node:fs/promises";
 import * as files from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,10 +31,19 @@ const fakeLookup = async (name: string) => {
 /** A host as config() passes it: the URL parser's hostname spelling. */
 const configHostname = (h: string) => new URL(`http://${h}:8188`).hostname;
 const instances: { close(): Promise<void> }[] = [];
-afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.all(instances.splice(0).map((i) => i.close())); });
+const dirs: string[] = [];
+afterEach(async () => {
+  vi.restoreAllMocks(); vi.useRealTimers();
+  try {
+    for (const instance of instances.splice(0).toReversed()) await instance.close();
+  } finally {
+    await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+  }
+});
 
 async function fixture(options: Partial<ImageDeps> = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-"));
+  dirs.push(dataDir);
   const lease = createGpuLease();
   const events: ImageEvent[] = [];
   const calls: string[] = [];
@@ -611,7 +620,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
 });
 
 it("serves only token-authorized PNGs inside images, refusing traversal and symlinks", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "gates-files-")); await mkdir(path.join(dir, "images"));
+  const dir = await mkdtemp(path.join(tmpdir(), "gates-files-")); dirs.push(dir); await mkdir(path.join(dir, "images"));
   await writeFile(path.join(dir, "images", "job.png"), png); await writeFile(path.join(dir, "outside.png"), png);
   await symlink(path.join(dir, "outside.png"), path.join(dir, "images", "link.png"));
   const server = await startWsServer({ port: 0, token: "test-launch", allowedOrigins: [], handlers: {}, dataDir: dir }); instances.push(server);

@@ -1,7 +1,6 @@
 // Runtime modes (system / app), the switch between them, and the Windows
 // paths with the platform injected. Fakes only: a fake Ollama server, a
 // fake `ollama` binary, a fake PowerShell runner.
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -21,6 +20,7 @@ import {
   freePort,
   freePortRun,
   removeDir,
+  spawnSleeper,
   startFakeOllama,
   startReleaseServer,
   startWrongService,
@@ -170,8 +170,9 @@ describe("runtimeMode app", () => {
   it("S-04: a recorded copy that is alive but no longer holds its port is not adopted; the foreign Ollama there is skipped", async () => {
     const base = await freePortRun(2);
     const foreign = await startFakeOllama({ port: base });
-    const recorded = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    const { child: recorded, ready } = spawnSleeper();
     try {
+      await ready;
       const p = readProc(recorded.pid ?? 0);
       if (!p) throw new Error("no /proc entry for the recorded process");
       writeRecord(ownedStateFile(appDataDir), { pid: p.pid, startTime: p.startTime, command: p.command, baseUrl: foreign.baseUrl, binary: "/fake/ollama", startedAt: 1 });

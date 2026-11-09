@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { streamToolTurn } from "./tools.ts";
@@ -9,6 +9,14 @@ import { createApp } from "../app.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
+
+const dirs: string[] = [];
+const scratch = (prefix: string) => {
+  const root = mkdtempSync(path.join(tmpdir(), prefix));
+  dirs.push(root);
+  return root;
+};
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const sentMessages = (bodies: Record<string, unknown>[]) => (bodies[0]?.["messages"] ?? []) as { role: string; content: string }[];
 
@@ -42,7 +50,7 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
 };
 /** A tool turn whose first reply calls the image tool; `second` answers the request after the tool ran. */
 const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>) => {
-  const root = mkdtempSync(path.join(tmpdir(), "gl-app-image-"));
+  const root = scratch("gl-app-image-");
   const sources = createSources({ dataDir: path.join(root, "data") });
   const file = path.join(root, "notes.txt"); writeFileSync(file, "hello");
   await sources.add({ kind: "file", path: file });
@@ -137,7 +145,7 @@ describe("tool chat transport", () => {
     }
   });
   it("persists a chat.send tool step through app.ts with fake fetch and no listeners", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "gl-app-tools-"));
+    const root = scratch("gl-app-tools-");
     const sources = createSources({ dataDir: path.join(root, "data") });
     const file = path.join(root, "notes.txt"); writeFileSync(file, "hello library");
     const source = await sources.add({ kind: "file", path: file });
@@ -214,7 +222,7 @@ describe("tool chat transport", () => {
     });
   for (const scenario of ["tools explicitly off", "tools default off", "empty Library"] as const) {
     it(`keeps the original plain turn for ${scenario}`, async () => {
-      const root = mkdtempSync(path.join(tmpdir(), "gl-plain-tools-"));
+      const root = scratch("gl-plain-tools-");
       const sources = createSources({ dataDir: path.join(root, "data") });
       if (scenario !== "empty Library") {
         const file = path.join(root, "note.txt"); writeFileSync(file, "note");

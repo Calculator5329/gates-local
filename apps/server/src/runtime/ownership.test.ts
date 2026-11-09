@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -18,15 +19,18 @@ import {
   type ListenerFs,
   type SyncRunner,
 } from "./ownership.ts";
-import { removeDir, tmpDir } from "./test-fakes.ts";
+import { removeDir, spawnSleeper, tmpDir } from "./test-fakes.ts";
 
 let work: string;
 let file: string;
 const children: ChildProcess[] = [];
+const startup = new WeakMap<ChildProcess, Promise<void>>();
 
-function sleeper(): ChildProcess {
-  const c = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+async function sleeper(): Promise<ChildProcess> {
+  const { child: c, ready } = spawnSleeper();
+  startup.set(c, ready);
   children.push(c);
+  await ready;
   return c;
 }
 
@@ -43,8 +47,13 @@ beforeEach(() => {
   file = path.join(work, "owned-ollama.json");
 });
 
-afterEach(() => {
-  for (const c of children.splice(0)) c.kill("SIGKILL");
+afterEach(async () => {
+  for (const c of children.splice(0)) {
+    if (c.exitCode !== null || c.signalCode !== null) continue;
+    const exited = once(c, "exit");
+    c.kill("SIGKILL");
+    await exited;
+  }
   removeDir(work);
 });
 
@@ -75,22 +84,29 @@ describe("readProc", () => {
 });
 
 describe("stopOwned", () => {
+  it("keeps the recorded identity once the child's startup finishes", async () => {
+    const c = await sleeper();
+    recordFor(c.pid!);
+    await startup.get(c);
+    expect(checkOwnership(file).kind).toBe("ours");
+  });
+
   // Windows never stops a process by PID number (R-12): runtime.ts stops its own child through the handle.
   it.runIf(process.platform === "win32")("on Windows adopts a matching live record and leaves the process running", async () => {
-    const c = sleeper();
+    const c = await sleeper();
     await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
-    expect(checkOwnership(file).kind).toBe("ours");
+    expect(checkOwnership(file).kind, JSON.stringify({ record: readRecord(file), now: readProc(c.pid!) })).toBe("ours");
     expect(await stopOwned(file, 500)).toEqual({ stopped: false, reason: "adopted" });
     expect(alive(c.pid!)).toBe(true);
     expect(c.exitCode).toBeNull();
   });
 
   it.skipIf(process.platform === "win32")("stops a process whose PID, start time and command all match the record", async () => {
-    const c = sleeper();
+    const c = await sleeper();
     await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
-    expect(checkOwnership(file).kind).toBe("ours");
+    expect(checkOwnership(file).kind, JSON.stringify({ record: readRecord(file), now: readProc(c.pid!) })).toBe("ours");
     const r = await stopOwned(file, 2000);
     expect(r).toEqual({ stopped: true, pid: c.pid });
     expect(await waitFor(() => !alive(c.pid!))).toBe(true);
@@ -98,9 +114,9 @@ describe("stopOwned", () => {
   });
 
   it("refuses a recorded PID now running a different command, and leaves it running", async () => {
-    const c = sleeper();
+    const c = await sleeper();
     await waitFor(() => alive(c.pid!));
-    recordFor(c.pid!, { command: "/home/someone/.local/share/gates-local/runtime/ollama/0.40.15/bin/ollama serve" });
+    recordFor(c.pid!, { command: "/different/ollama serve" });
     const r = await stopOwned(file, 500);
     expect(r.stopped).toBe(false);
     expect(r.stopped === false && r.reason).toBe("not-ours");
@@ -112,7 +128,7 @@ describe("stopOwned", () => {
   });
 
   it("refuses a recorded PID with a different start time (PID reuse), and leaves it running", async () => {
-    const c = sleeper();
+    const c = await sleeper();
     await waitFor(() => alive(c.pid!));
     const real = readProc(c.pid!)!.startTime;
     recordFor(c.pid!, { startTime: String(Number(real) - 1) });
@@ -124,7 +140,7 @@ describe("stopOwned", () => {
   });
 
   it("reports a recorded process that has exited as gone", async () => {
-    const c = sleeper();
+    const c = await sleeper();
     await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
     c.kill("SIGKILL");
@@ -208,7 +224,7 @@ describe("listenerPid (S-04)", () => {
     try {
       const { port } = server.address() as AddressInfo;
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid] })).toBe(process.pid);
-      const other = sleeper();
+      const other = await sleeper();
       await waitFor(() => alive(other.pid!));
       expect(await listenerPid(port, { platform: "linux", pids: [other.pid!] })).toBeUndefined();
     } finally {

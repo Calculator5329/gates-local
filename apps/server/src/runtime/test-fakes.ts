@@ -1,7 +1,7 @@
 // Test fakes for the runtime module: a fake Ollama HTTP server, a fake
 // non-Ollama service, a fake `ollama` binary and a fake release server.
 // Nothing here touches the real Ollama or port 11434.
-import { execFileSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -19,6 +19,22 @@ export function tmpDir(prefix: string): string {
 
 export function removeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
+}
+
+/** Startup changes the command before announcing ready, exposing premature identity reads. */
+export function spawnSleeper(): { child: ChildProcess; ready: Promise<void> } {
+  const child = spawn(process.execPath, ["-e", 'process.title = "gates-test-sleeper"; console.log("ready"); setInterval(() => {}, 1000)'], { stdio: ["ignore", "pipe", "ignore"] });
+  const ready = new Promise<void>((resolve, reject) => {
+    const failed = (code: number | null) => reject(new Error(`sleeper exited before ready: ${code}`));
+    child.once("error", reject);
+    child.once("exit", failed);
+    child.stdout!.once("data", () => {
+      child.off("error", reject);
+      child.off("exit", failed);
+      resolve();
+    });
+  });
+  return { child, ready };
 }
 
 function listen(server: http.Server, port = 0): Promise<number> {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { toBridgeState } from "../src/bridge.ts";
-import { Supervisor, TOKEN_ENV, type SupervisorOptions, type SupervisorState } from "../src/supervisor.ts";
+import { findFreePort, Supervisor, TOKEN_ENV, type SupervisorOptions, type SupervisorState } from "../src/supervisor.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-server.ts");
 const HOST = join(import.meta.dirname, "fixtures", "host.ts");
@@ -109,16 +109,25 @@ afterEach(async () => {
 });
 
 describe("Supervisor", () => {
-  it("starts the server, reaches ready on the passed port, and stops it", async () => {
-    const { supervisor, dataDir, states } = setup("ready");
+  it("starts even when another listener claims the port before the server binds", async () => {
+    const { supervisor, dataDir, logs } = setup("claimed-port");
     const state = await supervisor.start();
-    expect(state.status).toBe("ready");
+    expect(state.status, JSON.stringify({ state, logs })).toBe("ready");
+    expect(launches(dataDir)[0]?.port).toBe(0);
+    if (state.status === "ready") expect(state.port).toBeGreaterThan(0);
+  });
+
+  it("starts the server, reaches ready on its assigned port, and stops it", async () => {
+    const { supervisor, dataDir, states, logs } = setup("ready");
+    const state = await supervisor.start();
+    expect(state.status, JSON.stringify({ state, logs })).toBe("ready");
     if (state.status !== "ready") return;
 
     const [record] = launches(dataDir);
     expect(record?.pid).toBe(state.pid);
-    expect(record?.port).toBe(state.port);
-    expect(record?.argv).toEqual(["--port", String(state.port), "--data-dir", dataDir]);
+    expect(record?.port).toBe(0);
+    expect(state.port).toBeGreaterThan(0);
+    expect(record?.argv).toEqual(["--port", "0", "--data-dir", dataDir]);
     expect(record?.electronRunAsNode).toBe("1");
     expect(record?.argv.join(" ")).not.toContain(record?.token ?? "missing");
     expect(record?.token).toMatch(/^[0-9a-f]{64}$/);
@@ -151,10 +160,21 @@ describe("Supervisor", () => {
   });
 
   it("refuses a ready line that names another port", async () => {
-    const { supervisor } = setup("wrong-port");
+    const { supervisor } = setup("wrong-port", { port: await findFreePort() });
     const state = await supervisor.start();
     expect(state.status).toBe("crashed");
     if (state.status === "crashed") expect(state.reason.kind).toBe("bad-ready");
+  });
+
+  it.each([0, -1, 65536, 1.5])("refuses an invalid assigned port %s", async (port) => {
+    const { supervisor } = setup("ready", { env: { ...process.env, FAKE_MODE: "ready", FAKE_REPORTED_PORT: String(port) } });
+    expect(await supervisor.start()).toMatchObject({ status: "crashed", reason: { kind: "bad-ready" } });
+  });
+
+  it("uses an explicit port when requested", async () => {
+    const port = await findFreePort();
+    const { supervisor } = setup("ready", { port });
+    expect(await supervisor.start()).toMatchObject({ status: "ready", port });
   });
 
   it("reports a spawn error as a crash", async () => {

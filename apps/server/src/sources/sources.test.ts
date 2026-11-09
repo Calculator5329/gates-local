@@ -10,11 +10,25 @@ import { createSources, SQLITE_FILE_REFUSED } from "./index.ts";
 import { createTools, runLoop, type ModelMessage } from "../../../../packages/harness/src/index.ts";
 const isSqliteFile = (file: string) => statSync(file).isFile() && readFileSync(file).subarray(0, 16).equals(Buffer.from("SQLite format 3\0", "latin1"));
 const children: ChildProcess[] = [];
+const dirs: string[] = [];
+const scratch = () => {
+  const root = mkdtempSync(path.join(tmpdir(), "gl-sources-"));
+  dirs.push(root);
+  return root;
+};
 // One prerequisite probe; do not mistake an unsupported nested process for a snapshot failure.
 const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8", timeout: 2000 });
 const writerUnavailable = writerProbe.error && ["EPERM", "EACCES"].includes((writerProbe.error as NodeJS.ErrnoException).code ?? "");
 if (writerProbe.error && !writerUnavailable) throw writerProbe.error;
-afterEach(() => { for (const child of children.splice(0)) child.kill(); });
+afterEach(async () => {
+  for (const child of children.splice(0)) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    const exited = once(child, "exit");
+    child.kill();
+    await exited;
+  }
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 // Mode bits, links swapped mid-call and /proc handles are POSIX. On Windows the path fallback
 // runs (its test injects the platform) and the profile ACL on the data folder keeps it private.
 const windows = process.platform === "win32";
@@ -25,7 +39,7 @@ const tree = (dir: string) => [statSync(dir).mode, ...(readdirSync(dir, { recurs
   return [name, info.mode, info.isFile() ? readFileSync(file, "utf8") : null];
 })];
 const setup = () => {
-  const root = mkdtempSync(path.join(tmpdir(), "gl-sources-"));
+  const root = scratch();
   const dataDir = path.join(root, "app");
   return { root, dataDir, sources: createSources({ dataDir }) };
 };
@@ -456,7 +470,7 @@ describe.skipIf(windows)("a link swapped in mid-operation is never followed out 
     expect(statSync(target).mode & 0o777).toBe(0o644);
   });
   it("start: a snapshots folder that is a link is refused with an error naming it, and left in place", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "gl-sources-"));
+    const root = scratch();
     const dataDir = path.join(root, "app"); mkdirSync(dataDir);
     const external = outside(root, ["note.txt"]);
     const before = tree(external);

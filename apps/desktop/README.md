@@ -39,8 +39,9 @@ The coordinator's `apps/server/src/main.ts` must follow this; the fake in
 1. **Spawn.** `process.execPath` (the Electron binary) with
    `ELECTRON_RUN_AS_NODE=1`, args
    `<server entry .ts> --port <n> --data-dir <dir>`.
-   - `--port`: a free loopback port picked per launch (a restart usually gets
-     a new one). Bind `127.0.0.1` only. If the bind fails, print why on
+   - `--port`: 0 by default, letting the server reserve a free port when it
+     binds (a restart usually gets a new one). Bind `127.0.0.1` only. An
+     explicit port is used as given. If the bind fails, print why on
      stderr and exit non-zero; the user gets the error view and Restart
      picks a fresh port.
    - `--data-dir`: created by the supervisor before spawn. Default
@@ -56,10 +57,10 @@ The coordinator's `apps/server/src/main.ts` must follow this; the fake in
    401 before the upgrade). Clients connect to `ws://127.0.0.1:<port>/?token=<hex>`
    (built only by `serverUrl()` in `src/bridge.ts`).
 3. **Ready.** Once the WebSocket is listening, print exactly one line
-   `{"ready":true,"port":<n>}` on stdout, `<n>` being the `--port` value.
-   Other stdout lines are allowed and logged; a ready line naming another
-   port is treated as a failed launch. No ready line within 20 s: the
-   supervisor stops the process and reports `ready-timeout`.
+   `{"ready":true,"port":<n>}` on stdout, `<n>` being the bound port.
+   Other stdout lines are allowed and logged; a ready line naming a different
+   explicit port, or an invalid port, is treated as a failed launch. No ready
+   line within 20 s: the supervisor stops the process and reports `ready-timeout`.
 4. **stderr** is logged line by line; the last 20 lines appear in the
    error view.
 5. **SIGTERM** exits within 3 s (stop what the server owns, e.g. an

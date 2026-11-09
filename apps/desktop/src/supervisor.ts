@@ -27,7 +27,7 @@ export interface SupervisorOptions {
   readonly execPath?: string;
   /** Base environment for the child; defaults to process.env. */
   readonly env?: NodeJS.ProcessEnv;
-  /** Fixed port; by default a free loopback port is picked per launch. */
+  /** Fixed port; by default the server binds port 0 and reports the assigned port. */
   readonly port?: number;
   readonly readyTimeoutMs?: number;
   /** Grace between SIGTERM and SIGKILL. */
@@ -72,7 +72,7 @@ interface Launch {
   readonly id: number;
   readonly child: ChildProcess;
   readonly port: number;
-  readonly url: string;
+  readonly token: string;
   readonly stderrTail: string[];
   /** Set when the supervisor itself decided the launch failed (timeout, bad ready). */
   failure: CrashReason | null;
@@ -200,7 +200,7 @@ export class Supervisor {
     this.#setState({ status, launch: id });
     let port: number;
     try {
-      port = this.#opts.port ?? (await findFreePort());
+      port = this.#opts.port ?? 0;
       mkdirSync(this.#opts.dataDir, { recursive: true });
     } catch (error) {
       if (this.#stopping === null) this.#crash(id, null, { kind: "spawn-error", message: String(error) }, []);
@@ -220,7 +220,7 @@ export class Supervisor {
       id,
       child,
       port,
-      url: serverUrl(port, token),
+      token,
       stderrTail: [],
       failure: null,
       readyTimer: null,
@@ -280,13 +280,13 @@ export class Supervisor {
       return;
     }
     clearReadyTimer(launch);
-    if (ready.port !== launch.port) {
+    if (!Number.isInteger(ready.port) || ready.port < 1 || ready.port > 65535 || (launch.port !== 0 && ready.port !== launch.port)) {
       launch.failure = { kind: "bad-ready", line };
       void this.#terminate(launch);
       return;
     }
     const pid = launch.child.pid ?? -1;
-    this.#setState({ status: "ready", launch: launch.id, pid, port: launch.port, url: launch.url });
+    this.#setState({ status: "ready", launch: launch.id, pid, port: ready.port, url: serverUrl(ready.port, launch.token) });
   }
 
   #crash(id: number, pid: number | null, reason: CrashReason, stderrTail: readonly string[]): void {

@@ -18,6 +18,11 @@ Larger graphs use explicit bounded deterministic sampling rather than claiming
 exhaustive coverage. A planted lost Connect push passed the old schedules and
 failed the widened schedules. Production behavior is unchanged.
 
+## 2026-11-09: Reserve the server port when it starts
+
+The desktop app now lets its server reserve a free port as it binds. Another
+local program taking a briefly released port can no longer interrupt startup.
+
 ## 2026-11-09: Replay client actions across reconnect and delayed delivery
 
 Ordering probes now enumerate causal interleavings against two real client

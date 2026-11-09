@@ -1,13 +1,18 @@
 import { createServer } from "node:http";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { expect, it } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import type { ImageEvent } from "@gates-local/contracts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { createImageModule } from "./module.ts";
+
+const dirs: string[] = [];
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+});
 
 it("renders over fake HTTP and real WebSocket frames, ignoring unrelated object_info entries", async () => {
   const calls: string[] = [];
@@ -47,6 +52,7 @@ it("renders over fake HTTP and real WebSocket frames, ignoring unrelated object_
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const address = http.address(); if (!address || typeof address === "string") throw new Error("no fake port");
   const dataDir = await mkdtemp(path.join(tmpdir(), "gates-image-http-"));
+  dirs.push(dataDir);
   const store = openThreadStore(path.join(dataDir, "store.sqlite"));
   const events: ImageEvent[] = [];
   const baseUrl = `http://127.0.0.1:${address.port}`;

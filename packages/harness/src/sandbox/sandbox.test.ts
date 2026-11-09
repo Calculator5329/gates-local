@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -27,8 +27,11 @@ const markerProcesses = (marker: string) => readdirSync("/proc").filter(pid => /
 });
 
 /** A folder source and a SQLite snapshot in a fresh temp dir, for tests that move them. */
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const fresh = () => {
   const base = mkdtempSync(path.join(tmpdir(), "gl-shell-gone-"));
+  dirs.push(base);
   const docs = path.join(base, "docs"); mkdirSync(docs); writeFileSync(path.join(docs, "a.txt"), "a");
   const snapshots = path.join(base, "app", "snapshots"); mkdirSync(snapshots, { recursive: true });
   const snapshot = path.join(snapshots, "ledger.db");
@@ -48,6 +51,7 @@ const probe = await probeSandbox();
 const bwrapAbsent = process.platform !== "linux" || (!probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason));
 describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [${bwrapAbsent ? "SKIP" : "OFF"}: ${probe.reason}]`}`, () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-bwrap-"));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
   const snapshotPath = path.join(root, "test.db");
   const db = new DatabaseSync(snapshotPath); db.exec("CREATE TABLE t(n); INSERT INTO t VALUES(42)"); db.close();
   const folder = path.join(root, "folder"); mkdirSync(folder);

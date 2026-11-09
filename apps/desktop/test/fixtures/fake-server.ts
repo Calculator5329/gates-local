@@ -6,6 +6,7 @@
 //   exit-early   stderr line, exit 3 before ready
 //   ignore-term  ready, ignore SIGTERM (and stdin EOF)
 //   wrong-port   print a ready line naming another port
+//   claimed-port another listener takes the requested port before this one
 
 import { existsSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -49,11 +50,14 @@ if (mode !== "ignore-term") {
   process.stdin.resume();
 }
 
-function ready(reportedPort: number = port): void {
+function ready(reportedPort?: number): void {
   const server = createServer();
   server.listen(port, "127.0.0.1", () => {
     process.stdout.write("booting\n");
-    process.stdout.write(`${JSON.stringify({ ready: true, port: reportedPort })}\n`);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no bound port");
+    const override = process.env["FAKE_REPORTED_PORT"];
+    process.stdout.write(`${JSON.stringify({ ready: true, port: override === undefined ? (reportedPort ?? address.port) : Number(override) })}\n`);
   });
   process.on("SIGTERM", () => {
     if (mode === "ignore-term") {
@@ -66,6 +70,9 @@ function ready(reportedPort: number = port): void {
 }
 
 switch (mode) {
+  case "claimed-port":
+    createServer().listen(port, "127.0.0.1", () => ready());
+    break;
   case "ready":
   case "ignore-term":
     ready();
