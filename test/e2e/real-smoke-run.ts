@@ -8,10 +8,11 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { installPinned } from "../../apps/server/src/runtime/install.ts";
 import { PINNED_OLLAMA } from "../../apps/server/src/runtime/manifest.ts";
+import { REAL_SMOKE_URL } from "./real-smoke-checks.ts";
 
 const MODEL = "smollm2:135m";
 const cache = path.join(homedir(), ".cache", "gates-local-real-smoke");
-const url = "http://127.0.0.1:16195";
+const url = REAL_SMOKE_URL;
 
 async function exited(child: ChildProcess): Promise<number> {
   if (child.exitCode !== null) return child.exitCode;
@@ -80,7 +81,6 @@ async function main(): Promise<number> {
       clearTimeout(kill);
     }
     log.end();
-    console.log("[real-smoke setup] owned Ollama stopped; runner receipt must also show zero remaining descendants");
   }
 }
 

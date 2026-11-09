@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09: Make real-model smoke failures harder to miss
+
+The smoke now refuses every endpoint except its setup's dedicated port before
+making a request. Stop cannot pass by waiting for the reply to finish, and
+earlier-message recall must contain a made-up word built from random syllables.
+The public testing instructions describe only the setup a reader can run.
+
 ## 2026-11-09: Keep recovered sends safe through navigation
 
 Opening Settings or visiting another thread no longer changes a recovered

@@ -1,6 +1,6 @@
 // Opt-in probe against the production CLI and an actual Ollama. No stack/fakes.
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomInt, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import { expect, test } from "@playwright/test";
 import { createClient, decodePayload, decodeServerMessage, type Client, type Payload } from "@gates-local/contracts";
 import { DATA_ROOT, ROOT, WEB_ORIGIN } from "./env.ts";
+import { assertContextCopied, assertInterruptedCancellation, randomContextWord, requireRealSmokeUrl } from "./real-smoke-checks.ts";
 
 type Arrival = { at: number; payload: Payload<"chat.event"> };
 
@@ -51,10 +52,7 @@ async function stop(child: ChildProcess): Promise<void> {
 
 test("real model streams, stops, recalls the thread and survives a server restart", async ({ page }, info) => {
   test.setTimeout(180_000);
-  const url = process.env["GATES_REAL_SMOKE_URL"];
-  if (!url) throw new Error("Real Ollama is required: run the isolated real-smoke-run.ts setup, or set GATES_REAL_SMOKE_URL to its dedicated loopback port. Never skip.");
-  const endpoint = new URL(url);
-  if (endpoint.hostname !== "127.0.0.1" || endpoint.protocol !== "http:" || !endpoint.port || (Number(endpoint.port) >= 11434 && Number(endpoint.port) <= 11444)) throw new Error("Real smoke requires an explicit isolated loopback Ollama port outside the default range.");
+  const url = requireRealSmokeUrl(process.env["GATES_REAL_SMOKE_URL"]);
   const response = await fetch(new URL("/api/version", url), { signal: AbortSignal.timeout(5000) });
   expect(response.ok, "real Ollama must answer; absence is a failure").toBe(true);
   const model = process.env["GATES_REAL_SMOKE_MODEL"] ?? "smollm2:135m";
@@ -98,8 +96,8 @@ test("real model streams, stops, recalls the thread and survives a server restar
     await page.goto(`${WEB_ORIGIN}/?server=${encodeURIComponent(server.socketUrl)}`);
     await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
     await expect(page.locator("#ta")).toBeEnabled();
-    const name = ["Alice", "Bob", "Clara", "David"][randomInt(4)]!;
-    const firstPrompt = `My name is ${name}. Remember my name. Now count from 1 to 1000, with one number per line.`;
+    const word = randomContextWord();
+    const firstPrompt = `My name is ${word}. Remember my name. Now count from 1 to 1000, with one number per line.`;
     const firstStart = Date.now();
     await page.locator("#ta").fill(firstPrompt);
     await page.locator("#ta").press("Enter");
@@ -116,6 +114,9 @@ test("real model streams, stops, recalls the thread and survives a server restar
     await expect(firstReply.locator(".stopped")).toBeVisible();
     await expect(page.locator(".writing")).toHaveCount(0);
     await expect.poll(() => arrivals.some((a) => a.payload.event.type === "error" && a.payload.event.code === "cancelled")).toBe(true);
+    const cancellation = arrivals.map((a) => a.payload.event).find((event) => event.type === "error" && event.code === "cancelled");
+    if (cancellation?.type !== "error") throw new Error("Stop produced no cancelled event");
+    assertInterruptedCancellation(cancellation.message);
     const partial = await firstReply.locator(".md").innerText();
     expect(partial.trim().length).toBeGreaterThan(0);
     const cancelMs = Date.now() - stopAt;
@@ -124,25 +125,25 @@ test("real model streams, stops, recalls the thread and survives a server restar
     await page.waitForTimeout(500);
     expect(arrivals).toHaveLength(stoppedCount);
     expect(await firstReply.locator(".md").innerText()).toBe(partial);
-    evidence["stop"] = { ms: Date.now() - stopAt, cancelMs, quietWindowMs: 500, partial };
+    evidence["stop"] = { ms: Date.now() - stopAt, cancelMs, quietWindowMs: 500, message: cancellation.message, partial };
     console.log(`[real-smoke] Stop ${Date.now() - stopAt} ms; partial retained ${JSON.stringify(partial)}`);
 
-    // The name is chosen at runtime and absent from this question and system prompt.
+    // The made-up word is absent from this question and the system prompt.
     const secondStart = Date.now();
     await page.locator("#ta").fill("What is my name? Reply with my name only.");
     await page.locator("#ta").press("Enter");
     const secondReply = page.locator(".turn.a").last();
     await expect(secondReply).toHaveClass(/done/, { timeout: 60_000 });
     const answer = await secondReply.locator(".md").innerText();
-    expect(answer, "real model must recall the random name from the earlier user message").toMatch(new RegExp(`\\b${name}\\b`, "i"));
+    assertContextCopied(answer, word);
     expect(await firstReply.locator(".md").innerText(), "partial survives the following turn").toBe(partial);
     const completed = arrivals.findLast((a) => a.payload.event.type === "done");
     expect(completed).toBeDefined();
     const saved = await server.client.call("threads.get", { threadId });
-    expect(saved.messages.some((m) => m.role === "assistant" && m.content.includes(name))).toBe(true);
+    expect(saved.messages.some((m) => m.role === "assistant" && m.content.toLowerCase().includes(word))).toBe(true);
     evidence["stoppedPartialSaved"] = saved.messages.some((m) => m.role === "assistant" && m.content.trim() === partial.trim());
-    evidence["context"] = { name, answer, ms: Date.now() - secondStart };
-    console.log(`[real-smoke] context ${Date.now() - secondStart} ms; expected ${name}, got ${JSON.stringify(answer)}`);
+    evidence["context"] = { word, answer, ms: Date.now() - secondStart };
+    console.log(`[real-smoke] context ${Date.now() - secondStart} ms; expected ${word}, got ${JSON.stringify(answer)}`);
     await page.screenshot({ path: info.outputPath("real-smoke.png") });
 
     const restartAt = Date.now();
@@ -152,7 +153,7 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const restored = await server.client.call("threads.get", { threadId });
     expect(restored).toEqual(saved);
     await page.goto(`${WEB_ORIGIN}/?server=${encodeURIComponent(server.socketUrl)}#thread=${threadId}`);
-    await expect(page.locator(".turn.a .md").last()).toContainText(name);
+    await expect(page.locator(".turn.a .md").last()).toContainText(new RegExp(word, "i"));
     evidence["restartMs"] = Date.now() - restartAt;
     evidence["totalMs"] = Date.now() - started;
     console.log(`[real-smoke] restart/persistence ${Date.now() - restartAt} ms; total ${Date.now() - started} ms`);
