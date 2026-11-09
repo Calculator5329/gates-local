@@ -111,7 +111,7 @@ test("real model streams, stops, recalls the thread and survives a server restar
     const stopAt = Date.now();
     await page.getByRole("button", { name: "Stop", exact: true }).click();
     const firstReply = page.locator(".turn.a").first();
-    await expect(firstReply.locator(".stopped")).toBeVisible();
+    await expect(page.locator(".stop-note")).toBeVisible();
     await expect(page.locator(".writing")).toHaveCount(0);
     await expect.poll(() => arrivals.some((a) => a.payload.event.type === "error" && a.payload.event.code === "cancelled")).toBe(true);
     const cancellation = arrivals.map((a) => a.payload.event).find((event) => event.type === "error" && event.code === "cancelled");

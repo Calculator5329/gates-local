@@ -1,5 +1,58 @@
 # Changelog
 
+## 2026-11-09: A reply that is stopped, fails or is cut off keeps its words
+
+- Every way a turn ends goes through one function in `apps/server/src/app.ts`.
+  A finished reply is saved complete; any other end saves the words so far as
+  an interrupted reply. Interrupted replies are never sent to a model as
+  answers.
+- While a reply streams it is one row in the thread store, written with the
+  first words and then at most once a second, so a crash or power loss keeps
+  the text up to the last write. The in-memory turn buffer is gone.
+- A stopped or failed reply shows one note saying what happened, with the
+  server's reason when there is one. After a reload the note is the general
+  "Interrupted" one.
+- Retry on an unfinished reply (`retryOf` on `chat.send`) replaces the
+  question and the unfinished rows in the same write, so the thread never
+  holds the question twice. The old partial is gone once the retry is
+  admitted, even if the retry then fails before its first word.
+- A finished reply wins over a Stop that lands with the last token. It does
+  not win over deleting its question or its thread. Deleting an older message
+  stops the reply and keeps its words.
+- Known limits: another open window keeps replaced rows until it reloads; a
+  tool turn stopped at the last token is saved as interrupted; an image card
+  after the question makes Retry ask again instead of replacing.
+- Not run: `test/e2e/real-smoke.spec.ts` (real model). The stop, retry,
+  queue, streaming and thread journeys passed in a browser one merge before
+  landing.
+
+## 2026-11-09: A render crash shows a notice, and quit leaves nothing running
+
+- One error boundary wraps the app and one wraps the open thread. The notice
+  offers "Try again"; at app level it offers "Reload window" once a retry has
+  been used.
+- The app's own Ollama is stopped through the process handle this run kept
+  (its process group on Linux), models close last, and a shutdown that stalls
+  past its deadline kills that group and asks systemd to stop ComfyUI only
+  when this run started it. SIGHUP shuts down like SIGINT and SIGTERM.
+- An update check in flight is aborted on quit with a 300 ms grace for git,
+  and any command group still tracked at process exit is killed.
+- Not verified on real Windows, with a real `systemctl`, or with real Ollama
+  runner processes; the tests use throwaway child processes.
+
+## 2026-11-09: A failed GPU reading is no longer "no GPU"
+
+- The memory check, the load plan, the measured fit and the GPU status share
+  one `nvidia-smi` reading. A missing `nvidia-smi` means no NVIDIA GPU. "No
+  devices were found" or a driver that does not answer means no usable NVIDIA
+  GPU only after two agreeing reads and only when Ollama reports nothing
+  resident on a GPU. Anything else is unreadable: loads are refused with one
+  sentence instead of being planned against zero VRAM.
+- The reasons are in `apps/server/src/fit/gpu-failures.md`.
+- Not verified on real Windows or on AMD or Intel GPU hardware. On a machine
+  without a GPU the check does not yet count memory another loaded model
+  would give back.
+
 ## 2026-11-09: Desktop startup includes the process and server, and reconnect recovers sooner
 
 - The warm-server browser row omitted Electron and server boot. The opt-in

@@ -142,6 +142,24 @@ export class OrderingServer extends FakeServer {
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
   }
 
+  /** Words of a running reply; after Stop, its end with the saved row (runTurn in app.ts). */
+  chatWords(turnId: string, target: FakeSocket, text: string, ended = false): void {
+    const userMessage = this.turns.get(turnId);
+    if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
+    const event: Payload<"chat.event">["event"] = ended
+      ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 } }
+      : { type: "delta", text };
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
+  }
+
+  /** A runtime error after some words: the terminal event carries the saved row and the server's reason. */
+  chatFailed(turnId: string, target: FakeSocket, text: string, message: string): void {
+    const userMessage = this.turns.get(turnId);
+    if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
+    const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 };
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial } } });
+  }
+
   admittedPush(turnId: string, label: string): void {
     const target = this.startTargets.get(turnId)?.find((socket) => this.labels.get(socket) === label);
     if (target) this.chatPush(turnId, target);

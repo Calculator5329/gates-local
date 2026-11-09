@@ -2,10 +2,15 @@
 // thread store, runtime and catalog against a fake Ollama on port 0. The fit
 // check reads fake nvidia-smi and meminfo text; nothing touches the GPU or a
 // real Ollama, and the runtime only ever runs discover() (never ensure()).
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -99,7 +104,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; log?: (line: string) => void } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -117,7 +122,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   cleanups.push(() => ollama.close());
 
   const dir = cacheTmp();
-  const store = openThreadStore(path.join(dir, "threads.sqlite"));
+  const store = openThreadStore(opts.dbPath ?? path.join(dir, "threads.sqlite"));
   cleanups.push(() => store.close());
   // Both ports are ours: the fake (or a dead port) as external, a free port
   // for the app-owned slot, so classify never probes 11434 or 11435.
@@ -148,10 +153,12 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     runtime,
     catalog,
     ...(opts.admit ? { admit: opts.admit } : {}),
+    ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
     ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
-        const { threadId, event } = p as Payload<"chat.event">;
+        const { turnId, threadId, event } = p as Payload<"chat.event">;
+        if (event.type === "delta") opts.onDelta?.(turnId);
         if (event.type === "done") {
           storedAtDonePush.push(store.getThread(threadId).messages.length);
           app.replayTurns((channel, payload) => { if (channel === "chat.event") replayedAtDone.push(payload as Payload<"chat.event">); });
@@ -1149,6 +1156,25 @@ describe("threads.delete and the image jobs its turns queued", () => {
   });
 });
 
+const untilWords = async (r: Rig, turnId: string, count = 1) => r.waitFor("chat.event", (p) => p.turnId === turnId && p.event.type === "delta" && r.pushes.filter((q) => q.channel === "chat.event" && (q.payload as Payload<"chat.event">).turnId === turnId && (q.payload as Payload<"chat.event">).event.type === "delta").length >= count);
+const onDisk = (r: Rig, threadId: string) => r.store.getThread(threadId).messages.filter((m) => m.role === "assistant");
+const startReply = async (r: Rig, route: ChatRoute = slowReply) => {
+  r.setChat(route);
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+  return { threadId: t.id, sent };
+};
+const stoppedReply = async (r: Rig) => {
+  r.setChat(slowReply);
+  const t = await r.client.call("threads.create", {});
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
+  await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
+  await r.client.call("chat.cancel", { turnId: sent.turnId });
+  await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+  r.setChat(quickReply);
+  return { threadId: t.id, sent };
+};
+
 describe("chat.cancel and threads.delete during a turn", () => {
   it("AU-01 every client's chat.send passes the server admission boundary", async () => {
     const r = await rig({ admit: () => { throw Object.assign(new Error("Gates Local is closing to update. Try again after it reopens."), { code: "update-installing" }); } });
@@ -1158,7 +1184,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(r.app.activeTurns()).toBe(0);
     expect(r.store.getThread(thread.id).messages).toHaveLength(0);
   });
-  it("cancel mid-stream ends the turn with a cancelled error and persists nothing of the reply", async () => {
+  it("Stop mid-reply ends the turn once and keeps the words sent so far, marked interrupted", async () => {
     const r = await rig();
     r.setChat(slowReply);
     const t = await r.client.call("threads.create", {});
@@ -1166,10 +1192,14 @@ describe("chat.cancel and threads.delete during a turn", () => {
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
     expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
-    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled", partial: { role: "assistant", interrupted: true } });
     await sleep(800); // past where the fake would have sent done
     expect(events(r, sent.turnId).some((e) => e.type === "done")).toBe(false);
-    expect(r.store.getThread(t.id).messages.map((m) => m.role)).toEqual(["user"]);
+    expect(events(r, sent.turnId).filter((e) => e.type === "error")).toHaveLength(1);
+    const shown = events(r, sent.turnId).filter((e) => e.type === "delta").map((e) => e.text).join("");
+    const { messages } = await r.client.call("threads.get", { threadId: t.id });
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(messages[1]).toMatchObject({ content: shown, interrupted: true });
     expect(r.app.activeTurns()).toBe(0);
     // A finished or unknown turn is not cancellable; the thread takes a new turn.
     expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: false });
@@ -1177,6 +1207,239 @@ describe("chat.cancel and threads.delete during a turn", () => {
     r.setChat((res) => stream(res, [piece("fine"), doneLine]));
     const again = await r.client.call("chat.send", { threadId: t.id, content: "again", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
+  });
+
+  describe("a reply on its way to disk", () => {
+    it("is written marked interrupted from its first words, and threads.get does not show it while it runs", async () => {
+      const r = await rig();
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId);
+      expect(onDisk(r, threadId)).toMatchObject([{ content: "one ", interrupted: true }]);
+      expect((await r.client.call("threads.get", { threadId })).messages.map((m) => m.role)).toEqual(["user"]);
+      await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+      const finished = onDisk(r, threadId);
+      expect(finished).toHaveLength(1);
+      expect(finished[0]).toMatchObject({ content: "one two three four " });
+      expect(finished[0]?.interrupted).toBeUndefined();
+    });
+
+    it("is updated in place while it streams", async () => {
+      const r = await rig({ draftEveryMs: 20 });
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId, 3);
+      await vi.waitFor(() => expect(onDisk(r, threadId)[0]?.content.startsWith("one two")).toBe(true), { interval: 5 });
+      const rows = onDisk(r, threadId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.content.startsWith("one two")).toBe(true);
+      expect(rows[0]?.interrupted).toBe(true);
+    });
+
+    it("waits between writes rather than writing every word", async () => {
+      const r = await rig({ draftEveryMs: 60_000 });
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId, 3);
+      expect(onDisk(r, threadId)).toMatchObject([{ content: "one ", interrupted: true }]);
+    });
+
+    it("a Stop or a failure leaves one row, not the in-progress one beside it", async () => {
+      const r = await rig();
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId);
+      await r.client.call("chat.cancel", { turnId: sent.turnId });
+      const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+      expect(onDisk(r, threadId).map((m) => m.id)).toEqual([end.event.type === "error" ? end.event.partial?.id : undefined]);
+    });
+
+    it("deleting a message mid-reply leaves no in-progress row behind", async () => {
+      const r = await rig();
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId);
+      await r.client.call("messages.delete", { threadId, messageId: sent.userMessage.id });
+      expect(r.store.getThread(threadId).messages).toEqual([]);
+    });
+
+    it("deleting an older message stops the reply but keeps what it wrote", async () => {
+      const r = await rig();
+      r.setChat(quickReply);
+      const t = await r.client.call("threads.create", {});
+      const older = await r.client.call("chat.send", { threadId: t.id, content: "earlier", model: MODEL, numCtx: 16384 });
+      await r.waitFor("chat.event", (p) => p.turnId === older.turnId && p.event.type === "done");
+      await vi.waitFor(() => expect(r.app.activeTurns()).toBe(0));
+      r.setChat(slowReply);
+      const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+      await untilWords(r, sent.turnId);
+      await r.client.call("messages.delete", { threadId: t.id, messageId: older.userMessage.id });
+      const rows = r.store.getThread(t.id).messages;
+      expect(rows.map((m) => m.id)).not.toContain(older.userMessage.id);
+      expect(rows.at(-1)).toMatchObject({ role: "assistant", content: "one ", interrupted: true });
+      expect(events(r, sent.turnId).at(-1)).toMatchObject({ type: "error", partial: { content: "one ", interrupted: true } });
+    });
+
+    it("deleting the whole thread mid-reply saves nothing", async () => {
+      const r = await rig();
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId);
+      await r.client.call("threads.delete", { threadId });
+      expect(r.store.listThreads().map((t) => t.id)).not.toContain(threadId);
+      expect(events(r, sent.turnId).at(-1)).not.toHaveProperty("partial");
+    });
+
+    it("a finished reply the store refuses still saves every word, marked unfinished", async () => {
+      const r = await rig({ draftEveryMs: 60_000 });
+      const refused = line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", prompt_eval_count: -1, eval_count: 3 });
+      const { threadId, sent } = await startReply(r, (res) => stream(res, [piece("one "), piece("two "), piece("three "), refused]));
+      const terminal = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+      expect(terminal.event).toMatchObject({ type: "error", partial: { content: "one two three ", interrupted: true } });
+      expect(onDisk(r, threadId)).toMatchObject([{ content: "one two three ", interrupted: true }]);
+    });
+
+    it("a second send while it runs is refused and the model never reads the in-progress row", async () => {
+      const r = await rig();
+      const { threadId, sent } = await startReply(r);
+      await untilWords(r, sent.turnId);
+      expect(onDisk(r, threadId)).toHaveLength(1);
+      const asked = r.ollama.requests.filter((q) => q.path === "/api/chat").length;
+      expect((await rejection(r.client.call("chat.send", { threadId, content: "and?", model: MODEL, numCtx: 16384 }))).code).toBe("turn-active");
+      expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toHaveLength(asked);
+    });
+  });
+
+  describe("Retry of a reply that never finished", () => {
+    it("replaces the question and the unfinished words instead of asking twice", async () => {
+      const r = await rig();
+      const { threadId, sent } = await stoppedReply(r);
+      const again = await r.client.call("chat.send", { threadId, content: "the question", model: MODEL, numCtx: 16384, retryOf: sent.userMessage.id });
+      await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
+      const { messages } = await r.client.call("threads.get", { threadId });
+      expect(messages.map((m) => [m.role, m.content])).toEqual([["user", "the question"], ["assistant", "hi"]]);
+      expect(messages[1]?.interrupted).toBeUndefined();
+      expect(r.ollama.requests.filter((q) => q.path === "/api/chat").at(-1)?.body).toMatchObject({ messages: [{ role: "user", content: "the question" }] });
+      const body = r.ollama.requests.filter((q) => q.path === "/api/chat").at(-1)?.body as { messages: unknown[] };
+      expect(body.messages).toHaveLength(1);
+    });
+
+    it("keeps both copies when a finished reply followed the question", async () => {
+      const r = await rig();
+      r.setChat(quickReply);
+      const t = await r.client.call("threads.create", {});
+      const first = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
+      await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
+      const again = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384, retryOf: first.userMessage.id });
+      await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
+      expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    });
+
+    it("a send that is not a Retry keeps the unfinished words and leaves them out of the prompt", async () => {
+      const r = await rig();
+      const { threadId } = await stoppedReply(r);
+      const next = await r.client.call("chat.send", { threadId, content: "something else", model: MODEL, numCtx: 16384 });
+      await r.waitFor("chat.event", (p) => p.turnId === next.turnId && p.event.type === "done");
+      expect((await r.client.call("threads.get", { threadId })).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+      const body = r.ollama.requests.filter((q) => q.path === "/api/chat").at(-1)?.body as { messages: Array<{ role: string }> };
+      expect(body.messages.map((m) => m.role)).toEqual(["user", "user"]);
+    });
+  });
+
+  it("a server killed mid-reply keeps the streamed words, marked interrupted, and Retry does not ask twice", async () => {
+    const dir = cacheTmp();
+    const marker = `WORD${randomUUID().replaceAll("-", "")}`;
+    const child = spawn(process.execPath, ["--no-warnings", fileURLToPath(new URL("./crash-server.ts", import.meta.url)), dir, marker], { stdio: ["ignore", "pipe", "pipe"] });
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    cleanups.push(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await exited;
+    });
+    const ready = await new Promise<{ threadId: string; questionId: string; written: string }>((resolve, reject) => {
+      let stderr = "";
+      child.stderr.on("data", (b: Buffer) => (stderr += b.toString()));
+      createInterface({ input: child.stdout }).once("line", (l) => resolve(JSON.parse(l) as { threadId: string; questionId: string; written: string }));
+      child.once("exit", (code, signal) => reject(new Error(`child exited early (${code ?? signal}): ${stderr}`)));
+    });
+    expect(child.exitCode).toBeNull();
+    child.kill("SIGKILL");
+    await exited;
+    expect(child.signalCode).toBe("SIGKILL");
+
+    // The killed writer never checkpointed: reopening below is WAL recovery.
+    const dbPath = path.join(dir, "threads.sqlite");
+    expect(statSync(`${dbPath}-wal`).size).toBeGreaterThan(0);
+
+    const r = await rig({ dbPath });
+    r.setChat(quickReply);
+    const { threadId, questionId, written } = ready;
+    const after = await r.client.call("threads.get", { threadId });
+    expect(after.messages.map((m) => [m.role, m.interrupted])).toEqual([["user", undefined], ["assistant", undefined], ["user", undefined], ["assistant", true]]);
+    expect(after.messages[1]?.content).toBe("first answer");
+    expect(after.messages[3]?.content.startsWith(written)).toBe(true);
+
+    const raw = new DatabaseSync(dbPath, { readOnly: true });
+    expect(raw.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    expect(raw.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    raw.close();
+
+    const again = await r.client.call("chat.send", { threadId, content: "second question", model: MODEL, numCtx: 16384, retryOf: questionId });
+    await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
+    const retried = await r.client.call("threads.get", { threadId });
+    expect(retried.messages.map((m) => [m.role, m.content])).toEqual([["user", "first question"], ["assistant", "first answer"], ["user", "second question"], ["assistant", "hi"]]);
+    const prompt = JSON.stringify(r.ollama.requests.filter((q) => q.path === "/api/chat").at(-1)?.body);
+    expect(prompt).not.toContain(marker);
+    expect(prompt.split("second question")).toHaveLength(2);
+  }, 20_000);
+
+  it("Stop before any words saves nothing", async () => {
+    const r = await rig();
+    const reached = gate();
+    const held = gate();
+    cleanups.push(() => held.open());
+    r.setChat(async (res) => {
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.flushHeaders();
+      reached.open();
+      await held.shut;
+      res.end();
+    });
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    await reached.shut;
+    await r.client.call("chat.cancel", { turnId: sent.turnId });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(end.event).not.toHaveProperty("partial");
+    expect(r.store.getThread(t.id).messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("Stop that lands with the last token keeps the finished reply, not marked interrupted", async () => {
+    let r: Rig;
+    const r2 = await rig({ onDelta: (turnId) => { void r.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 }); } });
+    r = r2;
+    // One chunk: the last word and the done line are parsed with no await on the socket between them.
+    r.setChat((res) => stream(res, [piece("all of it") + doneLine]));
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && (p.event.type === "done" || p.event.type === "error"));
+    expect(end.event).toMatchObject({ type: "done", message: { role: "assistant", content: "all of it" } });
+    const saved = r.store.getThread(t.id).messages.at(-1);
+    expect(saved).toMatchObject({ role: "assistant", content: "all of it" });
+    expect(saved).not.toHaveProperty("interrupted");
+  });
+
+  it("deleting the question as its last token lands leaves neither the question nor an answer", async () => {
+    let r: Rig;
+    let threadId = "";
+    const r2 = await rig({ onDelta: () => {
+      const question = r.store.getThread(threadId).messages.find((m) => m.role === "user");
+      const remove = r.app.handlers["messages.delete"];
+      if (question !== undefined && remove !== undefined) void remove({ threadId, messageId: question.id }, { clientId: 1 });
+    } });
+    r = r2;
+    // One chunk: the delete lands with the done line already parsed.
+    r.setChat((res) => stream(res, [piece("all of it") + doneLine]));
+    threadId = (await r.client.call("threads.create", {})).id;
+    const sent = await r.client.call("chat.send", { threadId, content: "count", model: MODEL, numCtx: 16384 });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && (p.event.type === "done" || p.event.type === "error"));
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(end.event).not.toHaveProperty("partial");
+    await vi.waitFor(() => expect(r.store.getThread(threadId).messages).toEqual([]));
   });
 
   it("delete during a turn cancels it first, then deletes the thread", async () => {
@@ -1260,15 +1523,26 @@ describe("runtime.retry (W-06)", () => {
 });
 
 describe("turn failures", () => {
-  it("an Ollama error mid-stream is forwarded and nothing partial persists", async () => {
+  it("an Ollama error mid-stream reaches the person once and keeps the words shown so far", async () => {
     const r = await rig();
     r.setChat((res) => stream(res, [piece("half "), line({ error: "model runner crashed" })]));
     const t = await r.client.call("threads.create", {});
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+    expect(end.event).toMatchObject({ type: "error", code: "stream-error", message: "model runner crashed", partial: { content: "half ", interrupted: true } });
+    expect(events(r, sent.turnId).filter((e) => e.type === "error")).toHaveLength(1);
+    expect(r.store.getThread(t.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "half ", interrupted: true });
+    expect(r.app.activeTurns()).toBe(0);
+  });
+
+  it("an error before any words saves nothing", async () => {
+    const r = await rig();
+    r.setChat((res) => stream(res, [line({ error: "model runner crashed" })]));
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toEqual({ type: "error", code: "stream-error", message: "model runner crashed" });
     expect(r.store.getThread(t.id).messages.map((m) => m.role)).toEqual(["user"]);
-    expect(r.app.activeTurns()).toBe(0);
   });
 
   it("an unknown thread is thread-not-found and reserves nothing", async () => {

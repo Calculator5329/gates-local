@@ -20,7 +20,6 @@ import type { ChatEvent, Message as ChatMessage } from "../src/chat/types.ts";
 import { decideFit } from "../src/fit/fit.ts";
 import type { FitReport as FitFitReport } from "../src/fit/types.ts";
 import type { ModelInfo as RuntimeModelInfo, RuntimeStatus as RuntimeRuntimeStatus } from "../src/runtime/types.ts";
-import { createTurnBuffer } from "../src/threads/turn-buffer.ts";
 import type { Message as StoreMessage, Thread as StoreThread } from "../src/threads/types.ts";
 
 type Assignable<From, To> = [From] extends [To] ? true : false;
@@ -65,11 +64,7 @@ describe("real module outputs survive the wire", () => {
   }
 
   it("a finished turn's done event keeps stopReason and the message", () => {
-    let t = 1_762_520_000_000;
-    const turn = createTurnBuffer({ threadId: "t1", model: "qwen3.5:9b", now: () => (t += 7) });
-    turn.appendThinking("add them");
-    turn.appendDelta("Two plus two equals four.");
-    const message = turn.finish({ promptTokens: 24, completionTokens: 7, numCtx: 16384 });
+    const message: ChatMessage = { id: "m1", threadId: "t1", role: "assistant", content: "Two plus two equals four.", thinking: "add them", model: "qwen3.5:9b", createdAt: 1_762_520_000_007, stats: { promptTokens: 24, completionTokens: 7, numCtx: 16384 } };
     const event: ChatEvent = { type: "done", message, stopReason: "length" };
     const frame = encodePush("chat.event", { turnId: "turn-1", threadId: "t1", event });
     if (!frame.ok) throw frame.error;

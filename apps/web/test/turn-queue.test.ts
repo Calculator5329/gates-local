@@ -355,6 +355,8 @@ it.each([false, true])("keeps omission notices beside stopped words (notice befo
   await tick();
   expect(st().live).toHaveProperty("contextNotice", "Some earlier images are unavailable.");
   await answering("B");
+  // the terminal of the earlier-notice case comes after the person moved on, with the saved row
+  if (earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p-notice", "A", "Partial answer"), contextNotice: "Some earlier images are unavailable.", interrupted: true } });
   expect((st().messages["A"] ?? []).at(-1)).toMatchObject({ content: "Partial answer", contextNotice: "Some earlier images are unavailable." });
 });
 
@@ -473,6 +475,19 @@ describe("a send that would stop another chat", () => {
   });
 });
 
+const ask = async (reply: Payload<"chat.event">["event"]) => {
+  const turn = await answering("A");
+  chat(turn, "A", { type: "delta", text: "so far" });
+  b.frame();
+  if (reply.type === "error") session.stop();
+  chat(turn, "A", reply);
+  await tick();
+  return st().messages["A"]?.find((m) => m.role === "user")?.id ?? "";
+};
+const saved = (id: string, content = "so far") => ({ ...asstMsg(id, "A", content), interrupted: true as const });
+const cancelledWith = (partial: Message): Payload<"chat.event">["event"] => ({ type: "error", code: "cancelled", message: "stopped", partial });
+const replies = () => (st().messages["A"] ?? []).filter((m) => m.role === "assistant").map((m) => m.content);
+
 describe("the chat that got stopped", () => {
 
   it("keeps its partial reply and one plain sentence while another chat is open", async () => {
@@ -496,6 +511,104 @@ describe("the chat that got stopped", () => {
     expect(st().live).toBeNull();
     expect(st().messages["A"]?.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual(["so far"]);
     expect(st().stopNotes["p1"]).toMatch(/^Stopped so .+ could load\.$/);
+  });
+
+  describe("Retry", () => {
+    const unfinished: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true } };
+
+    it("of an unfinished reply names the question, and the old rows go once the server answers", async () => {
+      const question = await ask(unfinished);
+      const held = b.server.hold("chat.send");
+      session.retry();
+      const h = await held;
+      expect(h.params).toMatchObject({ retryOf: question, content: "hello A" });
+      expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual([question, "p8"]);
+      h.respond({ turnId: "turn-retry", userMessage: userMsg("u-again", "A", "hello A") });
+      await until(() => st().live?.turnId === "turn-retry", 2000, "the retry");
+      expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual(["u-again"]);
+    });
+
+    it("of a finished reply is a new question and names nothing", async () => {
+      await ask({ type: "done", message: asstMsg("whole", "A"), stopReason: "stop" });
+      const held = b.server.hold("chat.send");
+      session.retry();
+      const h = await held;
+      expect(h.params).not.toHaveProperty("retryOf");
+    });
+
+    it("that the server refuses leaves the unfinished words where they were", async () => {
+      const question = await ask(unfinished);
+      const held = b.server.hold("chat.send");
+      session.retry();
+      (await held).fail("wont-fit", "no");
+      await tick();
+      expect((st().messages["A"] ?? []).map((m) => m.id)).toEqual([question, "p8"]);
+    });
+  });
+
+  describe("a reply the person stopped, saved by the server", () => {
+    it("takes the live row's place, shown once with one note, and the queue waits for Send now", async () => {
+      const turn = await answering("A");
+      await session.send("next");
+      chat(turn, "A", { type: "delta", text: "so far" });
+      b.frame();
+      session.stop();
+      chat(turn, "A", cancelledWith(saved("p4")));
+      await tick();
+      expect(st().live).toBeNull();
+      expect(replies()).toEqual(["so far"]);
+      expect(st().stopNotes["p4"]).toMatch(/^Stopped after \d+ s\.$/);
+      expect(st().queued).toMatchObject([{ text: "next", held: true }]);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("still only once when the person has moved on before the server's answer", async () => {
+      const turn = await answering("A");
+      chat(turn, "A", { type: "delta", text: "so far" });
+      b.frame();
+      session.stop();
+      await answering("B");
+      chat(turn, "A", cancelledWith(saved("p5")));
+      await tick();
+      expect(replies()).toEqual(["so far"]);
+      expect(st().live?.threadId).toBe("B");
+    });
+
+    it("a Stop that lost the race to the last token leaves the finished reply and still holds the queue", async () => {
+      const turn = await answering("A");
+      await session.send("next");
+      chat(turn, "A", { type: "delta", text: "all of it" });
+      b.frame();
+      session.stop();
+      chat(turn, "A", done("whole", "A"));
+      await tick();
+      expect(st().live).toBeNull();
+      expect(st().stopNotes["whole"]).toBeUndefined();
+      expect(st().queued).toMatchObject([{ text: "next", held: true }]);
+      expect(sends()).toHaveLength(1);
+    });
+
+    it("a reply that broke mid-way says so once, leaving the kept-words sentence to the row", async () => {
+      const turn = await answering("A");
+      chat(turn, "A", { type: "delta", text: "so far" });
+      b.frame();
+      chat(turn, "A", { type: "error", code: "runtime-error", message: "the model crashed", partial: saved("p6") });
+      await tick();
+      expect(st().live).toBeNull();
+      expect(replies()).toEqual(["so far"]);
+      expect(st().stopNotes["p6"]).toBe("The reply didn't finish. The model crashed.");
+    });
+
+    it("a reply this window left running, stopped from elsewhere, still says it was stopped", async () => {
+      const turn = await answering("A");
+      chat(turn, "A", { type: "delta", text: "so far" });
+      b.frame();
+      await answering("B");
+      chat(turn, "A", cancelledWith(saved("p7")));
+      await tick();
+      expect(replies()).toEqual(["so far"]);
+      expect(st().stopNotes["p7"]).toMatch(/^Stopped after \d+ s\.$/);
+    });
   });
 
   it("stopped before a word: the sentence is on the live turn", async () => {

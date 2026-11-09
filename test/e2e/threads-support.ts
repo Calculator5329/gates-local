@@ -46,7 +46,7 @@ export async function start(page: Page, prompt: string, model = SMALL[0] ?? "tin
   return page.url();
 }
 export async function finished(page: Page, prompt: string, count = 1): Promise<void> {
-  await expect(page.locator(".turn.a:not(.done)")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".turn.a:not(.done):not(.interrupted)")).toHaveCount(0, { timeout: 15_000 });
   await expect(page.locator(".turn.a.done")).toHaveCount(count);
   await expect(page.locator(".turn.a.done .md").last()).toHaveText(threadReply(prompt).replaceAll("\n\n", ""));
 }

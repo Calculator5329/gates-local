@@ -54,7 +54,7 @@ test("TE-03: the same page resumes a mid-reply connection loss with exact words,
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect.poll(async () => (await state()).turns[0]?.outcome).toBe("cancelled");
   await expect(page.locator(".sb-row", { hasText: "alpha" }).getByLabel("Reply in progress")).toHaveCount(0);
-  await expect(page.locator(".stopped")).toContainText("Stopped after");
+  await expect(page.locator(".stop-note")).toContainText("Stopped after");
   expect((await state()).turns).toHaveLength(1);
   await shot(page, "reconnect-stopped");
 });

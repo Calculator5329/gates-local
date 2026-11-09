@@ -118,7 +118,7 @@ The built client and production server exercise real model discovery, unchanged
 fit, progressive tokens, Stop, recall of a random made-up word from the earlier message,
 and restart persistence. No GPU measurement override or `num_gpu` is supplied;
 the existing no-GPU path admits a small model as a system-memory spill. Stopped
-partials remain in the current client session only; restart checks the completed
+partials are saved as interrupted replies; restart checks the completed
 reply. Retain `real-ollama.log` and the browser screenshot, trace and
 `evidence.json`. This new diagnostic probe does not establish GPU or Electron
 behavior.

@@ -113,6 +113,8 @@ export const methods = {
       numCtx: NumCtx,
       /** A new send chooses its saved user-message id; retries reuse it. */
       messageId: S.optional(S.String.check(S.isMaxLength(200))),
+      /** Retry: the question this send repeats. It goes, with the unfinished words after it, so the thread does not ask twice. */
+      retryOf: S.optional(S.String.check(S.isMaxLength(200))),
       /** Up to eight pasted image data URLs (10 MiB each), or this thread's saved user-image paths for Retry. */
       images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
       /** Thinking for this turn; omitted means the settings default. */

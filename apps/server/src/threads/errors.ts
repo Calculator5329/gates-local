@@ -55,13 +55,3 @@ export class StoreClosedError extends Error {
     super("thread store is closed");
   }
 }
-
-export class TurnBufferClosedError extends Error {
-  override readonly name = "TurnBufferClosedError";
-  readonly code = "turn-buffer-closed";
-  readonly state: string;
-  constructor(state: string) {
-    super(`turn buffer is ${state}; it takes no more deltas`);
-    this.state = state;
-  }
-}

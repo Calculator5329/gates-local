@@ -94,10 +94,10 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
   await expect(page.locator(".turn.a .writing")).toBeVisible();
   // Stop hides immediately, even before chat.send returns its turn id.
-  // Retry becomes enabled only after the server acknowledges that turn's end.
+  // Regenerate appears only after the server has ended that turn and saved its words.
   await page.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Regenerate", exact: true })).toBeEnabled();
   await expect.poll(async () => (await runtimeState()).turns.every((turn) => turn.endedAt !== undefined)).toBe(true);
 
   await page.reload();

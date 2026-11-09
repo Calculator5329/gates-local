@@ -281,3 +281,17 @@ in tooltips. Reset all clears the shared prompt and every per-model override.
 **Direction recorded in chat:** "The owner picked layout A, and said it still needs
 iteration and will be design-iterated later, so build A now without gold-plating it."
 
+## 2026-11-09 · An unfinished reply is one row on disk, and Retry replaces it
+
+**Decided:** a streaming reply is written as one assistant row marked interrupted:
+its first words at once, then at most once a second. Every ending (finished, Stop,
+runtime error) replaces that row in one transaction, so a crash loses at most about
+a second of text and needs no recovery step or schema change. `threads.get` hides the
+row of a turn still running, and prompts leave out every interrupted reply. Retry
+names the question it repeats with `retryOf`; the server drops that question and the
+unfinished rows after it when the new question is saved, so the thread never holds
+the question twice. A Stop that lands with the last token keeps the finished reply;
+that rule covers plain replies, and a tool turn saves the same race as interrupted
+with every word kept.
+**Owner text (in chat):** Stop must keep the partial reply (confirmed 2026-11-09).
+

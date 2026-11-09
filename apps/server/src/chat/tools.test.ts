@@ -142,7 +142,7 @@ describe("tool chat transport", () => {
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "delta", text: "", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
       expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "error", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
-      expect(t.store.getThread(thread.id).messages.map(message => message.content)).toEqual(["read"]);
+      expect(t.store.getThread(thread.id).messages.map(message => message.content)).toEqual(["read", "Partial answer"]);
     } finally { await t.close(); stream.mockRestore(); }
   });
 
@@ -272,7 +272,8 @@ describe("tool chat transport", () => {
         await vi.waitFor(() => expect(t.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] }));
         expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
         expect(t.fake.ran).toEqual([]);
-        expect(t.store.getThread(thread.id).messages.map(m => m.role)).toEqual(["user"]);
+        // the tool step is what the person saw, so it stays, marked, with no image behind it
+        expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: "", interrupted: true, tools: [{ name: "image", state: "error" }] }]);
       } finally { await t.close(); }
     });
   for (const scenario of ["tools explicitly off", "tools default off", "empty Library"] as const) {

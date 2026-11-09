@@ -135,7 +135,7 @@ test("Stop keeps the rendered blocks and cancels further text", async ({ page, o
   await expect(reply.locator(".md h2")).toBeVisible();
   const first = await reply.locator(".md p").first().elementHandle();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(reply.locator(".stopped")).toBeVisible();
+  await expect(page.locator(".stop-note")).toBeVisible();
   expect(await first!.evaluate((el) => el.isConnected)).toBe(true);
   // Stop cancels delivery; the already received pacing tail still drains.
   await expect(reply.locator(".writing")).toHaveCount(0);

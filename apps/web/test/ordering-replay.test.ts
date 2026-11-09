@@ -360,6 +360,103 @@ export function stopSend(): ReplayScenario<World> {
   };
 }
 
+// The person stops a reply and sends in another chat. The saved row may reach
+// this window before or after the send is admitted, and either way is one row.
+export function stopSavedPartial(): ReplayScenario<World> {
+  return {
+    name: "Stop with a saved partial, moving on before it arrives", dispose,
+    create: async () => {
+      const w = await OrderingWorld.create();
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => w.server.admittedPush("turn-1", "A"));
+      await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
+      w.server.holdChat = true; w.server.deferAdmission = true;
+      return w;
+    },
+    events: [
+      event("A.Stop", [], (w) => w.step(() => { w.expectedCancelled.add("turn-1"); w.a.session.stop(); })),
+      // runTurn saves the partial on abort and broadcasts its end to every open socket.
+      event("server.stop.saved", ["A.Stop"], noop, { emit: () => [frame("A", "saved.push-to-A"), frame("B", "saved.push-to-B")] }),
+      event("saved.push-to-A", ["server.stop.saved"], (w) => w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far", true)), { delivery: true }),
+      event("saved.push-to-B", ["server.stop.saved"], (w) => w.step(() => w.server.chatWords("turn-1", w.b.socket, "so far", true)), { delivery: true }),
+      event("A.next-send.request", ["A.Stop"], (w) => w.step(() => {
+        w.a.store.setState({ view: "thread", threadId: "t2", draft: "second" }); void w.a.session.send("second");
+      })),
+      event("server.next-admission.complete", ["A.next-send.request"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
+      ...chatDeliveries("turn-2", "server.next-admission.complete"),
+    ],
+    check(w, order, complete) {
+      const state = w.a.store.getState();
+      const replies = (state.messages["t1"] ?? []).filter((m) => m.role === "assistant");
+      expect(replies.length, "the stopped reply is never two rows, after " + order.at(-1)).toBeLessThanOrEqual(1);
+      expect(w.server.cancelled.every((turn) => w.expectedCancelled.has(turn)), "Stop may cancel only the reply it named").toBe(true);
+      if (complete) {
+        expect(replies).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
+        expect(state.live).toMatchObject({ turnId: "turn-2", threadId: "t2", pendingUser: null });
+        expect(state.live?.end).toBeUndefined();
+      }
+    },
+  };
+}
+
+// A reply breaks after some words. The note under the saved row says why,
+// in whichever order the two open windows hear about it.
+export function errorSavedPartial(): ReplayScenario<World> {
+  const reason = "the model runner crashed";
+  return {
+    name: "A runtime error after some words keeps its reason", dispose,
+    create: async () => {
+      const w = await OrderingWorld.create();
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => w.server.admittedPush("turn-1", "A"));
+      await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
+      return w;
+    },
+    events: [
+      event("server.failed", [], noop, { emit: () => [frame("A", "failed.push-to-A"), frame("B", "failed.push-to-B")] }),
+      event("failed.push-to-A", ["server.failed"], (w) => w.step(() => w.server.chatFailed("turn-1", w.a.socket, "so far", reason)), { delivery: true }),
+      event("failed.push-to-B", ["server.failed"], (w) => w.step(() => w.server.chatFailed("turn-1", w.b.socket, "so far", reason)), { delivery: true }),
+    ],
+    check(w, _order, complete) {
+      if (!complete) return;
+      const state = w.a.store.getState();
+      expect(state.live).toBeNull();
+      expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
+      expect(state.stopNotes["reply-turn-1"]).toBe("The reply didn't finish. The model runner crashed.");
+    },
+  };
+}
+
+// Retry of an unfinished reply, with a history load landing while the server
+// has not answered yet: the load brings new objects for the same rows.
+export function retryThroughHistory(): ReplayScenario<World> {
+  return {
+    name: "Retry replaces the old rows when history reloads before its answer", dispose,
+    create: async () => {
+      const w = await OrderingWorld.create(false);
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => w.server.admittedPush("turn-1", "A"));
+      await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
+      await w.step(() => { w.expectedCancelled.add("turn-1"); w.a.session.stop(); });
+      await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far", true));
+      w.server.messages.push({ id: "reply-turn-1", threadId: "t1", role: "assistant", content: "so far", interrupted: true, createdAt: 1_000 });
+      w.server.holdChat = true; w.server.deferAdmission = true;
+      return w;
+    },
+    events: [
+      event("A.Retry", [], (w) => w.step(() => w.a.session.retry())),
+      event("A.history", ["A.Retry"], (w) => w.step(() => w.a.session.reloadThread("t1"))),
+      // chat.send with retryOf drops the old question and its unfinished rows as it saves the new question.
+      event("server.retry.admitted", ["A.history"], (w) => w.step(() => { w.server.messages.length = 0; w.server.admit("turn-2"); })),
+      event("A.retry.response", ["server.retry.admitted"], (w) => w.step(() => w.server.response("turn-2"))),
+    ],
+    check(w, _order, complete) {
+      if (!complete) return;
+      expect(w.a.store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["user-2"]);
+    },
+  };
+}
+
 const run = async (scenario: ReplayScenario<World>): Promise<void> => {
   await replay(scenario, { limit: LIMIT, order: process.env["REPLAY_ORDER"] });
 };
@@ -438,6 +535,17 @@ it.each([true, false])("speech cancels Connect at foreign receipt (tagged=%s)", 
 it("speech ignores unrelated foreign settings during hydration", () => run(foreignSpeech(true)));
 it("a message stays visible and sends once across reconnect", () => run(sendReconnect()));
 it("Stop applies only to its original reply around acknowledgements", () => run(stopSend()));
+it("Stop with a saved partial is one row whenever the saved row arrives", async () => {
+  const scenario = stopSavedPartial();
+  const { orders } = explore(scenario.events, LIMIT);
+  expect(orders.some((order) => before(order, "saved.push-to-A", "A.next-send.request"))).toBe(true);
+  expect(orders.some((order) => before(order, "A.next-send.request", "saved.push-to-A") && before(order, "saved.push-to-A", "turn-2.response"))).toBe(true);
+  expect(orders.some((order) => before(order, "turn-2.response", "saved.push-to-A"))).toBe(true);
+  await run(scenario);
+});
+
+it("a runtime error after some words keeps the server's reason in the one note", () => run(errorSavedPartial()));
+it("Retry removes the old rows even when history reloaded them as new objects", () => run(retryThroughHistory()));
 
 it("TL-01: active-turn hydration restores ongoing replies and orders terminal events around its snapshot", async () => {
   for (const ending of ["running", "offline", "during-hydration"] as const) {

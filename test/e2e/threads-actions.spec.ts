@@ -53,7 +53,7 @@ test("Retry after returning to a stopped thread leaves the other thread running"
   await configure({ holdAfterTokens: 28 });
   await start(page, "alpha"); await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Regenerate", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "New thread" }).click();
   await start(page, "beta", SMALL[1]); await expect(page.locator(".turn.a .md p")).toHaveCount(3);
   await page.locator(".sb-row", { hasText: "alpha" }).click();
@@ -61,8 +61,10 @@ test("Retry after returning to a stopped thread leaves the other thread running"
   await expect.poll(async () => (await state()).turns.filter((t) => t.prompt === "alpha").length).toBe(2);
   await expect(page.locator(".turn.a:not(.done) .md p")).toHaveCount(3);
   expect((await state()).turns.find((t) => t.prompt === "beta")?.endedAt).toBeUndefined();
-  // Regenerate from a saved row appends another turn; the stopped partial stays.
-  await release("alpha"); await finished(page, "alpha", 2);
+  // Regenerate from an interrupted row replaces the stopped partial.
+  await release("alpha"); await finished(page, "alpha");
+  await expect(page.locator(".turn.a.interrupted")).toHaveCount(0);
+  await expect(page.locator(".turn.u")).toHaveCount(1);
   await page.locator(".sb-row", { hasText: "beta" }).click();
   await release("beta"); await finished(page, "beta");
 });

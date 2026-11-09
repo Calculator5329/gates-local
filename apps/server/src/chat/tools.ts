@@ -83,7 +83,7 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
       } };
     }
   } catch (e) {
-    yield { type: "error", code: signal.aborted ? "cancelled" : "stream-error", message: signal.aborted ? "Tool turn cancelled; no reply saved" : (e as Error).message };
+    yield { type: "error", code: signal.aborted ? "cancelled" : "stream-error", message: signal.aborted ? "Tool turn cancelled; any words and steps so far are saved as interrupted" : (e as Error).message };
   }
 }
 

@@ -1,6 +1,6 @@
 // SQLite thread store (node:sqlite, so no native dependency; it runs under
-// Electron 45's Node as well). Completed messages and explicitly marked
-// interrupted replies persist; streaming text otherwise stays in memory.
+// Electron 45's Node as well). Completed messages persist, and a reply that
+// has not finished persists marked interrupted, rewritten as it streams.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -35,7 +35,8 @@ export interface ThreadStore {
   getThread(threadId: string): ThreadWithMessages;
   renameThread(threadId: string, title: string): Thread;
   deleteThread(threadId: string): void;
-  appendMessage(input: NewMessage): Message;
+  /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
+  appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
   saveImageJob(event: ImageEvent, prompt: string): void;
   /** Links the failed attempt and creates its retry card in one write transaction. */
   claimImageRetry(threadId: string, previousJobId: string, jobId: string): { jobId: string; prompt: string; created: boolean };
@@ -90,6 +91,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     deleteThread: db.prepare("DELETE FROM threads WHERE id = ?"),
     touchThread: db.prepare("UPDATE threads SET updated_at = MAX(updated_at, ?) WHERE id = ?"),
     messageExists: db.prepare("SELECT 1 AS hit FROM messages WHERE id = ?"),
+    deleteMessage: db.prepare("DELETE FROM messages WHERE id = ? AND thread_id = ?"),
     getMessage: db.prepare("SELECT * FROM messages WHERE id = ?"),
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
@@ -143,7 +145,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
 
     deleteMessage(threadId, messageId) {
       guard(); checkId("messageId", messageId); loadThread(threadId);
-      db.prepare("DELETE FROM messages WHERE id = ? AND thread_id = ?").run(messageId, threadId);
+      stmt.deleteMessage.run(messageId, threadId);
     },
     imageReferences() {
       guard();
@@ -206,11 +208,12 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
     },
 
-    appendMessage(input) {
+    appendMessage(input, replacing = []) {
       guard();
       const msg = checkNewMessage(input, now);
       return transaction(() => {
         loadThread(msg.threadId);
+        for (const id of replacing) stmt.deleteMessage.run(id, msg.threadId);
         if (stmt.messageExists.get(msg.id)) throw new DuplicateMessageError(msg.id);
         const s = msg.stats;
         stmt.insertMessage.run(

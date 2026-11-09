@@ -126,6 +126,27 @@ function stopReason(event: { readonly code: string; readonly neededBy?: string |
   return `Stopped so ${by} could load.`;
 }
 
+/** Why a reply the server saved unfinished stopped; the row adds that its words are kept. `end` is how this client saw it stop; none: the row's general marker says it, because this client cannot say why. */
+function savedNote(event: Extract<ChatEvent, { type: "error" }>, end: LiveTurn["end"]): string | undefined {
+  if (end?.kind === "stopped") return `Stopped after ${end.secs} s.`;
+  if (event.code === "cancelled") return undefined;
+  return stopReason(event) ?? `The reply didn't finish.${asSentence(event.message)}`;
+}
+
+/** The server's error text as a following sentence of a note; nothing when it has none. */
+function asSentence(text: string): string {
+  const t = text.trim();
+  if (t === "") return "";
+  const sentence = t.charAt(0).toUpperCase() + t.slice(1);
+  return ` ${/[.!?]$/.test(sentence) ? sentence : `${sentence}.`}`;
+}
+
+/** What a Retry replaces on the server: the last question and the unfinished rows after it. None when a finished reply followed: Regenerate is then a new question. */
+function retriedRows(messages: readonly Message[]): readonly Message[] {
+  const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
+  return rows[0]?.role === "user" && rows.slice(1).every((m) => m.interrupted === true) ? rows : [];
+}
+
 /** The reply these messages waited for stopped or failed: they wait for Send now instead of going out on their own. */
 function holdQueue(threadId: string): void {
   const waiting = (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
@@ -354,9 +375,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     setState({ live: back });
   }
 
-  /** A stopped or failed reply without a saved partial keeps its words in this client's chat. */
+  /** A stopped or failed reply without a saved partial keeps its words in this client's chat. Still `ending`: the server's terminal event is on its way and brings the saved row. */
   function keepStoppedWords(l: LiveTurn): void {
-    if (l.end === undefined || (l.end.kind === "error" && l.end.code === "closed") || (l.text === "" && l.thinking === "" && l.tools.length === 0)) return;
+    if (l.end === undefined || l.ending === true || (l.end.kind === "error" && l.end.code === "closed") || (l.text === "" && l.thinking === "" && l.tools.length === 0)) return;
     const { threadId } = l;
     const tools = l.tools.map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
     const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), ...(tools.length === 0 ? {} : { tools }), ...(l.contextNotice ? { contextNotice: l.contextNotice } : {}), model: l.model, createdAt: Date.now() };
@@ -375,6 +396,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const s = getState();
     const images = opts.out?.images ?? opts.from?.q.images ?? [];
     const gen = ++turnGen;
+    const replacing = opts.out?.regenerate === true ? retriedRows(s.messages[threadId] ?? []) : [];
+    // the server has taken the old rows out in the same write that saved the new question
+    const replacedIds = new Set(replacing.map((m) => m.id));
+    const withoutReplaced = (st: State): State => replacing.length === 0 ? st : { ...st, messages: { ...st.messages, [threadId]: (st.messages[threadId] ?? []).filter((m) => !replacedIds.has(m.id)) } };
     const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
     opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
     setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), live: { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images } }));
@@ -383,6 +408,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         threadId,
         content,
         messageId,
+        ...(replacing[0] === undefined ? {} : { retryOf: replacing[0].id }),
         model,
         numCtx: s.numCtx,
         think: s.think,
@@ -405,7 +431,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         // the person moved on before the id came, and another chat's turn took the slot: this one runs on behind it
         parked[away] = { ...(parked[away] as LiveTurn), turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null };
         noteMessage(threadId, r.userMessage);
-        applyServerEvent((st) => ({ messages: withMessage(st, threadId, r.userMessage) }));
+        applyServerEvent((st) => ({ messages: withMessage(withoutReplaced(st), threadId, r.userMessage) }));
         const theirs = early.filter((p) => p.turnId === r.turnId);
         early = early.filter((p) => p.turnId !== r.turnId);
         for (const p of theirs) turnEvent(p);
@@ -415,7 +441,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       const mine = now !== null && now.gen === gen;
       noteMessage(threadId, r.userMessage);
       applyServerEvent((st) => ({
-        messages: withMessage(st, threadId, r.userMessage),
+        messages: withMessage(withoutReplaced(st), threadId, r.userMessage),
         ...(st.live !== null && st.live.gen === gen ? { live: { ...st.live, turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null } } : {}),
       }));
       // stopped before its id was known, or replaced by a newer turn: end it on the server too
@@ -502,7 +528,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     holdQueue(live.threadId);
   }
 
-  /** Retry or Regenerate: send the thread's last user message again. The server keeps both copies (no regenerate method yet). */
+  /** Retry or Regenerate: send the thread's last user message again. An unfinished reply is replaced; after a finished one the server keeps both copies (no regenerate method yet). */
   function retry(): void {
     const s = getState();
     if (s.threadId === null || !canRetry(s)) return;
@@ -642,6 +668,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           };
         });
         invalidateFits();
+        // the person said stop: a Stop that lost the race to the last token holds the queue like any other
+        if (live.end?.kind === "stopped") holdQueue(threadId);
         flushQueued();
         return;
       }
@@ -660,7 +688,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           dropDeltas();
           const { partial } = event;
           noteMessage(threadId, partial);
-          applyServerEvent((s) => ({ messages: withMessage(s, threadId, partial), live: null, ...(why === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: why } }) }));
+          const note = savedNote(event, live.end);
+          applyServerEvent((s) => ({ messages: withMessage(s, threadId, partial), live: null, ...(note === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: note } }) }));
         } else {
           applyServerEvent((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: why ?? event.message } } } : {}));
         }
@@ -693,7 +722,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       case "error":
         parked.splice(i, 1);
         holdQueue(t.threadId);
-        if (event.partial !== undefined) keepStopped(t.threadId, t.userMessageId, event);
+        if (event.partial !== undefined) keepStopped(t.threadId, t.userMessageId, event, { kind: "stopped", secs: Math.round((Date.now() - t.startedAt) / 1000) });
         else if (t.text !== "" || t.thinking !== "" || t.tools.length > 0) {
           keepStoppedWords({ ...t, ...(event.contextNotice ? { contextNotice: event.contextNotice } : {}), end: event.code === "cancelled" ? { kind: "stopped", secs: Math.round((Date.now() - t.startedAt) / 1000) } : { kind: "error", code: event.code, message: event.message } });
         } else if (event.code !== "cancelled") keepStopped(t.threadId, t.userMessageId, event);
@@ -703,14 +732,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   }
 
   /** A turn that ended without being on screen: what it saved goes into its thread, with why it stopped under it. */
-  function keepStopped(threadId: string, userMessageId: string | undefined, event: Extract<ChatEvent, { type: "error" }>): void {
+  function keepStopped(threadId: string, userMessageId: string | undefined, event: Extract<ChatEvent, { type: "error" }>, ifCancelled?: LiveTurn["end"]): void {
     const { partial } = event;
     if (partial !== undefined) noteMessage(threadId, partial);
-    const why = stopReason(event) ?? "The reply didn't finish.";
+    const why = partial === undefined ? stopReason(event) ?? "The reply didn't finish." : savedNote(event, event.code === "cancelled" ? ifCancelled : undefined);
     const on = partial?.id ?? userMessageId;
     applyServerEvent((s) => ({
       ...(partial !== undefined && s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),
-      ...(on === undefined ? {} : { stopNotes: { ...s.stopNotes, [on]: why } }),
+      ...(on === undefined || why === undefined ? {} : { stopNotes: { ...s.stopNotes, [on]: why } }),
     }));
   }
 

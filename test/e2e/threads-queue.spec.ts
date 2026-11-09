@@ -37,7 +37,8 @@ for (const ending of ["stop", "error"] as const) {
     expect((await state()).turns.map((t) => t.prompt)).toEqual(["alpha"]);
     await shot(page, `queue-${ending}-held`);
     await page.locator("[data-send-now]").click();
-    await finished(page, "beta", 2);
+    await finished(page, "beta");
+    await expect(page.locator(".turn.a.interrupted")).toHaveCount(1);
     expect((await state()).turns.map((t) => t.prompt)).toEqual(["alpha", "beta"]);
   });
 }
@@ -53,7 +54,7 @@ test("Send now stops only this thread, keeping its partial words while another t
   await page.locator("[data-send-now]").click();
   await expect(page.locator(".turn.u")).toHaveCount(2);
   await expect(page.locator(".stop-note")).toContainText("Stopped after");
-  await expect(page.locator(".turn.a.done .md").first()).toContainText("Reply 1 for alpha.");
+  await expect(page.locator(".turn.a.interrupted .md").first()).toContainText("Reply 1 for alpha.");
   expect((await state()).turns.find((t) => t.prompt === "beta")?.endedAt).toBeUndefined();
   await expect.poll(async () => (await state()).turns.find((t) => t.prompt === "send now")?.outcome).toBe("done");
   await release("beta");

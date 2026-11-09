@@ -3,19 +3,20 @@
 // main.ts only parses flags and owns the process; tests drive this directly.
 //
 // A chat turn: one active turn per thread, a ready runtime, a fit verdict
-// other than refuse; then the user message persists, the reply streams on
-// chat.event and only the finished assistant message reaches the store.
+// other than refuse; then the user message persists and the reply streams on
+// chat.event. A finished reply is saved complete; any other end keeps the words
+// sent so far, marked interrupted (runTurn's finish).
 import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
-import type { BlockingTurn, Channel, Message, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
 import type { LibraryImports } from "./sources/imports.ts";
-import type { TurnMessage } from "./chat/types.ts";
+import type { ChatEvent, TurnMessage } from "./chat/types.ts";
 import { planLoad, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow, sameModel } from "./fit/ollama.ts";
@@ -25,6 +26,7 @@ import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { OllamaRuntime } from "./runtime/runtime.ts";
 import type { ThreadStore } from "./threads/store.ts";
+import type { NewMessage } from "./threads/types.ts";
 import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageModule } from "./image/module.ts";
@@ -86,6 +88,12 @@ export class AppError extends Error {
 /** A runtime switch ended the turn; the reply streamed so far is saved as a stopped reply. */
 export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
 const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
+/** What a Retry of `questionId` replaces: that question and the unfinished rows after it. None once something else was asked or a finished reply followed: then it is a new question. */
+function retriedRows(messages: readonly { readonly id: string; readonly role: string; readonly interrupted?: true }[], questionId: string): string[] {
+  const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
+  return rows[0]?.id === questionId && rows.slice(1).every((m) => m.interrupted === true) ? rows.map((m) => m.id) : [];
+}
+
 const HALTED = Symbol("halted");
 /** chat.send stopOthers ended this turn: `model`'s load needed the GPU memory `held` was using. */
 const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
@@ -95,6 +103,11 @@ const cancelledBeforeStart = () => new AppError("cancelled", "the turn was cance
 
 export type Push = <C extends Channel>(channel: C, payload: Payload<C>, changes?: readonly SyncChange[]) => void;
 type WireEvent = Payload<"chat.event">["event"];
+type TurnEnd = Extract<WireEvent, { type: "done" | "error" }>;
+type TurnFailure = Extract<WireEvent, { type: "error" }>;
+type StreamDone = Extract<ChatEvent, { type: "done" }>;
+/** A halt's one terminal event: its error's code, message and, for preempted, the model that needed the GPU. */
+const haltedEnd = (reason: AppError): TurnFailure => ({ type: "error", code: reason.code, message: reason.message, ...(reason.neededBy === undefined ? {} : { neededBy: reason.neededBy }) });
 
 export interface AppDeps {
   readonly admit?: () => void;
@@ -114,6 +127,8 @@ export interface AppDeps {
   readonly toolsEnabled?: () => boolean;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
+  /** How often a streaming reply is rewritten on disk; a crash loses at most this much. Defaults to a second. */
+  readonly draftEveryMs?: number;
   /**
    * Settings, GPU status, catalog, downloads and preloading (built in main
    * from settings/, fit/ and runtime/), plus the loader: a turn reserves its
@@ -164,6 +179,10 @@ interface Turn {
   started: boolean;
   terminal: boolean;
   start?: Extract<WireEvent, { type: "start" }>;
+  /** The reply's row on disk while it streams. threads.get hides it: this reply reaches clients as its live turn. */
+  draftId: string | undefined;
+  /** Its thread or the question it answers is being deleted: the reply is dropped, not saved. */
+  dropReply: boolean;
   text: string;
   thinking: string;
   contextNotice?: string;
@@ -194,6 +213,7 @@ export function createApp(deps: AppDeps): App {
   const newId = deps.newId ?? randomUUID;
   const imageFiles = deps.dataDir ? imageLifecycle(deps.dataDir, store) : undefined;
   const imageReady = imageFiles?.sweep() ?? Promise.resolve();
+  const draftEveryMs = deps.draftEveryMs ?? 1000;
   const turns = new Map<string, Turn>();
   const byThread = new Map<string, Turn>();
   let closing = false;
@@ -240,6 +260,8 @@ export function createApp(deps: AppDeps): App {
       },
       started: false,
       terminal: false,
+      draftId: undefined,
+      dropReply: false,
       text: "",
       thinking: "",
       steps: new Map(),
@@ -309,30 +331,77 @@ export function createApp(deps: AppDeps): App {
       // Send metadata before words using the trimmed context, without marking a first token.
       push("chat.event", { turnId, threadId, event: { type: "delta", text: "", contextNotice: turn.contextNotice } });
     };
-    const emit = (event: WireEvent) => {
+    const emit = (event: Exclude<WireEvent, TurnEnd>) => {
       if (turn.terminal) return;
-      if (event.type === "error" || event.type === "done") turn.terminal = true;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") load?.firstToken();
       if (event.type === "delta") turn.text += event.text;
       if (event.type === "thinking") turn.thinking += event.text;
       if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
-      push("chat.event", { turnId, threadId, event: event.type === "error" && turn.contextNotice ? { ...event, contextNotice: turn.contextNotice } : event });
+      push("chat.event", { turnId, threadId, event });
+      keepDraft();
     };
-    /** halt() ended the turn: save the text and thinking sent so far, then its one terminal event. */
-    const endHalted = (reason: AppError) => {
-      if (turn.terminal) return;
-      let partial: Message | undefined;
-      if (turn.text !== "" || turn.thinking !== "" || turn.steps.size > 0) {
-        try {
-          const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
-          partial = store.appendMessage({ threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
-        } catch (e) {
-          log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
-        }
+    const nothingYet = () => turn.text === "" && turn.thinking === "" && turn.steps.size === 0;
+    const replacingDraft = () => (turn.draftId === undefined ? [] : [turn.draftId]);
+    const unfinishedRow = (): NewMessage => {
+      const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
+      return { threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) };
+    };
+    let drafted = false;
+    let draftTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The reply so far on disk, marked interrupted, so a crash needs no recovery pass. Each write and the final save replace this one row. */
+    const writeDraft = () => {
+      draftTimer = undefined;
+      if (turn.terminal || turn.dropReply) return;
+      try {
+        turn.draftId = store.appendMessage(unfinishedRow(), replacingDraft()).id;
+      } catch (e) {
+        log(`turn ${turnId}: reply in progress not written: ${(e as Error).message}`);
       }
-      emit({ type: "error", code: reason.code, message: reason.message, ...(partial ? { partial } : {}), ...(reason.neededBy === undefined ? {} : { neededBy: reason.neededBy }) });
-      if (partial) push("threads.changed", { threadId });
+    };
+    /** Written at the first words, then at most once per draftEveryMs. */
+    const keepDraft = () => {
+      if (nothingYet()) return;
+      if (drafted) draftTimer ??= setTimeout(writeDraft, draftEveryMs);
+      else {
+        drafted = true;
+        writeDraft();
+      }
+    };
+    /** The words the person saw, saved marked interrupted. Nothing is written for a reply with no words yet, or one whose thread or question is being deleted. */
+    const saveUnfinished = (failure: TurnFailure): TurnFailure => {
+      try {
+        if (turn.dropReply) {
+          if (turn.draftId !== undefined) store.deleteMessage(threadId, turn.draftId);
+          return failure;
+        }
+        if (nothingYet()) return failure;
+        return { ...failure, partial: store.appendMessage(unfinishedRow(), replacingDraft()) };
+      } catch (e) {
+        log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
+        return failure;
+      }
+    };
+    /** The finished reply, saved complete. A store that refuses it keeps the words as an unfinished reply and ends the turn with that error. */
+    const saveFinished = (done: StreamDone): TurnEnd => {
+      try {
+        const notice = turn.contextNotice ?? done.message.contextNotice;
+        return { ...done, message: store.appendMessage({ ...done.message, ...(notice ? { contextNotice: notice } : {}) }, replacingDraft()) };
+      } catch (e) {
+        const code = (e as { code?: unknown }).code;
+        return saveUnfinished({ type: "error", code: typeof code === "string" ? code : "internal", message: `the final save failed: ${(e as Error).message}` });
+      }
+    };
+    /** Every way a turn ends comes here, once: it decides what is saved and sends the one terminal event. */
+    const finish = (outcome: StreamDone | TurnFailure) => {
+      if (turn.terminal) return;
+      turn.terminal = true;
+      clearTimeout(draftTimer);
+      // Done wins over a Stop, never over deleting the thread or the question.
+      const dropped = outcome.type === "done" && turn.dropReply ? { type: "error" as const, code: "cancelled" as const, message: "cancelled: its question was deleted" } : outcome;
+      const event = dropped.type === "done" ? saveFinished(dropped) : saveUnfinished(dropped);
+      push("chat.event", { turnId, threadId, event: event.type === "error" && turn.contextNotice ? { ...event, contextNotice: turn.contextNotice } : event });
+      if (event.type === "done" || event.partial !== undefined) push("threads.changed", { threadId });
     };
     /** `work`, or HALTED as soon as halt() runs; the dropped work finishes in the background. */
     const untilHalted = <T>(work: Promise<T>): Promise<T | typeof HALTED> => {
@@ -348,7 +417,7 @@ export function createApp(deps: AppDeps): App {
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
       const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
       if (think === HALTED || turn.halted) {
-        endHalted(turn.halted!);
+        finish(haltedEnd(turn.halted!));
         return;
       }
       // Include the installed prompt explicitly so context accounting sees it, including on tool turns.
@@ -356,7 +425,7 @@ export function createApp(deps: AppDeps): App {
       let systemPrompt = options.settings?.systemPrompt;
       if (systemPrompt === undefined && deps.settings !== undefined) {
         const show = await untilHalted(fetchShow(baseUrl, model, controller.signal));
-        if (show === HALTED || turn.halted) { endHalted(turn.halted!); return; }
+        if (show === HALTED || turn.halted) { finish(haltedEnd(turn.halted!)); return; }
         systemPrompt = show.system ?? "";
       }
       const input = {
@@ -379,33 +448,20 @@ export function createApp(deps: AppDeps): App {
           const step = await untilHalted(iterator.next());
           if (step === HALTED || turn.halted) {
             dropped = step === HALTED;
-            endHalted(turn.halted!);
+            finish(haltedEnd(turn.halted!));
             return;
           }
-          if (step.done === true) return;
+          if (step.done === true) {
+            finish({ type: "error", code: "internal", message: "the reply ended without finishing" });
+            return;
+          }
           const event = step.value;
-          if (event.type !== "done") {
-            emit(event);
-            if (turn.terminal) return;
-            continue;
-          }
-          // A cancel that lands with the done line still wins: nothing persists.
-          if (controller.signal.aborted) {
-            emit({ type: "error", code: "cancelled", message: "cancelled as the reply finished; not saved" });
+          // A Stop that lands with the done line keeps the finished reply: the done event wins.
+          if (event.type === "done" || event.type === "error") {
+            finish(event);
             return;
           }
-          let saved;
-          try {
-            const notice = turn.contextNotice ?? event.message.contextNotice;
-            saved = store.appendMessage({ ...event.message, ...(notice ? { contextNotice: notice } : {}) });
-          } catch (e) {
-            const code = (e as { code?: unknown }).code;
-            emit({ type: "error", code: typeof code === "string" ? code : "internal", message: `reply not saved: ${(e as Error).message}` });
-            return;
-          }
-          emit({ type: "done", message: saved, stopReason: event.stopReason });
-          push("threads.changed", { threadId });
-          return;
+          emit(event);
         }
       } finally {
         // The generator's own cleanup (its finally: the socket, a queued image's take-back) runs on
@@ -414,10 +470,10 @@ export function createApp(deps: AppDeps): App {
         if (!dropped) await cleanup;
       }
     } catch (e) {
-      if (turn.halted) endHalted(turn.halted);
+      if (turn.halted) finish(haltedEnd(turn.halted));
       else {
         log(`turn ${turnId} failed: ${(e as Error).message}`);
-        emit({ type: "error", code: "internal", message: (e as Error).message });
+        finish({ type: "error", code: "internal", message: (e as Error).message });
       }
     } finally {
       load?.end();
@@ -459,9 +515,10 @@ export function createApp(deps: AppDeps): App {
     return stop.map((t) => ({ threadId: t.threadId, title: titles.get(t.threadId) ?? "", model: t.model, turnId: t.turnId }));
   };
 
-  const cancelThreadTurn = async (threadId: string) => {
+  const cancelThreadTurn = async (threadId: string, dropReply: boolean) => {
     const turn = byThread.get(threadId);
     if (turn === undefined) return;
+    turn.dropReply ||= dropReply;
     turn.controller.abort();
     await turn.ended;
   };
@@ -490,7 +547,11 @@ export function createApp(deps: AppDeps): App {
       push("threads.changed", { threadId: thread.id });
       return thread;
     },
-    "threads.get": ({ threadId }) => store.getThread(threadId),
+    "threads.get": ({ threadId }) => {
+      const saved = store.getThread(threadId);
+      const draft = byThread.get(threadId)?.draftId;
+      return draft === undefined ? saved : { ...saved, messages: saved.messages.filter((m) => m.id !== draft) };
+    },
     "threads.rename": ({ threadId, title }) => {
       const thread = store.renameThread(threadId, title);
       push("threads.changed", { threadId });
@@ -501,7 +562,7 @@ export function createApp(deps: AppDeps): App {
       const marked = !deleting.has(threadId);
       deleting.add(threadId);
       try {
-        await cancelThreadTurn(threadId);
+        await cancelThreadTurn(threadId, true);
         // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
         await cancelThreadImages(threadId);
         await imageReady;
@@ -518,7 +579,8 @@ export function createApp(deps: AppDeps): App {
       const marked = !deleting.has(threadId);
       deleting.add(threadId);
       try {
-        await cancelThreadTurn(threadId);
+        // Deleting any other message stops the reply and keeps its words.
+        await cancelThreadTurn(threadId, byThread.get(threadId)?.start?.userMessage.id === messageId);
         await imageReady;
         const files = store.getThread(threadId).messages.find(message => message.id === messageId)?.images ?? [];
         store.deleteMessage(threadId, messageId);
@@ -558,13 +620,15 @@ export function createApp(deps: AppDeps): App {
       return blockingTurns((await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop);
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, messageId, images = [], tools, think, image, stopOthers, stopTurns, askFirst }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, image, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
       if (deleting.has(threadId)) throw threadGoing(threadId);
       // Keep unfinished text for the person, but never present it to a model as a completed answer.
-      const prior = store.getThread(threadId).messages.filter(m => m.role !== "assistant" || m.interrupted !== true);
+      const stored = store.getThread(threadId).messages;
+      const replaced = retryOf === undefined ? [] : retriedRows(stored, retryOf);
+      const prior = stored.filter(m => !replaced.includes(m.id) && (m.role !== "assistant" || m.interrupted !== true));
       const saved = messageId === undefined ? undefined : store.getMessage(messageId);
       if (saved) {
         if (saved.threadId !== threadId || saved.role !== "user" || saved.content !== content) throw new AppError("image-input", "This send identity belongs to a different message. Your words were not sent; edit them and try again.");
@@ -727,7 +791,7 @@ export function createApp(deps: AppDeps): App {
         if (savedImages.length) windowed.messages[windowed.messages.length - 1] = { ...windowed.messages.at(-1)!, images: savedImages };
         const modelHistory = vision && deps.dataDir ? await visionHistory(deps.dataDir, windowed.messages).catch(imageError) : windowed.messages;
         if (turnSignal.aborted) throw stoppedEarly();
-        const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}) });
+        const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}) }, replaced);
         const userMessage = imageFiles ? await imageFiles.save(savedImages, append).catch(imageError) : append();
         push("threads.changed", { threadId });
         started = true;

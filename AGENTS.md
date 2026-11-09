@@ -63,8 +63,8 @@ decision.
   come from the coordinating session.
 - `apps/server/src/ws/`: the server side of that WebSocket; `index.ts`
   composes the modules below.
-- `apps/server/src/threads/`: SQLite WAL thread store. Completed messages
-  persist; token deltas stay in memory.
+- `apps/server/src/threads/`: SQLite WAL thread store. A streaming reply
+  is one row marked interrupted, rewritten about once a second.
 - `apps/server/src/runtime/`: Ollama discovery, the app-owned install in
   the app folder, process ownership, the model list.
 - `apps/server/src/chat/` and `apps/server/src/fit/`: the streamed turn
