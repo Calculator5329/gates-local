@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-09: Check a real model through chat
+
+An opt-in smoke now starts an isolated, cached small Ollama model and exercises
+discovery, real streaming, Stop, earlier-message recall and completed-reply
+persistence after server restart. Missing runtimes and models fail loudly.
+Normal browser tests still use their offline stack. Product behavior and GPU
+measurement stay unchanged; stopped partials remain client-session text.
+
 ## 2026-11-09: Measure repeated actions before tuning responsiveness
 
 A separate browser performance harness now measures everyday chat actions and

@@ -1,5 +1,35 @@
 # Testing
 
+## Opt-in real-model smoke
+
+On an authorized Linux x64 CPU test runner, run:
+
+```sh
+GATES_REAL_SMOKE=1 node test/e2e/real-smoke-run.ts
+```
+
+The setup caches the checksum-verified pinned Ollama and `smollm2:135m`
+(about 271 MB) in a dedicated user cache, serves it on port 16195, and stops it
+at the end. Use the runner's exclusive/network-enabled mode; its cleanup receipt
+must show zero remaining owned processes. First setup downloads the runtime and
+model once; warmed runs reuse both without a pull.
+
+`pnpm e2e` excludes this spec by default. `GATES_REAL_SMOKE=1` selects only this
+journey and starts no fake stack. An absent runtime or model fails loudly.
+To watch the missing-model failure, add
+`GATES_REAL_SMOKE_MODEL=smollm2:missing-smoke-model` to the setup command.
+For an already isolated runtime, set `GATES_REAL_SMOKE_URL` to its loopback URL
+and run `GATES_REAL_SMOKE=1 pnpm e2e real-smoke.spec.ts` instead.
+
+The built client and production server exercise real model discovery, unchanged
+fit, progressive tokens, Stop, recall of a random name from the earlier message,
+and restart persistence. No GPU measurement override or `num_gpu` is supplied;
+the existing no-GPU path admits a small model as a system-memory spill. Stopped
+partials remain in the current client session only; restart checks the completed
+reply. Retain `real-ollama.log` and the browser screenshot, trace and
+`evidence.json`. This new diagnostic probe does not establish GPU or Electron
+behavior.
+
 ## Informational browser performance
 
 `test/perf/` is a separate Playwright project, excluded from `pnpm e2e`.

@@ -8,6 +8,7 @@
 // Playwright's own Chromium; Edge on Windows. One worker: every journey
 // shares the one server and resets it first.
 import { existsSync } from "node:fs";
+import path from "node:path";
 import { defineConfig, type LaunchOptions } from "@playwright/test";
 import { CONTROL_URL, RESULTS_DIR, ROOT, WEB_ORIGIN, WEB_PORT } from "./env.ts";
 
@@ -20,10 +21,12 @@ function browser(): { channel?: string; launchOptions?: LaunchOptions } {
 }
 
 const preview = `pnpm --filter @gates-local/web build && pnpm --filter @gates-local/web exec vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`;
+const realSmoke = process.env["GATES_REAL_SMOKE"] === "1";
 
 export default defineConfig({
   testDir: ".",
-  outputDir: RESULTS_DIR,
+  // Keep the setup's real-ollama.log outside Playwright's cleared output folder.
+  outputDir: realSmoke ? path.join(RESULTS_DIR, "browser") : RESULTS_DIR,
   workers: 1,
   fullyParallel: false,
   retries: 0,
@@ -40,13 +43,13 @@ export default defineConfig({
   },
   projects: [
     // Browser journeys are *.spec.ts; a *.test.ts here (seed.test.ts) is a vitest unit test.
-    { name: "e2e", testMatch: /\.spec\.ts$/, testIgnore: /shots\.spec\.ts/, grepInvert: /@timing/ },
+    { name: "e2e", testMatch: realSmoke ? /real-smoke\.spec\.ts$/ : /\.spec\.ts$/, testIgnore: realSmoke ? [] : [/shots\.spec\.ts/, /real-smoke\.spec\.ts/], grepInvert: /@timing/ },
     { name: "timing", testMatch: /\.spec\.ts$/, grep: /@timing/ },
     { name: "shots", testMatch: /(^|[\\/])shots\.spec\.ts$/ },
     { name: "readme", testMatch: /readme-shots\.spec\.ts$/ },
   ],
   webServer: [
-    { command: "node test/e2e/stack.ts", cwd: ROOT, url: `${CONTROL_URL}/health`, reuseExistingServer: false, timeout: 30_000, stdout: "ignore", stderr: "pipe" },
+    ...(realSmoke ? [] : [{ command: "node test/e2e/stack.ts", cwd: ROOT, url: `${CONTROL_URL}/health`, reuseExistingServer: false, timeout: 30_000, stdout: "ignore" as const, stderr: "pipe" as const }]),
     { command: preview, cwd: ROOT, url: WEB_ORIGIN, reuseExistingServer: false, timeout: 120_000, stdout: "ignore", stderr: "pipe" },
   ],
 });
