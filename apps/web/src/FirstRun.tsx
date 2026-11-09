@@ -13,27 +13,7 @@ import { NA, type State, fitKey, useStore } from "./store.ts";
 import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
-
-function Shell({ st, title, sub, children }: { st: ReactNode; title: string; sub: ReactNode; children?: ReactNode }) {
-  return (
-    <div className="fr">
-      <div className="fr-brand">
-        <svg className="mark" aria-hidden="true">
-          <use href="#i-mark" />
-        </svg>
-        Gates Local
-      </div>
-      <div className="fr-st">{st}</div>
-      <h1>{title}</h1>
-      <p className="sub">{sub}</p>
-      {children}
-      <div className="fr-foot">
-        <Icon id="lock" cls="s14" />
-        Runs on your computer. Nothing leaves your own network.
-      </div>
-    </div>
-  );
-}
+import { Shell } from "./FirstRunShell.tsx";
 
 function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; link?: string; onLink?: () => void }) {
   return (
@@ -346,25 +326,4 @@ export function FirstRun() {
   if (rt === "ready" && models !== undefined) return models.some(canChat) ? <Found /> : <NoModels />;
   if (rt === "missing" || rt === "stopped" || rt === "wrong" || rt === "error") return <NoOllama />;
   return <Waiting installing={rt === "installing"} />;
-}
-
-/** In a browser with no ?server= and no build-time server URL, nothing can connect. */
-export function NoServer() {
-  return (
-    <Shell
-      st={
-        <>
-          <span className="dot err" />
-          No server address
-        </>
-      }
-      title="Gates Local can't find its server"
-      sub={
-        <>
-          Start it from the desktop app, or open this page with <span className="mono">?server=</span> set to the server's encoded address,{" "}
-          <span className="mono">ws://127.0.0.1:PORT/?token=…</span>
-        </>
-      }
-    />
-  );
 }

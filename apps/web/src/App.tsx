@@ -8,15 +8,15 @@ import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, type Rt, rtOf } from "./Banner.tsx";
 import { Composer, OptsMenu, Picker, PlusMenu } from "./Composer.tsx";
-import { GpuPanel, closeGpuPanel, openGpuPanel } from "./FitPanel.tsx";
-import { FirstRun, NoServer } from "./FirstRun.tsx";
+import { closeGpuPanel, openGpuPanel } from "./fit-actions.ts";
+import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
-import { SettingsView } from "./Settings.tsx";
+import { GpuError, ScreenError, firstRunScreen, gpuScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
-import { call, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
+import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { PHONE, POP_ANCHOR, POP_EL, SheetHead, Tip, closePop, isPhone, isTouch, menuKeys, place, togglePop, useMedia } from "./ui.tsx";
@@ -414,7 +414,7 @@ function onTouchEnd(e: TouchEvent): void {
   else closeGpuPanel(true);
 }
 
-function onKey(e: KeyboardEvent): void {
+export function onKey(e: KeyboardEvent): void {
   const s = getState();
   if (e.key === "Tab") {
     const box = modalBox(s);
@@ -422,6 +422,7 @@ function onKey(e: KeyboardEvent): void {
     return;
   }
   if (e.key === "Escape") {
+    if (cancelPendingSettings()) e.preventDefault();
     if (s.pop !== null) {
       e.preventDefault();
       return closePop(true);
@@ -490,8 +491,12 @@ export function App() {
   const setList = useStore((s) => s.setList);
   const popId = useStore((s) => s.pop?.id ?? null);
   const gpuOpen = useStore((s) => s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun");
+  const settings = useScreen(settingsScreen, view === "settings");
+  const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
+  const gpu = useScreen(gpuScreen, gpuOpen);
+  useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
-  const gpuSheet = gpuOpen && phone;
+  const gpuSheet = gpuOpen && phone && gpu.kind !== "pending";
   // a phone's sheet is modal: focus moves in, except Ctrl+M's search field, which focuses itself
   useEffect(() => {
     if (popId === null || !isPhone()) return;
@@ -518,11 +523,12 @@ export function App() {
       window.removeEventListener("popstate", onDrawerPop);
     };
   }, []);
+  // A cold click keeps the existing chat layout until the whole screen is ready.
   const isSet = view === "settings";
   // the section list is a phone's Settings home; leaving Settings forgets it
   useEffect(() => {
-    if (!isSet && getState().setList) setState({ setList: false });
-  }, [isSet]);
+    if (view !== "settings" && getState().setList) setState({ setList: false });
+  }, [view]);
   const isNew = view === "new" || threadId === null;
   // first run covers the app; what is underneath takes no focus or clicks
   const covered = noServer || view === "firstrun";
@@ -533,7 +539,7 @@ export function App() {
         <div style={{ display: "contents" }} inert={covered || gpuSheet}>
           <Sidebar />
         </div>
-        {drawer ? <div className="scrim" aria-hidden="true" onClick={() => closeDrawer()} /> : null}
+        {drawer ? <div className="scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer}>
           {isSet ? <SettingsBar /> : <Header isNew={isNew} inert={gpuSheet} />}
           <div className="work">
@@ -541,7 +547,7 @@ export function App() {
               <div className={`set${setList ? " listing" : ""}`}>
                 <div className="set-in">
                   <SettingsList />
-                  <SettingsView />
+                  {settings.kind === "ready" ? <settings.value.SettingsView /> : <ScreenError />}
                 </div>
               </div>
             ) : (
@@ -562,16 +568,12 @@ export function App() {
                 )}
               </div>
             )}
-            <GpuPanel />
+            {gpu.kind === "ready" ? <gpu.value.GpuPanel /> : gpuOpen && gpu.kind === "error" ? <GpuError /> : null}
           </div>
         </main>
-        {noServer ? (
+        {covered ? (
           <div className="first">
-            <NoServer />
-          </div>
-        ) : view === "firstrun" ? (
-          <div className="first">
-            <FirstRun />
+            {noServer ? <NoServer /> : firstRun.kind === "ready" ? <firstRun.value.FirstRun /> : firstRun.kind === "error" ? <ScreenError /> : <FirstRunLoading />}
           </div>
         ) : null}
       </div>

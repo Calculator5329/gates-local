@@ -10,13 +10,12 @@
 // cores: 3 of 9 timing checks failed, all on the time from the handlers to
 // the paint (input delay at most 1.4 ms, processing at most 0.8 ms), and the
 // next try passed. The handler-time check holds on every try.
-import { readdirSync, readFileSync } from "node:fs";
 import { cpus, loadavg } from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
 import type { Page } from "@playwright/test";
 import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { bundleSize, jsWithinBudget } from "../bundle-size.ts";
 
 const BUDGET = {
   firstPaintMs: 120, // measured 76 and 84 ms
@@ -34,7 +33,12 @@ const BUDGET = {
   // re-measured with the T3-style picker, paragraph streaming, the memory menu and Settings › Models: JS 135.1, CSS 10.5
   // 2026-11-08, with the rebuilt Settings pages and the queue: JS 140.22. Every .js in the build counts, so loading a page on demand would not change it.
   // 2026-11-08, with the phone layout: JS 143.7, CSS 12.6; about 3.4 KB and 1.9 KB of that is the layout.
-  jsGzipKb: 144, // measured 120.6 KB at first
+  // JS began at 120.6 KB with a 144 KB cap. 2026-11-08 decision: protect startup with
+  // index-*.js plus HTML preloads; cap all JS at 170 KB. Entry measured 132.43 KB, plus 2 KB.
+  // 2026-11-08 review fixes: eager setup shell, deferred navigation and two chunk
+  // groups. Entry 131.0234 KB; add 2 KB and round the limit up to two decimals.
+  entryJsGzipKb: 133.03,
+  totalJsGzipKb: 170,
   cssGzipKb: 13, // measured 8.1 KB at first
 };
 
@@ -666,15 +670,12 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
 });
 
 test("bundle size", () => {
-  const dir = path.join(ROOT, "apps/web/dist/assets");
-  const size = (ext: string) =>
-    readdirSync(dir)
-      .filter((f) => f.endsWith(ext))
-      .reduce((a, f) => a + gzipSync(readFileSync(path.join(dir, f))).length, 0) / 1024;
-  const js = size(".js");
-  const css = size(".css");
-  report("js gzip", js, "KB");
-  report("css gzip", css, "KB");
-  expect(js).toBeLessThan(BUDGET.jsGzipKb);
-  expect(css).toBeLessThan(BUDGET.cssGzipKb);
+  const size = bundleSize(path.join(ROOT, "apps/web/dist"));
+  report("entry JS gzip", size.entryJs, "KiB");
+  report("total JS gzip", size.totalJs, "KiB");
+  report("CSS gzip", size.css, "KiB");
+  expect(size.entryJs, "index JS and HTML preloads").toBeLessThan(BUDGET.entryJsGzipKb);
+  expect(size.totalJs, "all emitted JS").toBeLessThan(BUDGET.totalJsGzipKb);
+  expect(jsWithinBudget(size, BUDGET)).toBe(true);
+  expect(size.css).toBeLessThan(BUDGET.cssGzipKb);
 });

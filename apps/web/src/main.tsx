@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
-import { connect, threadFromHash } from "./session.ts";
+import { connect, initialView, threadFromHash } from "./session.ts";
 import { setState } from "./store.ts";
 import { syncTitleBar } from "./titlebar.ts";
 import "./styles.css";
@@ -9,8 +9,7 @@ import "./styles.css";
 syncTitleBar();
 
 // a reload keeps the open thread: #thread=<id>
-const threadId = threadFromHash();
-if (threadId !== null) setState({ view: "thread", threadId });
+setState(initialView(threadFromHash()));
 connect();
 
 const root = document.getElementById("root");

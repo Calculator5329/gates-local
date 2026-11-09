@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-08: Cancel pending Settings navigation
+
+- Escape now cancels Settings or Models before its chunk finishes loading.
+  Returning to the current thread, choosing another thread or section,
+  starting a new thread, opening Search, the thread drawer or GPU memory
+  supersedes the old request. A late import cannot bring it back.
+- Checks cover both Settings targets, competing requests settling out of
+  order, and opening Settings again after a cancellation. Browser journeys
+  also exercise Escape and the visible thread, Search and new-thread exits.
+
+## 2026-11-08: Deferred screens preserve the displayed conversation
+
+- Opening Settings or Models while its chunk loads keeps navigation on the
+  displayed conversation. Both Enter and Send use that conversation until
+  the requested screen is ready. A newer navigation cancels the old request.
+- First run has a small eager frame from the first render; the app beneath
+  it stays inert. No Server is eager too and is detected before render.
+  A failed GPU import keeps a close button and a touch scrim back to chat.
+- Grouping the initial graph and deferred UI separately recovers 4.21 KiB
+  of the original split's 7.29 KiB overhead in a controlled build comparison.
+  Separate gzip dictionaries and chunk import/export boundaries caused that
+  overhead. With the correctness fixes, entry JS is 131.02 KiB and total JS
+  147.10 KiB gzip. The entry limit is 133.03 KiB, the measured size plus 2 KiB
+  rounded up; total stays at 170 KiB and CSS stays at 13 KiB.
+
+## 2026-11-08: Startup JS measured separately from deferred screens
+
+- Chat and its composer stay in the entry. Settings, including Models and
+  Download, first run, and the GPU panel load on demand and warm at idle
+  after first paint. A cold click keeps the chat layout until its screen is
+  ready. Failed screen imports offer a plain explanation and Reload.
+- The JS budget now counts the entry and every HTML script preload against
+  134.43 KiB gzip, with a separate 170 KiB total ceiling. CSS stays at 13 KiB.
+  Entry fell from 143.84 to 132.43 KiB; total rose to 151.13 KiB from the
+  separate chunks. These are build sizes, not startup timing measurements.
+- Unit probes caught eager Settings imports, omitted preload accounting,
+  disabled total limits, and broken import caching, error handling and idle
+  scheduling. Delayed-import and reload browser specs are written; browser
+  behavior and before/after startup timings still await the approved runner.
+
 ## 2026-11-08: One desktop titlebar
 
 - The desktop window uses the app's top row for its native window controls,

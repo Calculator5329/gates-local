@@ -5,4 +5,5 @@ out/
 .vite/
 /runtime-cache/
 /.data/
-docs/feedback-inbox.md
+/docs/feedback-inbox.md
+/docs/taste.md

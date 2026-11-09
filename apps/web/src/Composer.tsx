@@ -5,7 +5,7 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, ModelInfo } from "@gates-local/contracts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
-import { openFit } from "./FitPanel.tsx";
+import { openFit } from "./fit-actions.ts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";

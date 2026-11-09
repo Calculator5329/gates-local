@@ -5,39 +5,12 @@ import { useEffect, useState } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, otherCtxWords, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { ensureFit, openSettings, setContext, updateSettings } from "./session.ts";
-import { NA, type State, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
+import { ensureFit, setContext, updateSettings } from "./session.ts";
+import { NA, type State, chatReady, fitKey, setState, useStore } from "./store.ts";
 import { Fail, useAct } from "./settings-ui.tsx";
-import { PHONE, VLabel, anchorOf, closeTip, esc, isPhone, useMedia } from "./ui.tsx";
-
-/** Open GPU memory in Settings › Advanced for a model (none: the chat's own model). */
-export function openFit(model?: string): void {
-  const s = getState();
-  closeTip();
-  setState({ pop: null, fitPanel: { open: s.fitPanel.open, model: model !== undefined && model !== s.model ? model : null } });
-  openSettings("advanced");
-}
-
-/** The thread menu's GPU memory: the panel beside the chat, closed until asked for. */
-export function openGpuPanel(): void {
-  closeTip();
-  setState({ pop: null, fitPanel: { open: true, model: null } });
-  requestAnimationFrame(() => document.querySelector<HTMLElement>("#fitPanel .fpn-x")?.focus());
-}
-
-export function closeGpuPanel(refocus: boolean): void {
-  if (!getState().fitPanel.open) return;
-  closeTip();
-  setState({ fitPanel: { open: false, model: null } });
-  if (!refocus) return;
-  // a phone's sheet keeps the header inert until this close has rendered
-  if (isPhone()) requestAnimationFrame(focusAfterClose);
-  else focusAfterClose();
-}
-
-function focusAfterClose(): void {
-  (anchorOf("more") ?? document.getElementById("ta"))?.focus();
-}
+import { PHONE, VLabel, closeTip, esc, useMedia } from "./ui.tsx";
+import { closeGpuPanel } from "./fit-actions.ts";
+export { closeGpuPanel, openFit, openGpuPanel } from "./fit-actions.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -48,6 +21,9 @@ export function GpuPanel() {
   const ready = useStore(chatReady);
   const model = useStore((s) => s.fitPanel.model ?? s.model);
   const gpuRaw = useStore((s) => s.gpu);
+  useEffect(() => {
+    if (open) document.querySelector<HTMLElement>("#fitPanel .fpn-x")?.focus({ preventScroll: true });
+  }, [open]);
   if (!open) return null;
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const title = noGpu(gpu) ? "System memory" : "GPU memory";

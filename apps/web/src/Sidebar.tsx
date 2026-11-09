@@ -5,7 +5,7 @@ import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState } fr
 import { rtInfo, rtOf } from "./Banner.tsx";
 import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
-import { leaveSettings, newThread, openSettings, openThread } from "./session.ts";
+import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread } from "./session.ts";
 import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
 import { closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 
@@ -55,6 +55,7 @@ let closeTimer: ReturnType<typeof setTimeout> | undefined;
 const onDrawerEntry = () => (history.state as { [DRAWER_ENTRY]?: boolean } | null)?.[DRAWER_ENTRY] === true;
 
 export function openDrawer(): void {
+  cancelPendingSettings();
   if (getState().drawer) return;
   setState({ drawer: true, pop: null, searchOpen: false, search: "" });
   if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
@@ -97,13 +98,17 @@ export function closeDrawer(then?: () => void, refocus = then === undefined): vo
 
 /** The back gesture or a history.back() left the drawer's entry. */
 export function onDrawerPop(): void {
-  if (getState().drawer && !onDrawerEntry()) drawerClosed(afterClose === null);
+  if (getState().drawer && !onDrawerEntry()) {
+    if (afterClose === null) cancelPendingSettings();
+    drawerClosed(afterClose === null);
+  }
 }
 
 /** Ctrl K and the Search button: show the search field (leaving Settings first). */
 export function openSearch(): void {
   const s = getState();
   if (s.view === "firstrun") return;
+  cancelPendingSettings();
   if (s.view === "settings") leaveSettings();
   // below 1024 px the search field lives in the drawer
   if (window.innerWidth < 1024) openDrawer();
@@ -293,7 +298,7 @@ export function Sidebar() {
           <use href="#i-mark" />
         </svg>
         <span className="wordmark">Gates Local</span>
-        <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => closeDrawer()}>
+        <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => { cancelPendingSettings(); closeDrawer(); }}>
           <Icon id="x" />
         </button>
       </div>

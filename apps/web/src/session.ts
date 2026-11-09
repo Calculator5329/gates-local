@@ -21,6 +21,7 @@ import {
 import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
+import { settingsScreen } from "./screen-loaders.ts";
 import { syncTitleBar } from "./titlebar.ts";
 
 // ---------------------------------------------------------------- desktop bridge
@@ -65,6 +66,11 @@ window.glPerf = perf;
  */
 async function serverUrl(): Promise<string | null> {
   if (window.gatesLocal) return window.gatesLocal.getServerUrl();
+  return webServerUrl();
+}
+
+/** Browser configuration is synchronous, so No Server can cover the first render. */
+function webServerUrl(): string | null {
   const fromQuery = new URLSearchParams(location.search).get("server");
   const fromEnv: unknown = import.meta.env["VITE_GATES_LOCAL_SERVER"];
   const configured = fromQuery ?? (typeof fromEnv === "string" && fromEnv !== "" ? fromEnv : null);
@@ -102,7 +108,8 @@ let stopped = false;
 /** Start the connection loop. Called once at boot; the returned function ends it (the session tests use it). */
 export function connect(): () => void {
   stopped = false;
-  void loop();
+  if (!window.gatesLocal && webServerUrl() === null) setState({ conn: { kind: "no-server" } });
+  else void loop();
   return () => {
     stopped = true;
     client?.close();
@@ -499,6 +506,20 @@ const landed = new Map<string, number>();
 
 /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
 let navGen = 0;
+let pendingSettings: number | null = null;
+
+/** Every destination invalidates an older deferred request. */
+function beginNavigation(): number {
+  pendingSettings = null;
+  return ++navGen;
+}
+
+/** Escape and destinations outside the main view can dismiss a deferred request. */
+export function cancelPendingSettings(): boolean {
+  if (pendingSettings !== navGen) return false;
+  beginNavigation();
+  return true;
+}
 
 function setLoadError(threadId: string, message: string | null): void {
   if ((getState().loadErrors[threadId] ?? null) === message) return;
@@ -599,7 +620,7 @@ function wakeAfterEdit(): void {
 }
 
 export function openThread(threadId: string): void {
-  navGen++;
+  beginNavigation();
   wakeAfterEdit();
   setState((s) => {
     // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
@@ -613,7 +634,7 @@ export function openThread(threadId: string): void {
 }
 
 export function newThread(): void {
-  navGen++;
+  beginNavigation();
   wakeAfterEdit();
   // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
   setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...decided(pickChoice(s.models, s.model, undefined)) }));
@@ -626,12 +647,22 @@ function leavingChat(s: State): Partial<State> {
 }
 
 export function openSettings(section?: Section, addPage = false): void {
-  navGen++;
-  setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false }));
+  const nav = beginNavigation();
+  const show = () => {
+    if (nav !== navGen) return;
+    pendingSettings = null;
+    setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false }));
+  };
+  // The visible composer must still send into its visible thread while a chunk
+  // loads. Commit the navigation only when the screen (or its error) can render.
+  if (settingsScreen.get().kind === "pending") {
+    pendingSettings = nav;
+    void settingsScreen.load().then(show);
+  } else show();
 }
 
 export function leaveSettings(): void {
-  navGen++;
+  beginNavigation();
   const s = getState();
   setState({ view: s.threadId !== null ? "thread" : "new" });
   // back to a thread with nothing on screen whose load failed meanwhile: try again
@@ -1578,6 +1609,11 @@ export async function updateAndRestart(): Promise<ActionResult> {
 // ---------------------------------------------------------------- first run
 
 const FIRST_RUN_KEY = "gates-local.first-run-done";
+
+/** First run is a covered screen before hydration or its UI chunk can arrive. */
+export function initialView(threadId: string | null): Pick<State, "view" | "threadId"> {
+  return { view: threadId !== null ? "thread" : firstRunDone() ? "new" : "firstrun", threadId };
+}
 
 function firstRunDone(): boolean {
   try {
