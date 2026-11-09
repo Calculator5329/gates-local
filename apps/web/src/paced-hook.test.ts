@@ -17,6 +17,11 @@ const hooks = vi.hoisted(() => {
       if (!(i in slots)) slots[i] = typeof value === "function" ? value() : value;
       return [slots[i], (v: unknown) => { slots[i] = typeof v === "function" ? v(slots[i]) : v; }];
     },
+    useSyncExternalStore(subscribe: (change: () => void) => () => void, snapshot: () => unknown) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = subscribe(() => {});
+      return snapshot();
+    },
     useEffect(setup: () => void | (() => void), deps: unknown[]) {
       const i = cursor++;
       const old = effects[i];
@@ -90,6 +95,19 @@ it("segments near the reveal boundary rather than scanning the reply", () => {
   render(prefix + "👩🏽‍💻 next"); frame(25);
   expect(spy).toHaveBeenCalled();
   expect(Math.max(...spy.mock.calls.map(([s]) => s.length))).toBeLessThan(100);
+});
+
+it("asks for reduced motion once for the module, however many replies pace", async () => {
+  vi.resetModules();
+  const fresh = await import("./paced.ts");
+  const listen = vi.fn();
+  const ask = vi.fn(() => ({ matches: false, addEventListener: listen, removeEventListener() {} }));
+  vi.stubGlobal("matchMedia", ask);
+  for (const reply of ["First reply", "Second reply", "Third reply"]) {
+    hooks.reset(); hooks.render(); fresh.usePacedText(reply, true); hooks.flush();
+  }
+  expect(ask).toHaveBeenCalledTimes(1);
+  expect(listen, "one change listener on the query, not one per reply").toHaveBeenCalledTimes(1);
 });
 
 it("shows arrivals immediately with reduced motion and cancels pacing on preference changes", () => {

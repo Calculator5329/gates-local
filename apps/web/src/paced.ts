@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 export interface Pace {
   shown: number;
@@ -52,10 +52,29 @@ function graphemeCut(text: string, cut: number): number {
   }
 }
 
+/**
+ * One reduced-motion query for the module, asked the first time a live reply
+ * needs it, and one change listener on it while any reply paces: it is added
+ * for the first subscriber, removed with the last, and tells each of them.
+ */
+let motion: MediaQueryList | undefined;
+const motionQuery = () => motion ??= matchMedia("(prefers-reduced-motion: reduce)");
+const motionWatchers = new Set<() => void>();
+const motionChanged = () => { for (const change of motionWatchers) change(); };
+const onMotion = (change: () => void) => {
+  if (motionWatchers.size === 0) motionQuery().addEventListener("change", motionChanged);
+  motionWatchers.add(change);
+  return () => {
+    motionWatchers.delete(change);
+    if (motionWatchers.size === 0) motionQuery().removeEventListener("change", motionChanged);
+  };
+};
+const reducedMotion = () => motionQuery().matches;
+
 /** Received words are ready on mount, including a live prefix restored on a
  * thread switch. Only subsequent arrivals enter the pacing reservoir. */
 export function usePacedText(text: string, streaming: boolean): string {
-  const [reduced, setReduced] = useState(() => streaming && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const reduced = useSyncExternalStore(onMotion, reducedMotion, reducedMotion);
   const [shown, setShown] = useState(text);
   const pace = useRef<Pace | null>(null);
   pace.current ??= createPace(text.length, performance.now());
@@ -63,15 +82,6 @@ export function usePacedText(text: string, streaming: boolean): string {
   const latest = useRef({ text, streaming });
   latest.current = { text, streaming };
   const raf = useRef(0);
-  const active = streaming || shown.length < text.length;
-  useEffect(() => {
-    if (!active) return;
-    const media = matchMedia("(prefers-reduced-motion: reduce)");
-    const change = () => setReduced(media.matches);
-    change();
-    media.addEventListener("change", change);
-    return () => media.removeEventListener("change", change);
-  }, [active]);
   useEffect(() => {
     if (reduced) {
       cancelAnimationFrame(raf.current);

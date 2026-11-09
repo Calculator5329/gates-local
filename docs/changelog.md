@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-09: Long threads open at their last turns, and typing no longer wakes every saved reply
+
+- A long thread opens with its last 40 turns and mounts the older ones in
+  idle slices, so the whole thread is still in the page for find and scroll.
+  On a 2,000-message thread the first commit went from 2,000 turns to 40;
+  in the browser journey the first commit landed at 592 ms and every turn
+  was mounted by 3.6 s.
+- The turn you are reading stays put while older turns go in above it
+  (0.25 px of drift over 96 samples in the journey). Scrolling to the top
+  mounts the next turns at once without waiting for an idle moment.
+- A saved reply now takes props only. Only the reply being written reads
+  the store, so on the 2,000-message thread store subscriptions went from
+  6,006 to 10 and a keystroke runs 10 selectors where it ran 6,006.
+- Reduced motion is asked once for the app, with one listener, not once per
+  reply.
+- If the first mounted turn is deleted, the rest stay mounted. History that
+  arrives in front of the mounted turns is held back the same way as at
+  open.
+- Not checked: the scroll position after a turn at the top is deleted, and
+  any browser engine other than Chromium for the position hold.
+
 ## 2026-11-09: Send no longer dims for a moment when a picked model finishes loading
 
 - While a picked model loads, its own memory makes a fit check refuse it, so

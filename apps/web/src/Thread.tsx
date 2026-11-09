@@ -1,8 +1,11 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
-// The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
-// are memoised by message, so a streaming token re-renders only the live turn.
-import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Message, ToolStep } from "@gates-local/contracts";
+// The thread timeline (shell.md F11, F40, F50, F56, F58, F60). A saved reply is
+// props only and memoised by message, so a streaming token or a keystroke runs
+// nothing in it; only the live reply reads the store and paces its text. A
+// thread opens with its last turns mounted and adds the older ones when idle.
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import type { CatalogEntry, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -13,10 +16,11 @@ import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachmentImages } from "./attachment-images.tsx";
-import { NA, type State, setState, useStore } from "./store.ts";
+import { type LiveTurn, NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
+const NO_TOOLS: readonly ToolStep[] = [];
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
 declare global {
@@ -198,10 +202,14 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   );
 }
 
+/** Where a reply's generated images come from: the server's /files route. The timeline reads it once for every row. */
+interface Files {
+  readonly origin: string | null;
+  readonly token: string | null;
+}
+
 /** A generated image from the server's /files route; a quiet placeholder when it is gone. */
-function ImageOut({ path }: { path: string }) {
-  const origin = useStore((s) => s.serverOrigin);
-  const token = useStore((s) => s.fileToken);
+function ImageOut({ path, origin, token }: { path: string } & Files) {
   const [missing, setMissing] = useState(false);
   if (missing || origin === null) {
     return (
@@ -215,13 +223,13 @@ function ImageOut({ path }: { path: string }) {
   return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
 }
 
-function ImageJob({ msg }: { msg: Message }) {
+function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acceptedRetry, setAcceptedRetry] = useState<string>();
   const job = msg.imageJob!;
   const retryId = job.retryJobId ?? acceptedRetry;
-  const retried = useStore(s => retryId === undefined ? undefined : s.messages[msg.threadId]?.find(m => m.id === retryId)?.imageJob);
+  const retried = retryId === undefined ? undefined : thread.find(m => m.id === retryId)?.imageJob;
   const retryLabel = retried?.state === "done" ? "Image ready" : retried?.state === "error" ? "Retry failed" : retried?.state === "cancelled" ? "Retry cancelled" : retried?.state === "queued" ? "Retry queued" : "Retrying…";
   const pending = job.state === "queued" || job.state === "running";
   const label = job.state === "queued" ? "Waiting for the GPU" : "Making image";
@@ -236,7 +244,7 @@ function ImageJob({ msg }: { msg: Message }) {
     setBusy(false);
   };
   return <div className="image-job" data-image-job={job.state} data-fit={job.errorKind === "wont-fit" ? "refuse" : undefined}>
-    {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} /> : <div className="image-job-state" role="status">
+    {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status">
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
       <p>{pending ? label : job.message ?? "The image did not finish; try again."}</p>
       {job.state === "running" && (job.progress ?? 0) > 0 ? <span>{Math.round(job.progress! * 100)}%</span> : null}
@@ -271,78 +279,166 @@ const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
 /** The model never sees an interrupted reply again, and nothing else on screen says so. */
 const KEPT_OUT_OF_PROMPTS = "Its text is kept here and excluded from later model prompts.";
 
-/** One component owns a reply from its first delta through its saved message. */
-const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: string; msg: Message | undefined; last: boolean }) {
+/** What a reply shows, the same while it is written and once it is saved. Props only: the caller reads the store and paces the text. */
+interface ReplyView extends Files {
+  readonly msg: Message | undefined;
+  /** The reply being written, or the one that stopped before it saved; null for a saved reply. */
+  readonly live: LiveTurn | null;
+  readonly text: string;
+  /** The part of `text` revealed so far. */
+  readonly paced: string;
+  readonly thinking: string;
+  readonly tools: readonly ToolStep[];
+  readonly secs: number | undefined;
+  readonly contextNotice: string | undefined;
+  readonly allowedLinks: ReadonlySet<string> | undefined;
+  /** This session knows why the reply stopped; the timeline shows that note instead of the generic one. */
+  readonly knownStop: boolean;
+  readonly meta: string;
+  readonly regen: boolean;
+  /** The thread's messages when an image card needs them, else EMPTY. */
+  readonly thread: readonly Message[];
+  readonly loading: boolean;
+}
+
+function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, allowedLinks, knownStop, meta, regen, thread, loading, origin, token }: ReplyView) {
+  const end = live?.end;
+  const running = tools.some((t) => t.state === "running");
+  const interrupted = msg?.interrupted === true;
+  const streaming = live !== null && end === undefined;
+  const showThink = thinking !== "" && (!streaming || text !== "" || tools.length > 0);
+  const pending = paced.length < text.length;
+  const shown = reveal(paced, streaming || pending);
+  return (
+    <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
+      {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
+      {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
+        <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />
+      ))}
+      {msg?.imageJob ? <ImageJob msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
+      {contextNotice ? <p className="na" role="status">{contextNotice}</p> : null}
+      {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
+      {(streaming || pending) && text !== "" ? (
+        <div className="working writing" role="status">
+          <span className="ph">Writing</span>
+        </div>
+      ) : null}
+      {streaming && text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
+      {end?.kind === "stopped" ? (
+        <div className="stopped">
+          <span>Stopped after {end.secs} s</span>
+          {/* off until the server has ended the stopped turn (W-02) */}
+          <button type="button" className="qa" data-regen disabled={live?.ending} onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {end?.kind === "error" ? (
+        <div className="err-line" data-tip={esc(end.message)}>
+          <Icon id="alert" cls="s14" />
+          <span>{SAYS_WHY.has(end.code) ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
+          <button type="button" className="qa" onClick={retry}>
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {interrupted && !knownStop ? <div className="stop-note" role="status">Interrupted before this reply finished. {KEPT_OUT_OF_PROMPTS}</div> : null}
+      {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? <ActRow text={text} meta={meta} regen={regen} /> : null}
+    </div>
+  );
+}
+
+interface RowProps extends Files {
+  readonly msg: Message;
+  readonly last: boolean;
+  readonly thread: readonly Message[];
+}
+
+/**
+ * The reply being written, and the same reply once it is saved: it keeps its
+ * row, DOM and pacing through the save. Only this row reads the store and
+ * paces text, and only a reply that was live while the timeline was open is one.
+ */
+const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }: { threadId: string; msg: Message | undefined; last: boolean } & Files) {
   const live = useStore((s) => (msg === undefined && s.live?.threadId === threadId ? s.live : null));
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
   const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
-  const end = live?.end;
-  const contextNotice = msg?.contextNotice ?? live?.contextNotice;
   const name = describeModel(msg?.model ?? live?.model ?? "", catalog).name;
   const text = msg?.content ?? live?.text ?? "";
-  const thinking = msg?.thinking ?? live?.thinking ?? "";
-  const tools = msg?.tools ?? live?.tools ?? [];
+  const tools = msg?.tools ?? live?.tools ?? NO_TOOLS;
   const queuedImage = tools.some(t => t.name === "image" && t.state === "done");
   const messages = useStore(s => queuedImage ? s.messages[threadId] ?? EMPTY : EMPTY);
   const allowedLinks = useMemo(() => imageTurnLinks(messages, tools), [messages, tools]);
-  const running = tools.some((t) => t.state === "running");
-  const interrupted = msg?.interrupted === true;
   const knownStop = useStore(s => msg !== undefined && s.stopNotes[msg.id] !== undefined);
-  const streaming = live !== null && end === undefined;
-  const showThink = thinking !== "" && (!streaming || text !== "" || tools.length > 0);
   const secs = live === null
     ? ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))
     : live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000));
-  const paced = usePacedText(text, streaming);
-  const pending = paced.length < text.length;
-  const shown = reveal(paced, streaming || pending);
+  const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
       {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null}
-      <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
-        {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
-        {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
-          <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />
-        ))}
-        {msg?.imageJob ? <ImageJob msg={msg} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
-        {contextNotice ? <p className="na" role="status">{contextNotice}</p> : null}
-        {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} />)}
-        {(streaming || pending) && text !== "" ? (
-          <div className="working writing" role="status">
-            <span className="ph">Writing</span>
-          </div>
-        ) : null}
-        {streaming && text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
-        {end?.kind === "stopped" ? (
-          <div className="stopped">
-            <span>Stopped after {end.secs} s</span>
-            {/* off until the server has ended the stopped turn (W-02) */}
-            <button type="button" className="qa" data-regen disabled={live?.ending} onClick={retry}>
-              Retry
-            </button>
-          </div>
-        ) : null}
-        {end?.kind === "error" ? (
-          <div className="err-line" data-tip={esc(end.message)}>
-            <Icon id="alert" cls="s14" />
-            <span>{SAYS_WHY.has(end.code) ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
-            <button type="button" className="qa" onClick={retry}>
-              Retry
-            </button>
-          </div>
-        ) : null}
-        {interrupted && !knownStop ? <div className="stop-note" role="status">Interrupted before this reply finished. {KEPT_OUT_OF_PROMPTS}</div> : null}
-        {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? <ActRow text={text} meta={msg === undefined ? name : replyMeta(name, msg, ft)} regen={msg !== undefined && last} /> : null}
-      </div>
+      <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} secs={secs}
+        contextNotice={msg?.contextNotice ?? live?.contextNotice} allowedLinks={allowedLinks} knownStop={knownStop}
+        meta={msg === undefined ? name : replyMeta(name, msg, ft)} regen={msg !== undefined && last} thread={messages} loading={loading} origin={origin} token={token} />
     </>
   );
 });
 
+/** A saved reply: props only, so a keystroke or a token elsewhere runs nothing here. */
+const SavedReply = memo(function SavedReply({ msg, last, thread, catalog, ft, knownStop, origin, token }: RowProps & { catalog: readonly CatalogEntry[] | undefined; ft: number | undefined; knownStop: boolean }) {
+  countRender(msg.id);
+  const tools = msg.tools ?? NO_TOOLS;
+  const allowedLinks = useMemo(() => imageTurnLinks(thread, tools), [thread, tools]);
+  return (
+    <Reply msg={msg} live={null} text={msg.content} paced={msg.content} thinking={msg.thinking ?? ""} tools={tools}
+      secs={ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))} contextNotice={msg.contextNotice} allowedLinks={allowedLinks}
+      knownStop={knownStop} meta={replyMeta(describeModel(msg.model ?? "", catalog).name, msg, ft)} regen={last} thread={thread} loading={false} origin={origin} token={token} />
+  );
+});
+
+/** A row whose image card or image links read the rest of the thread. */
+const readsThread = (m: Message) => m.imageJob !== undefined || (m.tools ?? NO_TOOLS).some(t => t.name === "image" && t.state === "done");
+
 /** From this many messages, turns out of view skip rendering work (styles.css `.col.long`). */
 const LONG_THREAD = 50;
+/**
+ * Turns mounted when a thread opens. The shortest turn, a one-line question or
+ * a one-line reply with its action row, is about 70 px with its gap, so 40 fill
+ * 1.7 screens of a 1,600 px tall window: the first frame is full and there is a
+ * screen to scroll before the scroll handler mounts more. In a 2,000-message
+ * thread that is 2% of the rows.
+ */
+const FIRST_TURNS = 40;
+/** Turns added per idle slice, or per step while the reader scrolls up: no more than the first commit mounts. */
+const SLICE_TURNS = 40;
+
+/** The longest a slice waits for an idle moment before it mounts anyway. */
+const IDLE_WAIT_MS = 100;
+/** Idle time a further slice in the same callback needs: about what mounting 40 turns takes. */
+const SLICE_MS = 16;
+
+/**
+ * Runs `fn` once the browser is idle, or after IDLE_WAIT_MS at most, with how
+ * much of the idle period is left; a 50 ms timer with none left where there is
+ * no requestIdleCallback (Safari). On an idle page a callback mounts slices
+ * while the deadline has room. On a page that is never idle (a reply
+ * streaming), each slice waits the full 100 ms: 2,000 turns are 49 slices, so
+ * the thread is fully mounted about 5 s after it opens, plus the time the
+ * slices take. A hidden tab runs neither idle callbacks nor these timers on
+ * time, so nothing more mounts until the tab is seen again; nobody is reading
+ * it meanwhile.
+ */
+function whenIdle(fn: (timeLeft: () => number) => void): () => void {
+  if (typeof requestIdleCallback === "function") {
+    const id = requestIdleCallback((deadline) => fn(() => deadline.timeRemaining()), { timeout: IDLE_WAIT_MS });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(() => fn(() => 0), 50);
+  return () => clearTimeout(id);
+}
 
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
@@ -357,6 +453,11 @@ export function Timeline({ threadId }: { threadId: string }) {
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
   const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.live?.text.length ?? 0) : 0));
   const row = (m: Message) => (bust === 0 ? m : { ...m });
+  // what saved rows need from the store, read once here and passed down as props
+  const catalog = useStore(catalogOf);
+  const firstToken = useStore((s) => s.firstToken);
+  const origin = useStore((s) => s.serverOrigin);
+  const token = useStore((s) => s.fileToken);
   const tl = useRef<HTMLDivElement>(null);
   const col = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -368,6 +469,64 @@ export function Timeline({ threadId }: { threadId: string }) {
     return { msg, key: msg.role === "user" ? msg.id : msg.imageJob ? `image:${msg.id}` : `reply:${owner ?? msg.id}` };
   });
   if (liveOwner !== null) turns.push({ msg: undefined, key: `reply:${liveOwner}` });
+  // A reply that was live while this timeline was open stays a LiveReply once
+  // it is saved: a different component under its key would remount it.
+  const [wasLive] = useState(() => new Set<string>());
+  if (liveOwner !== null) wasLive.add(`reply:${liveOwner}`);
+
+  // The first mounted turn, by key. Turns in front of it are held back. When it
+  // leaves the thread (deleted), the first turn that was mounted and is still
+  // there takes its place. Only when none was (at open, or when the history
+  // replaces a cache that shares no turn with it) is everything but the last
+  // FIRST_TURNS held back. A turn added at the end never unmounts one at the top.
+  const [first, setFirst] = useState<string | null>(null);
+  const turnsNow = useRef(turns);
+  const skipNow = useRef(0);
+  const opening = Math.max(0, turns.length - FIRST_TURNS);
+  let at = first === null ? -1 : turns.findIndex((t) => t.key === first);
+  if (at < 0 && first !== null) {
+    // turnsNow and skipNow still hold the last render's turns and how many it held back
+    const now = new Map(turns.map((t, i) => [t.key, i]));
+    at = turnsNow.current.slice(skipNow.current).map((t) => now.get(t.key)).find((i) => i !== undefined) ?? -1;
+  }
+  const skip = at < 0 ? opening : Math.min(at, opening);
+  const firstKey = turns[skip]?.key ?? null;
+  if (firstKey !== null && firstKey !== first) setFirst(firstKey);
+  turnsNow.current = turns;
+  skipNow.current = skip;
+  // The first mounted turn and its distance from the top of the view, noted after
+  // each commit and scroll and just before a slice goes in. A distance in the
+  // view, not in the content: when the browser's own scroll anchoring has
+  // already kept the view still, the turn has not moved and nothing is added.
+  const anchor = useRef<{ readonly el: Element; readonly off: number } | null>(null);
+  const note = useCallback(() => {
+    const top = col.current?.querySelector(".turn") ?? null;
+    const view = tl.current;
+    anchor.current = top === null || view === null ? null : { el: top, off: top.getBoundingClientRect().top - view.getBoundingClientRect().top };
+  }, []);
+  const grow = useCallback(() => {
+    if (skipNow.current === 0) return;
+    const key = turnsNow.current[Math.max(0, skipNow.current - SLICE_TURNS)]?.key;
+    if (key === undefined) return;
+    note();
+    flushSync(() => setFirst(key));
+  }, [note]);
+
+  // Turns went in above the one that was first: put it back where it was, then note the new first.
+  useLayoutEffect(() => {
+    const el = tl.current;
+    const a = anchor.current;
+    if (el !== null && a !== null && a.el !== col.current?.querySelector(".turn") && col.current?.contains(a.el) === true) {
+      const moved = a.el.getBoundingClientRect().top - el.getBoundingClientRect().top - a.off;
+      if (moved !== 0) el.scrollTop += moved;
+    }
+    note();
+  });
+
+  // the rest of the thread mounts in idle time, so find-in-page and select-all see all of it
+  useEffect(() => (first === null || skip === 0 ? undefined : whenIdle((timeLeft) => {
+    do grow(); while (skipNow.current > 0 && timeLeft() > SLICE_MS);
+  })), [first, skip, grow]);
 
   // a newly opened thread starts at its end
   useLayoutEffect(() => {
@@ -382,6 +541,9 @@ export function Timeline({ threadId }: { threadId: string }) {
     if (!el || !c) return;
     const onScroll = () => {
       stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      note();
+      // within a screen of the turns not mounted yet: mount them now, not when idle
+      if (el.scrollTop < el.clientHeight) grow();
     };
     const ro = new ResizeObserver(() => {
       if (stick.current) el.scrollTop = el.scrollHeight;
@@ -393,22 +555,27 @@ export function Timeline({ threadId }: { threadId: string }) {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
     };
-  }, []);
+  }, [grow, note]);
 
   return (
     <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <p className="na" role="status" data-thread-loading>Loading conversation…</p> : null}
-        {turns.map(({ msg: m, key }, i) => (
-          <Fragment key={key}>
-            {m?.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn threadId={threadId} msg={m === undefined ? undefined : row(m)} last={i === messages.length - 1} />}
-            {m !== undefined && stopNotes[m.id] !== undefined ? (
-              <div className="stop-note" role="status">
-                {m.interrupted === true ? `${stopNotes[m.id]} ${KEPT_OUT_OF_PROMPTS}` : stopNotes[m.id]}
-              </div>
-            ) : null}
-          </Fragment>
-        ))}
+        {turns.slice(skip).map(({ msg: m, key }, j) => {
+          const last = skip + j === messages.length - 1;
+          return (
+            <Fragment key={key}>
+              {m?.role === "user" ? <UserTurn msg={row(m)} />
+                : m === undefined || wasLive.has(key) ? <LiveReply threadId={threadId} msg={m === undefined ? undefined : row(m)} last={last} origin={origin} token={token} />
+                : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} knownStop={stopNotes[m.id] !== undefined} origin={origin} token={token} />}
+              {m !== undefined && stopNotes[m.id] !== undefined ? (
+                <div className="stop-note" role="status">
+                  {m.interrupted === true ? `${stopNotes[m.id]} ${KEPT_OUT_OF_PROMPTS}` : stopNotes[m.id]}
+                </div>
+              ) : null}
+            </Fragment>
+          );
+        })}
         {loadError !== undefined ? (
           <div className="err-line" role="status" data-load-error>
             <Icon id="alert" cls="s14" />

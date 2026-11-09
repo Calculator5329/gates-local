@@ -297,6 +297,9 @@ export function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Test only: how many readers are subscribed now (apps/web/test/long-thread.test.ts counts them). */
+export const listenerCount = (): number => listeners.size;
+
 export function useStore<T>(selector: (s: State) => T): T {
   return useSyncExternalStore(subscribe, () => selector(state));
 }

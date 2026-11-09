@@ -207,10 +207,12 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 
 /* ---------- timeline (F04 F05 F10 F11 F12) ---------- */
 .turn{animation:fadein .18s ease-out}
-/* A long thread (Timeline's LONG_THREAD) opens in one frame: turns out of view skip style, layout
-   and paint until they scroll near it (the 400-message perf spec measured 57-91 ms of style and
-   layout in one task without this). The remembered size (auto) keeps the scrollbar steady once a
-   turn has been seen. Short threads skip it: containment snaps each turn's fractional line
+/* A long thread (Timeline's LONG_THREAD): the timeline mounts its last turns first and the rest in
+   idle slices, so the whole thread ends up in the DOM. Turns out of view skip style, layout and
+   paint until they scroll near it, so each slice and any later relayout (a resize, a text size
+   change) costs what is on screen, not the whole thread (the 400-message perf spec measured 57-91
+   ms of style and layout in one task without this). The remembered size (auto) keeps the scrollbar
+   steady once a turn has been seen. Short threads skip it: containment snaps each turn's fractional line
    positions to whole pixels, which moves text by a pixel against the design. */
 .col.long .turn{content-visibility:auto;contain-intrinsic-size:auto 120px}
 /* F40: the same gap after every turn. A finished reply's action row is the first 32 px of its gap

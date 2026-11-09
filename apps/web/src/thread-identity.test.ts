@@ -6,6 +6,8 @@ import type { State } from "./store.ts";
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useRef: (value: unknown) => ({ current: value }),
+  useState: (value: unknown) => [typeof value === "function" ? value() : value, () => undefined],
+  useCallback: (fn: unknown) => fn,
   useEffect: () => undefined,
   useLayoutEffect: () => undefined,
 }));
