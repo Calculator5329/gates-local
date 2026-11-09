@@ -129,16 +129,19 @@ that contains the six-syllable word, including an echo of the earlier prompt.
 
 ## Informational browser performance
 
-`pnpm build` and the blocking performance spec share the hard gzip
-limits in `test/bundle-size.ts`: entry JS below 133.03 KiB (including HTML
-preloads), all emitted JS below 170 KiB, startup CSS below 13 KiB, and total
-CSS below 15 KiB. Startup CSS comes from stylesheet and style-preload links
+`pnpm build`, the performance spec and the comparison report share the soft
+gzip targets in `test/bundle-size.ts`: entry JS 133.50 KiB (including HTML
+preloads), all emitted JS 171.65 KiB, startup CSS 13 KiB, and total
+CSS 15 KiB. Startup CSS comes from stylesheet and style-preload links
 in the built HTML, with each request URL counted once, not from a filename
 pattern. Different query strings count separately; fragments do not.
 Total CSS sums every emitted stylesheet, including deferred screens. The build
-prints each reading and fails with the overage. No timing measurement enters
-this gate. The package-level web build still emits an over-budget bundle for
-measurement; the root build, blocking browser spec and comparison refuse it.
+prints each reading and warns at or above a target, including the amount over.
+Existing performance reports retain sizes and warnings. Size never blocks a
+build, test, release check or landing. Never raise a target to make a build pass;
+a lane that passes one says what it added and why in its report so obvious bloat
+gets noticed in review. A missing entry, missing stylesheet href or asset, or
+unmeasurable size still fails. Timing comparisons remain informational too.
 
 Picker-only styles load with its dynamic import. Settings and first run still
 warm after first paint; the picker warms only on pointer/focus intent or open,

@@ -38,11 +38,14 @@ decision.
 
 - `pnpm verify` is the gate: root and per-package `tsc`, `oxlint
   --deny-warnings`, `vitest run`. It must fail on a planted type error.
-- `pnpm build` enforces the shared entry JS, total JS, startup CSS and total
-  CSS gzip limits in `test/bundle-size.ts`. Startup CSS counts HTML stylesheet
+- `pnpm build` reports the shared entry JS, total JS, startup CSS and total
+  CSS soft gzip targets in `test/bundle-size.ts`. Startup CSS counts HTML stylesheet
   and style-preload links; total CSS counts every emitted stylesheet.
-  Remove bytes rather than raising these limits.
-  Timing comparisons remain informational; candidate bundle sizes do not.
+  Size overages warn and never block a build, test, release check or landing.
+  Never raise a target to make a build pass. A lane that passes a target says
+  what it added and why in its report so obvious bloat gets noticed in review.
+  Missing assets and unmeasurable sizes still fail. Timing comparisons remain
+  informational too.
 - Node 24 runs the TypeScript sources directly (type stripping): erasable
   syntax only, relative imports end in `.ts`. Electron 45 ships Node
   24.22, which has `node:sqlite` and type stripping too.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09: Bundle size targets warn without blocking work
+
+- Gzip overages now report the size, target and amount over in builds and
+  existing performance reports, without failing builds, tests or release
+  checks. Targets stay unchanged; lanes explain added bytes in review instead
+  of raising targets to pass. Missing assets and unmeasurable sizes still fail.
+
 ## 2026-11-09: Release comparisons stop their servers and use qualifying releases
 
 - Canceling or timing out a comparison now stops its detached first-run server

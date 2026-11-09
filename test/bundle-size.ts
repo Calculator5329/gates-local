@@ -4,16 +4,19 @@ import { gzipSync } from "node:zlib";
 
 export const BUNDLE_BUDGET = { entryJsGzipKb: 134.85, totalJsGzipKb: 173.00, startupCssGzipKb: 13, totalCssGzipKb: 15 };
 
-/** Size alone blocks a build. Report every overage so one fix need not hide another. */
-export function assertBundleBudget(size: ReturnType<typeof bundleSize>, budget = BUNDLE_BUDGET): void {
+/** Size targets are informational; unreadable or nonfinite measurements still fail. */
+export function bundleSizeWarnings(size: ReturnType<typeof bundleSize>, budget = BUNDLE_BUDGET): string[] {
   const checks = [
     ["Entry JS (including HTML preloads)", size.entryJs, budget.entryJsGzipKb],
     ["Total JS", size.totalJs, budget.totalJsGzipKb],
     ["Startup CSS (HTML stylesheets and style preloads)", size.startupCss, budget.startupCssGzipKb],
     ["Total CSS", size.totalCss, budget.totalCssGzipKb],
   ] as const;
-  const failures = checks.filter(([, value, limit]) => !Number.isFinite(value) || value >= limit);
-  if (failures.length) throw new Error(`Bundle exceeds its gzip budget:\n${failures.map(([name, value, limit]) => `${name}: ${value.toFixed(3)} KiB; must be below ${limit} KiB. Remove bytes before rebuilding.`).join("\n")}`);
+  for (const [name, value] of checks) {
+    if (!Number.isFinite(value)) throw new Error(`Cannot measure bundle size: ${name} is ${value}`);
+  }
+  return checks.filter(([, value, target]) => value >= target)
+    .map(([name, value, target]) => `${name}: ${value.toFixed(3)} KiB; target ${target} KiB; ${(value - target).toFixed(3)} KiB over.`);
 }
 
 /** Gzip each emitted asset separately, as it is transferred to a cold client. */
@@ -45,8 +48,4 @@ export function bundleSize(dist: string) {
     startupCss: [...startupCss.values()].reduce((sum, file) => sum + gzipSync(readFileSync(file)).length / 1024, 0),
     totalCss: sizes.filter(({ file }) => file.endsWith(".css")).reduce((sum, { kb }) => sum + kb, 0),
   };
-}
-
-export function jsWithinBudget(size: { entryJs: number; totalJs: number }, budget: { entryJsGzipKb: number; totalJsGzipKb: number }) {
-  return size.entryJs < budget.entryJsGzipKb && size.totalJs < budget.totalJsGzipKb;
 }

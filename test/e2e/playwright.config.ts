@@ -1,5 +1,5 @@
 // E2E for the web client against the real server and the fake Ollama.
-//   pnpm e2e        functional journeys and deterministic size budgets (project "e2e")
+//   pnpm e2e        functional journeys and informational bundle sizes (project "e2e")
 //   pnpm e2e:timing wall-clock measurements, unchanged budgets (project "timing", informational for releases)
 // Timing journeys have separate functional companions in the blocking e2e project.
 //   pnpm e2e:shots  the deterministic screenshot rig (project "shots")

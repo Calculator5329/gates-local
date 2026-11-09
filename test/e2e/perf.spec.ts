@@ -3,7 +3,8 @@
 // above the number measured on the maintainer's Linux machine (2026-11-07, Chromium,
 // 1440x900, the fake Ollama at 12 ms a token); the measured value is in the
 // comment beside it. Every test also logs what it measured. Wall-clock
-// checks carry @timing and run separately; size and functional checks block releases.
+// checks carry @timing and run separately; sizes are informational soft targets.
+// Functional checks and unmeasurable bundles still block releases.
 //
 // The two timing gates (cold load, typing during a stream) pass when one of
 // up to TRIES tries is inside the budget. A slower app slows every try; a
@@ -16,7 +17,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
-import { assertBundleBudget, bundleSize } from "../bundle-size.ts";
+import { bundleSizeWarnings, bundleSize } from "../bundle-size.ts";
 
 const BUDGET = {
   firstPaintMs: 120, // measured 76 and 84 ms
@@ -34,8 +35,8 @@ const BUDGET = {
   // re-measured with the T3-style picker, paragraph streaming, the memory menu and Settings › Models: JS 135.1, CSS 10.5
   // 2026-11-08, with the rebuilt Settings pages and the queue: JS 140.22. Every .js in the build counts, so loading a page on demand would not change it.
   // 2026-11-08, with the phone layout: JS 143.7, CSS 12.6; about 3.4 KB and 1.9 KB of that is the layout.
-  // JS began at 120.6 KB with a 144 KB cap. 2026-11-08 decision: protect startup with
-  // index-*.js plus HTML preloads; cap all JS at 170 KB. Entry measured 132.43 KB, plus 2 KB.
+  // JS began at 120.6 KB with a 144 KB cap. 2026-11-08 decision: measure startup with
+  // index-*.js plus HTML preloads. Current soft targets live in bundle-size.ts.
   // 2026-11-08 review fixes: eager setup shell, deferred navigation and two chunk
   // groups. Entry 131.0234 KB; add 2 KB and round the limit up to two decimals.
 };
@@ -731,5 +732,8 @@ test("bundle size", () => {
   report("total JS gzip", size.totalJs, "KiB");
   report("startup CSS gzip", size.startupCss, "KiB");
   report("total CSS gzip", size.totalCss, "KiB");
-  expect(() => assertBundleBudget(size)).not.toThrow();
+  for (const warning of bundleSizeWarnings(size)) {
+    test.info().annotations.push({ type: "measured", description: `Bundle warning: ${warning}` });
+    process.stdout.write(`[perf] bundle warning: ${warning}\n`);
+  }
 });

@@ -299,12 +299,43 @@ function addrFs(bindv6only?: string): ListenerFs {
 
 /** A child process listening on host:port; resolves once it is listening. */
 function listenerChild(host: string, port: number): Promise<ChildProcess> {
-  const c = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${port}, ${JSON.stringify(host)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "ignore"] });
+  const c = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${port}, ${JSON.stringify(host)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "pipe"] });
   children.push(c);
+  let stderr = "";
+  c.stderr!.setEncoding("utf8").on("data", (text: string) => { stderr += text; });
   return new Promise((resolve, reject) => {
     c.stdout!.once("data", () => resolve(c));
-    c.once("exit", (code) => reject(new Error(`listener child exited ${code}`)));
+    c.once("error", reject);
+    c.once("close", (code, signal) => reject(new ListenerChildError(`listener child exited ${signal ?? code}\n${stderr}`, stderr)));
   });
+}
+
+class ListenerChildError extends Error {
+  readonly stderr: string;
+  constructor(message: string, stderr: string) {
+    super(message);
+    this.stderr = stderr;
+  }
+}
+
+/** Retry only a child's occupied IPv4 bind, recreating both listeners on a fresh port. */
+async function listenerPair(host: string, startChild = listenerChild) {
+  for (let attempt = 1; ; attempt++) {
+    const server = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen({ port: 0, host, ipv6Only: true }, resolve);
+      });
+      const { port } = server.address() as AddressInfo;
+      const child = await startChild("127.0.0.1", port);
+      return { server, port, child };
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (attempt >= 3 || !(error instanceof ListenerChildError) || !/\bError: listen EADDRINUSE:/.test(error.stderr)) throw error;
+      console.warn(`[ownership listener] bind conflict on attempt ${attempt}/3; retrying on a new port. ${error.message}`);
+    }
+  }
 }
 
 describe("listenerPid matches the probed address (R2-06)", () => {
@@ -330,11 +361,8 @@ describe("listenerPid matches the probed address (R2-06)", () => {
   });
 
   it("Linux, this machine: this process on 127.0.0.2:p and a child on 127.0.0.1:p; probing 127.0.0.1 is the child's", async () => {
-    const server = createServer();
-    await new Promise<void>((r) => server.listen(0, "127.0.0.2", r));
+    const { server, port, child } = await listenerPair("127.0.0.2");
     try {
-      const { port } = server.address() as AddressInfo;
-      const child = await listenerChild("127.0.0.1", port);
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBeUndefined();
       expect(await listenerPid(port, { platform: "linux", pids: [child.pid!], host: "127.0.0.1" })).toBe(child.pid);
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.2" })).toBe(process.pid);
@@ -345,16 +373,68 @@ describe("listenerPid matches the probed address (R2-06)", () => {
 
   it("Linux, this machine: this process on [::]:p with ipv6Only and a child on 127.0.0.1:p; probing 127.0.0.1 is never this process's", async () => {
     // The kernel default (bindv6only 0) says nothing about one socket: this one is IPv6-only.
-    const server = createServer();
-    await new Promise<void>((r) => server.listen({ port: 0, host: "::", ipv6Only: true }, r));
+    const { server, port, child } = await listenerPair("::");
     try {
-      const { port } = server.address() as AddressInfo;
-      const child = await listenerChild("127.0.0.1", port);
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "127.0.0.1" })).toBeUndefined();
       expect(await listenerPid(port, { platform: "linux", pids: [child.pid!], host: "127.0.0.1" })).toBe(child.pid);
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "::1" })).toBe(process.pid);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it.each(["127.0.0.2", "::"])("retries a child bind conflict beside %s on a new port", async (parentHost) => {
+    const holder = createServer();
+    let attempts = 0;
+    let heldPort = 0;
+    let pair: Awaited<ReturnType<typeof listenerPair>> | undefined;
+    try {
+      pair = await listenerPair(parentHost, async (host, port) => {
+        attempts++;
+        if (attempts === 1) {
+          heldPort = port;
+          await new Promise<void>((resolve, reject) => {
+            holder.once("error", reject);
+            holder.listen(port, host, resolve);
+          });
+        }
+        console.log(`[ownership probe] ${parentHost}: child attempt ${attempts}, port ${port}; deliberately held port ${heldPort}`);
+        return listenerChild(host, port);
+      });
+      expect(attempts).toBe(2);
+      expect(pair.port).not.toBe(heldPort);
+      expect(await listenerPid(pair.port, { platform: "linux", pids: [pair.child.pid!], host: "127.0.0.1" })).toBe(pair.child.pid);
+    } finally {
+      await new Promise<void>((resolve) => holder.close(() => resolve()));
+      if (pair) {
+        const { server } = pair;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    }
+  });
+
+  it("does not retry another child startup failure", async () => {
+    let attempts = 0;
+    await expect(listenerPair("127.0.0.2", () => {
+      attempts++;
+      return listenerChild("127.0.0.1", -1);
+    })).rejects.toThrow(/listener child exited 1[\s\S]*ERR_SOCKET_BAD_PORT/);
+    expect(attempts).toBe(1);
+  });
+
+  it("still fails after three child bind conflicts", async () => {
+    const holder = createServer();
+    await new Promise<void>((resolve) => holder.listen(0, "127.0.0.1", resolve));
+    let attempts = 0;
+    try {
+      const { port } = holder.address() as AddressInfo;
+      await expect(listenerPair("127.0.0.2", () => {
+        attempts++;
+        return listenerChild("127.0.0.1", port);
+      })).rejects.toThrow(/listener child exited 1[\s\S]*listen EADDRINUSE/);
+      expect(attempts).toBe(3);
+    } finally {
+      await new Promise<void>((resolve) => holder.close(() => resolve()));
     }
   });
 

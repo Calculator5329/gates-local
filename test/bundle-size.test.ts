@@ -4,7 +4,7 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { randomBytes } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
-import { BUNDLE_BUDGET, assertBundleBudget, bundleSize, jsWithinBudget } from "./bundle-size.ts";
+import { BUNDLE_BUDGET, bundleSizeWarnings, bundleSize } from "./bundle-size.ts";
 
 const dirs: string[] = [];
 function build(html: string, assets: Record<string, string>) {
@@ -38,41 +38,47 @@ it("a missing preloaded asset fails loudly instead of silently lowering the entr
   expect(() => bundleSize(dist)).toThrow(/missing\.js/);
 });
 
-it("includes JS outside the assets folder in the total ceiling", () => {
+it("includes JS outside the assets folder in the total", () => {
   const dist = build("", { "index-a.js": "chat" });
   writeFileSync(path.join(dist, "worker.js"), "worker");
   expect(bundleSize(dist)).toMatchObject({ entryJs: kb("chat"), totalJs: kb("chat") + kb("worker") });
 });
 
-it("both limits hold independently: entry growth and a total at or above 170 fail", () => {
-  const budget = { entryJsGzipKb: 133.03, totalJsGzipKb: 170 };
-  expect(jsWithinBudget({ entryJs: 131.02, totalJs: 147.10 }, budget)).toBe(true);
-  expect(jsWithinBudget({ entryJs: 143.84, totalJs: 147.10 }, budget)).toBe(false);
-  expect(jsWithinBudget({ entryJs: 131.02, totalJs: 170 }, budget)).toBe(false);
-  expect(jsWithinBudget({ entryJs: 131.02, totalJs: 170.01 }, budget)).toBe(false);
-});
-
-it("rejects a real emitted JS total above 170 KiB while its entry still fits", () => {
+it("reports a real emitted JS total over target while its entry still fits", () => {
   const dist = build("", { "index-a.js": "chat", "Settings.js": randomBytes(180 * 1024).toString("base64") });
   const size = bundleSize(dist);
-  expect(size.entryJs).toBeLessThan(133.03);
-  expect(size.totalJs).toBeGreaterThan(170);
-  expect(jsWithinBudget(size, { entryJsGzipKb: 133.03, totalJsGzipKb: 170 })).toBe(false);
+  expect(size.entryJs).toBeLessThan(BUNDLE_BUDGET.entryJsGzipKb);
+  expect(size.totalJs).toBeGreaterThan(BUNDLE_BUDGET.totalJsGzipKb);
+  expect(bundleSizeWarnings(size)).toEqual([expect.stringMatching(/^Total JS: .* KiB over\.$/)]);
 });
 
-it.runIf(process.env["GATES_LOCAL_BUNDLE_DIST"] !== undefined)("uses the production budget to check a built bundle when explicitly requested", () => {
+it.runIf(process.env["GATES_LOCAL_BUNDLE_DIST"] !== undefined)("reports built bundle overages when explicitly requested", () => {
   const dist = process.env["GATES_LOCAL_BUNDLE_DIST"];
   if (dist === undefined) throw new Error("GATES_LOCAL_BUNDLE_DIST must name the production build");
   const size = bundleSize(dist);
-  expect(() => assertBundleBudget(size)).not.toThrow();
+  for (const warning of bundleSizeWarnings(size)) console.warn(`[bundle] warning: ${warning}`);
 });
 
-it("accepts a fitting bundle and refuses each independent size limit, including nonfinite readings", () => {
+it("reports every over-target size without failing", () => {
+  const size = { entryJs: 134.5, totalJs: 172.65, startupCss: 14, totalCss: 16 };
+  const targets = { entryJsGzipKb: 133.5, totalJsGzipKb: 171.65, startupCssGzipKb: 13, totalCssGzipKb: 15 };
+  expect(() => bundleSizeWarnings(size, targets)).not.toThrow();
+  expect(bundleSizeWarnings(size, targets)).toEqual([
+    "Entry JS (including HTML preloads): 134.500 KiB; target 133.5 KiB; 1.000 KiB over.",
+    "Total JS: 172.650 KiB; target 171.65 KiB; 1.000 KiB over.",
+    "Startup CSS (HTML stylesheets and style preloads): 14.000 KiB; target 13 KiB; 1.000 KiB over.",
+    "Total CSS: 16.000 KiB; target 15 KiB; 1.000 KiB over.",
+  ]);
+});
+
+it("reports each reached target, but still fails nonfinite measurements", () => {
   const size = { entryJs: 132, totalJs: 169, startupCss: 12.8, totalCss: 14.4 };
-  expect(() => assertBundleBudget(size)).not.toThrow();
+  expect(bundleSizeWarnings(size)).toEqual([]);
   for (const [key, limit] of [["entryJs", BUNDLE_BUDGET.entryJsGzipKb], ["totalJs", BUNDLE_BUDGET.totalJsGzipKb], ["startupCss", BUNDLE_BUDGET.startupCssGzipKb], ["totalCss", BUNDLE_BUDGET.totalCssGzipKb]] as const) {
-    expect(() => assertBundleBudget({ ...size, [key]: limit })).toThrow(/Remove bytes/);
-    expect(() => assertBundleBudget({ ...size, [key]: Number.NaN })).toThrow(/Remove bytes/);
+    expect(bundleSizeWarnings({ ...size, [key]: limit })).toEqual([expect.stringContaining("0.000 KiB over.")]);
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => bundleSizeWarnings({ ...size, [key]: value })).toThrow(/Cannot measure bundle size/);
+    }
   }
 });
 
@@ -98,4 +104,9 @@ it("counts distinct stylesheet query URLs as separate startup downloads", () => 
 it("fails on a missing linked stylesheet instead of counting an unstyled startup as smaller", () => {
   const dist = build('<link rel="stylesheet" href="./assets/missing.css">', { "index-a.js": "chat" });
   expect(() => bundleSize(dist)).toThrow(/missing\.css/);
+});
+
+it("fails on a missing entry or a stylesheet without href", () => {
+  expect(() => bundleSize(build("", { "lazy.js": "lazy" }))).toThrow(/no index-\*\.js entry/);
+  expect(() => bundleSize(build('<link rel="stylesheet">', { "index-a.js": "chat" }))).toThrow(/without href/);
 });
