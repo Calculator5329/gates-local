@@ -11,10 +11,9 @@ import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
-import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
+import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
-import { Timeline } from "./Thread.tsx";
-import { UpdateNote } from "./Updates.tsx";
+import { UpdateNote } from "./UpdateNote.tsx";
 import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
@@ -466,6 +465,7 @@ export function App() {
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
   const picker = useScreen(pickerScreen, popId === "picker");
+  const thread = useScreen(threadScreen, view === "thread");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
   // A phone's sheet stays modal through live updates; Ctrl+M's search focuses itself after opening.
@@ -525,7 +525,7 @@ export function App() {
                   <Draft />
                 ) : (
                   <>
-                    <Timeline threadId={threadId} />
+                    {thread.kind === "ready" ? <thread.value.Timeline threadId={threadId} /> : <div className="tl">{thread.kind === "error" ? <ScreenError /> : null}</div>}
                     <div className="cw">
                       <div className="banner-slot">
                         <UpdateNote />

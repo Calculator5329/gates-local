@@ -1,10 +1,10 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { randomBytes } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
-import { bundleSize, jsWithinBudget } from "./bundle-size.ts";
+import { BUNDLE_BUDGET, assertBundleBudget, bundleSize, jsWithinBudget } from "./bundle-size.ts";
 
 const dirs: string[] = [];
 function build(html: string, assets: Record<string, string>) {
@@ -62,14 +62,15 @@ it("rejects a real emitted JS total above 170 KiB while its entry still fits", (
 it.runIf(process.env["GATES_LOCAL_BUNDLE_DIST"] !== undefined)("uses the production budget to check a built bundle when explicitly requested", () => {
   const dist = process.env["GATES_LOCAL_BUNDLE_DIST"];
   if (dist === undefined) throw new Error("GATES_LOCAL_BUNDLE_DIST must name the production build");
-  const spec = readFileSync(new URL("./e2e/perf.spec.ts", import.meta.url), "utf8");
-  const number = (key: string) => {
-    const value = spec.match(new RegExp(`${key}: ([0-9.]+)`))?.[1];
-    if (value === undefined) throw new Error(`Missing ${key} in perf.spec.ts`);
-    return Number(value);
-  };
   const size = bundleSize(dist);
-  expect(size.entryJs, "entry JS gzip KiB").toBeLessThan(number("entryJsGzipKb"));
-  expect(size.totalJs, "total JS gzip KiB").toBeLessThan(number("totalJsGzipKb"));
-  expect(size.css, "CSS gzip KiB").toBeLessThan(number("cssGzipKb"));
+  expect(() => assertBundleBudget(size)).not.toThrow();
+});
+
+it("accepts a fitting bundle and refuses each independent size limit, including nonfinite readings", () => {
+  const size = { entryJs: 132, totalJs: 169, css: 12.8 };
+  expect(() => assertBundleBudget(size)).not.toThrow();
+  for (const [key, limit] of [["entryJs", BUNDLE_BUDGET.entryJsGzipKb], ["totalJs", BUNDLE_BUDGET.totalJsGzipKb], ["css", BUNDLE_BUDGET.cssGzipKb]] as const) {
+    expect(() => assertBundleBudget({ ...size, [key]: limit })).toThrow(/Remove bytes/);
+    expect(() => assertBundleBudget({ ...size, [key]: Number.NaN })).toThrow(/Remove bytes/);
+  }
 });

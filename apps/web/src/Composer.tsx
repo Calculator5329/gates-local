@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
@@ -10,7 +10,7 @@ import { openFit } from "./fit-actions.ts";
 import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
-import { pickerScreen } from "./screen-loaders.ts";
+import { pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -32,7 +32,7 @@ import {
 } from "./session.ts";
 import { NA, type Queued, type State, editDraft, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
 import { SheetHead, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
-const Voice = lazy(() => import("./Voice.tsx").then((m) => ({ default: m.Voice })));
+import { Voice } from "./Voice.tsx";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
@@ -107,6 +107,11 @@ export function Composer() {
   const voiceThread = useStore((s) => s.threadId);
   const ta = useRef<HTMLTextAreaElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
+  // Preparing a reply is user intent, not an idle startup download. The
+  // renderer can arrive while the person types, before the first Send.
+  useEffect(() => {
+    if (draft.trim() || images.length) void threadScreen.load();
+  }, [draft, images.length]);
   useLayoutEffect(() => {
     const button = primary.current;
     if (primaryFocus) button?.focus();

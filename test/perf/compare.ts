@@ -1,13 +1,14 @@
 // Informational only: timing signals never set the process exit code.
 import { spawn, execFileSync } from "node:child_process";
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
 import { compare, type Run } from "./stats.ts";
-import { bundleSize } from "../bundle-size.ts";
+import { assertBundleBudget, bundleSize } from "../bundle-size.ts";
 import { prepareFixture } from "./fixture.ts";
+import { firstRunTimes } from "./first-run.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   prepare: { type: "boolean" }, prepared: { type: "string" }, out: { type: "string", default: "perf-results" },
@@ -30,6 +31,9 @@ function report(runs: Runs, commits: Inputs, count: number, repetitions: number,
   writeFileSync(path.join(out, "comparison.md"), markdown, { flag: "wx" });
   console.log(markdown);
   console.log(`Bundles (KiB gzip): ${JSON.stringify(bundles)}`);
+  // The baseline can predate the size pass. Only the candidate must fit;
+  // timing signals above remain informational, whatever their direction.
+  assertBundleBudget(bundles.candidate);
 }
 if (values.analyze) {
   const folder = path.resolve(values.analyze);
@@ -38,6 +42,8 @@ if (values.analyze) {
   const saved: Runs = { base: [], candidate: [] };
   for (const arm of ["base", "candidate"] as const) for (let round = 1; round <= prior.rounds; round++) {
     const run = JSON.parse(readFileSync(path.join(folder, `round-${round}-${arm}`, "run.json"), "utf8")) as Run;
+    const firstRunFile = path.join(folder, `round-${round}-${arm}`, "first-run.json");
+    if (existsSync(firstRunFile)) run.metrics.push(JSON.parse(readFileSync(firstRunFile, "utf8")) as Run["metrics"][number]);
     if (run.commit !== prior.commits[arm] || run.round !== round || run.arm !== arm) throw new Error("Run identity differs from comparison metadata");
     saved[arm].push(run);
   }
@@ -106,6 +112,9 @@ for (let round = 0; round < rounds; round++) {
     });
     const run = JSON.parse(readFileSync(path.join(runOut, "run.json"), "utf8")) as Run;
     if (run.commit !== inputs[arm] || run.metrics.length === 0) throw new Error("Incomplete run record");
+    const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined);
+    writeFileSync(path.join(runOut, "first-run.json"), JSON.stringify(firstRun, null, 2) + "\n", { flag: "wx" });
+    run.metrics.push(firstRun);
     runs[arm].push(run);
   }
 }

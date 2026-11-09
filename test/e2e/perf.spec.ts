@@ -16,7 +16,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
-import { bundleSize, jsWithinBudget } from "../bundle-size.ts";
+import { BUNDLE_BUDGET, bundleSize, jsWithinBudget } from "../bundle-size.ts";
 
 const BUDGET = {
   firstPaintMs: 120, // measured 76 and 84 ms
@@ -38,9 +38,7 @@ const BUDGET = {
   // index-*.js plus HTML preloads; cap all JS at 170 KB. Entry measured 132.43 KB, plus 2 KB.
   // 2026-11-08 review fixes: eager setup shell, deferred navigation and two chunk
   // groups. Entry 131.0234 KB; add 2 KB and round the limit up to two decimals.
-  entryJsGzipKb: 133.03,
-  totalJsGzipKb: 170,
-  cssGzipKb: 13, // measured 8.1 KB at first
+  ...BUNDLE_BUDGET,
 };
 
 /** Tries per timing gate: the gate passes when one try is inside the budget. */

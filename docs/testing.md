@@ -112,8 +112,16 @@ that contains the six-syllable word, including an echo of the earlier prompt.
 
 ## Informational browser performance
 
+`pnpm build` and the blocking performance spec share the hard gzip
+limits in `test/bundle-size.ts`: entry JS below 133.03 KiB (including HTML
+preloads), all emitted JS below 170 KiB, and all CSS below 13 KiB. The build
+prints each reading and fails with the overage. No timing measurement enters
+this gate. The package-level web build still emits an over-budget bundle for
+measurement; the root build, blocking browser spec and comparison refuse it.
+
 `test/perf/` is a separate Playwright project, excluded from `pnpm e2e`.
-Timing is informational and never changes the release verdict. On an authorized
+Timing is informational and never changes the release verdict. Candidate size
+overages fail the comparison after its measurements are saved. On an authorized
 browser machine, one command builds two commits and alternates them in one job:
 
 ```sh
@@ -144,6 +152,12 @@ threads, a 4,000-line code block and 300-row table, a 400-thread sidebar,
 concurrent streams and reconnect. Image paste is unsupported at this version.
 No production hook is used. Reconnect measures a usable composer after a drop;
 the visible stream is interrupted while the server may finish saving its reply.
+
+Each arm also measures first-run readiness in fresh contexts with HTTP cache
+disabled, using the same browser probe and paired-round noise calculation.
+These samples live separately in each round's `first-run.json`; analysis adds
+them without rewriting the original journey record. A first-run screenshot is
+retained for the candidate's first round.
 
 Cold means a fresh context with HTTP cache disabled and a warm fixture server.
 Input timestamps through the target DOM state and two animation frames bracket

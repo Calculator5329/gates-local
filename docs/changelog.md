@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-09: Connect without waiting for Settings
+
+- Restoring saved drafts loads independently of Settings, so a slow screen
+  download no longer keeps chat disconnected. Draft restoration still finishes
+  before the connection opens, with the same failure notice if it cannot save.
+
+## 2026-11-09: Smaller startup and enforced bundle limits
+
+- A new chat downloads its conversation renderer when needed. Settings-only
+  update controls also wait for Settings. Settings and the picker still warm
+  after first paint, without fetching the conversation renderer. Preparing a
+  draft warms that renderer before Send. The Dictate control renders immediately; audio capture stays
+  deferred. All files remain bundled for offline desktop use.
+- Unused dependency schemas no longer survive through unused property reads,
+  and CSS no longer carries rules for retired controls. Entry JS and total JS
+  fit their original limits; CSS still exceeds its unchanged 13 KiB limit.
+  `pnpm build` and performance comparisons fail on candidate size overages;
+  timing stays informational. The comparison also measures first-run
+  readiness in fresh browser contexts.
 ## 2026-11-09: Faster browser checks with useful boundary coverage
 
 - Broad flicker recordings are opt-in. Shorter shared journeys retain real

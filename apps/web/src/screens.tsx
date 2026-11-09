@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { afterFirstPaint, type deferred } from "./deferred.ts";
 import { firstRunScreen, pickerScreen, settingsScreen } from "./screen-loaders.ts";
-export { firstRunScreen, pickerScreen, settingsScreen } from "./screen-loaders.ts";
+export { firstRunScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
 
 export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
   const state = useSyncExternalStore(screen.subscribe, screen.get, screen.get);

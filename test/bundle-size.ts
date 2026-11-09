@@ -2,6 +2,19 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
+export const BUNDLE_BUDGET = { entryJsGzipKb: 133.03, totalJsGzipKb: 170, cssGzipKb: 13 };
+
+/** Size alone blocks a build. Report every overage so one fix need not hide another. */
+export function assertBundleBudget(size: ReturnType<typeof bundleSize>, budget = BUNDLE_BUDGET): void {
+  const checks = [
+    ["Entry JS (including HTML preloads)", size.entryJs, budget.entryJsGzipKb],
+    ["Total JS", size.totalJs, budget.totalJsGzipKb],
+    ["CSS", size.css, budget.cssGzipKb],
+  ] as const;
+  const failures = checks.filter(([, value, limit]) => !Number.isFinite(value) || value >= limit);
+  if (failures.length) throw new Error(`Bundle exceeds its gzip budget:\n${failures.map(([name, value, limit]) => `${name}: ${value.toFixed(3)} KiB; must be below ${limit} KiB. Remove bytes before rebuilding.`).join("\n")}`);
+}
+
 /** Gzip each emitted asset separately, as it is transferred to a cold client. */
 export function bundleSize(dist: string) {
   const sizes = readdirSync(dist, { recursive: true, encoding: "utf8" }).filter((file) => /\.(js|css)$/.test(file))

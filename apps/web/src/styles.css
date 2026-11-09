@@ -199,7 +199,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .hdr{height:var(--header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 12px 0 24px;border-bottom:1px solid var(--border)}
 .hdr h2{margin:0;font-size:14px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hdr h2.muted{color:var(--muted-foreground);font-weight:400}
-.hdr .vr{width:1px;height:16px;background:var(--border);margin:0 6px}
 .ibtn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-ctl);color:var(--muted-foreground);transition:background-color .12s,color .12s;flex:none}
 .ibtn:hover,.ibtn[aria-expanded="true"]{background:var(--hover);color:var(--foreground)}
 .ibtn:disabled,.ibtn:disabled:hover{color:var(--faint);background:none;cursor:default}
@@ -284,9 +283,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .wr[aria-expanded="true"] .wr-body{display:block}
 .cmd{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--foreground);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 10px}
 .cmd span{color:var(--muted-foreground)}
-.res{border-collapse:collapse;font-family:var(--font-mono);font-size:12.5px;line-height:1.7}
-.res th{text-align:left;font-weight:500;color:var(--muted-foreground);padding:0 24px 2px 0}
-.res td{padding:1px 24px 1px 0;color:var(--foreground)}
 .out{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--muted-foreground);white-space:pre-wrap;margin:0}
 
 /* the one live status row at the end of a streaming turn (F11) */
@@ -429,8 +425,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .btn.primary{background:var(--primary-bg);color:var(--primary-fg)}
 .btn.primary:hover{background:var(--primary-hover)}
 .btn.primary:disabled{opacity:.45;cursor:default}
-.btn.approve{background:var(--green);color:var(--on-green)}
-.btn.approve:hover{background:color-mix(in srgb,var(--green) 88%,#fff)}
 .btn.outline{border-color:var(--border-strong);color:var(--foreground)}
 .btn.outline:hover{background:var(--hover)}
 .btn.copy{display:inline-grid;justify-items:center}
@@ -463,9 +457,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .prog i{display:block;height:100%;background:var(--muted-foreground);border-radius:var(--r-sm);transition:width .4s ease-out}
 .prog-l{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted-foreground);margin-top:8px;font-variant-numeric:tabular-nums}
 /* F43: setup is two steps with one overall ETA; the active step has neutral progress, the next is muted */
-.steps{display:flex;flex-direction:column;gap:12px;margin-top:12px}
 .step .prog{margin-top:8px}
-.steps+.prog-l{margin-top:12px;justify-content:flex-start}
 
 /* ---------- popovers ---------- */
 .pop{position:fixed;z-index:50;display:none;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-xl);box-shadow:var(--popover-shadow)}
@@ -509,20 +501,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .lg-r .nm .ic{width:13px;height:13px;color:var(--muted-foreground);align-self:center}
 .lg-r .v{font-variant-numeric:tabular-nums}
 .fp-sep{height:1px;background:var(--border);margin:12px -16px}
-.fp-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px;min-height:30px}
-.fp-row .k{color:var(--muted-foreground)}
 .fp-v{display:flex;align-items:center;gap:8px;font-size:14px}
 .fp-n{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:4px;font-variant-numeric:tabular-nums;text-wrap:pretty}
 .fp-n+.fp-n{margin-top:8px}
 .fp-who{color:var(--foreground);font-weight:500}
-.fp-n+.fp-row{margin-top:8px}
 .fp-mt{font-size:13px;font-weight:500;color:var(--foreground);margin-bottom:8px}
 .fp-mt+.bar{margin-top:0}
 .meas{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 /* Warnings under the default-context control. */
 .ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
 #gpuMemory .ctx-line{min-height:3em}
-.ctx-alt{display:block}
 .meas div{display:flex;flex-direction:column}
 .meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
 .meas span{font-size:12.5px;color:var(--muted-foreground)}
@@ -713,7 +701,7 @@ a.btn{text-decoration:none}
    at 640 and below the phone layout: one top bar, a composer pinned to the bottom, bottom sheets
    for menus and the picker, and Settings as a list screen and a section screen. */
 @supports (height:100dvh){.app{height:100dvh}}
-#menuBtn,.hdr .nb,.hdr-t,.set-bar,.set-list,.sh-h,#optBtn,.pop-scrim,.sb-x,.a-det,.wr-who,.set-done{display:none}
+#menuBtn,.hdr .nb,.set-bar,.set-list,.sh-h,#optBtn,.pop-scrim,.sb-x,.a-det,.wr-who,.set-done{display:none}
 .scrim{position:fixed;inset:0;z-index:45;background:rgb(0 0 0/60%)}
 @media (max-width:1023px){
 .sb{position:fixed;inset:0 auto 0 0;z-index:46;width:min(340px,85vw);background:var(--popover);padding-top:env(safe-area-inset-top);transform:translateX(-100%);visibility:hidden;transition:transform .2s,visibility 0s .2s}
@@ -777,10 +765,6 @@ a.btn{text-decoration:none}
 .mini-seg button,.seg2 button{flex:1;height:44px;justify-content:center}
 .sv:has(.seg2),.sv:has(.mini-seg){width:100%}
 .ctx-c{flex:1;align-items:stretch}
-.fp-row{flex-direction:column;align-items:stretch}
-/* a download row: the fit word under the name, so the name keeps the width */
-.fp-det{min-height:44px}
-.fp-det .th-l{color:var(--foreground)}
 .mi{min-height:48px;align-items:center}
 .mi .ic{margin-top:0}
 .set-in{padding:16px 16px 32px}
@@ -808,7 +792,7 @@ a.btn{text-decoration:none}
 .set-bar .bk{display:inline-flex;align-items:center;gap:2px;justify-self:start;height:44px;padding:0 8px 0 4px;font-size:15px;color:var(--foreground)}
 .set-done{display:inline-flex;align-items:center;justify-self:end;height:44px;padding:0 12px;font-size:15px;font-weight:500}
 .set-bar .sp{justify-self:end}
-.set-h h1,.crumb{display:none}
+.set-h h1{display:none}
 .sl-r .val{margin-left:auto;font-size:14px;color:var(--muted-foreground);white-space:nowrap}
 .lg-r .nm .ic{display:none}
 /* first run: the steps read top to bottom, the button stays in reach */
@@ -824,7 +808,7 @@ a.btn{text-decoration:none}
 .fr-m .v{margin-left:0}
 /* one secondary grey, nothing under 14 px */
 .voice span{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.rt,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.u-q,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.fp-gpu,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.dlrow .sl b small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.crumb,.res-note,.prog-l,.step-h .sz,.card .cd,.chipf small,.kl td.k,.sh-h .fp-gpu,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.rt,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.fp-gpu,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.dlrow .sl b small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.prog-l,.card .cd,.kl td.k,.sh-h .fp-gpu,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */

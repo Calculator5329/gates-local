@@ -10,9 +10,10 @@ interface Probe {
 declare global { interface Window { perfJourney: Probe } }
 
 /** Instrument the browser only. No production hook; no automation round-trip in elapsed time. */
-export async function install(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem("gates-local.first-run-done", "1");
+export async function install(page: Page, firstRun = false) {
+  await page.addInitScript((setup) => {
+    if (setup) localStorage.removeItem("gates-local.first-run-done");
+    else localStorage.setItem("gates-local.first-run-done", "1");
     const sockets: WebSocket[] = [];
     const NativeSocket = window.WebSocket;
     window.WebSocket = class extends NativeSocket {
@@ -66,8 +67,8 @@ export async function install(page: Page) {
     };
     window.perfJourney = probe;
     // Armed before the production entry runs, including a cold startup slowdown.
-    probe.arm("navigation", "#ta", "", "ready");
-  });
+    probe.arm("navigation", setup ? ".fr h1" : "#ta", setup ? "Ready to chat" : "", setup ? "text" : "ready");
+  }, firstRun);
 }
 
 export async function measure(page: Page, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text"): Promise<Observation> {

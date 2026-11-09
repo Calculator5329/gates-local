@@ -7,15 +7,21 @@ export default defineConfig({
   plugins: [react()],
   build: {
     rolldownOptions: {
+      // Unused schema factory arguments read plain exported values. Keeping
+      // those unused reads retains date/network/cookie schemas the wire never uses.
+      treeshake: { propertyReadSideEffects: false },
       output: {
         // One gzip dictionary for the initial graph, another for deferred UI.
         // The first group captures only static dependencies of the entry.
         codeSplitting: { groups: [
           { name: "shell", tags: ["$initial"] },
-          // The microphone control cannot pull Settings into startup, and the
-          // actual audio capture code waits for the first microphone press.
-          { name: "voice", test: /apps[\\/]web[\\/]src[\\/](?:Voice\.tsx|draft-insertion\.ts)$/ },
-          { name: "voice-audio", test: /apps[\\/]web[\\/]src[\\/]voice-audio\.ts$/ },
+          // Restoring drafts precedes the WebSocket connection. It must load
+          // even while an optional screen's download is delayed.
+          { name: "draft-storage", test: /apps[\\/]web[\\/]src[\\/]draft-persistence\.ts$/ },
+          // Settings warming must not pull the conversation renderer back into
+          // startup. Its shared clipboard helper gets its own small dictionary.
+          { name: "conversation", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:Thread\.tsx|markdown\.tsx|paced\.ts|reveal\.ts|image-links\.ts)$/ },
+          { name: "clipboard", test: /apps[\\/]web[\\/]src[\\/]copy\.ts$/ },
           { name: "screens", test: /apps[\\/]web[\\/]src[\\/]/ },
         ] },
       },
