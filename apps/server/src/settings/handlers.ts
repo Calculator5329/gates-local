@@ -13,10 +13,10 @@ export interface SettingsHandlerDeps {
 export function createSettingsHandlers(deps: SettingsHandlerDeps) {
   return {
     "settings.get": () => deps.settings.get(),
-    "settings.update": (patch) => {
+    "settings.update": ({ voiceChange, ...patch }) => {
       const before = deps.settings.get();
       const next = deps.settings.update(patch);
-      if (next !== before) deps.push("settings.changed", next);
+      if (next !== before || voiceChange !== undefined) deps.push("settings.changed", { ...next, ...(voiceChange === undefined ? {} : { voiceChange }) });
       return next;
     },
     "settings.model.update": ({ model, patch }) => {

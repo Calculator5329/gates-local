@@ -15,6 +15,7 @@ import { addSource, checkImageStatus, dataFolder, openDataFolder, openSettings, 
 import { NA, setState, useStore } from "./store.ts";
 import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./Updates.tsx";
+const VoiceSettings = lazy(() => import("./VoiceSettings.tsx").then((m) => ({ default: m.VoiceSettings })));
 
 const Instructions = lazy(() => import("./Instructions.tsx"));
 
@@ -70,6 +71,7 @@ function General() {
         </Grp>
       )}
       <Updates />
+      <Suspense fallback={null}><VoiceSettings /></Suspense>
     </>
   );
 }
@@ -590,6 +592,8 @@ const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonl
     [
       ["Send", ["Enter"]],
       ["New line", ["Shift", "Enter"]],
+      ["Start or stop dictation", ["Ctrl", "Shift", "Space"]],
+      ["Cancel dictation", ["Esc"]],
     ],
   ],
 ];

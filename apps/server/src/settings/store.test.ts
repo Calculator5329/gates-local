@@ -34,13 +34,14 @@ describe("settings store", () => {
   it("an update persists, survives a reopen, and null clears defaultModel and comfyUrl", async () => {
     const dir = dataDir();
     const s = await open(dir);
-    s.update({ defaultModel: "qwen3.5:9b", comfyUrl: "http://127.0.0.1:8188", thinking: false, defaultNumCtx: 32768 });
+    s.update({ defaultModel: "qwen3.5:9b", comfyUrl: "http://127.0.0.1:8188", whisperUrl: "http://127.0.0.1:18078", thinking: false, defaultNumCtx: 32768 });
     const again = await open(dir, false);
-    expect(again.get()).toMatchObject({ defaultModel: "qwen3.5:9b", comfyUrl: "http://127.0.0.1:8188", thinking: false, defaultNumCtx: 32768, runtimeMode: "system" });
-    again.update({ defaultModel: null, comfyUrl: null });
+    expect(again.get()).toMatchObject({ defaultModel: "qwen3.5:9b", comfyUrl: "http://127.0.0.1:8188", whisperUrl: "http://127.0.0.1:18078", thinking: false, defaultNumCtx: 32768, runtimeMode: "system" });
+    again.update({ defaultModel: null, comfyUrl: null, whisperUrl: null });
     const third = await open(dir);
     expect(third.get()).not.toHaveProperty("defaultModel");
     expect(third.get()).not.toHaveProperty("comfyUrl");
+    expect(third.get()).not.toHaveProperty("whisperUrl");
     // No temp file left behind by the atomic write.
     expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
   });
@@ -113,6 +114,14 @@ describe("settings store", () => {
 });
 
 describe("settings handlers", () => {
+  it("echoes voice save provenance without persisting it, including an already-disconnected save", async () => {
+    const s = await open(dataDir());
+    const pushes: unknown[] = [];
+    const h = createSettingsHandlers({ settings: s, push: (channel, payload) => pushes.push({ channel, payload }) });
+    const next = h["settings.update"]({ whisperUrl: null, voiceChange: "disconnect-action" });
+    expect(pushes).toEqual([{ channel: "settings.changed", payload: { ...next, voiceChange: "disconnect-action" } }]);
+    expect(s.get()).not.toHaveProperty("voiceChange");
+  });
   it("settings.update pushes settings.changed once per real change and notifies readers", async () => {
     const s = await open(dataDir());
     const pushes: unknown[] = [];

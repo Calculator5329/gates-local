@@ -55,6 +55,7 @@ import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
 import { realRunner } from "./update/run.ts";
+import { createVoiceModule } from "./voice/module.ts";
 
 /** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
@@ -256,7 +257,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       port,
       token,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
-      handlers: app.handlers,
+      handlers: { ...app.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
       onClientCount: (n) => services.gpu.clientsChanged(n),
       dataDir,
       log: (line) => log(`ws ${line}`),

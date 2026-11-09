@@ -120,6 +120,10 @@ export interface State {
   /** On a phone, Settings shows its section list as its own screen instead of a section. */
   readonly setList: boolean;
   readonly draft: string;
+  /** Changes on replacement or clear, not ordinary typing within this draft. */
+  readonly draftVersion: number;
+  /** Tracks new speech actions; older local save completions do not supersede them. */
+  readonly voiceConnectionVersion: number;
   /** The header title is an input (thread menu › Rename). */
   readonly renaming: boolean;
   readonly searchOpen: boolean;
@@ -182,6 +186,8 @@ const initial: State = {
   drawer: false,
   setList: false,
   draft: "",
+  draftVersion: 0,
+  voiceConnectionVersion: 0,
   renaming: false,
   searchOpen: false,
   search: "",
@@ -216,8 +222,30 @@ export function getState(): State {
 
 /** Merge a patch (or the result of a function of the current state) and notify readers. */
 export function setState(patch: Partial<State> | ((s: State) => Partial<State>)): void {
+  publish(patch, false);
+}
+
+/** Native textarea input edits the current draft. Clearing it starts a new one. */
+export function editDraft(draft: string): void {
+  publish({ draft, notice: null, stopAsk: null }, true);
+}
+
+const voiceUrl = (settings: State["settings"]) => settings === NA ? undefined : settings?.whisperUrl;
+
+function publish(patch: Partial<State> | ((s: State) => Partial<State>), typing: boolean): void {
   const p = typeof patch === "function" ? patch(state) : patch;
-  state = { ...state, ...p };
+  const next = { ...state, ...p };
+  // Programmatic draft writes are replacements, including a failed send's
+  // restored text. All callers pass this boundary, so no async producer has
+  // to enumerate Send, Queue, Edit, Clear and navigation separately.
+  const replaced = (p.draft !== undefined && (!typing || p.draft === "")) ||
+    (p.editingQueued !== undefined && p.editingQueued !== state.editingQueued) ||
+    (p.threadId !== undefined && p.threadId !== state.threadId) ||
+    (p.view !== undefined && (p.view === "new" || p.view !== state.view));
+  state = { ...next,
+    draftVersion: state.draftVersion + Number(replaced),
+    voiceConnectionVersion: p.voiceConnectionVersion ?? state.voiceConnectionVersion + Number(voiceUrl(next.settings) !== voiceUrl(state.settings)),
+  };
   for (const l of listeners) l();
 }
 

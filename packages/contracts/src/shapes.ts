@@ -276,6 +276,8 @@ export const Settings = S.Struct({
   imageGen: S.Boolean,
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
+  /** Local dictation; absent means off. Only a loopback HTTP IP literal is accepted. */
+  whisperUrl: S.optional(S.String),
   /** Updates take every change on the main branch, not only releases. Unset means off. */
   updateEveryChange: S.optional(S.Boolean),
   /** Unset means "default". */
@@ -295,6 +297,7 @@ export const SettingsPatch = S.Struct({
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
   comfyUrl: S.optional(S.NullOr(S.String)),
+  whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   textSize: S.optional(TextSize),
   systemPrompt: S.optional(S.NullOr(S.String)),

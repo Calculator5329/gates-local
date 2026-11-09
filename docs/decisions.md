@@ -1,5 +1,19 @@
 # Decisions
 
+## 2026-11-08 · Local dictation first, voice conversation designed next
+
+**Decided:** add an optional whisper.cpp client, off until connected in
+Settings. Click the composer microphone to start and stop, or use
+Ctrl+Shift+Space; Esc cancels. Insert recognised text into the draft at the
+cursor without sending it. Audio stays in memory. Admit microphone audio
+only from the desktop client's own main frame. Whisper is an external
+service Gates Local never manages.
+**Next:** design voice conversation around local sentence-streamed CPU
+Pocket TTS and cancellation by turn identity, inspired by Milo. No TTS or
+automatic conversational send is implemented in this stage. Options and
+measured-reference latency targets: `docs/design/voice.md`.
+**Owner text (verbatim):** "next new featrure, integration with voice to text, and eventaully a voice to voice mode. take inspiration from our local milo project for some off this"
+
 The rulings before 2026-11-07 (D1 to D8 and the media-vault ruling) live in
 the incubator decisions file in the maintainer's private planning
 workspace, which is not published. New decisions are appended here.

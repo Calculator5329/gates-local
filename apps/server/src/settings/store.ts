@@ -104,15 +104,17 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
-  const { defaultModel, comfyUrl, systemPrompt, modelSettings, ...rest } = { ...current };
+  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
+  const whisper = patch.whisperUrl === undefined ? whisperUrl : (patch.whisperUrl ?? undefined);
   const prompt = patch.systemPrompt === undefined ? systemPrompt : (patch.systemPrompt ?? undefined);
   return {
     ...next,
     ...(model === undefined ? {} : { defaultModel: model }),
     ...(comfy === undefined ? {} : { comfyUrl: comfy }),
+    ...(whisper === undefined ? {} : { whisperUrl: whisper }),
     ...(prompt === undefined ? {} : { systemPrompt: prompt }),
     ...(patch.modelSettings === null || modelSettings === undefined ? {} : { modelSettings }),
     ...(patch.defaultNumCtx === undefined ? {} : { defaultNumCtx: patch.defaultNumCtx }),

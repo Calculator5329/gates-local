@@ -1,4 +1,7 @@
 /* Adapts T3 Code apps/web/src/index.css (MIT), commit d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a; full notice in LICENSES/T3-Code-MIT.txt. */
+.ctl.voice { width: 116px; justify-content: flex-start; flex-shrink: 0; }
+.ctl.voice.listening, .ctl.voice.transcribing, .ctl.voice.asking { color: var(--amber-fg); }
+.voice span { font-size: 11px; white-space: nowrap; }
 /* ============================================================
    Gates Local client styles: a verbatim port of the token block and
    component CSS in docs/design/shell.html (decisions in shell.md).

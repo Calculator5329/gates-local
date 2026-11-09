@@ -252,6 +252,29 @@ never shows a whisper stop, start or restart.
       is the only measured CPU option under 32 GB of RAM).
       *Accept:* plan fixture tests for both.
 
+## Voice: dictation now, conversation later
+
+2026-11-08: manual voice to text is implemented as an optional local
+whisper.cpp client. It inserts into the draft, never sends automatically,
+and keeps audio in memory. Setup: `docs/setup/voice.md`. Unit probes cover
+transcription, errors, cancellation, permissions and draft insertion. The five
+browser journeys passed with fake microphone audio and a fake speech service,
+including native undo/redo. The real microphone path is not tested.
+Every draft replacement gets a new identity. Dictation keeps its original
+identity from microphone start; insertion checks actual focus and retains
+blocked transcripts as plain text. Connection checks observe saved speech
+settings across windows. Earlier local saves cannot cancel a newer connection
+choice. Capture code loads on the first microphone press,
+while permission is requested, and voice configuration loads with Settings.
+
+Voice conversation remains unbuilt. The planned turn loop is bounded mic
+capture, silence detection, local transcription, streamed chat, sentence by
+sentence CPU Pocket TTS, and immediate local playback cancellation when the
+person talks over it. `docs/design/voice.md` compares CPU and GPU options,
+documents Milo's measured 404/850 ms first-audio references and the latency
+targets to validate here, and explains the request identities and PCM capture
+that stage 1 leaves reusable. Manual Dictate stays available separately.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

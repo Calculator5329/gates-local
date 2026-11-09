@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, ModelInfo } from "@gates-local/contracts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
@@ -27,8 +27,9 @@ import {
   setContext,
   stop,
 } from "./session.ts";
-import { NA, type Queued, type State, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
+import { NA, type Queued, type State, editDraft, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
 import { PHONE, SheetHead, closePop, closeTip, esc, isPhone, isTouch, place, togglePop, useMedia } from "./ui.tsx";
+const Voice = lazy(() => import("./Voice.tsx").then((m) => ({ default: m.Voice })));
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
@@ -95,6 +96,7 @@ export function Composer() {
   const used = useStore(usedTokens);
   const pop = useStore((s) => s.pop?.id ?? null);
   const view = useStore((s) => s.view);
+  const voiceThread = useStore((s) => s.threadId);
   const ta = useRef<HTMLTextAreaElement>(null);
 
   const ready = rt === "ready";
@@ -193,7 +195,7 @@ export function Composer() {
           aria-label="Message"
           value={draft}
           // the warning is about the words it was raised for
-          onChange={(e) => setState({ draft: e.target.value, notice: null, stopAsk: null })}
+          onChange={(e) => editDraft(e.target.value)}
           onKeyDown={(e) => {
             // a touch keyboard's Enter is a new line; the send button sends
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) {
@@ -284,6 +286,7 @@ export function Composer() {
             )}
           </div>
           <div className="cf-r">
+            <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}`} textarea={ta} /></Suspense>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />

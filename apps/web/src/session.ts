@@ -267,7 +267,7 @@ async function hydrateWith(
     void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
-  on("settings.changed", applySettings);
+  on("settings.changed", ({ voiceChange, ...settings }) => applySettings(settings, false, voiceChange));
   on("gpu.changed", (gpu) => {
     setState({ gpu });
     invalidateFits();
@@ -396,8 +396,15 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
   };
 }
 
-function applySettings(settings: Settings, first = false): void {
-  setState((s) => settingsPatch(s, settings, first));
+// The server sends each save's push before its response on the same socket.
+// Keep provenance until that response, so an older local completion is not a
+// new intent. Foreign saves still supersede checks, even if the URL is equal.
+const voiceWrites = new Set<string>();
+
+function applySettings(settings: Settings, first = false, voiceChange?: string): void {
+  setState((s) => ({ ...settingsPatch(s, settings, first),
+    ...(voiceChange === undefined ? {} : { voiceConnectionVersion: s.voiceConnectionVersion + Number(!voiceWrites.has(voiceChange)) }),
+  }));
   applyTheme(settings.theme);
   applyTextSize(settings.textSize);
 }
@@ -1435,6 +1442,7 @@ const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
   tools: "save the tools setting",
   imageGen: "save image generation",
   comfyUrl: "save the ComfyUI address",
+  whisperUrl: "save voice to text",
   updateEveryChange: "save the update setting",
   textSize: "save the text size",
   systemPrompt: "save the system prompt",
@@ -1442,19 +1450,26 @@ const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
 };
 
 /** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
-export async function updateSettings(patch: SettingsPatch): Promise<ActionResult> {
+export async function updateSettings(patch: SettingsPatch, options: { voiceActionStarted?: boolean } = {}): Promise<ActionResult> {
   const keys = Object.keys(patch) as Array<keyof SettingsPatch>;
   const what = keys.length === 1 && keys[0] !== undefined ? SETTING_WORDS[keys[0]] : "save these settings";
-  const r = await act("settings.update", patch, what);
-  if (!r.ok) return r.message;
-  applySettings(r.value);
-  // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
-  if ("imageGen" in patch || "comfyUrl" in patch) {
-    void probe("image.status", {}).then((imageStatus) => {
-      if (imageStatus !== undefined) setState({ imageStatus });
-    });
+  const voiceChange = "whisperUrl" in patch ? crypto.randomUUID() : undefined;
+  if (voiceChange !== undefined) {
+    if (!options.voiceActionStarted) setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+    voiceWrites.add(voiceChange);
   }
-  return null;
+  try {
+    const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what);
+    if (!r.ok) return r.message;
+    applySettings(r.value, false, voiceChange);
+    // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
+    if ("imageGen" in patch || "comfyUrl" in patch) {
+      void probe("image.status", {}).then((imageStatus) => {
+        if (imageStatus !== undefined) setState({ imageStatus });
+      });
+    }
+    return null;
+  } finally { if (voiceChange !== undefined) voiceWrites.delete(voiceChange); }
 }
 
 /** Save or reset one model; apply only the settings the server accepted. */
@@ -1474,6 +1489,7 @@ const RESET_SETTINGS = {
   tools: true,
   imageGen: false,
   comfyUrl: null,
+  whisperUrl: null,
   updateEveryChange: false,
   textSize: "default",
   systemPrompt: null,

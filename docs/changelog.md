@@ -41,6 +41,52 @@
 - Progress, cancel and retry use controls of fixed dimensions. Failed and
   interrupted imports leave no registered source; startup removes partial
   app-owned imports. Removing a manual folder still only disconnects it.
+## 2026-11-09: Let the newest speech connection choice win
+
+Connect, Disconnect, then Connect again now preserves the last choice even
+when the earlier Disconnect finishes saving later. Transient save provenance
+distinguishes older local completions from new actions; a Disconnect in another
+window still cancels a pending Connect, including when speech is already off.
+
+## 2026-11-08: Load voice capture when the microphone is first used
+
+Settings and voice configuration stay outside the initial app bundle. The
+microphone control loads separately, and capture code loads on the first press
+while microphone permission is requested. Cancelling or leaving the draft
+still releases a late microphone stream.
+
+## 2026-11-08: Keep each dictation with its original draft and connection choice
+
+Send, Queue, queued edits, clears and navigation now replace the draft's
+identity; a pending dictation cannot land in whatever the person types next.
+Ordinary typing stays in the same draft. A blocked composer cannot send a
+document editing command into another focused field, and its transcript is
+kept as a selectable plain line. Pending connection checks also observe saved
+speech settings changes from other windows, so Disconnect stays disconnected.
+The five browser journeys passed with fake audio and speech, including a
+native undo/redo check that was first seen failing with the old insertion.
+Real microphone capture and recognition remain an owner check.
+
+## 2026-11-08: Keep late speech and connection results with their original action
+
+Starting or switching a queued-message edit now cancels dictation, so a late
+transcript cannot enter the wrong draft. Disconnect invalidates pending
+Connect checks. Speech insertion now uses a small shared native textarea
+editing helper instead of rewriting the controlled value, preserving the
+browser's undo history. Non-browser race probes were seen failing before
+the fixes; native undo/redo was subsequently verified with fake audio.
+
+## 2026-11-08: Dictate into a draft with a local speech server
+
+The composer can now record a short passage and insert its transcript at
+the cursor without replacing existing words or sending the message.
+Connect a running whisper.cpp server in Settings › General first. Audio is
+memory-only; clips are bounded to 60 seconds and requests to 20 seconds.
+Esc, navigation and disconnection release the mic and cancel late results.
+Desktop permissions admit only the app's own microphone audio. Setup is in
+`docs/setup/voice.md`; future sentence-streamed voice conversation is designed
+in `docs/design/voice.md` and remains unbuilt. Real recognition quality
+remains an owner check.
 
 ## 2026-11-08: Reverted controls no longer overwrite newer settings
 

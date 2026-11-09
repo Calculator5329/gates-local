@@ -65,6 +65,27 @@ async function bootSettingsReady(): Promise<void> {
 const chat = (turnId: string, event: Payload<"chat.event">["event"], threadId = "t1") =>
   b.server.push("chat.event", { turnId, threadId, event });
 
+it("VD-01: own older speech saves do not supersede a newer action; foreign saves still do", async () => {
+  await boot();
+  const settings = { ...methodSamples["settings.get"].result, whisperUrl: "http://127.0.0.1:18078" };
+  b.server.push("settings.changed", settings);
+  const pending = b.server.hold("settings.update");
+  const saving = session.updateSettings({ whisperUrl: null });
+  const held = await pending;
+  expect(held.params.voiceChange).toEqual(expect.any(String));
+  // A newer Connect begins while the older Disconnect save is in flight.
+  store.setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+  const latest = store.getState().voiceConnectionVersion;
+  const disconnected = { ...settings, whisperUrl: undefined };
+  b.server.push("settings.changed", { ...disconnected, voiceChange: held.params.voiceChange });
+  expect(store.getState().voiceConnectionVersion).toBe(latest);
+  held.respond(disconnected); await saving;
+  expect(store.getState().voiceConnectionVersion).toBe(latest);
+  // A Disconnect from window B supersedes A even if its URL is already off.
+  b.server.push("settings.changed", { ...disconnected, voiceChange: "window-b-disconnect" });
+  expect(store.getState().voiceConnectionVersion).toBe(latest + 1);
+});
+
 /** Send "hi" from a new thread and wait until chat.send answered turn-1. */
 async function startFirstTurn(): Promise<void> {
   void session.send("hi");

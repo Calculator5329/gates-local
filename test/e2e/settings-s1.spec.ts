@@ -83,7 +83,9 @@ test("the Shortcuts page lists the bindings that work, and nothing else", async 
   const names = (group: string) => set.locator(".grp", { hasText: group }).locator("td:first-child");
   const keys = (what: string) => set.locator("tr", { hasText: what }).locator("kbd");
   await expect(names("Navigation")).toHaveText(["New thread", "Search threads", "Choose a model", "Settings", "Close a menu or Settings", "Open a thread's menu"]);
-  await expect(names("Chat")).toHaveText(["Send", "New line"]);
+  await expect(names("Chat")).toHaveText(["Send", "New line", "Start or stop dictation", "Cancel dictation"]);
+  await expect(keys("Start or stop dictation")).toHaveText(["Ctrl", "Shift", "Space"]);
+  await expect(keys("Cancel dictation")).toHaveText(["Esc"]);
   await expect(keys("New thread")).toHaveText(["Ctrl", "N"]);
   await expect(keys("Choose a model")).toHaveText(["Ctrl", "M"]);
   await expect(set).not.toContainText("Approve a pending note");

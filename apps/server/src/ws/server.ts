@@ -32,6 +32,7 @@ import { serveClient } from "../web/static.ts";
 export interface HandlerContext {
   /** Stable per connection, for handlers that track who started what. */
   readonly clientId: number;
+  readonly signal?: AbortSignal;
 }
 
 export type Handler<M extends MethodName> = (params: Params<M>, ctx: HandlerContext) => ResultOf<M> | Promise<ResultOf<M>>;
@@ -232,7 +233,8 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   wss.on("connection", (ws: WebSocket) => {
     clients.add(ws);
     options.onClientCount?.(clients.size);
-    const ctx: HandlerContext = { clientId: nextClientId++ };
+    const controller = new AbortController();
+    const ctx: HandlerContext = { clientId: nextClientId++, signal: controller.signal };
     ws.on("message", (data, isBinary) => {
       // Binary frames fail the text check in decodeRequest and are dropped with a log.
       const raw = isBinary ? data : Buffer.isBuffer(data) ? data.toString("utf8") : Buffer.concat(data as Buffer[]).toString("utf8");
@@ -240,6 +242,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     });
     ws.on("error", (e) => log(`client ${ctx.clientId} error: ${e.message}`));
     ws.on("close", () => {
+      controller.abort();
       if (clients.delete(ws)) options.onClientCount?.(clients.size);
     });
   });

@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState, type UpdateAndRestartResult } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
+import { allowsMicrophone } from "./media-permission.ts";
 import { serverDataDir } from "./data-dir.ts";
 import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
@@ -269,7 +270,11 @@ function run(): void {
 
   void app.whenReady().then(() => {
     if (hidesMenu(process.platform)) Menu.setApplicationMenu(null);
-    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      callback(allowsMicrophone(contents.getURL(), permission, details.requestingUrl, "mediaTypes" in details ? details.mediaTypes ?? [] : [], details.isMainFrame));
+    });
+    session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) =>
+      allowsMicrophone(contents?.getURL() ?? "", permission, origin, [details.mediaType ?? "unknown"], details.isMainFrame));
     const root = webRoot();
     protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
     if (windowAtStart(mode) && win === null) {

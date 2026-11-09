@@ -84,6 +84,9 @@ const SourceRef = S.Struct({ id: S.String });
 
 /** One definition for both ends: each method's params and result Schema. */
 export const methods = {
+  "voice.check": { params: S.Struct({ url: S.String }), result: S.Struct({ ready: S.Boolean }) },
+  "voice.transcribe": { params: S.Struct({ id: S.String, audio: S.String }), result: S.Struct({ text: S.String }) },
+  "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams },
   "threads.list": { params: NoParams, result: S.Array(Thread) },
   "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread },
   "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }) },
@@ -140,7 +143,7 @@ export const methods = {
   "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
   "settings.get": { params: NoParams, result: Settings },
-  "settings.update": { params: SettingsPatch, result: Settings },
+  "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings },
   "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings },
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults },
   "gpu.status": { params: NoParams, result: GpuStatus },
@@ -180,7 +183,9 @@ export const pushes = {
   "models.changed": { payload: S.Array(ModelInfo) },
   "threads.changed": { payload: ThreadRef },
   // ---- v2 surface (2026-11-07)
-  "settings.changed": { payload: Settings },
+  // Transient provenance, never persisted in Settings. A client can distinguish
+  // its older save completing from a new action in another window.
+  "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }) },
   "gpu.changed": { payload: GpuStatus },
   /** One per progress step of every download, until done, error or cancelled. */
   "models.pull": { payload: PullProgress },
