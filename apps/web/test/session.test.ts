@@ -55,6 +55,13 @@ async function boot(): Promise<void> {
   await tick();
 }
 
+/** Boots with the Settings chunk already in, so openSettings() lands at once whatever the load on the machine. */
+async function bootSettingsReady(): Promise<void> {
+  await boot();
+  const { settingsScreen } = await import("../src/screen-loaders.ts");
+  await settingsScreen.load();
+}
+
 const chat = (turnId: string, event: Payload<"chat.event">["event"], threadId = "t1") =>
   b.server.push("chat.event", { turnId, threadId, event });
 
@@ -364,7 +371,7 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
   });
 
   it("a reconnect reload that fails while Settings is open leaves Settings open", async () => {
-    await boot();
+    await bootSettingsReady();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
     session.openSettings();
@@ -375,7 +382,7 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
   });
 
   it("a reconnect reload that fails after Settings opened leaves Settings open", async () => {
-    await boot();
+    await bootSettingsReady();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
     const held = await reconnectHeld();
@@ -386,7 +393,7 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
   });
 
   it("a reload started in Settings that fails after leaving Settings is stale and keeps the thread", async () => {
-    await boot();
+    await bootSettingsReady();
     session.openThread("t1");
     await until(() => store.getState().messages["t1"] !== undefined);
     session.openSettings();
@@ -406,7 +413,7 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
   });
 
   it("a thread with nothing on screen whose load failed says why, and leaving Settings or Retry loads it again", async () => {
-    await boot();
+    await bootSettingsReady();
     const first = b.server.hold("threads.get");
     session.openThread("t1");
     await first;
