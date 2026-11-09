@@ -12,6 +12,8 @@
 //                           seedAt; installed: [names] sets the fake's installed
 //                           models; runtimeMode ("system" | "app") writes saved
 //                           settings in that mode, else first run picks it; the
+//                           controlledRuntimePorts: true pins discovery to a
+//                           fake-backed listener and checked-free adjacent ports;
 //                           reply carries the open thread's id; phone: true also
 //                           opens the phone listener (GATES_LOCAL_WEB_LISTEN) on a
 //                           Unix socket in a short 0700 dir under ~/.cache and a
@@ -32,10 +34,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer, request, type IncomingMessage } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createServer as createNetServer } from "node:net";
+import { createServer as createNetServer, type Server } from "node:net";
 import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_ADDR, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
@@ -89,6 +91,7 @@ function stopChild(child: ChildProcess | null): Promise<void> {
 const fake = await start("fake", ["test/fake-ollama/main.ts", "--port", String(FAKE_PORT), "--gpu-state", gpuState], process.env, /fake ollama on /);
 
 let server: ChildProcess | null = null;
+let controlledRuntime: Awaited<ReturnType<typeof allocateRuntimePorts>> | undefined;
 /** The Serve stand-in's port while a reset asked for the phone listener, else null. */
 let phonePort: number | null = null;
 let standIn: ServeStandIn | null = null;
@@ -109,6 +112,59 @@ async function freePort(): Promise<number> {
   }
 }
 
+function listen(listener: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    listener.once("error", reject);
+    listener.listen(port, "127.0.0.1", () => { listener.off("error", reject); resolve(); });
+  });
+}
+function close(listener: Server): Promise<void> {
+  return new Promise(resolve => listener.close(() => resolve()));
+}
+
+/** A real fake-backed listener, followed by nine checked-free discovery ports. */
+async function allocateRuntimePorts(target: string) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const proxy = createServer((req, res) => {
+      const upstream = request(`${target}${req.url ?? "/"}`, { method: req.method, headers: req.headers }, response => {
+        res.writeHead(response.statusCode ?? 502, response.headers);
+        response.pipe(res);
+      });
+      upstream.on("error", () => {
+        if (res.destroyed) return;
+        if (res.headersSent) res.destroy(); else res.writeHead(502).end("Fake transport failed");
+      });
+      res.on("close", () => upstream.destroy());
+      req.pipe(upstream);
+    });
+    await listen(proxy, 0);
+    const address = proxy.address();
+    const system = typeof address === "object" && address !== null ? address.port : 0;
+    const leases: Server[] = [];
+    let available = false;
+    try {
+      // Keep every discovery probe away from fixed service and fixture ports.
+      if (system < 20000 || system + 9 > 65535) continue;
+      for (let port = system + 1; port <= system + 9; port++) {
+        const lease = createNetServer(socket => socket.destroy());
+        await listen(lease, port);
+        leases.push(lease);
+      }
+      available = true;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error;
+    } finally {
+      await Promise.all(leases.map(close));
+      if (!available) { proxy.closeAllConnections(); await close(proxy); }
+    }
+    if (available) return {
+      system, app: system + 1, url: `http://127.0.0.1:${system}`,
+      close: async () => { proxy.closeAllConnections(); await close(proxy); },
+    };
+  }
+  throw new Error("Could not allocate a controlled runtime discovery range");
+}
+
 function phoneEnv(): NodeJS.ProcessEnv {
   if (phonePort === null) return {};
   return {
@@ -123,7 +179,7 @@ function serverEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
     ...phoneEnv(),
-    GATES_LOCAL_OLLAMA_URL: FAKE_URL,
+    GATES_LOCAL_OLLAMA_URL: controlledRuntime?.url ?? FAKE_URL,
     GL_E2E_LIBRARY_FIXTURE: libraryFixture,
     GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
@@ -212,7 +268,12 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, phone, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, phone, controlledRuntimePorts, ...fakeBody } = body;
+        await stopChild(server);
+        server = null;
+        await controlledRuntime?.close();
+        controlledRuntime = undefined;
+        if (controlledRuntimePorts === true) controlledRuntime = await allocateRuntimePorts(FAKE_URL);
         await fakeScenario({ scenario: "models", ...fakeBody });
         await standIn?.close();
         standIn = null;
@@ -221,6 +282,9 @@ const control = createServer((req, res) => {
         if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER, PHONE_ADDR);
         const reply = phonePort === null ? { dataDir, threadId, phonePort } : { dataDir, threadId, phonePort, phoneSocket };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));
+      } else if (route === "POST /runtime-ports") {
+        if (!controlledRuntime) throw new Error("This reset did not request controlled runtime ports");
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ system: controlledRuntime.system, app: controlledRuntime.app }));
       } else if (route === "POST /restart") {
         const body = await readJson(req);
         await stopChild(server);
@@ -243,7 +307,7 @@ control.listen(CONTROL_PORT, "127.0.0.1", () => log(`control on ${CONTROL_PORT};
 
 const shutdown = () => {
   control.close();
-  void Promise.all([stopChild(server), stopChild(fake), standIn?.close()]).then(() => process.exit(0));
+  void Promise.all([stopChild(server), stopChild(fake), standIn?.close(), controlledRuntime?.close()]).then(() => process.exit(0));
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-09: Runtime journeys control their discovery ports
+
+- Wrong-service journeys use a fresh fake-backed port and checked-free app
+  ports, so unrelated services cannot change their first-launch expectations.
+  They still let the server choose its mode and assert the real port-taken
+  message. Ordinary journeys retain their existing fixture endpoint.
+
+## 2026-11-09: Streaming proof bundles load imported styles
+
+- The streaming integrity spec and review harness include their emitted CSS
+  before running the client bundle. A stylesheet imported by a deferred screen
+  no longer stops these checks before they can render a reply.
+
 ## 2026-11-09: Release unit fixtures use the installed toolchain
 
 The isolated release scenarios reuse the suite's pnpm bootstrap cache with

@@ -1,7 +1,7 @@
 // Displayed component proof, using the real hook and renderer in development
 // StrictMode. Run only through the browser runner, not on the local desktop.
 import { build } from "esbuild";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium, expect } from "@playwright/test";
@@ -11,6 +11,7 @@ if (!output) throw new Error("The browser runner must supply GL_E2E_RESULTS");
 await mkdir(output, { recursive: true });
 const bundle = await build({
   stdin: { resolveDir: path.resolve("apps/web"), loader: "tsx", contents: `
+    import './src/styles.css';
     import { StrictMode, useState } from 'react';
     import { createRoot } from 'react-dom/client';
     import { usePacedText } from './src/paced.ts';
@@ -27,12 +28,15 @@ const bundle = await build({
     }
     createRoot(document.getElementById('root')).render(<StrictMode><Probe /></StrictMode>);
   ` },
+  outfile: path.join(output, "review.js"),
   bundle: true, write: false, format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"development"' },
 });
-const css = await readFile("apps/web/src/styles.css", "utf8");
+const css = bundle.outputFiles.filter(file => file.path.endsWith(".css")).map(file => file.text).join("\n");
+const script = bundle.outputFiles.find(file => file.path.endsWith(".js"));
+if (!script) throw new Error("The streaming review bundle emitted no JavaScript");
 const html = path.join(output, "review.html");
 await writeFile(html, `<!doctype html><html><head><meta charset="utf-8"><style>${css}
-body{display:block;padding:32px}#root{max-width:800px;margin:auto}.turn{padding:24px}</style></head><body><div id="root"></div><script>${bundle.outputFiles[0].text}</script></body></html>`);
+body{display:block;padding:32px}#root{max-width:800px;margin:auto}.turn{padding:24px}</style></head><body><div id="root"></div><script>${script.text}</script></body></html>`);
 const browser = await chromium.launch({ headless: false });
 const context = await browser.newContext({ viewport: { width: 1024, height: 900 }, colorScheme: "dark", recordVideo: { dir: output } });
 const page = await context.newPage();

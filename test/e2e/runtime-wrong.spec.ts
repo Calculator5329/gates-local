@@ -5,7 +5,7 @@
 import type { Page } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ scenario: "wrong-service" });
+test.use({ scenario: "wrong-service", controlledRuntimePorts: true });
 
 function marked(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(marked);
@@ -36,9 +36,9 @@ test.describe("with the app's own copy chosen", () => {
 
 test.describe("with the system Ollama chosen", () => {
   test.use({ runtimeMode: "system" });
-  test("a wrong service on the Ollama port blocks chat and says why", async ({ page, open }) => {
+  test("a wrong service on the Ollama port blocks chat and says why", async ({ page, open, runtimePorts }) => {
     await open();
-    const port = "5288";
+    const port = String(runtimePorts.system);
     await expect(page.locator(".sb-foot .rt")).toContainText(`Port ${port} · busy`);
     await expect(page.locator(".banner")).toBeVisible();
     await expect(page.locator(".banner")).toContainText(port);
@@ -68,9 +68,9 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.getByRole("button", { name: "Use Gates Local's Ollama" })).toHaveCount(0);
   });
 
-  test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {
+  test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open, runtimePorts }) => {
     await open();
-    await expect(page.locator(".banner")).toContainText("5288");
+    await expect(page.locator(".banner")).toContainText(String(runtimePorts.system));
     // the stack control turns the fake into a healthy Ollama on the same port
     await stack.scenario("models");
     await page.locator(".banner").getByRole("button", { name: "Retry" }).click();
@@ -79,27 +79,27 @@ test.describe("with the system Ollama chosen", () => {
   });
 });
 
-test("with the app's own copy chosen, the banner says which port is taken instead of asking to start Ollama", async ({ page, open }) => {
-  // fresh settings (first run already done): the app picks its own copy and routes around 5288
+test("with the app's own copy chosen, the banner says which port is taken instead of asking to start Ollama", async ({ page, open, runtimePorts }) => {
+  // Fresh settings: real discovery rejects the fake and picks the known free app port.
   await open();
   const banner = page.locator(".banner");
-  await expect(banner).toContainText(/Something other than Ollama answers on ports? 5288\b/);
-  await expect(banner).toContainText("Gates Local uses its own Ollama on port 5290.");
+  await expect(banner).toContainText(new RegExp(`Something other than Ollama answers on ports? ${runtimePorts.system}\\b`));
+  await expect(banner).toContainText(`Gates Local uses its own Ollama on port ${runtimePorts.app}.`);
   await expect(banner).not.toContainText("system-wide");
   await expect(banner).not.toContainText("Start Ollama");
   // the sidebar footer's tooltip tells the same story
-  await expect(page.locator(".sb-foot .rt")).toHaveAttribute("data-tip", /Something other than Ollama answers on ports? 5288\b.*own Ollama on port 5290/);
+  await expect(page.locator(".sb-foot .rt")).toHaveAttribute("data-tip", new RegExp(`Something other than Ollama answers on ports? ${runtimePorts.system}\\b.*own Ollama on port ${runtimePorts.app}`));
 });
 
 test.describe("on first launch", () => {
   test.use({ skipFirstRun: false });
-  test("first run says the port is taken and that the app uses its own Ollama", async ({ page, open }) => {
+  test("first run says the port is taken and that the app uses its own Ollama", async ({ page, open, runtimePorts }) => {
     await open();
     // fresh settings pick the app's own copy; the stack has no Ollama binary, so it is not installed
     await expect(page.getByRole("heading", { name: "Ollama isn't installed" })).toBeVisible();
-    // 5288 is the wrong service, 5289 the stack's control server; the app's port is the next free one
-    await expect(page.locator(".fr .sub")).toContainText(/Something other than Ollama answers on ports? 5288\b/);
-    await expect(page.locator(".fr .sub")).toContainText("Gates Local uses its own Ollama on port 5290.");
+    // No saved runtime mode: the fake is wrong, and the following port is known free.
+    await expect(page.locator(".fr .sub")).toContainText(new RegExp(`Something other than Ollama answers on ports? ${runtimePorts.system}\\b`));
+    await expect(page.locator(".fr .sub")).toContainText(`Gates Local uses its own Ollama on port ${runtimePorts.app}.`);
     await expect(page.locator(".fr .sub")).not.toContainText("GET /api/version");
     await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   });

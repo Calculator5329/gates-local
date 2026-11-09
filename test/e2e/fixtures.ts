@@ -18,7 +18,7 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string): Promise<string | null> {
+  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string, controlledRuntimePorts = false): Promise<string | null> {
     const r = await control("/reset", {
       scenario,
       seed,
@@ -26,9 +26,18 @@ export const stack = {
       ...(runtimeMode === undefined ? {} : { runtimeMode }),
       ...(installed === undefined ? {} : { installed }),
       ...(comfyUrl === undefined ? {} : { comfyUrl }),
+      ...(controlledRuntimePorts ? { controlledRuntimePorts: true } : {}),
     });
     const id = typeof r === "object" && r !== null ? (r as { threadId?: unknown }).threadId : undefined;
     return typeof id === "string" ? id : null;
+  },
+  /** Expected inputs owned by the fixture, not ports read from runtime status. */
+  async runtimePorts() {
+    const value = await control("/runtime-ports");
+    const fields = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+    const system = fields["system"], app = fields["app"];
+    if (typeof system !== "number" || typeof app !== "number" || !Number.isInteger(system) || system < 20000 || app !== system + 1 || app > 65535) throw new Error("The stack did not return controlled runtime ports");
+    return { system, app };
   },
   /** Stop the server, wait downMs, start it again on the same data. */
   restart: (downMs = 0) => control("/restart", { downMs }),
@@ -47,6 +56,10 @@ interface Fixtures {
   seedAt: number | undefined;
   /** Saved settings in this runtime mode before the server starts; undefined is a first launch (the server picks). */
   runtimeMode: RuntimeMode | undefined;
+  /** Allocate a fake-backed discovery range independent of host services. */
+  controlledRuntimePorts: boolean;
+  /** The known occupied system port and first free app port after reset. */
+  runtimePorts: Awaited<ReturnType<typeof stack.runtimePorts>>;
   /** Saved ComfyUI address, so a test never reaches the default port; undefined leaves it unset. */
   comfyUrl: string | undefined;
   /** Console errors this test expects, as patterns; anything else fails it. */
@@ -64,12 +77,17 @@ export const test = base.extend<Fixtures>({
   seed: [0, { option: true }],
   seedAt: [undefined, { option: true }],
   runtimeMode: [undefined, { option: true }],
+  controlledRuntimePorts: [false, { option: true }],
   comfyUrl: [undefined, { option: true }],
   installed: [undefined, { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
-  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl }, use) => {
-    await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl)));
+  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts }, use) => {
+    await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts)));
+  },
+  runtimePorts: async ({ seededThread }, use) => {
+    void seededThread;
+    await use(await stack.runtimePorts());
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens

@@ -1,6 +1,5 @@
 /// <reference lib="dom" />
 import { build } from "esbuild";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { State } from "../../apps/web/src/store.ts";
 import { expect, test } from "./fixtures.ts";
@@ -19,6 +18,7 @@ test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASUR
 async function proof(page: import("@playwright/test").Page) {
   const bundle = await build({
     stdin: { resolveDir: path.resolve("apps/web"), loader: "tsx", contents: `
+      import './src/styles.css';
       import { createRoot } from 'react-dom/client';
       import { flushSync } from 'react-dom';
       import { Timeline } from './src/Thread.tsx';
@@ -35,12 +35,15 @@ async function proof(page: import("@playwright/test").Page) {
         }
       };
     ` },
+    outfile: test.info().outputPath("proof.js"),
     bundle: true, write: false, format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"development"' },
   });
   await page.goto("about:blank");
   await page.setContent('<main id="proof"></main>');
-  await page.addStyleTag({ content: await readFile("apps/web/src/styles.css", "utf8") });
-  await page.addScriptTag({ content: bundle.outputFiles[0]!.text });
+  for (const stylesheet of bundle.outputFiles.filter(file => file.path.endsWith(".css"))) await page.addStyleTag({ content: stylesheet.text });
+  const script = bundle.outputFiles.find(file => file.path.endsWith(".js"));
+  if (!script) throw new Error("The streaming proof bundle emitted no JavaScript");
+  await page.addScriptTag({ content: script.text });
 }
 
 test("an arriving image card preserves the live reply node, thinking and reveal", async ({ page }, info) => {
