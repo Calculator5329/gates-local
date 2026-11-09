@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { urlsFromText } from "../../contracts/src/links.ts";
 import { parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";
 
@@ -277,7 +278,8 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
           const result = await race(input.execute(item.call, signal), signal);
           badCalls = 0;
           output = trimOutput(result.output);
-          step = { callId, name: item.name, state: "done", summary: result.summary, durationMs: Date.now() - started };
+          const links = urlsFromText(output);
+          step = { callId, name: item.name, state: "done", summary: result.summary, durationMs: Date.now() - started, links };
         } catch (e) {
           if (input.signal.aborted) {
             const cancelled: ToolStep = { ...running, state: "error", summary: "Tool was cancelled", durationMs: Date.now() - started };
@@ -300,6 +302,12 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         yield* say("Stopped after three invalid tool calls in a row. Try rephrasing your request.");
         yield finish(); return;
       }
+    }
+    // An image-only batch answers through its cards. Mixed batches go back to
+    // the model so it can explain the other tools' results while the image waits.
+    if (pending.every(item => item.name === "image")) {
+      if (tools.slice(-pending.length).every(step => step.state !== "done")) yield* say("The image could not be queued; check image generation in Settings and try again.");
+      yield { ...finish(), stats: complete.stats }; return;
     }
     if (phase.aborted) spent ??= "time";
     if (spent) askFinal(spent);

@@ -4,6 +4,7 @@
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
 // as whole blocks (reveal.ts); half-written input still renders as far as it goes.
 import { type ReactNode, memo, useEffect, useRef, useState } from "react";
+import { linkKey } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 
 type Block =
@@ -91,7 +92,7 @@ function parse(src: string): Block[] {
   return out;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)/g;
+const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|!\[([^\]]*)\]\((?:[^()\n]|\([^()]*\))*\)/g;
 
 /** A URL with a break offered after each / and - (and inside a run too long to fit), so a line never ends mid-word. */
 function wrapUrl(url: string): ReactNode[] {
@@ -99,7 +100,7 @@ function wrapUrl(url: string): ReactNode[] {
 }
 
 /** Inline spans: code, bold, italics, links and bare URLs. Anything else is text. */
-export function inline(text: string): ReactNode[] {
+export function inline(text: string, allowedLinks?: ReadonlySet<string>): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
@@ -112,20 +113,30 @@ export function inline(text: string): ReactNode[] {
     else if (m[3]) out.push(<em key={n++}>{s.slice(1, -1)}</em>);
     else if (m[4]) {
       const label = s.slice(1, s.indexOf("]("));
+      const url = m[5] ?? "";
+      if (allowedLinks !== undefined && !allowedLinks.has(linkKey(url) ?? "")) {
+        out.push(<span key={n++}>{label} ({wrapUrl(url)})</span>);
+        last = at + s.length;
+        continue;
+      }
       const isUrl = /^https?:\/\//.test(label);
       out.push(
         <a key={n++} href={m[5]} className={isUrl ? "url" : undefined} target="_blank" rel="noreferrer noopener">
           {isUrl ? wrapUrl(label) : label}
         </a>,
       );
+    } else if (m[7] !== undefined) {
+      // Model-authored image URLs are untrusted, including local-looking ones.
+      // Actual generated files render only from the message's server-owned images.
+      out.push(m[7] || "Image unavailable");
     } else {
       // a sentence's closing punctuation stays outside the link
       const url = s.replace(/[.,;:!?]+$/, "");
-      out.push(
+      out.push(allowedLinks !== undefined && !allowedLinks.has(linkKey(url) ?? "") ? <span key={n++} className="url">{wrapUrl(url)}</span> : (
         <a key={n++} href={url} className="url" target="_blank" rel="noreferrer noopener">
           {wrapUrl(url)}
-        </a>,
-      );
+        </a>
+      ));
       last = at + url.length;
       continue;
     }
@@ -192,7 +203,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-function Table({ b }: { b: Extract<Block, { t: "table" }> }) {
+function Table({ b, allowedLinks }: { b: Extract<Block, { t: "table" }>; allowedLinks?: ReadonlySet<string> }) {
   const ref = useEdges<HTMLTableElement>(b.rows.length);
   return (
     <table ref={ref}>
@@ -200,7 +211,7 @@ function Table({ b }: { b: Extract<Block, { t: "table" }> }) {
         <tr>
           {b.head.map((cell, j) => (
             <th key={j} className={b.num[j] ? "n" : undefined}>
-              {inline(cell)}
+              {inline(cell, allowedLinks)}
             </th>
           ))}
         </tr>
@@ -210,7 +221,7 @@ function Table({ b }: { b: Extract<Block, { t: "table" }> }) {
           <tr key={j}>
             {b.head.map((_, col) => (
               <td key={col} className={b.num[col] ? "n" : undefined}>
-                {inline(r[col] ?? "")}
+                {inline(r[col] ?? "", allowedLinks)}
               </td>
             ))}
           </tr>
@@ -220,13 +231,13 @@ function Table({ b }: { b: Extract<Block, { t: "table" }> }) {
   );
 }
 
-function renderBlock(b: Block, key: number): ReactNode {
+function renderBlock(b: Block, key: number, allowedLinks?: ReadonlySet<string>): ReactNode {
   switch (b.t) {
     case "p":
-      return <p key={key}>{inline(b.text)}</p>;
+      return <p key={key}>{inline(b.text, allowedLinks)}</p>;
     case "h": {
       const H = `h${b.level}` as const;
-      return <H key={key}>{inline(b.text)}</H>;
+      return <H key={key}>{inline(b.text, allowedLinks)}</H>;
     }
     case "ul":
     case "ol": {
@@ -234,7 +245,7 @@ function renderBlock(b: Block, key: number): ReactNode {
       return (
         <L key={key}>
           {b.items.map((it, j) => (
-            <li key={j}>{inline(it)}</li>
+            <li key={j}>{inline(it, allowedLinks)}</li>
           ))}
         </L>
       );
@@ -242,13 +253,13 @@ function renderBlock(b: Block, key: number): ReactNode {
     case "code":
       return <CodeBlock key={key} lang={b.lang} code={b.text} />;
     case "quote":
-      return <blockquote key={key}>{inline(b.text)}</blockquote>;
+      return <blockquote key={key}>{inline(b.text, allowedLinks)}</blockquote>;
     case "table":
-      return <Table key={key} b={b} />;
+      return <Table key={key} b={b} allowedLinks={allowedLinks} />;
   }
 }
 
 /** The reply body. `live` marks a streaming reply, whose blocks fade in as they finish. */
-export const Markdown = memo(function Markdown({ text, live }: { text: string; live?: boolean }) {
-  return <div className={live === true ? "md live" : "md"}>{parse(text).map((b, i) => renderBlock(b, i))}</div>;
+export const Markdown = memo(function Markdown({ text, live, allowedLinks }: { text: string; live?: boolean; allowedLinks?: ReadonlySet<string> }) {
+  return <div className={live === true ? "md live" : "md"}>{parse(text).map((b, i) => renderBlock(b, i, allowedLinks))}</div>;
 });

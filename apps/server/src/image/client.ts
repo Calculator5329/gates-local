@@ -11,6 +11,7 @@ const History = S.Record(S.String, S.Struct({ outputs: S.Record(S.String, S.Stru
 const Queue = S.Struct({ queue_running: S.Array(S.Array(S.Unknown)), queue_pending: S.Array(S.Array(S.Unknown)) });
 const ObjectInfo = S.Record(S.String, S.Unknown);
 const LoaderInfo = S.Struct({ input: S.Struct({ required: S.Record(S.String, S.Array(S.Unknown)) }) });
+const failure = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 export interface ComfyClientDeps {
   fetch?: typeof fetch;
@@ -46,12 +47,12 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         const loader = S.decodeUnknownOption(LoaderInfo)(info[node]);
         const choices = Option.isSome(loader) ? loader.value.input.required[field]?.[0] : undefined;
         const choice = Array.isArray(choices) ? choices.find((v: unknown) => typeof v === "string" && (v === wanted || v.replaceAll("\\", "/").endsWith(`/${wanted}`))) : undefined;
-        if (typeof choice !== "string") throw new Error(`ComfyUI model ${wanted} is absent. Install it in ComfyUI's model folders, then retry.`);
+        if (typeof choice !== "string") throw failure("image-model", `ComfyUI model ${wanted} is absent. Install it in ComfyUI's model folders, then retry.`);
         return choice;
       };
       const graph = workflow(prompt, Math.floor(Math.random() * 2 ** 32), select("CheckpointLoaderSimple", "ckpt_name", CHECKPOINT), select("LoraLoader", "lora_name", LORA));
       // Do not submit into another client's queue.
-      if (!await this.idle()) throw new Error("ComfyUI is busy with another job. Wait for it to finish, then retry.");
+      if (!await this.idle()) throw failure("image-busy", "ComfyUI is busy with another job. Wait for it to finish, then retry.");
       signal.throwIfAborted();
       const url = new URL(`${baseUrl}/ws`); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; url.searchParams.set("clientId", clientId);
       const ws = (deps.socket ?? ((address) => new WebSocket(address)))(url.href);
@@ -73,13 +74,13 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
           if (typeof value === "number" && typeof max === "number" && max > 0) progress(Math.max(0, Math.min(1, value / max)));
         }
         if (frame.type === "execution_success" || (frame.type === "executing" && frame.data["node"] === null)) done();
-        if (frame.type === "execution_error" || frame.type === "execution_interrupted") fail(new Error(`ComfyUI ${frame.type}: ${String(frame.data["exception_message"] ?? "image did not finish")}`));
+        if (frame.type === "execution_error" || frame.type === "execution_interrupted") fail(failure("image-workflow", `ComfyUI ${frame.type}: ${String(frame.data["exception_message"] ?? "image did not finish")}`));
       };
       const message = (event: MessageEvent) => {
         if (typeof event.data !== "string") return; // binary preview frames
         try { handle(S.decodeUnknownSync(Frame)(JSON.parse(event.data) as unknown)); } catch { /* unrelated or malformed progress frame */ }
       };
-      const closed = () => fail(new Error("ComfyUI disconnected while making the image. Retry after it is ready."));
+      const closed = () => fail(failure("image-disconnected", "ComfyUI disconnected while making the image. Retry after it is ready."));
       const aborted = () => fail(new Error("Image cancelled."));
       ws.addEventListener("message", message);
       ws.addEventListener("close", closed);
@@ -88,10 +89,10 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       try {
         if (ws.readyState !== 1) await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(() => finish(new Error("ComfyUI WebSocket did not open.")), 10_000);
-          const finish = (failure?: Error) => {
+          const finish = (openError?: Error) => {
             clearTimeout(timer);
             ws.removeEventListener("open", opened); ws.removeEventListener("error", error); ws.removeEventListener("close", error); signal.removeEventListener("abort", cancel);
-            if (failure) reject(failure); else resolve();
+            if (openError) reject(openError); else resolve();
           };
           const opened = () => finish();
           const error = () => finish(new Error("ComfyUI WebSocket failed to open."));
@@ -118,10 +119,10 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         signal.throwIfAborted();
         const history = S.decodeUnknownSync(History)(await (await request(`/history/${encodeURIComponent(promptId)}`, undefined, signal)).json());
         const image = Object.values(history[promptId]?.outputs ?? {}).flatMap((output) => output.images ?? [])[0];
-        if (!image) throw new Error("ComfyUI finished without an image. Check its workflow and retry.");
+        if (!image) throw failure("image-workflow", "ComfyUI finished without an image. Check its workflow and retry.");
         const params = new URLSearchParams({ filename: image.filename, subfolder: image.subfolder ?? "", type: image.type ?? "output" });
         const bytes = Buffer.from(await (await request(`/view?${params}`, undefined, signal)).arrayBuffer());
-        if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("ComfyUI returned a result that is not a PNG.");
+        if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw failure("image-result", "ComfyUI returned a result that is not a PNG.");
         success = true;
         fetched();
         return bytes;

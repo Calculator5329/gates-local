@@ -11,6 +11,69 @@
 - Startup and error pages keep a draggable header. Narrow desktop Settings
   keeps its Back control, drawer close stays clear of native controls, and
   switching threads in fullscreen updates the taskbar title too.
+## 2026-11-08: Preserve older saved links and keep tool provenance in its turn
+
+- Saved image replies without URL-provenance metadata retain their previous
+  rendering. New successful tool steps record that metadata even when their
+  output contains no URLs, so new image turns still enforce the rule.
+- A tool result can approve a link only in its own reply. A later successful
+  lookup cannot make an earlier fabricated download link clickable again.
+- The accepted streaming window remains: an invented link can be clickable
+  until the image tool queues, then becomes inert. Ordinary streaming replies
+  keep their link behavior. "Your image is ready" prose can still appear beside
+  the true image-status card.
+
+## 2026-11-08: Invented image-download links stay plain text
+
+- A mixed image/tool reply keeps its report answer and its independent image
+  status card. Links in that reply are clickable only when the person or
+  successful tool output supplied the complete URL in the thread. The rule
+  applies while streaming, after saving, and after reloading. Ordinary replies
+  keep their existing link behavior; model-written images remain labels.
+- Tool-output URL provenance persists with each tool step. Model arguments
+  and earlier model prose cannot approve a URL. Claims such as "Your image
+  is ready" remain untouched and can still appear beside the true job card.
+
+## 2026-11-08: One retry per image attempt, with complete mixed-tool answers
+
+- Clicking Try again twice, or retrying from another client, now returns the
+  same accepted job. The server creates its card and links it to the failed
+  attempt in one transaction. The original button follows that job through
+  its outcome. A failed retry can be retried from its own card.
+- Only image-only tool batches end the reply. Mixed batches return to the
+  model so report totals and other tool results reach the answer. The image
+  result explicitly says it is queued and not made yet; the card remains
+  authoritative and Markdown images remain labels without remote fetches.
+- The coordinator revised the JS budget while a separate entry/total build
+  split is pending. This build measures 144.46 KiB JS total and 12.76 KiB
+  CSS; the old 144 KiB total no longer blocks this lane. The total ceiling
+  is 170 KiB and the CSS limit remains 13 KiB.
+- Verification: nine review probes were seen failing before the fixes;
+  typecheck, lint and 1,314 unit tests pass, with one skipped. The remote
+  browser retry test failed with its button fix removed, then all four
+  image-request journeys passed with the fix restored. Inspected the waiting,
+  making and failure captures and retry trace frames; backends were fakes.
+
+## 2026-11-08: An image request stays visible until it finishes
+
+- Queued images used to disappear unless they succeeded, and the model could
+  follow the tool with a made-up image link. A saved chat card now shows
+  waiting, making, the image, or one actionable failure sentence. Failed and
+  cancelled jobs offer Try again; unfinished jobs become failures after a
+  restart. The card reserves the output's space.
+- The tool batch finishes after an image call, including its other tools,
+  without another model request. A queue failure gets a deterministic reason.
+  Model-written Markdown images render their labels without fetching or
+  linking their addresses. App-saved images still use the local file route.
+- Server failure logs contain the job id and error kind, without the prompt.
+  The queue has a separate 30-minute timeout; the 10-minute render budget
+  still starts when the GPU lease is granted.
+- Verification uses fake Ollama and ComfyUI only. The real failing job's
+  cause cannot be recovered from the old implementation's missing records.
+  Using the bundle test's gzip method, production JS is 144.30 KiB against
+  144 and CSS is 12.76 KiB against 13. The budgets remain unchanged; the JS
+  excess must be resolved before landing. Browser verification on the
+  designated external runner is pending.
 
 ## 2026-11-08: Settings, rebuilt page by page
 

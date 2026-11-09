@@ -41,8 +41,24 @@ export const ToolStep = S.Struct({
   /** The call and its trimmed output, for the expanded row. */
   detail: S.optional(S.String),
   durationMs: S.optional(S.Finite),
+  /** URLs from actual tool output, excluding the model's call arguments. */
+  links: S.optional(S.Array(S.String)),
 });
 export type ToolStep = typeof ToolStep.Type;
+
+/** Image jobs are durable messages; events carry the same state as the saved card. */
+export const ImageEvent = S.Struct({
+  jobId: S.String,
+  threadId: S.optional(S.String),
+  state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
+  progress: S.optional(S.Finite),
+  imagePath: S.optional(S.String),
+  message: S.optional(S.String),
+  errorKind: S.optional(S.String),
+  /** One accepted retry per failed attempt; duplicates return this same job. */
+  retryJobId: S.optional(S.String),
+});
+export type ImageEvent = typeof ImageEvent.Type;
 
 export const Message = S.Struct({
   id: S.String,
@@ -57,6 +73,7 @@ export const Message = S.Struct({
   tools: S.optional(S.Array(ToolStep)),
   /** Images made in this turn, as paths relative to the server's data dir ("images/<jobId>.png"); the server serves them over HTTP. */
   images: S.optional(S.Array(S.String)),
+  imageJob: S.optional(ImageEvent),
 });
 export type Message = typeof Message.Type;
 
@@ -317,18 +334,6 @@ export const ImageStatus = S.Struct({
   detail: S.optional(S.String),
 });
 export type ImageStatus = typeof ImageStatus.Type;
-
-export const ImageEvent = S.Struct({
-  jobId: S.String,
-  threadId: S.optional(S.String),
-  state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
-  /** 0 to 1. */
-  progress: S.optional(S.Finite),
-  /** The finished PNG, relative to the server's data dir ("images/<jobId>.png"). */
-  imagePath: S.optional(S.String),
-  message: S.optional(S.String),
-});
-export type ImageEvent = typeof ImageEvent.Type;
 
 // ---------------------------------------------------------------- setup
 

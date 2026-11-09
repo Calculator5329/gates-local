@@ -14,6 +14,8 @@ export interface ToolStep {
   summary: string;
   detail?: string;
   durationMs?: number;
+  /** Server-owned provenance from the tool's successful output only. */
+  links?: readonly string[];
 }
 export interface ModelMessage {
   role: "user" | "assistant" | "system" | "tool";

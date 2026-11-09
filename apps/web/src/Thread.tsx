@@ -1,14 +1,15 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The thread timeline (shell.md F11, F40, F50, F56, F58, F60). Finished turns
 // are memoised by message, so a streaming token re-renders only the live turn.
-import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Message, ToolStep } from "@gates-local/contracts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
+import { imageTurnLinks } from "./image-links.ts";
 import { reveal } from "./reveal.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { fileUrl, reloadThread, retry } from "./session.ts";
+import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -223,22 +224,56 @@ function ImageOut({ path }: { path: string }) {
   return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
 }
 
+function ImageJob({ msg }: { msg: Message }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [acceptedRetry, setAcceptedRetry] = useState<string>();
+  const job = msg.imageJob!;
+  const retryId = job.retryJobId ?? acceptedRetry;
+  const retried = useStore(s => retryId === undefined ? undefined : s.messages[msg.threadId]?.find(m => m.id === retryId)?.imageJob);
+  const retryLabel = retried?.state === "done" ? "Image ready" : retried?.state === "error" ? "Retry failed" : retried?.state === "cancelled" ? "Retry cancelled" : retried?.state === "queued" ? "Retry queued" : "Retrying…";
+  const pending = job.state === "queued" || job.state === "running";
+  const label = job.state === "queued" ? "Waiting for the GPU" : "Making image";
+  const action = async () => {
+    setBusy(true);
+    if (pending) setError(await cancelImage(job.jobId));
+    else {
+      const result = await retryImage(msg.threadId, msg.content, job.jobId);
+      if (typeof result === "string") setError(result);
+      else { setError(null); setAcceptedRetry(result.jobId); }
+    }
+    setBusy(false);
+  };
+  return <div className="image-job" data-image-job={job.state} data-fit={job.errorKind === "wont-fit" ? "refuse" : undefined}>
+    {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} /> : <div className="image-job-state" role="status">
+      <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
+      <p>{pending ? label : job.message ?? "The image did not finish; try again."}</p>
+      {job.state === "running" && (job.progress ?? 0) > 0 ? <span>{Math.round(job.progress! * 100)}%</span> : null}
+      <button type="button" className="qa" disabled={busy || retryId !== undefined} onClick={() => void action()}>{retryId !== undefined ? retryLabel : busy && !pending ? "Retrying…" : pending ? "Cancel image" : "Try again"}</button>
+      {error ? <p>{error}</p> : null}
+    </div>}
+  </div>;
+}
+
 const AsstTurn = memo(function AsstTurn({ msg, last }: { msg: Message; last: boolean }) {
   countRender(msg.id);
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => s.firstToken[msg.id]);
   const name = describeModel(msg.model ?? "", catalog).name;
+  const queuedImage = msg.tools?.some(t => t.name === "image" && t.state === "done") === true;
+  const messages = useStore(s => queuedImage ? s.messages[msg.threadId] ?? EMPTY : EMPTY);
+  const allowedLinks = useMemo(() => imageTurnLinks(messages, msg.tools ?? []), [messages, msg.tools]);
   return (
     <div className="turn a done" tabIndex={0} aria-label="Reply">
       {msg.thinking ? <ThinkLine secs={ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))} text={msg.thinking} /> : null}
-      {(msg.tools ?? []).map((t) => (
+      {(msg.tools ?? []).filter(t => t.name !== "image" || t.state !== "done").map((t) => (
         <ToolRow key={t.callId} step={t} />
       ))}
-      {msg.content !== "" ? <Markdown text={msg.content} /> : null}
-      {(msg.images ?? []).map((p) => (
+      {msg.imageJob ? <ImageJob msg={msg} /> : msg.content !== "" ? <Markdown text={msg.content} allowedLinks={allowedLinks} /> : null}
+      {(msg.imageJob ? [] : msg.images ?? []).map((p) => (
         <ImageOut key={p} path={p} />
       ))}
-      <ActRow text={msg.content} meta={replyMeta(name, msg, ft)} regen={last} />
+      {msg.imageJob || (msg.content === "" && msg.tools?.every(t => t.name === "image")) ? null : <ActRow text={msg.content} meta={replyMeta(name, msg, ft)} regen={last} />}
     </div>
   );
 });
@@ -269,6 +304,8 @@ function LiveTurnView({ threadId }: { threadId: string }) {
   const live = useStore((s) => (s.live?.threadId === threadId ? s.live : null));
   const catalog = useStore(catalogOf);
   const loading = useStore((s) => (s.live ? s.loads[s.live.model]?.state === "loading" : false));
+  const messages = useStore(s => s.messages[threadId] ?? EMPTY);
+  const allowedLinks = useMemo(() => imageTurnLinks(messages, live?.tools ?? []), [messages, live?.tools]);
   if (live === null) return null;
   const end = live.end;
   const name = describeModel(live.model, catalog).name;
@@ -281,10 +318,10 @@ function LiveTurnView({ threadId }: { threadId: string }) {
       {live.pendingUser !== null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
       <div className={`turn a${end ? " done" : ""}`} tabIndex={0} aria-label="Reply">
         {showThink ? <ThinkLine secs={live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000))} text={live.thinking} /> : null}
-        {live.tools.map((t) => (
+        {live.tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
           <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
         ))}
-        {shown !== "" ? <Markdown text={shown} live /> : null}
+        {shown !== "" ? <Markdown text={shown} live allowedLinks={allowedLinks} /> : null}
         {end === undefined && live.text !== "" ? (
           <div className="working writing" role="status">
             <span className="ph">Writing</span>

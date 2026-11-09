@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, symlink, writeFile, mkdir } from "node:fs/p
 import * as files from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImageEvent } from "@gates-local/contracts";
 import { createGpuLease } from "../gpu/lease.ts";
@@ -39,6 +40,7 @@ async function fixture(options: Partial<ImageDeps> = {}) {
   const calls: string[] = [];
   let enabled = true, answering = true, present = true, pid = 42, freeBytes = 20_000;
   let hold = false, missingModel = false, die = false;
+  let busy = false, noImage = false, invalidPng = false;
   const running = new Set<string>(); // hosts whose fake ComfyUI is running a prompt; each address has its own queue
   let swapPidOnQueue = false;
   let freeAfterStart: number | undefined;
@@ -54,6 +56,7 @@ async function fixture(options: Partial<ImageDeps> = {}) {
   instances.push({ close: async () => store.close() });
   const module = createImageModule({
     dataDir, lease, store, requiredBytes: 10_000, idleMs: 20,
+    log: () => {},
     // No test reaches real DNS or this machine's real interfaces.
     localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
     settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}) }),
@@ -88,7 +91,7 @@ async function fixture(options: Partial<ImageDeps> = {}) {
         CheckpointLoaderSimple: { input: { required: { ckpt_name: [missingModel ? [] : ["sdxl_lightning_4step.safetensors"]] } } },
         LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
       });
-      if (url.pathname === "/queue") { if (queueErrors-- > 0) throw new Error("queue temporarily unavailable"); if (swapPidOnQueue) pid = 99; return Response.json({ queue_running: running.has(url.host) ? [[1, "p1"]] : [], queue_pending: [] }); }
+      if (url.pathname === "/queue") { if (queueErrors-- > 0) throw new Error("queue temporarily unavailable"); if (swapPidOnQueue) pid = 99; return Response.json({ queue_running: busy ? [[1, "foreign"]] : running.has(url.host) ? [[1, "p1"]] : [], queue_pending: [] }); }
       if (url.pathname === "/prompt") {
         running.add(url.host);
         const body = JSON.parse(String(init?.body));
@@ -100,8 +103,8 @@ async function fixture(options: Partial<ImageDeps> = {}) {
         });
         return Response.json({ prompt_id: "p1" });
       }
-      if (url.pathname === "/history/p1") return Response.json(hold ? {} : { p1: { outputs: { "8": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
-      if (url.pathname === "/view") return new Response(png);
+      if (url.pathname === "/history/p1") return Response.json(hold ? {} : { p1: { outputs: noImage ? {} : { "8": { images: [{ filename: "out.png", subfolder: "", type: "output" }] } } } });
+      if (url.pathname === "/view") return new Response(invalidPng ? Buffer.from("not a PNG") : png);
       if (url.pathname === "/interrupt") { if (!stuck) running.delete(url.host); return Response.json({}); }
       throw new Error(`unexpected ${url.pathname}`);
     },
@@ -111,7 +114,7 @@ async function fixture(options: Partial<ImageDeps> = {}) {
   instances.push(module);
   const handlers = createImageHandlers({ image: module });
   return { module, handlers, lease, store, events, calls, dataDir, ollamaPosts, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
-    configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number }) => {
+    configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number; busy?: boolean; noImage?: boolean; invalidPng?: boolean }) => {
       enabled = v.enabled ?? enabled; answering = v.answering ?? answering; present = v.present ?? present;
       pid = v.pid ?? pid; freeBytes = v.freeBytes ?? freeBytes; hold = v.hold ?? hold;
       missingModel = v.missingModel ?? missingModel; die = v.die ?? die;
@@ -119,15 +122,131 @@ async function fixture(options: Partial<ImageDeps> = {}) {
       activeOverride = v.activeOverride ?? activeOverride;
       activeState = v.activeState ?? activeState; resident = v.resident ?? resident;
       comfyUrl = v.comfyUrl ?? comfyUrl; cpu = v.cpu ?? cpu; gpuError = v.gpuError ?? gpuError; stuck = v.stuck ?? stuck; queueErrors = v.queueErrors ?? queueErrors;
+      busy = v.busy ?? busy; noImage = v.noImage ?? noImage; invalidPng = v.invalidPng ?? invalidPng;
     },
   };
 }
 
 describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () => {
+  it("rolls back the retry card if linking the original attempt fails", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    f.store.saveImageJob({ jobId: "failed", threadId: thread.id, state: "error" }, "a tree");
+    const db = new DatabaseSync(f.store.dbPath);
+    db.exec("CREATE TRIGGER refuse_retry_link BEFORE UPDATE ON messages WHEN OLD.id = 'failed' BEGIN SELECT RAISE(ABORT, 'write failed'); END");
+    try {
+      await expect(f.module.generate({ prompt: "a tree", threadId: thread.id, retryOf: "failed" })).rejects.toThrow("write failed");
+      expect(f.store.getThread(thread.id).messages).toMatchObject([{ id: "failed", imageJob: { state: "error" } }]);
+      expect(f.store.getThread(thread.id).messages).toHaveLength(1);
+      expect(f.lease.status().waiting).toEqual([]);
+    } finally { db.close(); }
+  });
+  it("keeps retry identity after completion and database reopen, using the original prompt", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    f.store.saveImageJob({ jobId: "failed", threadId: thread.id, state: "error" }, "a tree");
+    const retry = await f.module.generate({ prompt: "an altered prompt", threadId: thread.id, retryOf: "failed" });
+    await f.module.wait(retry.jobId);
+    expect(f.store.getThread(thread.id).messages[1]).toMatchObject({ content: "a tree", imageJob: { state: "done" } });
+    const reopened = openThreadStore(f.store.dbPath);
+    try {
+      expect(reopened.claimImageRetry(thread.id, "failed", "duplicate")).toEqual({ jobId: retry.jobId, prompt: "a tree", created: false });
+      expect(await f.module.generate({ prompt: "a tree", threadId: thread.id, retryOf: "failed" })).toEqual(retry);
+      expect(reopened.getThread(thread.id).messages).toHaveLength(2);
+      expect(f.calls.filter(c => c === "/prompt")).toHaveLength(1);
+    } finally { reopened.close(); }
+  });
+  it("rejects retries of a running job or a job from another thread", async () => {
+    const f = await fixture(); const thread = f.store.createThread(); const other = f.store.createThread();
+    const release = await f.lease.acquire("chat");
+    const job = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+    try {
+      await expect(f.module.generate({ prompt: "a tree", threadId: thread.id, retryOf: job.jobId })).rejects.toThrow("only a failed or cancelled");
+      await expect(f.module.generate({ prompt: "a tree", threadId: other.id, retryOf: job.jobId })).rejects.toThrow("not in this thread");
+      expect(f.store.getThread(thread.id).messages).toHaveLength(1);
+      expect(f.store.getThread(other.id).messages).toHaveLength(0);
+    } finally { f.module.cancel(job.jobId); release(); await f.module.wait(job.jobId); }
+  });
+  it("deduplicates two clients retrying the same failed image and records both cards atomically", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    f.configure({ missingModel: true });
+    const original = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+    await f.module.wait(original.jobId);
+    f.configure({ missingModel: false });
+    const observer = openThreadStore(f.store.dbPath);
+    const release = await f.lease.acquire("chat");
+    const attempts = await Promise.all([1, 2].map(() => f.module.generate({ prompt: "a tree", threadId: thread.id, retryOf: original.jobId })));
+    try {
+      expect(attempts[0]?.jobId).toBe(attempts[1]?.jobId);
+      expect(observer.getThread(thread.id).messages).toMatchObject([
+        { id: original.jobId, imageJob: { state: "error", retryJobId: attempts[0]?.jobId } },
+        { id: attempts[0]?.jobId, imageJob: { state: "queued" } },
+      ]);
+      expect(f.lease.status().waiting).toEqual(["image"]);
+    } finally { for (const job of attempts) f.module.cancel(job.jobId); release(); await Promise.all(attempts.map(job => f.module.wait(job.jobId))); observer.close(); }
+  });
+  it("recovers queued and running cards after reopening the database, without touching ComfyUI", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    for (const state of ["queued", "running"] as const) f.store.saveImageJob({ jobId: state, threadId: thread.id, state }, "private prompt");
+    f.store.close();
+    const store = openThreadStore(f.store.dbPath);
+    instances.push({ close: async () => store.close() });
+    const fetcher = vi.fn(); const log = vi.fn();
+    const recovered = createImageModule({ dataDir: f.dataDir, store, lease: f.lease, fetch: fetcher, log,
+      settings: () => ({ imageGen: false }), appLoadedModels: () => [], ollamaUrl: () => undefined, push: () => {},
+    });
+    instances.push(recovered);
+    expect(store.getThread(thread.id).messages.map(m => m.imageJob)).toEqual(["queued", "running"].map(jobId => ({
+      jobId, threadId: thread.id, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again.",
+    })));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(log.mock.calls).toEqual([["job queued failed kind=restarted"], ["job running failed kind=restarted"]]);
+  });
+  it("ends a job whose lease stays busy, without spending a render budget or contacting ComfyUI", async () => {
+    const f = await fixture({ queueTimeoutMs: 10 });
+    const thread = f.store.createThread();
+    const release = await f.lease.acquire("chat");
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+    try {
+      await vi.waitFor(() => expect(f.store.getThread(thread.id).messages[0]).toMatchObject({ imageJob: { state: "error", errorKind: "timeout" } }), { timeout: 250 });
+    } finally { f.module.cancel(jobId); release(); await f.module.wait(jobId); }
+    expect(f.calls).toEqual([]);
+  });
+  it("persists a waiting card before returning, then updates the same card through completion", async () => {
+    const f = await fixture(); const thread = f.store.createThread();
+    const release = await f.lease.acquire("chat");
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+    expect(f.store.getThread(thread.id).messages).toMatchObject([{ id: jobId, imageJob: { state: "queued" } }]);
+    release(); await f.module.wait(jobId);
+    expect(f.store.getThread(thread.id).messages).toMatchObject([{ id: jobId, imageJob: { state: "done" }, images: [`images/${jobId}.png`] }]);
+  });
+  it.each(["fit", "missing", "model", "disconnected", "timeout", "off", "cancelled", "busy", "workflow", "invalid", "save", "config"] as const)("persists the %s end state with an actionable reason", async (kind) => {
+    const log = vi.fn();
+    const f = await fixture({ jobTimeoutMs: kind === "timeout" ? 40 : 1000, log });
+    const thread = f.store.createThread();
+    if (kind === "fit") f.configure({ freeBytes: 0 });
+    if (kind === "missing") f.configure({ answering: false, present: false });
+    if (kind === "model") f.configure({ missingModel: true });
+    if (kind === "disconnected") f.configure({ die: true });
+    if (kind === "timeout") f.configure({ hold: true });
+    if (kind === "busy") f.configure({ busy: true });
+    if (kind === "workflow") f.configure({ noImage: true });
+    if (kind === "invalid") f.configure({ invalidPng: true });
+    if (kind === "save") vi.mocked(files.writeFile).mockRejectedValueOnce(new Error("No space left"));
+    if (kind === "config") f.configure({ comfyUrl: "file:///bad" });
+    const release = kind === "off" || kind === "cancelled" ? await f.lease.acquire("chat") : undefined;
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id });
+    if (kind === "off") f.configure({ enabled: false });
+    if (kind === "cancelled") f.module.cancel(jobId);
+    release?.(); await f.module.wait(jobId);
+    const card = f.store.getThread(thread.id).messages[0];
+    expect(card).toMatchObject({ id: jobId, imageJob: { state: kind === "cancelled" ? "cancelled" : "error", message: expect.any(String), errorKind: expect.any(String) } });
+    expect(card?.images).toBeUndefined();
+    expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^job [\w-]+ failed kind=[\w-]+$/));
+  });
   it("reports off, missing and stopped without starting anything", async () => {
     const f = await fixture();
     f.configure({ enabled: false }); expect((await f.module.status()).state).toBe("off");
-    await expect(f.module.generate({ prompt: "a tree" })).rejects.toThrow(/off/i);
+    const off = await f.module.generate({ prompt: "a tree" }); await f.module.wait(off.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-off" });
     f.configure({ enabled: true, answering: false, present: false }); expect((await f.module.status()).state).toBe("missing");
     f.configure({ present: true }); expect((await f.module.status()).state).toBe("stopped");
     expect(f.calls).not.toContain("start");
@@ -164,7 +283,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("done"); expect(f.calls.filter((c) => c === "/api/generate")).toHaveLength(1);
     expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
     f.configure({ freeBytes: 100 }); const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringMatching(/needs 0.0 GiB, 0.0 GiB free, 0.0 GiB short.*whisper.*other-app/) });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(f.module.current().detail).toMatch(/needs 0.0 GiB, 0.0 GiB free, 0.0 GiB short.*whisper.*other-app/);
     expect(f.lease.status().holder).toBeNull();
   });
   it("cancels a queued image without interrupting Comfy", async () => {
@@ -186,11 +306,12 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const f = await fixture(); f.configure({ die: true });
     const first = await f.module.generate({ prompt: "a tree" }); await f.module.wait(first.jobId);
     expect(f.events.at(-1)?.state).toBe("error"); expect(f.module.current().state).toBe("error"); expect(f.lease.status().holder).toBeNull();
-    expect(f.events.at(-1)?.message).toMatch(/ComfyUI disconnected while making the image/);
+    expect(f.events.at(-1)).toMatchObject({ errorKind: "image-disconnected", message: expect.stringContaining("ComfyUI disconnected") });
     expect(f.module.current().detail).toMatch(/offline/);
     expect(f.module.current().detail).not.toMatch(/may still be running/); expect(f.module.current().owner).toBe("none");
     f.configure({ die: false, answering: true, missingModel: true }); const second = await f.module.generate({ prompt: "a tree" }); await f.module.wait(second.jobId);
-    expect(f.events.at(-1)?.message).toMatch(/sdxl_lightning_4step.*install/i);
+    expect(f.events.at(-1)).toMatchObject({ errorKind: "image-model", message: expect.stringMatching(/install.*checkpoint.*LoRA/i) });
+    expect(f.module.current().detail).toMatch(/sdxl_lightning_4step.*install/i);
   });
   it("uses the idle timer after an app-owned job", async () => {
     const f = await fixture(); f.configure({ answering: false });
@@ -250,7 +371,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const f = await fixture({ requiredBytes: 9 * gib, appLoadedModels: () => [] });
     f.configure({ freeBytes: 2.4 * gib, resident: 0 });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("needs 9.0 GiB, 2.4 GiB free, 6.6 GiB short") });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+    expect(f.module.current().detail).toContain("needs 9.0 GiB, 2.4 GiB free, 6.6 GiB short");
     expect(f.calls).not.toContain("/prompt");
     const error = imageFitError(9 * gib, gib, 2.4 * gib, "whisper; ComfyUI");
     expect(error).toMatchObject({ code: "wont-fit", estimatedBytes: 9 * gib, needBytes: 8 * gib, creditedBytes: gib, freeBytes: 2.4 * gib, shortfallBytes: 5.6 * gib, holders: "whisper; ComfyUI" });
@@ -262,7 +384,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     f.configure({ answering: false, activeOverride: activeState === "active", activeState });
     const discovered = await f.module.status();
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("startup timeout") });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-missing" });
+    expect(f.module.current().detail).toContain("startup timeout");
     expect(discovered).toMatchObject({ state: "starting", owner: "external" });
     await f.module.stopIdle(); expect(f.calls).not.toContain("start"); expect(f.calls).not.toContain("stop");
   });
@@ -300,7 +423,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   it("still refuses an unreadable loopback GPU without submitting or unloading", async () => {
     const f = await fixture(); f.configure({ gpuError: true });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("nvidia-smi failed") });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-fit" });
     expect(f.calls).not.toContain("/prompt"); expect(f.calls).not.toContain("/api/generate");
   });
 
@@ -339,7 +462,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const terminal = f.events.at(-1), holder = f.lease.status().holder;
     if (holder) { f.module.cancel(jobId); await vi.advanceTimersByTimeAsync(200); }
     await f.module.wait(jobId);
-    expect(terminal).toMatchObject({ state: "error", message: expect.stringContaining("run timeout") });
+    expect(terminal).toMatchObject({ state: "error", errorKind: "timeout" });
     expect(holder).toBeNull();
   });
 
@@ -355,7 +478,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const f = await fixture();
     f.configure({ comfyUrl: `http://${host}:8188`, gpuError: true });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("nvidia-smi failed") });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-fit" });
     expect(f.measurements()).toBeGreaterThan(0); expect(f.calls).not.toContain("/prompt");
   });
 
@@ -387,7 +510,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     if (end === "cancel") f.module.cancel(jobId);
     const outcome = await Promise.race([f.module.wait(jobId).then(() => "ended"), new Promise((r) => setTimeout(r, 300, "stuck"))]);
     expect(outcome).toBe("ended");
-    expect(f.events.at(-1)).toMatchObject(end === "cancel" ? { state: "cancelled" } : { state: "error", message: expect.stringContaining("run timeout") });
+    expect(f.events.at(-1)).toMatchObject(end === "cancel" ? { state: "cancelled" } : { state: "error", errorKind: "timeout" });
     expect(f.lease.status().holder).toBeNull();
     expect(f.measurements()).toBe(0);
   });
@@ -407,7 +530,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     await vi.advanceTimersByTimeAsync(30_000); await f.module.wait(jobId);
     expect(f.module.current()).toMatchObject({ owner: "app", detail: expect.stringMatching(/may still be running/) });
     const next = await f.module.generate({ prompt: "a tree" }); await f.module.wait(next.jobId);
-    expect(f.events.at(-1)).toMatchObject({ state: "error", message: expect.stringContaining("earlier image from this app") });
+    expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "image-busy" });
+    expect(f.module.current().detail).toContain("earlier image from this app");
     await f.module.stopIdle();
     expect(f.calls).toContain("stop"); expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
   });

@@ -177,6 +177,7 @@ async function main(): Promise<void> {
   const { runtime, catalog } = services;
   const image = createImageModule({
     dataDir, store, lease: gpuLease,
+    log: (line) => log(`image ${line}`),
     push: (channel, payload) => server?.push(channel, payload),
     settings: () => services.settings.get(),
     appLoadedModels: () => services.loader.appLoadedModels(),

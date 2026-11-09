@@ -150,7 +150,7 @@ export const methods = {
   "sources.refresh": { params: SourceRef, result: Source },
   "image.status": { params: NoParams, result: ImageStatus },
   "image.generate": {
-    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String) }),
+    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String) }),
     result: S.Struct({ jobId: S.String }),
   },
   "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },

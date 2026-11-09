@@ -30,7 +30,7 @@ const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
 };
 const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "image-turn", "image-claims"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -275,6 +275,31 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     if (short > 0) await sleep(short, abort.signal);
     // Everything before the first token is load and prompt time; decode starts here.
     const decodeFrom = Date.now();
+    if (scenario === "image-claims") {
+      const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool" || String(field(x, "content")).startsWith("Tool output follows."));
+      if (!observed) {
+        const system = Array.isArray(messages) ? String(field(messages.find(x => field(x, "role") === "system"), "content")) : "";
+        const library = system.slice(system.lastIndexOf("Library sources"));
+        const report = / at (\/library\/[^\s]+)/.exec(library)?.[1] ?? "/library/missing";
+        const calls = [{ name: "image", arguments: { prompt: "a ship" } }, { name: "read", arguments: { path: report, url: "https://invented.example/ship.png" } }];
+        const native = Array.isArray(tools);
+        line({ ...base(), message: native ? { role: "assistant", content: "", tool_calls: calls.map(fn => ({ function: fn })) } : { role: "assistant", content: calls.map(call => `<tool_call>${JSON.stringify(call)}</tool_call>`).join("") }, done: true });
+      } else {
+        const content = "The report total is 42.\n\nYour image is ready: [Download](https://invented.example/ship.png).\n\n![Ship](https://invented.example/ship.png)\n\nhttps://invented.example/raw\n\n[Person](https://person.example/brief) and [Report](https://tool.example/report).\n\n";
+        line({ ...base(), message: { role: "assistant", content }, done: false });
+        while (options.holdAfterTokens > 0 && !abort.signal.aborted) await sleep(20, abort.signal);
+        if (abort.signal.aborted) return;
+        line({ ...base(), message: { role: "assistant", content: "" }, done: true });
+      }
+      res.end(); return;
+    }
+    if (scenario === "image-turn") {
+      const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool");
+      line({ ...base(), message: observed
+        ? { role: "assistant", content: "Here's an image of a Star Trek ship: ![Star Trek Ship](https://example.com/invented.png)" }
+        : { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a Star Trek ship" } } }] }, done: true });
+      res.end(); return;
+    }
     let sent = 0;
     if (thinks) {
       for (const t of tokens(THINKING)) {

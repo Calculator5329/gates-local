@@ -68,6 +68,10 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    up: (db) => db.exec("ALTER TABLE messages ADD COLUMN image_job_json TEXT"),
+  },
 ];
 
 export const LATEST_VERSION: number = MIGRATIONS.length;

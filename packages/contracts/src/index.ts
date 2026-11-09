@@ -3,4 +3,5 @@
 export * from "./shapes.ts";
 export * from "./protocol.ts";
 export * from "./client.ts";
+export * from "./links.ts";
 export const CONTRACTS_VERSION = 1;

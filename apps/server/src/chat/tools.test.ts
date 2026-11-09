@@ -168,7 +168,7 @@ describe("tool chat transport", () => {
   });
   for (const image of [true, undefined]) {
     it(`chat.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when image is ${image}`, async () => {
-      const t = await imageApp(() => ndjson([{ message: { content: "done" }, done: true }]));
+      const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]));
       try {
         const thread = t.store.createThread();
         await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, ...(image ? { image } : {}) }, { clientId: 1 });
@@ -178,11 +178,11 @@ describe("tool chat transport", () => {
         if (image) {
           expect(offered).toContain("image");
           expect(t.fake.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: thread.id });
-          // While the reply streamed, the job waited for the GPU instead of running beside it.
-          expect(t.atSecond()).toMatchObject({ holder: "chat", waiting: ["image"] });
+          expect(t.chatBodies).toHaveLength(1);
+          expect(t.atSecond()).toBeUndefined();
           await vi.waitFor(() => expect(t.fake.ran).toEqual(["job-1"]));
           const messages = t.store.getThread(thread.id).messages;
-          expect(messages.map(m => [m.role, m.content])).toEqual([["user", "draw"], ["assistant", "done"], ["assistant", "a cat"]]);
+          expect(messages.map(m => [m.role, m.content])).toEqual([["user", "draw"], ["assistant", ""], ["assistant", "a cat"]]);
           expect(messages[1]).toMatchObject({ tools: [{ name: "image", state: "done", summary: "Queued an image" }] });
           expect(messages[1]).not.toHaveProperty("images");
           expect(messages[2]).toMatchObject({ images: ["images/job-1.png"] });
@@ -195,16 +195,14 @@ describe("tool chat transport", () => {
       } finally { await t.close(); }
     });
   }
-  for (const when of ["while the reply streams", "while the job is being queued"] as const) {
-    it(`a turn cancelled ${when} takes back the image it queued`, async () => {
+    it("a turn cancelled while the job is being queued takes back the image it queued", async () => {
       let open!: () => void;
-      const gate = when === "while the job is being queued" ? new Promise<void>(r => (open = r)) : undefined;
+      const gate = new Promise<void>(r => (open = r));
       const t = await imageApp(hang, gate);
       try {
         const thread = t.store.createThread();
         const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
-        if (gate) await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
-        else await vi.waitFor(() => expect(t.chatBodies).toHaveLength(2));
+        await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
         expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
         open?.();
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
@@ -214,7 +212,6 @@ describe("tool chat transport", () => {
         expect(t.store.getThread(thread.id).messages.map(m => m.role)).toEqual(["user"]);
       } finally { await t.close(); }
     });
-  }
   for (const scenario of ["tools explicitly off", "tools default off", "empty Library"] as const) {
     it(`keeps the original plain turn for ${scenario}`, async () => {
       const root = mkdtempSync(path.join(tmpdir(), "gl-plain-tools-"));

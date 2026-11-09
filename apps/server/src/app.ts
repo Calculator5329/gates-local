@@ -6,7 +6,7 @@
 // other than refuse; then the user message persists, the reply streams on
 // chat.event and only the finished assistant message reaches the store.
 import { randomUUID } from "node:crypto";
-import type { BlockingTurn, Channel, Message, Params, Payload } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, Message, Params, Payload, ToolStep } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -276,6 +276,7 @@ export function createApp(deps: AppDeps): App {
     // Exactly the text that reached the client: the reply a halted turn saves.
     let sentText = "";
     let sentThinking = "";
+    const sentTools = new Map<string, ToolStep>();
     // The one terminal event (error or done) went out: nothing follows it, a halt included.
     let over = false;
     const emit = (event: WireEvent) => {
@@ -285,6 +286,7 @@ export function createApp(deps: AppDeps): App {
       if (event.type === "delta" || event.type === "thinking") load?.firstToken();
       if (event.type === "delta") sentText += event.text;
       if (event.type === "thinking") sentThinking += event.text;
+      if (event.type === "tool") sentTools.set(event.step.callId, event.step);
       push("chat.event", { turnId, threadId, event });
     };
     /** halt() ended the turn: save the text and thinking sent so far, then its one terminal event. */
@@ -293,7 +295,8 @@ export function createApp(deps: AppDeps): App {
       let partial: Message | undefined;
       if (sentText !== "" || sentThinking !== "") {
         try {
-          partial = store.appendMessage({ threadId, role: "assistant", content: sentText, ...(sentThinking === "" ? {} : { thinking: sentThinking }), model, stats: { numCtx } });
+          const tools = [...sentTools.values()];
+          partial = store.appendMessage({ threadId, role: "assistant", content: sentText, ...(sentThinking === "" ? {} : { thinking: sentThinking }), ...(tools.some(t => t.name === "image" && t.state === "done") ? { tools } : {}), model, stats: { numCtx } });
         } catch (e) {
           log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
         }
@@ -625,7 +628,7 @@ export function createApp(deps: AppDeps): App {
         if (turnSignal.aborted) throw stoppedEarly();
         const userMessage = store.appendMessage({ threadId, role: "user", content });
         push("threads.changed", { threadId });
-        const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.content }));
+        const history = store.getThread(threadId).messages.map((m): TurnMessage => ({ role: m.role, content: m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : m.content }));
         started = true;
         turn.started = true;
         // Before the answer, so every client (also one that did not send this) knows the turn first.

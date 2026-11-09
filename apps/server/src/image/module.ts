@@ -30,10 +30,12 @@ export interface ImageDeps extends ComfyClientDeps {
   idleMs?: number;
   startupTimeoutMs?: number;
   jobTimeoutMs?: number;
+  queueTimeoutMs?: number;
   /** This machine's own interface addresses; tests inject them. */
   localAddresses?(): readonly string[];
   /** Every address a host name resolves to; tests inject it. */
   lookupHost?(name: string): Promise<readonly string[]>;
+  log?(line: string): void;
 }
 
 export interface ImageModule {
@@ -132,6 +134,8 @@ export function imageFitError(estimatedBytes: number, creditedBytes: number, fre
 }
 
 export function createImageModule(deps: ImageDeps): ImageModule {
+  const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
+  for (const job of deps.store.interruptImageJobs()) log(`job ${job.jobId} failed kind=restarted`);
   const service = deps.service ?? createComfyService();
   const jobs = new Map<string, { controller: AbortController; ended: Promise<void>; committing: boolean }>();
   let status: ImageStatus = { state: "off", owner: "none" };
@@ -266,56 +270,73 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     status: discover,
     async generate(params) {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
-      let cfg = config();
-      if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
-      if (!params.prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
+      let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "" };
       if (params.threadId) deps.store.getThread(params.threadId);
-      clearIdle();
       const jobId = randomUUID();
+      let prompt = params.prompt;
+      if (params.retryOf !== undefined) {
+        if (!params.threadId) throw imageError("bad-params", "An image retry must name its thread.");
+        const retry = deps.store.claimImageRetry(params.threadId, params.retryOf, jobId);
+        if (!retry.created) return { jobId: retry.jobId };
+        prompt = retry.prompt;
+      }
+      if (!prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
+      clearIdle();
       const controller = new AbortController();
-      let signal = controller.signal;
+      const deadline = new AbortController();
+      const signal = AbortSignal.any([controller.signal, deadline.signal]);
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let timedOut = false;
-      const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => emit("image.event", { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, ...rest });
+      let stage = "image-config";
+      const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => {
+        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, ...rest };
+        deps.store.saveImageJob(payload, prompt);
+        emit("image.event", payload);
+      };
       event("queued");
+      // Waiting has its own limit; it never spends the render's full run budget.
+      timeout = setTimeout(() => { timedOut = true; deadline.abort(new Error("Image queue timed out.")); }, deps.queueTimeoutMs ?? 1_800_000);
+      timeout.unref();
       // Begin after registering the promise; generate returns before any running event.
       const ended = Promise.resolve().then(async () => {
         try {
-          await deps.lease.run("image", controller.signal, async () => {
-            const deadline = new AbortController();
-            signal = AbortSignal.any([controller.signal, deadline.signal]);
+          await deps.lease.run("image", signal, async () => {
+            clearTimeout(timeout);
             timeout = setTimeout(() => { timedOut = true; deadline.abort(new Error("Image run timed out.")); }, deps.jobTimeoutMs ?? 600_000);
             timeout.unref();
             const latest = config();
             if (!latest.enabled) throw imageError("image-off", "Image generation was turned off while this job waited.");
             cfg = latest;
             activeJob = jobId;
+            event("running", { progress: 0 });
             update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
+            stage = "image-fit";
             await fit(cfg, signal);
+            stage = "image-missing";
             const comfy = await ensure(cfg.baseUrl, cfg.managed, signal);
+            stage = "image-render";
             const earlier = stuck.get(cfg.baseUrl);
             if (earlier) {
-              if ((await comfy.running(signal)).includes(earlier.promptId)) throw new Error("ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
+              if ((await comfy.running(signal)).includes(earlier.promptId)) throw imageError("image-busy", "ComfyUI is still running an earlier image from this app that did not stop when cancelled. Wait for it to finish, then retry.");
               stuck.delete(cfg.baseUrl);
             }
+            stage = "image-fit";
             await fit(cfg, signal); // startup or another GPU app may have changed the room
+            stage = "image-render";
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
-            event("running", { progress: 0 });
-            const bytes = await comfy.render(params.prompt, jobId, signal, (progress) => event("running", { progress }), () => {
+            const bytes = await comfy.render(prompt, jobId, signal, (progress) => event("running", { progress }), () => {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
             });
             const imagePath = `images/${jobId}.png`;
+            stage = "image-save";
             await mkdir(path.join(deps.dataDir, "images"), { recursive: true });
             const pendingPath = path.join(deps.dataDir, "images", `${jobId}.pending`);
             await writeFile(pendingPath, bytes, { flag: "wx" });
             await rename(pendingPath, path.join(deps.dataDir, imagePath));
-            if (params.threadId) {
-              deps.store.appendMessage({ threadId: params.threadId, role: "assistant", content: params.prompt, images: [imagePath] });
-              emit("threads.changed", { threadId: params.threadId });
-            }
             event("done", { progress: 1, imagePath });
+            if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
           });
         } catch (error) {
@@ -323,7 +344,25 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const cancelDetail = error instanceof Error && "cancelDetail" in error && typeof error.cancelDetail === "string" ? error.cancelDetail : undefined;
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
-          event(controller.signal.aborted ? "cancelled" : "error", { message });
+          const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
+          const reasons: Record<string, string> = {
+            "image-config": "Check the ComfyUI address in Settings, then try again.",
+            "image-off": "Turn on image generation in Settings, then try again.",
+            "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
+            "wont-fit": "There is not enough GPU memory; close another GPU app and try again.",
+            "image-missing": "ComfyUI is not ready; check its service or address in Settings and try again.",
+            "image-model": "Install the image checkpoint and LoRA in ComfyUI, then try again.",
+            "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
+            "image-disconnected": "ComfyUI disconnected; wait until it is ready and try again.",
+            "image-workflow": "ComfyUI did not make an image; check its workflow and try again.",
+            "image-result": "ComfyUI returned an invalid image; check its workflow and try again.",
+            "image-render": "The image did not finish; check ComfyUI and try again.",
+            "image-save": "The image could not be saved; check free disk space and try again.",
+          };
+          const errorKind = controller.signal.aborted ? "cancelled" : timedOut ? "timeout" : Object.hasOwn(reasons, code) ? code : stage;
+          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : timedOut ? "The image timed out; wait until ComfyUI is ready and try again." : reasons[errorKind];
+          log(`job ${jobId} failed kind=${errorKind}`);
+          event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
           if (cancelDetail && activeJob === jobId) {
             // Only a prompt that outlived the deadline means ComfyUI is still up; a failed cleanup alone does not.
             update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : stuckPromptId ? "external" : "none", baseUrl: cfg.baseUrl, detail: `${message} ${cancelDetail}` });

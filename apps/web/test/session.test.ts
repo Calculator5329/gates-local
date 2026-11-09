@@ -439,6 +439,25 @@ function imageDone(): void {
 }
 
 describe("an image saved into a thread outside chat events (WF3-01)", () => {
+  it("names the failed job when retrying and returns the accepted job id", async () => {
+    await boot();
+    const held = b.server.hold("image.generate");
+    const result = session.retryImage("t1", "a fox", "j1");
+    const request = await held;
+    expect(request.params).toMatchObject({ threadId: "t1", prompt: "a fox", retryOf: "j1" });
+    request.respond({ jobId: "retry1" });
+    expect(await result).toEqual({ jobId: "retry1" });
+  });
+  it.each(["queued", "running", "error", "cancelled"] as const)("reloads a persisted %s card without waiting for a done event", async (state) => {
+    await boot();
+    b.server.answer("threads.get", plain);
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const imageJob = { jobId: "j1", threadId: "t1", state };
+    b.server.answer("threads.get", () => snapshot([userMsg("m1"), { ...asstMsg("j1"), imageJob }]));
+    b.server.push("image.event", imageJob);
+    await until(() => store.getState().messages["t1"]?.at(-1)?.imageJob?.state === state, 1000, "the image card reload");
+  });
   it("a cached conversation reloads and shows it, also after switching away and back", async () => {
     await boot();
     b.server.answer("threads.get", plain);

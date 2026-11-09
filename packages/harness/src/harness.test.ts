@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { parseTextCalls, partialAnswer, repairCall, toolBlock, toolDefinitions, trimOutput, runLoop } from "./index.ts";
+import { createTools, parseTextCalls, partialAnswer, repairCall, toolBlock, toolDefinitions, trimOutput, runLoop } from "./index.ts";
 import { DETAIL_LIMIT, MAX_CALLS_PER_REPLY, TOOL_TIME_BUDGET_MS, toolOutputBudget } from "./loop.ts";
 import type { LoopEvent, ModelMessage } from "./types.ts";
 
@@ -54,6 +54,65 @@ describe("text tool calls", () => {
 });
 
 describe("turn loop", () => {
+  it("records URL provenance from successful tool output, never from model arguments", async () => {
+    let round = 0;
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [], native: true, signal: new AbortController().signal,
+      execute: async () => ({ output: "The report total is 42. https://tool.example/report.", summary: "Read the report" }),
+      stream: async function* () {
+        round++;
+        yield { type: "complete", content: round === 1 ? "" : "42", calls: round === 1 ? [{ name: "read", arguments: { path: "report", url: "https://invented.example/download" } }] : [], stopReason: "stop" };
+      },
+    })) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: "complete", tools: [{ links: ["https://tool.example/report"] }] });
+  });
+  it.each([true, false])("ends an image-only batch without requesting a fabricated follow-up (native %s)", async (native) => {
+    let requests = 0;
+    const call = { name: "image", arguments: { prompt: "a ship" } };
+    const tools = createTools({ sources: [], image: true, queueImage: async () => ({ jobId: "ship" }) });
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [], native, execute: tools.execute, signal: new AbortController().signal,
+      stream: async function* () {
+        requests++;
+        yield { type: "complete", content: requests === 1 ? (native ? "" : `<tool_call>${JSON.stringify(call)}</tool_call>`) : "Here's your image: ![Ship](https://example.com/invented.png)", calls: requests === 1 && native ? [call] : [], stopReason: "stop" };
+      },
+    })) events.push(event);
+    expect(requests).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: "", tools: [{ name: "image", state: "done", links: [] }] });
+  });
+  it("ends an image tool failure with a reason without asking for a fabricated follow-up", async () => {
+    let requests = 0;
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [], native: true, signal: new AbortController().signal,
+      execute: async () => { throw new TypeError("prompt must be a non-empty string"); },
+      stream: async function* () {
+        requests++;
+        yield { type: "complete", content: requests === 1 ? "" : "Here's your image: ![Ship](https://example.com/invented.png)", calls: requests === 1 ? [{ name: "image", arguments: {} }] : [], stopReason: "stop" };
+      },
+    })) events.push(event);
+    expect(requests).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: expect.stringContaining("could not be queued"), tools: [{ name: "image", state: "error" }] });
+  });
+  it.each([true, false])("answers from the other tools in a mixed image batch (native %s)", async (native) => {
+    const calls = [{ name: "image", arguments: { prompt: "a ship" } }, { name: "read", arguments: { path: "docs" } }];
+    let requests = 0;
+    const imageTools = createTools({ sources: [], image: true, queueImage: async () => ({ jobId: "ship" }) });
+    const execute = vi.fn(async (call, signal) => call.name === "image" ? imageTools.execute(call, signal) : { output: "The report total is 42.", summary: "Read the report" });
+    const events: LoopEvent[] = [];
+    for await (const e of runLoop({ messages: [], native, signal: new AbortController().signal, execute,
+      stream: async function* (messages) {
+        requests++;
+        if (requests === 2) {
+          expect(JSON.stringify(messages)).toContain("The report total is 42.");
+          expect(JSON.stringify(messages)).toContain("The image is not made yet.");
+        }
+        yield { type: "complete", content: requests === 1 ? (native ? "" : calls.map(c => `<tool_call>${JSON.stringify(c)}</tool_call>`).join("")) : "The report total is 42. The image is queued, not made yet.", calls: requests === 1 && native ? calls : [], stopReason: "stop" };
+      },
+    })) events.push(e);
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: "The report total is 42. The image is queued, not made yet.", tools: [{ name: "image", state: "done" }, { name: "read", state: "done" }] });
+    expect(requests).toBe(2);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
   it("feeds 50k output back as the 5k head and 5k tail", async () => {
     const output = "a".repeat(25000) + "z".repeat(25000);
     expect(trimOutput(output)).toBe("a".repeat(5000) + "\n[40000 characters elided]\n" + "z".repeat(5000));

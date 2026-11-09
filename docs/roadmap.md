@@ -165,6 +165,15 @@ never shows a whisper stop, start or restart.
       run one image, restore chat.
       *Accept:* `pnpm verify:image` with a fake; one real image on this
       machine with progress, cancel, chat restored and whisper unchanged.
+      2026-11-08: the image-turn lane adds durable waiting/running/result/error
+      cards, retry/cancel, restart recovery and terminal image-only batches.
+      Review fixes give each failed attempt one accepted retry and preserve
+      model answers for mixed tool batches. Image follow-ups keep invented
+      URLs inert while their real job cards remain independent of model prose.
+      Fake lifecycle coverage passes;
+      all four image browser journeys pass on the external runner, including
+      retries across clients. Real-runtime acceptance remains open. JS total is reported against the
+      revised lane ceiling while the entry/total build split lands separately.
 - [ ] <!-- workspace:id=work:efd92470-9e03-54a8-97a0-00dd3401270c --> Image presets measured in the room left beside whisper; a smaller
       preset or a refusal when the room is short.
 - [ ] <!-- workspace:id=work:d69f75c9-1b4a-5781-a36c-dd4bb9a21052 --> Turn loop in `packages/harness` (D3): pi's loop shape, a length stop

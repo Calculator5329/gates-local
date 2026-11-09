@@ -1,5 +1,6 @@
 // Shared shapes for the thread store. Plain TypeScript; packages/contracts
 // mirrors Thread and Message as Effect Schemas for the wire.
+import type { ImageEvent } from "@gates-local/contracts";
 
 export type Role = "user" | "assistant" | "system";
 
@@ -30,6 +31,7 @@ export interface ToolStepRecord {
   summary: string;
   detail?: string;
   durationMs?: number;
+  links?: readonly string[];
 }
 
 export const TOOL_STATES: readonly ToolStepRecord["state"][] = ["running", "done", "error"];
@@ -47,6 +49,7 @@ export interface Message {
   tools?: ToolStepRecord[];
   /** Paths of images the turn made, inside the app data dir. */
   images?: string[];
+  imageJob?: ImageEvent;
 }
 
 export interface ThreadWithMessages {

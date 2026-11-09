@@ -276,7 +276,7 @@ async function hydrateWith(
   on("sources.changed", (sources) => setState({ sources }));
   on("image.status", (imageStatus) => setState({ imageStatus }));
   on("image.event", (e) => {
-    if (e.state === "done" && e.threadId !== undefined) imageSaved(e.threadId);
+    if (e.threadId !== undefined) imageSaved(e.threadId);
   });
 
   // settings.get is a local store read and the model choice needs only it and
@@ -1301,7 +1301,7 @@ function untrackedDone(threadId: string, message: Message): void {
 
 /**
  * The image module saved its message into a thread outside chat events, and
- * image.event done names the thread but not the message. A thread this client
+ * image.event names the thread but not the message. A thread this client
  * has, shows or is loading reloads; the load tickets keep an older snapshot
  * in flight from replacing the one with the image (WF3-01).
  */
@@ -1450,6 +1450,18 @@ export async function checkImageStatus(): Promise<ActionResult> {
   if (!r.ok) return r.message;
   setState({ imageStatus: r.value });
   return null;
+}
+
+export async function retryImage(threadId: string, prompt: string, retryOf: string): Promise<{ jobId: string } | string> {
+  const result = await act("image.generate", { threadId, prompt, retryOf }, "make the image");
+  if (!result.ok) return result.message;
+  imageSaved(threadId);
+  return result.value;
+}
+
+export async function cancelImage(jobId: string): Promise<ActionResult> {
+  const result = await act("image.cancel", { jobId }, "cancel the image");
+  return result.ok ? null : result.message;
 }
 
 /** The app's data folder, or null outside the desktop window. */

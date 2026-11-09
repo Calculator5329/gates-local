@@ -59,7 +59,7 @@ export function createTools(deps: ToolsDeps) {
           const prompt = text(call.input, "prompt");
           const { jobId } = await queueImage(prompt, signal);
           signal.throwIfAborted();
-          return { output: `Queued image job ${jobId}. It starts after this reply ends and appears in this chat on its own; it is not made yet.`, summary: "Queued an image" };
+          return { output: `Queued image job ${jobId}. The image is not made yet. It starts after this reply ends and appears in this chat on its own; the job card shows its outcome.`, summary: "Queued an image" };
         }
         default: throw new TypeError(`Unknown tool: ${call.name}`);
       }
