@@ -8,6 +8,9 @@
 - Native controls follow the app's Light, Dark and System theme choices.
   The header reserves the controls' space and keeps its buttons clickable;
   browser and phone layouts keep their existing header.
+- Startup and error pages keep a draggable header. Narrow desktop Settings
+  keeps its Back control, drawer close stays clear of native controls, and
+  switching threads in fullscreen updates the taskbar title too.
 
 ## 2026-11-08: Settings, rebuilt page by page
 

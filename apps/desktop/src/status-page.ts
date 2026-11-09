@@ -1,6 +1,6 @@
 // The small local page main shows while the server is starting, after it
-// crashed, or when the web client failed to load. Plain and unstyled on
-// purpose: the visual direction is not picked yet. Its buttons call the
+// crashed, or when the web client failed to load. The draggable header stays
+// clear of native controls even when the web client is unavailable. Its buttons call the
 // preload bridge (window.gatesLocal), so it works with the sandbox on.
 
 import { describeCrash, type BridgeState } from "./bridge.ts";
@@ -25,10 +25,18 @@ function page(title: string, body: string): string {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
 <title>${escapeHtml(title)}</title>
+<style>
+body{margin:0}
+.titlebar{box-sizing:border-box;height:max(52px,env(titlebar-area-height,52px));display:flex;align-items:center;overflow:hidden;white-space:nowrap;-webkit-app-region:drag;padding-left:max(16px,calc(env(titlebar-area-x,0px) + 16px));padding-right:calc(100vw - env(titlebar-area-width,calc(100vw - 138px)) - env(titlebar-area-x,0px) + 16px)}
+main{padding:24px}
+</style>
 </head>
 <body>
+<header class="titlebar">Gates Local</header>
+<main>
 <h1>${escapeHtml(title)}</h1>
 ${body}
+</main>
 <script>
 for (const button of document.querySelectorAll("button[data-action]")) {
   button.addEventListener("click", async () => {

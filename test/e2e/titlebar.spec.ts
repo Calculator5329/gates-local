@@ -1,13 +1,28 @@
+import type { Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test("desktop overlay reserves native controls, follows geometry and keeps header controls clickable", async ({ page, open }) => {
-  await page.addInitScript(() => {
+async function desktopOverlay(page: Page, interceptNativeControls = false): Promise<void> {
+  await page.addInitScript((intercept) => {
     const overlay = new EventTarget();
     Object.assign(overlay, { visible: true });
     Object.defineProperty(navigator, "windowControlsOverlay", { value: overlay });
     // A browser stub has no native env() values; supply the same geometry fallback.
-    document.addEventListener("DOMContentLoaded", () => document.documentElement.style.setProperty("--window-controls-width", "138px"));
-  });
+    document.addEventListener("DOMContentLoaded", () => {
+      document.documentElement.style.setProperty("--window-controls-width", "138px");
+      if (intercept) {
+        // Native controls own this rectangle; a transparent blocker makes a
+        // browser test reject clicks that a real overlay would intercept.
+        const controls = document.createElement("div");
+        controls.setAttribute("aria-hidden", "true");
+        Object.assign(controls.style, { position: "fixed", top: "0", right: "0", width: "138px", height: "52px", zIndex: "2147483647" });
+        document.body.append(controls);
+      }
+    });
+  }, interceptNativeControls);
+}
+
+test("desktop overlay reserves native controls, follows geometry and keeps header controls clickable", async ({ page, open }) => {
+  await desktopOverlay(page);
   await open();
   await waitReady(page);
   await expect(page.locator("html")).toHaveClass(/wco/);
@@ -32,6 +47,43 @@ test("desktop overlay reserves native controls, follows geometry and keeps heade
   });
   await expect(page.locator("html")).not.toHaveClass(/wco/);
 });
+
+for (const width of [390, 640]) {
+  test(`narrow desktop Settings has a mouse route from a section back to chat at ${width}px (TB-02)`, async ({ page, open }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await desktopOverlay(page, true);
+    await open();
+    await waitReady(page);
+    await page.getByRole("button", { name: "Open threads", exact: true }).click();
+    await page.locator(".sb-set").click();
+    await expect(page.locator(".set.listing")).toBeVisible();
+    await page.locator(".set-list").getByRole("button", { name: /^General/ }).click();
+    await expect(page.locator(".set.listing")).toBeHidden();
+    await page.getByRole("button", { name: "Back to Settings", exact: true }).click();
+    await expect(page.locator(".set.listing")).toBeVisible();
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await waitReady(page);
+  });
+}
+
+for (const width of [320, 390]) {
+  test(`drawer close stays outside the native controls at ${width}px (TB-03)`, async ({ page, open }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await desktopOverlay(page, true);
+    await open();
+    await waitReady(page);
+    await page.getByRole("button", { name: "Open threads", exact: true }).click();
+    const sidebar = page.locator(".sb");
+    await expect(sidebar).toBeVisible();
+    await sidebar.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    const close = page.getByRole("button", { name: "Close threads", exact: true });
+    const box = await close.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? Infinity) + (box?.width ?? 0), "close button ends before native controls").toBeLessThanOrEqual(width - 138);
+    await close.click();
+    await expect(sidebar).toBeHidden();
+  });
+}
 
 test("ordinary browser and phone retain their original header layout", async ({ page, open }) => {
   await open();

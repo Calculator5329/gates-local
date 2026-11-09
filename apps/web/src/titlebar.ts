@@ -4,6 +4,11 @@ interface Overlay extends EventTarget { readonly visible: boolean }
 
 export const windowOverlay = (navigator as Navigator & { windowControlsOverlay?: Overlay }).windowControlsOverlay;
 
+/** The OS title remains available to the taskbar and window switcher. */
+export function syncWindowTitle(title: string | null): void {
+  if (windowOverlay && window.gatesLocal) document.title = `${title === null ? "" : `${title} · `}Gates Local`;
+}
+
 /** Only a desktop overlay changes the shell. Theme colours come from the same tokens as the page. */
 export function syncTitleBar(): void {
   if (!windowOverlay) return;
