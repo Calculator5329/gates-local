@@ -325,6 +325,29 @@ and per-model saves now keep newer pushes authoritative, with no-push response
 fallback preserved. The seven scenarios remain 64 deterministic schedules each,
 plus the explicit batched-write regression; coverage is sampled, not exhaustive.
 
+2026-11-09: eight further guard-specific cases cover fit/preflight epochs, late
+preloads, installed-model pushes, off-screen completion across reconnect, image
+probes, update hydration and pull acknowledgement timeouts. All seven guard
+removals failed for their intended reason. Three real bugs were fixed: stale
+image readiness, restored update notes/lost checks, and disappearing download
+progress. Runtime retry was excluded by the current server's serialization
+guarantee. The combined replay runs 719 schedules; `docs/testing.md` records the
+sampled and exhaustive portions. No browser is needed for these state checks.
+
+2026-11-09, RS-01: reconnect reads pending server downloads in the first hydration
+batch. Missed terminal events retire stale active rows, live jobs retain progress,
+and newer buffered pushes win. First-model queued sends resume after installation;
+an unavailable read preserves rows. Seven new replay cases add 262 schedules for
+981 total, with explicit witnesses and the same 64-sample cap. Stale rows and
+stale progress were watched failing before the fix. RS-02 remains unchanged.
+
+2026-11-09, RS-01 wording: first-model queued messages explain a failed or cancelled
+download at render time without changing the queue or reconnect reconciliation.
+Offline replays preserve the entry and text, and real Composer rendering checks
+cover connected failure, Cancel, editing, removal, retry and a live download
+during a disconnect. All four stopped-download wording checks were watched red.
+RS-03 remains dropped.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

@@ -153,6 +153,8 @@ export const methods = {
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults },
   "gpu.status": { params: NoParams, result: GpuStatus },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry) },
+  /** Download jobs still known to the server; reconnect reconciles missed terminal pushes. */
+  "models.pulls": { params: NoParams, result: S.Array(PullProgress) },
   "models.pull": { params: ModelRef, result: PullProgress },
   "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }) },
   "models.remove": { params: ModelRef, result: ModelRef },

@@ -370,9 +370,9 @@ export function Composer() {
 
 // ---------------------------------------------------------------- queue and warning
 
-function queueWords(q: Queued, editing: boolean): string {
+export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string {
   if (editing) return "Editing in the composer";
-  if (q.waitFor === "download") return "Sends when the download finishes";
+  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped. Download a model to send this." : "Sends when the download finishes";
   if (q.waitFor === "setup") return "Sends when setup finishes";
   return q.held ? "On hold" : "Sends after this reply";
 }
@@ -389,6 +389,8 @@ function QueueTray() {
   const queued = useStore((s) => s.queued);
   const threadId = useStore((s) => s.threadId);
   const editingId = useStore((s) => s.editingQueued);
+  const first = useStore(firstPull);
+  const model = useStore((s) => s.model);
   const mine = queued.filter((q) => q.threadId === threadId);
   if (mine.length === 0) return null;
   const n = mine.length;
@@ -401,7 +403,7 @@ function QueueTray() {
             <Icon id="clock" cls="s14" />
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
             <span className="qt-s" role="status">
-              {queueWords(q, editing)}
+              {queueWords(q, editing, first, model)}
             </span>
             {q.waitFor === "reply" && !editing ? (
               <button type="button" className="qa" data-send-now data-tip={q.held ? "Send this now" : "Stop this reply and send this now"} onClick={andFocus(() => sendQueuedNow(q.id))}>

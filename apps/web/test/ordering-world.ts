@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { isValidElement } from "react";
 import { vi } from "vitest";
-import type { Message, Params, Payload, Settings, SettingsPatch } from "@gates-local/contracts";
+import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { FakeServer, FakeSocket, installBrowser } from "./harness.ts";
 
@@ -28,6 +28,7 @@ export class OrderingServer extends FakeServer {
   readonly cancelled: string[] = [];
   readonly labels = new Map<FakeSocket, string>();
   holdHydration = false;
+  modelsSnapshot: ResultOf<"models.list"> = methodSamples["models.list"].result;
   holdChat = false;
   deferAdmission = false;
   private nextTurn = 0;
@@ -42,16 +43,16 @@ export class OrderingServer extends FakeServer {
       if (this.holdHydration && label === "A") save("snapshot", this.settings);
       else respond(this.settings);
     } else if (request.method === "models.list" && this.holdHydration && label === "A") {
-      this.log.push(request); save("hydration", methodSamples["models.list"].result);
+      this.log.push(request); save("hydration", this.modelsSnapshot);
     } else if (request.method === "voice.check") {
       this.log.push(request); save(`health-${++this.nextHealth}`, methodSamples["voice.check"].result);
     } else if (request.method === "settings.update") {
       this.log.push(request);
       // The real wire decoder has already checked the outgoing request.
       const patch = request.params as Params<"settings.update">;
-      const { voiceChange, whisperUrl, theme } = patch;
-      if (Object.keys(patch).some((key) => !["voiceChange", "whisperUrl", "theme"].includes(key))) throw new Error("Script a settings result for this patch first");
-      this.settings = { ...this.settings, ...(theme ? { theme } : {}), ...("whisperUrl" in patch ? { whisperUrl: whisperUrl ?? undefined } : {}) };
+      const { voiceChange, whisperUrl, theme, imageGen } = patch;
+      if (Object.keys(patch).some((key) => !["voiceChange", "whisperUrl", "theme", "imageGen"].includes(key))) throw new Error("Script a settings result for this patch first");
+      this.settings = { ...this.settings, ...(theme ? { theme } : {}), ...(imageGen === undefined ? {} : { imageGen }), ...("whisperUrl" in patch ? { whisperUrl: whisperUrl ?? undefined } : {}) };
       const key = `${label}-${"whisperUrl" in patch ? whisperUrl === null ? "disconnect" : this.connectName : "theme"}`;
       this.writes.push({ socket, patch, key });
       save(key, this.settings);

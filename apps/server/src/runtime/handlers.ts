@@ -1,4 +1,4 @@
-// models.catalog, models.pull, models.cancelPull, models.remove and
+// models.catalog, models.pulls, models.pull, models.cancelPull, models.remove and
 // models.load. models.list and models.refresh stay in app.ts (slice 1).
 import type { FitDeps } from "../fit/fit.ts";
 import type { SettingsReader } from "../settings/store.ts";
@@ -55,6 +55,7 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
         ...(deps.fit ? { fit: deps.fit } : {}),
         ...(deps.log ? { log: deps.log } : {}),
       }),
+    "models.pulls": () => deps.pulls.pending(),
     // Refused while no runtime is ready, a switch included: never queued against the old one.
     "models.pull": ({ name }) => {
       ready();

@@ -262,6 +262,10 @@ async function hydrate(c: Client): Promise<void> {
       applySettings(settings, false, true);
     });
   });
+  c.subscribe("image.status", (imageStatus) => {
+    imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
+    dispatch("image.status", () => setState({ imageStatus }));
+  });
   try {
     await hydrateWith(on, release);
   } finally {
@@ -311,7 +315,6 @@ async function hydrateWith(
     if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits();
   });
   on("sources.changed", (sources) => setState({ sources }));
-  on("image.status", (imageStatus) => setState({ imageStatus }));
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
   });
@@ -324,11 +327,12 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadsOrder.next();
-  const [status, listed, threads, settings] = await Promise.all([
+  const [status, listed, threads, settings, pendingPulls] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
     probe("settings.get", {}),
+    probe("models.pulls", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
@@ -337,7 +341,7 @@ async function hydrateWith(
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(s.pulls, models ?? s.models), threads: ordered, fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   restoreSaved();
@@ -347,6 +351,7 @@ async function hydrateWith(
   release(SECOND_BATCH);
 
   const catalogTicket = catalogOrder.next();
+  const updateTicket = updateOrder.next();
   // update.status reads the .git folder and a local file; the check that
   // fetches runs only from the Check for updates button (checkForUpdates).
   const [gpu, catalog, sources, imageStatus, update] = await Promise.all([
@@ -356,7 +361,7 @@ async function hydrateWith(
     probe("image.status", {}),
     probe("update.status", {}),
   ]);
-  setState({ gpu, sources, imageStatus, update, ...(catalogLands(catalogTicket) ? { catalog } : {}) });
+  setState({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}) });
   release("none");
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
   // Read after the release: a GPU push held behind gpu.status is the newer answer.
@@ -392,6 +397,8 @@ const modelsOrder = newestOnly();
 const runtimeOrder = newestOnly();
 // A catalog asked before a later models.changed describes the list before it: only the newest lands.
 const catalogOrder = newestOnly();
+const imageOrder = newestOnly();
+const updateOrder = newestOnly();
 /** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
 let thinkSeeded = false;
 // A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
@@ -405,6 +412,13 @@ async function refreshCatalog(): Promise<void> {
   const ticket = catalogOrder.next();
   const catalog = await probe("models.catalog", {});
   if (catalog !== undefined && catalogLands(ticket)) setState({ catalog });
+}
+
+/** First-batch hydration holds all pushes until this snapshot lands. */
+function reconcilePulls(pulls: State["pulls"], pending: ResultOf<"models.pulls"> | typeof NA | undefined): State["pulls"] {
+  if (pending === NA || pending === undefined) return pulls;
+  const terminal = Object.entries(pulls).filter(([, p]) => p.state !== "queued" && p.state !== "downloading" && p.state !== "verifying");
+  return { ...Object.fromEntries(terminal), ...Object.fromEntries(pending.map((p) => [p.name, p])) };
 }
 
 /** Completed progress bridges the list handoff, then retires so Remove cannot revive it. */
@@ -1596,8 +1610,9 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
     if (received === settingsReceipt) applySettings(r.value, false, voiceChange !== undefined);
     // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
     if ("imageGen" in patch || "comfyUrl" in patch) {
+      const ticket = imageOrder.next();
       void probe("image.status", {}).then((imageStatus) => {
-        if (imageStatus !== undefined) setState({ imageStatus });
+        if (imageStatus !== undefined && imageOrder.current(ticket)) setState({ imageStatus });
       });
     }
     return null;
@@ -1639,9 +1654,10 @@ export async function resetSettings(): Promise<ActionResult> {
 
 /** Ask ComfyUI again, so Settings says what it finds now. */
 export async function checkImageStatus(): Promise<ActionResult> {
+  const ticket = imageOrder.next();
   const r = await act("image.status", {}, "check ComfyUI");
   if (!r.ok) return r.message;
-  setState({ imageStatus: r.value });
+  if (imageOrder.current(ticket)) setState({ imageStatus: r.value });
   return null;
 }
 
@@ -1669,10 +1685,12 @@ export async function openDataFolder(): Promise<ActionResult> {
 export async function pull(name: string): Promise<ActionResult> {
   const tag = name.trim();
   if (tag === "") return null;
-  setState((s) => ({ pulls: { ...s.pulls, [tag]: { name: tag, state: "queued", completedBytes: 0 } } }));
+  const queued = { name: tag, state: "queued", completedBytes: 0 } satisfies Payload<"models.pull">;
+  setState((s) => ({ pulls: { ...s.pulls, [tag]: queued } }));
   const r = await act("models.pull", { name: tag }, `start downloading ${tag}`);
   if (r.ok) return null;
   setState((s) => {
+    if (s.pulls[tag] !== queued) return {}; // A push or newer attempt already owns the row.
     const { [tag]: _gone, ...pulls } = s.pulls;
     return { pulls };
   });
@@ -1744,16 +1762,23 @@ export async function checkForUpdates(): Promise<ActionResult> {
   if (getState().updateChecking) return null;
   setState({ updateChecking: true });
   const r = await act("update.check", {}, "check for updates");
-  setState((s) => ({
-    updateChecking: false,
-    ...(r.ok && s.update !== undefined && s.update !== NA ? { update: { ...s.update, lastCheck: r.value } } : {}),
-  }));
+  setState((s) => {
+    if (r.ok && s.update !== undefined && s.update !== NA) {
+      updateOrder.next(); // A completed check is newer than an in-flight hydration snapshot.
+      return { updateChecking: false, update: { ...s.update, lastCheck: r.value } };
+    }
+    return { updateChecking: false };
+  });
   return r.ok ? null : r.message;
 }
 
 /** Hide the last update's result; the server forgets it too, so other windows lose it on their next start. */
 export async function dismissUpdateResult(): Promise<void> {
-  setState((s) => (s.update === undefined || s.update === NA ? {} : { update: { ...s.update, result: null } }));
+  setState((s) => {
+    if (s.update === undefined || s.update === NA) return {};
+    updateOrder.next();
+    return { update: { ...s.update, result: null } };
+  });
   await act("update.dismissResult", {}, "hide the update note");
 }
 

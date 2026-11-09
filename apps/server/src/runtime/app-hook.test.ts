@@ -83,11 +83,13 @@ async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLea
     },
     ...(lease ? { lease } : {}),
   });
+  const pulls = createPullManager({ baseUrl: () => runtime.baseUrl(), push: () => undefined });
+  cleanups.push(() => pulls.stop());
   const handlers = createRuntimeHandlers({
     baseUrl: () => runtime.baseUrl(),
     catalog,
     settings: { get: () => defaultSettings("system") },
-    pulls: createPullManager({ baseUrl: () => runtime.baseUrl(), push: () => undefined }),
+    pulls,
     loader,
   });
   const app = createApp({
@@ -108,8 +110,33 @@ async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLea
   const thread = store.createThread({});
   const send = () => Promise.resolve(app.handlers["chat.send"]({ threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
   const remove = () => Promise.resolve(app.handlers["models.remove"]?.({ name: MODEL }, { clientId: 1 }));
-  return { app, loader, ollama, loads, send, remove };
+  return { app, loader, ollama, loads, send, remove, pulls };
 }
+
+it("RS-01: models.pulls reads live progress and queued jobs through the app handler", async () => {
+  const held = deferred();
+  const { app, pulls } = await setup([], {
+    "POST /api/pull": async (_b, res) => {
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(line({ status: "pulling weights", digest: "sha256:weights", total: 1000, completed: 400 }));
+      await held.promise;
+      res.end(line({ status: "success" }));
+    },
+  });
+  const read = () => app.handlers["models.pulls"]?.({}, { clientId: 1 });
+  expect(await read()).toEqual([]);
+  pulls.pull(MODEL);
+  pulls.pull("waiting:7b");
+  await until(() => pulls.pending()[0]?.completedBytes === 400);
+  expect(await read()).toEqual([
+    { name: MODEL, state: "downloading", completedBytes: 400, totalBytes: 1000 },
+    { name: "waiting:7b", state: "queued", completedBytes: 0 },
+  ]);
+  expect(pulls.cancel("waiting:7b")).toBe(true);
+  held.release();
+  await until(() => pulls.pending().length === 0);
+  expect(await read()).toEqual([]);
+});
 
 it("a turn on a cold model pushes loading, then ready at the first token, and the app owns the model", async () => {
   const ps: string[] = [];

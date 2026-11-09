@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-09: Queued messages explain a stopped first-model download
+
+When a first-model download fails or is cancelled, its queued message now says
+"Download stopped. Download a model to send this." The message stays editable
+and removable, and another download restores the waiting words. A disconnect
+with a retained live download still says it will send when downloading finishes.
+This is derived during render; queue state and download reconciliation are unchanged.
+
+Offline failure/cancellation replays and the connected Composer rendering checks
+were watched showing the old misleading words before the fix.
+
+## 2026-11-09: Reconnect reconciles downloads that ended while offline
+
+A download that finished, failed or was cancelled during a disconnect no longer
+stays Downloading after reconnect. A typed first-model message resumes when the
+completed model appears. Live queued, downloading and verifying jobs keep their
+rows, progress and Cancel controls; disconnect alone never clears them.
+
+The typed `models.pulls` read snapshots server jobs in hydration's first batch.
+Buffered progress applies afterward, completed rows still bridge installation,
+and an unavailable read preserves cached rows. Seven replay cases cover missed
+terminal events, first-model sends, quiet live jobs and newer progress. The stale
+rows and stale progress were watched failing before the fix. RS-02 is unchanged.
+
+## 2026-11-09: Keep newer image, update and download state across late replies
+
+An older image-status probe no longer replaces a newer busy push, either from
+Check or after saving image settings. Reconnect hydration keeps a newer update
+check and does not restore a dismissed result. A pull acknowledgement timing out
+after initial server progress no longer removes that progress from view.
+
+Eight guard-specific ordering cases now cover fit/preflight freshness, model
+choice, installed-model refresh, off-screen running marks, image probes, updates
+and pull timeouts. Each has an explicit witness and a watched failing guard
+removal. Small graphs run exhaustively; larger graphs use deterministic samples.
+The runtime-retry hypothesis was checked against its serialized producer and
+left unchanged. See `docs/testing.md` for scope and coverage counts.
+
 ## 2026-11-09: Make real-model smoke failures harder to miss
 
 The smoke now refuses every endpoint except its setup's dedicated port before

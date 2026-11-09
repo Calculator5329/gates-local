@@ -202,6 +202,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
   "models.pull": { params: { name: "qwen3.5:14b" }, result: { ...pull, state: "queued", completedBytes: 0 } },
   "models.cancelPull": { params: { name: "qwen3.5:14b" }, result: { cancelled: true } },
+  "models.pulls": { params: {}, result: [] },
   "models.remove": { params: { name: "gemma3:4b" }, result: { name: "gemma3:4b" } },
   "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
   "sources.list": { params: {}, result: [source] },

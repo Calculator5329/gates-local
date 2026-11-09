@@ -151,7 +151,7 @@ chats' admissions may finish in either order.
 
 Graphs with at most 64 legal orders are exhausted. Larger shipping scenarios
 run 64 unique deterministic schedules each: required regression witnesses, a DFS
-witness, witnesses that delay each event in turn, then fixed-seed priority samples. The seven current product
+witness, witnesses that delay each event in turn, then fixed-seed priority samples. The original seven product
 scenarios all exceed 64 orders, so their 448 executed schedules are **not
 exhaustive**. Required witnesses count inside that budget and are checked against
 causal constraints and FIFO. A separate RP-01 regression explicitly delivers two
@@ -197,6 +197,68 @@ duplicates, broken causal constraints and socket FIFO violations. A new real bug
 an unavailable fixture or invalid schedule must not count as rediscovering a bug.
 The scheduler also has a planted failing invariant to prove that checks fire and
 the failing world is disposed.
+
+`ordering-state.test.ts` adds eight cases across seven guards. They use the same
+real sessions and protocol decoder, capturing RPC results when requested and
+separating server completion from delivery. Every case has an explicit witness;
+small graphs are exhausted and larger graphs retain the 64-schedule cap.
+
+| Scenario | Guard | Orders | Watched result with guard removed |
+| --- | --- | ---: | --- |
+| Fit and blocker preflight across a GPU reading | `fitEpoch` | 64 sampled | Old refusal replaces the fresh fitting verdict |
+| Model choice while preload preflight waits | `preload` current-model check | 7 exhaustive | Superseded model starts loading |
+| Refresh crossing another window's removal push | `modelsOrder.current` | 64 sampled | Removed model returns to the installed list |
+| Off-screen completion around reconnect hydration | `lostTurn` clears `runningTurns` | 64 sampled | Disconnected stream stays marked running |
+| Check and post-save image probes crossing busy | `imageOrder.current` | 13 exhaustive each | Ready replaces a newer busy push |
+| Update hydration crossing Check and Dismiss | `updateOrder.current` | 42 exhaustive | Fresh check disappears and dismissed result returns |
+| Pull acknowledgement timeout after initial progress | Queued-row identity | 3 exhaustive | Received download progress disappears |
+
+These add 270 schedules, for 719 including the earlier cases and RP-01 witness.
+Guard removals use cache copies selected with `REPLAY_SESSION`; production source
+is restored for every normal run. All seven removals made their intended tests
+fail. No case was kept on the evidence of a passing mutation alone.
+
+The last three rows reproduced real client bugs before their guards were added.
+Image push receipt now supersedes pending probes. Update Check and Dismiss
+invalidate older hydration publication. A failed pull acknowledgement can remove
+only its own optimistic queued row, preserving server progress or a newer attempt.
+The pull case advances fake time by 30,001 ms: the initial downloading push
+precedes its delayed/lost acknowledgement, as `pull.run` allows. It does not put
+a later progress frame ahead of an earlier synchronous server refusal.
+
+The proposed runtime-retry rollback was excluded for the current server:
+`RuntimeSwitch` serializes ensure, discover and mode changes, and a probe through
+that real wrapper emitted the old retry response before the next mode's push.
+Runtime code remains unchanged. This assumption needs revisiting if its producer
+ordering changes. These replays cover the declared graphs, not all possible
+JavaScript or network schedules, and remain diagnostic probes.
+
+`ordering-downloads.test.ts` adds RS-01 reconnect reconciliation. Missed done,
+error and cancelled pushes each run with an installed model and with no chat
+model yet. A first-model send queued during the download must resume when the
+installed snapshot arrives. These six graphs and the unavailable-read graph
+each exhaust 10 legal orders. Queued, downloading and verifying jobs each run
+64 deterministic samples, with explicit witnesses for newer progress before
+and after hydration releases. Those larger graphs are sampled, not exhaustive.
+The 262 additional schedules bring the combined count to 981.
+
+The server's `models.pulls` read returns `PullManager.pending()`. Hydration reads
+it in the first batch while all pushes are held, replacing cached active jobs
+with server jobs before releasing buffered progress. Terminal rows remain for
+the existing installation handoff, and unavailable reads leave cached jobs alone.
+The tests check rows throughout the disconnect, not just after reconnect, and
+retain done rows until installed while preserving earlier error feedback.
+Before the fix, missed terminal events left Downloading rows and server progress
+of 55% remained at the client's old 20%. Both failures were observed in the real
+session replay. These state checks do not measure browser paints.
+
+First-model messages are queued for all three terminal outcomes. After an offline
+failure or cancellation, their entries and text remain, while the real tray's
+`queueWords` function explains that another model download is needed. Two further
+checks render the real Composer for a connected failure and Cancel, retaining
+Edit and Remove, editing status, retry wording and the live-download wording
+during a drop. All four terminal wording checks failed with the old copy. These
+extend the existing 981 schedules; the two connected checks are single journeys.
 
 Historical checks can select a cache copy of a real `session.ts` with
 `REPLAY_SESSION`. Redirect only that copy's relative imports to the current
