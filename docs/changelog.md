@@ -38,7 +38,7 @@
 - Unit probes caught eager Settings imports, omitted preload accounting,
   disabled total limits, and broken import caching, error handling and idle
   scheduling. Delayed-import and reload browser specs are written; browser
-  behavior and before/after startup timings still await the approved runner.
+  behavior and before/after startup timings have not been run yet.
 
 ## 2026-11-08: One desktop titlebar
 
@@ -84,10 +84,6 @@
   model so report totals and other tool results reach the answer. The image
   result explicitly says it is queued and not made yet; the card remains
   authoritative and Markdown images remain labels without remote fetches.
-- The coordinator revised the JS budget while a separate entry/total build
-  split is pending. This build measures 144.46 KiB JS total and 12.76 KiB
-  CSS; the old 144 KiB total no longer blocks this lane. The total ceiling
-  is 170 KiB and the CSS limit remains 13 KiB.
 - Verification: nine review probes were seen failing before the fixes;
   typecheck, lint and 1,314 unit tests pass, with one skipped. The remote
   browser retry test failed with its button fix removed, then all four
