@@ -437,7 +437,9 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     let models: { path: string; hasModels?: boolean } | undefined;
     if (mode === "app") {
       // Its own models folder, so it never writes into a system install's store.
-      models = { path: appModelsDir(appDataDir, platform) };
+      // Like installedBinary and runtimeDir, a supplied data folder uses the
+      // host filesystem's paths, even when a test injects Windows policy.
+      models = { path: appModelsDir(appDataDir) };
       mkdirSync(models.path, { recursive: true });
     } else {
       models = detectModelsDir(env, options.home, options.systemModelsDirs);

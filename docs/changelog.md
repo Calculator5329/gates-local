@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-09: Unit tests wait for state and clean up, and a query stops when its server died early
+
+- Each test run gets one scratch folder and removes it at the end. Run
+  folders older than a day, left by a crashed run, are swept at the next
+  start. The sweep touches only real folders with its own prefix and repairs
+  permissions on directories only, so a link inside a stale run cannot
+  change anything outside it.
+- Tests that slept on the clock now wait for the state they need with a
+  named bound: runtime and loader shutdown, worker readiness, release
+  cancellation, sandbox cleanup, socket ownership. A regression fails in
+  about two seconds and says what never happened.
+- Process tests stop what they started after a timeout too.
+- A SQL query child now stops when its server is gone even if the server
+  died before the child started running. It used to spin until its own
+  timer. This was also a flaky red in the suite (1 failure in 2 runs under
+  load before, 20 of 20 after).
+- The release check waits for a cancelled step's output to close, with a
+  two-second bound.
+- Not verified: native Windows, and the sweep against a real day-old run.
+  Still open: one release test ("interrupting a running check stops its
+  child") has failed once and passed on rerun in three lanes.
+
 ## 2026-11-09: The phone is for chat only, and the read tool checks a path before touching it
 
 - Every wire method has a required `phone` row in the contracts table, and

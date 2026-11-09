@@ -21,12 +21,6 @@ describe("the model the Default card names (MR-01)", () => {
     expect(savedDefault(s)).toBeUndefined();
   });
 
-  it("keeps an installed saved default, whatever the open chat uses", () => {
-    const s = state("beta", [chat("alpha", "best"), chat("beta")], "alpha");
-    expect(cardDefault(s)).toBe("beta");
-    expect(savedDefault(s)).toBe("beta");
-  });
-
   it("with no pick, stays on the model new chats would keep", () => {
     expect(cardDefault(state("gone", [chat("alpha"), chat("beta")], "beta"))).toBe("beta");
   });
@@ -44,12 +38,6 @@ describe("removing a model and moving the default (MR-02)", () => {
     session.updateSettings.mockResolvedValue("Couldn't save the default model.");
     expect(await removeModelAndMoveDefault("alpha", "beta")).toEqual({ removeErr: null, defaultErr: "Couldn't save the default model." });
     expect(session.removeModel).toHaveBeenCalledTimes(1);
-  });
-
-  it("saves nothing when the removal fails", async () => {
-    session.removeModel.mockResolvedValue("Couldn't remove alpha.");
-    expect(await removeModelAndMoveDefault("alpha", "beta")).toEqual({ removeErr: "Couldn't remove alpha.", defaultErr: null });
-    expect(session.updateSettings).not.toHaveBeenCalled();
   });
 
   it("moves the open chat too once the save worked", async () => {

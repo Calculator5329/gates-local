@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -184,8 +184,7 @@ describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [
   it("kills commands over the time and output limits, and nothing outlives a timeout", async () => {
     const marker = `98${Date.now() % 100000}.5`;
     await expect(runSandbox({ command: `sleep ${marker} & sleep ${marker} & wait`, sources, timeoutMs: 500 })).rejects.toThrow(/time limit/);
-    await new Promise(r => setTimeout(r, 300));
-    expect(markerProcesses(marker)).toEqual([]);
+    await vi.waitFor(() => expect(markerProcesses(marker)).toEqual([]), { timeout: 20_000 });
     await expect(runSandbox({ command: "yes", sources, outputCap: 100 })).rejects.toThrow(/output limit/);
   });
 });

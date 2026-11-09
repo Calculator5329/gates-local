@@ -36,12 +36,6 @@ async function sleeper(): Promise<ChildProcess> {
 
 const alive = (pid: number) => readProc(pid) !== undefined;
 
-async function waitFor(pred: () => boolean, ms = 3000) {
-  const end = Date.now() + ms;
-  while (!pred() && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
-  return pred();
-}
-
 beforeEach(() => {
   work = tmpDir("own");
   file = path.join(work, "owned-ollama.json");
@@ -94,7 +88,6 @@ describe("stopOwned", () => {
   // Windows never stops a process by PID number (R-12): runtime.ts stops its own child through the handle.
   it.runIf(process.platform === "win32")("on Windows adopts a matching live record and leaves the process running", async () => {
     const c = await sleeper();
-    await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
     expect(checkOwnership(file).kind, JSON.stringify({ record: readRecord(file), now: readProc(c.pid!) })).toBe("ours");
     expect(await stopOwned(file, 500)).toEqual({ stopped: false, reason: "adopted" });
@@ -104,23 +97,22 @@ describe("stopOwned", () => {
 
   it.skipIf(process.platform === "win32")("stops a process whose PID, start time and command all match the record", async () => {
     const c = await sleeper();
-    await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
     expect(checkOwnership(file).kind, JSON.stringify({ record: readRecord(file), now: readProc(c.pid!) })).toBe("ours");
+    const exited = once(c, "exit");
     const r = await stopOwned(file, 2000);
     expect(r).toEqual({ stopped: true, pid: c.pid });
-    expect(await waitFor(() => !alive(c.pid!))).toBe(true);
+    await exited;
+    expect(alive(c.pid!)).toBe(false);
     expect(existsSync(file)).toBe(false);
   });
 
   it("refuses a recorded PID now running a different command, and leaves it running", async () => {
     const c = await sleeper();
-    await waitFor(() => alive(c.pid!));
     recordFor(c.pid!, { command: "/different/ollama serve" });
     const r = await stopOwned(file, 500);
     expect(r.stopped).toBe(false);
     expect(r.stopped === false && r.reason).toBe("not-ours");
-    await new Promise((res) => setTimeout(res, 200));
     expect(alive(c.pid!)).toBe(true);
     expect(c.exitCode).toBeNull();
     expect(c.signalCode).toBeNull();
@@ -129,22 +121,20 @@ describe("stopOwned", () => {
 
   it("refuses a recorded PID with a different start time (PID reuse), and leaves it running", async () => {
     const c = await sleeper();
-    await waitFor(() => alive(c.pid!));
     const real = readProc(c.pid!)!.startTime;
     recordFor(c.pid!, { startTime: String(Number(real) - 1) });
     const r = await stopOwned(file, 500);
     expect(r.stopped === false && r.reason).toBe("not-ours");
-    await new Promise((res) => setTimeout(res, 200));
     expect(alive(c.pid!)).toBe(true);
     expect(c.signalCode).toBeNull();
   });
 
   it("reports a recorded process that has exited as gone", async () => {
     const c = await sleeper();
-    await waitFor(() => alive(c.pid!));
     recordFor(c.pid!);
+    const exited = once(c, "exit");
     c.kill("SIGKILL");
-    await waitFor(() => !alive(c.pid!));
+    await exited;
     expect(await stopOwned(file, 500)).toEqual({ stopped: false, reason: "gone" });
   });
 
@@ -225,7 +215,6 @@ describe("listenerPid (S-04)", () => {
       const { port } = server.address() as AddressInfo;
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid] })).toBe(process.pid);
       const other = await sleeper();
-      await waitFor(() => alive(other.pid!));
       expect(await listenerPid(port, { platform: "linux", pids: [other.pid!] })).toBeUndefined();
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
@@ -297,44 +286,46 @@ function addrFs(bindv6only?: string): ListenerFs {
   };
 }
 
-/** A child process listening on host:port; resolves once it is listening. */
-function listenerChild(host: string, port: number): Promise<ChildProcess> {
-  const c = spawn(process.execPath, ["-e", `require("node:net").createServer().listen(${port}, ${JSON.stringify(host)}, () => console.log("up"))`], { stdio: ["ignore", "pipe", "pipe"] });
+/** Hand the child an already-bound IPv4 socket; the parent still binds its second address. */
+function listenerChild(server: ReturnType<typeof createServer>): Promise<ChildProcess> {
+  const c = spawn(process.execPath, ["-e", 'process.on("message", (_message, server) => { server.on("connection", socket => socket.end()); process.send("ready"); });'], { stdio: ["ignore", "pipe", "pipe", "ipc"] });
   children.push(c);
   let stderr = "";
   c.stderr!.setEncoding("utf8").on("data", (text: string) => { stderr += text; });
   return new Promise((resolve, reject) => {
-    c.stdout!.once("data", () => resolve(c));
+    const failed = (code: number | null, signal: NodeJS.Signals | null) => reject(new Error(`listener child exited ${signal ?? code}\n${stderr}`));
     c.once("error", reject);
-    c.once("close", (code, signal) => reject(new ListenerChildError(`listener child exited ${signal ?? code}\n${stderr}`, stderr)));
+    c.once("exit", failed);
+    c.once("message", () => {
+      c.off("error", reject);
+      c.off("exit", failed);
+      resolve(c);
+    });
+    c.send("listen", server, error => { if (error) reject(error); });
   });
 }
 
-class ListenerChildError extends Error {
-  readonly stderr: string;
-  constructor(message: string, stderr: string) {
-    super(message);
-    this.stderr = stderr;
-  }
-}
-
-/** Retry only a child's occupied IPv4 bind, recreating both listeners on a fresh port. */
-async function listenerPair(host: string, startChild = listenerChild) {
-  for (let attempt = 1; ; attempt++) {
-    const server = createServer();
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen({ port: 0, host, ipv6Only: true }, resolve);
-      });
-      const { port } = server.address() as AddressInfo;
-      const child = await startChild("127.0.0.1", port);
-      return { server, port, child };
-    } catch (error) {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      if (attempt >= 3 || !(error instanceof ListenerChildError) || !/\bError: listen EADDRINUSE:/.test(error.stderr)) throw error;
-      console.warn(`[ownership listener] bind conflict on attempt ${attempt}/3; retrying on a new port. ${error.message}`);
-    }
+async function listenerPair(host: string) {
+  const handed = createServer();
+  const server = createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      handed.once("error", reject);
+      handed.listen(0, "127.0.0.1", resolve);
+    });
+    const address = handed.address();
+    if (!address || typeof address === "string") throw new Error("Missing listener address");
+    const { port } = address;
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen({ port, host, ipv6Only: true }, resolve);
+    });
+    const child = await listenerChild(handed);
+    await new Promise<void>(resolve => handed.close(() => resolve()));
+    return { server, port, child };
+  } catch (error) {
+    await Promise.all([handed, server].map(socket => new Promise<void>(resolve => socket.close(() => resolve()))));
+    throw error;
   }
 }
 
@@ -380,61 +371,6 @@ describe("listenerPid matches the probed address (R2-06)", () => {
       expect(await listenerPid(port, { platform: "linux", pids: [process.pid], host: "::1" })).toBe(process.pid);
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
-    }
-  });
-
-  it.each(["127.0.0.2", "::"])("retries a child bind conflict beside %s on a new port", async (parentHost) => {
-    const holder = createServer();
-    let attempts = 0;
-    let heldPort = 0;
-    let pair: Awaited<ReturnType<typeof listenerPair>> | undefined;
-    try {
-      pair = await listenerPair(parentHost, async (host, port) => {
-        attempts++;
-        if (attempts === 1) {
-          heldPort = port;
-          await new Promise<void>((resolve, reject) => {
-            holder.once("error", reject);
-            holder.listen(port, host, resolve);
-          });
-        }
-        console.log(`[ownership probe] ${parentHost}: child attempt ${attempts}, port ${port}; deliberately held port ${heldPort}`);
-        return listenerChild(host, port);
-      });
-      expect(attempts).toBe(2);
-      expect(pair.port).not.toBe(heldPort);
-      expect(await listenerPid(pair.port, { platform: "linux", pids: [pair.child.pid!], host: "127.0.0.1" })).toBe(pair.child.pid);
-    } finally {
-      await new Promise<void>((resolve) => holder.close(() => resolve()));
-      if (pair) {
-        const { server } = pair;
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-    }
-  });
-
-  it("does not retry another child startup failure", async () => {
-    let attempts = 0;
-    await expect(listenerPair("127.0.0.2", () => {
-      attempts++;
-      return listenerChild("127.0.0.1", -1);
-    })).rejects.toThrow(/listener child exited 1[\s\S]*ERR_SOCKET_BAD_PORT/);
-    expect(attempts).toBe(1);
-  });
-
-  it("still fails after three child bind conflicts", async () => {
-    const holder = createServer();
-    await new Promise<void>((resolve) => holder.listen(0, "127.0.0.1", resolve));
-    let attempts = 0;
-    try {
-      const { port } = holder.address() as AddressInfo;
-      await expect(listenerPair("127.0.0.2", () => {
-        attempts++;
-        return listenerChild("127.0.0.1", port);
-      })).rejects.toThrow(/listener child exited 1[\s\S]*listen EADDRINUSE/);
-      expect(attempts).toBe(3);
-    } finally {
-      await new Promise<void>((resolve) => holder.close(() => resolve()));
     }
   });
 

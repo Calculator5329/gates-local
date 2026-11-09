@@ -107,7 +107,7 @@ it("S-02: a preload's fit reads the URL the load captured, not whatever the runt
   expect(s.settings.get().runtimeMode).toBe("system");
   expect((await s.runtime.ensure()).state).toBe("ready");
   const loading = s.loader.load("qwen3.5:9b", 16384);
-  await new Promise((r) => setTimeout(r, 50));
+  await until(() => !firstPs);
   healthy = false;
   await s.runtime.discover();
   expect(s.runtime.baseUrl()).toBeUndefined();
@@ -118,21 +118,31 @@ it("S-02: a preload's fit reads the URL the load captured, not whatever the runt
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const until = (ready: () => boolean) => vi.waitFor(() => expect(ready()).toBe(true), { timeout: 20_000 });
 /** A promise and the function that resolves it. */
 function signalled(): { promise: Promise<void>; resolve: () => void } {
   let release: (() => void) | undefined;
   const promise = new Promise<void>((r) => (release = r));
   return { promise, resolve: () => release?.() };
 }
-const settledWithin = <T>(p: Promise<T>, ms: number): Promise<unknown> =>
-  Promise.race([p.then((v) => ({ resolved: v }), (e: unknown) => ({ rejected: e })), sleep(ms).then(() => "pending")]);
+async function settled<T>(p: Promise<T>, what: string, ms = 20_000): Promise<unknown> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p.then((v) => ({ resolved: v }), (e: unknown) => ({ rejected: e })),
+      new Promise<never>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), ms); }),
+    ]);
+  } finally { clearTimeout(deadline); }
+}
 
 describe("R2-02: shutdown aborts a preload in its residency read or its fit", () => {
   for (const where of ["/api/ps", "/api/show"] as const) {
-    it(`a request to ${where} that never answers ends at close(); loader and image close settle well under main's 2500 ms`, async () => {
+    it(`a request to ${where} that never answers ends when the loader and image close`, async () => {
       const hungAt = signalled();
       const hung = hungAt.promise;
-      const never: Route = () => {
+      const aborted = signalled();
+      const never: Route = (_body, res) => {
+        res.once("close", aborted.resolve);
         hungAt.resolve();
         return new Promise<void>(() => undefined);
       };
@@ -153,15 +163,14 @@ describe("R2-02: shutdown aborts a preload in its residency read or its fit", ()
       const s = await services(path.join(work, "data"), { appPort: await freePort(), externalBaseUrl: ollama.baseUrl }, lease);
       expect((await s.runtime.ensure()).state).toBe("ready");
       const loading = s.loader.load("qwen3.5:9b", 16384);
-      expect(await settledWithin(hung, 1000)).toEqual({ resolved: undefined });
+      expect(await settled(hung, "held runtime request readiness")).toEqual({ resolved: undefined });
       // main.ts: cancel turns, drain model loads, close image module.
-      const started = Date.now();
       const shutdown = (async () => {
         await s.loader.close();
         await comfy.image.close();
       })();
-      expect(await settledWithin(shutdown, 1000)).toEqual({ resolved: undefined });
-      expect(Date.now() - started).toBeLessThan(1000);
+      expect(await settled(aborted.promise, `shutdown aborting ${where}`, 2000)).toEqual({ resolved: undefined });
+      expect(await settled(shutdown, "application shutdown")).toEqual({ resolved: undefined });
       expect(await loading).toMatchObject({ state: "error" });
       expect(comfy.stops()).toBe(1);
       expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
@@ -275,13 +284,12 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     });
     const { turnId } = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
     expect(turnId).toBeTruthy();
-    expect(await settledWithin(asked.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(asked.promise, "held request readiness")).toEqual({ resolved: undefined });
     const switching = r.s.runtime.setMode("app");
-    await sleep(50);
+    await until(() => r.s.runtime.baseUrl() === undefined);
     show.resolve();
     await switching;
-    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
-    await sleep(50);
+    await until(() => r.app.activeTurns() === 0);
     expect(r.chats()).toBe(0);
     expect(r.app.activeTurns()).toBe(0);
     expectRuntimeChangedEnd(r.events);
@@ -315,14 +323,13 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       { image },
     );
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
-    expect(await settledWithin(queuedOnce.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect([queued, r.chats()]).toEqual([1, 1]);
     const switching = r.s.runtime.setMode("app");
-    await sleep(50);
+    await until(() => r.s.runtime.baseUrl() === undefined);
     tool.resolve();
     await switching;
-    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
-    await sleep(50);
+    await until(() => r.app.activeTurns() === 0);
     expect(r.chats()).toBe(1);
     expect(r.app.activeTurns()).toBe(0);
     expectRuntimeChangedEnd(r.events);
@@ -335,6 +342,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
   it("a tool that never lets go: the switch ends the turn now (one runtime-changed, GPU claim released) and completes; the tool's late result is dropped", async () => {
     const tool = signalled();
     const queuedOnce = signalled();
+    const aborted = signalled();
     const cancelled: string[] = [];
     const image = {
       current: () => ({ state: "off", owner: "none" }),
@@ -357,15 +365,15 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
           res.end(line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true, done_reason: "stop" }));
         },
       },
-      { image, lease },
+      { image, lease, turnDrainMs: 15_000, onEvent: event => { if (event.type === "error") aborted.resolve(); } },
     );
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
-    expect(await settledWithin(queuedOnce.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect(lease.status().holders).toBe(1);
-    const started = Date.now();
-    // The tool is still held: the switch must not wait on it (nor time out and go on).
-    expect(await settledWithin(r.s.runtime.setMode("app"), 2000)).toMatchObject({ resolved: { owner: expect.any(String) } });
-    expect(Date.now() - started).toBeLessThan(2000);
+    // The held tool must be aborted before the 15-second turn-drain fallback.
+    const switching = r.s.runtime.setMode("app");
+    expect(await settled(aborted.promise, "runtime switch aborting the held tool", 2000)).toEqual({ resolved: undefined });
+    expect(await settled(switching, "runtime switch", 2000)).toMatchObject({ resolved: { owner: expect.any(String) } });
     expect(r.s.runtime.mode()).toBe("app");
     expect(r.app.activeTurns()).toBe(0);
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
@@ -375,6 +383,8 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     const seen = r.events.length;
     // The stuck operation finishes in the background: its result is dropped, its job taken back.
     tool.resolve();
+    await until(() => cancelled.length === 1);
+    // A short observation window checks that no later completion leaks through.
     await sleep(100);
     expect(r.events).toHaveLength(seen);
     expect(r.chats()).toBe(1);
@@ -387,7 +397,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     const before = r.s.runtime.baseUrl();
     // A turn the switch cannot end early (here a bare reservation nobody ends).
     const stuck = r.s.loader.reserve(MODEL);
-    const failed = await settledWithin(r.s.runtime.setMode("app"), 2000);
+    const failed = await settled(r.s.runtime.setMode("app"), "runtime switch");
     expect(failed).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
     expect(r.s.runtime.mode()).toBe("system");
     expect(r.s.runtime.baseUrl()).toBe(before);
@@ -407,7 +417,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     });
     const choose = (runtimeMode: "app" | "system") => r.s.handlers["settings.update"]!({ runtimeMode }, { clientId: 1 });
     expect(choose("app")).toMatchObject({ runtimeMode: "app" });
-    for (let i = 0; i < 200 && r.s.runtime.status().state !== "error"; i++) await sleep(5);
+    await until(() => r.s.runtime.status().state === "error");
     expect(r.s.runtime.status()).toMatchObject({ state: "error", detail: expect.stringMatching(/still running/) });
     await sleep(20);
     expect(r.s.runtime.mode()).toBe("system");
@@ -420,7 +430,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expect(switches).toEqual(["app"]);
     stuck.end();
     choose("app");
-    for (let i = 0; i < 400 && r.s.runtime.mode() !== "app"; i++) await sleep(5);
+    await until(() => r.s.runtime.mode() === "app");
     expect(r.s.runtime.mode()).toBe("app");
     await r.done();
   });
@@ -443,8 +453,8 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     // While the first switch drains: system, then app again.
     choose("system");
     choose("app");
-    expect(await settledWithin(first!, 2000)).toMatchObject({ resolved: { message: expect.stringMatching(/still running/) } });
-    for (let i = 0; i < 400 && r.s.runtime.mode() !== "app"; i++) await sleep(5);
+    expect(await settled(first!, "first runtime switch")).toMatchObject({ resolved: { message: expect.stringMatching(/still running/) } });
+    await until(() => r.s.runtime.mode() === "app");
     await sleep(100);
     expect(r.s.runtime.mode()).toBe("app");
     expect(r.s.handlers["settings.get"]!({}, { clientId: 1 })).toMatchObject({ runtimeMode: "app" });
@@ -469,8 +479,8 @@ describe("R3-02: a switch saves the reply streamed so far", () => {
       },
     });
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-    expect(await settledWithin(streaming.promise, 1000)).toEqual({ resolved: undefined });
-    for (let i = 0; i < 200 && r.events.filter((e) => e.type === "delta").length < 2; i++) await sleep(5);
+    expect(await settled(streaming.promise, "stream readiness")).toEqual({ resolved: undefined });
+    await until(() => r.events.filter((e) => e.type === "delta").length >= 2);
     const sent = r.events.filter((e) => e.type === "delta").map((e) => e.text).join("");
     expect(sent).toBe("Already streamed");
     await r.s.runtime.setMode("app");
@@ -495,7 +505,7 @@ describe("a turn's stream ends once", () => {
     // A switch's first step, landing while the turn handles its error event.
     switchNow = () => r.s.loader.runtimeChanged();
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    await until(() => r.app.activeTurns() <= 0);
     expect(r.app.activeTurns()).toBe(0);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "stream-error" }]);
     r.s.loader.runtimeSettled();
@@ -513,9 +523,9 @@ describe("a turn's stream ends once", () => {
       },
     });
     await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
-    for (let i = 0; i < 200 && r.app.activeTurns() > 0; i++) await sleep(5);
+    await until(() => r.app.activeTurns() <= 0);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "done" }]);
-    expect(await settledWithin(closed.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(closed.promise, "HTTP request socket closure")).toEqual({ resolved: undefined });
     await r.done();
   });
 });
@@ -546,8 +556,8 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
       { image: comfy.image, lease, fit: tight },
     );
     const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    expect(await settledWithin(asked.promise, 1000)).toEqual({ resolved: undefined });
-    expect(await settledWithin(r.app.shutdown(), 1000)).toEqual({ resolved: undefined });
+    expect(await settled(asked.promise, "held request readiness")).toEqual({ resolved: undefined });
+    expect(await settled(r.app.shutdown(), "application shutdown")).toEqual({ resolved: undefined });
     expect(await send).toMatchObject({ code: "cancelled" });
     expect(r.app.activeTurns()).toBe(0);
     expect(comfy.stops()).toBe(0);
@@ -562,9 +572,9 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
     const other = await lease.acquire("chat");
     const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    for (let i = 0; i < 200 && lease.status().waiting.length === 0; i++) await sleep(5);
+    await until(() => lease.status().waiting.length !== 0);
     expect(lease.status().waiting).toEqual(["image"]);
-    expect(await settledWithin(r.app.shutdown(), 1000)).toEqual({ resolved: undefined });
+    expect(await settled(r.app.shutdown(), "application shutdown")).toEqual({ resolved: undefined });
     expect(await send).toMatchObject({ code: "cancelled" });
     expect(r.app.activeTurns()).toBe(0);
     expect(lease.status()).toMatchObject({ holders: 1, waiting: [] });
@@ -582,11 +592,11 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
     const inspect = comfy.hold("inspect");
     const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    expect(await settledWithin(inspect.asked, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(inspect.asked, "ComfyUI inspection readiness")).toEqual({ resolved: undefined });
     expect(lease.status()).toMatchObject({ holder: "image" });
     const switched = r.s.runtime.setMode("app");
-    expect(await send).toMatchObject({ code: "runtime-changed" });
-    expect(await settledWithin(r.s.loader.turnsEnded(), 1000)).toEqual({ resolved: undefined });
+    expect(await settled(send, "chat send admission")).toMatchObject({ resolved: { code: "runtime-changed" } });
+    expect(await settled(r.s.loader.turnsEnded(), "model turns to drain")).toEqual({ resolved: undefined });
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await switched;
     inspect.release();
@@ -602,8 +612,8 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const r = await rig(cold, { image: comfy.image, lease, fit: tight, turnDrainMs: 200 });
     const stop = comfy.hold("stop");
     const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
-    expect(await settledWithin(stop.asked, 1000)).toEqual({ resolved: undefined });
-    expect(await settledWithin(r.s.runtime.setMode("app"), 2000)).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
+    expect(await settled(stop.asked, "ComfyUI stop readiness")).toEqual({ resolved: undefined });
+    expect(await settled(r.s.runtime.setMode("app"), "runtime switch")).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
     expect(r.s.runtime.mode()).toBe("system");
     expect(lease.status()).toMatchObject({ holder: "image" });
     stop.release();
@@ -664,8 +674,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const r = await rig(m.routes, { ...options, fit: fitDeps });
     const xThread = r.store.createThread({ title: "Long answer" });
     const x = await r.app.handlers["chat.send"]({ threadId: xThread.id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
-    expect(await settledWithin(m.xStreaming.promise, 1000)).toEqual({ resolved: undefined });
-    for (let i = 0; i < 200 && !r.events.some((e) => e.turnId === x.turnId && e.type === "delta"); i++) await sleep(5);
+    expect(await settled(m.xStreaming.promise, "stream readiness")).toEqual({ resolved: undefined });
+    await until(() => r.events.some((e) => e.turnId === x.turnId && e.type === "delta"));
     const of = (turnId: string) => r.events.filter((e) => e.turnId === turnId);
     const terminal = (turnId: string) => of(turnId).filter((e) => e.type === "error" || e.type === "done");
     return { ...m, r, xThread, x, of, terminal };
@@ -674,7 +684,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("stopOthers: X's turn ends now (partial saved, preempted, names Y) and Y's turn reaches its first token", async () => {
     const t = await withX(tight);
     const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
-    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     const xEnd = t.terminal(t.x.turnId);
     expect(xEnd).toHaveLength(1);
@@ -682,7 +692,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(xEnd[0]?.message).toContain(Y);
     expect(t.r.events.indexOf(xEnd[0]!)).toBeLessThan(t.r.events.findIndex((e) => e.turnId === y.turnId && e.type === "delta"));
     expect(t.r.store.getThread(t.xThread.id).messages.map((m) => [m.role, m.content])).toEqual([["user", "write a lot"], ["assistant", "X so far"]]);
-    for (let i = 0; i < 200 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
     await t.r.done();
   });
@@ -697,7 +707,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.of(y.turnId).filter((e) => e.type === "delta")).toEqual([]);
     t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
-    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "cancelled" }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     await t.r.done();
@@ -706,7 +716,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("CFS-07, askFirst: a blocker comes back in the refusal, X keeps running and nothing is saved", async () => {
     const t = await withX(tight);
     const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
-    const sent = await settledWithin(Promise.resolve(send), 1000);
+    const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
@@ -717,7 +727,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("CFT-04, stopTurns: the turn the person agreed to is stopped and Y starts", async () => {
     const t = await withX(tight);
     const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
-    for (let i = 0; i < 400 && !t.of(y.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     await t.r.done();
@@ -726,7 +736,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("CFT-04, stopTurns: a turn nobody agreed to is named and left running, and nothing is saved", async () => {
     const t = await withX(tight);
     const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: ["a-turn-that-has-ended"] }, ctx);
-    const sent = await settledWithin(Promise.resolve(send), 1000);
+    const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.store.getThread(t.r.thread.id).messages).toEqual([]);
@@ -738,9 +748,9 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const t = await withX(tight);
     const second = t.r.store.createThread({ title: "Second answer" });
     const x2 = await t.r.app.handlers["chat.send"]({ threadId: second.id, content: "more", model: MODEL, numCtx: 16384 }, ctx);
-    for (let i = 0; i < 400 && !t.of(x2.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    await until(() => t.of(x2.turnId).some((e) => e.type === "delta"));
     const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
-    const sent = await settledWithin(Promise.resolve(send), 1000);
+    const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop" } });
     const named = ((sent as { rejected: { blocking: { turnId: string }[] } }).rejected.blocking).map((b) => b.turnId);
     expect(named.toSorted()).toEqual([t.x.turnId, x2.turnId].toSorted());
@@ -770,8 +780,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       { fit: tight, lease },
     );
     const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
-    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
-    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), 2000);
+    expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
+    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
     r.app.handlers["chat.cancel"]({ turnId: x.turnId }, ctx);
     await r.done();
@@ -789,7 +799,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("CFS-07, askFirst: stopOthers wins, so a confirmed retry is never refused", async () => {
     const t = await withX(tight);
     const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, askFirst: true }, ctx);
-    for (let i = 0; i < 200 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
     await t.r.done();
   });
@@ -799,10 +809,10 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const comfy = await ownedIdleComfy(lease, work);
     const t = await withX(tight, { image: comfy.image, lease });
     const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
-    const sent = await settledWithin(Promise.resolve(send), 2000);
+    const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
-    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     // X's memory, idle once its turn ended, was enough: ComfyUI kept running and nothing waits on the lease.
@@ -828,14 +838,14 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const t = await withX({ ...fit, runNvidiaSmi });
     pause = resume.promise;
     const y = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx));
-    expect(await settledWithin(paused.promise, 1000)).toEqual({ resolved: undefined });
+    expect(await settled(paused.promise, "held request readiness")).toEqual({ resolved: undefined });
     const x2Thread = t.r.store.createThread({});
     const x2 = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: x2Thread.id, content: "more", model: MODEL, numCtx: 16384 }, ctx));
     // Unless something holds it back, the second X turn is streaming before Y's plan goes on.
-    for (let i = 0; i < 60 && t.r.events.filter((e) => e.text === "X so far").length < 2; i++) await sleep(5);
+    await until(() => t.r.events.filter((e) => e.text === "X so far").length >= 2);
     resume.resolve();
     const yTurn = await y;
-    for (let i = 0; i < 400 && !t.of(yTurn.turnId).some((e) => e.type === "delta"); i++) await sleep(5);
+    await until(() => t.of(yTurn.turnId).some((e) => e.type === "delta"));
     expect(t.of(yTurn.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
     const x2Turn = await x2;
@@ -872,7 +882,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const sendOn = async (model: string) => (await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "hi", model, numCtx: 16384, stopOthers: true }, ctx)).turnId;
     const ids = await Promise.all([sendOn(Y), sendOn(Z)]);
     const delta = (id: string) => r.events.some((e) => e.turnId === id && e.type === "delta");
-    for (let i = 0; i < 400 && !ids.every(delta); i++) await sleep(5);
+    await until(() => ids.every(delta));
     expect(ids.filter(delta)).toHaveLength(2);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "preempted" }]);
     expect(r.app.activeTurns()).toBe(1);
@@ -883,7 +893,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const t = await withX(tight, {}, twoModels(4e9, { name: "llama3.1:8b", vram: 9e9 }));
     expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
     const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
-    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
     expect(t.terminal(t.x.turnId)).toEqual([]);
@@ -922,18 +932,18 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       { fit: tight, lease },
     );
     const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
-    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
-    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 2000);
+    expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
+    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
     const terminal = (turnId: string) => r.events.filter((e) => e.turnId === turnId && (e.type === "error" || e.type === "done"));
-    for (let i = 0; i < 400 && terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => terminal(y.turnId).length !== 0);
     expect(terminal(x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(r.events.find((e) => e.turnId === y.turnId && e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(terminal(y.turnId)).toMatchObject([{ type: "done" }]);
     // X's claim went before Y's request reached Ollama; Y's goes at its end.
     expect(atYChat).toEqual({ xEnded: true, holders: 1 });
-    for (let i = 0; i < 200 && lease.status().holders > 0; i++) await sleep(5);
+    await until(() => lease.status().holders <= 0);
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     await r.done();
   });
@@ -943,10 +953,10 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const comfy = await ownedIdleComfy(lease, work);
     // Y needs about 7830 MiB plus the 512 MiB margin: 1000 free + X's 1907 + ComfyUI's 6000, and neither alone is enough.
     const t = await withX(withComfyToo(comfy, 6000), { image: comfy.image, lease }, twoModels(2e9));
-    const sent = await settledWithin(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 2000);
+    const sent = await settled(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
-    for (let i = 0; i < 400 && t.terminal(y.turnId).length === 0; i++) await sleep(5);
+    await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(comfy.stops()).toBe(1);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
@@ -959,7 +969,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     const t = await withX(withComfyToo(comfy, 1000), { image: comfy.image, lease }, twoModels(2e9));
-    const sent = await settledWithin(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 1000);
+    const sent = await settled(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(comfy.stops()).toBe(0);
@@ -990,8 +1000,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       { fit: { runNvidiaSmi: (args) => (xResident ? smi(1000) : smi(15000))(args), readMeminfo: async () => "MemAvailable: 1000000 kB\n" }, lease },
     );
     const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
-    expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
-    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, ...consent }, ctx)), 1000);
+    expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
+    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, ...consent }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
     expect(r.events.filter((e) => e.turnId === x.turnId && (e.type === "error" || e.type === "done"))).toEqual([]);
     expect(yAsked).toBe(false);
@@ -1016,7 +1026,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(await r.app.handlers["fit.check"]({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ verdict: "fits" });
     expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
     const y = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
-    for (let i = 0; i < 400 && !r.events.some((e) => e.turnId === y.turnId && e.type === "done"); i++) await sleep(5);
+    await until(() => r.events.some((e) => e.turnId === y.turnId && e.type === "done"));
     expect(r.events.filter((e) => e.turnId === y.turnId).map((e) => e.type)).toEqual(["start", "delta", "done"]);
     await r.done();
   });

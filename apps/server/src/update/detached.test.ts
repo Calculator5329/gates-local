@@ -28,7 +28,8 @@ describe("the detached updater", () => {
   it("waits for the app's pid to exit before its first command, then updates and opens the app again", async () => {
     const target = commit(r.seed, "Newer");
     publish(r.seed);
-    const app = spawn(process.execPath, ["-e", "setTimeout(() => {}, 700)"], { stdio: "ignore" });
+    const app = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+    const exited = new Promise<void>(resolve => app.once("exit", () => resolve()));
     let exitedAt: number | undefined;
     app.on("exit", () => (exitedAt = performance.now()));
     await new Promise<void>((resolve) => app.once("spawn", () => resolve()));
@@ -55,9 +56,9 @@ describe("the detached updater", () => {
       runner,
       appRunning: () => null,
       relaunch,
-      print: () => undefined,
+      print: message => { if (message.includes("Waiting for Gates Local to close")) app.stdin?.end(); },
       platform: "linux",
-    });
+    }).finally(async () => { app.stdin?.end(); await exited; });
     expect(code).toBe(0);
     expect(exitedAt).toBeDefined();
     expect(aliveAtFirst).toBe(false);

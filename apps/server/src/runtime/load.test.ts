@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
-async function until(pred: () => boolean, ms = 2000): Promise<void> {
+async function until(pred: () => boolean, ms = 20_000): Promise<void> {
   const end = Date.now() + ms;
   while (!pred()) {
     if (Date.now() > end) throw new Error("condition not reached");
@@ -371,9 +371,15 @@ describe("chat turn reservation", () => {
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** "pending" when `p` has not settled within `ms`, else its value or rejection. */
-const settledWithin = <T>(p: Promise<T>, ms: number): Promise<unknown> =>
-  Promise.race([p.then((v) => ({ resolved: v }), (e: unknown) => e), sleep(ms).then(() => "pending")]);
+async function settled<T>(p: Promise<T>, what: string, ms = 20_000): Promise<unknown> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p.then((v) => ({ resolved: v }), (e: unknown) => e),
+      new Promise<never>((_resolve, reject) => { deadline = setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), ms); }),
+    ]);
+  } finally { clearTimeout(deadline); }
+}
 const thrown = (fn: () => unknown): unknown => {
   try {
     fn();
@@ -484,9 +490,9 @@ describe("S-02: one runtime identity per load", () => {
     const waiting = loader.reserve("b:7b");
     const pending = waiting.admit(16384);
     loader.runtimeChanged();
-    expect(await settledWithin(pending, 200)).toMatchObject({ code: "runtime-switching" });
+    expect(await settled(pending, "model admission")).toMatchObject({ code: "runtime-switching" });
     loader.runtimeSettled();
-    expect(await settledWithin(old.admit(16384), 200)).toMatchObject({ code: "runtime-switching" });
+    expect(await settled(old.admit(16384), "model admission")).toMatchObject({ code: "runtime-switching" });
     expect(loader.inUse("m")).toBe(false);
     expect(loader.inUse("b:7b")).toBe(false);
     holder.end();
@@ -577,7 +583,7 @@ describe("S-05: preloads reserve their model", () => {
       },
     });
     const loading = loader.load("m", 16384);
-    await sleep(30);
+    await until(() => loader.inUse("m"));
     expect(loader.inUse("m")).toBe(true);
     expect(thrown(() => loader.beginRemove("m"))).toMatchObject({ code: "model-in-use" });
     hold.release();
@@ -635,10 +641,10 @@ describe("S-06: every loading notice ends exactly once", () => {
 
 describe("I-04: loads drain before the image module closes", () => {
   it("shutdown aborts a slow preload in its generate stage, so the real image close stops ComfyUI once and leaves the lease empty", async () => {
-    let aborted = false;
+    const aborted = deferred();
     const s = await fakeOllama([], [], {
       // Ten minutes of cold load, cut short only by the client going away.
-      "POST /api/generate": (_b, res) => new Promise<void>((r) => res.on("close", () => ((aborted = true), r()))),
+      "POST /api/generate": (_b, res) => new Promise<void>((r) => res.on("close", () => { aborted.release(); r(); })),
     });
     const lease = createGpuLease();
     // The real image module, owning an idle ComfyUI it started (injected service and HTTP fakes).
@@ -655,14 +661,15 @@ describe("I-04: loads drain before the image module closes", () => {
       await comfy.image.close();
     };
     try {
-      expect(await settledWithin(shutdown(), 1000)).toEqual({ resolved: undefined });
+      const closing = shutdown();
+      expect(await settled(aborted.promise, "shutdown aborting the preload socket", 2000)).toEqual({ resolved: undefined });
+      expect(await settled(closing, "application shutdown")).toEqual({ resolved: undefined });
       expect(comfy.stops()).toBe(1);
       expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     } finally {
       comfy.close();
       rmSync(dir, { recursive: true, force: true });
     }
-    await until(() => aborted);
     expect((await loading).state).toBe("error");
     expect(pushes.map((p) => p.state)).toEqual(["loading", "error"]);
     // Closed: no new load or turn.
@@ -676,12 +683,12 @@ describe("I-04: loads drain before the image module closes", () => {
     const releaseImage = await lease.acquire("image");
     const loader = loaderFor(s, [], "fits", { lease });
     const queued = loader.load("m", 16384);
-    await sleep(20);
+    await until(() => lease.status().waiting.includes("chat"));
     const drained = (async () => {
       await (loader as Partial<Pick<ModelLoader, "close">>).close?.();
       return queued;
     })();
-    expect(await settledWithin(drained, 500)).toMatchObject({ resolved: { state: "error" } });
+    expect(await settled(drained, "model loader shutdown")).toMatchObject({ resolved: { state: "error" } });
     expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: [] });
     expect(s.requests).toEqual([]);
     releaseImage();

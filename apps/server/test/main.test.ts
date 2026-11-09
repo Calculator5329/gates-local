@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { type SocketLike, createClient } from "@gates-local/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type FakeOllama, startFakeOllama, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 
@@ -40,11 +40,11 @@ interface Launched {
 
 function launch(env: Record<string, string>, dataDir: string): Launched {
   const child = spawn(process.execPath, [ENTRY, "--port", "0", "--data-dir", dataDir], {
-    env: { PATH: process.env["PATH"] ?? "", HOME: os.homedir(), ...env },
+    env: { PATH: process.env["PATH"] ?? "", HOME: os.homedir(), TMPDIR: process.env["TMPDIR"], TMP: process.env["TMP"], TEMP: process.env["TEMP"], ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
-    child.once("exit", (code, signal) => resolve({ code, signal })),
+    child.once("close", (code, signal) => resolve({ code, signal })),
   );
   cleanups.push(async () => {
     if (child.exitCode === null && child.signalCode === null) {
@@ -68,14 +68,13 @@ async function until<T>(what: string, probe: () => T | undefined, timeoutMs = 20
   }
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_r, reject) => (timer = setTimeout(() => reject(new Error(`${what} took over ${ms} ms`)), ms)));
+async function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([p, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
+    return await Promise.race([work, new Promise<never>((_resolve, reject) => {
+      deadline = setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), ms);
+    })]);
+  } finally { clearTimeout(deadline); }
 }
 
 /** The HTTP status of an upgrade the server refused, or "open". */
@@ -144,16 +143,16 @@ describe("server CLI", () => {
 
     const ws = new WebSocket(`${base}?token=${TOKEN}`);
     cleanups.push(() => ws.terminate());
-    const client = createClient(ws as unknown as SocketLike, { timeoutMs: 5000 });
+    const client = createClient(ws as unknown as SocketLike, { timeoutMs: 20_000 });
     expect(await client.call("threads.list", {})).toEqual([]);
     const t = await client.call("threads.create", { title: "From the CLI test" });
     expect((await client.call("threads.list", {})).map((x) => x.id)).toEqual([t.id]);
     // discover() ran in the background against the fake.
     let status = await client.call("runtime.status", {});
-    for (const deadline = Date.now() + 5000; status.state !== "ready" && Date.now() < deadline; ) {
-      await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(async () => {
       status = await client.call("runtime.status", {});
-    }
+      expect(status.state).toBe("ready");
+    }, { timeout: 20_000 });
     expect(status).toMatchObject({ state: "ready", owner: "external", baseUrl: fake.baseUrl, version: "0.0.7-cli-fake" });
     expect((await client.call("models.list", {})).map((m) => m.name)).toEqual(["fake:1b"]);
     client.close();
@@ -161,11 +160,9 @@ describe("server CLI", () => {
     expect(s.stdout).toEqual([readyLine]); // exactly one stdout line; logs went to stderr
     expect(s.stderr.join("\n")).not.toContain(TOKEN);
 
-    const t0 = Date.now();
     s.child.stdin?.end();
-    const exit = await withTimeout(s.exited, 3000, "exit after stdin end");
+    const exit = await s.exited;
     expect(exit).toEqual({ code: 0, signal: null });
-    expect(Date.now() - t0).toBeLessThan(3000);
     // Nothing on the fake but reads: discover-only never starts or installs.
     // POST /api/show is a read (capabilities for models.list).
     expect(fake.requests.filter((r) => !r.startsWith("GET ") && !r.startsWith("POST /api/show"))).toEqual([]);
@@ -227,12 +224,12 @@ describe("server CLI", () => {
       const ready = JSON.parse(await until("the ready line", () => s.stdout[0])) as { port: number };
       const ws = new WebSocket(`ws://127.0.0.1:${ready.port}/?token=${TOKEN}`);
       cleanups.push(() => ws.terminate());
-      const client = createClient(ws as unknown as SocketLike, { timeoutMs: 5000 });
+      const client = createClient(ws as unknown as SocketLike, { timeoutMs: 20_000 });
       let status = await client.call("runtime.status", {});
-      for (const deadline = Date.now() + 5000; status.state === "starting" && Date.now() < deadline; ) {
-        await new Promise((r) => setTimeout(r, 50));
+      await vi.waitFor(async () => {
         status = await client.call("runtime.status", {});
-      }
+        expect(status.state).not.toBe("starting");
+      }, { timeout: 20_000 });
       client.close();
       return status;
     };
@@ -264,7 +261,8 @@ describe("server CLI", () => {
     cleanups.push(() => ws.terminate());
     const client = createClient(ws as unknown as SocketLike, { timeoutMs: 20_000 });
     const retried = await client.call("runtime.retry", {});
-    await new Promise((r) => setTimeout(r, 300)); // a start would have written its line by now
+    // A short observation window checks that Retry schedules no later start.
+    await new Promise(resolve => setTimeout(resolve, 300));
     expect(existsSync(record) ? readFileSync(record, "utf8") : "").toBe("");
     expect(retried).toMatchObject({ state: "stopped", owner: "none" });
     client.close();
@@ -273,8 +271,7 @@ describe("server CLI", () => {
   it("refuses an unknown GATES_LOCAL_OLLAMA_BINARY value", async () => {
     const tmp = cacheTmp();
     const s = launch({ GATES_LOCAL_SERVER_TOKEN: TOKEN, GATES_LOCAL_OLLAMA_BINARY: "off", XDG_DATA_HOME: path.join(tmp, "xdg") }, path.join(tmp, "data"));
-    const exit = await withTimeout(s.exited, 5000, "exit on a bad knob");
-    await new Promise((r) => setTimeout(r, 50));
+    const exit = await s.exited;
     expect(exit.code).toBe(2);
     expect(s.stdout).toEqual([]);
     expect(s.stderr.join("\n")).toContain('GATES_LOCAL_OLLAMA_BINARY must be unset or "none", got "off"');
@@ -284,8 +281,7 @@ describe("server CLI", () => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
     const s = launch({ GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_URL: fake.baseUrl, XDG_DATA_HOME: path.join(tmp, "xdg") }, path.join(tmp, "data"));
-    const exit = await withTimeout(s.exited, 5000, "exit without a token");
-    await new Promise((r) => setTimeout(r, 50)); // let readline flush
+    const exit = await s.exited;
     expect(exit.code).not.toBe(0);
     expect(exit.code).not.toBeNull();
     expect(s.stdout).toEqual([]);
@@ -356,8 +352,7 @@ describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
     };
     for (const [k, v] of Object.entries(override)) env[k] = v.replace("{port}", String(port));
     const s = launch(env, path.join(tmp, "data"));
-    const exit = await withTimeout(s.exited, 3000, "exit on a bad phone knob");
-    await new Promise((r) => setTimeout(r, 50));
+    const exit = await s.exited;
     expect(exit.code).toBe(2);
     expect(s.stdout).toEqual([]);
     expect(s.stderr.join("\n")).toContain(named);
@@ -383,7 +378,7 @@ describe("server CLI phone listener (GATES_LOCAL_WEB_LISTEN)", () => {
       },
       path.join(tmp, "data"),
     );
-    const exit = await withTimeout(s.exited, 3000, "exit on a group-readable socket directory");
+    const exit = await s.exited;
     expect(exit.code).not.toBe(0);
     expect(s.stdout).toEqual([]);
     expect(s.stderr.join("\n")).toContain("group or other access");

@@ -17,7 +17,7 @@ const scratch = () => {
   return root;
 };
 // One prerequisite probe; do not mistake an unsupported nested process for a snapshot failure.
-const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8", timeout: 2000 });
+const writerProbe = spawnSync(process.execPath, ["--version"], { encoding: "utf8", timeout: 30_000 });
 const writerUnavailable = writerProbe.error && ["EPERM", "EACCES"].includes((writerProbe.error as NodeJS.ErrnoException).code ?? "");
 if (writerProbe.error && !writerUnavailable) throw writerProbe.error;
 afterEach(async () => {
@@ -351,10 +351,7 @@ describe("Library registry", () => {
     children.push(child);
     let stderr = "";
     child.stderr!.on("data", data => { stderr += String(data); });
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([once(child.stdout!, "data"), once(child, "exit").then(([code]) => { throw new Error(`WAL writer exited ${code}: ${stderr}`); }), new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error(`WAL writer did not become ready (${process.execPath}, pid ${child.pid}): ${stderr}`)), 1500); })]);
-    } finally { clearTimeout(deadline); }
+    await Promise.race([once(child.stdout!, "data"), once(child, "exit").then(([code]) => { throw new Error(`WAL writer exited ${code}: ${stderr}`); })]);
     try {
       const source = await sources.add({ kind: "sqlite", path: file });
       for (let i = 0; i < 5; i++) {

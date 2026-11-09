@@ -15,7 +15,7 @@ const { Worker } = require("node:worker_threads");
 new Worker("const { workerData: w } = require('node:worker_threads');" +
   "const die = () => process.kill(w.pid, 'SIGKILL');" +
   "setTimeout(die, w.ms); setInterval(() => { if (process.ppid !== w.parent) die(); }, 250);",
-  { eval: true, workerData: { pid: process.pid, parent: process.ppid, ms: Number(process.argv[1]) + 1000 } }).unref();
+  { eval: true, workerData: { pid: process.pid, parent: Number(process.argv[2]), ms: Number(process.argv[1]) + 1000 } }).unref();
 const { DatabaseSync } = require("node:sqlite");
 const big = (_k, v) => typeof v === "bigint" ? v.toString() : v;
 let input = "";
@@ -47,7 +47,7 @@ export function runSnapshotQuery(input: { file: string; query: string; limit: nu
   const timeoutMs = input.timeoutMs ?? SQL_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     // The server runs with ELECTRON_RUN_AS_NODE=1 under Electron, so execPath is a Node here too.
-    const child = spawn(process.execPath, ["-e", CHILD, String(timeoutMs)], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
+    const child = spawn(process.execPath, ["-e", CHILD, String(timeoutMs), String(process.pid)], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
     let stdout = "";
     let stderr = "";
     let failure: unknown;

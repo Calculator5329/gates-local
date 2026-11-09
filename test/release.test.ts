@@ -2,17 +2,28 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport } from "../scripts/release.ts";
 import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
 
 const scratch: string[] = [];
+const processCleanups: Array<() => void> = [];
 const originalPath = process.env["PATH"];
 afterEach(() => {
+  for (const cleanup of processCleanups.splice(0)) cleanup();
   if (originalPath === undefined) delete process.env["PATH"]; else process.env["PATH"] = originalPath;
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-function fixture() {
+
+async function within<T>(work: Promise<T>, what: string): Promise<T> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<never>((_resolve, reject) => {
+      deadline = setTimeout(() => reject(new Error(`Timed out waiting for ${what}`)), 20_000);
+    })]);
+  } finally { clearTimeout(deadline); }
+}
+function fixture(unitCommand = "node --test unit.cjs") {
   const dir = mkdtempSync(path.join(homedir(), ".cache", "release-test-"));
   scratch.push(dir);
   const remote = path.join(dir, "remote.git");
@@ -28,7 +39,7 @@ function fixture() {
   execFileSync("git", ["init", "--initial-branch=main", cwd], { stdio: "ignore" });
   git("config", "user.name", "Release test");
   git("config", "user.email", "release@example.com");
-  writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { verify: "node --test unit.cjs", build: 'node -e "process.exit(0)"' } }));
+  writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { verify: unitCommand, build: 'node -e "process.exit(0)"' } }));
   writeFileSync(path.join(cwd, "unit.cjs"), 'require("node:test")("planted unit test", () => require("node:assert/strict").fail("intentional unit failure"));');
   execFileSync("pnpm", ["install", "--lockfile-only"], { cwd, stdio: "ignore" });
   git("add", "package.json", "pnpm-lock.yaml", "unit.cjs");
@@ -44,6 +55,26 @@ function fixture() {
     failures: [], timing: { completed: false, exitCode: 134, reportPath: "informational.json" }, scratchRemoved: true,
   };
   return { dir, cwd, remote, git, sha, report };
+}
+
+/** Expire the command's deadline after its readiness event, keeping process I/O real. */
+function commandDeadline() {
+  const budget = 60_000;
+  let expire: (() => void) | undefined;
+  const realTimeout = globalThis.setTimeout;
+  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, ms, ...args) => {
+    const handle = realTimeout(callback, ms, ...args);
+    // The comparison subtracts preparation time from its shared budget.
+    if (ms !== undefined && ms > budget / 2 && ms <= budget) expire = () => {
+      clearTimeout(handle);
+      callback(...args);
+    };
+    return handle;
+  });
+  return { budget, expire: () => {
+    if (!expire) throw new Error("The command did not schedule its deadline");
+    expire();
+  }, restore: () => timer.mockRestore() };
 }
 
 describe("release tag decisions against a local bare remote", () => {
@@ -335,17 +366,19 @@ test.each(["timeout", "cancel"])("release comparison preserves bounded shutdown 
   const abort = new AbortController();
   const watcher = watch(f.dir);
   const ready = new Promise<void>(resolve => watcher.on("change", () => { if (existsSync(marker)) resolve(); }));
-  const checked = runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.git("rev-parse", "HEAD"), reportPath: path.join(f.dir, "bounded-performance.json"), performanceBase: f.sha, performanceTimeoutMs: mode === "timeout" ? 1000 : undefined, signal: abort.signal });
+  const clock = mode === "timeout" ? commandDeadline() : undefined;
+  const checked = runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.git("rev-parse", "HEAD"), reportPath: path.join(f.dir, "bounded-performance.json"), performanceBase: f.sha, performanceTimeoutMs: clock?.budget, signal: abort.signal });
   try {
     await Promise.race([ready, checked.then(() => { throw new Error("comparison exited before readiness"); })]);
     if (mode === "cancel") abort.abort();
+    else await clock?.expire();
     const report = await checked;
     expect(report.status).toBe(mode === "timeout" ? "passed" : "failed");
     expect(report.performance).toMatchObject({ status: "unavailable", timedOut: mode === "timeout" });
     expect(report.scratchRemoved).toBe(true);
     if (mode === "cancel") expect(report.interrupted).toBe(true);
     else await expect(checkTag(f.cwd, "v1.0.0", report)).resolves.toMatchObject({ commit: f.git("rev-parse", "HEAD") });
-  } finally { watcher.close(); abort.abort(); await checked; }
+  } finally { clock?.restore(); watcher.close(); abort.abort(); await checked; }
 }, 30_000);
 
 test("release comparison states its default first-release base even when that commit is unavailable", async () => {
@@ -388,14 +421,15 @@ test("RJ timing has its own bound and its timeout is informational", async () =>
   f.git("add","tools/cli.cjs"); f.git("commit","-m","bounded informational fixture"); f.git("push","origin","main");
   const abort = new AbortController(); const watcher = watch(f.dir);
   const ready = new Promise<void>(resolve=>watcher.on("change",()=>{if(existsSync(marker))resolve();}));
-  const checked = runReleaseCheck({cwd:f.cwd,remote:f.remote,commit:f.git("rev-parse","HEAD"),reportPath:path.join(f.dir,"bounded.json"),signal:abort.signal,timingTimeoutMs:1000});
-  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const clock = commandDeadline();
+  const checked = runReleaseCheck({cwd:f.cwd,remote:f.remote,commit:f.git("rev-parse","HEAD"),reportPath:path.join(f.dir,"bounded.json"),signal:abort.signal,timingTimeoutMs:clock.budget});
   try {
-    await ready;
-    const report = await Promise.race([checked,new Promise<never>((_resolve,reject)=>{deadline=setTimeout(()=>reject(new Error("timing did not settle within its own bound")),2500);})]);
+    await Promise.race([ready, checked.then(() => { throw new Error("timing exited before readiness"); })]);
+    await clock.expire();
+    const report = await checked;
     expect(report.status).toBe("passed");
     expect(report.timing).toMatchObject({completed:false,timedOut:true});
-  } finally {if(deadline)clearTimeout(deadline);watcher.close();abort.abort();await checked;}
+  } finally {clock.restore();watcher.close();abort.abort();await checked;}
 },30_000);
 
 test("RJ inherited writers: the failed report discloses a possible escaped descendant", async () => {
@@ -468,20 +502,37 @@ test("RH-03: cancellation settles when an escaped session keeps stdout open", as
     if (typeof value !== "object" || value === null || !("escaped" in value) || !("owner" in value) || typeof value.escaped !== "number" || typeof value.owner !== "number") throw new Error("invalid process marker");
     return { escaped: value.escaped, owner: value.owner };
   };
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await started;
-    abort.abort();
-    const state = await Promise.race([checked.then(() => "settled"), new Promise<string>(resolve => { deadline = setTimeout(() => resolve("blocked on inherited stdout"), 1000); })]);
-    expect(groupAlive(pids().owner), "the owned group already ended").toBe(false);
-    expect(state).toBe("settled");
-    expect(processAlive(pids().escaped), "cancellation must not kill another session").toBe(true);
-    expect(await checked).toMatchObject({ code: 130, interrupted: true });
-  } finally {
-    if (deadline) clearTimeout(deadline);
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     watcher.close(); abort.abort();
-    if (existsSync(marker)) { try { process.kill(pids().escaped, "SIGKILL"); } catch { /* already gone */ } }
-    await checked;
+    if (!existsSync(marker)) return;
+    let ids: ReturnType<typeof pids>;
+    try { ids = pids(); } catch { return; }
+    try { process.kill(ids.escaped, "SIGKILL"); } catch { /* Already gone. */ }
+    try { process.kill(process.platform === "win32" ? ids.owner : -ids.owner, "SIGKILL"); } catch { /* Already gone. */ }
+  };
+  processCleanups.push(cleanup);
+  try {
+    await within(started, "escaped worker readiness");
+    abort.abort();
+    const result = await within(checked, "release cancellation with an escaped stdout writer");
+    expect(groupAlive(pids().owner), "the owned group already ended").toBe(false);
+    expect(processAlive(pids().escaped), "cancellation must not kill another session").toBe(true);
+    expect(result).toMatchObject({ code: 130, interrupted: true });
+    const ids = pids();
+    let laterCleanupRan = false;
+    processCleanups.push(() => { laterCleanupRan = true; });
+    writeFileSync(marker, "{");
+    try {
+      expect(() => { for (const runCleanup of processCleanups.splice(0)) runCleanup(); }).not.toThrow();
+      expect(laterCleanupRan).toBe(true);
+    } finally {
+      try { process.kill(ids.escaped, "SIGKILL"); } catch { /* Already gone. */ }
+    }
+  } finally {
+    cleanup();
   }
 }, 30_000);
 
@@ -494,7 +545,7 @@ test("RG-07: a focused blocking browser test is refused", async () => {
 }, 30_000);
 
 test("RG-06: cancellation stops a SIGTERM-ignoring descendant after the leader closes its pipes", async () => {
-  const f = fixture();
+  const f = fixture("node unit.cjs");
   const marker = path.join(f.dir, "descendant.pid");
   const worker = `process.on("SIGTERM",()=>{}); require("node:fs").writeFileSync(${JSON.stringify(marker)},String(process.pid)); setInterval(()=>{},1000);`;
   writeFileSync(path.join(f.cwd, "unit.cjs"), `require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(worker)}],{stdio:"ignore"}).unref(); setInterval(()=>{},1000);`);
@@ -516,7 +567,7 @@ test("RG-06: cancellation stops a SIGTERM-ignoring descendant after the leader c
 }, 30_000);
 
 test("interrupting a running check stops its child and preserves a failed report before cleanup", async () => {
-  const f = fixture();
+  const f = fixture("node unit.cjs");
   const marker = path.join(f.dir, "unit-started");
   writeFileSync(path.join(f.cwd, "unit.cjs"), `require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(() => {}, 1000);`);
   f.git("add", "unit.cjs"); f.git("commit", "-m", "interrupt fixture"); f.git("push", "origin", "main");
@@ -530,7 +581,7 @@ test("interrupting a running check stops its child and preserves a failed report
     abort.abort();
     const result = await checked;
     expect(result.status).toBe("failed");
-    expect(result.scratchRemoved).toBe(true);
+    expect(result.scratchRemoved, JSON.stringify(result.failures)).toBe(true);
     expect(result.steps.find((s) => s.name === "verify")?.exitCode).toBe(130);
     expect(existsSync(reportPath)).toBe(true);
     expect(processAlive(Number(readFileSync(marker, "utf8")))).toBe(false);

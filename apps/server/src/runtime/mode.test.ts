@@ -32,7 +32,6 @@ import {
 
 const VERSION = "9.9.9-test";
 const noop = () => undefined;
-const startDir = process.cwd();
 let work: string;
 let appDataDir: string;
 let home: string;
@@ -43,15 +42,12 @@ beforeEach(() => {
   work = tmpDir("mode");
   appDataDir = path.join(work, "data");
   home = path.join(work, "home");
-  // A faked win32 joins the models path with backslashes: on POSIX that is one odd folder name relative to here.
-  process.chdir(work);
 });
 
 afterEach(async () => {
   for (const rt of runtimes.splice(0)) await rt.stop();
   await system?.close();
   system = undefined;
-  process.chdir(startDir);
   removeDir(work);
 });
 
@@ -478,6 +474,8 @@ describe("Windows (platform injected)", () => {
     const rt = await runtime({ mode: "app", platform: "win32", arch: "x64", procRun: cimFake(calls), externalBaseUrl: await nothingAt() });
     expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
     expect(readRecord(ownedStateFile(appDataDir))?.binary).toBe(installedBinary(appDataDir, VERSION));
+    expect(readRecord(ownedStateFile(appDataDir))?.modelsDir).toBe(appModelsDir(appDataDir));
+    expect(existsSync(appModelsDir(appDataDir))).toBe(true);
   });
 
   it("win32 x64 with a PATH ollama.exe and no pinned install never launches the PATH one (system mode only reads it, to say stopped)", async () => {
@@ -645,9 +643,9 @@ describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
     const pidFile = path.join(work, "started-pid");
     const neverAnswers = `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => undefined, 1000);\n`;
     writeFakeBinary(installedBinary(appDataDir, VERSION), neverAnswers);
-    const rt = await runtime({ mode: "app", platform, ...(platform === "win32" ? { procRun: cimFake([]) } : {}), externalBaseUrl: await nothingAt(), startTimeoutMs: 3000 });
+    const rt = await runtime({ mode: "app", platform, ...(platform === "win32" ? { procRun: cimFake([]) } : {}), externalBaseUrl: await nothingAt(), startTimeoutMs: 30_000 });
     const starting = rt.ensure();
-    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 2500 });
+    await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 20_000 });
     rt.killNow();
     const end = await starting;
     expect(end.state).toBe("error");

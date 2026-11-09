@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -8,7 +8,18 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createTools, type LibraryFs } from "./tools.ts";
 
+const processCleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const cleanup of processCleanups.splice(0)) await cleanup(); });
+
+function isQueryProcess(cmd: string, timeoutMs: number) {
+  return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}\0`);
+}
+
 describe("Library tools", () => {
+  it("query cleanup matches the complete timer argument", () => {
+    expect(isQueryProcess(["node", "-e", "require('node:sqlite')", "1234", "5678", ""].join("\0"), 1234)).toBe(true);
+    expect(isQueryProcess(["node", "-e", "require('node:sqlite')", "12345", "5678", ""].join("\0"), 1234)).toBe(false);
+  });
   it("reads and lists approved sources with caps, refusing traversal and symlinks", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-tools-"));
     const docs = path.join(root, "docs"); mkdirSync(docs);
@@ -149,36 +160,56 @@ describe("Library tools", () => {
     const snapshotPath = path.join(root, "slow.db");
     const db = new DatabaseSync(snapshotPath); db.exec("CREATE TABLE t(n)"); db.close();
     const tools = createTools({ platform: "win32", sqlTimeoutMs: 1500, sources: [{ id: "slow", kind: "sqlite", path: "live", snapshotPath, label: "slow.db" }] });
-    let ticks = 0;
-    const interval = setInterval(() => { ticks++; }, 50);
-    const started = Date.now();
+    const ticks = [performance.now()];
+    const interval = setInterval(() => { ticks.push(performance.now()); }, 50);
     try {
       await expect(tools.execute({ name: "sql", input: { source: "slow", query: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c" } }, new AbortController().signal))
         .rejects.toThrow("The query ran longer than 1.5 s and was stopped.");
     } finally { clearInterval(interval); }
-    expect(Date.now() - started).toBeLessThan(3000);
-    expect(ticks).toBeGreaterThan(5);
+    ticks.push(performance.now());
+    const longestGap = Math.max(...ticks.slice(1).map((at, i) => at - ticks[i]!));
+    expect(longestGap, "the query must not block the event loop for most of its timer").toBeLessThan(500);
   });
   it("a query child does not outlive a parent that dies mid-query", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-sql-orphan-"));
     const snapshotPath = path.join(root, "slow.db");
     const db = new DatabaseSync(snapshotPath); db.exec("CREATE TABLE t(n)"); db.close();
-    // A unique timer shows up in the child's argv; the watchdog would also kill it at the timer + 1 s.
-    const timeoutMs = 3000 + Math.floor(Math.random() * 900);
+    // The unique timer identifies this query. Its own watchdog must not be
+    // what ends it during the test's 10-second wait for parent-death cleanup.
+    const timeoutMs = 60_000 + process.pid;
     const sql = new URL("./sql.ts", import.meta.url).href;
     const parent = spawn(process.execPath, ["--input-type=module", "-e",
-      `import { runSnapshotQuery } from ${JSON.stringify(sql)}; runSnapshotQuery({ file: ${JSON.stringify(snapshotPath)}, query: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c", limit: 1, signal: new AbortController().signal, timeoutMs: ${timeoutMs} }).catch(() => {}); setTimeout(() => process.exit(0), 400);`], { stdio: "ignore" });
-    await once(parent, "exit");
+      `import { runSnapshotQuery } from ${JSON.stringify(sql)}; runSnapshotQuery({ file: ${JSON.stringify(snapshotPath)}, query: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c", limit: 1, signal: new AbortController().signal, timeoutMs: ${timeoutMs} }).catch(() => {});`], { stdio: "ignore" });
+    const exited = once(parent, "exit");
     // Linux: /proc. Windows has none: one CIM query for the same command line.
     // (On Windows libuv's kill-on-close job for spawned children also ends it.)
     const children = () => process.platform === "win32"
       ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*node:sqlite*' -and $_.CommandLine -like '* ${timeoutMs}' } | ForEach-Object { $_.ProcessId }`],
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*node:sqlite*' -and $_.CommandLine -like '* ${timeoutMs} ${parent.pid}' } | ForEach-Object { $_.ProcessId }`],
       { encoding: "utf8", windowsHide: true }).split(/\r?\n/).filter(Boolean)
       : readdirSync("/proc").filter(pid => /^\d+$/.test(pid)).filter(pid => {
-        try { const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8"); return cmd.includes("node:sqlite") && cmd.includes(`\0${timeoutMs}`); } catch { return false; }
+        try { return isQueryProcess(readFileSync(`/proc/${pid}/cmdline`, "utf8"), timeoutMs); } catch { return false; }
       });
-    await vi.waitFor(() => expect(children()).toEqual([]), { timeout: 1500, interval: 100 });
+    let cleaned = false;
+    const cleanup = async () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (parent.exitCode === null && parent.signalCode === null) parent.kill("SIGKILL");
+      const remaining = children();
+      for (const pid of remaining) {
+        try { process.kill(Number(pid), "SIGKILL"); } catch { /* The query already ended. */ }
+      }
+      await exited;
+    };
+    processCleanups.push(cleanup);
+    try {
+      await vi.waitFor(() => expect(children(), "query child readiness").toHaveLength(1), { timeout: 10_000 });
+      parent.kill("SIGKILL");
+      await exited;
+      await vi.waitFor(() => expect(children(), "query child to exit after parent death").toEqual([]), { timeout: 10_000 });
+    } finally {
+      await cleanup();
+    }
   });
   it("says 10 s by default", async () => {
     const tools = createTools({ platform: "win32", sources: [] });

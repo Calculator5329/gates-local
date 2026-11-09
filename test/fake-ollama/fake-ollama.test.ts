@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
@@ -298,9 +298,7 @@ describe("fake nvidia-smi", () => {
     expect(await run(["--query-gpu=memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"])).toBe("16303, 4182, 12121\n");
     // gpu.status's form (GPU_STATUS_ARGS): the card name, then the same totals
     expect(await run([...GPU_STATUS_ARGS])).toBe("NVIDIA GeForce RTX 5070 Ti, 16303, 4182, 12121\n");
-    const dir = path.join(homedir(), ".cache", "gates-local-lanes", "build-web", "unit");
-    mkdirSync(dir, { recursive: true });
-    const stateFile = path.join(mkdtempSync(path.join(dir, "gpu-")), "gpu.json");
+    const stateFile = path.join(mkdtempSync(path.join(tmpdir(), "gpu-")), "gpu.json");
     const fake = await startFakeOllama({ gpuStateFile: stateFile });
     try {
       await post(fake, "/api/generate", { model: "qwen3.5:9b", options: { num_ctx: 16384 } });

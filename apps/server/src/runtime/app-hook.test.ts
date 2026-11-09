@@ -25,7 +25,7 @@ const MODEL = "qwen3.5:9b";
 const SHOW = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8")) as unknown;
 const line = (v: unknown) => `${JSON.stringify(v)}\n`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until(pred: () => boolean, ms = 3000): Promise<void> {
+async function until(pred: () => boolean, ms = 20_000): Promise<void> {
   const end = Date.now() + ms;
   while (!pred()) {
     if (Date.now() > end) throw new Error("condition not reached");
@@ -194,7 +194,7 @@ it("R-05: with a slow /api/ps, the model a cold turn loaded still ends up owned"
   });
   await send();
   await until(() => app.activeTurns() === 0);
-  await sleep(400);
+  await until(() => loader.appLoadedModels().includes(MODEL));
   expect(loader.appLoadedModels()).toEqual([MODEL]);
   expect(loads()).toEqual(["loading", "ready"]);
 });
@@ -251,7 +251,7 @@ it("a turn waits while an image job holds the GPU, then streams once the job end
   const { app, ollama, send } = await setup([MODEL], { "POST /api/chat": (_b, res) => reply(res) }, lease);
   let sent = false;
   const sending = send().then(() => (sent = true));
-  await sleep(100);
+  await until(() => lease.status().waiting.includes("chat"));
   expect([sent, chats(ollama)]).toEqual([false, 0]);
   expect(lease.status()).toEqual({ holder: "image", holders: 1, waiting: ["chat"] });
   releaseImage();
@@ -276,7 +276,7 @@ it("an image job waits until a streaming turn ends", async () => {
   await until(() => chats(ollama) === 1);
   let imaged = false;
   const image = lease.run("image", undefined, async () => { imaged = true; });
-  await sleep(100);
+  await until(() => lease.status().waiting.includes("image"));
   expect(imaged).toBe(false);
   expect(lease.status()).toEqual({ holder: "chat", holders: 1, waiting: ["image"] });
   held.release();
@@ -296,7 +296,7 @@ it("a turn that ends in an error, or is cancelled while it waits for the GPU, gi
 
   const releaseImage = await lease.acquire("image");
   const waiting = send();
-  await sleep(50);
+  await until(() => lease.status().waiting.includes("chat"));
   expect(lease.status().waiting).toEqual(["chat"]);
   await app.shutdown();
   await expect(waiting).rejects.toMatchObject({ code: "cancelled" });
@@ -312,7 +312,7 @@ it("models.load does nothing while an image job holds the GPU", async () => {
   const before = ollama.requests.length;
   let done = false;
   const loading = Promise.resolve(app.handlers["models.load"]?.({ model: MODEL, numCtx: 16384 }, { clientId: 1 })).then(() => (done = true));
-  await sleep(100);
+  await until(() => lease.status().waiting.includes("chat"));
   expect([done, ollama.requests.length - before]).toEqual([false, 0]);
   releaseImage();
   await loading;

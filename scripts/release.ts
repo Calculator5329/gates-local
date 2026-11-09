@@ -169,6 +169,7 @@ export async function runReleaseCommand(cmd: string[], cwd: string, env: NodeJS.
     let output = "";
     let stopping: Promise<boolean> | undefined;
     let settled = false;
+    const outputClosed = new Promise<void>(done => proc.once("close", () => done()));
     let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
     let timedOut = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -199,13 +200,20 @@ export async function runReleaseCommand(cmd: string[], cwd: string, env: NodeJS.
       const interrupted = stopping !== undefined || signal?.aborted || terminatedBy !== null;
       const ended = stopping === undefined || await stopping;
       signal?.removeEventListener("abort", cancel);
-      if (interrupted && ended) {
-        // The kernel can close the group's writers before Node delivers EOF.
-        // Drain pending I/O across a poll turn; do not wait on a live writer.
-        await new Promise<void>(done => setImmediate(done));
-        await new Promise<void>(done => setImmediate(done));
+      let possibleEscaped = false;
+      if (interrupted && ended && [proc.stdout, proc.stderr].some(stream => !stream.readableEnded && !stream.destroyed)) {
+        // Group exit can precede delivery of the pipes' EOF. Wait for close,
+        // rather than guessing how many event-loop turns it takes. A writer
+        // outside the owned group can keep the pipes open forever, so its
+        // lifetime still needs a bound and must be reported as unconfirmed.
+        let drainBound: ReturnType<typeof setTimeout> | undefined;
+        try {
+          possibleEscaped = await Promise.race([
+            outputClosed.then(() => false),
+            new Promise<boolean>(done => { drainBound = setTimeout(() => done(true), 2000); }),
+          ]);
+        } finally { clearTimeout(drainBound); }
       }
-      const possibleEscaped = interrupted && ended && [proc.stdout, proc.stderr].some(stream => !stream.readableEnded && !stream.destroyed);
       if (interrupted) {
         // Another session may hold inherited pipe writers. Its lifetime is
         // outside our group; shutdown confirmation, not EOF, settles cancel.

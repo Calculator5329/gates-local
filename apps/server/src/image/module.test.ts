@@ -562,8 +562,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     const { jobId } = await f.module.generate({ prompt: "a tree" });
     await vi.waitFor(() => expect(f.lease.status().holder).toBe("image"));
     if (end === "cancel") f.module.cancel(jobId);
-    const outcome = await Promise.race([f.module.wait(jobId).then(() => "ended"), new Promise((r) => setTimeout(r, 300, "stuck"))]);
-    expect(outcome).toBe("ended");
+    await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject(end === "cancel" ? { state: "cancelled" } : { state: "error", errorKind: "timeout" });
     expect(f.lease.status().holder).toBeNull();
     expect(f.measurements()).toBe(0);
