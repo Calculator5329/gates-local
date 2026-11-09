@@ -10,6 +10,7 @@
 // the image module), which the e2e stack must never touch.
 import type { Page } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { release, state } from "./threads-support.ts";
 
 const DEAD_COMFY = "http://127.0.0.1:9";
 const OTHER_DEAD_COMFY = "http://127.0.0.1:7";
@@ -104,17 +105,29 @@ test("a live tool step that cannot run says why while the reply streams, and the
   await page.keyboard.press("Escape");
   await waitReady(page);
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await stack.scenario("models", { tokenDelayMs: 1, firstTokenDelayMs: 0 });
+  await stack.scenario("threads", { tokenDelayMs: 1, firstTokenDelayMs: 0, holdAfterTokens: 1, repeatToolCalls: 1 });
   await sendMessage(page, "Use a tool to open my docs");
 
+  // Complete the first model request so its tool can fail. The next request
+  // then holds after one token, keeping the failed step live until we release it.
+  await expect.poll(async () => (await state()).turns[0]?.tokens).toBe(1);
+  await release();
+  await expect.poll(async () => (await state()).turns[1]?.tokens).toBe(1);
+
   // live: the failed step shows in the turn that is still streaming (a finished turn is .done)
-  const step = page.locator(".turn.a:not(.done) .wr").first();
+  const step = page.locator(".turn.a:not(.done):not(.interrupted) .wr").first();
   await expect(step.locator(".wr-m")).toContainText("failed");
   await expect(step.locator(".wr-h")).toHaveText("Tool could not finish");
   // the fake model asks for the same tool every step, so the reply runs to the
   // harness's tool-turn limit; it must still end by itself
+  await expect.poll(async () => {
+    // Release each subsequent request; no Stop or other product-side shortcut.
+    await release();
+    return page.locator(".turn.a.done").count();
+  }, { timeout: 30_000, intervals: [50] }).toBe(1);
   await replyEnded(page, 30_000);
   const reply = page.locator(".turn.a").last();
+  await expect(reply.locator(".md")).toContainText("Stopped after the tool turn limit.");
   await expect(reply.locator(".wr").first().locator(".wr-h")).toHaveText("Tool could not finish");
   await reply.locator(".wr").first().click();
   await expect(reply.locator(".wr").first()).toContainText("Path is outside your Library");

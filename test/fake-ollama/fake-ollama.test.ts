@@ -204,6 +204,15 @@ describe("fake ollama", () => {
     expect(continued.some((l) => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(false);
   });
 
+  it("can repeat native tool requests after an observation, while still respecting tools off", async () => {
+    await post(fake, "/__fake/scenario", { scenario: "models", repeatToolCalls: 1, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    const body = { model: "gemma4:12b", messages: [{ role: "user", content: "use a tool please" }, { role: "tool", content: "Path is outside your Library" }] };
+    const repeated = await ndjson(await post(fake, "/api/chat", { ...body, tools: [{ type: "function", function: { name: "read" } }] }));
+    expect(repeated.some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(true);
+    const plain = await ndjson(await post(fake, "/api/chat", body));
+    expect(plain.some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(false);
+  });
+
   it("breaks the stream with an error in the mid-stream-error scenario", async () => {
     await post(fake, "/__fake/scenario", { scenario: "mid-stream-error", tokenDelayMs: 0, firstTokenDelayMs: 0, errorAfterTokens: 3 });
     const lines = await ndjson(await post(fake, "/api/chat", { model: "qwen3.5:9b", think: false, messages: [{ role: "user", content: "hi" }] }));

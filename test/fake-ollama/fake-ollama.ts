@@ -50,6 +50,8 @@ export interface FakeOptions {
   errorAfterTokens: number;
   /** slow-drip/threads: pause after this many tokens until released or cancelled; 0 never pauses. */
   holdAfterTokens: number;
+  /** Keep asking for a native tool after receiving its result, to exercise the tool-turn limit. */
+  repeatToolCalls: number;
   /** slow-drip: use the long mixed-Markdown measurement fixture when nonzero. */
   longDrip: number;
   /** Number of reply tokens delivered together; tokenDelayMs is then the gap between bursts. */
@@ -78,6 +80,7 @@ const DEFAULTS: FakeOptions = {
   replyWords: 60,
   errorAfterTokens: 8,
   holdAfterTokens: 0,
+  repeatToolCalls: 0,
   longDrip: 0,
   burstTokens: 0,
   loadDelayMs: 0,
@@ -385,7 +388,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           await sleep(timing.tokenDelayMs, abort.signal);
         }
       }
-      if (Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt) && (!Array.isArray(messages) || !messages.some((msg) => field(msg, "role") === "tool"))) {
+      if (Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt) && (timing.repeatToolCalls > 0 || !Array.isArray(messages) || !messages.some((msg) => field(msg, "role") === "tool"))) {
         const image = /\b(draw|image|ship)\b/i.test(prompt) ? tools.find((tool) => field(field(tool, "function"), "name") === "image") : undefined;
         const fn = field(field(image ?? tools[0], "function"), "name");
         line({
