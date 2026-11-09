@@ -1,5 +1,6 @@
 # Testing
 
+
 ## Opt-in real-model smoke
 
 On an authorized Linux x64 CPU test runner, run:
@@ -83,8 +84,9 @@ Each `round-N-ARM/run.json` contains commit, action, unit, samples, median, p95,
 browser version, CPU count, memory and load before/after, without names,
 addresses or paths. `comparison.json` and `comparison.md` show AB/BA paired-round
 changes. Noise is the larger of p95 changes between adjacent same-build round
-medians and the sum of both builds' p95 sample deviations from their medians, at least 2 ms or
-one count. A paired-round bootstrap supplies a
+medians and the sum of both builds' p95 sample deviations. Deviations use each
+round's median only when every round has at least three samples; otherwise they
+use each build's pooled median. The minimum is 2 ms or one count. A paired-round bootstrap supplies a
 descriptive 95% interval. A signal must exceed that floor and have its interval
 on one side of zero. Noise over 20% of baseline and 10 ms/one count is marked
 too noisy for small changes. This is screening, not a significance test.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-09: Keep fixture creation out of server readiness
+
+Performance comparisons prepare their test data once per build and copy a
+pristine database for every block. Creating thousands of durable seed rows no
+longer consumes the server's readiness window. The health endpoints and their
+30-second limits stay the same, and blocks keep independent data.
+The concurrency fixture explicitly permits two replies, and reconnect checks
+keep the thread identity across both resumed and interrupted subject versions.
+
+## 2026-11-09: Keep performance comparisons fair in both directions
+
+Performance comparisons now average the middle pair of round differences and
+separate within-round jitter from shared drift when every round has enough
+samples. Sparse rounds keep the pooled noise estimate. Concurrent-reply startup
+timing now waits for visible reply text, including admission work.
+
 ## 2026-11-09: Instructions status text meets the phone reading minimum
 
 - Loading, saving, saved and error messages share the same 14 px status

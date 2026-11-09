@@ -2,8 +2,12 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 import { CONTROL_URL, ROOT, WEB_ORIGIN, WEB_PORT } from "../e2e/env.ts";
+import { prepareFixture } from "./fixture.ts";
 
 const target = process.env["GL_PERF_TARGET"] ?? ROOT;
+// The comparison supplies a template per build. Direct Playwright invocations
+// prepare it before the webServer deadline begins; workers inherit this path.
+process.env["GL_PERF_FIXTURE"] ??= await prepareFixture(target);
 const executablePath = process.env["GATES_LOCAL_CHROMIUM"] ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
 
 export default defineConfig({

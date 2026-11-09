@@ -13,7 +13,7 @@ export interface Run {
   arm: "base" | "candidate";
   machine: { cpus: number; memoryBytes: number; freeBytes: number; loadBefore: number[]; loadAfter: number[] };
   browser: string;
-  fake: { firstTokenDelayMs: number; tokenDelayMs: number; burstTokens: number; thinking: false; loadDelayMs: number; longMarkdown: { tokenDelayMs: number; burstTokens: number } };
+  fake: { firstTokenDelayMs: number; tokenDelayMs: number; burstTokens: number; thinking: false; loadDelayMs: number; longMarkdown: { tokenDelayMs: number; burstTokens: number }; concurrentParallelLimit?: number };
   metrics: Metric[];
 }
 
@@ -30,7 +30,8 @@ export function metric(action: string, unit: Metric["unit"], samples: number[]):
 
 function signedMedian(values: number[]): number {
   const sorted = values.toSorted((a, b) => a - b);
-  return sorted[Math.floor((sorted.length - 1) / 2)]!;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 }
 
 export interface Change {
@@ -65,9 +66,13 @@ export function compare(base: Run[], candidate: Run[]): Change[] {
     const differences = a.map((m, i) => b[i]!.median - m.median);
     const delta = signedMedian(differences);
     const repeats = [a, b].flatMap(arm => arm.slice(1).map((m, i) => Math.abs(m.median - arm[i]!.median)));
-    // Round medians conceal phase jitter. Allow both arms to vary in opposite
-    // directions; their individual p95 spreads add in a measured difference.
-    const within = [allA, allB].map(arm => quantile(arm.samples.map(v => Math.abs(v - arm.median)), 0.95));
+    // Separate within-round jitter from drift only with enough samples in
+    // every round. Sparse rounds retain pooled spread, including singletons.
+    const perRound = [...a, ...b].every(row => row.samples.length >= 3);
+    const within = [a, b].map((arm, i) => {
+      const pooledMedian = [allA, allB][i]!.median;
+      return quantile(arm.flatMap(row => row.samples.map(v => Math.abs(v - (perRound ? row.median : pooledMedian)))), 0.95);
+    });
     const noiseFloor = Math.max(first.unit === "ms" ? 2 : 1, quantile(repeats, 0.95), within[0]! + within[1]!);
     let seed = 19;
     const bootstrap = Array.from({ length: 2000 }, () => signedMedian(differences.map(() => {

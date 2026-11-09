@@ -7,7 +7,7 @@ function run(round: number, samples: number[]): Run {
 describe("informational comparison diagnostic probes", () => {
   it("keeps identical timings within measured noise", () => {
     const runs = [100, 110, 98, 108, 101].map((v, i) => run(i, [v, v + 1, v + 2]));
-    expect(compare(runs, runs)[0]).toMatchObject({ signal: "within noise", delta: 0, noiseFloor: 20 });
+    expect(compare(runs, runs)[0]).toMatchObject({ signal: "within noise", delta: 0, noiseFloor: 12 });
   });
   it("identifies a repeatable slowdown and its reverse", () => {
     const runs = [100, 110, 98, 108, 101].map((v, i) => run(i, [v, v + 1, v + 2]));
@@ -37,5 +37,30 @@ describe("informational comparison diagnostic probes", () => {
     const result = compare(base, candidate)[0]!;
     expect(result.interval95[0]).toBeLessThan(0);
     expect(result.signal).toBe("within noise");
+  });
+  it("keeps a four-round verdict symmetric when the comparison is reversed", () => {
+    const base = Array.from({ length: 4 }, (_, i) => run(i, [100]));
+    const candidate = [104, 104.4, 213.3, 214].map((value, i) => run(i, [value]));
+    const forward = compare(base, candidate)[0]!;
+    const reverse = compare(candidate, base)[0]!;
+    expect(forward.delta).toBeCloseTo(58.85);
+    expect(reverse.delta).toBeCloseTo(-forward.delta);
+    expect([forward.signal, reverse.signal]).toEqual(["within noise", "within noise"]);
+  });
+  it("separates shared drift from jitter at five rounds of three samples", () => {
+    const base = [80, 90, 100, 110, 120].map((value, i) => run(i, [value - 1, value, value + 1]));
+    const candidate = base.map((r, i) => run(i, r.metrics[0]!.samples.map(value => value * 1.2)));
+    expect(compare(base, candidate)[0]).toMatchObject({ signal: "slower", delta: 20, noiseFloor: 12 });
+    expect(compare(candidate, base)[0]).toMatchObject({ signal: "faster", delta: -20, noiseFloor: 12 });
+  });
+  it.each([1, 2])("keeps pooled jitter when each round has %i samples", count => {
+    const base = [40, 50, 60, 70].map((value, i) => run(i, Array.from({ length: count }, (_, j) => value + j * 2)));
+    const candidate = base.map((r, i) => run(i, r.metrics[0]!.samples.map(value => value + 20)));
+    expect(compare(base, candidate)[0]).toMatchObject({ signal: "within noise", delta: 20, noiseFloor: 40 });
+  });
+  it("keeps pooled jitter for both builds when only one round is sparse", () => {
+    const base = [40, 50, 60, 70].map((value, i) => run(i, [value, value + 1, value + 2]));
+    const candidate = base.map((r, i) => run(i, r.metrics[0]!.samples.map(value => value + 20).slice(0, i === 0 ? 2 : 3)));
+    expect(compare(base, candidate)[0]).toMatchObject({ signal: "within noise", delta: 20, noiseFloor: 40 });
   });
 });

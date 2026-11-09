@@ -127,13 +127,13 @@ test("production browser journeys", async ({ browser }) => {
     latency("stop", await measure(page, () => page.getByRole("button", { name: "Stop", exact: true }).click(), "click", ".stopped", "Stopped"));
 
     // Same model/context permits two real server turns at once. Both must visibly start.
-    await scenario({ longDrip: 1, tokenDelayMs: 12, burstTokens: 4 });
+    await scenario({ longDrip: 1, tokenDelayMs: 12, burstTokens: 4, parallelLimit: 2 });
     await newThread(page);
     await send(page, "First concurrent reply");
     const firstId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
     await newThread(page);
     await page.locator("#ta").fill("Second concurrent reply");
-    latency("two-streams-start", await measure(page, () => page.locator("#ta").press("Enter"), "keydown", '.sb [aria-label="Reply in progress"]', "2", "count"));
+    latency("two-streams-start", await measure(page, () => page.locator("#ta").press("Enter"), "keydown", ".turn.a:not(.done) .md", "", "text"));
     await expect(page.locator(".turn.a:not(.done) .md")).toBeVisible();
     const secondId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
     await expect(page.locator('.sb [aria-label="Reply in progress"]')).toHaveCount(2);
@@ -151,10 +151,10 @@ test("production browser journeys", async ({ browser }) => {
     const reconnectId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
     const reconnect = await measure(page, () => page.evaluate(() => window.perfJourney.drop()), "now", ".composer:not(.blocked) #ta", "", "reconnect");
     latency("reconnect-during-stream", reconnect);
-    await expect(page.locator(".err-line")).toContainText("The connection dropped");
+    expect(new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread")).toBe(reconnectId);
     await expect(page.locator(".turn.a .md")).toBeVisible();
-    // A drop ends this client's visible stream; the server still saves its reply.
-    // Let it finish before resetting fake timing for another repetition.
+    // The subject may resume the live reply or show its interrupted snapshot.
+    // In either case the same thread must finish saving before the next repeat.
     const socketUrl = new URL(appUrl()).searchParams.get("server");
     if (!socketUrl || !reconnectId) throw new Error("Missing fixture connection");
     const client = createClient(new WebSocket(socketUrl));
@@ -168,7 +168,7 @@ test("production browser journeys", async ({ browser }) => {
     schema: 1, commit: process.env["GL_PERF_COMMIT"] ?? "working-tree", round: Number(process.env["GL_PERF_ROUND"] ?? 0), arm: process.env["GL_PERF_ARM"] === "candidate" ? "candidate" : "base",
     browser: browser.version(),
     machine: { cpus: availableParallelism(), memoryBytes: totalmem(), freeBytes: freemem(), loadBefore, loadAfter: loadavg() },
-    fake: { firstTokenDelayMs, tokenDelayMs, burstTokens, thinking: false, loadDelayMs: 0, longMarkdown: { tokenDelayMs: 12, burstTokens: 4 } },
+    fake: { firstTokenDelayMs, tokenDelayMs, burstTokens, thinking: false, loadDelayMs: 0, longMarkdown: { tokenDelayMs: 12, burstTokens: 4 }, concurrentParallelLimit: 2 },
     metrics: [...values].map(([action, row]) => metric(action, row.unit, row.samples)),
   };
   const out = process.env["GL_PERF_OUT"] ?? "perf-results";

@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
 import { compare, type Run } from "./stats.ts";
 import { bundleSize } from "../bundle-size.ts";
+import { prepareFixture } from "./fixture.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   prepare: { type: "boolean" }, prepared: { type: "string" }, out: { type: "string", default: "perf-results" },
@@ -23,7 +24,7 @@ type Runs = { base: Run[]; candidate: Run[] };
 type Bundles = { base: ReturnType<typeof bundleSize>; candidate: ReturnType<typeof bundleSize> };
 function report(runs: Runs, commits: Inputs, count: number, repetitions: number, bundles: Bundles) {
   const changes = compare(runs.base, runs.candidate);
-  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 3, informational: true, commits, rounds: count, samples: repetitions, bundles, changes }, null, 2) + "\n", { flag: "wx" });
+  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, bundles, changes }, null, 2) + "\n", { flag: "wx" });
   const lines = ["Timing is informational. Slower means a measured signal, never a release failure.", "", "| Action | Unit | Base median | Base p95 | Candidate median | Delta | Noise floor | Signal |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", ...changes.map(c => `| ${c.action} | ${c.unit} | ${c.base.median.toFixed(2)} | ${c.base.p95.toFixed(2)} | ${c.candidate.median.toFixed(2)} | ${c.delta.toFixed(2)} | ${c.noiseFloor.toFixed(2)} | ${c.signal}${c.tooNoisy ? "; too noisy for small changes" : ""} |`)];
   const markdown = lines.join("\n") + "\n";
   writeFileSync(path.join(out, "comparison.md"), markdown, { flag: "wx" });
@@ -89,6 +90,10 @@ for (const arm of ["base", "candidate"] as const) {
   await command(["pnpm", "install", "--frozen-lockfile"], subjects[arm]);
   await command(["pnpm", "--filter", "@gates-local/web", "build"], subjects[arm]);
 }
+const fixtures = {
+  base: await prepareFixture(subjects.base),
+  candidate: await prepareFixture(subjects.candidate),
+};
 const runs: Runs = { base: [], candidate: [] };
 for (let round = 0; round < rounds; round++) {
   // AB BA AB BA: swap which build goes first to reduce warm-up and drift bias.
@@ -96,7 +101,7 @@ for (let round = 0; round < rounds; round++) {
     console.log(`PERF round ${round + 1}/${rounds} ${arm} ${inputs[arm]}`);
     const runOut = path.join(out, `round-${round + 1}-${arm}`);
     await command(["pnpm", "exec", "playwright", "test", "-c", "test/perf/playwright.config.ts"], ROOT, {
-      ...process.env, GL_PERF_TARGET: subjects[arm], GL_PERF_COMMIT: inputs[arm], GL_PERF_ARM: arm,
+      ...process.env, GL_PERF_TARGET: subjects[arm], GL_PERF_FIXTURE: fixtures[arm], GL_PERF_COMMIT: inputs[arm], GL_PERF_ARM: arm,
       GL_PERF_ROUND: String(round + 1), GL_PERF_SAMPLES: String(samples), GL_PERF_OUT: runOut,
     });
     const run = JSON.parse(readFileSync(path.join(runOut, "run.json"), "utf8")) as Run;
