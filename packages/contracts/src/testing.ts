@@ -180,6 +180,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "turns.blocking": { params: { model: "qwen3:14b", numCtx: 16384 }, result: [{ threadId: "t1", title: "First", model: "qwen3.5:9b" }] },
   "settings.get": { params: {}, result: settings },
   "settings.update": { params: { thinking: false, defaultModel: null }, result: { ...settings, thinking: false } },
+  "settings.model.update": { params: { model: "qwen3.5:9b", patch: { temperature: 0.6 } }, result: { ...settings, modelSettings: { "qwen3.5:9b": { temperature: 0.6 } } } },
+  "settings.modelDefaults": { params: { model: "qwen3.5:9b" }, result: { system: "", parameters: "temperature 0.8" } },
   "gpu.status": { params: {}, result: gpu },
   "models.catalog": {
     params: {},

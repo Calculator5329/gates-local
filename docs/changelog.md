@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-11-08: Reverted controls no longer overwrite newer settings
+
+- Returning a reply control to its original value removes it from the draft.
+  Saving a different control then preserves a newer value saved elsewhere.
+- Legacy out-of-range numbers are preserved while loading only. A later settings
+  save, even a theme-only save, replaces them with their effective normalized values.
+
+## 2026-11-08: Settings saves preserve other clients' changes
+
+- Saving one reply control now sends only edited fields, so it cannot clear
+  another client's seed or other untouched values. Incoming changes update
+  untouched controls while preserving edits already in progress.
+- Shared numeric limits reject impractical or overflowing new values. Existing
+  files still load, with effective values clamped before use; prompts stay intact
+  and the original file is not rewritten just by opening it. Any later settings
+  save writes normalized values, including for untouched legacy controls.
+
+## 2026-11-08: Instructions in Settings
+
+- Shared instructions and per-model overrides now have their own Instructions
+  section. Layout A separates All chats from Per model and keeps the existing
+  Settings rows. Model selection reads installed models without loading one.
+- Each model has reply controls with a default state and reset, and a read-only
+  view of its installed prompt and parameters. Tooltips explain the controls and
+  when saved changes apply. Save and error states reserve their space.
+- Reset all clears shared instructions and every model override in one update,
+  leaving the runtime choice, chats, Library and downloads alone.
+
+## 2026-11-08: Model instructions and reply controls, server foundation
+
+- Chats can use shared instructions or a model-specific override, while preserving
+  Gates Local's built-in tool instructions. System prompts count against context;
+  one that cannot fit gets a plain error before any chat request.
+- Settings save per-model temperature, top p, top k, repeat penalty, seed, reply
+  length and keep-loaded seconds. Unset controls inherit the model or Ollama default;
+  resetting a field or model preserves other settings. Old settings files still load.
+- A reply snapshots settings when its message is accepted. Editing settings affects
+  later messages, including in existing threads, and never alters an ongoing tool loop.
+- New additive RPCs expose per-model edits and the installed model's read-only system
+  prompt and parameters. Context sizing and GPU placement stay on the existing path.
+- The Settings UI is not built yet; it waits for the owner's layout choice.
+
 ## 2026-11-08: Cancel pending Settings navigation
 
 - Escape now cancels Settings or Models before its chunk finishes loading.

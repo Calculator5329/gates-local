@@ -26,6 +26,8 @@ import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
+import type { SettingsReader } from "./settings/store.ts";
+import { turnSettings, type TurnSettings } from "./settings/turn.ts";
 
 /** The slice-1 methods every build answers. v2 methods join as their lanes land; until then the socket answers "not-implemented". */
 type CoreMethod =
@@ -99,6 +101,7 @@ export interface AppDeps {
   readonly fit?: Omit<FitDeps, "baseUrl">;
   /** Ollama's think flag for every turn; omitted from the request when undefined. */
   readonly think?: boolean;
+  readonly settings?: Pick<SettingsReader, "get">;
   readonly sources?: Sources;
   readonly toolsEnabled?: () => boolean;
   readonly newId?: () => string;
@@ -271,7 +274,7 @@ export function createApp(deps: AppDeps): App {
     return job;
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean } = {}) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean; settings?: TurnSettings } = {}) => {
     const { turnId, threadId, controller } = turn;
     // Exactly the text that reached the client: the reply a halted turn saves.
     let sentText = "";
@@ -321,10 +324,19 @@ export function createApp(deps: AppDeps): App {
         endHalted(turn.halted!);
         return;
       }
+      // Include the installed prompt explicitly so context accounting sees it, including on tool turns.
+      // A failed show must not send a prompt whose size we could not account for.
+      let systemPrompt = options.settings?.systemPrompt;
+      if (systemPrompt === undefined && deps.settings !== undefined) {
+        const show = await untilHalted(fetchShow(baseUrl, model, controller.signal));
+        if (show === HALTED || turn.halted) { endHalted(turn.halted!); return; }
+        systemPrompt = show.system ?? "";
+      }
       const input = {
         baseUrl,
         model,
-        messages,
+        messages: systemPrompt === undefined ? messages : [{ role: "system" as const, content: systemPrompt }, ...messages.filter(m => m.role !== "system")],
+        settings: options.settings,
         numCtx,
         signal: controller.signal,
         threadId,
@@ -503,6 +515,7 @@ export function createApp(deps: AppDeps): App {
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       store.getThread(threadId); // thread-not-found before anything is reserved
+      const settings = turnSettings(deps.settings?.get(), model);
       const { turn, end: endTurn } = reserve(threadId, model);
       let releaseGpu: (() => void) | undefined;
       // Every way a turn ends goes through end(): the GPU claim goes with it.
@@ -633,7 +646,7 @@ export function createApp(deps: AppDeps): App {
         turn.started = true;
         // Before the answer, so every client (also one that did not send this) knows the turn first.
         push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
-        void runTurn(turn, end, baseUrl, model, report.numCtx, history, load, { tools, think, image });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, history, load, { tools, think, image, settings });
         return { turnId: turn.turnId, userMessage };
       } finally {
         if (!started) {

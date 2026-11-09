@@ -20,6 +20,8 @@ import {
   SetupPlan,
   SetupProbe,
   SettingsPatch,
+  ModelDefaults,
+  ModelSettingsPatch,
   Source,
   SourceKind,
   Thread,
@@ -137,6 +139,8 @@ export const methods = {
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
   "settings.get": { params: NoParams, result: Settings },
   "settings.update": { params: SettingsPatch, result: Settings },
+  "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings },
+  "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults },
   "gpu.status": { params: NoParams, result: GpuStatus },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry) },
   "models.pull": { params: ModelRef, result: PullProgress },

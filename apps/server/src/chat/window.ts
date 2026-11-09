@@ -32,6 +32,9 @@ export function fitToWindow(messages: readonly TurnMessage[], numCtx: number, ov
   const system = messages.filter((m) => m.role === "system");
   const talk = messages.filter((m) => m.role !== "system");
   let used = system.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  if (used > budget) {
+    return { ok: false, message: `The system prompt is too long for this model's ${contextWords(numCtx)} context. Shorten it in Settings or choose a model with more context.` };
+  }
   const last = talk.at(-1);
   if (last !== undefined && used + estimateTokens(last.content) > budget) {
     return { ok: false, message: `This message is too long for this model, which keeps about ${contextWords(numCtx)} tokens in view. Shorten it or pick a model with more context.` };

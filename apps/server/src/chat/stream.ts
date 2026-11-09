@@ -7,6 +7,7 @@
 import { Schema as S } from "effect";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
 import { fitToWindow } from "./window.ts";
+import { ollamaSettings, type TurnSettings } from "../settings/turn.ts";
 
 export interface StreamTurnInput {
   baseUrl: string;
@@ -15,6 +16,8 @@ export interface StreamTurnInput {
   numCtx: number;
   /** Ollama's think flag; omitted from the request when undefined. */
   think?: boolean;
+  /** Immutable settings chosen when this turn was accepted. */
+  settings?: TurnSettings;
   signal?: AbortSignal;
   /** Stamped on the done message; the caller's thread. */
   threadId?: string;
@@ -45,13 +48,13 @@ type ChatChunk = typeof ChatChunk.Type;
 const decodeChunk = S.decodeUnknownSync(ChatChunk);
 
 /** The exact /api/chat request body. Exported so tests and callers can see it. */
-export function chatRequestBody(input: Pick<StreamTurnInput, "model" | "messages" | "numCtx" | "think">): Record<string, unknown> {
+export function chatRequestBody(input: Pick<StreamTurnInput, "model" | "messages" | "numCtx" | "think" | "settings">): Record<string, unknown> {
   return {
     model: input.model,
     messages: input.messages.map(({ role, content }) => ({ role, content })),
     stream: true,
     ...(input.think === undefined ? {} : { think: input.think }),
-    options: { num_ctx: input.numCtx },
+    ...ollamaSettings(input.settings, input.numCtx),
   };
 }
 

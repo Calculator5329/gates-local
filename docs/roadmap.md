@@ -283,6 +283,12 @@ never shows a whisper stop, start or restart.
 - [ ] Settings left for later (Settings council S1), each added only when
       the feature behind it exists:
       - Instructions: one home for what the model is told in every chat.
+        2026-11-08: server/schema foundation implemented:
+        global prompt, per-model overrides and generation controls, read-only installed
+        defaults, context accounting and per-turn snapshots. The owner chose layout A;
+        Instructions adds shared/model views and reply controls. Reset all clears
+        these fields atomically. Existing Settings and context browser journeys pass;
+        a later design iteration is expected.
       - Tools: a switch per tool, past the one switch and the list.
       - MCP servers.
       - Shortcuts: rebinding keys, and a choice of which key sends.

@@ -17,6 +17,8 @@ const TagsResponse = S.Struct({
 export type TagsResponse = typeof TagsResponse.Type;
 
 const ShowResponse = S.Struct({
+  system: S.optional(S.String),
+  parameters: S.optional(S.String),
   model_info: S.optional(S.Record(S.String, S.Unknown)),
   capabilities: S.optional(S.Array(S.String)),
 });

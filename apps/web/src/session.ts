@@ -14,6 +14,7 @@ import {
   type ResultOf,
   type Settings,
   type SettingsPatch,
+  type ModelSettingsPatch,
   type ToolStep,
   WireError,
   createClient,
@@ -1436,6 +1437,8 @@ const SETTING_WORDS: Record<keyof SettingsPatch, string> = {
   comfyUrl: "save the ComfyUI address",
   updateEveryChange: "save the update setting",
   textSize: "save the text size",
+  systemPrompt: "save the system prompt",
+  modelSettings: "reset model settings",
 };
 
 /** Save settings; null on success, else the sentence to show beside the control. Nothing changes locally until the server agrees. */
@@ -1454,6 +1457,14 @@ export async function updateSettings(patch: SettingsPatch): Promise<ActionResult
   return null;
 }
 
+/** Save or reset one model; apply only the settings the server accepted. */
+export async function updateModelSettings(model: string, patch: ModelSettingsPatch | null): Promise<ActionResult> {
+  const r = await act("settings.model.update", { model, patch }, "save model settings");
+  if (!r.ok) return r.message;
+  applySettings(r.value);
+  return null;
+}
+
 /** What a new install starts with. Who runs Ollama stays as it is: switching it stops models and can download. */
 const RESET_SETTINGS = {
   defaultModel: null,
@@ -1465,6 +1476,8 @@ const RESET_SETTINGS = {
   comfyUrl: null,
   updateEveryChange: false,
   textSize: "default",
+  systemPrompt: null,
+  modelSettings: null,
 } as const satisfies SettingsPatch;
 
 export async function resetSettings(): Promise<ActionResult> {

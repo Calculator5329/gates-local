@@ -202,7 +202,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
   });
 
   const handlers = {
-    ...createSettingsHandlers({ settings, push: options.push }),
+    ...createSettingsHandlers({ settings, push: options.push, baseUrl: () => runtime.baseUrl() }),
     ...createGpuHandlers({ gpu }),
     // The catalog's fit survey reads the same injected GPU and memory as every other fit.
     ...createRuntimeHandlers({ baseUrl: () => runtime.baseUrl(), catalog, settings, pulls, loader, log, ...(options.fit ? { fit: options.fit } : {}) }),

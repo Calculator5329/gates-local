@@ -200,6 +200,7 @@ async function main(): Promise<void> {
     lease: gpuLease,
     store,
     sources,
+    settings: services.settings,
     // A turn that does not say runs tools when Settings has them on.
     toolsEnabled: () => services.settings.get().tools,
     // discover-only never starts Ollama: runtime Retry looks again without starting one

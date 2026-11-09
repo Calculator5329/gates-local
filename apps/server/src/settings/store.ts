@@ -5,8 +5,10 @@
 // never lost silently. Other modules read settings through SettingsReader.
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { Settings, type SettingsPatch } from "@gates-local/contracts";
+import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch } from "@gates-local/contracts";
 import { Result, Schema as S } from "effect";
+import { canonicalTag } from "../runtime/recommended.ts";
+import { boundedModelSettings } from "./turn.ts";
 
 /** The file format version this build writes. A higher one is a newer build's file. */
 export const SETTINGS_FILE_VERSION = 1;
@@ -24,6 +26,8 @@ export interface SettingsReader {
 export interface SettingsStore extends SettingsReader {
   /** Apply a patch (`null` clears defaultModel and comfyUrl), persist, notify. */
   update(patch: SettingsPatch): Settings;
+  /** Merge fields for one model; null fields inherit again, a null patch resets the model. */
+  updateModel(model: string, patch: ModelSettingsPatch | null): Settings;
   /** Set when the load fell back to defaults: says why and where the old file went. */
   readonly loadNote: string | undefined;
 }
@@ -43,6 +47,16 @@ export function defaultSettings(runtimeMode: Settings["runtimeMode"]): Settings 
 }
 
 const SettingsFile = S.Struct({ version: S.Number, settings: S.Unknown });
+// File compatibility only: accept finite legacy numeric values, normalize them,
+// then decode the strict wire schema. New writes always use the strict schemas.
+const StoredSettings = S.Struct({
+  ...Settings.fields,
+  modelSettings: S.optional(S.Record(S.String, S.Struct({
+    systemPrompt: S.optional(S.String),
+    temperature: S.optional(S.Finite), top_p: S.optional(S.Finite), top_k: S.optional(S.Finite),
+    repeat_penalty: S.optional(S.Finite), seed: S.optional(S.Finite), num_predict: S.optional(S.Finite), keep_alive: S.optional(S.Finite),
+  }))),
+});
 
 type Loaded = { kind: "ok"; settings: Settings } | { kind: "absent" } | { kind: "bad"; why: string };
 
@@ -65,7 +79,10 @@ function readFile(file: string): Loaded {
   const { version, settings } = envelope.success;
   if (version > SETTINGS_FILE_VERSION) return { kind: "bad", why: `was written by a newer Gates Local (format ${version}; this build reads ${SETTINGS_FILE_VERSION})` };
   if (version !== SETTINGS_FILE_VERSION) return { kind: "bad", why: `has an unknown format version ${version}` };
-  const decoded = S.decodeUnknownResult(Settings)(settings);
+  const stored = S.decodeUnknownResult(StoredSettings)(settings);
+  if (Result.isFailure(stored)) return { kind: "bad", why: `does not match the settings shape (${stored.failure.message})` };
+  const models = stored.success.modelSettings;
+  const decoded = S.decodeUnknownResult(Settings)({ ...stored.success, ...(models === undefined ? {} : { modelSettings: Object.fromEntries(Object.entries(models).map(([model, value]) => [model, boundedModelSettings(value)])) }) });
   if (Result.isFailure(decoded)) return { kind: "bad", why: `does not match the settings shape (${decoded.failure.message})` };
   return { kind: "ok", settings: decoded.success };
 }
@@ -87,14 +104,17 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
-  const { defaultModel, comfyUrl, ...rest } = { ...current };
+  const { defaultModel, comfyUrl, systemPrompt, modelSettings, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
+  const prompt = patch.systemPrompt === undefined ? systemPrompt : (patch.systemPrompt ?? undefined);
   return {
     ...next,
     ...(model === undefined ? {} : { defaultModel: model }),
     ...(comfy === undefined ? {} : { comfyUrl: comfy }),
+    ...(prompt === undefined ? {} : { systemPrompt: prompt }),
+    ...(patch.modelSettings === null || modelSettings === undefined ? {} : { modelSettings }),
     ...(patch.defaultNumCtx === undefined ? {} : { defaultNumCtx: patch.defaultNumCtx }),
     ...(patch.thinking === undefined ? {} : { thinking: patch.thinking }),
     ...(patch.theme === undefined ? {} : { theme: patch.theme }),
@@ -127,17 +147,36 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
   }
 
   const listeners = new Set<SettingsListener>();
+  const persist = (next: Settings): Settings => {
+    if (sameSettings(next, current)) return current;
+    writeAtomic(file, next, options.rename);
+    const previous = current;
+    current = next;
+    for (const l of listeners) l(next, previous);
+    return next;
+  };
   return {
     loadNote,
     get: () => current,
     update(patch) {
-      const next = applyPatch(current, patch);
-      if (sameSettings(next, current)) return current;
-      writeAtomic(file, next, options.rename);
-      const previous = current;
-      current = next;
-      for (const l of listeners) l(next, previous);
-      return next;
+      return persist(S.decodeUnknownSync(Settings)(applyPatch(current, S.decodeUnknownSync(SettingsPatch)(patch))));
+    },
+    updateModel(model, patch) {
+      const key = canonicalTag(model);
+      if (!model.trim()) throw new Error("Choose a model before saving its settings.");
+      const decoded = patch === null ? null : S.decodeUnknownSync(ModelSettingsPatch)(patch);
+      const entries = new Map(Object.entries(current.modelSettings ?? {}));
+      // Accept an old unqualified tag, but write one canonical key from now on.
+      const previous = entries.get(key) ?? entries.get(model) ?? {};
+      if (model !== key) entries.delete(model);
+      if (decoded === null) entries.delete(key);
+      else {
+        const fields = Object.fromEntries(Object.entries({ ...previous, ...decoded }).filter(([, value]) => value !== null && value !== undefined));
+        if (Object.keys(fields).length) entries.set(key, S.decodeUnknownSync(ModelSettings)(fields));
+        else entries.delete(key);
+      }
+      const { modelSettings: _old, ...rest } = current;
+      return persist(S.decodeUnknownSync(Settings)({ ...rest, ...(entries.size ? { modelSettings: Object.fromEntries(entries) } : {}) }));
     },
     onChange(listener) {
       listeners.add(listener);

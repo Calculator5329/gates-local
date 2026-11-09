@@ -197,3 +197,12 @@ lane follows.
 **Owner text (in chat):** “Hey my friend is on Windows and wants to try
 this out so we need to make the repo Public”, then “Full history”.
 
+## 2026-11-08 · Instructions uses layout A
+
+**Decided:** build layout A now: shared instructions and a per-model view under
+Settings. It will be design-iterated later. Stay close to existing Settings screens;
+keep sections easy to move, controls stable across state changes, and explanations
+in tooltips. Reset all clears the shared prompt and every per-model override.
+**Direction recorded in chat:** "The owner picked layout A, and said it still needs
+iteration and will be design-iterated later, so build A now without gold-plating it."
+

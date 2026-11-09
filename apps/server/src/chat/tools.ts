@@ -3,6 +3,7 @@ import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, ty
 import { streamTurn, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 import { contextWords, estimateTokens, fitRound, fitToWindow } from "./window.ts";
+import { ollamaSettings } from "../settings/turn.ts";
 type ChatEvent = PlainChatEvent | { type: "tool"; step: import("../../../../packages/harness/src/types.ts").ToolStep };
 
 export interface ToolTurnInput extends StreamTurnInput {
@@ -49,7 +50,10 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
     }
     const windowed = fitToWindow(input.messages, input.numCtx, overhead);
     if (!windowed.ok) { yield { type: "error", code: "context-too-small", message: windowed.message }; return; }
-    const messages: ModelMessage[] = [{ role: "system", content: system }, ...windowed.messages];
+    // Some model templates use only one system message. Keep the user's prompt and our tool
+    // instructions together so a later system message cannot replace the built-in block.
+    const prompt = windowed.messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
+    const messages: ModelMessage[] = [{ role: "system", content: prompt ? `${prompt}\n\n${system}` : system }, ...windowed.messages.filter(m => m.role !== "system")];
     const turnStart = messages.length;
     // Every round is budgeted, not only the first: tool results grow the history the loop sends.
     // If the definitions are all that stand in the way, this request goes without them.
@@ -85,7 +89,7 @@ async function* ollamaStep(deps: { input: ToolTurnInput; fetcher: typeof fetch; 
   const { input, fetcher, signal } = deps;
   const response = await fetcher(new URL("/api/chat", input.baseUrl), {
     method: "POST", headers: { "content-type": "application/json" }, signal,
-    body: JSON.stringify({ model: input.model, messages: deps.messages, stream: true, options: { num_ctx: input.numCtx }, ...(input.think === undefined ? {} : { think: input.think }), ...(deps.definitions ? { tools: deps.definitions } : {}) }),
+    body: JSON.stringify({ model: input.model, messages: deps.messages, stream: true, ...ollamaSettings(input.settings, input.numCtx), ...(input.think === undefined ? {} : { think: input.think }), ...(deps.definitions ? { tools: deps.definitions } : {}) }),
   });
   if (!response.ok) throw new Error(`Chat request failed (HTTP ${response.status}): ${(await response.text()).slice(0, 500)}`);
   if (!response.body) throw new Error("Chat response has no body");

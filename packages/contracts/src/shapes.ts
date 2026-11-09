@@ -214,6 +214,55 @@ export type RuntimeMode = typeof RuntimeMode.Type;
 export const TextSize = S.Literals(["small", "default", "large"]);
 export type TextSize = typeof TextSize.Type;
 
+/** Product limits, shared by update validation, numeric inputs and legacy-value normalization. */
+export const MODEL_CONTROL_BOUNDS = {
+  temperature: { min: 0, max: 5, integer: false },
+  top_p: { min: 0, max: 1, integer: false },
+  top_k: { min: 0, max: 262144, integer: true },
+  repeat_penalty: { min: 0, max: 10, integer: false },
+  seed: { min: -1, max: 2147483647, integer: true },
+  num_predict: { min: 1, max: 65536, integer: true },
+  keep_alive: { min: 0, max: 604800, integer: false },
+} as const;
+export type ModelControl = keyof typeof MODEL_CONTROL_BOUNDS;
+const decimalControl = (key: ModelControl) => S.Finite.check(S.isBetween({ minimum: MODEL_CONTROL_BOUNDS[key].min, maximum: MODEL_CONTROL_BOUNDS[key].max }));
+const integerControl = (key: ModelControl) => S.Int.check(S.isBetween({ minimum: MODEL_CONTROL_BOUNDS[key].min, maximum: MODEL_CONTROL_BOUNDS[key].max }));
+const ReplyLimit = S.Union([S.Literals([-2, -1]), integerControl("num_predict")]);
+const KeepAlive = S.Union([S.Literals([-1]), decimalControl("keep_alive")]);
+
+/** Only supported generation overrides. Omitted fields inherit the installed model/Ollama default. */
+export const ModelSettings = S.Struct({
+  /** Unset inherits the global prompt; an empty string explicitly uses no user/model prompt. */
+  systemPrompt: S.optional(S.String),
+  temperature: S.optional(decimalControl("temperature")),
+  top_p: S.optional(decimalControl("top_p")),
+  top_k: S.optional(integerControl("top_k")),
+  repeat_penalty: S.optional(decimalControl("repeat_penalty")),
+  seed: S.optional(integerControl("seed")),
+  /** -1: no reply limit; -2: fill context; positive: maximum reply tokens. */
+  num_predict: S.optional(ReplyLimit),
+  /** Seconds after a reply; 0 unloads, -1 keeps loaded. Unset inherits Ollama's default. */
+  keep_alive: S.optional(KeepAlive),
+});
+export type ModelSettings = typeof ModelSettings.Type;
+
+/** null resets one field. A null patch resets this model's entire entry. */
+export const ModelSettingsPatch = S.Struct({
+  systemPrompt: S.optional(S.NullOr(S.String)),
+  temperature: S.optional(S.NullOr(decimalControl("temperature"))),
+  top_p: S.optional(S.NullOr(decimalControl("top_p"))),
+  top_k: S.optional(S.NullOr(integerControl("top_k"))),
+  repeat_penalty: S.optional(S.NullOr(decimalControl("repeat_penalty"))),
+  seed: S.optional(S.NullOr(integerControl("seed"))),
+  num_predict: S.optional(S.NullOr(ReplyLimit)),
+  keep_alive: S.optional(S.NullOr(KeepAlive)),
+});
+export type ModelSettingsPatch = typeof ModelSettingsPatch.Type;
+
+/** Raw, read-only /api/show fields. Unreported values stay empty, never invented defaults. */
+export const ModelDefaults = S.Struct({ system: S.String, parameters: S.String });
+export type ModelDefaults = typeof ModelDefaults.Type;
+
 export const Settings = S.Struct({
   /** Unset means the server picks: the best installed chat model that fits at defaultNumCtx (apps/server/src/runtime/pick.ts). */
   defaultModel: S.optional(S.String),
@@ -231,6 +280,9 @@ export const Settings = S.Struct({
   updateEveryChange: S.optional(S.Boolean),
   /** Unset means "default". */
   textSize: S.optional(TextSize),
+  /** Unset uses the installed model's system prompt. */
+  systemPrompt: S.optional(S.String),
+  modelSettings: S.optional(S.Record(S.String, ModelSettings)),
 });
 export type Settings = typeof Settings.Type;
 
@@ -245,6 +297,9 @@ export const SettingsPatch = S.Struct({
   comfyUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   textSize: S.optional(TextSize),
+  systemPrompt: S.optional(S.NullOr(S.String)),
+  /** Reset all model overrides in one atomic settings update. Individual edits use settings.model.update. */
+  modelSettings: S.optional(S.Null),
 });
 export type SettingsPatch = typeof SettingsPatch.Type;
 

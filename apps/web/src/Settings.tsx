@@ -3,7 +3,7 @@
 // control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import type { Source, TextSize, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
@@ -14,6 +14,8 @@ import { addSource, checkImageStatus, dataFolder, openDataFolder, openSettings, 
 import { NA, setState, useStore } from "./store.ts";
 import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./Updates.tsx";
+
+const Instructions = lazy(() => import("./Instructions.tsx"));
 
 function Seg2<T extends string | number>({ value, options, onPick, label }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string }) {
   return (
@@ -524,6 +526,7 @@ function ResetSettings() {
           <b>Reset every setting?</b>
           <ul>
             <li>Theme, text size, default model, context, tools and image generation go back to how they started.</li>
+            <li>Shared instructions, model instructions and reply controls are cleared.</li>
             <li>Your chats, Library and downloaded models stay.</li>
             <li>Which Ollama Gates Local uses stays as it is.</li>
           </ul>
@@ -622,6 +625,8 @@ export function SettingsView() {
       return <General />;
     case "models":
       return <ModelsPage />;
+    case "instructions":
+      return <Suspense fallback={<><Head title="Instructions" /><div className="inst-status" role="status">Loading…</div></>}><Instructions /></Suspense>;
     case "library":
       return <Library />;
     case "tools":
