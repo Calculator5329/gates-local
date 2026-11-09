@@ -163,14 +163,36 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     return [...loads].some((l) => l.threadId === threadId);
   }
 
+  let actionNotice: { readonly key: string; readonly message: string } | undefined;
+
+  /** A retry clears only its still-current failure; a missing thread confirms a delete. */
+  async function threadAction(action: "rename" | "delete", threadId: string, send: () => Promise<unknown>): Promise<boolean> {
+    const key = action + threadId;
+    const previous = actionNotice?.key === key ? actionNotice : undefined;
+    try {
+      await send();
+    } catch (e) {
+      if (action !== "delete" || codeOf(e) !== "thread-not-found") {
+        const message = failure(`${action} this conversation`, e);
+        actionNotice = { key, message };
+        applyServerEvent({ notice: message });
+        return false;
+      }
+    }
+    if (previous !== undefined && actionNotice === previous) {
+      actionNotice = undefined;
+      if (getState().notice === previous.message) applyServerEvent({ notice: null });
+    }
+    return true;
+  }
+
   async function renameThread(threadId: string, title: string): Promise<void> {
     const t = title.trim();
-    if (t === "") return;
-    await call("threads.rename", { threadId, title: t }).catch(() => undefined);
+    if (t !== "") await threadAction("rename", threadId, () => call("threads.rename", { threadId, title: t }));
   }
 
   async function deleteThread(threadId: string): Promise<void> {
-    await call("threads.delete", { threadId }).catch(() => undefined);
+    if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }))) return;
     threadsOrder.next();
     applyServerEvent((s) => {
       const { [threadId]: _gone, ...messages } = s.messages;
@@ -178,7 +200,11 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       const { [threadId]: _error, ...loadErrors } = s.loadErrors;
       return { messages, threadModels, loadErrors, threads: s.threads.filter((t) => t.id !== threadId), queued: s.queued.filter((q) => q.threadId !== threadId) };
     });
-    if (getState().threadId === threadId) newThread();
+    if (getState().threadId === threadId) {
+      const notice = getState().notice;
+      newThread();
+      if (notice !== null) applyServerEvent({ notice });
+    }
   }
 
   /** A new chat for this message; null, with the text back in the box, when the server does not answer. */

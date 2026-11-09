@@ -65,6 +65,45 @@ async function bootSettingsReady(): Promise<void> {
 const chat = (turnId: string, event: Payload<"chat.event">["event"], threadId = "t1") =>
   b.server.push("chat.event", { turnId, threadId, event });
 
+it("TT-01: retrying an already-deleted thread removes its stale row without a notice", async () => {
+  await boot();
+  store.setState({ view: "thread", threadId: "t1", messages: { t1: [userMsg("u1")] } });
+  const failing = b.server.hold("threads.delete");
+  const first = session.deleteThread("t1");
+  (await failing).fail("internal", "old cleanup failed");
+  await first;
+  expect(store.getState().notice).toContain("Couldn't delete this conversation");
+  const missing = b.server.hold("threads.delete");
+  const retry = session.deleteThread("t1");
+  (await missing).fail("thread-not-found");
+  await retry;
+  expect(store.getState()).toMatchObject({ view: "new", threadId: null, threads: [], messages: {}, notice: null });
+});
+
+it.each(["rename", "delete"] as const)("TT-02: %s retries clear their own notice and retain a newer unrelated notice", async action => {
+  await boot();
+  const method = action === "rename" ? "threads.rename" : "threads.delete";
+  const invoke = () => action === "rename" ? session.renameThread("t1", "Retry title") : session.deleteThread("t1");
+  const unrelated = "Your image draft could not be saved.";
+  const notices: Array<string | null> = [];
+  for (const newer of [null, unrelated]) {
+    store.setState({ view: "thread", threadId: "t1", threads: methodSamples["threads.list"].result, messages: { t1: [] }, notice: null });
+    const failing = b.server.hold(method);
+    const first = invoke();
+    (await failing).fail("internal", "action refused");
+    await first;
+    expect(store.getState().notice).toContain(`Couldn't ${action} this conversation`);
+    const succeeding = b.server.hold(method);
+    const retry = invoke();
+    const held = await succeeding;
+    if (newer !== null) store.setState({ notice: newer });
+    held.respond(methodSamples[method].result);
+    await retry;
+    notices.push(store.getState().notice);
+  }
+  expect(notices).toEqual([null, unrelated]);
+});
+
 it("VD-01: own older speech saves do not supersede a newer action; foreign saves still do", async () => {
   await boot();
   const settings = { ...methodSamples["settings.get"].result, whisperUrl: "http://127.0.0.1:18078" };

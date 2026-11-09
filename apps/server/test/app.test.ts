@@ -10,6 +10,8 @@ import { type Channel, type Client, type ImageEvent, type Payload, type SocketLi
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, createApp } from "../src/app.ts";
+import * as imageFiles from "../src/chat/image-lifecycle.ts";
+import { saveAttachments } from "../src/chat/attachments.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
 import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
@@ -97,7 +99,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; log?: (line: string) => void } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -162,7 +164,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
       runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? `16303, ${16303 - gpu.freeMib}, ${gpu.freeMib}\n` : (gpu.apps ?? "")),
       readMeminfo: async () => `MemTotal: 32541464 kB\nMemAvailable: ${gpu.memAvailableKb} kB\n`,
     },
-    log: () => undefined,
+    log: opts.log ?? (() => undefined),
   });
   cleanups.push(() => app.shutdown());
   server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], handlers: app.handlers, onClientReady: (push) => app.replayTurns(push), log: () => undefined });
@@ -305,6 +307,29 @@ it("a shared image survives until the last saved message is removed", async () =
   expect(existsSync(filename)).toBe(true);
   await r.client.call("messages.delete", { threadId: second.id, messageId: copy.id });
   expect(existsSync(filename)).toBe(false);
+});
+
+it.each(["threads.delete", "messages.delete"] as const)("TT-01: %s succeeds and publishes after image collection fails", async method => {
+  const lifecycle = imageFiles.imageLifecycle;
+  const collect = vi.fn().mockRejectedValue(new Error("EACCES: image cleanup denied"));
+  const factory = vi.spyOn(imageFiles, "imageLifecycle").mockImplementation((...args) => ({ ...lifecycle(...args), collect }));
+  try {
+    const logs: string[] = [];
+    const r = await rig({ log: message => logs.push(message) });
+    const thread = r.store.createThread();
+    const images = await saveAttachments(path.dirname(r.store.dbPath), ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg=="]);
+    const message = r.store.appendMessage({ threadId: thread.id, role: "user", content: "chart", images });
+    const result = method === "threads.delete"
+      ? await r.client.call(method, { threadId: thread.id })
+      : await r.client.call(method, { threadId: thread.id, messageId: message.id });
+    expect(result).toEqual(method === "threads.delete" ? { threadId: thread.id } : { messageId: message.id });
+    if (method === "threads.delete") expect(() => r.store.getThread(thread.id)).toThrow();
+    else expect(r.store.getThread(thread.id).messages).toEqual([]);
+    await r.waitFor("threads.changed", payload => payload.threadId === thread.id);
+    expect(collect).toHaveBeenCalledWith(images);
+    expect(logs).toContainEqual(expect.stringMatching(/image cleanup.*EACCES/));
+    expect(existsSync(path.join(path.dirname(r.store.dbPath), images[0]!))).toBe(true);
+  } finally { factory.mockRestore(); }
 });
 
 it("failed admission leaves no new image file", async () => {

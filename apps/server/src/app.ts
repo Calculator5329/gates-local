@@ -507,7 +507,7 @@ export function createApp(deps: AppDeps): App {
         await imageReady;
         const files = store.getThread(threadId).messages.flatMap(message => message.images ?? []);
         store.deleteThread(threadId);
-        await imageFiles?.collect(files);
+        await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after thread deletion failed: ${String(error)}`));
       } finally {
         if (marked) deleting.delete(threadId);
       }
@@ -522,7 +522,7 @@ export function createApp(deps: AppDeps): App {
         await imageReady;
         const files = store.getThread(threadId).messages.find(message => message.id === messageId)?.images ?? [];
         store.deleteMessage(threadId, messageId);
-        await imageFiles?.collect(files);
+        await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after message deletion failed: ${String(error)}`));
       } finally { if (marked) deleting.delete(threadId); }
       push("threads.changed", { threadId });
       return { messageId };

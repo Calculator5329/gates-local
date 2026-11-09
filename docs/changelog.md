@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-09: Completed deletes succeed even when image cleanup fails
+
+Thread and message deletion now log an image-cleanup failure after the row
+is removed, still return success and publish the change. Earlier cancellation
+and initialization failures still reject the request. A missing-thread reply
+also removes a stale sidebar row left by an earlier partial failure.
+
+Successful rename and delete retries clear their own still-current error
+without clearing a newer unrelated notice, including when the open thread
+is deleted. The browser retries both actions without a reload.
+
+An image that could not be removed remains on disk. The existing startup
+sweep retries unreferenced pasted uploads after 24 hours if permissions
+allow it; other image filenames have no automatic retry.
+
+## 2026-11-09: Failed thread actions keep the saved conversation
+
+A rejected delete keeps the conversation, its sidebar position and queued
+messages. A rejected rename keeps the server's title. Both now explain the
+failure in the composer's existing notice; successful actions are unchanged.
+The browser journey checks failure, row geometry, retry and reload. A bounded
+replay checks history loads, reply completion and newer index pushes around
+both rejections.
 ## 2026-11-09: Phone resets preserve desktop update preferences
 
 Reset settings on a phone still resets its other settings, while leaving

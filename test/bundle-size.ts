@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 
-export const BUNDLE_BUDGET = { entryJsGzipKb: 133.35, totalJsGzipKb: 171.50, startupCssGzipKb: 13, totalCssGzipKb: 15 };
+export const BUNDLE_BUDGET = { entryJsGzipKb: 133.50, totalJsGzipKb: 171.65, startupCssGzipKb: 13, totalCssGzipKb: 15 };
 
 /** Size alone blocks a build. Report every overage so one fix need not hide another. */
 export function assertBundleBudget(size: ReturnType<typeof bundleSize>, budget = BUNDLE_BUDGET): void {
