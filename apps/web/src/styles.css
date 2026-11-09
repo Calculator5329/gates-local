@@ -409,6 +409,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .btn.copy{display:inline-grid;justify-items:center}
 .btn.copy::before{content:"Couldn't copy";visibility:hidden;grid-area:1/1}
 .btn.copy>span{grid-area:1/1}
+.steady{display:grid}
+.steady>span{grid-area:1/1}
+.steady>[aria-hidden=true]{visibility:hidden;user-select:none}
 /* F59: an outline button with nothing to act on yet: muted, no hover */
 .btn.outline:disabled,.btn.outline:disabled:hover{color:var(--faint);border-color:var(--border);background:transparent;cursor:default}
 .btn.outline.pressed{background:var(--selected);border-color:var(--border-strong)}
@@ -488,6 +491,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* Warnings under the default-context control. */
 .ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
 #gpuMemory .ctx-line{min-height:3em}
+@media(min-width:641px){.ctx-c{width:min-content}#gpuMemory .ctx-line{min-height:6em;align-self:stretch}}
+@media(max-width:640px){.fp-numbers{min-height:7.5em}.lg-r:has(>.sw-chat){min-height:calc(2lh + 8px)}}
 .meas div{display:flex;flex-direction:column}
 .meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}
 .meas span{font-size:12.5px;color:var(--muted-foreground)}

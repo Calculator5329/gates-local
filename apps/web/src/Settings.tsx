@@ -281,7 +281,10 @@ function Tools() {
       <Head title="Tools">What the model can do in a chat beyond writing a reply.</Head>
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Let the model use tools" desc={on ? "On. It can use the tools below when a chat needs them." : "Off. It answers from the conversation alone, unless you turn Image on in a chat."} err={err}>
+          <Row label="Let the model use tools" desc={<span className="steady">
+            <span aria-hidden={!on}>On. It can use the tools below when a chat needs them.</span>
+            <span aria-hidden={on}>Off. It answers from the conversation alone, unless you turn Image on in a chat.</span>
+          </span>} err={err}>
             <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />
           </Row>
         </Grp>
@@ -334,9 +337,7 @@ function ImageState({ address }: { address: string }) {
           : undefined;
   return (
     <Row label={<Status dot={dot}>{word}</Status>} desc={desc} err={err}>
-      {state === "missing" ? (
-        <SetupLink />
-      ) : state === "error" ? (
+      {state === "error" ? (
         <button type="button" className="btn outline" onClick={() => void run(checkImageStatus())}>
           Retry
         </button>
@@ -379,11 +380,9 @@ function Images() {
           <Row label="Generate images" desc="Once enabled, use the Image button in the message box for a chat. If the GPU is short, the chat model is unloaded while an image renders." err={genErr}>
             <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />
           </Row>
-          {on ? null : (
-            <Row label="Set up ComfyUI" desc="Install ComfyUI first, then turn this on to connect to it.">
-              <SetupLink />
-            </Row>
-          )}
+          <Row label="Set up ComfyUI" desc="Install ComfyUI first, then connect it to Gates Local.">
+            <SetupLink />
+          </Row>
         </Grp>
       )}
       {on ? (
@@ -392,7 +391,10 @@ function Images() {
           <Row label="ComfyUI address" desc="Only change this if ComfyUI runs somewhere else." err={urlErr}>
             <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
             <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
-              {testing ? "Testing…" : "Test connection"}
+              <span className="steady">
+                <span aria-hidden={testing}>Test connection</span>
+                <span aria-hidden={!testing}>Testing…</span>
+              </span>
             </button>
           </Row>
         </Grp>

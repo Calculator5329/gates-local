@@ -76,7 +76,8 @@ test("image generation with no ComfyUI says none was found, and a chat with Imag
   await imageWithNoComfy(page);
   const install = page.locator(".srow", { hasText: "Not connected" });
   await expect(install).toContainText(`ComfyUI did not answer at ${DEAD_COMFY}.`);
-  await expect(install.getByRole("link", { name: "How to set up" })).toBeVisible();
+  const setup = page.locator(".grp").filter({ has: page.getByRole("switch", { name: "Generate images" }) });
+  await expect(setup.getByRole("link", { name: "How to set up" })).toBeVisible();
 
   // Test saves the typed address and asks again, so the status row names the new one
   await page.getByRole("textbox", { name: "ComfyUI address" }).fill(OTHER_DEAD_COMFY);

@@ -108,6 +108,8 @@ async function refusedGemma(page: Page): Promise<void> {
   await page.locator("#modelBtn").click();
   await page.locator("#pkSearch").fill("gemma");
   await page.locator('#picker .pk-r[data-m="gemma4:12b"]').click();
+  await expect(page.locator("#picker")).toBeHidden();
+  await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.locator(".set").getByRole("button", { name: "64k" }).first().click();

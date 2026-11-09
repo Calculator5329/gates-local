@@ -8,9 +8,10 @@ import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { fitPendingWord, fitReading } from "./fit-state.ts";
-import { nameOf, sizeText, splitTail } from "./models-rules.ts";
+import { nameOf, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, pendingDownload } from "./pick.ts";
 import { cancelPull, ensureFit, pull } from "./session.ts";
+import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
 import { NA, type State, fitKey, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
@@ -80,7 +81,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
         <div className="mp-l1">
           {n.id ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
         </div>
-        {n.purpose ? <div className="mp-p">{detail}</div> : null}
+        {n.purpose ? <div className="mp-p">{detail}</div> : n.id === undefined ? null : <div className="mp-p"><PathText path={n.id} shown={shortTag(n.id)} /></div>}
         <div className="mp-meta">
           <span>{size}</span><span aria-hidden="true">·</span>{n.purpose ? <span>{state}</span> : detail}
         </div>

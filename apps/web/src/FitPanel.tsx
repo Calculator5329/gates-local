@@ -117,16 +117,14 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
             <span className="v">{ch.toFixed(1)} GB</span>
           </div>
         ) : null}
-        {un > 0 ? (
-          <div className="lg-r">
-            <span className="chip sw-free" />
-            <span className="nm">
-              {loaded ? "Currently free" : "Free after loading"}
-              {loaded ? null : <small>estimated</small>}
-            </span>
-            <span className="v">{un.toFixed(1)} GB</span>
-          </div>
-        ) : null}
+        <div className="lg-r">
+          <span className="chip sw-free" />
+          <span className="nm">
+            {loaded ? "Currently free" : "Free after loading"}
+            {loaded ? null : <small>estimated</small>}
+          </span>
+          <span className="v">{un.toFixed(1)} GB</span>
+        </div>
       </div>
       {occ.some((o) => o.protected) ? <div className="fp-n">A lock means another program holds that memory. Gates Local can't free it.</div> : null}
     </>
@@ -186,7 +184,7 @@ function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict;
     const who = gpu && gpu.vendor === "nvidia" ? holders(gpu.occupants) : null;
     return (
       <>
-        <div className="fp-n">
+        <div className="fp-n fp-numbers">
           <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. {gb(r.freeVramBytes)} of GPU memory is available to this model{sys}.
         </div>
         {who ? <div className="fp-n">{who}</div> : null}
@@ -194,7 +192,7 @@ function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict;
     );
   }
   return (
-    <div className="fp-n">
+    <div className="fp-n fp-numbers">
       Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
       <br />
       {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : phase === "fresh" ? "Runs entirely on the GPU." : "Previously fit on the GPU."}

@@ -39,12 +39,17 @@ test.describe("first run", () => {
     await open();
     const sub = page.locator(".fr .sub");
     await expect(sub).toHaveText(/Switch models in any chat\./);
-    const g = await sub.evaluate((el) => {
+    const measure = () => sub.evaluate((el) => {
       const lh = parseFloat(getComputedStyle(el).lineHeight);
       const col = el.closest(".fr")?.getBoundingClientRect();
       const r = el.getBoundingClientRect();
-      return { lines: Math.round(r.height / lh), right: r.right, colRight: col?.right ?? 0, colWidth: col?.width ?? 0, scroll: el.scrollWidth, client: el.clientWidth };
+      return { ready: /Switch models in any chat\./.test(el.textContent ?? ""), lines: Math.round(r.height / lh), right: r.right, colRight: col?.right ?? 0, colWidth: col?.width ?? 0, scroll: el.scrollWidth, client: el.clientWidth };
     });
+    // A memory refresh can replace the ready copy between two protocol calls.
+    // Capture the intended copy and its geometry together; poll only the copy,
+    // so a wrapped ready subtitle still fails the geometry assertions below.
+    let g = await measure();
+    await expect.poll(async () => { g = await measure(); return g.ready; }).toBe(true);
     expect(g.colWidth).toBeLessThanOrEqual(540);
     expect(g.lines).toBe(1);
     expect(g.scroll).toBeLessThanOrEqual(g.client);

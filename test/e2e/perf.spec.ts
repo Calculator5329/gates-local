@@ -371,6 +371,14 @@ test("the typing window's end: a stopped input still counts, an input elsewhere 
   }, KEYS.length);
   await typeFreely(page, KEYS);
   await expect(ta).toHaveValue(KEYS);
+  // Reconcile the controlled textarea through an unrelated composer render:
+  // a field-level interceptor would otherwise leave the final DOM-only key
+  // visible until React next renders, concealing the test's own interference.
+  await page.getByRole("button", { name: "Thinking", exact: true }).evaluate(button => {
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Thinking must be a native button");
+    button.click();
+  });
+  await expect(ta).toHaveValue(KEYS);
   await page.evaluate(endKeys, KEYS.length);
   const ends = () =>
     page.evaluate(() => {

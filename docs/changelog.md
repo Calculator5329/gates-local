@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-11-09: Release unit fixtures use the installed toolchain
+
+The isolated release scenarios reuse the suite's pnpm bootstrap cache with
+Corepack networking disabled. Registry availability no longer decides
+whether their failure, cancellation and cleanup checks reach the action
+they are meant to test. Production release isolation is unchanged.
+
+## 2026-11-09: First-run copy and layout are observed together
+
+The one-line ready-subtitle check measures the ready words and their box
+in the same browser call. A memory refresh can replace those words with a
+longer explanation; it no longer makes the test measure the wrong state.
+
+## 2026-11-09: Image setup keeps its installation instruction
+
+The persistent setup row still tells you to install ComfyUI first, before
+turning image generation on or changing the connection.
+The disconnected-image journey checks the help link in that stable group.
+
+## 2026-11-09: Fit-error journeys wait for their selected model
+
+The fit-error setup waits until Gemma is selected before opening Settings.
+Opening Settings during a pending pick correctly cancels it, leaving the
+old model selected and testing the wrong memory requirement.
+
+## 2026-11-09: Typing capture also checks the controlled draft
+
+The stopped-input journey forces a composer render while the textarea keeps
+focus. This catches a test interceptor withholding a key from React even
+when the browser initially displays that key.
+
+## 2026-11-09: Memory details keep their size as context changes
+
+The free-memory legend stays visible at zero. The context control keeps its
+width, and phone numbers and the model legend reserve their wrapped height.
+Changing from GPU to system-memory use keeps expanded Details and the
+surrounding group still.
+
+## 2026-11-09: Tool permissions stay still when switched
+
+The Tools switch reserves the wrapped height of both explanations, so
+turning tools off keeps the row and permissions below it in place on phones.
+
+## 2026-11-09: Testing an image connection keeps the controls still
+
+The connection button reserves room for both labels, so testing does not
+shrink the button or move the address field.
+
+## 2026-11-09: Image setup keeps its group height
+
+Enabling image generation keeps the setup instructions in their original
+group, so the whole group stays the same size. Setup help has one stable
+location in both states.
+
+## 2026-11-09: Custom downloads finish without growing their row
+
+Custom model downloads show the same ID line before and after installation,
+keeping the row height and ordering steady on desktop and phone.
+
 ## 2026-11-09: Remove repeated clipboard code and tiny chunk overhead
 
 - Settings copy buttons use the same clipboard helper as conversation and

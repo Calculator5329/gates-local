@@ -354,9 +354,7 @@ for (const width of [1440, 360]) {
       await waitReady(page);
       await section(page, "Image generation", true);
       const images = page.getByRole("switch", { name: "Generate images", exact: true });
-      // The group now also contains a separate setup row that collapses on
-      // enable. Keep this trigger-size assertion on the trigger's own row.
-      await mark(page.locator(".srow").filter({ has: images }), "body-0");
+      await mark(boxFor(page, images), "body-0");
       const frames = await burst(page, `r2-${width}/images-trigger`, ".set", () => images.click());
       stableSize(frames, "body-0", `images-trigger-${width}`);
     });
