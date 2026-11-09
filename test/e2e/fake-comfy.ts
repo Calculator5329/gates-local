@@ -37,6 +37,11 @@ export async function fakeComfy() {
     res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body));
   });
   server.on("upgrade", (req, socket) => {
+    // The backend may reset its preview connection when it exits on restart.
+    // This test-owned peer disconnect is expected; unrelated faults still fail.
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ECONNRESET") throw error;
+    });
     const key = req.headers["sec-websocket-key"];
     if (!key) { socket.destroy(); return; }
     const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");

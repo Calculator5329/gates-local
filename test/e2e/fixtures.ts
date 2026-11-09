@@ -2,7 +2,8 @@
 // a chosen fake scenario, and fails if the page logs a console error or an
 // uncaught exception (a spec that expects some, like reconnect, lists them).
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
-import { CONTROL_URL, appUrl } from "./env.ts";
+import { createClient } from "@gates-local/contracts";
+import { CONTROL_URL, SERVER_PORT, TOKEN, appUrl } from "./env.ts";
 
 export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name" | "threads" | "image-turn" | "image-claims";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
@@ -39,8 +40,18 @@ export const stack = {
     if (typeof system !== "number" || typeof app !== "number" || !Number.isInteger(system) || system < 20000 || app !== system + 1 || app > 65535) throw new Error("The stack did not return controlled runtime ports");
     return { system, app };
   },
-  /** Stop the server, wait downMs, start it again on the same data. */
-  restart: (downMs = 0) => control("/restart", { downMs }),
+  /** Stop the server, wait downMs, then require an answer from its replacement. */
+  async restart(downMs = 0) {
+    const result = await control("/restart", { downMs });
+    // /restart joins the old child and starts a new one. Probe over a fresh
+    // connection as well, so neither a disconnect nor a log line proves ready.
+    const client = createClient(new WebSocket(`ws://127.0.0.1:${SERVER_PORT}/?token=${TOKEN}`));
+    try {
+      await client.negotiate();
+      await client.call("runtime.status", {});
+    } finally { client.close(); }
+    return result;
+  },
   /** Switch the fake's behaviour mid-test (options such as tokenDelayMs; without `installed` the scenario's own models return). */
   scenario: (scenario: Scenario, options: Record<string, number | readonly string[]> = {}) => control("/scenario", { scenario, ...options }),
 };
