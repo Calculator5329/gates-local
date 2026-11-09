@@ -217,18 +217,36 @@ repetitions, as it does for a well-behaved quartile, 4 rounds of 8 would roughly
 halve the sizes above: thread-2000 rows near 15 %, cold start near 20 %. That is
 an estimate, not a measurement. Frame-held short rows will gain less.
 
-## Rows worth dropping from the priority journeys
+## Rows omitted from the priority journeys
 
-These come from the recorded runs and live in files this method does not own:
+The older `priority.spec.ts` path omits these redundant rows. The scorers read
+the recorded metric set, so old recordings remain readable without rewriting
+them or changing scoring thresholds:
 
-- The input-delay rows (`paste-input-delay` and the like): about 0.3 ms against
-  a 2 ms floor, nothing to measure.
-- `.frame-p95`: identical to `.frame-max` in every run of 16 older recordings,
-  except on two-streams and parallel-switch, whose windows hold many frames.
+- `paste-input-delay`: 0.2–0.8 ms across 56 recorded samples, below the older
+  scorer's 2 ms floor. The median alone is not enough to drop the other input
+  rows: `voice-arrival-input-delay` reached 4.6 ms in round 3's candidate arm
+  of `climb-budget-20261109T191209204Z`, so it stays. The broad journeys'
+  composer and streaming input delays also stay; their maxima were 7.2 and
+  25.2 ms.
+- `.frame-p95` on the eight thread visits, paste and voice arrival: identical
+  sample for sample to `.frame-max` across the recordings that include them.
+  `.frame-max` stays. The priority path keeps `parallel-switch.frame-p95`,
+  which differs from its maximum. The broad suite's `two-streams.frame-p95`
+  also differs and is unchanged; its separate measurements are not removed
+  from `journeys.spec.ts`.
 - `open-thread-200` and `open-thread-2000`: the same values as the
-  `thread-*-cold-click` rows in every run.
+  `thread-*-cold-click` rows in all 16 runs that record both names. The cold
+  click rows and their functional assertions stay. The broad suite's open
+  rows have no cold-click aliases and stay.
 - `.long-tasks` and `.long-task-time` on thread-200-cold-click and the paste
-  rows: 0 in every run.
+  row: zero across 56 samples each. Other thread visits keep their long-task
+  rows: even the 200-message warm/hover visits recorded nonzero work.
+
+This removes 17 priority rows. The shared probe still collects input and long
+tasks for the remaining consumers, including the broad suite. The newer
+`next.spec.ts` path already records elapsed time, CPU cost and counters rather
+than these rows; its measurements and scorer are unchanged.
 
 ## How to climb
 

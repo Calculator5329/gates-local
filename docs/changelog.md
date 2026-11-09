@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-09: Priority performance reports omit duplicate and empty rows
+
+- The older priority journey drops 17 rows: duplicate frame p95s and thread
+  open aliases, the below-floor paste input delay, and the cold-200/paste
+  long-task rows that always read zero. The actions, functional assertions,
+  frame maxima and scoring rules stay the same.
+- Voice arrival keeps its input-delay row because a recorded sample exceeded
+  the noise floor. Parallel switches keep distinct frame p95s; other thread
+  visits keep their nonzero long-task readings. The broad and newer cost
+  journeys retain their separate measurements.
+
 ## 2026-11-09: Long threads open at their last turns, and typing no longer wakes every saved reply
 
 - A long thread opens with its last 40 turns and mounts the older ones in

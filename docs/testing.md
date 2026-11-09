@@ -291,6 +291,12 @@ the application's handling, audio encoding and loopback transport, not real
 transcription speed. A second, explicitly held fake response allows a keypress
 while transcription is pending; its arrival window reports frames, long tasks
 and input dispatch delay. That controlled window is not an ASR latency metric.
+The older priority path omits duplicate frame-p95 and open-thread aliases,
+the below-floor paste input delay and the always-zero cold-200/paste long-task
+rows. It keeps the voice-arrival input delay, which has exceeded the floor.
+[The recorded-data audit](perf-method.md#rows-omitted-from-the-priority-journeys)
+lists the retained exceptions. The broad suite and the newer cost path keep
+their separate measurement sets.
 Queue handoff starts on the first reply's completed DOM state and ends when the
 next reply's first words paint; the unchanged fake's 40 ms token delay remains.
 
