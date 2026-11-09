@@ -3,14 +3,17 @@
 // apart (G7-01) and keeps context fit on hover (S1), a refused verdict's
 // dot is red in the first-run card (item 4), and tok/s counts decode time only.
 import type { Page } from "@playwright/test";
+import { decodeResult, type GpuStatus } from "@gates-local/contracts";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
 
 type Box = { top: number; bottom: number; left: number; right: number };
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
-/** Hold real catalog/fit answers until the pointer is on the initially visible picker. */
+/** Prepare normally, then hold real fit answers during an open picker's refresh. */
 async function holdPickerReports(page: Page) {
-  let holding = true;
+  let holding = false;
+  let gpu: GpuStatus | undefined;
+  let refresh: (() => void) | undefined;
   const held: Array<() => void> = [];
   const received = new Set<string>();
   await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
@@ -18,22 +21,34 @@ async function holdPickerReports(page: Page) {
     const methods = new Map<unknown, string>();
     ws.onMessage(message => {
       const req = JSON.parse(String(message)) as { id?: unknown; method?: string };
-      if (req.method === "models.catalog" || req.method === "fit.check") methods.set(req.id, req.method);
+      if (req.method) methods.set(req.id, req.method);
       server.send(message);
     });
     server.onMessage(message => {
-      const res = JSON.parse(String(message)) as { type?: string; id?: unknown };
+      const res = JSON.parse(String(message)) as { type?: string; id?: unknown; result?: unknown };
       const method = res.type === "response" ? methods.get(res.id) : undefined;
-      if (method !== undefined) {
-        methods.delete(res.id);
-        received.add(method);
+      methods.delete(res.id);
+      if (method === "gpu.status") {
+        const reading = decodeResult("gpu.status", res.result);
+        if (reading.ok) gpu = reading.value;
       }
-      if (holding && method !== undefined) held.push(() => ws.send(message));
+      const report = method === "models.catalog" || method === "fit.check";
+      if (report) received.add(method);
+      if (holding && report) held.push(() => ws.send(message));
       else ws.send(message);
     });
+    refresh = () => {
+      if (!gpu) throw new Error("No GPU reading to refresh");
+      holding = true; received.clear();
+      ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpu }));
+    };
   });
   return {
     received,
+    refresh: () => {
+      if (!refresh) throw new Error("Picker connection has not opened");
+      refresh();
+    },
     release: () => { holding = false; for (const send of held.splice(0)) send(); },
   };
 }
@@ -75,12 +90,20 @@ for (const width of [1440, 760]) {
     await expect(picker).toBeVisible();
     await picker.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
     const before = await picker.boundingBox();
+    reports.refresh();
+    await expect.poll(() => reports.received.has("fit.check")).toBe(true);
+    await expect(picker).toBeVisible();
+    await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
     await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
+    await expect(page.locator("#tip.open")).toBeVisible();
     reports.release();
+    await expect(picker.locator('.pk-r[aria-busy="true"]')).toHaveCount(0);
     await expect(picker.locator(".pk-bottom").getByRole("button", { name: "Download models", exact: true })).toBeVisible();
     await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
-    expect(await picker.boundingBox(), "catalog and fit replies keep the picker under the resting pointer").toEqual(before);
-    await expect(page.locator("#tip.open")).toBeVisible();
+    expect(await picker.boundingBox(), "fit replies keep the picker under the resting pointer").toEqual(before);
+    // The refreshed fit changes the tip's advice. It must update or close;
+    // subsequent hovers still exercise every original non-overlap assertion.
+    await expect.poll(() => page.locator("#tip").evaluate(el => !el.classList.contains("open") || !el.textContent?.includes("previous check"))).toBe(true);
     for (const t of await rowTips(page)) {
       for (const o of t.others) expect(meets(t.tip, o), `${t.tag}: tip ${JSON.stringify(t.tip)} covers ${JSON.stringify(o)}`).toBe(false);
     }

@@ -79,7 +79,7 @@ test("won't fit together: exact warning, Cancel preserves draft and running repl
   await finished(page, "beta");
   await page.locator(".sb-row", { hasText: "alpha" }).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
-  await expect(page.locator(".turn.a.done .md")).toContainText("Reply 1 for alpha.");
+  await expect(page.locator(".turn.a.interrupted .md")).toContainText("Reply 1 for alpha.");
   await shot(page, "preempted");
   const [a, b] = (await state()).turns;
   expect(a?.outcome).toBe("cancelled");

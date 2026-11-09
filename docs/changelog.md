@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-09: Stopped replies show their specific reason once
+
+A reply stopped for another model or a runtime switch keeps its partial
+text and shows one explanation. The generic interrupted note remains for
+replies whose stop reason is unknown.
+
 ## 2026-11-09: Priority baseline fits the browser job budget
 
 - The full set uses two repetitions per arm per round after the three-repeat

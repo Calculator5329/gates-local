@@ -72,7 +72,7 @@ test("sending on a model that needs the memory warns, then stops the other chat,
   // the chat that stopped: its words and one sentence
   await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
-  await expect(page.locator(".turn.a.done .md ul li")).toHaveCount(3);
+  await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
   await expect(page.locator(".turn.a .writing")).toHaveCount(0);
   await shot(page, "03-stopped-chat");
 });
@@ -119,7 +119,7 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   expect(target).not.toBeNull();
   await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
-  await expect(page.locator(".turn.a.done .md ul li")).toHaveCount(3);
+  await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
   await expect(page.locator(".writing")).toHaveCount(0);
   await expect.poll(() => sends.findLast((send) => send.threadId === target)?.stopOthers).toBe(true);
   await expect.poll(async () => (await runtimeState()).turns.find((turn) => turn.id === running?.id)?.outcome).toBe("cancelled");

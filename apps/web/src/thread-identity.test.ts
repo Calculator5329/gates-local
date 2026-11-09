@@ -17,7 +17,7 @@ vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), relo
 import { Timeline } from "./Thread.tsx";
 import { setState } from "./store.ts";
 
-afterEach(() => { setState({ messages: {}, live: null }); vi.unstubAllGlobals(); });
+afterEach(() => { setState({ messages: {}, live: null, stopNotes: {} }); vi.unstubAllGlobals(); });
 
 it("retains interrupted text and its unfinished label in the shared live-to-saved reply slot", () => {
   vi.stubGlobal("window", {});
@@ -29,6 +29,18 @@ it("retains interrupted text and its unfinished label in the shared live-to-save
   expect(html).toContain("A retained partial answer");
   expect(html).toContain("excluded from later model prompts");
   expect(html).not.toContain('class="turn a done"');
+});
+
+it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime changed."])("shows only the known stop reason: %s", reason => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({ live: null, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: reason } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  expect(html.match(/class="stop-note"/g)).toHaveLength(1);
+  expect(html).toContain(reason);
+  expect(html).not.toContain("Interrupted before this reply finished");
+  expect(html).toContain("A retained partial answer");
+  expect(html).toContain('aria-label="Interrupted reply"');
 });
 
 function child(node: unknown, index: number): unknown {

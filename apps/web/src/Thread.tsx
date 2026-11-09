@@ -286,6 +286,7 @@ const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: str
   const allowedLinks = useMemo(() => imageTurnLinks(messages, tools), [messages, tools]);
   const running = tools.some((t) => t.state === "running");
   const interrupted = msg?.interrupted === true;
+  const knownStop = useStore(s => msg !== undefined && s.stopNotes[msg.id] !== undefined);
   const streaming = live !== null && end === undefined;
   const showThink = thinking !== "" && (!streaming || text !== "" || tools.length > 0);
   const secs = live === null
@@ -331,7 +332,7 @@ const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: str
             </button>
           </div>
         ) : null}
-        {interrupted ? <div className="stop-note" role="status">Interrupted before this reply finished. Its text is kept here and excluded from later model prompts.</div> : null}
+        {interrupted && !knownStop ? <div className="stop-note" role="status">Interrupted before this reply finished. Its text is kept here and excluded from later model prompts.</div> : null}
         {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? <ActRow text={text} meta={msg === undefined ? name : replyMeta(name, msg, ft)} regen={msg !== undefined && last} /> : null}
       </div>
     </>

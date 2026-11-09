@@ -85,7 +85,7 @@ test("runtime switch while two threads run stops both with their partial words a
   for (const prompt of ["alpha", "beta"]) {
     await page.locator(".sb-row", { hasText: prompt }).click();
     await expect(page.locator(".stop-note")).toHaveText("Stopped when the Ollama runtime changed.");
-    await expect(page.locator(".turn.a.done .md")).toContainText(`Reply 1 for ${prompt}.`);
+    await expect(page.locator(".turn.a.interrupted .md")).toContainText(`Reply 1 for ${prompt}.`);
   }
   expect((await state()).turns).toHaveLength(2);
 });

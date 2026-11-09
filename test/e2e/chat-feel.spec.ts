@@ -4,6 +4,7 @@
 // the runtime needs the user, the context size inside the model picker, and
 // GPU memory under Settings > Advanced.
 import { DRIP_REPLY } from "../fake-ollama/fake-ollama.ts";
+import { decodeRequest } from "@gates-local/contracts";
 import { FAKE_URL } from "./env.ts";
 import { blockPrefix, type BlockSnap } from "./block-prefix.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -254,13 +255,14 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await expect(set).not.toContainText("At 64k: ");
 });
 
-/** How many /api/chat requests the fake has seen. */
-async function chats(): Promise<number> {
-  const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { requests: { path: string }[] };
-  return state.requests.filter((r) => r.path === "/api/chat").length;
-}
-
 test("a send refused for memory says why and its click opens Settings > Advanced", async ({ page, open }) => {
+  // The fake's 500-request history rolls over during a full suite. Observe
+  // this client's sends directly, including requests the server would reject.
+  let sends = 0;
+  page.on("websocket", socket => socket.on("framesent", frame => {
+    const request = decodeRequest(frame.payload);
+    if (request.ok && request.value.method === "chat.send") sends++;
+  }));
   await open();
   await waitReady(page);
   await page.locator("#modelBtn").click();
@@ -278,10 +280,10 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await expect(sendBtn).toHaveAttribute("data-tip", /Settings › Advanced/);
   await sendBtn.hover();
   await expect(page.locator("#tip")).toContainText("Settings › Advanced");
-  const before = await chats();
+  const before = sends;
   await sendBtn.dispatchEvent("click");
   await expect(page.locator(".set").getByRole("heading", { name: "Advanced" })).toBeVisible();
   await expect(page.locator("#gpuMemory")).toContainText("Gemma 4 12B");
   // the click opened the why; nothing was sent
-  expect(await chats()).toBe(before);
+  expect(sends).toBe(before);
 });
