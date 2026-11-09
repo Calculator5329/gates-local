@@ -12,18 +12,15 @@
 // by this uid and a connect to it is refused (a dead server's leftover);
 // anything else stops the start. Node unlinks the socket when it closes.
 //
-// Two starts at once (the app's single-instance lock normally prevents it)
-// could both find the same dead socket. The path is lstat'ed again after the
-// refused probe and left alone if it is no longer that file (dev, ino, uid,
-// type), and after listen the path must still be the file this bind made.
-// What remains is the moment between those lstats and the unlink or bind. A
-// process can only act there as the same user, since the directory is 0700
-// and ours. At worst one listener ends up with no path, so the phone cannot
-// reach it until a restart; nobody gains access.
-import { type Stats, lstatSync, mkdirSync, unlinkSync } from "node:fs";
+// Starters hold an exclusive recoverable lease beside the socket through
+// cleanup, bind and the listener's lifetime. A dead owner's lease can be
+// taken over. Before unlinking, probe again: identity and timestamps alone
+// cannot distinguish every replacement. A live listener is never removed.
+import { type BigIntStats, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import type { Server } from "node:http";
 import { connect } from "node:net";
 import path from "node:path";
+import { acquireFileLock } from "../update/lock.ts";
 
 /** Linux sun_path is 108 bytes including the terminating NUL. */
 const MAX_SOCKET_PATH_BYTES = 107;
@@ -79,34 +76,38 @@ export interface SocketTestHooks {
 }
 
 /** Clears a dead server's socket at the path; refuses anything else there. */
-async function clearStale(socketPath: string, uid: number, hooks: SocketTestHooks): Promise<void> {
+async function clearStale(socketPath: string, uid: number, hooks: SocketTestHooks, stillOurs: () => boolean): Promise<void> {
   let st;
   try {
-    st = lstatSync(socketPath);
+    st = lstatSync(socketPath, { bigint: true });
   } catch (e) {
     if (code(e) === "ENOENT") return;
     throw e;
   }
   if (!st.isSocket()) throw new Error(`${socketPath} exists and is not a socket; refusing to touch it`);
-  if (st.uid !== uid) throw new Error(`${socketPath} is a socket owned by uid ${st.uid}, not this user; refusing to touch it`);
+  if (st.uid !== BigInt(uid)) throw new Error(`${socketPath} is a socket owned by uid ${st.uid}, not this user; refusing to touch it`);
   if (await answers(socketPath)) throw new Error(`another server is already listening on ${socketPath}`);
   await hooks.afterRefusedProbe?.();
   // A second start may have cleared the same dead socket and bound its own
   // while the probe ran; that one is live, so leave it.
   let now;
   try {
-    now = lstatSync(socketPath);
+    now = lstatSync(socketPath, { bigint: true });
   } catch (e) {
     throw new Error(`the stale socket at ${socketPath} changed while it was being checked; refusing to touch it`, { cause: e });
   }
-  if (!now.isSocket() || now.uid !== st.uid || now.dev !== st.dev || now.ino !== st.ino) {
+  if (!now.isSocket() || now.uid !== st.uid || !sameFile(now, st)) {
     throw new Error(`the stale socket at ${socketPath} changed while it was being checked; refusing to touch it`);
   }
+  if (await answers(socketPath)) throw new Error(`another server is already listening on ${socketPath}; refusing to remove it`);
+  if (!stillOurs()) throw new Error(`phone socket lease changed: ${socketPath}; refusing to remove it`);
+  const last = lstatSync(socketPath, { bigint: true });
+  if (!last.isSocket() || last.uid !== st.uid || !sameFile(last, now)) throw new Error(`the stale socket at ${socketPath} changed while it was being checked; refusing to touch it`);
   unlinkSync(socketPath);
 }
 
-function sameFile(a: Stats, b: Stats): boolean {
-  return a.dev === b.dev && a.ino === b.ino;
+function sameFile(a: BigIntStats, b: BigIntStats): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.ctimeNs === b.ctimeNs && a.birthtimeNs === b.birthtimeNs;
 }
 
 /** Binds server to socketPath, owner-only. Throws, with nothing bound, on any check that fails. */
@@ -115,35 +116,50 @@ export async function listenOwnerSocket(server: Server, socketPath: string, hook
   if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH_BYTES) throw new Error(`the phone socket path is over ${MAX_SOCKET_PATH_BYTES} bytes`);
   const uid = ownUid();
   checkParent(path.dirname(socketPath), uid);
-  await clearStale(socketPath, uid, hooks);
-  let bound: Stats | null = null;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    // Throws in a worker thread; that stops the start, which is the safe side.
-    const old = process.umask(0o177);
-    try {
-      server.listen(socketPath, () => {
-        server.off("error", reject);
-        resolve();
-      });
-      // bind() ran inside listen(), so this is the file it made, unless a
-      // bind error is about to arrive on "error".
-      bound = lstatSync(socketPath, { throwIfNoEntry: false }) ?? null;
-    } finally {
-      process.umask(old);
+  const acquired = acquireFileLock(`${socketPath}.lock`);
+  if (!acquired.ok) throw new Error(`phone socket is locked by another starter (${acquired.pid ?? "unknown owner"}): ${socketPath}`);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    process.off("exit", release);
+    server.off("close", release);
+    acquired.lock.release();
+  };
+  process.once("exit", release);
+  server.once("close", release);
+  try {
+    await clearStale(socketPath, uid, hooks, acquired.lock.stillOurs);
+    if (!acquired.lock.stillOurs()) throw new Error(`phone socket lease changed: ${socketPath}; refusing to bind`);
+    let bound: BigIntStats | null = null;
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      // Throws in a worker thread; that stops the start, which is the safe side.
+      const old = process.umask(0o177);
+      try {
+        server.listen(socketPath, () => {
+          server.off("error", reject);
+          resolve();
+        });
+        // bind() ran inside listen(), so this is the file it made, unless a
+        // bind error is about to arrive on "error".
+        bound = lstatSync(socketPath, { bigint: true, throwIfNoEntry: false }) ?? null;
+      } finally {
+        process.umask(old);
+      }
+    });
+    await hooks.afterBind?.();
+    const st = lstatSync(socketPath, { bigint: true, throwIfNoEntry: false });
+    if (bound === null || st === undefined || !sameFile(st, bound)) {
+      // Not closed: closing a Unix server unlinks its path, which now names
+      // another listener's socket (or nothing). This one has no path left, so
+      // nothing can reach it; unref'd, it ends with the process.
+      server.unref();
+      throw new Error(`${socketPath} is not the socket this server bound (another start replaced it); refusing to run`);
     }
-  });
-  await hooks.afterBind?.();
-  const st = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (bound === null || st === undefined || !sameFile(st, bound)) {
-    // Not closed: closing a Unix server unlinks its path, which now names
-    // another listener's socket (or nothing). This one has no path left, so
-    // nothing can reach it; unref'd, it ends with the process.
-    server.unref();
-    throw new Error(`${socketPath} is not the socket this server bound (another start replaced it); refusing to run`);
-  }
-  if (!st.isSocket() || st.uid !== uid || (st.mode & 0o777) !== 0o600) {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    throw new Error(`the phone socket came up with mode ${(st.mode & 0o777).toString(8)}, not 600; closed it`);
-  }
+    if (!st.isSocket() || st.uid !== BigInt(uid) || (st.mode & 0o777n) !== 0o600n) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw new Error(`the phone socket came up with mode ${(st.mode & 0o777n).toString(8)}, not 600; closed it`);
+    }
+  } catch (error) { release(); throw error; }
 }

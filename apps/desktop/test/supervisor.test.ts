@@ -28,6 +28,8 @@ function procState(pid: number): "gone" | "zombie" | "alive" {
   }
 }
 
+const survivors = (candidates: Iterable<number>) => [...candidates].filter((pid) => procState(pid) === "alive");
+
 async function waitUntil(check: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -94,10 +96,10 @@ afterEach(async () => {
     for (const record of launches(dir)) pids.add(record.pid);
     rmSync(dir, { recursive: true, force: true });
   }
-  // No child of any test survives it, not even as a zombie. Survivors are
-  // SIGKILLed first so one failure cannot leak processes past the run.
-  const survivors = [...pids].filter((pid) => procState(pid) !== "gone");
-  for (const pid of survivors) {
+  // A zombie has exited; its adopting parent is responsible for reaping it.
+  // Kill actual survivors first so a failure cannot leave running processes.
+  const remaining = survivors(pids);
+  for (const pid of remaining) {
     try {
       process.kill(pid, "SIGKILL");
     } catch {
@@ -105,7 +107,7 @@ afterEach(async () => {
     }
   }
   pids.clear();
-  expect(survivors, "processes left behind").toEqual([]);
+  expect(remaining, "processes left behind").toEqual([]);
 });
 
 describe("Supervisor", () => {
@@ -298,7 +300,26 @@ describe("Supervisor", () => {
     const hostExited = new Promise((resolve) => host.once("exit", resolve));
     host.kill("SIGKILL");
     await hostExited;
-    expect(await waitUntil(() => procState(pid) === "gone", 5_000)).toBe(true);
+    expect(await waitUntil(() => existsSync(join(dataDir, `eof-${pid}`)), 5_000)).toBe(true);
+    expect(await waitUntil(() => procState(pid) !== "alive", 5_000)).toBe(true);
+  });
+
+  it("detects a planted server that keeps running after stdin EOF", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "gates-desktop-survivor-"));
+    dirs.push(dataDir);
+    const child = spawn(process.execPath, [FAKE, "--port", "0", "--data-dir", dataDir], {
+      env: { ...process.env, FAKE_MODE: "ignore-term" }, stdio: ["pipe", "pipe", "ignore"],
+    });
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    const pid = child.pid!;
+    pids.add(pid);
+    try {
+      await new Promise<void>((resolve) => createInterface({ input: child.stdout }).on("line", (line) => { if (line.startsWith("{")) resolve(); }));
+      child.stdin.end();
+      expect(await waitUntil(() => survivors([pid]).length === 0, 100)).toBe(false);
+      expect(survivors([pid])).toEqual([pid]);
+      expect(existsSync(join(dataDir, `eof-${pid}`))).toBe(false);
+    } finally { child.kill("SIGKILL"); await exited; }
   });
 });
 

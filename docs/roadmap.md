@@ -339,6 +339,9 @@ plus the explicit batched-write regression; coverage is sampled, not exhaustive.
       selected models ready, whisper unchanged through success and failure.
       *Accept:* `pnpm release:smoke` on this machine plus a try-it packet for
       Ethan. Packaging does not authorize a release or publication.
+- [ ] Release gate: after a step exits normally, stop its owned process group
+      and keep the scratch directory if shutdown stays unconfirmed.
+      *Accept:* a step that leaves a same-group process behind gets it stopped.
 - [ ] Packaged releases (AppImage, Windows installer, auto-update) once
       Ethan picks that path. `pnpm run app-update` covers git clones only;
       a packaged copy says it cannot update itself.

@@ -206,6 +206,11 @@ export function acquireLock(root: string, o: LockOptions = {}): Acquired {
   const dir = stateDir(root);
   if (dir === null) return { ok: true, lock: NOT_A_CHECKOUT };
   const file = path.join(dir, LOCK_FILE);
+  return acquireFileLock(file, o);
+}
+
+/** Exclusive recoverable lease at an owner-controlled path, also used by the phone socket. */
+export function acquireFileLock(file: string, o: LockOptions = {}): Acquired {
   const pid = o.pid ?? process.pid;
   const start = (o.startOf ?? startOf)(pid);
   const text = JSON.stringify({ pid, start, startedAt: (o.now ?? Date.now)(), token: randomUUID() });

@@ -1,5 +1,7 @@
 // E2E for the web client against the real server and the fake Ollama.
-//   pnpm e2e        journeys and perf budgets (project "e2e")
+//   pnpm e2e        functional journeys and deterministic size budgets (project "e2e")
+//   pnpm e2e:timing wall-clock measurements, unchanged budgets (project "timing", informational for releases)
+// Timing journeys have separate functional companions in the blocking e2e project.
 //   pnpm e2e:shots  the deterministic screenshot rig (project "shots")
 //   pnpm shots:readme  the README images in docs/screenshots (project "readme")
 // Browser: GATES_LOCAL_CHROMIUM, else /usr/bin/chromium when present, else
@@ -38,7 +40,8 @@ export default defineConfig({
   },
   projects: [
     // Browser journeys are *.spec.ts; a *.test.ts here (seed.test.ts) is a vitest unit test.
-    { name: "e2e", testMatch: /\.spec\.ts$/, testIgnore: /shots\.spec\.ts/ },
+    { name: "e2e", testMatch: /\.spec\.ts$/, testIgnore: /shots\.spec\.ts/, grepInvert: /@timing/ },
+    { name: "timing", testMatch: /\.spec\.ts$/, grep: /@timing/ },
     { name: "shots", testMatch: /(^|[\\/])shots\.spec\.ts$/ },
     { name: "readme", testMatch: /readme-shots\.spec\.ts$/ },
   ],

@@ -7,10 +7,13 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "pnpm --filter @gates-local/web build",
     "start": "pnpm --filter @gates-local/web build && pnpm --filter @gates-local/desktop start",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --no-bail typecheck",
     "lint": "oxlint --deny-warnings apps packages scripts test",
     "app-update": "node scripts/update.ts",
+    "release:check": "node scripts/release-check.ts",
+    "release:tag": "node scripts/release-tag.ts",
     "machine-check": "node scripts/machine-check.ts",
     "test": "vitest run",
     "verify": "pnpm typecheck && pnpm lint && pnpm test",
@@ -18,6 +21,7 @@
     "verify:image": "vitest run apps/server/src/image",
     "verify:gpu": "vitest run apps/server/src/gpu",
     "e2e": "playwright test -c test/e2e/playwright.config.ts --project=e2e",
+    "e2e:timing": "playwright test -c test/e2e/playwright.config.ts --project=timing",
     "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots",
     "shots:readme": "playwright test -c test/e2e/playwright.config.ts --project=readme",
     "verify:tools": "vitest run packages/harness apps/server/src/chat/tools.test.ts --reporter=verbose",

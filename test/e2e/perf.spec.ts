@@ -2,7 +2,8 @@
 // Performance budgets on the production build. Each budget sits a little
 // above the number measured on the maintainer's Linux machine (2026-11-07, Chromium,
 // 1440x900, the fake Ollama at 12 ms a token); the measured value is in the
-// comment beside it. Every test also logs what it measured.
+// comment beside it. Every test also logs what it measured. Wall-clock
+// checks carry @timing and run separately; size and functional checks block releases.
 //
 // The two timing gates (cold load, typing during a stream) pass when one of
 // up to TRIES tries is inside the budget. A slower app slows every try; a
@@ -233,6 +234,45 @@ async function typeFreely(page: Page, text: string): Promise<void> {
   await Promise.all(sent);
 }
 
+/** The same controlled busy main thread for the functional journey and the timing measurement. */
+function beginBusyTyping() {
+  const w = window as unknown as { glBusy: boolean; glStamps: [number, number][]; glChan: MessageChannel };
+  w.glBusy = true;
+  w.glStamps = [];
+  window.addEventListener("keydown", (e) => w.glStamps.push([e.timeStamp, performance.now()]), { capture: true });
+  const ch = new MessageChannel();
+  w.glChan = ch;
+  ch.port1.addEventListener("message", () => {
+    if (!w.glBusy) return;
+    const end = performance.now() + 100;
+    while (performance.now() < end) {
+      // spin
+    }
+    ch.port2.postMessage(null);
+  });
+  ch.port1.start();
+  ch.port2.postMessage(null);
+}
+
+async function busyBurst(page: Page, text: string) {
+  const ta = page.locator("#ta");
+  await ta.fill("");
+  await ta.focus();
+  await page.evaluate(clearEvents);
+  await page.evaluate(beginBusyTyping);
+  let stamps: [number, number][];
+  try { await typeFreely(page, text); }
+  finally {
+    stamps = await page.evaluate(() => {
+      const w = window as unknown as { glBusy: boolean; glStamps: [number, number][] };
+      w.glBusy = false;
+      return w.glStamps;
+    });
+  }
+  const value = await ta.inputValue();
+  return { stamps, value };
+}
+
 /**
  * The W-08 gate: the 95th percentile key event, input to paint, inside the
  * budget, and no long task over the long-task budget while the keys go in.
@@ -351,6 +391,8 @@ test("the typing window's end: a stopped input still counts, an input elsewhere 
 });
 
 test.beforeEach(async ({ page }) => {
+  if (test.info().tags.includes("@timing")) test.info().annotations.push({ type: "budget", description:
+    `first paint <${BUDGET.firstPaintMs} ms; ready composer <${BUDGET.readyMs} ms; longest task <=${BUDGET.longTaskMs} ms; key p95 <=${BUDGET.keyP95Ms} ms; key processing <=${BUDGET.keyHandlerMs} ms` });
   await page.addInitScript(observe);
 });
 
@@ -364,7 +406,21 @@ async function coldTimes(page: Page) {
 }
 const coldWithinBudget = (t: { fcp: number; ready: number }) => t.fcp < BUDGET.firstPaintMs && t.ready < BUDGET.readyMs;
 
-test("cold load: first paint and time to a ready composer", async ({ page, open, browser }) => {
+test("cold load reaches a ready composer without console errors", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
+  try {
+    const page = await ctx.newPage();
+    const errors: string[] = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+    await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+    await page.goto(appUrl());
+    await waitReady(page);
+    expect(errors, "console errors").toEqual([]);
+  } finally { await ctx.close(); }
+});
+
+test("cold load: first paint and time to a ready composer", { tag: "@timing" }, async ({ page, open, browser }) => {
   reportLoad();
   await open();
   const tries = [await coldTimes(page)];
@@ -373,15 +429,9 @@ test("cold load: first paint and time to a ready composer", async ({ page, open,
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
     try {
       const p = await ctx.newPage();
-      const errors: string[] = [];
-      p.on("console", (m) => {
-        if (m.type() === "error") errors.push(m.text());
-      });
-      p.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
       await p.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
       await p.goto(appUrl());
       tries.push(await coldTimes(p));
-      expect(errors, "console errors").toEqual([]);
     } finally {
       await ctx.close();
     }
@@ -538,10 +588,14 @@ test.describe("finished turns while a reply streams", () => {
 
 test.describe("a 400-message thread", () => {
   test.use({ seed: 400 });
-  test("opens and scrolls with no long task over 50 ms", async ({ page, open, seededThread }) => {
+  test("renders all 400 messages", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     await expect(page.locator(".tl .turn")).toHaveCount(400);
+  });
+  test("opens and scrolls with no long task over 50 ms", { tag: "@timing" }, async ({ page, open, seededThread }) => {
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
     const tl = page.locator(".tl");
     await tl.evaluate((el) => el.scrollTo({ top: 0 }));
     await page.waitForTimeout(200);
@@ -560,7 +614,32 @@ test.describe("a 400-message thread", () => {
   });
 });
 
-test("typing during a stream: p95 key event, input to paint, inside the budget", async ({ page, open }) => {
+test("typing preserves every character while idle, streaming and busy", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const ta = page.locator("#ta");
+  const typed = "typing while the reply streams in";
+  await ta.focus();
+  await typeFreely(page, typed);
+  await expect(ta).toHaveValue(typed);
+  await ta.fill("");
+  // Keep the fake reply active throughout this functional journey; no speed budget is asserted here.
+  await stack.scenario("models", { tokenDelayMs: 120, replyWords: 180 });
+  await sendMessage(page, "A slow reply please");
+  const writing = page.locator(".writing");
+  await expect(writing).toBeVisible();
+  await ta.focus();
+  await typeFreely(page, typed);
+  await expect(ta).toHaveValue(typed);
+  await expect(writing).toBeVisible();
+  const burst = "a shorter burst";
+  const delayed = await busyBurst(page, burst);
+  expect(delayed.value).toBe(burst);
+  expect(delayed.stamps, "one stamp per key").toHaveLength(burst.length);
+  await expect(writing).toBeVisible();
+});
+
+test("typing during a stream: p95 key event, input to paint, inside the budget", { tag: "@timing" }, async ({ page, open }) => {
   await open();
   await waitReady(page);
   const ta = page.locator("#ta");
@@ -570,7 +649,6 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   await ta.focus();
   await page.evaluate(clearEvents);
   await typeFreely(page, TYPED);
-  await expect(ta).toHaveValue(TYPED);
   await page.evaluate(endKeys, TYPED.length);
   const idle = keyStats(await page.evaluate(readKeys));
   reportKeys("idle", idle);
@@ -594,7 +672,6 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
     await ta.focus();
     await page.evaluate(clearEvents);
     await typeFreely(page, TYPED);
-    await expect(ta).toHaveValue(TYPED);
     await page.evaluate(endKeys, TYPED.length);
     const live = await writing.isVisible();
     return { ...keyStats(await page.evaluate(readKeys)), live };
@@ -616,38 +693,9 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   // channel hangs on window so nothing can collect it mid-burst. One try:
   // the control must fail the gate every time.
   await streaming();
-  await ta.fill("");
-  await ta.focus();
-  await page.evaluate(clearEvents);
-  await page.evaluate(() => {
-    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][]; glChan: MessageChannel };
-    w.glBusy = true;
-    w.glStamps = [];
-    // each keydown's timestamp and the time its handlers ran
-    window.addEventListener("keydown", (e) => w.glStamps.push([e.timeStamp, performance.now()]), { capture: true });
-    const ch = new MessageChannel();
-    w.glChan = ch;
-    ch.port1.addEventListener("message", () => {
-      if (!w.glBusy) return;
-      const end = performance.now() + 100;
-      while (performance.now() < end) {
-        // spin
-      }
-      ch.port2.postMessage(null);
-    });
-    ch.port1.start();
-    ch.port2.postMessage(null);
-  });
   const BURST = "a shorter burst";
-  await typeFreely(page, BURST);
-  const stamps = await page.evaluate(() => {
-    const w = window as unknown as { glBusy: boolean; glStamps: [number, number][] };
-    w.glBusy = false;
-    return w.glStamps;
-  });
-  await expect(ta).toHaveValue(BURST);
+  const { stamps } = await busyBurst(page, BURST);
   await page.evaluate(endKeys, BURST.length);
-  await expect(writing).toBeVisible();
   const raw = await page.evaluate(readKeys);
   const delayed = keyStats(raw);
   reportKeys("stream + 100 ms delay control", delayed);
@@ -658,7 +706,6 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   // key may have no entry only if it waited 24 ms or less. In the runs where
   // every key is stamped after its slice, every wait is that short and the
   // long-task leg above fails the gate.
-  expect(stamps, "one stamp per key").toHaveLength(BURST.length);
   report("stream + 100 ms delay control keys that waited over 24 ms", stamps.filter(([at, ran]) => ran - at > 24).length, "keys");
   for (const [at, ran] of stamps) {
     const wait = ran - at;

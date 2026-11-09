@@ -276,7 +276,8 @@ download.
 
 ```sh
 pnpm verify        # typecheck, lint and unit tests
-pnpm e2e           # browser journeys against a fake Ollama (Chromium)
+pnpm e2e           # functional browser journeys and size budgets against a fake Ollama
+pnpm e2e:timing    # wall-clock measurements against unchanged timing budgets
 pnpm shots:readme  # regenerate the images in docs/screenshots
 ```
 
@@ -284,7 +285,7 @@ pnpm shots:readme  # regenerate the images in docs/screenshots
 sends and Stop acknowledgements in memory. They print a pasteable event order
 when a connection choice or message invariant breaks.
 
-`pnpm e2e` and `pnpm shots:readme` run the real server against a fake
+`pnpm e2e`, `pnpm e2e:timing` and `pnpm shots:readme` run the real server against a fake
 Ollama and a fake `nvidia-smi`, so they need no GPU and no models. They
 need a Chromium. They use the one named in `GATES_LOCAL_CHROMIUM`, else
 `/usr/bin/chromium` if it exists, else Playwright's own, which you install
@@ -300,6 +301,11 @@ install them from your package manager.
 
 On Windows the browser suite uses Microsoft Edge, which Windows already
 has, unless `GATES_LOCAL_CHROMIUM` names another browser.
+
+Releases are tested from a fresh public clone on a release machine before
+tagging. See [docs/releasing.md](docs/releasing.md) for the commands and report.
+Timing results are advisory for releases because host speed changes them;
+`pnpm e2e` keeps every functional test and deterministic size budget blocking.
 
 The screenshots use demo threads and a pinned clock and time zone, so a
 rerun gives the same images.

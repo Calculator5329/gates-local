@@ -1,5 +1,65 @@
 # Changelog
 
+## 2026-11-09: Timing records no longer decide releases
+
+- Only unit verification, the build and functional browser checks decide
+  the test verdict. Timing runs separately with a fixed limit and records
+  its exit and report path as information; no timing outcome is classified.
+- Phone starters hold a recoverable exclusive lease through cleanup and
+  listening, and re-probe a stale socket immediately before removal.
+  Equal timestamps and reused inode numbers cannot remove a live listener.
+
+## 2026-11-09: Incomplete timing runs cannot authorize a release
+
+- Completed timing assertion failures stay advisory. Crashes, timeouts and
+  missing or incomplete browser reports fail the release check. Setup,
+  runtime and teardown errors cannot become advisory timing failures.
+- The final remote refresh happens before tag creation, so its refusal
+  leaves no local tag that would block the next attempt.
+- Canceling settles after owned-group shutdown is confirmed, even when
+  another session keeps an inherited output pipe open. The report discloses
+  that possible survivor and retains temporary data.
+- Failed publication removes only the unchanged local tag it created;
+  unrelated tags and concurrent replacements are preserved.
+
+## 2026-11-08: Concurrent phone starts preserve a live socket
+
+- A socket inode number reused after stale-file cleanup no longer makes a
+  live listener look like the old dead socket. Both the stale-file and
+  after-bind checks compare nanosecond change and birth timestamps too.
+- Real-socket race probes force inode reuse without changing the existing
+  event ordering or widening timeouts.
+
+## 2026-11-08: Release checks keep their blocking guarantees
+
+- Canceling a timing check now fails the release, and cancellation waits
+  for its command's descendants to stop before removing temporary data.
+- Tagging checks the report's origin and refreshes main and release tags
+  immediately before pushing. Focused browser tests are refused.
+- Large-thread rendering, cold-load readiness and typing correctness stay
+  in the blocking suite; their unchanged timing budgets run separately.
+
+## 2026-11-08: Exited processes no longer block updates
+
+- An exited process awaiting reaping no longer counts as running work.
+  Update waits, locks and process-group cleanup distinguish zombies from
+  live processes, including a group whose leader has already exited.
+- A zombie main thread with a live worker still counts as running work.
+- Unreadable or changing process-group membership still blocks an update.
+  Parent-death checks verify the server's own stdin-EOF exit marker;
+  planted live servers and group members prove actual survivors still fail.
+
+## 2026-11-08: Releases prove a fresh clone
+
+- A release check now installs and verifies an exact public commit in a
+  clean clone, then runs the functional browser suite and size budgets.
+  Its JSON report and retained failure artifacts explain where it stopped.
+- Wall-clock browser checks run separately with unchanged thresholds;
+  their measurements remain visible as advisory release evidence.
+- Release tagging defaults to a dry run and requires a current passing
+  report for `origin/main`, a matching main checkout, and a new increasing
+  version. Explicit `--push` creates and pushes only that annotated tag.
+
 ## 2026-11-08: Calmer tooltips, thread actions on the row, every running reply marked
 
 Hover tooltips wait a moment before appearing. Thread actions moved to a stable

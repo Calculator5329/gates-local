@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type TreeStop, createRunner, endTree, realRunner } from "./run.ts";
+import { type TreeStop, createRunner, endTree, groupExists, realRunner } from "./run.ts";
 import { type Repos, makeRepos, removeRepos, testEnv } from "./testing.ts";
 import { isAlive } from "./wait.ts";
 
@@ -64,6 +64,21 @@ describe.skipIf(process.platform === "win32")("a command that runs past its time
     updater.kill("SIGINT");
     expect(await exited).toBe("SIGINT");
     await vi.waitFor(() => expect(isAlive(pidIn(file))).toBe(false), { timeout: 5000, interval: 25 });
+  });
+
+  it("detects a planted live group member after its leader exits", async () => {
+    const file = path.join(r.base, "survivor.pid");
+    const leader = spawn("sh", ["-c", `sleep 30 & echo $! > "${file}"`], { detached: true, stdio: "ignore" });
+    const group = leader.pid!;
+    await new Promise((resolve) => leader.once("exit", resolve));
+    try {
+      expect(isAlive(group)).toBe(false);
+      expect(isAlive(pidIn(file))).toBe(true);
+      expect(groupExists(group)).toBe(true);
+      // Deliberately leave it running: confirmation must fail for a true survivor.
+      expect(await endTree(group, { platform: process.platform, graceMs: 40, confirmMs: 40, exists: groupExists, signal: () => {}, taskkill: async () => 0 })).toBe(false);
+      expect(groupExists(group)).toBe(true);
+    } finally { await endTree(group); }
   });
 });
 

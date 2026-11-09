@@ -13,10 +13,38 @@ import os from "node:os";
 import path from "node:path";
 import { type Client, type SocketLike, createClient } from "@gates-local/contracts";
 import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type SocketTestHooks, listenOwnerSocket } from "../src/web/socket.ts";
 import { type Handlers, type WsServer, startWsServer } from "../src/ws/server.ts";
+
+const reusedIdentity = vi.hoisted(() => ({ socketPath: "", inodes: new Set<string>(), equalTimes: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...fs,
+    lstatSync: (...args: Parameters<typeof fs.lstatSync>) => {
+      const st = fs.lstatSync(...args);
+      // A freed inode number can be reused by the next bind. Keep real socket
+      // operations, modes and timestamps; force only that identity collision.
+      if (st && args[0] === reusedIdentity.socketPath) {
+        const inode = String(st.ino);
+        if (reusedIdentity.inodes.size < 2) reusedIdentity.inodes.add(inode);
+        if (reusedIdentity.inodes.has(inode)) {
+          if (typeof st.ino === "bigint") st.ino = 1n;
+          else st.ino = 1;
+          if (reusedIdentity.equalTimes) {
+            st.ctimeMs = typeof st.ctimeMs === "bigint" ? 1n : 1;
+            st.birthtimeMs = typeof st.birthtimeMs === "bigint" ? 1n : 1;
+            if ("ctimeNs" in st) st.ctimeNs = 1n;
+            if ("birthtimeNs" in st) st.birthtimeNs = 1n;
+          }
+        }
+      }
+      return st;
+    },
+  };
+});
 
 const TOKEN = "per-launch-secret";
 const ORIGIN = "https://hub.example.ts.net:8456";
@@ -28,6 +56,9 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3
 
 const cleanups: Array<() => unknown> = [];
 afterEach(async () => {
+  reusedIdentity.socketPath = "";
+  reusedIdentity.inodes.clear();
+  reusedIdentity.equalTimes = false;
   for (const c of cleanups.splice(0).toReversed()) await c();
 });
 
@@ -473,27 +504,59 @@ describe("phone socket", () => {
     expect((await req(s.phoneSocket, "/")).status).toBe(200);
   });
 
-  it("two starts that both find the same stale socket: exactly one binds, and the path reaches it", async () => {
+  it("RJ equal identity: never removes a live socket with reused inode and equal timestamps", async () => {
+    const fx = fixture(); await staleSocket(fx);
+    reusedIdentity.socketPath = fx.socketPath; reusedIdentity.equalTimes = true;
+    const before = lstatSync(fx.socketPath,{bigint:true});
+    const winner = createHttpServer((_q,r)=>r.end("winner"));
+    const loser = createHttpServer((_q,r)=>r.end("loser"));
+    cleanups.push(()=>new Promise(resolve=>loser.close(resolve)));
+    cleanups.push(()=>new Promise(resolve=>winner.close(resolve)));
+    const attempt = listenOwnerSocket(loser,fx.socketPath,{afterRefusedProbe:async()=>{
+      rmSync(fx.socketPath);
+      await withUmask(0o177,()=>new Promise<void>(resolve=>winner.listen(fx.socketPath,resolve)));
+      const after = lstatSync(fx.socketPath,{bigint:true});
+      expect([after.ino,after.ctimeNs,after.birthtimeNs]).toEqual([before.ino,before.ctimeNs,before.birthtimeNs]);
+    }});
+    await expect(attempt).rejects.toThrow(/already listening/);
+    expect((await req(fx.socketPath,"/")).body).toBe("winner");
+    expect(loser.listening).toBe(false);
+  });
+
+  it.each(["exit", "kill"])("RJ socket lease: excludes a live process and recovers after %s", async (mode) => {
+    const fx = fixture();
+    const script = `import {createServer} from "node:http"; import {listenOwnerSocket} from ${JSON.stringify(path.resolve("apps/server/src/web/socket.ts"))}; const server=createServer((_q,r)=>r.end("child")); await listenOwnerSocket(server,${JSON.stringify(fx.socketPath)}); process.stdin.once("data",()=>process.exit(0)); console.log("ready");`;
+    const child = spawn(process.execPath,["--input-type=module","-e",script],{stdio:["pipe","pipe","inherit"]});
+    const exited = new Promise<void>(resolve=>child.once("exit",()=>resolve()));
+    cleanups.push(async()=>{ if (child.exitCode===null && child.signalCode===null) child.kill("SIGKILL"); await exited; });
+    await new Promise<void>((resolve,reject)=>{ child.stdout.once("data",()=>resolve()); child.once("error",reject); child.once("exit",()=>reject(new Error("socket child ended before readiness"))); });
+    const lock = `${fx.socketPath}.lock`;
+    expect(existsSync(lock)).toBe(true);
+    await expect(startRaw(fx)).rejects.toThrow(/locked by another starter/);
+    expect((await req(fx.socketPath,"/")).body).toBe("child");
+    if (mode==="exit") child.stdin.end("exit"); else child.kill("SIGKILL");
+    await exited;
+    expect(existsSync(lock)).toBe(mode==="kill");
+    if (mode==="kill") expect(lstatSync(fx.socketPath).isSocket()).toBe(true);
+    const server = await startRaw(fx);
+    try { expect((await req(fx.socketPath,"/")).status).toBe(200); }
+    finally { await server.close(); }
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it.each([false, true])("two starts that both find the same stale socket: exactly one binds, and the path reaches it (reused inode: %s)", async (reuseInode) => {
     const fx = fixture();
     await staleSocket(fx);
-    // The interleaving that lets the second start remove the first's new
-    // socket: both probes are refused by the dead one, the first unlinks and
-    // binds, then the second goes on from its probe, and only once it has
-    // finished does the first make its own after-bind check.
-    const secondProbed = gate();
-    const firstBound = gate();
+    if (reuseInode) reusedIdentity.socketPath = fx.socketPath;
+    reusedIdentity.equalTimes = reuseInode;
+    // Hold the first starter inside cleanup while the second tries to
+    // enter. Only the lease owner may probe or unlink the stale socket.
+    const firstProbed = gate();
     const secondDone = gate();
     const firstHooks: SocketTestHooks = {
-      afterRefusedProbe: () => secondProbed.promise,
-      afterBind: () => {
-        firstBound.resolve();
-        return secondDone.promise;
-      },
-    };
-    const secondHooks: SocketTestHooks = {
       afterRefusedProbe: () => {
-        secondProbed.resolve();
-        return firstBound.promise;
+        firstProbed.resolve();
+        return secondDone.promise;
       },
     };
     const servers = ["first", "second"].map((name) => {
@@ -501,18 +564,18 @@ describe("phone socket", () => {
       cleanups.push(() => new Promise((resolve) => s.close(resolve)));
       return s;
     });
-    const results = await Promise.allSettled([
-      listenOwnerSocket(servers[0] as Server, fx.socketPath, firstHooks),
-      listenOwnerSocket(servers[1] as Server, fx.socketPath, secondHooks).finally(() => secondDone.resolve()),
-    ]);
+    const first = listenOwnerSocket(servers[0] as Server, fx.socketPath, firstHooks);
+    await firstProbed.promise;
+    const results = await Promise.allSettled([first, listenOwnerSocket(servers[1] as Server, fx.socketPath).finally(() => secondDone.resolve())]);
     expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected"]);
-    expect(String((results[1] as PromiseRejectedResult).reason)).toMatch(/changed while it was being checked/);
+    expect(String((results[1] as PromiseRejectedResult).reason)).toMatch(/locked by another starter/);
     expect(servers[1]?.listening).toBe(false);
     expect((await req(fx.socketPath, "/")).body).toBe("first");
   });
 
-  it("refuses to run when the path is no longer the socket it bound, and leaves the other socket alone", async () => {
+  it.each([false, true])("refuses to run when the path is no longer the socket it bound, and leaves the other socket alone (reused inode: %s)", async (reuseInode) => {
     const fx = fixture();
+    if (reuseInode) reusedIdentity.socketPath = fx.socketPath;
     mkdirSync(fx.runDir, { mode: 0o700 });
     const other = createServer((c) => c.on("error", () => undefined).end("other\n"));
     cleanups.push(() => new Promise((resolve) => other.close(resolve)));

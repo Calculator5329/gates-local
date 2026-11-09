@@ -1,16 +1,7 @@
 // Waiting for the app to close before the detached updater touches the
-// checkout. process.kill(pid, 0) sends nothing: it only asks whether the
-// process exists, on Linux and Windows alike.
-
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    // EPERM: it exists but belongs to someone else.
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
+// checkout. An exited process awaiting reaping is already closed.
+import { processAlive as isAlive } from "../process-state.ts";
+export { isAlive };
 
 export interface WaitOptions {
   readonly timeoutMs: number;
