@@ -235,10 +235,15 @@ async function hydrate(c: Client): Promise<void> {
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
     c.subscribe(channel, (p) => dispatch(channel, () => handler(p)));
   c.subscribe("settings.changed", ({ voiceChange, ...settings }) => {
-    // Capture provenance at receipt. Replaying a buffered push must not
-    // reclassify an older local save after its response has settled.
+    // Apply intent ordering at receipt, before a pending health check can
+    // finish. Only the settings themselves wait behind hydration snapshots.
     const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
-    dispatch("settings.changed", () => applySettings(settings, false, voiceChange, own));
+    const current = getState().settings;
+    const previousUrl = current === NA ? undefined : current?.whisperUrl;
+    if (!own && (voiceChange !== undefined || previousUrl !== settings.whisperUrl)) {
+      setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+    }
+    dispatch("settings.changed", () => applySettings(settings, false, true));
   });
   try {
     await hydrateWith(on, release);
@@ -408,9 +413,9 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
 // closing the connection retires any unmatched saves.
 const voiceWrites = new Set<string>();
 
-function applySettings(settings: Settings, first = false, voiceChange?: string, own = false): void {
+function applySettings(settings: Settings, first = false, preserveVoiceIntent = false): void {
   setState((s) => ({ ...settingsPatch(s, settings, first),
-    ...(voiceChange === undefined ? {} : { voiceConnectionVersion: s.voiceConnectionVersion + Number(!own) }),
+    ...(preserveVoiceIntent ? { voiceConnectionVersion: s.voiceConnectionVersion } : {}),
   }));
   applyTheme(settings.theme);
   applyTextSize(settings.textSize);
@@ -1470,7 +1475,7 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
     const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what);
     if (!r.ok) return r.message;
     saved = true;
-    applySettings(r.value, false, voiceChange, true);
+    applySettings(r.value, false, voiceChange !== undefined);
     // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
     if ("imageGen" in patch || "comfyUrl" in patch) {
       void probe("image.status", {}).then((imageStatus) => {

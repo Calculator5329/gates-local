@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-09: Cancel pending speech connections when a foreign save arrives
+
+A Disconnect received during reconnect now invalidates older Connect checks
+immediately, while its settings still wait for hydration. Replaying those
+settings does not cancel a Connect started after the foreign save arrived.
+
 ## 2026-11-09: Preserve speech connection choices while reconnecting
 
 An older Disconnect push buffered during reconnect no longer cancels a newer

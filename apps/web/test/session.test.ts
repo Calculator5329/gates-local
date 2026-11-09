@@ -115,10 +115,11 @@ it.each([
     }
     if (step === "foreign") b.server.push("settings.changed", { ...disconnected, voiceChange: "other-window-disconnect" });
   }
-  expect(store.getState().voiceConnectionVersion).toBe(latest);
+  const afterReceipt = latest + Number(steps.includes("foreign"));
+  expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
   hydration.respond(MODELS);
   await until(hydrated, 2000, "hydration replay"); await tick();
-  expect(store.getState().voiceConnectionVersion).toBe(latest + Number(steps.includes("foreign")));
+  expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);
 });
 
 /** Send "hi" from a new thread and wait until chat.send answered turn-1. */
