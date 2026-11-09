@@ -130,9 +130,8 @@ that contains the six-syllable word, including an echo of the earlier prompt.
 ## Informational browser performance
 
 `pnpm build`, the performance spec and the comparison report share the soft
-gzip targets in `test/bundle-size.ts`: entry JS 133.50 KiB (including HTML
-preloads), all emitted JS 171.65 KiB, startup CSS 13 KiB, and total
-CSS 15 KiB. Startup CSS comes from stylesheet and style-preload links
+gzip targets in `test/bundle-size.ts` for entry JS (including HTML
+preloads), all emitted JS, startup CSS and total CSS. Startup CSS comes from stylesheet and style-preload links
 in the built HTML, with each request URL counted once, not from a filename
 pattern. Different query strings count separately; fragments do not.
 Total CSS sums every emitted stylesheet, including deferred screens. The build

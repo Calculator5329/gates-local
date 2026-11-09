@@ -13,7 +13,8 @@ ref. Refresh that ref first. It clones into a new cache directory with a
 fresh home and configuration, checks out the exact commit, installs with
 `--frozen-lockfile`, runs `pnpm verify`, builds the web client with
 `pnpm build`, then runs Playwright's blocking `e2e` project.
-Every functional test and deterministic JS/CSS size budget blocks.
+Every functional test blocks. JS and CSS sizes are reported against soft
+targets and never block; a size that can't be measured still fails.
 A failed blocking command, missing browser report or zero executed
 unit/browser tests fails the release.
 

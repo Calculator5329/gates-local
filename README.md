@@ -303,7 +303,7 @@ download.
 
 ```sh
 pnpm verify        # typecheck, lint and unit tests
-pnpm e2e           # functional browser journeys and size budgets against a fake Ollama
+pnpm e2e           # functional browser journeys and reported bundle sizes against a fake Ollama
 pnpm e2e:timing    # wall-clock measurements against unchanged timing budgets
 pnpm shots:readme  # regenerate the images in docs/screenshots
 ```
@@ -332,7 +332,8 @@ has, unless `GATES_LOCAL_CHROMIUM` names another browser.
 Releases are tested from a fresh public clone on a release machine before
 tagging. See [docs/releasing.md](docs/releasing.md) for the commands and report.
 Timing results are advisory for releases because host speed changes them;
-`pnpm e2e` keeps every functional test and deterministic size budget blocking.
+`pnpm e2e` keeps every functional test blocking, and bundle sizes are reported
+against soft targets without blocking.
 
 The screenshots use demo threads and a pinned clock and time zone, so a
 rerun gives the same images.
