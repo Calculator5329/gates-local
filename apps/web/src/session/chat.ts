@@ -17,6 +17,7 @@ declare global {
 }
 
 interface ChatEffects {
+  readonly applyServerEvent: typeof setState;
   readonly call: <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
   readonly codeOf: (error: unknown) => string;
   readonly createThread: (content: string, model: string | undefined) => Promise<string | null>;
@@ -84,22 +85,6 @@ export function cancelStopAsk(): void {
   setState({ stopAsk: null });
 }
 
-/** A saved user message confirms its exact copy; edited words already have a new identity. */
-function confirmCopy(message: Message): void {
-  setState(s => {
-    const queued = s.queued.find(q => q.messageId === message.id);
-    const editing = queued !== undefined && queued.id === s.editingQueued;
-    const draft = s.draftSendId === message.id && s.draftSendThreadId === message.threadId;
-    const ask = s.stopAsk?.messageId === message.id;
-    if (!queued && !draft && !ask) return {};
-    return {
-      ...(queued ? { queued: s.queued.filter(q => q.messageId !== message.id) } : {}),
-      ...(editing ? { editingQueued: null } : {}),
-      ...(draft ? { draft: "", draftImages: [], draftSendId: null } : {}),
-      ...(ask ? { stopAsk: null } : {}),
-    };
-  });
-}
 
 function elsewhereNotice(s: State, threadId: string): string {
   const title = s.threads.find((t) => t.id === threadId)?.title;
@@ -127,14 +112,6 @@ function refusal(code: string, model: string, where: "box" | "queue" | null): st
   }
 }
 
-/** A late terminal must leave a newer turn in the same thread marked. */
-function clearRunning(threadId: string, turnId: string | undefined): void {
-  const active = getState().runningTurns;
-  if (turnId === undefined || active[threadId] !== turnId) return;
-  const runningTurns = { ...active };
-  delete runningTurns[threadId];
-  setState({ runningTurns });
-}
 
 /** Retry stays off while a stopped turn has not ended on the server: the server refuses a second turn in a thread, and the old turn's events must not land on the new one. */
 export function canRetry(s: State): boolean {
@@ -192,7 +169,33 @@ interface TurnOptions {
 }
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
-export function createChat({ call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor, invalidateFits }: ChatEffects) {
+export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor, invalidateFits }: ChatEffects) {
+  /** A late terminal must leave a newer turn in the same thread marked. */
+  function clearRunning(threadId: string, turnId: string | undefined): void {
+    const active = getState().runningTurns;
+    if (turnId === undefined || active[threadId] !== turnId) return;
+    const runningTurns = { ...active };
+    delete runningTurns[threadId];
+    applyServerEvent({ runningTurns });
+  }
+
+  /** A saved user message confirms its exact copy; edited words already have a new identity. */
+  function confirmCopy(message: Message): void {
+    applyServerEvent(s => {
+      const queued = s.queued.find(q => q.messageId === message.id);
+      const editing = queued !== undefined && queued.id === s.editingQueued;
+      const draft = s.draftSendId === message.id && s.draftSendThreadId === message.threadId;
+      const ask = s.stopAsk?.messageId === message.id;
+      if (!queued && !draft && !ask) return {};
+      return {
+        ...(queued ? { queued: s.queued.filter(q => q.messageId !== message.id) } : {}),
+        ...(editing ? { editingQueued: null } : {}),
+        ...(draft ? { draft: "", draftImages: [], draftSendId: null } : {}),
+        ...(ask ? { stopAsk: null } : {}),
+      };
+    });
+  }
+
   const perf: NonNullable<Window["glPerf"]> = { deltas: 0, flushes: 0 };
   window.glPerf = perf;
 
@@ -361,7 +364,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     // A partial is not the whole history of a chat this client never opened.
     if (getState().messages[threadId] === undefined && !loading(threadId)) void loadThread(threadId);
     noteMessage(threadId, msg);
-    setState((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
+    applyServerEvent((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
   }
 
   /** Sends Stop reached before the server gave them an id: the live slot that showed it may belong to another chat by the time the answer comes. */
@@ -391,7 +394,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
       if (r.replayed) {
         parked = parked.filter(turn => turn.gen !== gen);
         noteMessage(threadId, r.userMessage);
-        setState(st => ({ messages: withMessage(st, threadId, r.userMessage), notice: "Your message was already sent. It was not sent again.", ...(st.live?.gen === gen ? { live: null } : {}) }));
+        applyServerEvent(st => ({ messages: withMessage(st, threadId, r.userMessage), notice: "Your message was already sent. It was not sent again.", ...(st.live?.gen === gen ? { live: null } : {}) }));
         replayEarly();
         await loadThread(threadId, true);
         flushQueued();
@@ -402,7 +405,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
         // the person moved on before the id came, and another chat's turn took the slot: this one runs on behind it
         parked[away] = { ...(parked[away] as LiveTurn), turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null };
         noteMessage(threadId, r.userMessage);
-        setState((st) => ({ messages: withMessage(st, threadId, r.userMessage) }));
+        applyServerEvent((st) => ({ messages: withMessage(st, threadId, r.userMessage) }));
         const theirs = early.filter((p) => p.turnId === r.turnId);
         early = early.filter((p) => p.turnId !== r.turnId);
         for (const p of theirs) turnEvent(p);
@@ -411,7 +414,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
       const now = getState().live;
       const mine = now !== null && now.gen === gen;
       noteMessage(threadId, r.userMessage);
-      setState((st) => ({
+      applyServerEvent((st) => ({
         messages: withMessage(st, threadId, r.userMessage),
         ...(st.live !== null && st.live.gen === gen ? { live: { ...st.live, turnId: r.turnId, userMessageId: r.userMessage.id, pendingUser: null } } : {}),
       }));
@@ -462,7 +465,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && (from !== undefined || where !== "queue") ? { ...out, threadId, blocking } : null;
     const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, at: Date.now(), waitFor: "reply", model, held: true };
     const consented = ask !== null && stopOthersOk();
-    setState({
+    applyServerEvent({
       ...(owner === null ? {} : { live: halted ? { ...owner, pendingUser: null, ending: undefined } : null }),
       ...(where === "box" ? { draft: content, draftImages: images, draftSendId: messageId ?? null, draftSendThreadId: threadId } : {}),
       ...(where === "queue" ? { queued: from === undefined ? [...st.queued, typed] : putBack(st.queued, from) } : {}),
@@ -513,9 +516,9 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     flushDeltas();
     // the words of a turn behind another chat stop too; the next visit to its thread reloads what was saved
     parked = [];
-    setState({ runningTurns: {} });
+    applyServerEvent({ runningTurns: {} });
     // the old socket's terminal events will not come; a stopped turn stops waiting for them
-    setState((s) =>
+    applyServerEvent((s) =>
       s.live === null
         ? {}
         : s.live.end === undefined
@@ -540,7 +543,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     pendText = "";
     pendThinking = "";
     perf.flushes++;
-    setState((s) => {
+    applyServerEvent((s) => {
       if (s.live === null || s.live.end !== undefined) return {};
       const now = Date.now();
       const l = s.live;
@@ -575,7 +578,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     if (event.type === "start") confirmCopy(event.userMessage);
     const active = getState().runningTurns;
     if (event.type === "start" && !oldTurns.has(turnId) && active[threadId] !== turnId) {
-      setState({ runningTurns: { ...active, [threadId]: turnId } });
+      applyServerEvent({ runningTurns: { ...active, [threadId]: turnId } });
     } else if (event.type === "done" || event.type === "error") clearRunning(threadId, turnId);
     turnEvent(p);
   }
@@ -598,17 +601,17 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     if (away >= 0) return parkedEvent(away, event);
     if (!ours) return otherTurn(p);
     // the stopped turn has ended on the server: Retry may send again
-    if (terminal && live.ending) setState((s) => (s.live?.gen === live.gen ? { live: { ...s.live, ending: undefined } } : {}));
+    if (terminal && live.ending) applyServerEvent((s) => (s.live?.gen === live.gen ? { live: { ...s.live, ending: undefined } } : {}));
     switch (event.type) {
       case "start":
         noteMessage(threadId, event.userMessage);
-        return setState((s) => ({ messages: withMessage(s, threadId, event.userMessage),
+        return applyServerEvent((s) => ({ messages: withMessage(s, threadId, event.userMessage),
           ...(s.live?.end?.kind === "error" && s.live.end.code === "closed"
             ? { live: { ...s.live, end: undefined, text: "", thinking: "", tools: [] } } : {}),
         }));
       case "delta": {
         const contextNotice = event.contextNotice;
-        if (contextNotice) setState(s => s.live ? { live: { ...s.live, contextNotice } } : {});
+        if (contextNotice) applyServerEvent(s => s.live ? { live: { ...s.live, contextNotice } } : {});
         if (event.text !== "") queueDelta("text", event.text);
         return;
       }
@@ -616,19 +619,19 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
         return queueDelta("thinking", event.text);
       case "tool":
         flushDeltas();
-        return setState((s) => (s.live ? { live: { ...s.live, tools: upsertStep(s.live.tools, event.step) } } : {}));
+        return applyServerEvent((s) => (s.live ? { live: { ...s.live, tools: upsertStep(s.live.tools, event.step) } } : {}));
       case "done": {
         // the saved message has every word: drop the waiting ones instead of
         // publishing them a moment before the row that replaces them (W-09)
         if (window.glPerf?.terminalFlush === true) {
           perf.flushes++;
-          setState((s) => ({ live: s.live === null ? null : { ...s.live } }));
+          applyServerEvent((s) => ({ live: s.live === null ? null : { ...s.live } }));
         }
         const firstWordsWaiting = pendText !== "";
         dropDeltas();
         const msg = event.message;
         noteMessage(threadId, msg);
-        setState((s) => {
+        applyServerEvent((s) => {
           const l = s.live;
           const firstAt = l?.firstTokenAt ?? (firstWordsWaiting ? Date.now() : undefined);
           const ft = l !== null && firstAt !== undefined ? { [msg.id]: firstAt - l.startedAt } : {};
@@ -645,11 +648,11 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
       case "error": {
         flushDeltas();
         const contextNotice = event.contextNotice;
-        if (contextNotice) setState(s => s.live ? { live: { ...s.live, contextNotice } } : {});
+        if (contextNotice) applyServerEvent(s => s.live ? { live: { ...s.live, contextNotice } } : {});
         holdQueue(threadId);
         const why = stopReason(event);
         if (event.code === "cancelled") {
-          setState((s) =>
+          applyServerEvent((s) =>
             s.live && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs: Math.round((Date.now() - s.live.startedAt) / 1000) } } } : {},
           );
         } else if (event.partial !== undefined) {
@@ -657,9 +660,9 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
           dropDeltas();
           const { partial } = event;
           noteMessage(threadId, partial);
-          setState((s) => ({ messages: withMessage(s, threadId, partial), live: null, ...(why === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: why } }) }));
+          applyServerEvent((s) => ({ messages: withMessage(s, threadId, partial), live: null, ...(why === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: why } }) }));
         } else {
-          setState((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: why ?? event.message } } } : {}));
+          applyServerEvent((s) => (s.live ? { live: { ...s.live, end: { kind: "error", code: event.code, message: why ?? event.message } } } : {}));
         }
         flushQueued();
         return;
@@ -705,7 +708,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     if (partial !== undefined) noteMessage(threadId, partial);
     const why = stopReason(event) ?? "The reply didn't finish.";
     const on = partial?.id ?? userMessageId;
-    setState((s) => ({
+    applyServerEvent((s) => ({
       ...(partial !== undefined && s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),
       ...(on === undefined ? {} : { stopNotes: { ...s.stopNotes, [on]: why } }),
     }));
@@ -735,7 +738,7 @@ export function createChat({ call, codeOf, createThread, creatingDraft, loadThre
     const start = Date.now();
     const turn: LiveTurn = { gen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: start, thinking: "", text: "", tools: [], pendingUser: null };
     if (!adopt) parked.push(turn);
-    setState((st) => ({
+    applyServerEvent((st) => ({
       ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
       ...(adopt
         ? { live: turn }

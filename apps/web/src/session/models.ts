@@ -7,6 +7,7 @@ type Request = <M extends MethodName>(method: M, params: Params<M>) => Promise<R
 type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
 type Probe = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M> | typeof NA | undefined>;
 interface ModelEffects {
+  readonly applyServerEvent: typeof setState;
   readonly call: Request;
   readonly probe: Probe;
   readonly act: Act;
@@ -47,7 +48,7 @@ export function modelChoice(s: State): ModelDecision {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
-export function createModels({ call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued, hasParkedModel, blockingFor }: ModelEffects) {
+export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued, hasParkedModel, blockingFor }: ModelEffects) {
   const modelsOrder = newestOnly();
   const runtimeOrder = newestOnly();
   // A catalog asked before a later models.changed describes the list before it: only the newest lands.
@@ -60,14 +61,14 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
     if (getState().catalog === NA) return;
     const ticket = catalogOrder.next();
     const catalog = await probe("models.catalog", {});
-    if (catalog !== undefined && catalogLands(ticket)) setState({ catalog });
+    if (catalog !== undefined && catalogLands(ticket)) applyServerEvent({ catalog });
   }
 
   async function refreshModels(): Promise<void> {
     const ticket = modelsOrder.next();
     const models = await call("models.refresh", {}).catch(() => undefined);
     if (models === undefined || !modelsOrder.current(ticket)) return;
-    setState((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
+    applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
     invalidateFits();
@@ -96,10 +97,10 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
     const tag = name.trim();
     if (tag === "") return null;
     const queued = { name: tag, state: "queued", completedBytes: 0 } satisfies Payload<"models.pull">;
-    setState((s) => ({ pulls: { ...s.pulls, [tag]: queued } }));
+    applyServerEvent((s) => ({ pulls: { ...s.pulls, [tag]: queued } }));
     const r = await act("models.pull", { name: tag }, `start downloading ${tag}`);
     if (r.ok) return null;
-    setState((s) => {
+    applyServerEvent((s) => {
       if (s.pulls[tag] !== queued) return {}; // A push or newer attempt already owns the row.
       const { [tag]: _gone, ...pulls } = s.pulls;
       return { pulls };
@@ -111,7 +112,7 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
     const r = await act("models.cancelPull", { name }, `cancel the download of ${name}`);
     // a cancel the server never heard leaves the download running, and its row stays
     if (!r.ok) return r.message;
-    setState((s) => {
+    applyServerEvent((s) => {
       const { [name]: _gone, ...pulls } = s.pulls;
       return { pulls };
     });
@@ -132,7 +133,7 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
    */
   async function recheckRuntime(): Promise<void> {
     const runtime = await call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e))).catch(() => undefined);
-    if (runtime !== undefined) setState({ runtime });
+    if (runtime !== undefined) applyServerEvent({ runtime });
     await refreshModels();
   }
 
@@ -140,7 +141,7 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
       // A list asked before the change describes the runtime before it (MP2-02); ask again.
       modelsOrder.next();
       runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
-      setState({ runtime });
+      applyServerEvent({ runtime });
       if (runtime.state === "ready") {
         invalidateFits();
         flushQueued();
@@ -156,7 +157,7 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
         const old = previous?.find(p => p.name === m.name);
         return !old || old.digest !== m.digest || old.sizeBytes !== m.sizeBytes || old.maxContext !== m.maxContext;
       });
-      setState((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
+      applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
       restoreSaved();
       chooseModel();
       if (filesChanged) invalidateFits();
@@ -167,12 +168,12 @@ export function createModels({ call, probe, act, isNA, restoreSaved, invalidateF
   }
 
   function pullChanged(p: Payload<"models.pull">): void {
-      setState((s) => ({ pulls: settlePulls({ ...s.pulls, [p.name]: p }, s.models) }));
+      applyServerEvent((s) => ({ pulls: settlePulls({ ...s.pulls, [p.name]: p }, s.models) }));
       if (p.state === "done") void refreshModels();
   }
 
   function loadChanged(l: Payload<"models.load">): void {
-      setState((s) => ({ loads: { ...s.loads, [l.model]: l } }));
+      applyServerEvent((s) => ({ loads: { ...s.loads, [l.model]: l } }));
       // a failed load may have freed what it took, so it changes memory too
       if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits(false);
   }

@@ -5,6 +5,7 @@ import { choosable, newestOnly } from "../pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../store.ts";
 
 interface ThreadEffects {
+  readonly applyServerEvent: typeof setState;
   readonly call: <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
   readonly codeOf: (error: unknown) => string;
   readonly failure: (what: string, error: unknown, todo?: string) => string;
@@ -20,13 +21,6 @@ export function sortThreads<T extends { updatedAt: number }>(threads: readonly T
   return threads.toSorted((a, b) => b.updatedAt - a.updatedAt);
 }
 
-function setLoadError(threadId: string, message: string | null): void {
-  if ((getState().loadErrors[threadId] ?? null) === message) return;
-  setState((s) => {
-    const { [threadId]: _old, ...rest } = s.loadErrors;
-    return { loadErrors: message === null ? rest : { ...rest, [threadId]: message } };
-  });
-}
 
 function upsertMessage(list: readonly Message[], msg: Message): readonly Message[] {
   const i = list.findIndex((m) => m.id === msg.id);
@@ -71,7 +65,15 @@ export function threadMarkdown(threadId: string, messages: readonly Message[]): 
 }
 
 /** Navigation and RPC operations are wired by session.ts; history guards stay with their loads. */
-export function createThreads({ call, codeOf, failure, openThread, newThread, navigationGeneration, pendingSettings }: ThreadEffects) {
+export function createThreads({ applyServerEvent, call, codeOf, failure, openThread, newThread, navigationGeneration, pendingSettings }: ThreadEffects) {
+  function setLoadError(threadId: string, message: string | null): void {
+    if ((getState().loadErrors[threadId] ?? null) === message) return;
+    applyServerEvent((s) => {
+      const { [threadId]: _old, ...rest } = s.loadErrors;
+      return { loadErrors: message === null ? rest : { ...rest, [threadId]: message } };
+    });
+  }
+
   // A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
   const threadsOrder = newestOnly();
 
@@ -99,7 +101,7 @@ export function createThreads({ call, codeOf, failure, openThread, newThread, na
     const ticket = threadsOrder.next();
     const threads = await call("threads.list", {}).catch(() => undefined);
     if (threads === undefined || !threadsOrder.current(ticket)) return;
-    setState((s) => {
+    applyServerEvent((s) => {
       const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
       const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
       return { threads: sortThreads(threads), threadModels, ...(s.view === "thread" && !open ? { view: "new" as const, threadId: null } : {}) };
@@ -124,7 +126,7 @@ export function createThreads({ call, codeOf, failure, openThread, newThread, na
       landed.set(threadId, req.seq);
       stale.delete(threadId);
       const messages = req.since.reduce(upsertMessage, snapshot);
-      setState((s) => ({
+      applyServerEvent((s) => ({
         messages: { ...s.messages, [threadId]: messages },
         ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
         ...savedModel(s, threadId, messages),
@@ -139,7 +141,7 @@ export function createThreads({ call, codeOf, failure, openThread, newThread, na
       setLoadError(threadId, failure("load this conversation", e));
       // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts, loaded or still loading)
       const s = getState();
-      if (codeOf(e) === "thread-not-found" && nav === navigationGeneration() && pendingSettings() === null && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
+      if (codeOf(e) === "thread-not-found" && nav === navigationGeneration() && pendingSettings() === null && s.view === "thread" && s.threadId === threadId) applyServerEvent({ view: "new", threadId: null });
     } finally {
       loads.delete(req);
     }
@@ -170,7 +172,7 @@ export function createThreads({ call, codeOf, failure, openThread, newThread, na
   async function deleteThread(threadId: string): Promise<void> {
     await call("threads.delete", { threadId }).catch(() => undefined);
     threadsOrder.next();
-    setState((s) => {
+    applyServerEvent((s) => {
       const { [threadId]: _gone, ...messages } = s.messages;
       const { [threadId]: _model, ...threadModels } = s.threadModels;
       const { [threadId]: _error, ...loadErrors } = s.loadErrors;
@@ -189,11 +191,11 @@ export function createThreads({ call, codeOf, failure, openThread, newThread, na
       // Its history is known empty, so loadThread never runs for it: record the model it starts on here.
       const own = model === undefined ? {} : { threadModels: { ...getState().threadModels, [t.id]: model } };
       threadsOrder.next();
-      setState((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
+      applyServerEvent((st) => ({ threads: sortThreads([t, ...st.threads.filter((x) => x.id !== t.id)]), messages: { ...st.messages, [t.id]: [] }, ...own }));
       openThread(t.id);
       return t.id;
     } catch {
-      setState({ notice: "The message didn't send. Gates Local isn't answering; your words are still in the composer." });
+      applyServerEvent({ notice: "The message didn't send. Gates Local isn't answering; your words are still in the composer." });
       return null;
     } finally { creatingDrafts.delete(version); }
   }

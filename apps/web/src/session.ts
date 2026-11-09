@@ -11,6 +11,7 @@ import {
 import { modelChoice as pickChoice, newestOnly } from "./pick.ts";
 import { NA, type State, getState, setState } from "./store.ts";
 import { createChat } from "./session/chat.ts";
+import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
 import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
 import { createFit, staleFitReports, staleFitStatus } from "./session/fit.ts";
@@ -26,29 +27,9 @@ export { type ActionResult, failure, isNA } from "./session/connection.ts";
 export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, updateAndRestart } from "./session/platform.ts";
 export { threadFromHash } from "./session/navigation.ts";
 
-const chat = createChat({
-  call: (method, params) => call(method, params), codeOf,
-  createThread: (content, model) => createThread(content, model),
-  creatingDraft: (version) => threadSession.creatingDraft(version),
-  loadThread: (threadId, force) => loadThread(threadId, force),
-  loading: (threadId) => loading(threadId),
-  noteMessage: (threadId, message) => noteMessage(threadId, message), withMessage,
-  untrackedDone: (threadId, message) => untrackedDone(threadId, message),
-  openThread: (threadId) => openThread(threadId), blockingFor, invalidateFits: (hideOld) => invalidateFits(hideOld),
-});
-export const { send, confirmStopAsk, repliesInProgress, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
-const { onChatEvent, lostTurn, bringBack, flushQueued } = chat;
+export const applyServerEvent = createServerState(getState, setState);
 
-const threadSession = createThreads({
-  call: (method, params) => call(method, params), codeOf, failure,
-  openThread: (threadId) => openThread(threadId), newThread: () => newThread(),
-  navigationGeneration: () => navigation.generation,
-  pendingSettings: () => navigation.pendingSettings,
-});
-export const { reloadThread, renameThread, deleteThread } = threadSession;
-const { refreshThreads, noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
-
-const connection = createConnection({
+const connection = createConnection({ applyServerEvent,
   serverUrl, webServerUrl, desktopBridge: () => window.gatesLocal, hydrate,
   beforeDisconnect: () => markFitsStale(),
   afterDisconnect: () => {
@@ -59,18 +40,40 @@ const connection = createConnection({
 export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
 
-const fitSession = createFit({ call, blockingFor, isStopped: () => connection.stopped });
+const threadSession = createThreads({ applyServerEvent,
+  call, codeOf, failure,
+  openThread: (threadId) => openThread(threadId), newThread: () => newThread(),
+  navigationGeneration: () => navigation.generation,
+  pendingSettings: () => navigation.pendingSettings,
+});
+export const { reloadThread, renameThread, deleteThread } = threadSession;
+const { refreshThreads, noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
+
+const fitSession = createFit({ applyServerEvent, call, blockingFor, isStopped: () => connection.stopped });
 export const { currentFit, fitIsCurrent, ensureFit } = fitSession;
 const { markFitsStale, invalidateFits } = fitSession;
 
-const modelsSession = createModels({
+const chat = createChat({ applyServerEvent,
+  call, codeOf,
+  createThread,
+  creatingDraft: threadSession.creatingDraft,
+  loadThread,
+  loading,
+  noteMessage, withMessage,
+  untrackedDone,
+  openThread: (threadId) => openThread(threadId), blockingFor, invalidateFits,
+});
+export const { send, confirmStopAsk, repliesInProgress, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
+const { onChatEvent, lostTurn, bringBack, flushQueued } = chat;
+
+const modelsSession = createModels({ applyServerEvent,
   call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued,
-  hasParkedModel: (model) => chat.hasParkedModel(model), blockingFor,
+  hasParkedModel: chat.hasParkedModel, blockingFor,
 });
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
 
-const settingsSession = createSettings({ act, applyTheme, applyTextSize, refreshImageStatus: probeImageStatus });
+const settingsSession = createSettings({ applyServerEvent, act, applyTheme, applyTextSize, refreshImageStatus: probeImageStatus });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
@@ -90,19 +93,19 @@ async function hydrate(c: Client): Promise<void> {
   const waiting: Array<() => void> = [];
   const release = (next: ReadonlySet<Channel> | "none") => {
     held = next;
-    for (const run of waiting.splice(0)) run();
+    for (const run of waiting.splice(0)) applyServerEvent(run);
   };
   const dispatch = (channel: Channel, run: () => void) => {
     if (held === "all" || (held !== "none" && held.has(channel))) waiting.push(run);
-    else run();
+    else applyServerEvent(run);
   };
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
-    c.subscribe(channel, (p) => dispatch(channel, () => handler(p)));
-  c.subscribe("settings.changed", (payload) => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run)));
-  c.subscribe("image.status", (imageStatus) => {
+    c.subscribe(channel, (p) => applyServerEvent(() => dispatch(channel, () => handler(p))));
+  c.subscribe("settings.changed", (payload) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run))));
+  c.subscribe("image.status", (imageStatus) => applyServerEvent(() => {
     imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
-    dispatch("image.status", () => setState({ imageStatus }));
-  });
+    dispatch("image.status", () => applyServerEvent({ imageStatus }));
+  }));
   try {
     await hydrateWith(on, release);
   } finally {
@@ -121,7 +124,7 @@ async function hydrateWith(
   on("gpu.changed", fitSession.gpuChanged);
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
-  on("sources.changed", (sources) => setState({ sources }));
+  on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
   });
@@ -146,7 +149,7 @@ async function hydrateWith(
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   markFitsStale();
   settingsSession.noteVoiceSnapshot(settings);
-  setState((s) => {
+  applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
     const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, runningTurns: Object.fromEntries(active.map(({ threadId, turnId }) => [threadId, turnId])), fits: { ...s.fits }, staleFits: staleFitReports(s), fitStatus: staleFitStatus(s), ...withSettings };
@@ -171,7 +174,7 @@ async function hydrateWith(
     probe("image.status", {}),
     probe("update.status", {}),
   ]);
-  setState({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}) });
+  applyServerEvent({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}) });
   release("none");
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
   // Read after the release: a GPU push held behind gpu.status is the newer answer.
@@ -205,7 +208,7 @@ async function blockingFor(model: string, numCtx: number): Promise<readonly Bloc
 function probeImageStatus(): void {
   const ticket = imageOrder.next();
   void probe("image.status", {}).then((imageStatus) => {
-    if (imageStatus !== undefined && imageOrder.current(ticket)) setState({ imageStatus });
+    if (imageStatus !== undefined && imageOrder.current(ticket)) applyServerEvent({ imageStatus });
   });
 }
 
@@ -214,14 +217,14 @@ export async function checkImageStatus(): Promise<ActionResult> {
   const ticket = imageOrder.next();
   const r = await act("image.status", {}, "check ComfyUI");
   if (!r.ok) return r.message;
-  if (imageOrder.current(ticket)) setState({ imageStatus: r.value });
+  if (imageOrder.current(ticket)) applyServerEvent({ imageStatus: r.value });
   return null;
 }
 
 export async function retryImage(threadId: string, prompt: string, retryOf: string): Promise<{ jobId: string } | string> {
   const result = await act("image.generate", { threadId, prompt, retryOf }, "make the image");
   if (!result.ok) return result.message;
-  imageSaved(threadId);
+  applyServerEvent(() => { imageSaved(threadId); });
   return result.value;
 }
 
@@ -260,7 +263,7 @@ export async function checkForUpdates(): Promise<ActionResult> {
   if (getState().updateChecking) return null;
   setState({ updateChecking: true });
   const r = await act("update.check", {}, "check for updates");
-  setState((s) => {
+  applyServerEvent((s) => {
     if (r.ok && s.update !== undefined && s.update !== NA) {
       updateOrder.next(); // A completed check is newer than an in-flight hydration snapshot.
       return { updateChecking: false, update: { ...s.update, lastCheck: r.value } };

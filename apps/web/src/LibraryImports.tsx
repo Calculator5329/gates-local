@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SourceImport, SourceImports } from "@gates-local/contracts";
-import { libraryRequest } from "./session.ts";
+import { applyServerEvent, libraryRequest } from "./session.ts";
 import { Fail, Grp, Row } from "./settings-ui.tsx";
 import { NA, useStore } from "./store.ts";
 import { esc } from "./ui.tsx";
@@ -27,8 +27,8 @@ export default function LibraryImports() {
     const read = async () => {
       if (request.current) return;
       request.current = true;
-      try { const next = await libraryRequest("sources.imports", {}); if (live.current) setValue(next); }
-      catch (e) { if (live.current) setError(e instanceof Error ? e.message : "Couldn't read the available samples. Retry."); }
+      try { const next = await libraryRequest("sources.imports", {}); applyServerEvent(() => { if (live.current) setValue(next); }); }
+      catch (e) { applyServerEvent(() => { if (live.current) setError(e instanceof Error ? e.message : "Couldn't read the available samples. Retry."); }); }
       finally { request.current = false; }
     };
     void read();
@@ -41,13 +41,13 @@ export default function LibraryImports() {
     setPending(key);
     try {
       const job = await action();
-      if (live.current) setValue(v => v && ({ ...v, jobs: [...v.jobs.filter(j => j.id !== job.id && !(j.kind === job.kind && j.key === job.key)), job] }));
-    } catch (e) { if (live.current) setError(e instanceof Error ? e.message : "Couldn't start this import. Retry."); }
+      applyServerEvent(() => { if (live.current) setValue(v => v && ({ ...v, jobs: [...v.jobs.filter(j => j.id !== job.id && !(j.kind === job.kind && j.key === job.key)), job] })); });
+    } catch (e) { applyServerEvent(() => { if (live.current) setError(e instanceof Error ? e.message : "Couldn't start this import. Retry."); }); }
     finally { if (live.current) setPending(undefined); }
   };
   const cancel = async (job: SourceImport) => {
     try { await libraryRequest("sources.cancelImport", { id: job.id }); }
-    catch { if (live.current) setError("Couldn't cancel while disconnected. Retry once Gates Local reconnects."); }
+    catch { applyServerEvent(() => { if (live.current) setError("Couldn't cancel while disconnected. Retry once Gates Local reconnects."); }); }
   };
   const ready = (kind: "sample" | "repository", key: string) => {
     const shownKey = kind === "repository" ? key.replace(/\.git\/?$|\/$/g, "") : key;

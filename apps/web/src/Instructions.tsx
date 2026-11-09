@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { MODEL_CONTROL_BOUNDS, type ModelDefaults, type ModelSettings, type ModelSettingsPatch } from "@gates-local/contracts";
 import { describeModel } from "./format.ts";
-import { call, updateModelSettings, updateSettings } from "./session.ts";
+import { applyServerEvent, call, updateModelSettings, updateSettings } from "./session.ts";
 import { NA, useStore } from "./store.ts";
 import { Grp, Head, Row } from "./settings-ui.tsx";
 import { esc } from "./ui.tsx";
@@ -101,7 +101,7 @@ function ModelEditors({ model, name, saved, shared, locked }: { model: string; n
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     let current = true;
-    void call("settings.modelDefaults", { model }).then(value => { if (current) setRead({ value }); }, (error: unknown) => { if (current) setRead({ error: error instanceof Error ? error.message : "Could not read model defaults." }); });
+    void call("settings.modelDefaults", { model }).then(value => { applyServerEvent(() => { if (current) setRead({ value }); }); }, (error: unknown) => { applyServerEvent(() => { if (current) setRead({ error: error instanceof Error ? error.message : "Could not read model defaults." }); }); });
     return () => { current = false; };
   }, [model, retry]);
   return <>

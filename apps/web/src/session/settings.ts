@@ -6,13 +6,14 @@ import { NA, type State, getState, setState } from "../store.ts";
 type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
 
 interface SettingsEffects {
+  readonly applyServerEvent: typeof setState;
   readonly act: Act;
   readonly applyTheme: (theme: Settings["theme"]) => void;
   readonly applyTextSize: (size: Settings["textSize"]) => void;
   readonly refreshImageStatus: () => void;
 }
 
-export function createSettings({ act, applyTheme, applyTextSize, refreshImageStatus }: SettingsEffects) {
+export function createSettings({ applyServerEvent, act, applyTheme, applyTextSize, refreshImageStatus }: SettingsEffects) {
   /** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
   let thinkSeeded = false;
   /** A context choice belongs to this page session, including reconnects. */
@@ -70,7 +71,7 @@ export function createSettings({ act, applyTheme, applyTextSize, refreshImageSta
   }
 
   function applySettings(settings: Settings, first = false, preserveVoiceIntent = false): void {
-    setState((s) => ({ ...settingsPatch(s, settings, first),
+    applyServerEvent((s) => ({ ...settingsPatch(s, settings, first),
       ...(preserveVoiceIntent ? { voiceConnectionVersion: s.voiceConnectionVersion } : {}),
     }));
     applyTheme(settings.theme);
@@ -131,7 +132,7 @@ export function createSettings({ act, applyTheme, applyTextSize, refreshImageSta
     const changed = receivedVoiceUrl !== settings.whisperUrl;
     receivedVoiceUrl = settings.whisperUrl;
     if (!own && changed) {
-      setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+      applyServerEvent((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
     }
     dispatch(() => {
       receivedVoiceUrl = settings.whisperUrl;

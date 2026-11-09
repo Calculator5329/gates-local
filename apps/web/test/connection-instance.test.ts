@@ -3,12 +3,14 @@ import { expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { createConnection } from "../src/session/connection.ts";
 import { installBrowser, tick, until } from "./harness.ts";
+import { setState } from "../src/store.ts";
 
 it("stopping one connection leaves another instance's pending and subsequent RPCs alone", async () => {
   const browser = installBrowser();
   const hydrated: string[] = [];
   const cleanup: string[] = [];
   const instance = (name: string) => createConnection({
+    applyServerEvent: setState,
     serverUrl: async () => `ws://${name}.invalid/ws`,
     webServerUrl: () => `ws://${name}.invalid/ws`,
     desktopBridge: () => undefined,

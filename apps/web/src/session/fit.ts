@@ -5,6 +5,7 @@ import { NA, type State, chatReady, fitKey, getState, setState, streaming } from
 type Request = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
 
 interface FitEffects {
+  readonly applyServerEvent: typeof setState;
   readonly call: Request;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
   readonly isStopped: () => boolean;
@@ -36,7 +37,7 @@ export const staleFitReports = (s: State): State["staleFits"] => {
 
 export const staleFitStatus = (s: State): State["fitStatus"] => Object.fromEntries(Object.keys(staleFitReports(s)).map(key => [key, "stale" as const]));
 
-export function createFit({ call, blockingFor, isStopped }: FitEffects) {
+export function createFit({ applyServerEvent, call, blockingFor, isStopped }: FitEffects) {
   // A report remains readable while its replacement is measured. The epoch also
   // stops an answer started before a memory change from becoming current.
   const fitChecks = new Map<string, number>();
@@ -49,7 +50,7 @@ export function createFit({ call, blockingFor, isStopped }: FitEffects) {
     const s = getState();
     for (const r of Object.values(s.fits)) if (r !== undefined && r !== "error") staleFits.add(r);
     if (s.catalog !== NA) for (const c of s.catalog ?? []) if (c.fit) staleFits.add(c.fit);
-    setState(state => ({ fitStatus: staleFitStatus(state) }));
+    applyServerEvent(state => ({ fitStatus: staleFitStatus(state) }));
   }
 
   /** Memory details must wait for this reading instead of claiming an old report still fits. */
@@ -76,14 +77,14 @@ export function createFit({ call, blockingFor, isStopped }: FitEffects) {
   function checkFit(model: string, numCtx: number, key: string, failures: number): void {
     const epoch = fitEpoch;
     fitChecks.set(key, epoch);
-    setState(s => ({ fitStatus: { ...s.fitStatus, [key]: failures > 0 ? "error" : currentFit(s.fits[key]) === undefined || s.fits[key] === "error" ? "checking" : s.fitStatus[key] ?? "fresh" } }));
+    applyServerEvent(s => ({ fitStatus: { ...s.fitStatus, [key]: failures > 0 ? "error" : currentFit(s.fits[key]) === undefined || s.fits[key] === "error" ? "checking" : s.fitStatus[key] ?? "fresh" } }));
     call("fit.check", { model, numCtx })
       .then(async (r) => {
         // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
         const frees = r.verdict === "refuse" && (await blockingFor(model, numCtx)).length > 0;
         if (epoch !== fitEpoch) return;
         answeredAt.set(r, epoch);
-        setState((st) => {
+        applyServerEvent((st) => {
           const { [key]: _old, ...stopFrees } = st.stopFrees;
           const { [key]: _stale, ...remainingStale } = st.staleFits;
           const { [key]: _history, ...history } = st.fitHistory;
@@ -92,7 +93,7 @@ export function createFit({ call, blockingFor, isStopped }: FitEffects) {
       })
       .catch(() => {
         if (epoch !== fitEpoch) return;
-        setState((st) => {
+        applyServerEvent((st) => {
           const { [key]: _stale, ...remainingStale } = st.staleFits;
           const previous = st.fits[key];
           return { fits: { ...st.fits, [key]: "error" as const }, fitStatus: { ...st.fitStatus, [key]: "error" as const }, fitHistory: previous !== undefined && previous !== "error" ? { ...st.fitHistory, [key]: previous } : st.fitHistory, staleFits: remainingStale };
@@ -111,14 +112,14 @@ export function createFit({ call, blockingFor, isStopped }: FitEffects) {
     else fitEpoch++;
     // A load refreshes the measurement in place. An external GPU/file change
     // withdraws the old advice; a later load must not clear that pending state.
-    setState((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits, fitStatus: hideOld ? staleFitStatus(s) : s.fitStatus }));
+    applyServerEvent((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits, fitStatus: hideOld ? staleFitStatus(s) : s.fitStatus }));
     const s = getState();
     ensureFit(s.model, s.numCtx);
   }
 
   function gpuChanged(gpu: Payload<"gpu.changed">): void {
       const retain = onlyIdleOwnedModelsChanged(getState(), gpu);
-      setState({ gpu });
+      applyServerEvent({ gpu });
       invalidateFits(!retain);
   }
 

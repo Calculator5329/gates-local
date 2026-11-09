@@ -20,7 +20,7 @@ vi.mock("react", async original => {
     useEffect: (effect: () => () => void) => { if (host.fresh) host.cleanups.push(effect()); },
   };
 });
-vi.mock("../src/session.ts", () => ({ libraryRequest: host.request }));
+vi.mock("../src/session.ts", () => ({ libraryRequest: host.request, applyServerEvent: (run: () => void) => run() }));
 vi.mock("../src/store.ts", () => ({ NA: Symbol("NA"), useStore: () => [] }));
 import LibraryImports from "../src/LibraryImports.tsx";
 
