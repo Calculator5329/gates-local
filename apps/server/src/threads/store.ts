@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { ImageEvent } from "@gates-local/contracts";
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 
 import {
   DuplicateMessageError,

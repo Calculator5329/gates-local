@@ -4,7 +4,7 @@
 //
 // Nothing persists here: the caller owns the thread store and feeds the
 // deltas to its turn buffer. Ends with exactly one done or one error event.
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE } from "./window.ts";
 import { ollamaSettings, type TurnSettings } from "../settings/turn.ts";

@@ -1,4 +1,4 @@
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
 import { streamTurn, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";

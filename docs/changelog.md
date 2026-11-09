@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-09: Desktop startup includes the process and server, and reconnect recovers sooner
+
+- The warm-server browser row omitted Electron and server boot. The opt-in
+  `desktop-launch` group now measures native process start, window visibility,
+  server readiness and an enabled composer accepting a key. Binary preparation
+  happens before the timer; raw events retain runtime versions and import counts.
+- Profiling showed server import work dominated synchronous store/settings
+  setup. Direct public Effect imports remove 105 startup modules (396 to 291),
+  keeping all 98 TypeScript modules and the existing schemas. The desktop main
+  build reports 287.8 KB instead of 799.6 KB.
+- A healthy connection retries after 16 ms, capped at once per second, while
+  failed startup and hydration retain exponential backoff. Zero-delay retry was
+  dropped because it lost the observable offline boundary. Existing download,
+  ordering and retry tests remain unchanged.
+- Four paired rounds with five repetitions per arm measured reconnect at
+  351.30 to 99.40 ms (noise floor 66.50 ms), and main initialization at 100.24 to
+  80.19 ms (floor 15.81 ms). Both clear the scorer. Whole native launch was
+  1276.31 to 1176.11 ms with a 457.92 ms floor, still too noisy for an overall
+  launch-speed claim. Cold composer and first-run readiness remain within noise.
+- Reconnect measurement handles socket replacement between frames and verifies
+  the exact persisted prompt and reply. The desktop smoke can run on a virtual
+  X11 display and uses the existing process-state helper for liveness, keeping
+  live workers and unreadable states blocking.
+- Verification: typecheck, lint and 2,210 unit tests pass (two skipped); the web
+  build passes. Entry JS adds 27 gzip bytes and total JS adds 31 bytes against
+  the starting commit; CSS is unchanged. Existing size overages remain warnings.
+- All 15 virtual-display desktop smoke stages pass, including server crash,
+  same-route restart, parent death, keyboard and background mode. The retained
+  child was observed in state Z after exit. The unchanged baseline also fails
+  the default headless check with no DevTools page target; that backend remains
+  unverified. Functional first-run, reconnect, no-model and update journeys pass.
 ## 2026-11-09: Keep rapid touch Queue and Update presses
 
 Queue could silently leave a draft unsent when the browser counted its tap

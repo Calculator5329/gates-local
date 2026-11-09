@@ -57,3 +57,16 @@ test("a cached reply from another thread cannot finish the current-text marker",
   f.element.textContent = "Reply 1\nfresh"; f.tick(); await window.perfJourney.result;
   expect(finished).toBe(true);
 });
+
+test("reconnect observes a replaced socket even when loss and recovery happen between frames", async () => {
+  const f = fixture();
+  const initial = new window.WebSocket("ws://fixture");
+  window.perfJourney.arm("now", "#ta", "", "reconnect");
+  let finished = false; void window.perfJourney.result.then(() => { finished = true; });
+  f.tick(1); await Promise.resolve(); expect(finished).toBe(false);
+  window.perfJourney.drop();
+  const replacement = new window.WebSocket("ws://fixture");
+  expect(initial.readyState).toBe(3); expect(replacement).not.toBe(initial);
+  f.tick(); await Promise.resolve();
+  expect(finished).toBe(true);
+});

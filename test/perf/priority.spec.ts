@@ -12,10 +12,12 @@ import type { FixtureIds } from "./fixture.ts";
 import { fakeVoice } from "./voice-fixture.ts";
 import { threadReply } from "../fake-ollama/fake-ollama.ts";
 import { parallelPrompt } from "./workload.ts";
+import { STREAM_REPLY } from "../fake-ollama/stream-reply.ts";
 
 const only = selectJourneys(process.env["GL_PERF_ONLY"]);
 if (!only) throw new Error("Priority journeys require an explicit --only selection");
 const selected = new Set<Journey>(only);
+selected.delete("desktop-launch");
 const samples = Number(process.env["GL_PERF_SAMPLES"] ?? 5);
 const values = new Map<string, { unit: "ms" | "count"; samples: number[] }>();
 const hoverDwellMs = 350;
@@ -186,7 +188,12 @@ test("focused priority production journeys", async ({ browser }) => {
           expect(threadId(page)).toBe(id); await expect(page.locator(".turn.a .md")).toBeVisible();
           const socket = new URL(appUrl()).searchParams.get("server"); if (!socket) throw new Error("Missing fixture socket");
           const client = createClient(new WebSocket(socket));
-          try { await expect.poll(async () => (await client.call("threads.get", { threadId: id })).messages.filter(m => m.role === "assistant").length, { timeout: 15_000 }).toBe(1); }
+          try {
+            await expect.poll(async () => (await client.call("threads.get", { threadId: id })).messages.filter(m => m.role === "assistant").length, { timeout: 15_000 }).toBe(1);
+            const saved = await client.call("threads.get", { threadId: id });
+            expect(saved.messages.filter(message => message.role === "user").map(message => message.content)).toEqual(["Reconnect while replying"]);
+            expect(saved.messages.find(message => message.role === "assistant")?.content).toBe(STREAM_REPLY);
+          }
           finally { client.close(); }
           console.log("Priority reconnect complete");
         }

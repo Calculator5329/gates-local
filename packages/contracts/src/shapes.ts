@@ -1,6 +1,6 @@
 // Domain shapes that cross the wire. Every module keeps plain TypeScript
 // inside; these Schemas are the boundary check at both ends of the socket.
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 
 const Millis = S.Finite;
 const Count = S.Int.check(S.isGreaterThanOrEqualTo(0));

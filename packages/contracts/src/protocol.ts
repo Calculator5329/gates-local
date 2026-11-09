@@ -1,7 +1,8 @@
 // The wire protocol: envelopes, the method table, the push table and the
 // boundary codecs both ends use. Decode functions never throw; a message
 // that does not decode comes back as a WireError with a named code.
-import { Result, Schema as S } from "effect";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
 import { SyncDomain, SyncMetadata, SyncNegotiation } from "./sync.ts";
 import {
   BlockingTurn,

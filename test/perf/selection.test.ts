@@ -10,6 +10,7 @@ test("focus is explicit, validated and deduplicated", () => {
   expect(selectJourneys()).toBeUndefined();
   expect(selectJourneys("priority")).toEqual(PRIORITY);
   expect(selectJourneys("threads,queue,threads")).toEqual(["threads", "queue"]);
+  expect(selectJourneys("desktop-launch")).toEqual(["desktop-launch"]);
   expect(() => selectJourneys("threadz")).toThrow("Unknown performance journey");
   expect(() => selectJourneys("")).toThrow("Unknown performance journey");
 });

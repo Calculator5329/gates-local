@@ -152,7 +152,7 @@ sheet does not restyle chat or Settings after the picker closes.
 
 `test/perf/` is a separate Playwright project, excluded from `pnpm e2e`.
 Timing is informational and never changes the release verdict. Candidate size
-overages fail the comparison after its measurements are saved. On an authorized
+overages warn in the comparison report. On an authorized
 browser machine, one command builds two commits and alternates them in one job:
 
 ```sh
@@ -198,11 +198,51 @@ is usually the maximum and remains descriptive. For an individual climb, use
 a narrower `--only` group and increase `--samples` to 5 or more within the same
 job budget; the full set at three repetitions per arm exceeded that budget.
 `--only` also accepts any comma
-separated subset of `startup,send,threads,parallel,clipboard,voice,queue,reconnect,first-run`.
+separated subset of `startup,send,threads,parallel,clipboard,voice,queue,reconnect,first-run,desktop-launch`.
 Unknown names fail before a browser starts. Omit `--self` and prepare different
 commits to measure a climb. Omit `--only` for the established broad journey.
 Only selected groups execute, and first run is skipped unless selected.
 The selection is retained in every round and the comparison report.
+
+`--only desktop-launch` measures a fresh Electron process and profile against
+the built main, preload and client, with the real supervised server and the
+existing fake Ollama/GPU fixtures. Each repetition restores the prepared
+400-thread data folder before timing. The launch request is the process-start
+origin; markers record main entry, app ready, the native window becoming
+visible, server spawn and its ready line, navigation, and an enabled composer
+through two animation frames. The journey also types and reads back a draft.
+Binary resolution (including Electron's automatic binary preparation) happens
+before that clock. The raw main-entry event includes the native runtime versions.
+These are process-cold launches against warm OS file caches, not power-on or
+installed-package measurements. The window marker does not prove physical
+display presentation. A normal native process is observed over DevTools;
+Playwright's Electron launcher is avoided because it holds the ready event
+while attaching. Test-only observers run outside the shipped code. A server
+loader hook records imported and TypeScript module counts before readiness,
+plus time in the loader (which does not include module evaluation).
+
+Desktop launch is a separate opt-in group, excluded from `priority` to preserve
+that workload's job budget. Its raw events, screenshot and metrics live in
+each round's `desktop-events.json`, `desktop-launch.png` and
+`desktop-launch.json`; reanalysis reads the saved metrics. A separate
+`node test/perf/desktop-profile.ts --out FRESH_DIRECTORY` invocation after
+building web and desktop captures a server CPU profile. Those diagnostic
+samples must not enter the unprofiled paired comparison.
+
+The native fixture is a returning app with saved settings and 400 threads,
+using a fresh Electron profile and warm OS file caches. First-ever settings
+creation still probes the runtime to choose its mode before the server listens;
+that absent-settings path is not this returning-launch measurement. Catalog and
+fit work follow readiness. First-run screen timing remains its separate group.
+
+On a test machine with a virtual X11 display, run the full desktop lifecycle
+smoke with `GL_DESKTOP_SMOKE_DISPLAY=1 pnpm --filter @gates-local/desktop smoke`.
+The default still uses headless Ozone. Both modes retain the same assertions.
+Liveness uses the shared process-state checker: stable exited zombies count as
+exited, while running workers and unreadable state still block.
+The virtual-display smoke completed all stages during this climb. The default
+headless path failed before a page target appeared on both the candidate and
+the unchanged starting commit; those failures are retained, not counted as passes.
 
 Priority workloads add cold/warm clicks and 350 ms hover-to-click paths at
 200/2,000 messages, switching between two genuinely streaming replies, copying

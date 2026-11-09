@@ -6,7 +6,8 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch, type SyncChange } from "@gates-local/contracts";
-import { Result, Schema as S } from "effect";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
 import { canonicalTag } from "../runtime/recommended.ts";
 import { boundedModelSettings } from "./turn.ts";
 

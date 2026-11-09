@@ -1,6 +1,7 @@
 // Effect Schemas for everything the runtime module reads from outside:
 // Ollama HTTP responses, the ownership state file and the install manifest.
-import { Result, Schema } from "effect";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 
 export const VersionResponse = Schema.Struct({ version: Schema.String });
 

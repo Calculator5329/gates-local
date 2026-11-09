@@ -81,6 +81,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
 
   async function loop(): Promise<void> {
     let delay = 250;
+    let nextImmediateAt = 0;
     for (;;) {
       if (stopped) return;
       const url = await serverUrl().catch(() => null);
@@ -103,6 +104,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         ws.addEventListener("open", () => resolve(true));
         ws.addEventListener("close", () => resolve(false));
       });
+      let hydrated = false;
       if (opened && stopped) {
         c.close();
         return;
@@ -111,7 +113,7 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         client = c;
         applyServerEvent({ conn: { kind: "open" }, hydrationSettled: false });
         // An open socket may still fail negotiation or its startup reads.
-        await hydrate(c).then(() => { delay = 250; }, () => undefined).finally(() => {
+        await hydrate(c).then(() => { delay = 250; hydrated = ws.readyState === 1; }, () => undefined).finally(() => {
           // Only this still-open, negotiated connection may settle preparation.
           if (!stopped && client === c && ws.readyState === 1 && c.sync !== undefined) applyServerEvent({ hydrationSettled: true });
         });
@@ -121,6 +123,14 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
         afterDisconnect();
       }
       applyServerEvent((s) => ({ conn: s.conn.kind === "down" ? s.conn : { kind: "down", since: Date.now() } }));
+      // Give the offline state a frame, then retry a healthy connection promptly.
+      // Cap fast retries at once per second; failed attempts keep their backoff.
+      if (hydrated && Date.now() >= nextImmediateAt) {
+        nextImmediateAt = Date.now() + 1000;
+        await nextChance(16);
+        delay = Math.min(delay * 2, 4000);
+        continue;
+      }
       await nextChance(delay);
       delay = Math.min(delay * 2, 4000);
     }

@@ -7,6 +7,13 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*Measured 2026-11-09:* Native launch now includes Electron and the supervised
+server, with separate phase markers and import counters. Startup imports fell
+from 396 to 291; main initialization and same-thread reconnect have qualified
+timing improvements. Whole launch, cold composer and first-run readiness still
+need lower-noise measurements before claiming an overall improvement. Reconnect
+keeps exact saved text and the existing offline/download ordering tests.
+
 *Done 2026-11-09, input performance:* A 50,000-character multiline paste is one
 native undoable edit, with 69.2 ms median latency versus 19,135.0 ms in the paired
 comparison. Draft writes start on edits; recovery retains the last completed

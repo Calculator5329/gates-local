@@ -4,7 +4,7 @@ import path from "node:path";
 import { openChild, openDir, unlinkIfAny, type Dir } from "./anchored.ts";
 import type { Source } from "@gates-local/contracts";
 import { SourceImport } from "@gates-local/contracts";
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 
 export interface OwnedSlot { readonly id: string; readonly path: string; readonly work: string; }
 const ID = /^[0-9a-f]{8}-[0-9a-f-]{27}$/;

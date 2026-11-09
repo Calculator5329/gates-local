@@ -1,4 +1,5 @@
-import { Option, Schema as S } from "effect";
+import * as Option from "effect/Option";
+import * as S from "effect/Schema";
 import { setTimeout as delay } from "node:timers/promises";
 import { CHECKPOINT, LORA, workflow } from "./workflow.ts";
 

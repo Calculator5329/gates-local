@@ -1,7 +1,7 @@
 // The three Ollama reads the fit check needs: /api/tags (weights size),
 // /api/show (architecture) and /api/ps (what is loaded and where). Effect
 // Schema decodes each response at the boundary; unknown keys are ignored.
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 import { FitError } from "./types.ts";
 
 const TagsResponse = S.Struct({

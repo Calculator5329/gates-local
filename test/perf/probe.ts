@@ -38,7 +38,7 @@ export function browserProbe(setup: boolean) {
           begin = event === "navigation" ? 0 : input?.timeStamp ?? performance.now();
           if (input) inputs.push(Math.max(0, performance.now() - input.timeStamp));
           let previous = performance.now();
-          let disconnected = false;
+          const initialSocket = sockets.at(-1);
           const check = () => {
             const now = performance.now();
             frames.push(now - previous); previous = now;
@@ -46,7 +46,6 @@ export function browserProbe(setup: boolean) {
             const visible = el !== null && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
             const rect = el?.getBoundingClientRect();
             const inView = visible && rect !== undefined && rect.bottom > 0 && rect.top < innerHeight;
-            disconnected ||= sockets.at(-1)?.readyState !== NativeSocket.OPEN;
             const match = mode === "absent" ? !visible
               : mode === "value" ? visible && (el as HTMLTextAreaElement).value === text
               : mode === "usable-value" ? visible && (el as HTMLTextAreaElement).value === text && !(el as HTMLTextAreaElement).disabled && document.activeElement === el
@@ -54,7 +53,7 @@ export function browserProbe(setup: boolean) {
               : mode === "count" ? document.querySelectorAll(selector).length === Number(text)
               : mode === "less-than" ? document.querySelectorAll(selector).length < Number(text)
               : mode === "ready" ? visible && !(el as HTMLTextAreaElement).disabled && !document.querySelector(".composer.blocked")
-              : mode === "reconnect" ? disconnected && sockets.at(-1)?.readyState === NativeSocket.OPEN && visible && !(el as HTMLTextAreaElement).disabled && !document.querySelector(".composer.blocked")
+              : mode === "reconnect" ? initialSocket !== undefined && sockets.at(-1) !== initialSocket && sockets.at(-1)?.readyState === NativeSocket.OPEN && visible && !(el as HTMLTextAreaElement).disabled && !document.querySelector(".composer.blocked")
               : inView && (el?.textContent ?? "").includes(text);
             if (!match) { requestAnimationFrame(check); return; }
             // Two rAFs bracket a paint opportunity after the state is in the DOM.

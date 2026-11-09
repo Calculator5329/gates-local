@@ -1,5 +1,7 @@
 // Real-Electron smoke for the roadmap Accept line, with no visible window:
 // Chromium's headless Ozone backend, DISPLAY and WAYLAND_DISPLAY removed.
+// GL_DESKTOP_SMOKE_DISPLAY=1 uses the runner's virtual X11 display instead;
+// every lifecycle, isolation, keyboard and background-mode assertion stays on.
 // Uses the fake server and fake client from test/fixtures, drives the page
 // over the DevTools protocol, and checks:
 //   1. the client loads and the bridge gives a ws:// URL with a 64-hex token;
@@ -13,8 +15,8 @@
 //   8. the window keys work without a menu: Ctrl +/-/0 zoom, F11 full
 //      screen, Ctrl+Shift+I dev tools, Ctrl+R and Ctrl+Shift+R reload;
 //   9. Ctrl+A, Ctrl+C, Ctrl+V and Ctrl+Z still edit a textarea;
-//  10. Ctrl+W closes the window and the app quits, servers gone;
-//  11. Ctrl+Q quits, servers gone.
+//  10. Ctrl+W closes the window and the app quits, servers exited;
+//  11. Ctrl+Q quits, servers exited.
 // Keys 7-11 go in through webContents.sendInputEvent over the main
 // process's inspector (--inspect): it enters where OS keys do, before
 // before-input-event. DevTools-protocol key events skip that hook.
@@ -33,6 +35,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { findFreePort } from "../src/supervisor.ts";
+import { processAlive } from "../../server/src/process-state.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const electronBin = createRequire(import.meta.url)("electron") as string;
@@ -50,9 +53,19 @@ function serverPids(dataDir: string): number[] {
     .map((name) => (JSON.parse(readFileSync(path.join(dataDir, name), "utf8")) as { pid: number }).pid);
 }
 
-const alive = (pid: number) => existsSync(`/proc/${pid}`);
+const alive = (pid: number) => {
+  const live = processAlive(pid);
+  if (!live && process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      log(`exited pid ${pid} retains a process record in state ${state}`);
+    } catch { /* A collected process has no record left. */ }
+  }
+  return live;
+};
 
-async function waitGone(pids: number[], ms: number): Promise<boolean> {
+async function waitExited(pids: number[], ms: number): Promise<boolean> {
   const end = Date.now() + ms;
   while (Date.now() < end && pids.some(alive)) await sleep(50);
   return !pids.some(alive);
@@ -75,10 +88,13 @@ function launch(
     GATES_LOCAL_USER_DATA: path.join(work, "user-data"),
     FAKE_MODE: "ready",
   };
-  delete env["DISPLAY"];
-  delete env["WAYLAND_DISPLAY"];
+  const display = process.env["GL_DESKTOP_SMOKE_DISPLAY"] === "1";
+  if (!display) {
+    delete env["DISPLAY"];
+    delete env["WAYLAND_DISPLAY"];
+  }
   delete env["ELECTRON_RUN_AS_NODE"];
-  const args = [root, "--ozone-platform=headless", ...extraArgs];
+  const args = [root, display ? "--ozone-platform=x11" : "--ozone-platform=headless", ...extraArgs];
   if (debugPort !== null) args.push(`--remote-debugging-port=${debugPort}`);
   if (inspectPort !== null) args.push(`--inspect=127.0.0.1:${inspectPort}`);
   const electron = spawn(electronBin, args, { env, stdio: ["ignore", "ignore", "pipe"] });
@@ -188,8 +204,8 @@ async function lifecycle(work: string): Promise<void> {
     const pids = serverPids(dataDir);
     electron.kill("SIGTERM");
     const code = await exited;
-    if (!(await waitGone(pids, 4_000))) fail(`servers left after quit: ${pids.filter(alive).join(" ")}`);
-    log(`5 SIGTERM to Electron: exit ${String(code)}, servers ${pids.join(", ")} gone`);
+    if (!(await waitExited(pids, 4_000))) fail(`servers left after quit: ${pids.filter(alive).join(" ")}`);
+    log(`5 SIGTERM to Electron: exit ${String(code)}, servers ${pids.join(", ")} exited`);
   } finally {
     if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
   }
@@ -205,8 +221,8 @@ async function parentDeath(work: string): Promise<void> {
     if (pids.length === 0 || !pids.every(alive)) fail("server did not come up");
     electron.kill("SIGKILL");
     await exited;
-    if (!(await waitGone(pids, 4_000))) fail(`server ${pids.join(" ")} outlived a SIGKILLed Electron main`);
-    log(`6 SIGKILL of Electron main: server ${pids.join(", ")} gone`);
+    if (!(await waitExited(pids, 4_000))) fail(`server ${pids.join(" ")} outlived a SIGKILLed Electron main`);
+    log(`6 SIGKILL of Electron main: server ${pids.join(", ")} exited`);
   } finally {
     if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
   }
@@ -288,8 +304,8 @@ async function keys(work: string): Promise<void> {
     main.close();
     const code = await Promise.race([exited, sleep(10_000).then(() => "timeout")]);
     if (code !== 0) fail(`Ctrl+W: Electron did not quit cleanly (${String(code)})`);
-    if (!(await waitGone(pids, 4_000))) fail(`servers left after Ctrl+W: ${pids.filter(alive).join(" ")}`);
-    log(`10 Ctrl+W closed the window: exit 0, servers ${pids.join(", ")} gone`);
+    if (!(await waitExited(pids, 4_000))) fail(`servers left after Ctrl+W: ${pids.filter(alive).join(" ")}`);
+    log(`10 Ctrl+W closed the window: exit 0, servers ${pids.join(", ")} exited`);
   } finally {
     if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
   }
@@ -307,8 +323,8 @@ async function quitKey(work: string): Promise<void> {
     main.close();
     const code = await Promise.race([exited, sleep(10_000).then(() => "timeout")]);
     if (code !== 0) fail(`Ctrl+Q: Electron did not quit cleanly (${String(code)})`);
-    if (!(await waitGone(pids, 4_000))) fail(`servers left after Ctrl+Q: ${pids.filter(alive).join(" ")}`);
-    log(`11 Ctrl+Q quit: exit 0, servers ${pids.join(", ")} gone`);
+    if (!(await waitExited(pids, 4_000))) fail(`servers left after Ctrl+Q: ${pids.filter(alive).join(" ")}`);
+    log(`11 Ctrl+Q quit: exit 0, servers ${pids.join(", ")} exited`);
   } finally {
     if (electron.exitCode === null && electron.signalCode === null) electron.kill("SIGKILL");
   }
@@ -383,8 +399,8 @@ async function background(work: string): Promise<void> {
 
     electron.kill("SIGTERM");
     const code = await exited;
-    if (!(await waitGone(serverPids(dataDir), 4_000))) fail("the server outlived SIGTERM to a background instance");
-    log(`15 second --background launch (exit ${String(quietCode)}) opened nothing; SIGTERM: exit ${String(code)}, server ${String(pid)} gone`);
+    if (!(await waitExited(serverPids(dataDir), 4_000))) fail("the server outlived SIGTERM to a background instance");
+    log(`15 second --background launch (exit ${String(quietCode)}) opened nothing; SIGTERM: exit ${String(code)}, server ${String(pid)} exited`);
   } finally {
     for (const child of [electron, ...seconds]) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }

@@ -1,6 +1,6 @@
 // Inspired by Milo's milo/server.py transcription flow; implemented here for
 // Gates Local's authenticated RPC, without its companion-specific corrections.
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 import { randomUUID } from "node:crypto";
 import { WireError } from "@gates-local/contracts";
 import type { Handlers } from "../ws/server.ts";

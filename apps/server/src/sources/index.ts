@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmdirSync, statSync, writeFileSync, type Stats } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 import { Source } from "@gates-local/contracts";
 import { canonicalPathSync, containsPath } from "../../../../packages/harness/src/paths.ts";
 import type { LibraryEntry } from "../../../../packages/harness/src/types.ts";

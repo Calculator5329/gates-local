@@ -1,7 +1,7 @@
 // Informational only: timing signals never set the process exit code.
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { availableParallelism, freemem, homedir, loadavg, totalmem } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
@@ -11,6 +11,7 @@ import { prepareFixture } from "./fixture.ts";
 import { firstRunTimes } from "./first-run.ts";
 import { ownProcesses } from "./processes.ts";
 import { selectJourneys } from "./selection.ts";
+import { desktopLaunchTimes } from "./desktop-launch.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   prepare: { type: "boolean" }, prepared: { type: "string" }, out: { type: "string", default: "perf-results" },
@@ -20,6 +21,9 @@ const { values, positionals } = parseArgs({ allowPositionals: true, options: {
 } });
 const selected = selectJourneys(values.only);
 const includeFirstRun = selected === undefined || selected.includes("first-run");
+const includeDesktop = selected?.includes("desktop-launch") ?? false;
+const browserJourneys = selected?.filter(name => name !== "desktop-launch");
+const browserNeeded = browserJourneys === undefined || browserJourneys.length > 0;
 const out = path.resolve(values.out);
 const rounds = Number(values.rounds), samples = Number(values.samples);
 if (!Number.isInteger(rounds) || rounds < 4 || !Number.isInteger(samples) || samples < 1) throw new Error("Use at least four rounds and one sample");
@@ -51,6 +55,8 @@ if (values.analyze) {
     const run = JSON.parse(readFileSync(path.join(folder, `round-${round}-${arm}`, "run.json"), "utf8")) as Run;
     const firstRunFile = path.join(folder, `round-${round}-${arm}`, "first-run.json");
     if (existsSync(firstRunFile)) run.metrics.push(JSON.parse(readFileSync(firstRunFile, "utf8")) as Run["metrics"][number]);
+    const desktopFile = path.join(folder, `round-${round}-${arm}`, "desktop-launch.json");
+    if (existsSync(desktopFile)) run.metrics.push(...JSON.parse(readFileSync(desktopFile, "utf8")) as Run["metrics"]);
     if (run.commit !== prior.commits[arm] || run.round !== round || run.arm !== arm) throw new Error("Run identity differs from comparison metadata");
     saved[arm].push(run);
   }
@@ -104,6 +110,7 @@ for (const arm of ["base", "candidate"] as const) {
   execFileSync("tar", ["-xf", path.join(source, values.self ? "base.tar" : `${arm}.tar`), "-C", subjects[arm]]);
   await command(["pnpm", "install", "--frozen-lockfile"], subjects[arm]);
   await command(["pnpm", "--filter", "@gates-local/web", "build"], subjects[arm]);
+  if (includeDesktop) await command(["pnpm", "--filter", "@gates-local/desktop", "build"], subjects[arm]);
 }
 const fixtures = {
   base: await prepareFixture(subjects.base),
@@ -115,17 +122,31 @@ for (let round = 0; round < rounds; round++) {
   for (const arm of (round % 2 === 0 ? ["base", "candidate"] : ["candidate", "base"]) as ("base" | "candidate")[]) {
     console.log(`PERF round ${round + 1}/${rounds} ${arm} ${inputs[arm]}`);
     const runOut = path.join(out, `round-${round + 1}-${arm}`);
+    mkdirSync(runOut, { recursive: true });
+    if (browserNeeded) {
     await command(["pnpm", "exec", "playwright", "test", "-c", "test/perf/playwright.config.ts"], ROOT, {
       ...process.env, GL_PERF_TARGET: subjects[arm], GL_PERF_FIXTURE: fixtures[arm], GL_PERF_COMMIT: inputs[arm], GL_PERF_ARM: arm,
       GL_PERF_ROUND: String(round + 1), GL_PERF_SAMPLES: String(samples), GL_PERF_OUT: runOut,
       GL_PERF_ONLY: selected?.join(",") ?? "",
     });
+    } else {
+      const run: Run = { schema: 1, commit: inputs[arm], round: round + 1, arm, only: selected,
+        browser: "Electron (built desktop)", machine: { cpus: availableParallelism(), memoryBytes: totalmem(), freeBytes: freemem(), loadBefore: loadavg(), loadAfter: loadavg() },
+        fake: { firstTokenDelayMs: 40, tokenDelayMs: 8, burstTokens: 8, thinking: false, loadDelayMs: 0, longMarkdown: { tokenDelayMs: 8, burstTokens: 8 } }, metrics: [] };
+      writeFileSync(path.join(runOut, "run.json"), JSON.stringify(run, null, 2) + "\n", { flag: "wx" });
+    }
     const run = JSON.parse(readFileSync(path.join(runOut, "run.json"), "utf8")) as Run;
-    if (run.commit !== inputs[arm] || (run.metrics.length === 0 && !includeFirstRun)) throw new Error("Incomplete run record");
+    run.only = selected;
+    if (run.commit !== inputs[arm] || (run.metrics.length === 0 && browserNeeded && !includeFirstRun)) throw new Error("Incomplete run record");
     if (includeFirstRun) {
       const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined, shutdown.signal);
       writeFileSync(path.join(runOut, "first-run.json"), JSON.stringify(firstRun, null, 2) + "\n", { flag: "wx" });
       run.metrics.push(firstRun);
+    }
+    if (includeDesktop) {
+      const desktop = await desktopLaunchTimes(subjects[arm], fixtures[arm], samples, runOut, shutdown.signal);
+      writeFileSync(path.join(runOut, "desktop-launch.json"), JSON.stringify(desktop, null, 2) + "\n", { flag: "wx" });
+      run.metrics.push(...desktop);
     }
     runs[arm].push(run);
   }

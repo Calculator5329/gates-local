@@ -1,5 +1,5 @@
 // Optional synchronization envelopes. Domains opt in only after all their writers are versioned.
-import { Schema as S } from "effect";
+import * as S from "effect/Schema";
 
 export const SyncDomain = S.Literals(["settings", "models", "threads", "turns", "sources", "images", "updates"]);
 export type SyncDomain = typeof SyncDomain.Type;
