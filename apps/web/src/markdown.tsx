@@ -3,7 +3,7 @@
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
 // at a steady pace; incomplete inline spans render without their delimiters.
-import { type ReactNode, memo, useEffect, useRef, useState } from "react";
+import { type ReactNode, memo, useEffect, useRef } from "react";
 import { useCopy } from "./copy.ts";
 import { linkKey } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
