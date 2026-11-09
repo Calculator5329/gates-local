@@ -212,11 +212,11 @@ export function Composer() {
     if (showStop) stopThisReply();
     else if (memRefused) openFit();
     else submit();
-  });
+  }, { ignoreRepeatedClicks: showStop });
   const compactStopPress = useActionPress(`stop:${running}`, () => {
     stopThisReply();
     primary.current?.focus();
-  });
+  }, { ignoreRepeatedClicks: true });
 
   return (
     <>

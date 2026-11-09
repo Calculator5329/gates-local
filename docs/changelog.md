@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-09: Keep rapid touch Queue and Update presses
+
+Queue could silently leave a draft unsent when the browser counted its tap
+as the second click on the persistent primary button. Double-click suppression
+now applies to Stop, preserving protection against accidentally cancelling a
+reply just sent. Queue and Update accept fresh presses regardless of click
+count; a press whose action changes before release is still ignored.
+
 ## 2026-11-09: Tabs sharing a draft scope keep words and attachments together
 
 - Text-only writes now check `attachmentsRevision` in the small metadata row

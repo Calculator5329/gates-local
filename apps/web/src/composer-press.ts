@@ -1,7 +1,7 @@
 import { type KeyboardEvent, type MouseEvent, useRef } from "react";
 
 /** Bind a button press to its starting action identity, including its turn. */
-export function useActionPress(action: string, activate: () => void) {
+export function useActionPress(action: string, activate: () => void, options: { ignoreRepeatedClicks?: boolean } = {}) {
   const pointer = useRef<string | null>(null);
   const keyboard = useRef<{ key: "Enter" | " "; action: string } | null>(null);
   const run = (from: string) => {
@@ -37,8 +37,9 @@ export function useActionPress(action: string, activate: () => void) {
       if (event.detail === 0 && keyboard.current !== null) return;
       const started = event.detail === 0 ? action : pointer.current;
       pointer.current = null;
-      // Ignore Send's second click after its node has become Stop.
-      if (event.detail > 1 || started === null) return;
+      // Stop rejects Send's second click. Queue/Update still accept a fresh
+      // press when the browser carries a click count across a draft edit.
+      if ((options.ignoreRepeatedClicks && event.detail > 1) || started === null) return;
       run(started);
     },
   };

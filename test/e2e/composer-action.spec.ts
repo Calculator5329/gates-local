@@ -105,7 +105,7 @@ test.describe("a fresh chat", () => {
 
 test.describe("a touch keyboard", () => {
   test.use({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true });
-  test("Enter inserts a newline, typing offers Queue, and clearing or queueing returns Stop", async ({ page, open, seededThread }) => {
+  test("Enter inserts a newline, typing offers Queue, and clearing or queueing returns Stop", async ({ page, open, seededThread }, info) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     await stack.scenario("slow-drip", { holdAfterTokens: 46 });
@@ -136,5 +136,6 @@ test.describe("a touch keyboard", () => {
     await action.tap();
     await expect(page.locator(".qt-r")).toContainText("Updated on touch");
     await expect(action).toHaveAccessibleName("Stop");
+    await page.screenshot({ path: info.outputPath("touch-queue-updated.png") });
   });
 });
