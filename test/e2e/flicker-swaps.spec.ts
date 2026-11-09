@@ -66,6 +66,7 @@ function sources() {
 }
 
 const groupOf = (page: Page, kind: string) => page.locator(".set .grp").filter({ has: page.locator(".grp-t", { hasText: kind === "sqlite" ? "SQLite databases" : "Files and folders" }) });
+const boxFor = (page: Page, control: Locator) => page.locator(".set .grp").filter({ has: control }).locator(":scope > .box");
 const nounOf = (kind: string) => kind === "sqlite" ? "database" : kind;
 
 async function refuseAction(page: Page, method: string) {
@@ -251,8 +252,9 @@ for (const width of [1440, 360]) {
       await open();
       await waitReady(page);
       await section(page, "General", true);
-      await libraryBoxes(page);
-      const frames = await burst(page, `r2-${width}/theme-system`, ".set", () => page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "System", exact: true }).click());
+      const theme = page.getByRole("group", { name: "Theme", exact: true });
+      await mark(boxFor(page, theme), "body-0");
+      const frames = await burst(page, `r2-${width}/theme-system`, ".set", () => theme.getByRole("button", { name: "System", exact: true }).click());
       stableSize(frames, "body-0", `theme-system-${width}`);
     });
 
@@ -260,8 +262,10 @@ for (const width of [1440, 360]) {
       await open();
       await waitReady(page);
       await section(page, "Tools", true);
-      await libraryBoxes(page);
-      const frames = await burst(page, `r2-${width}/tools-state`, ".set", () => page.getByRole("switch", { name: "Let the model use tools" }).click());
+      const tools = page.getByRole("switch", { name: "Let the model use tools", exact: true });
+      await mark(boxFor(page, tools), "body-0");
+      await mark(boxFor(page, page.getByRole("button", { name: "Library", exact: true })), "body-1");
+      const frames = await burst(page, `r2-${width}/tools-state`, ".set", () => tools.click());
       stableSize(frames, "body-0", `tools-state-${width}`);
       stableSize(frames, "body-1", `tools-permissions-${width}`);
     });
@@ -270,8 +274,9 @@ for (const width of [1440, 360]) {
       await open();
       await waitReady(page);
       await section(page, "Image generation", true);
-      await libraryBoxes(page);
-      const frames = await burst(page, `r2-${width}/images-trigger`, ".set", () => page.getByRole("switch", { name: "Generate images" }).click());
+      const images = page.getByRole("switch", { name: "Generate images", exact: true });
+      await mark(boxFor(page, images), "body-0");
+      const frames = await burst(page, `r2-${width}/images-trigger`, ".set", () => images.click());
       stableSize(frames, "body-0", `images-trigger-${width}`);
     });
 
