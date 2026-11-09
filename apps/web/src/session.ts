@@ -570,9 +570,9 @@ async function loadThread(threadId: string, force = false): Promise<void> {
     landed.set(threadId, req.seq);
     // a cached thread keeps its content; either way the open thread says why and offers Retry
     setLoadError(threadId, failure("load this conversation", e));
-    // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts)
+    // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts, loaded or still loading)
     const s = getState();
-    if (codeOf(e) === "thread-not-found" && nav === navGen && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
+    if (codeOf(e) === "thread-not-found" && nav === navGen && pendingSettings === null && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
   } finally {
     loads.delete(req);
   }

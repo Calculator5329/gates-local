@@ -161,6 +161,7 @@ describe("the check runs only on a click", () => {
     expect(b.server.calls("update.status").length).toBe(1);
     expect(store.getState().update).toEqual(methodSamples["update.status"].result);
     session.openSettings("general");
+    await until(() => store.getState().view === "settings", 5000, "Settings to open");
     await tick(10);
     expect(b.server.calls("update.check")).toEqual([]);
     expect(session.canUpdateHere()).toBe(false);

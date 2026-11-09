@@ -392,6 +392,23 @@ describe("thread loads against newer pushes and navigation (WF-02, WF-03)", () =
     expect(store.getState()).toMatchObject({ view: "settings", threadId: "t1" });
   });
 
+  it("a thread found gone while Settings is still loading stays behind Settings", async () => {
+    await boot();
+    session.openThread("t1");
+    await until(() => store.getState().messages["t1"] !== undefined);
+    const { settingsScreen } = await import("../src/screen-loaders.ts");
+    let release!: () => void;
+    vi.spyOn(settingsScreen, "load").mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+    session.openSettings();
+    const held = await reconnectHeld();
+    held.fail("thread-not-found", "no thread t1");
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "thread", threadId: "t1", loadErrors: { t1: expect.any(String) } });
+    release();
+    await tick();
+    expect(store.getState()).toMatchObject({ view: "settings", threadId: "t1" });
+  });
+
   it("a reload started in Settings that fails after leaving Settings is stale and keeps the thread", async () => {
     await bootSettingsReady();
     session.openThread("t1");
