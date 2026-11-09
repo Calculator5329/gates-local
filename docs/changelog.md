@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-09: Send no longer dims for a moment when a picked model finishes loading
+
+- While a picked model loads, its own memory makes a fit check refuse it, so
+  the composer holds the verdict from before the load. When the load ended,
+  the composer read that load-time refusal from the cache until the next
+  check answered, and Send dimmed for 175 to 800 ms.
+- A report that was in the cache during the load no longer replaces the held
+  verdict after it. The first report asked after the load does, at once,
+  including a real refusal. A failed check still ends the hold.
+- With no verdict from before the load (the model was never checked, or the
+  composer was not on screen), the cached advice shows as before.
+- The toolbar journey passed 60 of 60 repetitions; it failed about 1 run in
+  15 before.
+
 ## 2026-11-09: A performance comparison that counts work and says what it cannot see
 
 - `pnpm perf:next` (`test/perf/next-compare.ts`) runs the priority journeys

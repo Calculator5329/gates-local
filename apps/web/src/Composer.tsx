@@ -5,6 +5,7 @@
 import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
+import { composerFit } from "./composer-fit.ts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
@@ -142,10 +143,11 @@ export function Composer() {
   const failed = fit === "error";
   const fresh = fit === undefined || failed ? undefined : verdictOf(fit);
   const held = useRef<{ at: string; v: Verdict } | undefined>(undefined);
-  if (failed) held.current = undefined;
+  const duringLoad = useRef<typeof fit>(undefined);
+  if (loading) duringLoad.current = fit;
   const kept = held.current?.at === fitAt ? held.current.v : undefined;
-  const v = loading ? (kept ?? fresh) : (fresh ?? kept);
-  if (!loading && fresh !== undefined) held.current = { at: fitAt, v: fresh };
+  const { shown: v, held: next } = composerFit(kept, failed ? "error" : fresh, loading, fit === duringLoad.current);
+  held.current = next === undefined ? undefined : { at: fitAt, v: next };
   const text = draft.trim() || images.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
