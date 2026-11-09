@@ -236,12 +236,39 @@ for (const width of [1440, 360]) {
     });
 
     test("download progress replaces an equal-sized model row", async ({ page, open }) => {
+      // Hold catalog hydration so a probe started before the row exists
+      // reliably distinguishes initial loading from a download-state gap.
+      const heldCatalog: Array<() => void> = [];
+      let holdingCatalog = true;
+      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+        const server = ws.connectToServer();
+        const catalogRequests = new Set<unknown>();
+        ws.onMessage(message => {
+          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
+          if (request.method === "models.catalog") catalogRequests.add(request.id);
+          server.send(message);
+        });
+        server.onMessage(message => {
+          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+          if (response.type === "response" && catalogRequests.delete(response.id) && holdingCatalog) heldCatalog.push(() => ws.send(message));
+          else ws.send(message);
+        });
+      });
       await open();
       await waitReady(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
       await stack.scenario("models", { pullTickMs: 250, pullChunkBytes: 256 * 1024 * 1024 });
       const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
+      await expect.poll(() => heldCatalog.length).toBeGreaterThan(0);
+      await expect(row).toHaveCount(0);
+      // A bounded hydration delay, deliberately included before measurement.
+      setTimeout(() => {
+        holdingCatalog = false;
+        for (const deliver of heldCatalog.splice(0)) deliver();
+      }, 500);
+      // Establish the old state before sampling; click() alone waits too late.
+      await expect(row).toBeVisible();
       const frames = await burst(page, `r2-${width}/download-start`, '.dlrow[data-cat="qwen3.5:4b"]', () => row.getByRole("button", { name: "Download", exact: true }).click());
       stableSize(frames, "surface", `download-start-${width}`);
       await row.getByRole("button", { name: "Cancel download" }).click();
