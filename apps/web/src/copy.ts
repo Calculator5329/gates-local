@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Use the native API when allowed, otherwise copy a temporary plain-text selection. */
 export async function copyText(text: string): Promise<boolean> {
@@ -41,13 +41,17 @@ export async function copyText(text: string): Promise<boolean> {
 /** A success flash starts only after copying succeeds; a failure stays until retried. */
 export function useCopy(text: string, ms = 1500) {
   const [copied, setCopied] = useState<boolean | null>(null);
+  const attempt = useRef(0);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(null), ms);
     return () => clearTimeout(timer);
   }, [copied, ms]);
   return [copied, () => {
+    const current = ++attempt.current;
     setCopied(null);
-    void copyText(text).then(setCopied);
+    void copyText(text).then((ok) => {
+      if (current === attempt.current) setCopied(ok);
+    });
   }] as const;
 }

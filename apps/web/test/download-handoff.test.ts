@@ -71,3 +71,16 @@ it("a list update preserves active progress and an actual download failure", asy
   await tick();
   expect(store.getState().pulls[model.name]).toEqual(failed);
 });
+
+it.each(["llama3", "library/llama3", "registry.invalid:5000/library/llama3"])("settles an untagged custom download: %s", async (name) => {
+  const installed = { ...model, name: `${name}:latest` };
+  const progress = { ...done, name };
+  store.setState({ models: [], pulls: { [name]: progress } });
+  b.server.push("models.changed", [installed]);
+  await tick();
+  expect(store.getState().pulls[name]).toBeUndefined();
+  // A later completion push must not revive the row either.
+  b.server.push("models.pull", progress);
+  await tick();
+  expect(store.getState().pulls[name]).toBeUndefined();
+});

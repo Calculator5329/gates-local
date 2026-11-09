@@ -93,6 +93,16 @@ failed the widened schedules. Production behavior is unchanged.
 The desktop app now lets its server reserve a free port as it binds. Another
 local program taking a briefly released port can no longer interrupt startup.
 
+## 2026-11-09: Finish custom downloads and refresh GPU context advice
+
+Custom downloads entered without a tag now finish when their installed
+`:latest` model arrives, without leaving duplicate pending rows. GPU memory
+in Settings rechecks context sizes when memory changes and shows Checking
+in the previous verdict's space until the new answer arrives. Dictation no
+longer triggers an old Stop press after a missed Space release, and copy
+feedback follows the latest click when clipboard writes overlap. Copy
+failure checks now inspect the control that was clicked.
+
 ## 2026-11-09: Replay client actions across reconnect and delayed delivery
 
 Ordering probes now enumerate causal interleavings against two real client

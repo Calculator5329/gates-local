@@ -79,9 +79,12 @@ for (const fallback of ["false", "throw"] as const) {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     for (const selector of [".turn.u [data-copy]", ".turn.a [data-copy]", ".cb-copy"]) {
-      await page.locator(selector).last().click();
-      await expect(page.getByRole("status").filter({ hasText: "Couldn't copy" }).last()).toBeVisible();
-      await expect(page.locator(selector).last()).not.toHaveAttribute("data-tip", "Copied");
+      const copy = page.locator(selector).last();
+      await copy.click();
+      const feedback = selector === ".cb-copy" ? copy : copy.locator("..");
+      await expect(feedback.getByRole("status").filter({ hasText: "Couldn't copy" })).toBeVisible();
+      await expect(copy).not.toHaveAttribute("data-tip", "Copied");
+      await expect(copy).not.toHaveText("Copied");
     }
     await page.keyboard.press("Control+Comma");
     await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();

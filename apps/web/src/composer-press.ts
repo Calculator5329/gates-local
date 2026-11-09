@@ -12,7 +12,10 @@ export function useActionPress(action: string, activate: () => void) {
     onPointerCancel: () => { pointer.current = null; },
     onBlur: () => { pointer.current = null; keyboard.current = null; },
     onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented) {
+        if (keyboard.current?.key === event.key) keyboard.current = null;
+        return;
+      }
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       // A fresh press also recovers a keyup delivered to another window.

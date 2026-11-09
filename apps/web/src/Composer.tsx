@@ -9,7 +9,7 @@ import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
-import { awaitingInstall, canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
+import { awaitingInstall, canThink, chatBlockedReason, chatModels, modelNameKey, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import {
   cancelQueuedEdit,
@@ -648,7 +648,7 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
   }
   for (const p of Object.values(s.pulls)) {
     if (!awaitingInstall(p)) continue;
-    if ((s.models ?? []).some((m) => m.name === p.name)) continue;
+    if ((s.models ?? []).some((m) => modelNameKey(m.name) === modelNameKey(p.name))) continue;
     const d = describeModel(p.name, catalog);
     if (!hit(p.name, d.name, d.purpose)) continue;
     // at the picker's context, as installed rows are (the catalog's own fit is at the saved default)

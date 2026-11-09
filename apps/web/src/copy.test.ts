@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { copyText } from "./copy.ts";
+import { copyText, useCopy } from "./copy.ts";
+
+const feedback = vi.hoisted(() => ({ value: null as boolean | null }));
+vi.mock("react", () => ({
+  useState: () => [feedback.value, (value: boolean | null) => { feedback.value = value; }],
+  useRef: (current: unknown) => ({ current }),
+  useEffect: () => {},
+}));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -76,4 +83,23 @@ describe("copyText", () => {
       });
     }
   }
+});
+
+it.each([true, false])("only the latest overlapping copy controls feedback (latest=%s)", async (latest) => {
+  fallback("rejected", false);
+  const attempts: Array<{ resolve(): void; reject(error: Error): void }> = [];
+  vi.stubGlobal("navigator", { clipboard: { writeText: () => new Promise<void>((resolve, reject) => { attempts.push({ resolve, reject }); }) } });
+  const [, copy] = useCopy("exact text");
+  copy();
+  copy();
+  const finish = async (index: number, success: boolean) => {
+    const attempt = attempts[index]!;
+    if (success) attempt.resolve();
+    else attempt.reject(new Error("Permission denied"));
+    for (let job = 0; job < 8; job++) await Promise.resolve();
+  };
+  await finish(1, latest);
+  expect(feedback.value).toBe(latest);
+  await finish(0, !latest);
+  expect(feedback.value).toBe(latest);
 });

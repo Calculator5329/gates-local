@@ -24,8 +24,9 @@ export function shortGpu(name: string | undefined): string {
 const runsAtMost = (max: number) => `Runs at ${k(max)}, the most this model takes.`;
 
 /** A context segment's tooltip in Settings, and whether that size cannot run. */
-function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean): { tip: string | undefined; wont: boolean } {
+function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean, pending: boolean): { tip: string | undefined; wont: boolean } {
   if (max !== undefined && c > max) return { tip: `This model takes at most ${k(max)}.`, wont: false };
+  if (pending) return { tip: "Checking…", wont: false };
   if (r === undefined || r === "error") return { tip: undefined, wont: false };
   const v = verdictOf(r);
   const at = k(c);
@@ -260,15 +261,18 @@ function SettingsBody({ model }: { model: string }) {
   const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
   const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, saved);
   const fits = useStore((s) => s.fits);
+  const stale = useStore((s) => s.staleFits);
   const settingsNA = useStore((s) => s.settings === NA);
   const [err, run] = useAct();
   useEffect(() => {
+    if (CONTEXT_SIZES.some((c) => stale[fitKey(model, c)] === true)) closeTip();
     // the report shown is keyed by the size asked for, even one over the model's limit; the server clamps it
     ensureFit(model, numCtx);
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
-  }, [model, numCtx, max, fits]);
+  }, [model, numCtx, max, fits, stale]);
   const cpu = noGpu(gpu);
   const report = fits[fitKey(model, numCtx)];
+  const pending = stale[fitKey(model, numCtx)] === true;
   const pick = (c: ContextSize) => {
     closeTip();
     setContext(c);
@@ -281,13 +285,17 @@ function SettingsBody({ model }: { model: string }) {
       ) : report === "error" ? (
         <div className="fp-n">Gates Local couldn't check {cpu ? "memory" : "GPU memory"} for {name} right now.</div>
       ) : (
-        <FitLine v={verdictOf(report)} ctx={ctx} />
+        <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
+          {/* Keep the previous verdict's footprint while its replacement is checked. */}
+          <div aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(report)} ctx={ctx} /></div>
+          {pending ? <div className="fp-v" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
+        </div>
       )}
       <div className="fp-row fp-ctl">
         <span className="k">Default context</span>
         <span className="mini-seg" role="group" aria-label="Default context">
           {CONTEXT_SIZES.map((c) => {
-            const f = ctxFit(c, max, fits[fitKey(model, c)], cpu);
+            const f = ctxFit(c, max, fits[fitKey(model, c)], cpu, stale[fitKey(model, c)] === true);
             return (
               <button
                 key={c}

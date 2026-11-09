@@ -20,7 +20,7 @@ import {
   createClient,
 } from "@gates-local/contracts";
 import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
-import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, newestOnly, sendableModel } from "./pick.ts";
+import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, modelNameKey, newestOnly, sendableModel } from "./pick.ts";
 import { type LiveTurn, NA, type Queued, type Section, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
 import { settingsScreen } from "./screen-loaders.ts";
 import { syncTitleBar } from "./titlebar.ts";
@@ -327,7 +327,7 @@ async function hydrateWith(
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(s.pulls, models ?? s.models), threads: ordered, fits: { ...s.fits }, ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(s.pulls, models ?? s.models), threads: ordered, fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   restoreSaved();
@@ -399,8 +399,8 @@ async function refreshCatalog(): Promise<void> {
 
 /** Completed progress bridges the list handoff, then retires so Remove cannot revive it. */
 function settlePulls(pulls: State["pulls"], models: State["models"]): State["pulls"] {
-  const installed = new Set(models?.map((m) => m.name));
-  return Object.fromEntries(Object.entries(pulls).filter(([name, p]) => p.state !== "done" || !installed.has(name)));
+  const installed = new Set(models?.map((m) => modelNameKey(m.name)));
+  return Object.fromEntries(Object.entries(pulls).filter(([name, p]) => p.state !== "done" || !installed.has(modelNameKey(name))));
 }
 
 export async function refreshModels(): Promise<void> {
@@ -501,12 +501,16 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
       if (epoch !== fitEpoch) return;
       setState((st) => {
         const { [key]: _old, ...stopFrees } = st.stopFrees;
-        return { fits: { ...st.fits, [key]: r }, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
+        const { [key]: _stale, ...staleFits } = st.staleFits;
+        return { fits: { ...st.fits, [key]: r }, staleFits, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
       });
     })
     .catch(() => {
       if (epoch !== fitEpoch) return;
-      setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } }));
+      setState((st) => {
+        const { [key]: _stale, ...staleFits } = st.staleFits;
+        return { fits: { ...st.fits, [key]: "error" as const }, staleFits };
+      });
       // A failure ends the held verdict; retry while this reading is current.
       setTimeout(() => {
         const s = getState();
@@ -518,10 +522,12 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
 /** Memory changed: refresh the open chat now and other reports when shown. */
 function invalidateFits(): void {
   fitEpoch++;
-  setState((s) => ({ fits: { ...s.fits } }));
+  setState((s) => ({ fits: { ...s.fits }, staleFits: staleFitReports(s) }));
   const s = getState();
   ensureFit(s.model, s.numCtx);
 }
+
+const staleFitReports = (s: State): State["staleFits"] => Object.fromEntries(Object.keys(s.fits).map((key) => [key, true as const]));
 
 // ---------------------------------------------------------------- threads
 

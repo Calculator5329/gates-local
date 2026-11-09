@@ -17,9 +17,11 @@ const model = methodSamples["models.list"].result[0]!;
 const pulls = { [fit.model]: { name: fit.model, state: "done" as const, completedBytes: model.sizeBytes, totalBytes: model.sizeBytes } };
 let DownloadTab: typeof import("../src/ModelDownloads.tsx")["DownloadTab"];
 let Picker: typeof import("../src/Composer.tsx")["Picker"];
+let pendingDownloads: typeof import("../src/ModelDownloads.tsx")["usePendingDownloads"];
 beforeAll(async () => {
   vi.stubGlobal("window", {});
   DownloadTab = (await import("../src/ModelDownloads.tsx")).DownloadTab;
+  pendingDownloads = (await import("../src/ModelDownloads.tsx")).usePendingDownloads;
   Picker = (await import("../src/Composer.tsx")).Picker;
 });
 beforeEach(() => {
@@ -48,4 +50,10 @@ it("an installed list ends the pending state", () => {
   expect(renderToStaticMarkup(createElement(DownloadTab))).toContain("Installed</span>");
   expect(renderToStaticMarkup(createElement(Picker))).not.toContain("Downloading · 100%");
   expect(firstChatPull([model], pulls)).toBeUndefined();
+});
+
+it("the installed rows and picker match an untagged pull to its latest tag", () => {
+  setState({ models: [{ ...model, name: "llama3:latest" }], pulls: { llama3: { ...pulls[fit.model]!, name: "llama3" } } });
+  expect(pendingDownloads()).toEqual([]);
+  expect(renderToStaticMarkup(createElement(Picker))).not.toContain("Downloading · 100%");
 });

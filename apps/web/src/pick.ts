@@ -80,6 +80,9 @@ export function chatBlockedReason(models: readonly ModelInfo[] | undefined, curr
 /** Keep completed progress until the installed list arrives; callers exclude installed models. */
 export const awaitingInstall = (p: { readonly state: string }): boolean => p.state === "queued" || p.state === "downloading" || p.state === "verifying" || p.state === "done";
 
+/** An omitted tag and :latest name the same model; preserve all other tags. */
+export const modelNameKey = (name: string): string => name.replace(/:latest$/, "");
+
 /** The download that will become the first chat model, while no installed model can chat. */
 export function firstChatPull(models: readonly ModelInfo[] | undefined, pulls: Readonly<Record<string, { name: string; state: string }>>): string | undefined {
   if ((models ?? []).some(canChat)) return undefined;

@@ -143,6 +143,8 @@ export interface State {
   readonly think: boolean;
   readonly image: boolean;
   readonly fits: Readonly<Record<string, FitReport | "error">>;
+  /** Retained reports awaiting a check against the latest memory reading. */
+  readonly staleFits: Readonly<Record<string, true>>;
   /** By fitKey: refused only because another chat's reply holds the memory, so a send may stop it. */
   readonly stopFrees: Readonly<Record<string, true>>;
   readonly loads: Readonly<Record<string, ModelLoad>>;
@@ -204,6 +206,7 @@ const initial: State = {
   think: true,
   image: false,
   fits: {},
+  staleFits: {},
   stopFrees: {},
   loads: {},
   settings: undefined,

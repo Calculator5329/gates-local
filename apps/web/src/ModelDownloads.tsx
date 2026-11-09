@@ -8,7 +8,7 @@ import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { nameOf, sizeText, splitTail } from "./models-rules.ts";
-import { awaitingInstall } from "./pick.ts";
+import { awaitingInstall, modelNameKey } from "./pick.ts";
 import { cancelPull, pull } from "./session.ts";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
 import { NA, type State, useStore } from "./store.ts";
@@ -57,7 +57,7 @@ export function usePendingDownloads() {
   const models = useStore((s) => s.models);
   // A completed pull stays here until the installed list arrives. Otherwise
   // the row briefly vanishes between the two independent push messages.
-  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => m.name === p.name));
+  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => modelNameKey(m.name) === modelNameKey(p.name)));
 }
 
 export function DownloadingRows() {

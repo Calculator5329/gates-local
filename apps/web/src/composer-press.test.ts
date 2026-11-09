@@ -14,6 +14,19 @@ function space(handled: boolean): Parameters<ReturnType<typeof useActionPress>["
 }
 
 for (const action of ["send", "stop:1"]) {
+  it(`a handled shortcut clears a missed Space release on ${action}`, () => {
+    const activate = vi.fn();
+    const press = useActionPress(action, activate);
+    press.onKeyDown(space(false));
+    // The first keyup went to another window; Voice consumes the next keydown.
+    press.onKeyDown(space(true));
+    press.onKeyUp(space(false));
+    expect(activate).not.toHaveBeenCalled();
+    press.onKeyDown(space(false));
+    press.onKeyUp(space(false));
+    expect(activate).toHaveBeenCalledOnce();
+  });
+
   it(`a handled dictation shortcut cannot activate ${action}; plain Space still can`, () => {
     const activate = vi.fn();
     const press = useActionPress(action, activate);
