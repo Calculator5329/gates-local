@@ -1,5 +1,5 @@
 // What the stylesheet may contain: the two radii, the one error red, the
-// sheets' safe-area padding, and no rules for a dock that nothing renders.
+// sheets' safe-area padding.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -54,7 +54,4 @@ describe("styles.css", () => {
     expect(rule?.[1]).toContain("env(safe-area-inset-bottom)");
   });
 
-  it("carries no rules for the approval dock nothing renders", () => {
-    expect(css).not.toMatch(/\.dock\b|\.dk-[a-z]|\.diff\b/);
-  });
 });

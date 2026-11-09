@@ -11,7 +11,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 // Enabling the Image pill must never probe a real image service.
 const unavailableImage = new URL(FAKE_URL);
 unavailableImage.port = "9";
-test.use({ comfyUrl: unavailableImage.origin, video: "on", screenshot: "only-on-failure" });
+test.use({ comfyUrl: unavailableImage.origin, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", screenshot: "only-on-failure" });
 
 /** Records the last reply's blocks on every DOM change. */
 function sampleReplies(): void {

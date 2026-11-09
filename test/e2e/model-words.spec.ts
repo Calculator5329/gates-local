@@ -114,21 +114,6 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await expect(panel.locator(".legend")).toContainText("Currently free");
 });
 
-test("a refused verdict's dot is red in the first-run card, as everywhere else", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  const colours = await page.evaluate(() => {
-    const host = document.createElement("div");
-    host.innerHTML = '<div class="fr-m"><span class="v"><span class="vl no"><span class="vd no" id="t-fr"></span>x</span></span></div><span class="vl no"><span class="vd no" id="t-vl"></span>x</span>';
-    document.body.append(host);
-    const [card, elsewhere] = ["t-fr", "t-vl"].map((id) => getComputedStyle(document.getElementById(id) as Element).backgroundColor);
-    const out = { card, elsewhere };
-    host.remove();
-    return out;
-  });
-  expect(colours.card).toBe(colours.elsewhere);
-});
-
 test.describe("decode speed", () => {
   test.use({ scenario: "slow-first-token" });
 

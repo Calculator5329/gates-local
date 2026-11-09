@@ -8,7 +8,9 @@ import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, transitionMetrics } from "./flicker-probe.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test.use({ seed: "design", video: "on", comfyUrl: "http://127.0.0.1:1" });
+test.skip(!process.env["GL_FLICKER_MEASURE"], "set GL_FLICKER_MEASURE=1 for diagnostic recordings");
+
+test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
 for (const delay of [0, 150, 600]) {
   test(`flicker audit Settings at ${delay} ms`, async ({ page, open }) => {

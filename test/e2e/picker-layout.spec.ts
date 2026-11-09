@@ -1,6 +1,6 @@
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test.use({ viewport: { width: 1137, height: 749 }, video: "on" });
+test.use({ viewport: { width: 1137, height: 749 }, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 test("approved picker closes when the composer is clicked and lets that click focus it", async ({ page, open }) => {
   await open(); await waitReady(page);

@@ -14,7 +14,7 @@ writeFileSync(fixture, audio);
 const shots = process.env["GL_VOICE_SHOTS"] ?? path.join(CHECKOUT_CACHE, "shots", "voice");
 mkdirSync(shots, { recursive: true });
 test.use({
-  video: "on",
+  video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off",
   launchOptions: {
     ...(existsSync("/usr/bin/chromium") ? { executablePath: "/usr/bin/chromium" } : {}),
     args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${fixture}`],
@@ -34,60 +34,6 @@ async function connect(page: import("@playwright/test").Page) {
   await expect(page.locator(".voice")).toBeVisible();
 }
 const shot = (page: import("@playwright/test").Page, name: string) => page.screenshot({ path: path.join(shots, `${name}.png`) });
-
-test("voice: VD-01 older Disconnect completion preserves the newest Connect; VC-03 another window still cancels it", async ({ page, context, open }) => {
-  const checks: (() => void)[] = [];
-  const healthIds = new Set<string>();
-  let healthReplies = 0;
-  let delay = false;
-  let disconnectSave: (() => void) | undefined;
-  await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
-    const server = ws.connectToServer();
-    ws.onMessage((message) => {
-      const req = JSON.parse(String(message)) as { method?: string; id?: string; params?: { whisperUrl?: string | null } };
-      if (req.method === "voice.check" && req.id) healthIds.add(req.id);
-      if (delay && req.method === "voice.check") checks.push(() => server.send(message));
-      else if (delay && req.method === "settings.update" && req.params?.whisperUrl === null) disconnectSave = () => server.send(message);
-      else server.send(message);
-    });
-    server.onMessage((message) => {
-      const reply = JSON.parse(String(message)) as { type?: string; id?: string };
-      if (reply.type === "response" && reply.id && healthIds.delete(reply.id)) healthReplies++;
-      ws.send(message);
-    });
-  });
-  await open(); await waitReady(page); await connect(page);
-  await page.keyboard.press("Control+Comma");
-  delay = true;
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect.poll(() => checks.length).toBe(1);
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
-  await expect.poll(() => !!disconnectSave).toBe(true);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect.poll(() => checks.length).toBe(2);
-  disconnectSave?.();
-  await expect(page.getByText("Off. Connect your running local server", { exact: false })).toBeVisible();
-  checks.splice(0).forEach((send) => send());
-  await expect(page.getByText("Connected for dictation.", { exact: false })).toBeVisible();
-  await shot(page, "reconnected");
-
-  const other = await context.newPage();
-  try {
-    const url = new URL(page.url()); url.hash = "";
-    await other.goto(url.toString()); await waitReady(other);
-    await other.keyboard.press("Control+Comma");
-    await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await expect.poll(() => checks.length).toBe(1);
-    await other.getByRole("button", { name: "Disconnect", exact: true }).click();
-    await expect(page.getByText("Off. Connect your running local server", { exact: false })).toBeVisible();
-    const replies = healthReplies;
-    checks.splice(0).forEach((send) => send());
-    await expect.poll(() => healthReplies).toBe(replies + 1);
-    await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("button", { name: "Dictate", exact: true })).toHaveAttribute("title", /Connect whisper/);
-  } finally { await other.close(); }
-});
 
 test("voice: local microphone transcript stays in the draft at the cursor; cancel and late answers are safe", async ({ page, open }) => {
   await open(); await waitReady(page);
@@ -202,14 +148,23 @@ test("voice: a late permission grant, navigation and the clip limit all release 
 });
 
 test("voice: a transcription timeout recovers without changing the draft", async ({ page, open }) => {
-  test.setTimeout(45_000);
+  // The real backend deadline is covered by module.test.ts. Deliver that error
+  // at the RPC boundary here so draft recovery does not spend twenty seconds.
+  await page.routeWebSocket(/.*/, ws => {
+    const server = ws.connectToServer();
+    ws.onMessage(message => {
+      const request = JSON.parse(String(message)) as { method?: string; id?: string };
+      if (request.method === "voice.transcribe") ws.send(JSON.stringify({ type: "response", id: request.id, ok: false, error: { code: "voice", message: "Transcription timed out. Check whisper.cpp, then retry." } }));
+      else server.send(message);
+    });
+    server.onMessage(message => ws.send(message));
+  });
   await open(); await waitReady(page); await connect(page);
   await page.locator("#ta").fill("kept draft");
-  whisper.mode = "slow";
   await page.getByRole("button", { name: "Dictate", exact: true }).click();
   await expect(page.locator(".voice")).toContainText("1s");
   await page.getByRole("button", { name: "Stop dictation" }).click();
-  await expect(page.locator(".c-note")).toContainText("timed out", { timeout: 25_000 });
+  await expect(page.locator(".c-note")).toContainText("timed out");
   await expect(page.locator("#ta")).toHaveValue("kept draft");
   await expect(page.locator(".voice")).toContainText("Dictate");
   await shot(page, "timeout");

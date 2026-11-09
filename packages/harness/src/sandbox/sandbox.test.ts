@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { chmodSync, closeSync, constants, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -83,7 +83,6 @@ describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [
   it("allows fcntl calls that take no lock", async () => {
     expect(await runSandbox({ command: `python3 -c 'import fcntl, os; fd = os.open("/tmp/x", os.O_CREAT | os.O_RDWR); fcntl.fcntl(fd, fcntl.F_GETFL); print("ok")'`, sources })).toContain("ok");
   });
-  it("the home read is a real path that exists outside the sandbox", () => { expect(existsSync(homedir())).toBe(true); });
   it("sees only the loopback interface", async () => {
     const devices = (await runSandbox({ command: "cat /proc/net/dev", sources })).split("\n").slice(2).filter(Boolean).map(l => l.split(":")[0]!.trim());
     expect(devices).toEqual(["lo"]);

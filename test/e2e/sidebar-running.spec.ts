@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 import { appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ seed: "design", video: "on" });
+test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 const FIRST = "Library: Effect Schema books";
 const SECOND = "Fix the backup cron";

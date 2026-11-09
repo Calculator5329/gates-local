@@ -1,5 +1,83 @@
 # Testing
 
+## Fast default browser run
+
+`pnpm e2e` builds the client and runs the complete one-worker `e2e` project.
+Explicit selections such as `pnpm e2e first-run.spec.ts` retain the ordinary
+Playwright command and admission checks. The release check uses the same
+complete project. A two-worker experiment did not qualify for adoption;
+acceptance requires two passing runs with isolated backends, and unchanged
+quick selection, evidence retention and admission behavior.
+
+The sample database and Git repository are prepared once per backend, while
+application data, import failures and retries still start fresh for every
+journey. Performance and native clipboard tests remain serial.
+
+Set `GL_FLICKER_MEASURE=1` to include the six broad flicker recordings and
+two state-swap surveys. Their probe-liveness checks are diagnostic; ordinary
+journeys retain Library mutation, refresh/error/cancel geometry, restored
+focus and queued-editor geometry. All dedicated zero-Checking-frame,
+zero-layout-shift, tooltip-overlap and native-control hit-target checks stay.
+Set `GL_E2E_RECORD=1` for passing-run video and full chunk traces. Failure
+traces and explicit screenshots remain available by default.
+
+Journey durations above five seconds warn. Above ten seconds, add a
+`budget` annotation explaining the necessary work. Missing explanations
+also warn; they never fail the run. The full default command warns above
+six minutes including build and teardown. Logs separate backend reset,
+page load, ready and teardown steps; the remainder includes actions,
+framework and browser setup. Explicit diagnostic recordings are excluded
+from journey warnings.
+
+## Test trim coverage ledger
+
+- Spellcheck remains in the complete window-security options assertion.
+  Package resolution is exercised by substantive imports and typechecking.
+  The obsolete dock-selector ban and standalone host-home existence check
+  were retired; actual sandbox home-read refusal remains.
+- Contract negative type examples remain compile-only. Runtime unknown
+  methods, bad channels, malformed parameters and garbage are still checked
+  by the codec boundary tests. The unused fit-label alternatives were already
+  removed before this trim; current fit wording is retained.
+- Clipboard exact user/reply/code text, sentinel replacement and feedback
+  share one journey per restricted API mode. Native clipboard permission,
+  backward selection and failure behavior retain their own browser checks.
+- First-model recommendation shares download/cancel/resume/send setup.
+  Small-model chat, real loaded context, unsupported sizes, Settings wording,
+  saved defaults and oversized-message refusal share a journey. A held
+  terminal frame preserves the Settings-open completion race.
+- Phone modal focus/inert/Tab/Escape checks share setup with close and swipe
+  checks. Code overflow/copy targets, table columns and link wrapping share
+  one journey per width. The decorative spacing and trash-symbol assertions
+  were retired. Actual switch hit targets and the readable-text sweep stay.
+- Tooltip rest delay, pass-through suppression, immediate handoff, keyboard
+  focus, click dismissal and popover suppression share two journeys. Their
+  real absence observation windows remain. Theme persistence and Library
+  cancelled/failed retry branches share setup without dropping assertions.
+- The dedicated voice Disconnect/Connect race and Stop acknowledgement race
+  leave the browser. Their cases remain in session/voice tests and ordering
+  replay. Normal microphone, track-release, cursor and Undo/Redo journeys stay.
+  The React-children identity browser check is redundant with retained
+  Markdown unit coverage; real DOM continuity/disclosure journeys stay.
+- Speech timeout recovery receives the backend's error at the RPC boundary;
+  the real deadline is still checked in the voice module tests. Export
+  timeout uses the browser clock and releases the late response before
+  checking for an unwanted download. Load/GPU/frame and request-settlement
+  conditions replace setup sleeps. Pacing still requires over fifty real
+  intermediate rendering frames with no raw Markdown.
+
+Three new diagnostic boundary probes exercise main's registered privileged
+IPC handlers, the 8 MiB runtime HTTP ceiling and the speech response ceiling.
+Both accepted and rejected inputs are checked, including connection close
+and speech-slot reuse. Each failed with its guard deliberately disabled
+and passed after restoration: unconditional IPC authorization, and an
+infinite limit for each response. These probes supplement existing gate
+evidence; they are not independent reviews of the boundaries.
+
+The historical supervisor-parent-EOF, phone simultaneous-start and updater
+timeout-cleanup failures did not reproduce in the full remote unit run at
+the starting revision. No product change was needed for those failures.
+
 
 ## Opt-in real-model smoke
 

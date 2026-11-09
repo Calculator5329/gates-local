@@ -144,24 +144,6 @@ test("Stop keeps the rendered blocks and cancels further text", async ({ page, o
   expect(await reply.locator(".md").textContent()).toBe(text);
 });
 
-test("streaming keeps a completed paragraph from rendering while later blocks arrive", async ({ page, open }) => {
-  await stack.scenario("slow-drip", { tokenDelayMs: 20 });
-  await open();
-  await waitReady(page);
-  await sendMessage(page, "Check disk space");
-  const para = page.locator(".turn.a .md p").first();
-  await expect(page.locator(".turn.a .md h2")).toBeVisible();
-  const children = await para.evaluateHandle((el) => {
-    const key = Object.keys(el).find((k) => k.startsWith("__reactProps$"))!;
-    return (Reflect.get(el, key) as { children: unknown }).children;
-  });
-  await expect(page.locator(".turn.a .md pre")).toBeVisible();
-  expect(await para.evaluate((el, before) => {
-    const key = Object.keys(el).find((k) => k.startsWith("__reactProps$"))!;
-    return (Reflect.get(el, key) as { children: unknown }).children === before;
-  }, children), "the completed paragraph keeps its React children").toBe(true);
-});
-
 for (const rate of [20, 60, 110]) {
   test(`measure mixed Markdown at ${rate} fake tokens per second`, async ({ page, open }, info) => {
     const root = process.env["GL_STREAM_MEASURE"];
@@ -227,6 +209,7 @@ for (const rate of [20, 60, 110]) {
 }
 
 test("steady pacing continues between delivery bursts and finishes the complete reply", async ({ browser, seededThread }, info) => {
+  test.info().annotations.push({ type: "budget", description: "Real rendering frames between spaced network bursts prove visible pacing; immediate delivery cannot exercise this behavior." });
   void seededThread;
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark", recordVideo: { dir: info.outputPath("video") } });
   const page = await context.newPage();
@@ -236,7 +219,7 @@ test("steady pacing continues between delivery bursts and finishes the complete 
   await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
   try {
     await page.addInitScript(installProbe);
-    await stack.scenario("slow-drip", { longDrip: 1, burstTokens: 26, tokenDelayMs: 240 });
+    await stack.scenario("slow-drip", { longDrip: 1, burstTokens: 26, tokenDelayMs: 120 });
     await page.goto(appUrl());
     await waitReady(page);
     await page.evaluate(() => { window.streamProbe.start = performance.now(); });

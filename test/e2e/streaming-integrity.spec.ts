@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-test.use({ video: "on", screenshot: "only-on-failure" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", screenshot: "only-on-failure" });
 
 async function proof(page: import("@playwright/test").Page) {
   const bundle = await build({

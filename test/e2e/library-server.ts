@@ -1,27 +1,18 @@
 // E2E entry with explicit transports. Production main has no environment switch
 // that can replace the pinned samples or allow a local repository URL.
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { setTimeout } from "node:timers/promises";
 import { main } from "../../apps/server/src/main.ts";
 import { SAMPLES } from "../../apps/server/src/sources/samples.ts";
 import { runGit } from "../../apps/server/src/sources/clone.ts";
 
-const root = mkdtempSync(path.join(tmpdir(), "library-browser-"));
-const file = path.join(root, "sample.db");
-const db = new DatabaseSync(file);
-db.exec("CREATE TABLE albums (title TEXT); INSERT INTO albums VALUES ('Fixture album');"); db.close();
-const bytes = readFileSync(file);
+const root = process.env["GL_E2E_LIBRARY_FIXTURE"];
+if (!root) throw new Error("The offline Library fixture must be prepared by the test stack.");
+const bytes = readFileSync(path.join(root, "sample.db"));
 const samples = SAMPLES.map(s => ({ ...s, sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }));
-const seed = path.join(root, "seed"); mkdirSync(seed);
-const git = (...args: string[]) => execFileSync("git", args, { cwd: seed, stdio: "ignore", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: path.join(root, "empty-global") } });
-git("init", "--quiet"); git("config", "user.name", "Library fixture"); git("config", "user.email", "fixture@example.test");
-writeFileSync(path.join(seed, "README.md"), "A small public documentation fixture"); git("add", "."); git("commit", "--quiet", "-m", "Fixture");
-const bare = path.join(root, "fixture.git"); git("clone", "--bare", seed, bare);
+const bare = path.join(root, "fixture.git");
 let northwindAttempts = 0;
 let failedClone = false;
 await main({ imports: {

@@ -2,7 +2,7 @@ import { expect, test, waitReady } from "./fixtures.ts";
 import { threadReply } from "../fake-ollama/fake-ollama.ts";
 import { INSTALLED, configure, release, shot, start, state } from "./threads-support.ts";
 
-test.use({ installed: INSTALLED, video: "on", screenshot: "only-on-failure", allowedErrors: [/WebSocket connection to .* failed/] });
+test.use({ installed: INSTALLED, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", screenshot: "only-on-failure", allowedErrors: [/WebSocket connection to .* failed/] });
 
 test("TE-03: the same page resumes a mid-reply connection loss with exact words, Stop and its running mark", async ({ page, open }) => {
   let cut: (() => Promise<void>) | undefined;

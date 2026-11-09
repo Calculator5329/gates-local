@@ -69,7 +69,7 @@ export const test = base.extend<Fixtures>({
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
   seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl }, use) => {
-    await use(await stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl));
+    await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl)));
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens
@@ -80,9 +80,9 @@ export const test = base.extend<Fixtures>({
     page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
     if (skipFirstRun) await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
     await use(async (hash = "") => {
-      await page.goto(appUrl(hash));
+      await test.step("page load", () => page.goto(appUrl(hash)));
     });
-    expect(errors, "console errors").toEqual([]);
+    await test.step("teardown", async () => { expect(errors, "console errors").toEqual([]); });
   },
 });
 
@@ -106,6 +106,8 @@ export async function openGpuMemory(page: Page): Promise<Locator> {
 
 /** The composer is unblocked: connected, and Ollama answers (a healthy runtime has no sidebar row). */
 export async function waitReady(page: Page): Promise<void> {
+  await test.step("page ready", async () => {
   await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
   await expect(page.locator("#ta")).toBeEnabled();
+  });
 }

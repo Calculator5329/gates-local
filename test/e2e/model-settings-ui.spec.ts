@@ -5,7 +5,7 @@ import type { Locator, Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 async function instructions(page: Page) {
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Instructions", exact: true }).click();

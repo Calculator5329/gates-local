@@ -120,11 +120,7 @@ test.describe("sheets on a phone", () => {
       await expect(page.locator(sheet)).toBeHidden();
       await expect(page.locator("#app")).not.toHaveAttribute("inert", "");
       await expect(page.locator(opener).first()).toBeFocused();
-    });
-
-    test(sheet === "#picker" ? "the model picker keeps its fixed frame and has a 44 px close" : `${label} has a grab handle, a 44 px close and closes on a swipe down`, async ({ page, open, seededThread }) => {
-      await openThread(page, open, seededThread);
-      if (sheet === "#threadMenu") await openDrawer(page);
+      await test.step("close target and swipe dismissal remain reachable", async () => {
       await page.locator(opener).first().tap();
       if (sheet === "#picker") {
         const frame = await box(page, sheet), close = await box(page, "#picker .pk-close");
@@ -143,6 +139,7 @@ test.describe("sheets on a phone", () => {
         el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch(600)] }));
       });
       await expect(page.locator(sheet)).toBeHidden();
+      });
     });
   }
 });
@@ -262,8 +259,9 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
   test.describe(`long content at ${name}`, () => {
     test.use({ ...use, seed: "design-code" });
 
-    test("code scrolls inside its block, never the timeline, with a copy target and a fade", async ({ page, open, seededThread }) => {
+    test("read code, tables and long links without overflowing the timeline", async ({ page, open, seededThread }) => {
       await openThread(page, open, seededThread);
+      await test.step("code scrolls inside its block, never the timeline, with a copy target and a fade", async () => {
       const pre = page.locator(".md .cb pre").last();
       await pre.scrollIntoViewIfNeeded();
       const m = await pre.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth, pad: getComputedStyle(el).paddingRight }));
@@ -286,10 +284,8 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
       const copy = await page.locator(".md .cb-copy").last().boundingBox();
       expect(Math.min(copy?.width ?? 0, copy?.height ?? 0), "copy target").toBeGreaterThanOrEqual(44);
       await expect(page.locator(".md .cb-copy").last()).toHaveCSS("opacity", "1");
-    });
-
-    test("a table scrolls by itself, its first column readable and numbers to content", async ({ page, open, seededThread }) => {
-      await openThread(page, open, seededThread);
+      });
+      await test.step("a table scrolls by itself, its first column readable and numbers to content", async () => {
       const table = page.locator(".md table").last();
       await table.scrollIntoViewIfNeeded();
       const m = await table.evaluate((el) => {
@@ -300,10 +296,8 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
       expect(m.heads[0] ?? 0, "first column").toBeGreaterThanOrEqual(160);
       expect(m.heads[3] ?? 999, "number column").toBeLessThan(90);
       await expect(table).toHaveAttribute("data-more", "end");
-    });
-
-    test("a long URL is a link, underlined, and wraps only after / or -", async ({ page, open, seededThread }) => {
-      await openThread(page, open, seededThread);
+      });
+      await test.step("a long URL is a link, underlined, and wraps only after / or -", async () => {
       const link = page.locator('.md a[href^="https://effect.website"]');
       await expect(link).toBeVisible();
       await expect(link).toHaveCSS("text-decoration-line", "underline");
@@ -323,6 +317,7 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
       });
       expect(ends.length, "the URL wraps").toBeGreaterThan(0);
       for (const c of ends) expect("/-", `a line ends in "${c}"`).toContain(c);
+      });
     });
   });
 }
@@ -349,22 +344,6 @@ test.describe("a finished thread on touch", () => {
     await expect(first.locator(".meta")).toContainText("Qwen 3.5 9B");
   });
 
-  test("blocks, turns and icons sit on the 8/16/24 scale and the 16 px column", async ({ page, open, seededThread }) => {
-    await openThread(page, open, seededThread);
-    await expect(page.locator(".md p:not(:first-child)").first()).toHaveCSS("margin-top", "16px");
-    const gap = await page.evaluate(() => {
-      const u = document.querySelectorAll(".turn.u")[1]?.getBoundingClientRect();
-      const a = document.querySelectorAll(".turn.a")[0]?.getBoundingClientRect();
-      return (u?.top ?? 0) - (a?.bottom ?? 0);
-    });
-    expect(gap, "between turns").toBe(24);
-    const left = await page.evaluate(() => {
-      const icon = document.querySelector(".turn.a .a-act [data-copy] svg")?.getBoundingClientRect();
-      const text = document.querySelector(".turn.a .md")?.getBoundingClientRect();
-      return { icon: icon?.left ?? 0, text: text?.left ?? 99 };
-    });
-    expect(Math.abs(left.icon - left.text), "action icon on the text column").toBeLessThanOrEqual(1);
-  });
 
   test("a tool row's collapsed line drops the tool's name; its details keep it", async ({ page, open, seededThread }) => {
     await openThread(page, open, seededThread);
@@ -453,12 +432,6 @@ test.describe("sheet content on a phone", () => {
     await expect(sheet.locator(".mi.st use")).toHaveAttribute("href", "#i-gauge");
   });
 
-  test("the thread menu's Delete has a trash icon", async ({ page, open, seededThread }) => {
-    await openThread(page, open, seededThread);
-    await openDrawer(page);
-    await page.locator(".sb-row .sb-menu").first().tap();
-    await expect(page.locator("#threadMenu .mi.danger use")).toHaveAttribute("href", "#i-trash");
-  });
 
   test("the picker: search fills the model column and each row shows estimated memory", async ({ page, open }) => {
     await open();

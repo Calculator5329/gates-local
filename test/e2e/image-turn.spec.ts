@@ -3,7 +3,7 @@ import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on", allowedErrors: [/WebSocket connection to .* failed/] });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
 test.beforeEach(async () => { comfy = await fakeComfy(); });
 test.afterEach(async () => { await comfy.close(); });

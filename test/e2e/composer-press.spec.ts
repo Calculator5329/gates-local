@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-test.use({ seed: 2, video: "on" });
+test.use({ seed: 2, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 /** Observe admission/cancellation synchronously, before an async RPC can hide a stray click. */
 async function watchRequests(page: Page) {

@@ -42,9 +42,11 @@ import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../.
 import { seedDesign, seedLong, seedReadme } from "./seed.ts";
 import { type ServeStandIn, startServeStandIn } from "./serve-standin.ts";
 import { e2eServerEntry } from "./server-entry.ts";
+import { prepareLibraryFixture } from "./library-fixture.ts";
 
 // Resolve before starting even the fakes: a missing fixture stops setup outright.
 const SERVER_ENTRY = e2eServerEntry(ROOT);
+const libraryFixture = prepareLibraryFixture();
 const runDir = path.join(DATA_ROOT, new Date().toISOString().replaceAll(/[:.]/g, "-"));
 // One per checkout, reused across runs, and short so the socket path stays
 // under sun_path's 107 bytes. The server makes it 0700; a socket a killed run
@@ -122,6 +124,7 @@ function serverEnv(): NodeJS.ProcessEnv {
     ...process.env,
     ...phoneEnv(),
     GATES_LOCAL_OLLAMA_URL: FAKE_URL,
+    GL_E2E_LIBRARY_FIXTURE: libraryFixture,
     GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
     GATES_LOCAL_MEMINFO: path.join(ROOT, "test/fake-ollama/meminfo.txt"),

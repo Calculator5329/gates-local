@@ -130,23 +130,29 @@ function runs(values: readonly string[]): string[] {
 test("the composer toolbar holds still while a picked model loads slowly", async ({ page, open }) => {
   // gemma4:12b takes 3 s to load and fills the GPU a step at a time, as a real load does
   await stack.scenario("models", { loadDelayMs: 3000 });
+  let gpuPushes = 0;
+  page.on("websocket", ws => ws.on("framereceived", frame => {
+    if (String(frame.payload).includes('"gpu.changed"')) gpuPushes++;
+  }));
   await open();
   await waitReady(page);
   await expect(page.locator("#modelBtn")).toContainText("Qwen");
   await page.locator("#ta").fill("Hello");
-  // let the start settle: the first fit and GPU poll
-  await page.waitForTimeout(3500);
+  await expect.poll(async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] }).loaded.map(model => model.name)).toContain("qwen3.5:9b");
+
 
   await page.locator("#modelBtn").click();
   await page.locator("#pkSearch").fill("gemma");
   await sampleToolbar(page);
+  const before = gpuPushes;
   await page.locator(`#picker .pk-r[data-m="gemma4:12b"]`).click();
   await expect(page.locator("#picker")).toBeHidden();
   await expect
     .poll(async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] }).loaded.map((l) => l.name), { timeout: 10_000 })
     .toContain("gemma4:12b");
-  // a GPU poll (3 s) and the fits it invalidates land after the load
-  await page.waitForTimeout(4000);
+  // Observe the real GPU invalidation and enough rendered frames, rather than sleeping a polling period.
+  await expect.poll(() => gpuPushes, { timeout: 10_000 }).toBeGreaterThan(before);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { glToolbar: Frame[][] }).glToolbar.filter(frame => frame.find(control => control.k === "modelBtn")?.s.includes("Gemma")).length)).toBeGreaterThan(60);
   const frames = await page.evaluate(() => {
     const w = window as unknown as { glToolbar: Frame[][]; glToolbarStop?: boolean };
     w.glToolbarStop = true;

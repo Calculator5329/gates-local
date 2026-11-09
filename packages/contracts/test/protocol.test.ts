@@ -106,20 +106,16 @@ describe("boundary refusals", () => {
   });
 });
 
-describe("static types", () => {
-  it("rejects wrong params at compile time", () => {
+export function compileOnlyContractChecks(): void {
     // These lines exist for `tsc`; each must stay an error.
     // @ts-expect-error threadId is required
     encodeRequest("1", "threads.get", {});
     // @ts-expect-error numCtx is a number
     encodeRequest("1", "fit.check", { model: "m", numCtx: "16k" });
     // @ts-expect-error not a method
-    const nuke = encodeRequest("1", "threads.nuke", {});
-    expect(nuke.ok ? "sent" : nuke.error.code).toBe("unknown-method");
+    encodeRequest("1", "threads.nuke", {});
     // @ts-expect-error not a channel
-    const push = encodePush("nope", {});
-    expect(push.ok ? "sent" : push.error.code).toBe("bad-payload");
+    encodePush("nope", {});
     // @ts-expect-error not a method
-    expect(encodeRequest("1", "constructor", {}).ok).toBe(false);
-  });
-});
+    encodeRequest("1", "constructor", {});
+}

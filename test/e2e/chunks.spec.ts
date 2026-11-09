@@ -6,7 +6,7 @@ import { WEB_ORIGIN } from "./env.ts";
 
 const CHUNKS = /\/assets\/(?:screens|Settings|FirstRun|FitPanel|ModelDownloads)-[^/]+\.js(?:\?.*)?$/;
 
-test.use({ video: "on", trace: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", trace: process.env["GL_E2E_RECORD"] ? "on" : "retain-on-failure" });
 
 async function capture(page: Page, name: string) {
   // Capture the real settled frame, without disabling or rewriting animations.

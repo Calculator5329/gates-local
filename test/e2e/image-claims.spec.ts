@@ -3,7 +3,7 @@ import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]] as const) {
   test(`fabricated image claims retain the report and true card but invented links stay inert (${mode})`, async ({ page, open }, info) => {
     const comfy = await fakeComfy();

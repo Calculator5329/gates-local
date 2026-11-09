@@ -5,7 +5,7 @@ import { CHECKOUT_CACHE } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { INSTALLED, SMALL, configure, contextSize, finished, noWarnings, observe, pick, release, shot, start, state } from "./threads-support.ts";
 
-test.use({ installed: INSTALLED, screenshot: "only-on-failure", video: "on" });
+test.use({ installed: INSTALLED, screenshot: "only-on-failure", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 test("background life: return mid-reply, finish away, and keep exact ordered words across three threads", async ({ page, open }) => {
   await open();

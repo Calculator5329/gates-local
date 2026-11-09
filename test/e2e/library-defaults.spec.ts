@@ -82,11 +82,13 @@ test.describe("while an import is interrupted", () => {
   });
 });
 
-for (const width of [1440, 390]) for (const mode of ["cancelled", "failed"] as const) {
-  test(`Library Retry after leaving Settings returns to the ${mode} repository at ${width}px (DG-02)`, async ({ page, open }, info) => {
+for (const width of [1440, 390]) {
+  test(`Library Retry returns to cancelled and failed repositories at ${width}px (DG-02)`, async ({ page, open }, info) => {
+    test.info().annotations.push({ type: "budget", description: "Both cancelled and failed clone recovery cross Settings remounts and real import-state polling; each retry must finish as the right added source." });
     await page.setViewportSize({ width, height: 900 }); await open(); await library(page);
     const input = page.getByRole("textbox", { name: "Public GitHub repository URL" });
     const button = page.locator(".srow", { has: input }).getByRole("button");
+    for (const mode of ["cancelled", "failed"] as const) await test.step(`recover the ${mode} repository`, async () => {
     const key = `https://github.com/example/retry-${mode}`;
     await input.fill(key); await button.click(); await expect(button).toHaveText("Cancel");
     if (mode === "cancelled") { await button.click(); await expect(button).toHaveText("Retry"); }
@@ -95,6 +97,7 @@ for (const width of [1440, 390]) for (const mode of ["cancelled", "failed"] as c
     await shot(page, info, "retry-returned");
     await button.click(); await expect(input).toHaveValue(key); await expect(button).toHaveText("Added");
     await expect(page.getByRole("button", { name: `More for example/retry-${mode}` })).toBeVisible();
-    await shot(page, info, "retry-added");
+    await shot(page, info, `retry-${mode}-added`);
+    });
   });
 }

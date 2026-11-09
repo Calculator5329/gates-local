@@ -3,7 +3,7 @@ import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { INSTALLED, SMALL, configure, contextSize, finished, pick, release, shot, start, state } from "./threads-support.ts";
 
-test.use({ installed: INSTALLED, video: "on", screenshot: "only-on-failure" });
+test.use({ installed: INSTALLED, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", screenshot: "only-on-failure" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
 test.beforeEach(async () => { comfy = await fakeComfy(); });
 test.afterEach(async () => { await comfy.close(); });

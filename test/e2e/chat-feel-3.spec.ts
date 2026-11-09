@@ -17,6 +17,9 @@ interface Tap {
   readonly fail: Set<string>;
   /** Methods whose answer reaches the page this many ms late (the server has already acted). */
   readonly late: Map<string, number>;
+  readonly hold: Set<string>;
+  release(method: string): number;
+  readonly pending: Set<unknown>;
   /** Methods whose result is rewritten on its way to the page: what another client changed since this one last looked. */
   readonly edit: Map<string, (result: unknown) => unknown>;
   push(channel: string, payload: unknown): void;
@@ -26,6 +29,9 @@ async function tap(page: Page): Promise<Tap> {
   const calls = new Map<string, number>();
   const fail = new Set<string>();
   const late = new Map<string, number>();
+  const hold = new Set<string>();
+  const held = new Map<string, (() => void)[]>();
+  const pending = new Set<unknown>();
   const edit = new Map<string, (result: unknown) => unknown>();
   const methodOf = new Map<unknown, string>();
   let app: WebSocketRoute | undefined;
@@ -38,7 +44,9 @@ async function tap(page: Page): Promise<Tap> {
         app = ws;
         calls.set(req.method, (calls.get(req.method) ?? 0) + 1);
         methodOf.set(req.id, req.method);
+        pending.add(req.id);
         if (fail.has(req.method)) {
+          pending.delete(req.id);
           ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: "test: refused by the tap" } }));
           return;
         }
@@ -50,15 +58,30 @@ async function tap(page: Page): Promise<Tap> {
       const method = res?.type === "response" ? (methodOf.get(res.id) ?? "") : "";
       const change = edit.get(method);
       const frame = change === undefined ? m : rewritten(m, change);
-      const ms = late.get(method);
-      if (ms === undefined) ws.send(frame);
-      else setTimeout(() => ws.send(frame), ms);
+      const deliver = () => { pending.delete(res?.id); ws.send(frame); };
+      if (hold.has(method)) {
+        const waiting = held.get(method) ?? [];
+        waiting.push(deliver); held.set(method, waiting);
+      } else {
+        const ms = late.get(method);
+        if (ms === undefined) deliver();
+        else setTimeout(deliver, ms);
+      }
     });
   });
   return {
     calls,
     fail,
     late,
+    hold,
+    pending,
+    release: method => {
+      hold.delete(method);
+      const waiting = held.get(method) ?? [];
+      held.delete(method);
+      waiting.forEach(deliver => deliver());
+      return waiting.length;
+    },
     edit,
     push: (channel, payload) => app?.send(JSON.stringify({ type: "push", channel, payload })),
   };
@@ -100,8 +123,7 @@ test.describe("a failed fit check", () => {
     await refusedGemma(page);
     const send = page.getByRole("button", { name: "Send message" });
     await expect(send).toHaveAttribute("aria-disabled", "true");
-    // let the checks in flight answer: a push during one is overwritten by its answer
-    await page.waitForTimeout(500);
+    await expect.poll(() => t.pending.size).toBe(0);
 
     // another model leaves the GPU; the fresh check fails
     t.fail.add("fit.check");
@@ -121,7 +143,7 @@ test.describe("a failed fit check", () => {
     await open();
     await waitReady(page);
     await refusedGemma(page);
-    await page.waitForTimeout(500);
+    await expect.poll(() => t.pending.size).toBe(0);
     const before = t.calls.get("fit.check") ?? 0;
     t.push("models.load", { model: "gemma4:12b", numCtx: 65536, state: "error", message: "test: the load failed" });
     await expect.poll(() => t.calls.get("fit.check") ?? 0).toBeGreaterThan(before);
@@ -309,22 +331,27 @@ test.describe("Export as Markdown from the thread menu", () => {
     const files = downloads(page);
     t.fail.add("threads.get");
     await exportRow(page, OTHER);
-    await expect(page.getByRole("status")).toContainText(`Couldn't export “${OTHER}”`);
-    await page.waitForTimeout(1000);
+    await expect(page.locator('.c-note[role="status"]')).toContainText(`Couldn't export “${OTHER}”`);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(files).toHaveLength(0);
   });
 
   test("a load slower than the limit says so and makes no file", async ({ page, open, seededThread }) => {
+    await page.clock.install();
     const t = await tap(page);
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     // the open thread has loaded, so a load the tap fails or holds below is only the export's
     await expect(page.locator(".tl .turn").first()).toBeVisible();
     const files = downloads(page);
-    t.late.set("threads.get", 12_000);
+    t.hold.add("threads.get");
+    const before = t.calls.get("threads.get") ?? 0;
     await exportRow(page, OTHER);
-    await expect(page.getByRole("status")).toContainText("took too long", { timeout: 12_000 });
-    await page.waitForTimeout(1000);
+    await expect.poll(() => t.calls.get("threads.get") ?? 0).toBeGreaterThan(before);
+    await page.clock.fastForward(10_001);
+    await expect(page.locator('.c-note[role="status"]')).toContainText("took too long");
+    await expect.poll(() => t.release("threads.get")).toBe(1);
+    await page.clock.runFor(1000);
     expect(files).toHaveLength(0);
   });
 
@@ -340,8 +367,8 @@ test.describe("Export as Markdown from the thread menu", () => {
     await row(page, OTHER).click({ button: "right" });
     await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
     await expect(row(page, OTHER)).toHaveCount(0);
-    await expect(page.getByRole("status")).toContainText("it was deleted");
-    await page.waitForTimeout(1000);
+    await expect(page.locator('.c-note[role="status"]')).toContainText("it was deleted");
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(files).toHaveLength(0);
   });
 });

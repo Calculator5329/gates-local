@@ -32,7 +32,7 @@ export default defineConfig({
   retries: 0,
   timeout: 30_000,
   expect: { timeout: 5_000 },
-  reporter: [["list"]],
+  reporter: [["list"], ["./budget-reporter.ts"]],
   use: {
     ...browser(),
     baseURL: WEB_ORIGIN,

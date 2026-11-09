@@ -4,7 +4,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test.use({ seed: "design", video: "on" });
+test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 const OPEN = "Library: Effect Schema books";
 const OTHER = "Fix the backup cron";

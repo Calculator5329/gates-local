@@ -2,7 +2,7 @@
 import { burst, delayedMemory, memoryMetrics } from "./flicker-probe.ts";
 import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 for (const delay of [0, 150, 600]) {
   test(`GPU memory context pick keeps its verdict and details at ${delay} ms`, async ({ page, open }) => {

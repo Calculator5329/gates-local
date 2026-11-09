@@ -3,7 +3,7 @@
 // complement the real-composer render matrix in Composer.test.ts.
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ seed: 2, video: "on" });
+test.use({ seed: 2, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 test("one primary button keeps its node, position and keyboard focus across Send, Stop and Update", async ({ page, open, seededThread }) => {
   await open(`#thread=${seededThread ?? ""}`);

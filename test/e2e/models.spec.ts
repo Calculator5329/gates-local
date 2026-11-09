@@ -6,7 +6,7 @@
 import type { Page } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 const openModels = async (page: Page) => {
   await page.keyboard.press("Control+Comma");

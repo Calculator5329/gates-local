@@ -7,7 +7,7 @@ import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, type Frame, transitionMetrics } from "./flicker-probe.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
-test.use({ seed: "design", video: "on", comfyUrl: "http://127.0.0.1:1" });
+test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
 async function section(page: Page, name: string, first = false) {
   if (first) await page.keyboard.press("Control+Comma");
@@ -406,7 +406,75 @@ for (const delay of [0, 150, 600]) {
 }
 
 for (const width of [1440, 360]) {
+  test.describe(`state-swap assertions at ${width}`, () => {
+    test.use({ viewport: { width, height: 900 } });
+    test("Library mutations preserve refresh, error and cancel geometry and restore focus", async ({ page, open }) => {
+      test.info().annotations.push({ type: "budget", description: "Refresh, error and cancellation each need a live frame observation window to prove zero layout shift; source mutations and restored focus are checked in the same journey." });
+      await libraryTraffic(page);
+      await open();
+      await waitReady(page);
+      await section(page, "Library", true);
+      const measure = async (name: string, selector: string, action: () => Promise<unknown>) => {
+        if (["library-refresh", "library-error", "library-cancel"].includes(name)) {
+          await libraryBoxes(page);
+          return burst(page, `library-${width}/${name}`, selector, action);
+        }
+        await test.step(name, action);
+        return [];
+      };
+      const files = sources();
+      for (const kind of ["folder", "file", "sqlite"] as const) {
+        const group = groupOf(page, kind);
+        const noun = nounOf(kind);
+        await measure(`library-${kind}-open`, ".set", () => group.getByRole("button", { name: `Add ${noun}…`, exact: true }).click());
+        await page.getByRole("textbox", { name: `Add a ${noun} path` }).fill(files[kind]);
+        await measure(`library-${kind}-submit`, ".set", () => group.getByRole("button", { name: "Add", exact: true }).click());
+        const label = path.basename(files[kind]);
+        const row = group.locator(".src").filter({ hasText: label });
+        await expect(row).toBeVisible();
+        await measure(`library-${kind}-menu`, ".set", () => row.getByRole("button", { name: `More for ${label}` }).click());
+        if (kind === "sqlite") {
+          const refreshed = await measure("library-refresh", ".set", () => page.getByRole("menuitem", { name: "Refresh", exact: true }).click());
+          stableSize(refreshed, "body-1", `library-refresh-${width}`);
+          await row.getByRole("button", { name: `More for ${label}` }).click();
+        }
+        await measure(`library-${kind}-remove`, ".set", () => page.getByRole("menuitem", { name: "Remove", exact: true }).click());
+      }
+      const group = groupOf(page, "folder");
+      await group.getByRole("button", { name: "Add folder…", exact: true }).click();
+      await page.getByRole("textbox", { name: "Add a folder path" }).fill(path.join(CHECKOUT_CACHE, "missing-size-swap-folder"));
+      const failure = await measure("library-error", ".set", () => group.getByRole("button", { name: "Add", exact: true }).click());
+      stableSize(failure, "body-0", `library-error-${width}`);
+      const cancel = await measure("library-cancel", ".set", () => page.getByRole("textbox", { name: "Add a folder path" }).press("Escape"));
+      stableSize(cancel, "body-0", `library-cancel-${width}`);
+      await expect(group.getByRole("button", { name: "Add folder…", exact: true })).toBeFocused();
+
+    });
+    test("queued editing and cancellation keep the row size and removal clears the queue", async ({ page, open }) => {
+      await open();
+      await waitReady(page);
+      const measure = (name: string, selector: string, action: () => Promise<unknown>) => burst(page, `queue-${width}/${name}`, selector, action);
+      await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+      await sendMessage(page, "How do I check disk space before a download?");
+      await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await sendMessage(page, "A queued edit");
+      await expect(page.locator(".qt-r")).toHaveCount(1);
+      const editing = await measure("queued-edit", ".qt-r", () => page.locator("[data-edit-queued]").click());
+      stableSize(editing, "surface", `queued-edit-${width}`);
+      const cancelled = await measure("queued-edit-cancel", ".qt-r", () => page.getByRole("button", { name: "Cancel editing" }).click());
+      stableSize(cancelled, "surface", `queued-edit-cancel-${width}`);
+      await measure("queued-remove", ".stage", () => page.locator("[data-unqueue]").click());
+      // Stop/Retry presentation is owned by the streaming lane; this only
+      // ends the fake reply after observing the queue editor.
+      await page.getByRole("button", { name: "Stop", exact: true }).click();
+      await expect(page.locator(".qt-r")).toHaveCount(0);
+    });
+  });
+}
+
+for (const width of [1440, 360]) {
   test.describe(`state-swap survey at ${width}`, () => {
+    test.skip(!process.env["GL_FLICKER_MEASURE"], "set GL_FLICKER_MEASURE=1 for diagnostic recordings");
     test.use({ viewport: { width, height: 900 } });
     test("audit disclosures, editors, errors and Library mutations", async ({ page, open, seededThread }) => {
       test.setTimeout(180_000);

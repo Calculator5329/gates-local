@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-09: Faster browser checks with useful boundary coverage
+
+- Broad flicker recordings are opt-in. Shorter shared journeys retain real
+  focus, clipboard, layout, streaming and recovery assertions, with warnings
+  for slow checks. The default retains one worker, including native and
+  performance checks.
+- Redundant unit checks are removed. New IPC authorization and oversized
+  runtime/speech reply probes were watched failing with disabled guards.
+
 ## 2026-11-09: First-run memory advice
 
 - Memory advice waits for a check, failures stay visible through retries, and phone sheets keep focus when their controls change.

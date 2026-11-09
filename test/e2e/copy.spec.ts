@@ -13,7 +13,7 @@ declare global {
   }
 }
 
-test.use({ seed: 2, permissions: ["clipboard-read", "clipboard-write"], video: "on" });
+test.use({ seed: 2, permissions: ["clipboard-read", "clipboard-write"], video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 /** Keep the native reader: assertions check the browser's clipboard, not a copy mock. */
 async function limitClipboard(page: Page, mode: "rejected" | "missing") {
@@ -34,11 +34,11 @@ const reply = [
 ].join("\n");
 
 for (const mode of ["rejected", "missing"] as const) {
-  for (const target of ["user message", "reply", "code"] as const) {
-    test(`${target} copies exact text when the clipboard API is ${mode}`, async ({ page, open, seededThread }, info) => {
+  test(`copy each content type when the clipboard API is ${mode}`, async ({ page, open, seededThread }, info) => {
       await limitClipboard(page, mode);
       await open(`#thread=${seededThread ?? ""}`);
       await waitReady(page);
+      for (const target of ["user message", "reply", "code"] as const) await test.step(`copy exact ${target} text`, async () => {
       await page.evaluate(() => window.copyProbe.write("clipboard sentinel"));
       const turn = page.locator(target === "user message" ? ".turn.u" : ".turn.a").last();
       const copy = target === "code" ? turn.getByRole("button", { name: "Copy code", exact: true }) : turn.locator("[data-copy]");
@@ -49,8 +49,8 @@ for (const mode of ["rejected", "missing"] as const) {
       await expect.poll(() => page.evaluate(() => window.copyProbe.read())).toBe(expected);
       if (target === "code") await expect(copy).toHaveText("Copied");
       else await expect(copy).toHaveAttribute("data-tip", "Copied");
-    });
-  }
+      });
+  });
 }
 
 test("copy waits for success instead of flashing a premature check mark", async ({ page, open, seededThread }) => {

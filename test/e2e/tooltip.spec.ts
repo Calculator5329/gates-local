@@ -5,7 +5,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test.use({ video: "on" });
+test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 interface Rec {
   start: number | null;
@@ -52,16 +52,8 @@ test.describe("tooltips", () => {
     await page.locator("#ta").hover();
   });
 
-  test("a tooltip waits for the pointer to rest", async ({ page }) => {
-    await watchTip(page, "#plusBtn");
-    await page.locator("#plusBtn").hover();
-    await expect(page.locator("#tip.open")).toBeVisible();
-    await page.screenshot({ path: test.info().outputPath("tooltip.png") });
-    const r = await rec(page);
-    expect((r.opened ?? 0) - (r.start ?? 0)).toBeGreaterThanOrEqual(300);
-  });
-
-  test("a pointer passing over a control shows nothing", async ({ page }) => {
+  test("pointer hints wait, hand off and stay dismissed after clicking", async ({ page }) => {
+    await test.step("a pointer passing over a control shows nothing", async () => {
     await watchTip(page, "#plusBtn");
     // in one task, so the pass takes no time however busy the machine is
     await page.evaluate(() => {
@@ -70,9 +62,16 @@ test.describe("tooltips", () => {
     });
     await settle(page);
     expect((await rec(page)).opened).toBeNull();
-  });
-
-  test("moving on from an open tooltip shows the next one at once", async ({ page }) => {
+    });
+    await test.step("a tooltip waits for the pointer to rest", async () => {
+    await watchTip(page, "#plusBtn");
+    await page.locator("#plusBtn").hover();
+    await expect(page.locator("#tip.open")).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("tooltip.png") });
+    const r = await rec(page);
+    expect((r.opened ?? 0) - (r.start ?? 0)).toBeGreaterThanOrEqual(300);
+    });
+    await test.step("moving on from an open tooltip shows the next one at once", async () => {
     await page.locator("#plusBtn").hover();
     await expect(page.locator("#tip.open")).toBeVisible();
     await watchTip(page, "#modelBtn");
@@ -80,9 +79,19 @@ test.describe("tooltips", () => {
     await expect.poll(async () => (await rec(page)).opened).not.toBeNull();
     const r = await rec(page);
     expect((r.opened ?? 0) - (r.start ?? 0)).toBeLessThan(200);
+    });
+    await test.step("a mouse click does not bring the tooltip back", async () => {
+    // Copy leaves the tooltip alone when clicked; controls that act on the chat close it themselves
+    const copy = page.getByRole("button", { name: "Copy", exact: true }).first();
+    await copy.hover();
+    await expect(page.locator("#tip.open")).toBeVisible();
+    await copy.click();
+    await settle(page);
+    await expect(page.locator("#tip.open")).toHaveCount(0);
+    });
   });
-
-  test("keyboard focus shows a tooltip at once", async ({ page }) => {
+  test("keyboard hints and popovers keep the active surface accessible", async ({ page }) => {
+    await test.step("keyboard focus shows a tooltip at once", async () => {
     await page.locator("#ta").focus();
     await watchTip(page, "#plusBtn");
     for (let i = 0; i < 12; i++) {
@@ -93,30 +102,19 @@ test.describe("tooltips", () => {
     await expect.poll(async () => (await rec(page)).opened).not.toBeNull();
     const r = await rec(page);
     expect((r.opened ?? 0) - (r.start ?? 0)).toBeLessThan(200);
-  });
-
-  test("a mouse click does not bring the tooltip back", async ({ page }) => {
-    // Copy leaves the tooltip alone when clicked; controls that act on the chat close it themselves
-    const copy = page.getByRole("button", { name: "Copy", exact: true }).first();
-    await copy.hover();
-    await expect(page.locator("#tip.open")).toBeVisible();
-    await copy.click();
-    await settle(page);
-    await expect(page.locator("#tip.open")).toHaveCount(0);
-  });
-
-  test("nothing behind an open popover draws a tooltip over it", async ({ page }) => {
+    });
+    await test.step("nothing behind an open popover draws a tooltip over it", async () => {
     await page.locator("#modelBtn").click();
     await expect(page.locator("#picker")).toBeVisible();
     await watchTip(page, "#plusBtn");
     await page.locator("#plusBtn").hover();
     await settle(page);
     expect((await rec(page)).opened).toBeNull();
-  });
-
-  test("a row inside the open picker still has its tooltip", async ({ page }) => {
-    await page.locator("#modelBtn").click();
+    });
+    await test.step("a row inside the open picker still has its tooltip", async () => {
+    await expect(page.locator("#picker")).toBeVisible();
     await page.locator("#picker .pk-r").first().hover();
     await expect(page.locator("#tip.open")).toBeVisible();
+    });
   });
 });
