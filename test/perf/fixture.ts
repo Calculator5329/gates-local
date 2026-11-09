@@ -9,8 +9,7 @@ import type { openThreadStore } from "../../apps/server/src/threads/store.ts";
 export interface FixtureIds { short: string; long: string; thousands: string; huge: string; hoverLong: string; hoverThousands: string }
 
 /** Build one closed, pristine database using the subject commit's store and schema. */
-export async function prepareFixture(target: string): Promise<string> {
-  const cache = path.join(homedir(), ".cache", "gates-local-perf");
+export async function prepareFixture(target: string, cache = path.join(homedir(), ".cache", "gates-local-perf")): Promise<string> {
   mkdirSync(cache, { recursive: true });
   const data = mkdtempSync(path.join(cache, "fixture-"));
   const db = path.join(data, "threads.sqlite");

@@ -1,16 +1,16 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { openThreadStore } from "../../apps/server/src/threads/store.ts";
 import { ROOT } from "../e2e/env.ts";
 import { prepareFixture, restoreFixture } from "./fixture.ts";
 
-const cache = path.join(homedir(), ".cache", "gates-local-perf-test");
-mkdirSync(cache, { recursive: true });
-const scratch = mkdtempSync(path.join(cache, "fixture-"));
+const scratch = mkdtempSync(path.join(tmpdir(), "gates-local-perf-test-"));
 let template: string;
-beforeAll(async () => { template = await prepareFixture(ROOT); });
+// Seeding 4,402 messages through the real store takes several seconds and far longer on a busy machine.
+beforeAll(async () => { template = await prepareFixture(ROOT, path.join(scratch, "templates")); }, 180_000);
+afterAll(() => { rmSync(scratch, { recursive: true, force: true }); });
 
 describe("prepared performance data", () => {
   it("restores isolated blocks with the complete workload", () => {
