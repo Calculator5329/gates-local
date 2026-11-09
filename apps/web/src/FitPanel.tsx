@@ -287,7 +287,7 @@ function SettingsBody({ model }: { model: string }) {
       ) : (
         <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
           {/* Keep the previous verdict's footprint while its replacement is checked. */}
-          <div aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(report)} ctx={ctx} /></div>
+          <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(report)} ctx={ctx} /></div>
           {pending ? <div className="fp-v" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
         </div>
       )}
@@ -323,8 +323,13 @@ function SettingsBody({ model }: { model: string }) {
       {report === undefined || report === "error" ? null : (
         <details className="upd-more fp-more">
           <summary>Details</summary>
-          <Numbers r={report} v={verdictOf(report)} name={name} gpu={gpu} loaded={loaded} />
-          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
+          <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
+            <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}>
+              <Numbers r={report} v={verdictOf(report)} name={name} gpu={gpu} loaded={loaded} />
+              <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
+            </div>
+            {pending ? <div className="fp-n" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
+          </div>
         </details>
       )}
     </>

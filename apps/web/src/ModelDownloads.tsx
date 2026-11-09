@@ -57,7 +57,7 @@ export function usePendingDownloads() {
   const models = useStore((s) => s.models);
   // A completed pull stays here until the installed list arrives. Otherwise
   // the row briefly vanishes between the two independent push messages.
-  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => modelNameKey(m.name) === modelNameKey(p.name)));
+  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name))));
 }
 
 export function DownloadingRows() {

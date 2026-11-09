@@ -30,6 +30,22 @@ large-thread, large-reply, concurrent-stream and reconnect cases. It alternates
 two production builds in one job, keeps raw samples and reports each action's
 noise floor. Results are informational and do not change the release verdict.
 
+## 2026-11-09: Measure open GPU Details through a refresh
+
+GPU refresh checks now target the visible verdict, open Details, and measure
+both the panel and Details while old content keeps their space. Retained
+content is inert as well as visually hidden and excluded from accessibility,
+so it cannot be focused or selected next to Checking. The desktop and phone
+journeys check the accessibility tree and actual text selection during refresh.
+
+## 2026-11-09: Keep active custom downloads and refreshing GPU details usable
+
+An untagged custom download stays visible and cancellable when its `:latest`
+model is already installed. Exact-name rows still share the installed row,
+and completed downloads still settle against their installed tag. Expanded
+GPU Details stays open and keeps its space while refreshing, showing Checking
+in place of the previous memory report.
+
 ## 2026-11-09: Timing records no longer decide releases
 
 - Only unit verification, the build and functional browser checks decide

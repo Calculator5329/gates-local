@@ -32,6 +32,7 @@ const contexts = [8192, 16384, 32768, 65536];
 const report = methodSamples["fit.check"].result;
 const model = report.model;
 const button = (html: string, numCtx: number) => html.match(new RegExp('<button[^>]*data-ctx="' + numCtx + '"[^>]*>'))?.[0] ?? "";
+const details = (html: string) => html.match(/<details class="upd-more fp-more">[\s\S]*?<\/details>/)?.[0] ?? "";
 const render = () => {
   const html = renderToStaticMarkup(createElement(GpuMemory));
   const run = effects.pending;
@@ -73,6 +74,7 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   const before = render();
   expect(button(before, 32768)).toContain('data-tip="Runs on the GPU at 32k.');
   expect(button(before, 65536)).toContain('data-tip="Runs on the GPU at 64k.');
+  expect(details(before)).toContain("Runs entirely on the GPU.");
   const retained = store.getState().fits;
   const closeTip = vi.mocked((await import("../src/ui.tsx")).closeTip);
   closeTip.mockClear();
@@ -87,7 +89,15 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(button(pending, 65536)).toContain('data-tip="Checking…');
   expect(pending).toContain('aria-busy="true"');
   expect(pending).toContain('aria-hidden="true" style="visibility:hidden"><div class="fp-v">');
+  expect(pending).toContain('inert="" aria-hidden="true" style="visibility:hidden"><div class="fp-v">');
   expect(pending).toContain('style="position:absolute;inset:0"');
+  const pendingDetails = details(pending);
+  expect(pendingDetails).toContain("<summary>Details</summary>");
+  // Static markup retains hidden and closed content: check the actual stale-content wrapper.
+  expect(pendingDetails).toContain('aria-busy="true" style="position:relative"');
+  expect(pendingDetails).toContain('aria-hidden="true" style="visibility:hidden"><div class="fp-n">');
+  expect(pendingDetails).toContain('inert="" aria-hidden="true" style="visibility:hidden"><div class="fp-n">');
+  expect(pendingDetails).toContain('style="position:absolute;inset:0">Checking GPU memory…');
   await tick();
   expect(b.server.calls("fit.check").slice(count)).toHaveLength(contexts.length);
   const held = await Promise.all(replies);
@@ -99,4 +109,6 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(refreshed).toContain("Needs ");
   expect(refreshed).not.toContain("Checking…");
   expect(refreshed).not.toContain("ctx-def");
+  expect(details(refreshed)).toContain("<summary>Details</summary>");
+  expect(details(refreshed)).not.toContain('<div aria-hidden="true" style="visibility:hidden">');
 });

@@ -18,10 +18,12 @@ const pulls = { [fit.model]: { name: fit.model, state: "done" as const, complete
 let DownloadTab: typeof import("../src/ModelDownloads.tsx")["DownloadTab"];
 let Picker: typeof import("../src/Composer.tsx")["Picker"];
 let pendingDownloads: typeof import("../src/ModelDownloads.tsx")["usePendingDownloads"];
+let DownloadingRows: typeof import("../src/ModelDownloads.tsx")["DownloadingRows"];
 beforeAll(async () => {
   vi.stubGlobal("window", {});
   DownloadTab = (await import("../src/ModelDownloads.tsx")).DownloadTab;
   pendingDownloads = (await import("../src/ModelDownloads.tsx")).usePendingDownloads;
+  DownloadingRows = (await import("../src/ModelDownloads.tsx")).DownloadingRows;
   Picker = (await import("../src/Composer.tsx")).Picker;
 });
 beforeEach(() => {
@@ -56,4 +58,19 @@ it("the installed rows and picker match an untagged pull to its latest tag", () 
   setState({ models: [{ ...model, name: "llama3:latest" }], pulls: { llama3: { ...pulls[fit.model]!, name: "llama3" } } });
   expect(pendingDownloads()).toEqual([]);
   expect(renderToStaticMarkup(createElement(Picker))).not.toContain("Downloading · 100%");
+});
+
+it("an active untagged pull stays visible and cancellable beside its installed latest tag", () => {
+  const progress = { name: "llama3", state: "downloading" as const, completedBytes: 5, totalBytes: 10 };
+  setState({ models: [{ ...model, name: "llama3:latest" }], pulls: { llama3: progress } });
+  expect.soft(pendingDownloads()).toEqual([progress]);
+  const rows = renderToStaticMarkup(createElement(DownloadingRows));
+  expect.soft(rows).toContain('data-pull="llama3"');
+  expect.soft(rows).toContain('aria-label="Cancel download"');
+  expect.soft(rows).not.toContain('disabled=""');
+  expect.soft(renderToStaticMarkup(createElement(Picker))).toContain("Downloading · 50%");
+  // An exact-name row remains suppressed so its installed row keeps a unique key.
+  setState({ models: [{ ...model, name: "llama3" }] });
+  expect(pendingDownloads()).toEqual([]);
+  expect(renderToStaticMarkup(createElement(Picker))).not.toContain("Downloading · 50%");
 });

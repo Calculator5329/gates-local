@@ -658,7 +658,7 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
   }
   for (const p of Object.values(s.pulls)) {
     if (!awaitingInstall(p)) continue;
-    if ((s.models ?? []).some((m) => modelNameKey(m.name) === modelNameKey(p.name))) continue;
+    if ((s.models ?? []).some((m) => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name)))) continue;
     const d = describeModel(p.name, catalog);
     if (!hit(p.name, d.name, d.purpose)) continue;
     // at the picker's context, as installed rows are (the catalog's own fit is at the saved default)

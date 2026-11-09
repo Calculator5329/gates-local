@@ -141,6 +141,32 @@ for (const width of [1440, 360]) {
     });
 
     test("expanded GPU details keep their size when the verdict changes to spill", async ({ page, open }) => {
+      let holding = false;
+      let invalidate: (() => void) | undefined;
+      let gpuSnapshot: unknown;
+      const held: Array<() => void> = [];
+      await page.routeWebSocket(/.*/, (ws) => {
+        const server = ws.connectToServer();
+        const checks = new Set<unknown>();
+        let gpuRequest: unknown;
+        ws.onMessage((message) => {
+          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
+          if (typeof request.method === "string") invalidate = () => {
+            if (gpuSnapshot === undefined) throw new Error("A measured GPU snapshot is required before invalidation");
+            holding = true;
+            ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpuSnapshot }));
+          };
+          if (request.method === "gpu.status") gpuRequest = request.id;
+          if (request.method === "fit.check") checks.add(request.id);
+          server.send(message);
+        });
+        server.onMessage((message) => {
+          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown; result?: unknown };
+          if (response.type === "response" && response.id === gpuRequest) gpuSnapshot = response.result;
+          if (response.type === "response" && checks.delete(response.id) && holding) held.push(() => ws.send(message));
+          else ws.send(message);
+        });
+      });
       await open();
       await waitReady(page);
       await page.keyboard.press("Control+Comma");
@@ -149,11 +175,62 @@ for (const width of [1440, 360]) {
         await page.locator(".set-list").getByRole("button", { name: "Advanced" }).click();
       } else await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
       const gpu = page.locator("#gpuMemory");
-      await expect(gpu.locator(".fp-v")).toBeVisible();
+      const verdict = gpu.locator(".fp-v:visible");
+      await expect(verdict).toHaveCount(1);
+      await expect(verdict).toBeVisible();
+      await expect(verdict).not.toContainText("Checking");
       await expect(gpu.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /.+/);
-      await gpu.locator("summary").click();
+      await expect(gpu.locator('[data-ctx="65536"]')).not.toHaveAttribute("data-tip", "Checking…");
+      await expect.poll(() => gpuSnapshot !== undefined).toBe(true);
+      const details = gpu.locator("details.fp-more");
+      await details.locator("summary").click();
+      await expect(details).toHaveJSProperty("open", true);
+      await mark(details, "gpu-details");
+      try {
+        const refresh = await burst(page, `r2-${width}/gpu-refresh`, "#gpuMemory", async () => {
+          if (!invalidate) throw new Error("The app socket must be connected before invalidation");
+          invalidate();
+          await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(2);
+          await expect(verdict).toHaveCount(1);
+          await expect(verdict).toHaveText("Checking GPU memory…");
+          await expect(details).toHaveJSProperty("open", true);
+          const placeholder = details.locator(".fp-n:visible");
+          await expect(placeholder).toHaveText("Checking GPU memory…");
+          const retained = gpu.locator('[inert][aria-hidden="true"]');
+          await expect(retained).toHaveCount(2);
+          for (const node of await retained.all()) await expect(node).toBeHidden();
+          const staleWords = /Runs on GPU|Runs entirely on the GPU|Free after loading/;
+          const accessible = await gpu.ariaSnapshot();
+          expect(accessible).toContain("Checking GPU memory");
+          expect(accessible).not.toMatch(staleWords);
+          const start = await gpu.locator(".fp-t").boundingBox();
+          const end = await placeholder.boundingBox();
+          if (!start || !end) throw new Error("Visible text endpoints are required for the selection check");
+          await page.mouse.move(start.x + 1, start.y + start.height / 2);
+          await page.mouse.down();
+          await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 10 });
+          await page.mouse.up();
+          const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
+          expect(selected).toContain("Checking GPU memory");
+          expect(selected).not.toMatch(staleWords);
+          await page.evaluate(() => document.getSelection()?.removeAllRanges());
+          await page.screenshot({ path: test.info().outputPath("gpu-refresh-open-details.png") });
+        });
+        stableSize(refresh, "surface", `gpu-refresh-${width}`);
+        stableSize(refresh, "gpu-details", `gpu-details-refresh-${width}`);
+      } finally {
+        holding = false;
+        for (const deliver of held.splice(0)) deliver();
+      }
+      await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(0);
+      await expect(gpu.locator('[data-ctx="65536"]')).not.toHaveAttribute("data-tip", "Checking…");
+      await expect(details).toHaveJSProperty("open", true);
+      await expect(details).toHaveAttribute("data-flicker-box", "gpu-details");
       const frames = await burst(page, `r2-${width}/gpu-spill`, "#gpuMemory", () => gpu.locator('[data-ctx="65536"]').click());
       stableSize(frames, "surface", `gpu-spill-${width}`);
+      stableSize(frames, "gpu-details", `gpu-details-spill-${width}`);
+      await expect(details).toHaveJSProperty("open", true);
+      await expect(verdict).toContainText("Uses system memory");
     });
 
     test("download progress replaces an equal-sized model row", async ({ page, open }) => {
