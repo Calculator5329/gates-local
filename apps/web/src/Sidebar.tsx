@@ -288,17 +288,15 @@ export function Sidebar() {
   const inSettings = useStore((s) => s.view === "settings");
   return (
     <aside className="sb">
-      {inSettings ? null : (
-        <div className="sb-head">
-          <svg className="mark" aria-hidden="true">
-            <use href="#i-mark" />
-          </svg>
-          <span className="wordmark">Gates Local</span>
-          <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => closeDrawer()}>
-            <Icon id="x" />
-          </button>
-        </div>
-      )}
+      <div className={`sb-head${inSettings ? " set-brand" : ""}`}>
+        <svg className="mark" aria-hidden="true">
+          <use href="#i-mark" />
+        </svg>
+        <span className="wordmark">Gates Local</span>
+        <button type="button" className="ibtn sb-x" aria-label="Close threads" onClick={() => closeDrawer()}>
+          <Icon id="x" />
+        </button>
+      </div>
       {inSettings ? <SettingsNav /> : <ChatNav />}
       <div className="sb-foot">
         <DownloadRow />

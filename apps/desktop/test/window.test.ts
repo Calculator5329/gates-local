@@ -14,6 +14,14 @@ function pngSize(file: string): [number, number] {
 }
 
 describe("window options", () => {
+  it.each(["linux", "win32", "darwin"] as const)("integrates the titlebar on %s without removing native controls", (platform) => {
+    const options = windowOptions({ icon: "/i.png", preload: "/x/preload.cjs", platform });
+    expect(options.titleBarStyle).toBe(platform === "darwin" ? "hiddenInset" : "hidden");
+    expect(options.titleBarOverlay).toEqual({ height: 52 });
+    expect(options.frame).not.toBe(false);
+    if (platform === "darwin") expect(options.trafficLightPosition).toEqual({ x: 16, y: 18 });
+  });
+
   it("give the window the gate mark: the 512x512 assets/icon.png in an unpackaged run", () => {
     const icon = iconFile({ packaged: false, resourcesPath: "/unused", desktopDir });
     const options = windowOptions({ icon, preload: "/x/preload.cjs" });

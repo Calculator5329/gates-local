@@ -148,6 +148,15 @@ function run(): void {
     if (!fromOurWindow(event)) throw new Error("refused");
     return bridgeState();
   });
+  ipcMain.handle(IPC.titleBar, (event, colors: unknown) => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    if (typeof colors !== "object" || colors === null || !("color" in colors) || !("symbolColor" in colors)) return;
+    const { color, symbolColor } = colors;
+    if (typeof color !== "string" || typeof symbolColor !== "string" || !/^#[0-9a-f]{6}$/i.test(color) || !/^#[0-9a-f]{6}$/i.test(symbolColor)) return;
+    win?.setBackgroundColor(color);
+    // macOS owns the traffic-light colours; its overlay geometry still works.
+    if (process.platform !== "darwin") win?.setTitleBarOverlay({ color, symbolColor });
+  });
   ipcMain.handle(IPC.restart, (event) => {
     if (!fromOurWindow(event)) throw new Error("refused");
     return supervisor.restart();

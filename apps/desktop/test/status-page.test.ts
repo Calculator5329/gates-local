@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { dataUrl, renderStatusPage } from "../src/status-page.ts";
+import { dataUrl, renderStatusPage, type StatusView } from "../src/status-page.ts";
 
 describe("status page", () => {
+  const views: StatusView[] = [
+    { kind: "server", state: { status: "starting", launch: 1 } },
+    { kind: "server", state: { status: "restarting", launch: 2 } },
+    { kind: "server", state: { status: "crashed", launch: 1, reason: { kind: "exit", code: 1, signal: null }, stderrTail: [], restartBlockedUntil: null } },
+    { kind: "client-load-failed", url: "gates-local://app/index.html", error: "ERR_FAILED" },
+  ];
+  it.each(views)("keeps a draggable header clear of native controls for $kind $state.status (TB-01)", (view) => {
+    const html = renderStatusPage(view);
+    expect(html).toContain('<header class="titlebar">Gates Local</header>');
+    const header = /\.titlebar\{([^}]+)\}/.exec(html)?.[1];
+    expect(header).toContain("-webkit-app-region:drag");
+    expect(header).toContain("env(titlebar-area-height,52px)");
+    expect(header).toContain("env(titlebar-area-x,0px)");
+    expect(header).toContain("env(titlebar-area-width,");
+    expect(html).toMatch(/<main>[\s\S]*<h1>[\s\S]*<\/main>/);
+  });
+
   it("shows the exit reason, escaped stderr and a Restart button wired to the bridge", () => {
     const html = renderStatusPage({
       kind: "server",

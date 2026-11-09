@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { connect, threadFromHash } from "./session.ts";
 import { setState } from "./store.ts";
+import { syncTitleBar } from "./titlebar.ts";
 import "./styles.css";
+
+syncTitleBar();
 
 // a reload keeps the open thread: #thread=<id>
 const threadId = threadFromHash();

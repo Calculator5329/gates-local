@@ -15,6 +15,7 @@ export const IPC = {
   dataFolder: "gates-local:data-folder",
   openDataFolder: "gates-local:open-data-folder",
   state: "gates-local:state",
+  titleBar: "gates-local:title-bar",
 } as const;
 
 /** The global name the preload exposes the bridge under (`window.gatesLocal`). */
@@ -53,6 +54,8 @@ export type UpdateAndRestartResult = { readonly ok: true } | { readonly ok: fals
 
 /** `window.gatesLocal` in the renderer. */
 export interface GatesLocalBridge {
+  /** Match native window controls to the renderer's resolved theme tokens. */
+  syncTitleBar(colors: { color: string; symbolColor: string }): Promise<void>;
   /** Current state; resolves immediately. */
   getState(): Promise<BridgeState>;
   /** The server WebSocket URL with token when ready, else null. Ask again after every reconnect. */

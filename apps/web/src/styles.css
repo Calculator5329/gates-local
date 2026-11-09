@@ -1,4 +1,4 @@
-/* Adapts T3 Code styles (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt. */
+/* Adapts T3 Code apps/web/src/index.css (MIT), commit d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a; full notice in LICENSES/T3-Code-MIT.txt. */
 /* ============================================================
    Gates Local client styles: a verbatim port of the token block and
    component CSS in docs/design/shell.html (decisions in shell.md).
@@ -1073,4 +1073,24 @@ a.btn{text-decoration:none}
   .mp .srow .sl{flex:1 1 100%}
   .mp .srow .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}
   .mp .srow .inp{flex:1;min-width:0;height:44px}
+}
+
+/* Desktop only: the app header is the native titlebar. env() reserves native
+   buttons on either side, including macOS traffic lights and fullscreen changes. */
+.wco{--header-h:max(52px,env(titlebar-area-height,52px));--window-controls-right:calc(100vw - env(titlebar-area-width,calc(100vw - var(--window-controls-width,0px))) - env(titlebar-area-x,0px))}
+.wco .hdr,.wco .sb-head{-webkit-app-region:drag}
+.wco :is(.hdr,.sb-head) :is(button,input,textarea,select,a){-webkit-app-region:no-drag}
+.wco .hdr{padding-right:calc(var(--window-controls-right) + 12px)}
+.wco .sb-head{padding-left:max(16px,calc(env(titlebar-area-x,0px) + 12px));border-bottom:1px solid var(--border)}
+.wco .wordmark{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.wco .set-bar{display:flex}
+.wco .set-bar .bk,.wco .set-bar .sp{display:none}
+.sb-head.set-brand{display:none}
+.wco .set-brand{display:flex}
+@media (max-width:1023px){
+  .wco .hdr{padding-left:max(8px,calc(env(titlebar-area-x,0px) + 8px))}
+  .wco .sb-head{padding-right:max(16px,calc(var(--window-controls-right) - 100vw + min(340px,85vw) + 12px))}
+}
+@media (max-width:640px){
+  .wco .set-bar .bk{display:inline-flex}
 }

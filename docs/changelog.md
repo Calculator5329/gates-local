@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-08: One desktop titlebar
+
+- The desktop window uses the app's top row for its native window controls,
+  removing the extra system titlebar and duplicate brand. The taskbar title
+  includes the current thread.
+- Native controls follow the app's Light, Dark and System theme choices.
+  The header reserves the controls' space and keeps its buttons clickable;
+  browser and phone layouts keep their existing header.
+- Startup and error pages keep a draggable header. Narrow desktop Settings
+  keeps its Back control, drawer close stays clear of native controls, and
+  switching threads in fullscreen updates the taskbar title too.
+
 ## 2026-11-08: Settings, rebuilt page by page
 
 - A plain nav: General, Models, Library, Tools, Image generation, Runtime,
