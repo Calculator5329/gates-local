@@ -128,11 +128,15 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
 
   /**
    * Retry from a runtime banner: the server looks for Ollama again (and starts
-   * the app's own copy where it may), then the model list reloads. A server
-   * without runtime.retry answers its cached status instead.
+   * the app's own copy where it may), then the model list reloads. The phone
+   * only looks, starting nothing; a server without runtime.retry answers its
+   * cached status.
    */
   async function recheckRuntime(): Promise<void> {
-    const runtime = await call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e))).catch(() => undefined);
+    const asked = getState().unavailable["runtime.retry"]
+      ? call("runtime.discover", {})
+      : call("runtime.retry", {}).catch((e: unknown) => (isNA(e) ? call("runtime.status", {}) : Promise.reject(e)));
+    const runtime = await asked.catch(() => undefined);
     if (runtime !== undefined) applyServerEvent({ runtime });
     await refreshModels();
   }

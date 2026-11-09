@@ -1,5 +1,5 @@
 // Desktop bridge, server discovery and browser appearance effects.
-import type { Settings, UpdateInstallRequest } from "@gates-local/contracts";
+import { type Settings, type UpdateInstallRequest, methodNames, phoneMay } from "@gates-local/contracts";
 import { syncTitleBar } from "../titlebar.ts";
 
 // The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
@@ -46,10 +46,19 @@ export function webServerUrl(): string | null {
   const fromEnv: unknown = import.meta.env["VITE_GATES_LOCAL_SERVER"];
   const configured = fromQuery ?? (typeof fromEnv === "string" && fromEnv !== "" ? fromEnv : null);
   if (configured !== null) return configured;
-  if (document.querySelector('meta[name="gates-local-server"]')?.getAttribute("content") === "same-origin") {
-    return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
-  }
+  if (onPhoneListener()) return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
   return null;
+}
+
+/** Only the phone listener injects this meta; a phone-sized window on the computer does not have it. */
+function onPhoneListener(): boolean {
+  return document.querySelector('meta[name="gates-local-server"]')?.getAttribute("content") === "same-origin";
+}
+
+/** What the phone listener refuses, marked unavailable before the first render so no control offers it. */
+export function computerOnlyMethods(phone: boolean = onPhoneListener()): Readonly<Record<string, true>> {
+  if (!phone) return {};
+  return Object.fromEntries(methodNames.filter((m) => !phoneMay(m)).map((m): [string, true] => [m, true]));
 }
 
 /** A /files/ URL on the server; the token rides along only when the socket URL had one. */

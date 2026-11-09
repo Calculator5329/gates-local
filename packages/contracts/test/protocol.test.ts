@@ -1,7 +1,9 @@
+import * as S from "effect/Schema";
 import { describe, expect, it } from "vitest";
 import {
   type Channel,
   type MethodName,
+  type MethodRow,
   channelNames,
   decodePayload,
   decodeRequest,
@@ -11,6 +13,7 @@ import {
   encodeRequest,
   encodeResult,
   methodNames,
+  methods,
 } from "../src/index.ts";
 import { methodSamples, pushSamples } from "../src/testing.ts";
 
@@ -130,4 +133,11 @@ export function compileOnlyContractChecks(): void {
     encodePush("nope", {});
     // @ts-expect-error not a method
     encodeRequest("1", "constructor", {});
+    // A method row has to decide what the phone may do.
+    // @ts-expect-error phone is required
+    const undecided: MethodRow = { params: S.Struct({}), result: S.Struct({}) };
+    // @ts-expect-error phone is allow or deny
+    const unclear: MethodRow = { params: S.Struct({}), result: S.Struct({}), phone: "maybe" };
+    const everyRowDecides: Record<MethodName, MethodRow> = methods;
+    void [undecided, unclear, everyRowDecides];
 }

@@ -11,7 +11,7 @@ import { type Server, createServer as createHttpServer, request } from "node:htt
 import { connect, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { type Client, type SocketLike, createClient } from "@gates-local/contracts";
+import { type Client, type MethodName, type SocketLike, createClient, methodNames, phoneMay } from "@gates-local/contracts";
 import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
@@ -127,7 +127,60 @@ it("AV-01 phone updates are status-only while the desktop listener retains its c
   expect(mutations).toBe(1);
 });
 
-it("UB-01 phone Reset preserves desktop update preferences while desktop Reset can change them", async () => {
+/** Every method answers its sample; `called` records which handlers ran. */
+async function walkServer(fx: Fixture, called: MethodName[]): Promise<{ phone: Client; desktop: Client }> {
+  const all: Record<string, () => unknown> = {};
+  for (const m of methodNames) all[m] = () => { called.push(m); return methodSamples[m].result; };
+  const server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [],
+    handlers: all as Partial<Handlers>,
+    phone: { socketPath: fx.socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot },
+  });
+  cleanups.push(() => server.close());
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?token=${TOKEN}`);
+  cleanups.push(() => socket.terminate());
+  const [phone, desktop] = await Promise.all([opened(phoneSocket(fx.socketPath, SERVE, ORIGIN)), opened(socket)]);
+  return { phone, desktop };
+}
+
+describe("the contracts table decides what the phone may call", () => {
+  it.each(methodNames)("%s answers as its row says on the phone and always on the computer", async (method) => {
+    const called: MethodName[] = [];
+    const { phone, desktop } = await walkServer(fixture(), called);
+    // sync.negotiate belongs to the transport, so no application handler ever runs for it.
+    const ran = method === "sync.negotiate" ? [] : [method];
+    const { params } = methodSamples[method];
+
+    if (phoneMay(method)) {
+      await expect(phone.call(method, params as never)).resolves.toBeDefined();
+      expect(called, "the phone reached the handler").toEqual(ran);
+    } else {
+      await expect(phone.call(method, params as never)).rejects.toMatchObject({ code: "forbidden" });
+      expect(called, "a refused call must not reach the handler").toEqual([]);
+    }
+
+    called.length = 0;
+    await expect(desktop.call(method, params as never)).resolves.toBeDefined();
+    expect(called, "the computer reached the handler").toEqual(ran);
+  });
+});
+
+it("BD-CO-01 the phone's Retry can ask Ollama for its model list", async () => {
+  const called: MethodName[] = [];
+  const { phone } = await walkServer(fixture(), called);
+  await expect(phone.call("models.refresh", {})).resolves.toBeDefined();
+  expect(called).toEqual(["models.refresh"]);
+});
+
+it("BD-02 the phone may look for Ollama again but not start it", async () => {
+  const called: MethodName[] = [];
+  const { phone } = await walkServer(fixture(), called);
+  await expect(phone.call("runtime.discover", {})).resolves.toBeDefined();
+  expect(called).toEqual(["runtime.discover"]);
+  await expect(phone.call("runtime.retry", {})).rejects.toMatchObject({ code: "forbidden" });
+  expect(called).toEqual(["runtime.discover"]);
+});
+
+it("UB-01 the phone cannot write settings, Reset included, while the computer can", async () => {
   const fx = fixture();
   const settings = await openSettingsStore({ dataDir: fx.dataDir, systemOllamaAnswers: async () => false });
   settings.update({ updateAutomatic: false, updateEveryChange: true, theme: "light", tools: false, defaultNumCtx: 8192 });
@@ -142,25 +195,22 @@ it("UB-01 phone Reset preserves desktop update preferences while desktop Reset c
   const file = path.join(fx.dataDir, "settings.json");
   const saved = readFileSync(file, "utf8");
   const preferences = { updateAutomatic: true, updateEveryChange: false };
-  expect.soft(await phone.call("settings.update", preferences)).toEqual(before);
+  // The same fields sent by Advanced > Reset, including its non-update settings.
+  const reset = { defaultModel: null, defaultNumCtx: 16384, thinking: true, theme: "dark", tools: true, imageGen: false, comfyUrl: null, whisperUrl: null, ...preferences, textSize: "default", systemPrompt: null, modelSettings: null } as const;
+
+  for (const patch of [preferences, { systemPrompt: "from the phone" }, { comfyUrl: "http://192.0.2.1:8188" }, reset]) {
+    await expect(phone.call("settings.update", patch)).rejects.toMatchObject({ code: "forbidden" });
+  }
   expect.soft(settings.get()).toBe(before);
   expect.soft(readFileSync(file, "utf8")).toBe(saved);
   expect.soft(pushes).toEqual([]);
 
-  // The same fields sent by Advanced > Reset, including its non-update settings.
-  const reset = { defaultModel: null, defaultNumCtx: 16384, thinking: true, theme: "dark", tools: true, imageGen: false, comfyUrl: null, whisperUrl: null, ...preferences, textSize: "default", systemPrompt: null, modelSettings: null } as const;
-  const kept = { updateAutomatic: false, updateEveryChange: true, theme: "dark", tools: true, defaultNumCtx: 16384 };
-  expect.soft(await phone.call("settings.update", reset)).toMatchObject(kept);
-  expect.soft(settings.get()).toMatchObject(kept);
-  expect.soft(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ settings: kept });
-  expect.soft(pushes.at(-1)).toMatchObject(kept);
-
-  settings.update({ updateAutomatic: false, updateEveryChange: true, theme: "light" });
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?token=${TOKEN}`);
   cleanups.push(() => socket.terminate());
   const desktop = await opened(socket);
-  expect(await desktop.call("settings.update", reset)).toMatchObject({ ...kept, ...preferences });
-  expect(settings.get()).toMatchObject({ ...kept, ...preferences });
+  const changed = { theme: "dark", tools: true, defaultNumCtx: 16384, ...preferences };
+  expect(await desktop.call("settings.update", reset)).toMatchObject(changed);
+  expect(settings.get()).toMatchObject(changed);
 });
 
 function startRaw(fx: Fixture, logs: string[] = [], socketPath = fx.socketPath, peers?: readonly string[]): Promise<WsServer> {

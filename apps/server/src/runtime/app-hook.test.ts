@@ -18,6 +18,7 @@ import { ModelActionError, createModelLoader } from "./load.ts";
 import { createModelCatalog, listLoaded } from "./models.ts";
 import { createPullManager } from "./pull.ts";
 import { createOllamaRuntime } from "./runtime.ts";
+import { createRuntimeSwitch } from "./switch.ts";
 import { freePort } from "./test-fakes.ts";
 
 const MODEL = "qwen3.5:9b";
@@ -94,7 +95,7 @@ async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLea
   });
   const app = createApp({
     store,
-    runtime,
+    runtime: createRuntimeSwitch({ initialMode: "system", make: () => runtime }),
     catalog,
     push,
     models: { handlers, loader },

@@ -49,6 +49,7 @@ function contextTip(v: Verdict | undefined, cpu: boolean, frees: boolean, histor
 export function Picker() {
   const pop = useStore(s => s.pop?.id === "picker" ? s.pop : null);
   const models = useStore(s => s.models);
+  const pullNA = useStore(s => s.unavailable["models.pull"] === true);
   const catalogRaw = useStore(s => s.catalog);
   const fits = useStore(s => s.fits);
   const pulls = useStore(s => s.pulls);
@@ -278,6 +279,6 @@ export function Picker() {
         {active?.v?.k === "no" ? <button className="pk-detail" onClick={() => { closePop(); openFit(active.tag); }}>Memory details</button> : null}
       </section>
     </div>
-    <footer className="pk-bottom"><button onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button><span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free · ${gb(Math.max(0, free - MARGIN))} usable`}</span></footer>
+    <footer className="pk-bottom">{pullNA ? <span /> : <button onClick={() => { closePop(); openSettings("models", true); }}><Icon id="download" />Download models</button>}<span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free · ${gb(Math.max(0, free - MARGIN))} usable`}</span></footer>
   </div>;
 }

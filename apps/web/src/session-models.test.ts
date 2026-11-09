@@ -3,7 +3,7 @@
 // module touches window at load, so each test stubs the browser globals and
 // imports a fresh copy. Kept apart from session.test.ts, whose discovery
 // tests need the real createClient this file mocks.
-import type { ModelInfo } from "@gates-local/contracts";
+import { type ModelInfo, methodNames, phoneMay } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -83,6 +83,34 @@ async function boot(answers: Record<string, () => Promise<unknown>> = {}, connec
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+/** What main.tsx seeds on the phone: every method the table denies. */
+const phoneUnavailable = () => Object.fromEntries(methodNames.filter((m) => !phoneMay(m)).map((m) => [m, true] as const));
+
+it("BD-CO-01 Retry on the phone shows a model installed after the first load", async () => {
+  const { session, store, hydrated } = await boot({ "models.list": async () => [info(QWEN, true)], "models.refresh": async () => [info(QWEN, true), info(GEMMA)] });
+  await hydrated();
+  store.setState({ unavailable: phoneUnavailable() });
+  await session.recheckRuntime();
+  expect(store.getState().models?.map((m) => m.name)).toEqual([QWEN, GEMMA]);
+});
+
+it("BD-02 Retry on the phone looks again without runtime.retry, shows Ollama running and loads the list", async () => {
+  const running = { state: "ready", owner: "external", version: "0.12.0" };
+  const { session, store, calls, hydrated } = await boot({
+    "runtime.status": async () => ({ state: "stopped", owner: "none" }),
+    "runtime.discover": async () => running,
+    "models.list": async () => [],
+    "models.refresh": async () => [info(QWEN, true)],
+  });
+  await hydrated();
+  store.setState({ unavailable: phoneUnavailable() });
+  expect(store.getState().runtime?.state).toBe("stopped");
+  await session.recheckRuntime();
+  expect(store.getState().runtime).toEqual(running);
+  expect(store.getState().models?.map((m) => m.name)).toEqual([QWEN]);
+  expect(calls).not.toContain("runtime.retry");
 });
 
 it("a models.list answered after a newer models.changed push is dropped (MP2-02)", async () => {

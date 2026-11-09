@@ -222,6 +222,101 @@ it("R2-03: the old runtime stops only after beforeSwitch's turns have ended", as
   expect(made[0]!.stops).toBe(1);
 });
 
+const SYSTEM_URL = "http://system.invalid";
+const READY: RuntimeStatus = { state: "ready", owner: "external", baseUrl: SYSTEM_URL };
+const STOPPED: RuntimeStatus = { state: "stopped", owner: "none", baseUrl: SYSTEM_URL };
+const FAILED: RuntimeStatus = { state: "error", owner: "app", baseUrl: SYSTEM_URL, detail: "The download's checksum did not match." };
+
+/**
+ * A runtime whose looks are counted and answer what `probe` finds, as a slow or absent Ollama would.
+ * Like the real one it tells listeners only when its status changes.
+ */
+function lookingRuntime(start: RuntimeStatus, probe: () => Promise<RuntimeStatus>, startup: Promise<void> = Promise.resolve()) {
+  let status = start;
+  const listeners = new Set<(s: RuntimeStatus) => void>();
+  const set = (s: RuntimeStatus) => {
+    if (JSON.stringify(s) === JSON.stringify(status)) return status;
+    status = s;
+    for (const l of listeners) l(s);
+    return s;
+  };
+  const rt = {
+    ...fakeRuntime("system", startup),
+    looks: 0,
+    status: () => status,
+    baseUrl: () => (status.state === "ready" ? status.baseUrl : undefined),
+    async discover() {
+      rt.looks++;
+      return set(await probe());
+    },
+    async ensure() {
+      await startup;
+      return set(READY);
+    },
+    onChange(l: (s: RuntimeStatus) => void) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+  };
+  return rt;
+}
+
+it("BD-05 a phone look that arrives during startup waits its turn and never probes the ready runtime", async () => {
+  let release!: () => void;
+  const startup = new Promise<void>((r) => (release = r));
+  const rt = lookingRuntime({ ...STOPPED, state: "starting" }, async () => STOPPED, startup);
+  const sw = createRuntimeSwitch({ initialMode: "system", make: () => rt });
+  const starting = sw.ensure();
+  const look = sw.lookIfDown();
+  release();
+  await starting;
+  expect(await look).toEqual(READY);
+  expect(rt.looks, "probes after startup").toBe(0);
+  expect(sw.status()).toEqual(READY);
+});
+
+it("BD-06 three phone looks while Ollama is down share one probe and one answer", async () => {
+  let answer!: () => void;
+  const answered = new Promise<void>((r) => (answer = r));
+  const rt = lookingRuntime(STOPPED, () => answered.then(() => READY));
+  const sw = createRuntimeSwitch({ initialMode: "system", make: () => rt });
+  const looks = [sw.lookIfDown(), sw.lookIfDown(), sw.lookIfDown()];
+  answer();
+  expect(await Promise.all(looks)).toEqual([READY, READY, READY]);
+  expect(rt.looks).toBe(1);
+});
+
+it("BD-07 a phone look leaves an error and its reason as they are, and pushes nothing", async () => {
+  const rt = lookingRuntime(FAILED, async () => STOPPED);
+  const sw = createRuntimeSwitch({ initialMode: "system", make: () => rt });
+  const pushed: RuntimeStatus[] = [];
+  sw.onChange((s) => pushed.push(s));
+  expect(await sw.lookIfDown()).toEqual(FAILED);
+  expect(sw.status().detail).toBe(FAILED.detail);
+  expect(rt.looks).toBe(0);
+  expect(pushed).toEqual([]);
+});
+
+it("BD-09 the computer's Retry ends a refused switch: ready again, pushed once, and the phone's look agrees", async () => {
+  const rt = lookingRuntime(READY, async () => STOPPED);
+  const sw = createRuntimeSwitch({
+    initialMode: "system",
+    make: () => rt,
+    beforeSwitch: () => {
+      throw new Error("a turn would not end");
+    },
+  });
+  await expect(sw.setMode("app")).rejects.toThrow("a turn would not end");
+  expect(sw.status().state).toBe("error");
+  const pushed: RuntimeStatus[] = [];
+  sw.onChange((s) => pushed.push(s));
+  expect(await sw.ensure()).toEqual(READY);
+  expect(sw.status()).toEqual(READY);
+  expect(pushed).toEqual([READY]);
+  expect(await sw.lookIfDown()).toEqual(READY);
+  expect(rt.looks).toBe(0);
+});
+
 it("killNow reaches the runtime in use (W1-01)", () => {
   const made: Fake[] = [];
   const sw = createRuntimeSwitch({

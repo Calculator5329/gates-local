@@ -11,7 +11,7 @@ function markup(stale = false) {
   mock.stale = stale;
   const tag = "milo-e4b-v4:latest", gib = 1024 ** 3;
   mock.state = {
-    pop: { id: "picker", kb: true, ready: true }, numCtx: 16384, model: tag,
+    pop: { id: "picker", kb: true, ready: true }, unavailable: {}, numCtx: 16384, model: tag,
     models: [{ name: tag, digest: "test", sizeBytes: 5.37 * gib, modifiedAt: "", capabilities: ["completion", "thinking"], maxContext: 131072 }],
     catalog: [{ name: tag, label: "milo-e4b-v4", purpose: "Installed by you", installed: true, downloadBytes: 5.37 * gib, recommended: false }],
     fits: { [`${tag}@16384`]: { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", measuredAt: 0 } },

@@ -12,13 +12,14 @@
 // (a local dial to its own Tailscale address) is refused.
 import { request } from "node:http";
 import { networkInterfaces } from "node:os";
+import type { Page } from "@playwright/test";
 import { CONTROL_URL } from "./env.ts";
-import { expect, sendMessage, test } from "./fixtures.ts";
+import { expect, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ viewport: { width: 412, height: 915 } });
 
-async function phoneReset(): Promise<{ port: number; socket: string }> {
-  const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true }) });
+async function phoneReset(seed?: "design"): Promise<{ port: number; socket: string }> {
+  const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true, seed }) });
   if (!r.ok) throw new Error(`/reset: ${r.status} ${await r.text()}`);
   const { phonePort, phoneSocket } = (await r.json()) as { phonePort?: unknown; phoneSocket?: unknown };
   if (typeof phonePort !== "number" || typeof phoneSocket !== "string") throw new Error("the stack gave no phone port or socket");
@@ -76,4 +77,114 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
   await sendMessage(page, "Hello from the phone");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello from the phone", { timeout: 10_000 });
   expect(errors, "console errors").toEqual([]);
+});
+
+/** The controls each section must at least offer on a phone; a section at 0 shows only read-only rows there. */
+const SETTINGS_SECTIONS = [["General", 0], ["Models", 4], ["Instructions", 2], ["Library", 0], ["Tools", 3], ["Image generation", 0], ["Runtime", 1], ["Advanced", 0], ["Shortcuts", 0]] as const;
+
+/** Which requests are still unanswered, and which the server refused as computer-only. */
+function watchRequests(page: Page): { open: Map<string, string>; refused: string[] } {
+  const open = new Map<string, string>();
+  const refused: string[] = [];
+  page.on("websocket", (ws) => {
+    ws.on("framesent", ({ payload }) => {
+      const { id, method } = JSON.parse(payload.toString()) as { id?: string; method?: string };
+      if (id !== undefined && method !== undefined) open.set(id, method);
+    });
+    ws.on("framereceived", ({ payload }) => {
+      const { type, id, error } = JSON.parse(payload.toString()) as { type?: string; id?: string; error?: { code?: string } };
+      if (type !== "response" || id === undefined) return;
+      if (error?.code === "forbidden") refused.push(open.get(id) ?? id);
+      open.delete(id);
+    });
+  });
+  return { open, refused };
+}
+
+async function showSection(page: Page, section: string): Promise<void> {
+  if ((await page.locator('[role="menu"]:visible').count()) > 0) await page.keyboard.press("Escape");
+  const bar = page.locator(".set-bar h2");
+  if ((await bar.isVisible()) && (await bar.textContent()) === section) return;
+  const back = page.getByRole("button", { name: "Back to Settings" });
+  if (await back.isVisible()) await back.click();
+  if (!(await page.locator(".set-list").isVisible())) {
+    await page.getByRole("button", { name: "Open threads" }).click();
+    await page.locator(".sb").getByRole("button", { name: "Settings" }).click();
+  }
+  await page.locator(".set-list").getByRole("button", { name: section }).click();
+  await expect(bar).toHaveText(section);
+}
+
+/**
+ * Taps every button and switch a section shows, once each from a clean section, and answers how
+ * many there were. It covers controls that write on the first tap; a write behind a confirmation
+ * or inside a menu is not reached.
+ */
+async function tapEverything(page: Page, section: string, atLeast: number): Promise<number> {
+  await showSection(page, section);
+  const controls = page.locator('.set-in :is(button, [role="switch"]):visible:not([disabled])');
+  await expect.poll(() => controls.count(), { message: `controls in ${section}` }).toBeGreaterThanOrEqual(atLeast);
+  const count = await controls.count();
+  for (let i = 0; i < count; i++) {
+    await showSection(page, section);
+    if ((await controls.count()) > i) await controls.nth(i).click({ timeout: 5000 });
+  }
+  return count;
+}
+
+test("the phone reads, sends, stops and switches models, and nothing it offers is refused", async ({ page }) => {
+  test.setTimeout(120_000);
+  const { port } = await phoneReset("design");
+  const { open, refused } = watchRequests(page);
+  await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+  await page.goto(`http://127.0.0.1:${port}/`);
+  await expect(page.locator(".composer:not(.blocked)")).toBeAttached({ timeout: 10_000 });
+
+  // Open a thread from the drawer; its menu can rename but not delete.
+  await page.getByRole("button", { name: "Open threads" }).click();
+  await page.locator(".sb .sb-row .sb-thread").first().focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(page.locator("#threadMenu")).toHaveClass(/\bopen\b/);
+  await expect(page.locator("#threadMenu").getByRole("menuitem", { name: "Rename" })).toBeVisible();
+  await expect(page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.locator(".sb .sb-row .sb-thread").first().click();
+  await expect(page.locator(".turn").first()).toBeVisible();
+
+  // Send, then stop while the reply is still coming.
+  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+  await sendMessage(page, "Stop this one");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(page.locator(".stopped")).toContainText("Stopped after");
+  await stack.scenario("models");
+
+  // Pick another installed model. Downloading a new one is not offered.
+  await page.locator("#modelBtn").click();
+  await expect(page.locator("#picker").getByRole("button", { name: "Download models" })).toHaveCount(0);
+  await page.locator('#picker .pk-r[data-m="gemma4:12b"] .pk-select').click();
+  await page.locator('#picker [data-ctx="32768"]').click();
+  await expect(page.locator("#picker")).toBeHidden({ timeout: 10_000 });
+  await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
+
+  await page.getByRole("button", { name: "Open threads" }).click();
+  await page.locator(".sb").getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator(".set-list")).toBeVisible();
+
+  await showSection(page, "Models");
+  await expect(page.getByRole("tab", { name: "Installed" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Download" })).toHaveCount(0);
+  await page.locator(".mp-kebab").first().click();
+  await expect(page.getByRole("menuitem", { name: "Copy Ollama name" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Use as default|Remove/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await showSection(page, "Library");
+  await expect(page.locator(".set-in")).toContainText("Available on the computer.");
+
+  // Tap every control the phone still shows: a first-tap writer someone forgot to gate is refused here.
+  const tapped: Record<string, number> = {};
+  for (const [section, atLeast] of SETTINGS_SECTIONS) tapped[section] = await tapEverything(page, section, atLeast);
+  console.log(`TAPPED ${JSON.stringify(tapped)}`);
+
+  await expect.poll(() => [...open.values()], { message: "every request was answered" }).toEqual([]);
+  expect(refused, "no control that writes on the first tap was refused (confirmations and menu items are not tapped)").toEqual([]);
 });

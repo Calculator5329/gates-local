@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { call, updateSettings } from "./session.ts";
 import { getState, NA, setState, useStore } from "./store.ts";
-import { Grp, Row } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Grp, Row } from "./settings-ui.tsx";
 
 function begin() {
   setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
@@ -16,6 +16,7 @@ export function VoiceSettings() {
   const busy = pendingVersion === savedVersion;
   const [err, fail] = useState<string | null>(null);
   const attempt = useRef(0);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   useEffect(() => () => { attempt.current++; }, []);
   if (!settings || settings === NA) return null;
   const connect = async () => {
@@ -40,10 +41,12 @@ export function VoiceSettings() {
     if (attempt.current === current && getState().voiceConnectionVersion === version) fail(error);
   };
   return <Grp title="Voice to text" desc="Your local whisper.cpp transcribes audio. Gates Local keeps no recording. Review the draft before sending.">
-    <Row label="Speech server" desc={settings.whisperUrl ? "Connected for dictation. Gates Local never starts or stops this service." : "Off. Connect your running local server to use the microphone."} err={err}>
-      <input className="inp" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
-      <button type="button" className="btn outline" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
-      {settings.whisperUrl ? <button type="button" className="btn ghost" onClick={() => void disconnect()}>Disconnect</button> : null}
+    <Row label="Speech server" desc={settings.whisperUrl ? "Connected for dictation. Gates Local never starts or stops this service." : locked ? `Off. ${COMPUTER_ONLY}` : "Off. Connect your running local server to use the microphone."} err={err}>
+      {locked ? null : <>
+        <input className="inp" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
+        <button type="button" className="btn outline" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
+        {settings.whisperUrl ? <button type="button" className="btn ghost" onClick={() => void disconnect()}>Disconnect</button> : null}
+      </>}
     </Row>
   </Grp>;
 }

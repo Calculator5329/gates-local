@@ -1,5 +1,21 @@
 # Decisions
 
+## 2026-11-09 · The phone is for chat only
+
+The phone can read threads, send, stop, pick among the installed models,
+dictate and see status. It cannot change settings, files, installed models,
+sources or updates. Sending a message or making an image loads and unloads
+models and the app's own image service exactly as it does from the computer.
+Retry on the phone asks Ollama for its model list and looks for an Ollama that
+came back; it starts and installs nothing. Every wire method has a required
+`phone` row in the contracts table, and the server decides from that row
+alone, so a new method cannot ship without a decision.
+
+`settings.update` is denied whole. Chatting needs no saved setting: the model
+pick, context size and thinking live in the page, and every writer is a
+Settings screen. The client reads the same table and hides what would be
+refused. Being on the phone listener decides this, not the window size.
+
 ## 2026-11-09 · Updates finish at server readiness and imports cannot be interrupted
 
 Only the desktop listener may control updates. The phone listener exposes

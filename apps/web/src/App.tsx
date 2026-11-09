@@ -321,6 +321,7 @@ function placeAt(pop: HTMLElement, at: { x: number; y: number }): void {
 
 function ThreadMenu() {
   const pop = useStore((s) => (s.pop?.id === "thread" ? s.pop : null));
+  const canDelete = useStore((s) => s.unavailable["threads.delete"] !== true);
   const open = pop !== null;
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -342,11 +343,15 @@ function ThreadMenu() {
         <Icon id="download" />
         <b>Export as Markdown</b>
       </button>
-      <div className="msep" />
-      <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
-        <Icon id="trash" />
-        <b>Delete thread</b>
-      </button>
+      {canDelete ? (
+        <>
+          <div className="msep" />
+          <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
+            <Icon id="trash" />
+            <b>Delete thread</b>
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }

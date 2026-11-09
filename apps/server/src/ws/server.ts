@@ -5,7 +5,8 @@
 // With `phone` set a second listener, on an owner-only Unix socket
 // (src/web/socket.ts), serves the web client and the same socket on /ws,
 // admitted by Tailscale Serve's headers instead of the token
-// (src/web/phone.ts); both listeners share handlers and pushes.
+// (src/web/phone.ts); both listeners share handlers and pushes, and the
+// contracts method table says which methods the phone may call.
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
@@ -22,6 +23,7 @@ import {
   type SyncMetadata,
   WireError,
   ORDERED_DOMAINS,
+  phoneMay,
   settingsSnapshotMethod,
   decodeRequest,
   encodeErrorResponse,
@@ -233,6 +235,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       return send(ws, encodeErrorResponse(req.id, req.error.code, req.error.message));
     }
     const { id, method, params: decodedParams } = req.value;
+    if (ctx.listener === "phone" && !phoneMay(method)) {
+      return send(ws, encodeErrorResponse(id, "forbidden", "That can only be done on the computer running Gates Local."));
+    }
     if (method === "sync.negotiate") {
       const domains = (options.ordered ?? []).filter(domain => ORDERED_DOMAINS.includes(domain) && decodedParams.ordered.includes(domain));
       const frame = encodeResult(id, method, { epoch, ordered: domains });
@@ -241,21 +246,12 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       ordered.set(ws, domains); // Success is enqueued before any ordered push.
       return;
     }
-    if (ctx.listener === "phone" && method.startsWith("update.") && method !== "update.status") {
-      return send(ws, encodeErrorResponse(id, "forbidden", "Updates can only be controlled from the computer running Gates Local."));
-    }
-    let params: unknown = decodedParams;
-    if (ctx.listener === "phone" && req.value.method === "settings.update") {
-      // Reset still succeeds on phones, but desktop update preferences stay put.
-      const { updateAutomatic: _automatic, updateEveryChange: _channel, ...phonePatch } = req.value.params;
-      params = phonePatch;
-    }
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
     if (handler === undefined) return send(ws, encodeErrorResponse(id, "not-implemented", `${method} has no handler`));
     let result: unknown;
     let captured: SyncMetadata | undefined;
     try {
-      result = await handler(params, { ...ctx, capture: changes => { captured = { epoch, changes }; } });
+      result = await handler(decodedParams, { ...ctx, capture: changes => { captured = { epoch, changes }; } });
     } catch (e) {
       const { code, message, blocking } = errorCode(e);
       if (code === "internal") log(`${method} handler threw: ${message}`);

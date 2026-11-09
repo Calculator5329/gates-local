@@ -24,7 +24,7 @@ import { FitError, type FitReport } from "./fit/types.ts";
 import { estimateOffered } from "./runtime/catalog.ts";
 import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
-import type { OllamaRuntime } from "./runtime/runtime.ts";
+import type { RuntimeSwitch } from "./runtime/switch.ts";
 import type { ThreadStore } from "./threads/store.ts";
 import type { NewMessage } from "./threads/types.ts";
 import type { Handlers } from "./ws/server.ts";
@@ -113,7 +113,7 @@ export interface AppDeps {
   readonly admit?: () => void;
   readonly dataDir?: string;
   readonly store: ThreadStore;
-  readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure">;
+  readonly runtime: Pick<RuntimeSwitch, "status" | "baseUrl" | "onChange" | "ensure" | "lookIfDown">;
   readonly catalog: ModelCatalog;
   /** Bound late: main creates the ws server after the handlers. */
   readonly push: Push;
@@ -595,6 +595,7 @@ export function createApp(deps: AppDeps): App {
 
     "runtime.status": () => runtime.status(),
     "runtime.retry": () => runtime.ensure(),
+    "runtime.discover": () => runtime.lookIfDown(),
 
     "fit.check": async ({ model, numCtx }) => {
       const baseUrl = runtime.baseUrl();

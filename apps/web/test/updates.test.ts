@@ -189,6 +189,17 @@ describe("the note after an update", () => {
   });
 });
 
+describe("dismissing the note on a phone", () => {
+  it("clears the phone's note and sends no update.dismissResult", async () => {
+    b.server.answer("update.status", () => ({ ...CLONE, canControl: false, result: { at: 1, outcome: "updated", line: "Updated to v0.2.0." } }));
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    await session.dismissUpdateResult();
+    expect(store.getState().update).toMatchObject({ result: null });
+    expect(b.server.calls("update.dismissResult")).toEqual([]);
+  });
+});
+
 describe("the check runs only on a click", () => {
   it("AU-02 an older bridge cannot silently discard the checked target", () => {
     vi.stubGlobal("gatesLocal", { getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart: async () => ({ ok: true }) });

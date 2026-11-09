@@ -16,7 +16,7 @@ import { addSource, canOpenFolder, checkImageStatus, dataFolder, openDataFolder,
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
-import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./SettingsUpdates.tsx";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -130,7 +130,8 @@ function Runtime() {
   }, [app, runtime?.state, runtime?.modelsDir, runtime?.baseUrl]);
   // Desktop uses main's verified ownership record. A browser can only copy the server-reported path.
   const folder = window.gatesLocal === undefined ? runtime?.modelsDir : app && runtime?.state === "ready" ? knownFolder ?? undefined : undefined;
-  const switchable = !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
+  const switchable = !locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
   return (
     <>
       <Head title="Runtime">Ollama is the program that runs your models. Gates Local finds it on its own.</Head>
@@ -265,6 +266,7 @@ function libraryTool(on: boolean, sources: readonly Source[] | "na" | undefined,
 
 function Tools() {
   const settings = useStore((s) => s.settings);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const sources = useStore((s) => s.sources);
   const status = useStore((s) => s.imageStatus);
   const [err, run] = useAct();
@@ -285,7 +287,7 @@ function Tools() {
             <span aria-hidden={!on}>On. It can use the tools below when a chat needs them.</span>
             <span aria-hidden={on}>Off. It answers from the conversation alone, unless you turn Image on in a chat.</span>
           </span>} err={err}>
-            <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />
+            {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}
           </Row>
         </Grp>
       )}
@@ -352,6 +354,7 @@ function ImageState({ address }: { address: string }) {
 
 function Images() {
   const settings = useStore((s) => s.settings);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const status = useStore((s) => s.imageStatus);
   const [url, setUrl] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -377,8 +380,8 @@ function Images() {
       <Head title="Image generation">Let the assistant make images on this computer. It uses ComfyUI, a separate free program you install yourself.</Head>
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc="Once enabled, use the Image button in the message box for a chat. If the GPU is short, the chat model is unloaded while an image renders." err={genErr}>
-            <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "Once enabled, use the Image button in the message box for a chat. If the GPU is short, the chat model is unloaded while an image renders."} err={genErr}>
+            {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
           <Row label="Set up ComfyUI" desc="Install ComfyUI first, then connect it to Gates Local.">
             <SetupLink />
@@ -388,15 +391,17 @@ function Images() {
       {on ? (
         <Grp title="Connection">
           <ImageState address={address} />
-          <Row label="ComfyUI address" desc="Only change this if ComfyUI runs somewhere else." err={urlErr}>
-            <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
-            <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
-              <span className="steady">
-                <span aria-hidden={testing}>Test connection</span>
-                <span aria-hidden={!testing}>Testing…</span>
-              </span>
-            </button>
-          </Row>
+          {locked ? null : (
+            <Row label="ComfyUI address" desc="Only change this if ComfyUI runs somewhere else." err={urlErr}>
+              <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
+              <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
+                <span className="steady">
+                  <span aria-hidden={testing}>Test connection</span>
+                  <span aria-hidden={!testing}>Testing…</span>
+                </span>
+              </button>
+            </Row>
+          )}
         </Grp>
       ) : null}
     </>
@@ -416,6 +421,7 @@ const ADD_WORDS: Record<SourceKind, { noun: string; hint: string }> = {
 const KIND_ICON: Record<SourceKind, IconId> = { folder: "folder", file: "file", sqlite: "db" };
 
 function SourceRow({ src }: { src: Source }) {
+  const locked = useStore((s) => s.unavailable["sources.remove"] === true);
   const [open, setOpen] = useState(false);
   const [err, run] = useAct();
   const box = useRef<HTMLDivElement>(null);
@@ -442,39 +448,41 @@ function SourceRow({ src }: { src: Source }) {
       </div>
       <div className="sv">
         {detail === "" ? null : <span className="src-d">{detail}</span>}
-        <div className="mp-acts" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
-          <button ref={btn} type="button" className={`mp-kebab${open ? " on" : ""}`} aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-            <Icon id="more" />
-          </button>
-          {open ? (
-            <div className="mp-menu src-menu" role="menu">
-              {src.kind === "sqlite" || broken ? (
+        {locked ? null : (
+          <div className="mp-acts" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
+            <button ref={btn} type="button" className={`mp-kebab${open ? " on" : ""}`} aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+              <Icon id="more" />
+            </button>
+            {open ? (
+              <div className="mp-menu src-menu" role="menu">
+                {src.kind === "sqlite" || broken ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="mp-mi"
+                    onClick={() => {
+                      close();
+                      void run(refreshSource(src.id));
+                    }}
+                  >
+                    Refresh
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   role="menuitem"
-                  className="mp-mi"
+                  className="mp-mi danger"
                   onClick={() => {
                     close();
-                    void run(refreshSource(src.id));
+                    void run(removeSource(src.id));
                   }}
                 >
-                  Refresh
+                  Remove
                 </button>
-              ) : null}
-              <button
-                type="button"
-                role="menuitem"
-                className="mp-mi danger"
-                onClick={() => {
-                  close();
-                  void run(removeSource(src.id));
-                }}
-              >
-                Remove
-              </button>
-            </div>
-          ) : null}
-        </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -521,6 +529,7 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
 }
 
 function SourceGroup({ title, desc, kinds, items }: { title: string; desc: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
+  const locked = useStore((s) => s.unavailable["sources.add"] === true);
   const [adding, setAdding] = useState<SourceKind | null>(null);
   const entry = useRef<HTMLDivElement>(null);
   const close = () => {
@@ -541,8 +550,8 @@ function SourceGroup({ title, desc, kinds, items }: { title: string; desc: strin
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">Choose a local path to share.</span>}>
-            {action}
+          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">{locked ? COMPUTER_ONLY : "Choose a local path to share."}</span>}>
+            {locked ? null : action}
           </Row>
         ) : <AddRow key={adding} kind={adding} close={close} />}
       </div>
@@ -552,13 +561,14 @@ function SourceGroup({ title, desc, kinds, items }: { title: string; desc: strin
 
 function Library() {
   const sources = useStore((s) => s.sources);
+  const locked = useStore((s) => s.unavailable["sources.add"] === true);
   const list = sources === NA || sources === undefined ? [] : sources;
   return (
     <>
       <Head title="Library">Folders, files and databases the model can read in every chat. Gates Local never changes them.</Head>
       {sources === NA ? null : (
         <>
-          <LibraryImports />
+          {locked ? null : <LibraryImports />}
           <SourceGroup title="Files and folders" desc="The model always sees the latest version." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
           <SourceGroup title="SQLite databases" desc="The model reads a snapshot from when you added it. Later changes show up after you refresh it." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
         </>

@@ -61,7 +61,7 @@ beforeEach(() => {
   probe.stale.clear();
   probe.held.clear();
   vi.clearAllMocks(); probe.phone = false; probe.states = []; probe.root = undefined; probe.refValues = [];
-  probe.state = { pop: { id: "picker", kb: true, ready: true }, model: "other:1b", numCtx: 16384,
+  probe.state = { pop: { id: "picker", kb: true, ready: true }, unavailable: {}, model: "other:1b", numCtx: 16384,
     models: [{ name: tag, maxContext: 8192, sizeBytes: gib, capabilities: ["completion"] }],
     catalog: [], fits: {}, pulls: {}, stopFrees: {}, gpu: { vendor: "nvidia", freeBytes: 12 * gib } };
 });

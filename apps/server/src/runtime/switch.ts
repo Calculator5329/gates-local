@@ -14,6 +14,13 @@ export interface RuntimeSwitch extends Pick<OllamaRuntime, "status" | "baseUrl" 
   setMode(mode: RuntimeMode): Promise<RuntimeStatus>;
   /** Stop the app's own copy if this process started it (server shutdown). */
   stopIfStartedHere(): Promise<void>;
+  /**
+   * The phone's Retry: look for an Ollama that came back, never start or install one. Decided
+   * when its turn in the queue comes: a ready status is not probed again (a slow probe would mark
+   * it stopped), and an error stays (only ensure(), the computer's Retry, can clear it). Callers
+   * share one pending look; that is the only bound, since the phone is the owner's own.
+   */
+  lookIfDown(): Promise<RuntimeStatus>;
 }
 
 export interface RuntimeSwitchOptions {
@@ -64,6 +71,8 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   // a switch waits for an outstanding startup to settle before it decides
   // whether the old runtime was started here (no orphaned app Ollama).
   let chain: Promise<unknown> = Promise.resolve();
+  /** The phone's queued or running look, shared by every caller until it settles. */
+  let looking: Promise<RuntimeStatus> | undefined;
   const serial = <T>(fn: () => Promise<T>): Promise<T> => {
     const run = chain.then(fn);
     chain = run.catch(() => undefined);
@@ -79,7 +88,15 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
   return {
     status: () => refused ?? inner.status(),
     baseUrl: () => (switching ? undefined : inner.baseUrl()),
-    ensure: () => serial(() => inner.ensure()),
+    // The computer's Retry ends a refused switch: a ready runtime's ensure() changes nothing, so forward never would.
+    ensure: () =>
+      serial(async () => {
+        const s = await inner.ensure();
+        if (refused === undefined) return s;
+        refused = undefined;
+        send(inner.status());
+        return inner.status();
+      }),
     discover: () => serial(() => inner.discover()),
     startedByThisProcess: () => inner.startedByThisProcess(),
     killNow: () => inner.killNow(),
@@ -116,5 +133,15 @@ export function createRuntimeSwitch(options: RuntimeSwitchOptions): RuntimeSwitc
       });
     },
     stopIfStartedHere: () => serial(() => stopIfStartedHere(inner)),
+    lookIfDown() {
+      looking ??= serial(async () => {
+        const now = refused ?? inner.status();
+        if (now.state !== "ready" && now.state !== "error") await inner.discover();
+        return refused ?? inner.status();
+      }).finally(() => {
+        looking = undefined;
+      });
+      return looking;
+    },
   };
 }

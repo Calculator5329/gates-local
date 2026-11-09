@@ -5,7 +5,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
-import { DlDetail } from "./ModelDownloads.tsx";
+import { DlDetail, canCancelPull } from "./ModelDownloads.tsx";
 import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
@@ -138,6 +138,7 @@ function NoModels() {
   const entry = useStore(recommendedEntry);
   const catalogNA = useStore((s) => s.catalog === NA);
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
+  const canCancel = useStore(canCancelPull);
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
   const numCtx = useStore((s) => s.numCtx);
@@ -165,19 +166,21 @@ function NoModels() {
       <Shell st={st} title="Downloading your first model" sub={sub}>
         <RecCard tag={active} have={false} entry={entry?.name === active ? entry : undefined}>
           <DlDetail p={p} name={describeModel(active, undefined).name} cancel={false} />
-          <div className="prog-l">
-            <span />
-            <button
-              type="button"
-              className="qa"
-              onClick={() => {
-                setCancelled(true);
-                void cancelPull(active);
-              }}
-            >
-              Cancel download
-            </button>
-          </div>
+          {canCancel ? (
+            <div className="prog-l">
+              <span />
+              <button
+                type="button"
+                className="qa"
+                onClick={() => {
+                  setCancelled(true);
+                  void cancelPull(active);
+                }}
+              >
+                Cancel download
+              </button>
+            </div>
+          ) : null}
         </RecCard>
         <Cta label="Start chatting" onGo={startChat} />
         <p className="fr-note">You can type now; replies start when the download finishes.</p>
@@ -195,10 +198,10 @@ function NoModels() {
   if (entry === undefined || pullNA) {
     // no catalog or no downloads in this build: say how to get a model without the app
     return (
-      <Shell st={st} title="Download your first model" sub="Gates Local needs one model to chat.">
+      <Shell st={st} title={pullNA ? "No model installed yet" : "Download your first model"} sub="Gates Local needs one model to chat.">
         <p className="fr-note na">
-          {pullNA || catalogNA ? "Downloading models from here is not available in this build. " : ""}
-          Download one with Ollama, for example <span className="mono">ollama pull qwen3.5:9b</span>, then press Retry.
+          {pullNA || catalogNA ? "Gates Local can't download models from here. " : ""}
+          On the computer, download one with Ollama, for example <span className="mono">ollama pull qwen3.5:9b</span>, then press Retry.
         </p>
         <Cta label="Retry" onGo={() => void recheckRuntime()} />
       </Shell>
@@ -283,6 +286,7 @@ function NoOllama() {
   const baseUrl = useStore((s) => s.runtime?.baseUrl);
   const detail = useStore((s) => s.runtime?.detail);
   const note = useStore(ownCopyNote);
+  const computerOnly = useStore((s) => s.unavailable["runtime.retry"] === true);
   const own = note !== "";
   const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
@@ -305,7 +309,8 @@ function NoOllama() {
       title={title}
       sub={sub}
     >
-      {rt === "missing" ? <p className="fr-note na">Installing Gates Local's own copy is not available in this build.</p> : null}
+      {rt === "missing" ? <p className="fr-note na">{computerOnly ? "Gates Local can't install Ollama from here. On the computer, install it from ollama.com, then press Retry." : "Installing Gates Local's own copy is not available in this build."}</p> : null}
+      {rt === "error" && computerOnly ? <p className="fr-note na">Gates Local can't fix this from here. On the computer, press Retry in Gates Local.</p> : null}
       <Cta label="Retry" onGo={() => void recheckRuntime()} link="Settings" onLink={() => finishFirstRun("runtime")} />
     </Shell>
   );

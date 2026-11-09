@@ -28,12 +28,13 @@ function Progress({ p, name }: { p: PullProgress; name: string }) {
 /** First-run detail: bar, bytes, speed, time left, Cancel download. */
 export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
   const [err, run] = useAct();
+  const canCancel = useStore(canCancelPull);
   return (
     <>
       <Progress p={p} name={name} />
       <div className="prog-l">
         <span>{etaText(p)}</span>
-        {cancel ? (
+        {cancel && canCancel ? (
           <button
             type="button"
             className="qa"
@@ -52,6 +53,9 @@ export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: st
 }
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
+
+/** The phone watches a download; only the computer can cancel one. */
+export const canCancelPull = (s: State): boolean => s.unavailable["models.cancelPull"] !== true;
 
 /** Completed pulls bridge the interval until the installed list arrives. */
 export function usePendingDownloads() {
@@ -74,6 +78,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
   const size = bytes === undefined ? "Size pending" : sizeText(bytes);
   const state = p.state === "done" ? "Finishing download" : "Downloading";
   const [err, run] = useAct();
+  const canCancel = useStore(canCancelPull);
   const detail = <span className="prog-l dl-status"><span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? etaText(p)}</span></span>;
   return (
     <div className="mp-row mp-dling" data-pull={p.name}>
@@ -89,19 +94,21 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
       <span className="mp-sz">{size}</span>
       <span className="mp-fitc"><span className="mp-fit none">{n.purpose ? state : detail}</span></span>
       <div className="mp-acts">
-        <button
-          type="button"
-          className="mp-kebab"
-          aria-label="Cancel download"
-          data-tip="Cancel download"
-          disabled={p.state === "done"}
-          onClick={() => {
-            closeTip();
-            void run(cancelPull(p.name));
-          }}
-        >
-          <Icon id="x" />
-        </button>
+        {canCancel ? (
+          <button
+            type="button"
+            className="mp-kebab"
+            aria-label="Cancel download"
+            data-tip="Cancel download"
+            disabled={p.state === "done"}
+            onClick={() => {
+              closeTip();
+              void run(cancelPull(p.name));
+            }}
+          >
+            <Icon id="x" />
+          </button>
+        ) : null}
       </div>
       <Progress p={p} name={n.text} />
     </div>
@@ -217,7 +224,6 @@ export function DownloadTab() {
   const gpu = useStore((s) => s.gpu);
   const fits = useStore((s) => s.fits);
   const fitStatus = useStore(s => s.fitStatus);
-  const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
   // Only a changed installation or successful progress confirms a start.
@@ -280,7 +286,7 @@ export function DownloadTab() {
           ))}
         </Grp>
       ) : null}
-      <Grp title="Something else">{pullNA ? <Row label="Any model from the Ollama library" desc="Downloads are not available in this build." /> : <CustomPull actions={actions} />}</Grp>
+      <Grp title="Something else"><CustomPull actions={actions} /></Grp>
     </>
   );
 }

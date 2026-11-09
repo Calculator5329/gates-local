@@ -68,6 +68,9 @@ export function Row({ label, desc, err = null, children }: { label: ReactNode; d
 
 export const Na = ({ children }: { children: ReactNode }) => <span className="na">{children}</span>;
 
+/** Stands in for a control the phone listener refuses. */
+export const COMPUTER_ONLY = "Available on the computer.";
+
 /** Close a popover on a press outside it. */
 export function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, close: () => void): void {
   useEffect(() => {

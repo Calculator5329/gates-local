@@ -12,6 +12,7 @@ import { createApp } from "../src/app.ts";
 import { json, startFakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime } from "../src/runtime/runtime.ts";
+import { createRuntimeSwitch } from "../src/runtime/switch.ts";
 import { freePort } from "../src/runtime/test-fakes.ts";
 import { openThreadStore } from "../src/threads/store.ts";
 
@@ -74,7 +75,7 @@ const catalog = createModelCatalog(() => runtime.baseUrl());
 const app = createApp({
   dataDir: dir,
   store,
-  runtime,
+  runtime: createRuntimeSwitch({ initialMode: "system", make: () => runtime }),
   catalog,
   draftEveryMs: 5,
   push: () => undefined,

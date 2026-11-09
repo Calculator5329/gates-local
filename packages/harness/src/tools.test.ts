@@ -48,9 +48,75 @@ describe("Library tools", () => {
         for (const host of [root, process.cwd()]) expect(error?.message).not.toContain(host);
       }
       // Argument and containment errors keep their own messages.
-      await expect(tools.execute({ name: "read", input: { path: "/library/f/../x" } }, signal)).rejects.toThrow("Path is outside your Library source");
       await expect(tools.execute({ name: "read", input: { path: "/library/nope/x" } }, signal)).rejects.toThrow("Path is outside your Library; use /library/<source id>");
     } finally { chmodSync(path.join(docs, "shut"), 0o700); chmodSync(path.join(docs, "locked.txt"), 0o600); }
+  });
+  const leavesEverywhere: [string, string][] = [
+    ["absolute", "/etc/passwd"],
+    ["double slash after the source id", "//etc/passwd"],
+    ["parent", "../private.txt"],
+    ["nested parent", "sub/../../private.txt"],
+    ["backslash parent", "..\\private.txt"],
+  ];
+  const leavesOnWindows: [string, string][] = [
+    ["drive", "C:\\Windows\\system.ini"],
+    ["drive with forward slash", "C:/Windows/system.ini"],
+    ["drive-relative", "C:system.ini"],
+    ["UNC", "\\\\host\\share\\file.txt"],
+    ["device", "\\\\?\\C:\\Windows\\system.ini"],
+  ];
+  describe.each([
+    ["linux" as const, leavesEverywhere],
+    ["win32" as const, [...leavesEverywhere, ...leavesOnWindows]],
+  ])("a path that leaves the source by its text, on %s", (platform, rows) => {
+    it.each(rows)("%s gets the missing-file refusal and touches nothing", async (_shape, relative) => {
+      const touched: string[] = [];
+      const fs = {
+        stat: (async (file: string) => { touched.push(`stat ${file}`); throw new Error("touched"); }) as LibraryFs["stat"],
+        opendir: (async (file: string) => { touched.push(`opendir ${file}`); throw new Error("touched"); }) as LibraryFs["opendir"],
+        open: (async (file: string) => { touched.push(`open ${file}`); throw new Error("touched"); }) as LibraryFs["open"],
+      };
+      const realpath = async (file: string) => { touched.push(`realpath ${file}`); return file; };
+      const tools = createTools({ platform, realpath, fs, sources: [{ id: "f", label: "Docs", path: "/srv/docs", kind: "folder" }] });
+      const requested = `/library/f/${relative}`;
+      await expect(tools.execute({ name: "read", input: { path: requested } }, new AbortController().signal)).rejects.toThrow(new Error(`${requested}: no such file`));
+      expect(touched).toEqual([]);
+    });
+  });
+  describe.skipIf(process.platform === "win32")("a file with a name only Windows would treat as a root, on Linux", () => {
+    it.each([
+      ["drive-like", "C:notes.txt"],
+      ["leading backslash", "\\notes.txt"],
+    ])("%s is the person's own file and reads", async (_shape, name) => {
+      const docs = mkdtempSync(path.join(tmpdir(), "gl-tools-"));
+      writeFileSync(path.join(docs, name), "kept in the Library");
+      const tools = createTools({ platform: "linux", sources: [{ id: "f", label: "Docs", path: docs, kind: "folder" }] });
+      const read = await tools.execute({ name: "read", input: { path: `/library/f/${name}` } }, new AbortController().signal);
+      expect(read.output).toContain("kept in the Library");
+    });
+  });
+  it("Windows ignores trailing dots and spaces, so a dressed-up parent is refused there and is only a name elsewhere", async () => {
+    const realpath = vi.fn(async (file: string) => file);
+    const sources = [{ id: "f", label: "Docs", path: "/srv/docs", kind: "folder" as const }];
+    const signal = new AbortController().signal;
+    await expect(createTools({ platform: "win32", realpath, sources }).execute({ name: "read", input: { path: "/library/f/.. /x" } }, signal)).rejects.toThrow(new Error("/library/f/.. /x: no such file"));
+    expect(realpath).not.toHaveBeenCalled();
+    await expect(createTools({ platform: "linux", realpath, sources, fs: { stat: (async () => { throw Object.assign(new Error("gone"), { code: "ENOENT" }); }) as LibraryFs["stat"] } }).execute({ name: "read", input: { path: "/library/f/.. /x" } }, signal)).rejects.toThrow(new Error("/library/f/.. /x: no such file"));
+    expect(realpath).toHaveBeenCalled();
+  });
+  it("a path under a single-file source is refused like a missing file without touching the disk", async () => {
+    const realpath = vi.fn(async (file: string) => file);
+    const tools = createTools({ realpath, sources: [{ id: "f", label: "Doc", path: "/srv/doc.txt", kind: "file" }] });
+    await expect(tools.execute({ name: "read", input: { path: "/library/f/x" } }, new AbortController().signal)).rejects.toThrow(new Error("/library/f/x: no such file"));
+    expect(realpath).not.toHaveBeenCalled();
+  });
+  it("a symlink inside the source that points out is still refused after the disk check", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "gl-link-"));
+    const docs = path.join(root, "docs"); mkdirSync(docs);
+    writeFileSync(path.join(root, "private.txt"), "private");
+    symlinkSync(path.join(root, "private.txt"), path.join(docs, "escape"));
+    const tools = createTools({ sources: [{ id: "f", label: "Docs", path: docs, kind: "folder" }] });
+    await expect(tools.execute({ name: "read", input: { path: "/library/f/escape" } }, new AbortController().signal)).rejects.toThrow(new Error("Symlink leaves your Library source"));
   });
   it("accepts a source whose native realpath differs only in case (Windows)", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "gl-case-"));

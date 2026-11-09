@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-09: The phone is for chat only, and the read tool checks a path before touching it
+
+- Every wire method has a required `phone` row in the contracts table, and
+  the server decides from that row alone. From the phone you can read
+  threads, send, stop, pick an installed model, dictate, make images and
+  create or rename threads. Settings, sources, model installs, thread
+  deletes and updates are refused, and the client hides what would be
+  refused.
+- Retry on the phone only looks for an Ollama that came back. It never
+  starts or installs one, it does not probe a runtime that is ready, and it
+  leaves an error for the computer's Retry to clear. Several taps share one
+  look.
+- The computer's Retry now also ends a refused runtime switch. Before, the
+  error stayed until the runtime's status next changed.
+- The read tool decides whether a path leaves its source from the text of
+  the path, before anything on disk is touched. On Windows that includes
+  drive letters and network paths.
+- Not verified: Retry from a real phone against a real Ollama, and the
+  path check on native Windows. The phone can still read more than a chat
+  needs (settings, sources list, update status).
+
 ## 2026-11-09: Hover refreshes replace stale visited history after reconnect
 
 - A completed hover read no longer marks an older displayed history current.

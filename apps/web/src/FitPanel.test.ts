@@ -21,7 +21,7 @@ function panel(gpu: GpuStatus, history: boolean, pending = false): string {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
     gpu, models: [], catalog: [], loads: { chat: { state: "ready", numCtx: 16384 } }, messages: {}, firstToken: {},
-    fits: pending ? {} : { "chat@16384": "error" }, fitStatus: { "chat@16384": pending ? "checking" : "error" }, fitHistory: history ? { "chat@16384": previous } : {}, staleFits: {},
+    fits: pending ? {} : { "chat@16384": "error" }, fitStatus: { "chat@16384": pending ? "checking" : "error" }, fitHistory: history ? { "chat@16384": previous } : {}, staleFits: {}, unavailable: {},
   };
   return renderToStaticMarkup(createElement(GpuMemory));
 }

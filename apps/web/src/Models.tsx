@@ -34,11 +34,12 @@ import {
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { ensureFit, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
-import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
+const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
 
 /** The failure of the last action a control ran; cleared when the next try starts. */
 // ---------------------------------------------------------------- names and fit
@@ -89,7 +90,8 @@ function useInstalledRows(): { rows: InstalledRow[]; def: string | undefined } {
 }
 
 export function ModelsPage() {
-  const addPage = useStore((s) => s.addPage);
+  const canDownload = useStore((s) => s.unavailable["models.pull"] !== true);
+  const addPage = useStore((s) => s.addPage) && canDownload;
   const count = useStore((s) => s.models?.length);
   const tab = addPage ? "download" : "installed";
   const tabs = [useRef<HTMLButtonElement>(null), useRef<HTMLButtonElement>(null)] as const;
@@ -99,7 +101,7 @@ export function ModelsPage() {
     if (focus) tabs[download ? 1 : 0].current?.focus();
   };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End") {
+    if (canDownload && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End")) {
       e.preventDefault();
       go(e.key === "End" || (e.key !== "Home" && !addPage), true);
     }
@@ -125,21 +127,23 @@ export function ModelsPage() {
             </span>
             {count === undefined ? null : <span className="mp-n">{count}</span>}
           </button>
-          <button
-            ref={tabs[1]}
-            type="button"
-            role="tab"
-            id="mp-tab-download"
-            aria-selected={tab === "download"}
-            aria-controls="mp-panel"
-            tabIndex={tab === "download" ? 0 : -1}
-            className={`mp-tab${tab === "download" ? " on" : ""}`}
-            onClick={() => go(true)}
-          >
-            <span className="mp-lbl" data-l="Download">
-              Download
-            </span>
-          </button>
+          {canDownload ? (
+            <button
+              ref={tabs[1]}
+              type="button"
+              role="tab"
+              id="mp-tab-download"
+              aria-selected={tab === "download"}
+              aria-controls="mp-panel"
+              tabIndex={tab === "download" ? 0 : -1}
+              className={`mp-tab${tab === "download" ? " on" : ""}`}
+              onClick={() => go(true)}
+            >
+              <span className="mp-lbl" data-l="Download">
+                Download
+              </span>
+            </button>
+          ) : null}
         </div>
       </div>
       <div role="tabpanel" id="mp-panel" aria-labelledby={tab === "installed" ? "mp-tab-installed" : "mp-tab-download"}>
@@ -156,7 +160,7 @@ function Installed() {
   const { rows, def } = useInstalledRows();
   const [filter, setFilter] = useState("");
   const [removing, setRemoving] = useState<{ row: InstalledRow; back: HTMLElement | null } | null>(null);
-  const settingsNA = useStore((s) => s.settings === NA);
+  const settingsNA = useStore(cannotSaveDefault);
   const saved = useStore(savedDefault);
   // A removal that worked but could not save the next default. Ends for good once a default is saved.
   const [note, setNote] = useState<{ removed: string; text: string } | null>(null);
@@ -275,7 +279,7 @@ function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | unde
   const box = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const canRemove = useStore((s) => s.unavailable["models.remove"] !== true);
-  const settingsNA = useStore((s) => s.settings === NA);
+  const settingsNA = useStore(cannotSaveDefault);
   const close = (refocus = true) => {
     setOpen(false);
     setCopied(null);
@@ -442,6 +446,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const numCtx = useStore((s) => s.numCtx);
   const saved = useStore(savedDefault);
   const models = useStore((s) => s.models);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   // the server's pick (runtime/pick.ts) is the model new chats really start on
   const picked = pickedModel(models);
   const fallback = saved !== undefined && picked !== undefined && picked.name !== saved ? (rows.find((r) => r.name === picked.name)?.label.text ?? picked.name) : undefined;
@@ -499,6 +504,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         <span>
           New chats start on this model. If it can't run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.
           {limit === undefined ? null : ` This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
+          {locked ? ` Changing this default: ${COMPUTER_ONLY.toLowerCase()}` : null}
         </span>
         {fallback === undefined ? null : (
           <span className="mp-fb">
@@ -572,25 +578,27 @@ function NoModels() {
       <Icon id="box" cls="mp-big" />
       <h2>No models yet</h2>
       <p>
-        Download one to start chatting.
-        {pick ? (
+        {pullNA ? `Downloading: ${COMPUTER_ONLY.toLowerCase()}` : "Download one to start chatting."}
+        {pick && !pullNA ? (
           <>
             {" "}
             We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {fitLabel(pick.fit?.verdict ?? "fits", false, cpu).toLowerCase()} on this computer.
           </>
         ) : null}
       </p>
-      <div className="mp-r2">
-        {pick && !pullNA ? (
-          <button type="button" className="btn primary" onClick={() => void run(pull(pick.name))}>
-            <Icon id="download" cls="s14" />
-            Download {pick.label}
+      {pullNA ? null : (
+        <div className="mp-r2">
+          {pick ? (
+            <button type="button" className="btn primary" onClick={() => void run(pull(pick.name))}>
+              <Icon id="download" cls="s14" />
+              Download {pick.label}
+            </button>
+          ) : null}
+          <button type="button" className={pick ? "btn outline" : "btn primary"} onClick={() => setState({ addPage: true })}>
+            Browse models
           </button>
-        ) : null}
-        <button type="button" className={pick && !pullNA ? "btn outline" : "btn primary"} onClick={() => setState({ addPage: true })}>
-          Browse models
-        </button>
-      </div>
+        </div>
+      )}
       <Fail err={err} />
     </div>
   );

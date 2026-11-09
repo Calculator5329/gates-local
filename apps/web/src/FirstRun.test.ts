@@ -40,6 +40,36 @@ const oldOllama = (catalog: unknown[], version?: string) => ({
   settings: {},
 });
 
+describe("first run on a phone, where downloads and installs belong to the computer", () => {
+  const phone = { ...oldOllama([]), models: [], unavailable: { "models.pull": true } };
+
+  it("titles the screen for what is true and keeps the way to get a model", () => {
+    const t = text(phone);
+    expect(t).toContain("No model installed yet");
+    expect(t).not.toContain("Download your first model");
+    expect(t).toContain("Gates Local can't download models from here. On the computer, download one with Ollama");
+    expect(t).toContain("Retry");
+  });
+
+  it("does not call a computer-only install missing from this build", () => {
+    const t = text({ ...phone, runtime: { state: "missing", owner: "none" }, unavailable: { "models.pull": true, "runtime.retry": true } });
+    expect(t).not.toContain("not available in this build");
+    expect(t).toContain("Gates Local can't install Ollama from here. On the computer, install it from ollama.com, then press Retry.");
+  });
+
+  it("says an Ollama error needs the computer, and keeps the reason", () => {
+    const failed = { state: "error", owner: "app", detail: "The download's checksum did not match." } as const;
+    const t = text({ ...phone, runtime: failed, unavailable: { "models.pull": true, "runtime.retry": true } });
+    expect(t).toContain("The download's checksum did not match.");
+    expect(t).toContain("Gates Local can't fix this from here. On the computer, press Retry in Gates Local.");
+    expect(text({ ...phone, runtime: failed, unavailable: {} })).not.toContain("can't fix this from here");
+  });
+
+  it("keeps the old sentence where the build really has no installer", () => {
+    expect(text({ ...phone, runtime: { state: "missing", owner: "none" }, unavailable: {} })).toContain("not available in this build");
+  });
+});
+
 describe("first run with an Ollama that does not say which models can chat (MP3-02)", () => {
   for (const [name, catalog] of [
     ["no catalog entry", []],

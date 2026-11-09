@@ -22,7 +22,9 @@ import { createImageModule, type ImageModule } from "../src/image/module.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
-import { freePort } from "../src/runtime/test-fakes.ts";
+import { createRuntimeSwitch } from "../src/runtime/switch.ts";
+import { installedBinary } from "../src/runtime/paths.ts";
+import { FAKE_RELEASE_FORMAT, freePort, startFakeOllama, startReleaseServer, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 import { openThreadStore, type ThreadStore } from "../src/threads/store.ts";
 import { type WsServer, startWsServer } from "../src/ws/server.ts";
 
@@ -150,7 +152,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   const app: App = createApp({
     dataDir: dir,
     store,
-    runtime,
+    runtime: createRuntimeSwitch({ initialMode: "system", make: () => runtime }),
     catalog,
     ...(opts.admit ? { admit: opts.admit } : {}),
     ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
@@ -1511,6 +1513,7 @@ describe("runtime.retry (W-06)", () => {
         baseUrl: () => undefined,
         onChange: () => () => undefined,
         ensure: async () => (ensured++, { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:1" }),
+        lookIfDown: async () => ({ state: "wrong-service", owner: "none", baseUrl: "http://127.0.0.1:1", detail: "nginx" }),
       },
       catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => undefined, stop: () => undefined },
       push: () => undefined,
@@ -1519,6 +1522,73 @@ describe("runtime.retry (W-06)", () => {
     expect((await app.handlers["runtime.status"]({}, { clientId: 1 })).state).toBe("wrong-service");
     expect(await app.handlers["runtime.retry"]?.({}, { clientId: 1 })).toMatchObject({ state: "ready" });
     expect(ensured).toBe(1);
+  });
+});
+
+/** The real runtime and model list, nothing answering yet, with a recording `ollama` on PATH that must never run. */
+async function stoppedOllama() {
+  const dir = cacheTmp();
+  const ran = path.join(dir, "ran");
+  writeFakeBinary(path.join(dir, "bin", "ollama"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(ran)}, "ran");\n`);
+  const port = await freePort();
+  const ollama = createOllamaRuntime({ appDataDir: path.join(dir, "data"), home: path.join(dir, "home"), appPort: await freePort(), externalBaseUrl: `http://127.0.0.1:${port}`, env: { PATH: path.join(dir, "bin"), HOME: path.join(dir, "home") }, systemModelsDirs: [], probeTimeoutMs: 500 });
+  cleanups.push(() => ollama.stop());
+  const runtime = createRuntimeSwitch({ initialMode: "system", make: () => ollama });
+  const store = openThreadStore(path.join(dir, "threads.sqlite"));
+  cleanups.push(() => store.close());
+  const catalog = createModelCatalog(() => runtime.baseUrl());
+  cleanups.push(() => catalog.stop());
+  const pushed: unknown[] = [];
+  const app = createApp({ store, runtime, catalog, push: (channel, payload) => { if (channel === "runtime.changed") pushed.push(payload); } });
+  cleanups.push(() => app.shutdown());
+  expect(await runtime.discover()).toMatchObject({ state: "stopped" });
+  const answering = async () => {
+    const fake = await startFakeOllama({ port, tags: [{ name: MODEL, digest: "q", size: 1, modified_at: "2026-01-01T00:00:00Z" }] });
+    cleanups.push(() => fake.close());
+    return fake;
+  };
+  return { app, runtime, ran, pushed, answering };
+}
+const look = (app: App) => app.handlers["runtime.discover"]?.({}, { clientId: 1 });
+
+describe("runtime.discover, the phone's Retry (BD-02)", () => {
+  it("Ollama stopped, then answering: Retry shows it running, the list loads, and nothing is started", async () => {
+    const { app, runtime, ran, pushed, answering } = await stoppedOllama();
+    const fake = await answering();
+    const seen = await look(app);
+    expect(seen).toMatchObject({ state: "ready", owner: "external" });
+    expect(runtime.status()).toEqual(seen);
+    expect(pushed.at(-1), "the computer's window hears the same status").toEqual(seen);
+    expect((await app.handlers["models.refresh"]({}, { clientId: 1 })).map((m) => m.name)).toEqual([MODEL]);
+    expect(existsSync(ran)).toBe(false);
+    expect(fake.requests.filter((r) => !r.startsWith("GET ") && !r.startsWith("POST /api/show"))).toEqual([]);
+  });
+
+  it("a ready status is left alone, so a busy Ollama that misses a probe cannot look stopped", async () => {
+    const { app, runtime, answering } = await stoppedOllama();
+    const fake = await answering();
+    await look(app);
+    await fake.close();
+    expect(await look(app)).toMatchObject({ state: "ready" });
+    expect(runtime.status().state).toBe("ready");
+  });
+
+  it("no Ollama and a pinned release: Retry reports it missing and downloads nothing", async () => {
+    const dir = cacheTmp();
+    const release = await startReleaseServer(Buffer.from("never fetched"));
+    cleanups.push(() => release.close());
+    const ollama = createOllamaRuntime({ appDataDir: path.join(dir, "data"), home: path.join(dir, "home"), appPort: await freePort(), externalBaseUrl: `http://127.0.0.1:${await freePort()}`, env: { PATH: path.join(dir, "empty"), HOME: path.join(dir, "home") }, systemModelsDirs: [], probeTimeoutMs: 500, allowInstall: true, manifest: { version: "9.9.9", url: release.url, sha256: "0".repeat(64), sizeBytes: 13, format: FAKE_RELEASE_FORMAT, verified: true, source: "test" } });
+    cleanups.push(() => ollama.stop());
+    const runtime = createRuntimeSwitch({ initialMode: "system", make: () => ollama });
+    const store = openThreadStore(path.join(dir, "threads.sqlite"));
+    cleanups.push(() => store.close());
+    const catalog = createModelCatalog(() => runtime.baseUrl());
+    cleanups.push(() => catalog.stop());
+    const app = createApp({ store, runtime, catalog, push: () => undefined });
+    cleanups.push(() => app.shutdown());
+    expect(await look(app)).toMatchObject({ state: "missing" });
+    expect(release.hits).toBe(0);
+    expect(existsSync(installedBinary(path.join(dir, "data"), "9.9.9"))).toBe(false);
   });
 });
 

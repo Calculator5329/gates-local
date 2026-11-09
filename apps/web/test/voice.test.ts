@@ -9,7 +9,7 @@ const h = vi.hoisted(() => {
     cursor: 0, slots: [] as unknown[], refs: new Map<number, { current: unknown }>(),
     effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
     pending: [] as (() => void)[],
-    state: { settings, conn: { kind: "open" }, editingQueued: null as string | null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null as string | null },
+    state: { settings, unavailable: {}, conn: { kind: "open" }, editingQueued: null as string | null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null as string | null },
     call: vi.fn(), update: vi.fn(), capture: vi.fn(), discard: vi.fn(), insert: vi.fn(), audioLoaded: false,
   };
 });

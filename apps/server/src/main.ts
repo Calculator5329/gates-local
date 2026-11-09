@@ -227,7 +227,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     toolsEnabled: () => services.settings.get().tools,
     // discover-only never starts Ollama: runtime Retry looks again without starting one
     runtime: discoverOnly
-      ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover() }
+      ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover(), lookIfDown: () => runtime.lookIfDown() }
       : runtime,
     catalog,
     fit,

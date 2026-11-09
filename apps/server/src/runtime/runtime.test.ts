@@ -154,6 +154,17 @@ describe("stopped (installed, nothing answering)", () => {
     expect(s.detail).toContain("from PATH");
   });
 
+  it("a look while the app's copy is starting waits for that start and answers its result (BD-02)", async () => {
+    const binDir = path.join(work, "bin");
+    writeFakeBinary(path.join(binDir, "ollama"));
+    const { rt, seen } = await makeRuntime({ externalBaseUrl: await nothingAt(), env: { PATH: binDir } });
+    const starting = rt.ensure();
+    const looked = await rt.discover();
+    expect(looked).toMatchObject({ state: "ready", owner: "app" });
+    expect(looked).toEqual(await starting);
+    expect(seen.map((s) => s.state), "never stopped on the way to ready").not.toContain("stopped");
+  });
+
   it("with starts off (a pinned URL), an ollama on PATH is reported, never run", async () => {
     const binDir = path.join(work, "bin");
     const ran = path.join(work, "ran");

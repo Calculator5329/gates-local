@@ -279,6 +279,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const fitHistory = useStore(s => s.fitHistory);
   const catalog = useStore(s => s.catalog);
   const settingsNA = useStore((s) => s.settings === NA);
+  const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const [err, run] = useAct();
   useEffect(() => {
     if (CONTEXT_SIZES.some(c => stale[fitKey(model, c)] === true)) closeTip("#gpuMemory .ctx-c");
@@ -304,31 +305,33 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultFit.report === undefined ? undefined : defaultFit.phase !== "fresh" ? `${fitPendingWord(defaultFit.phase, true)} at ${k(defaultSize)}` : `${defaultFit.report.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultFit.report, cpu).tip ?? ""}`;
   return (
     <>
-      <Row label="Default context" desc={`How many tokens of conversation the model keeps in view. It's one size for all your chats: Gates Local opens at this one, and changing it in a chat changes every chat until you reopen the app. Longer keeps more in view and uses more ${memory}.`} err={err}>
-        <div className="ctx-c">
-          <span className="mini-seg" role="group" aria-label="Default context">
-            {CONTEXT_SIZES.map((c) => {
-              const f = ctxFit(c, max, currentFit({ fits, fitStatus, catalog }, model, c), cpu, stale[fitKey(model, c)] === true);
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  data-ctx={c}
-                  className={`${defaultSize === c ? "on" : ""}${f.wont ? " dim" : ""}`}
-                  aria-pressed={defaultSize === c}
-                  aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
-                  disabled={max !== undefined && c > max}
-                  data-tip={f.tip}
-                  onClick={() => pick(c)}
-                >
-                  {k(c)}
-                </button>
-              );
-            })}
-          </span>
-          {live === undefined ? null : <div className="ctx-line">{live}</div>}
-        </div>
-      </Row>
+      {locked ? null : (
+        <Row label="Default context" desc={`How many tokens of conversation the model keeps in view. It's one size for all your chats: Gates Local opens at this one, and changing it in a chat changes every chat until you reopen the app. Longer keeps more in view and uses more ${memory}.`} err={err}>
+          <div className="ctx-c">
+            <span className="mini-seg" role="group" aria-label="Default context">
+              {CONTEXT_SIZES.map((c) => {
+                const f = ctxFit(c, max, currentFit({ fits, fitStatus, catalog }, model, c), cpu, stale[fitKey(model, c)] === true);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    data-ctx={c}
+                    className={`${defaultSize === c ? "on" : ""}${f.wont ? " dim" : ""}`}
+                    aria-pressed={defaultSize === c}
+                    aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
+                    disabled={max !== undefined && c > max}
+                    data-tip={f.tip}
+                    onClick={() => pick(c)}
+                  >
+                    {k(c)}
+                  </button>
+                );
+              })}
+            </span>
+            {live === undefined ? null : <div className="ctx-line">{live}</div>}
+          </div>
+        </Row>
+      )}
       <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context{gpuNotice === undefined ? null : <><br />{gpuNotice}</>}</>}>
         {fit === undefined ? gpu?.vendor === "unreadable" ? null : <span className="fp-n">{report === "error" ? `Gates Local couldn't check ${memory} for ${name} right now.` : `Checking ${memory}…`}</span> : <FitLine r={fit} ctx={ctx} cpu={cpu} phase={phase} />}
         {action}

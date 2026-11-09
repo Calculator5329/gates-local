@@ -169,7 +169,7 @@ async function rig(native = true) {
   cleanups.push(() => fake.close());
   const events: unknown[] = [];
   const app = createApp({ store, settings, sources, toolsEnabled: () => true,
-    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), baseUrl: () => fake.baseUrl, onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }) },
+    runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), baseUrl: () => fake.baseUrl, onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: fake.baseUrl }) },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (_channel, payload) => events.push(payload),
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },

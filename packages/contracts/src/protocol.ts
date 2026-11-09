@@ -87,25 +87,42 @@ const ThreadRef = S.Struct({ threadId: S.String });
 const ModelRef = S.Struct({ name: S.String });
 const SourceRef = S.Struct({ id: S.String });
 
-/** One definition for both ends: each method's params and result Schema. */
+/**
+ * "allow": the phone listener may call this method. "deny": only the computer may.
+ * The phone is for chat: it reads threads, sends, stops, picks among installed
+ * models, dictates and sees status. It cannot change the computer.
+ */
+export type PhoneAccess = "allow" | "deny";
+
+/** A row must decide `phone`, so a new method without that decision does not typecheck. */
+export interface MethodRow {
+  readonly params: S.Top;
+  readonly result: S.Top;
+  readonly phone: PhoneAccess;
+}
+
+/** One definition for both ends: each method's params and result Schema, and whether the phone may call it. */
 export const methods = {
-  "sync.negotiate": { params: S.Struct({ ordered: S.Array(SyncDomain) }), result: SyncNegotiation },
-  "voice.check": { params: S.Struct({ url: S.String }), result: S.Struct({ ready: S.Boolean }) },
-  "voice.transcribe": { params: S.Struct({ id: S.String, audio: S.String }), result: S.Struct({ text: S.String }) },
-  "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams },
-  "threads.list": { params: NoParams, result: S.Array(Thread) },
-  "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread },
-  "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }) },
-  "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread },
-  "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }) },
-  "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }) },
-  "models.list": { params: NoParams, result: S.Array(ModelInfo) },
-  "models.refresh": { params: NoParams, result: S.Array(ModelInfo) },
-  "runtime.status": { params: NoParams, result: RuntimeStatus },
+  "sync.negotiate": { params: S.Struct({ ordered: S.Array(SyncDomain) }), result: SyncNegotiation, phone: "allow" },
+  "voice.check": { params: S.Struct({ url: S.String }), result: S.Struct({ ready: S.Boolean }), phone: "allow" },
+  "voice.transcribe": { params: S.Struct({ id: S.String, audio: S.String }), result: S.Struct({ text: S.String }), phone: "allow" },
+  "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams, phone: "allow" },
+  "threads.list": { params: NoParams, result: S.Array(Thread), phone: "allow" },
+  "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread, phone: "allow" },
+  "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }), phone: "allow" },
+  "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
+  "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny" },
+  "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
+  "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
+  "models.refresh": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
+  "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow" },
   /** Look for Ollama again now (start the app's own copy where it may) and answer the new status; runtime.status only reads the cached one. */
-  "runtime.retry": { params: NoParams, result: RuntimeStatus },
-  "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport },
+  "runtime.retry": { params: NoParams, result: RuntimeStatus, phone: "deny" },
+  /** Look for an Ollama that came back; starts and installs nothing, and a ready status stays as it is. The phone's Retry. */
+  "runtime.discover": { params: NoParams, result: RuntimeStatus, phone: "allow" },
+  "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport, phone: "allow" },
   "chat.send": {
+    phone: "allow",
     params: S.Struct({
       threadId: S.String,
       content: S.String,
@@ -149,6 +166,7 @@ export const methods = {
   "turns.active": {
     params: NoParams,
     result: S.Array(S.Struct({ turnId: S.String, threadId: S.String })),
+    phone: "allow",
   },
   /**
    * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
@@ -157,47 +175,49 @@ export const methods = {
   "turns.blocking": {
     params: S.Struct({ model: S.String, numCtx: NumCtx }),
     result: S.Array(BlockingTurn),
+    phone: "allow",
   },
-  "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
+  "chat.cancel": { params: S.Struct({ turnId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
   // ---- v2 surface (2026-11-07): settings, GPU, downloads, Library, images
-  "settings.get": { params: NoParams, result: Settings },
-  "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings },
-  "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings },
-  "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults },
-  "gpu.status": { params: NoParams, result: GpuStatus },
-  "models.catalog": { params: NoParams, result: S.Array(CatalogEntry) },
+  "settings.get": { params: NoParams, result: Settings, phone: "allow" },
+  "settings.update": { params: S.Struct({ ...SettingsPatch.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }), result: Settings, phone: "deny" },
+  "settings.model.update": { params: S.Struct({ model: S.String.check(S.isMinLength(1)), patch: S.NullOr(ModelSettingsPatch) }), result: Settings, phone: "deny" },
+  "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
+  "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
+  "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow" },
   /** Download jobs still known to the server; reconnect reconciles missed terminal pushes. */
-  "models.pulls": { params: NoParams, result: S.Array(PullProgress) },
-  "models.pull": { params: ModelRef, result: PullProgress },
-  "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }) },
-  "models.remove": { params: ModelRef, result: ModelRef },
+  "models.pulls": { params: NoParams, result: S.Array(PullProgress), phone: "allow" },
+  "models.pull": { params: ModelRef, result: PullProgress, phone: "deny" },
+  "models.cancelPull": { params: ModelRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
+  "models.remove": { params: ModelRef, result: ModelRef, phone: "deny" },
   /** Preload a model at a window after a fit check (the picker calls it on selection). */
-  "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad },
-  "sources.list": { params: NoParams, result: S.Array(Source) },
-  "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source },
-  "sources.remove": { params: SourceRef, result: SourceRef },
-  "sources.refresh": { params: SourceRef, result: Source },
-  "sources.imports": { params: NoParams, result: SourceImports },
-  "sources.downloadSample": { params: SourceRef, result: SourceImport },
-  "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport },
-  "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }) },
-  "image.status": { params: NoParams, result: ImageStatus },
+  "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad, phone: "allow" },
+  "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
+  "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
+  "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },
+  "sources.refresh": { params: SourceRef, result: Source, phone: "deny" },
+  "sources.imports": { params: NoParams, result: SourceImports, phone: "allow" },
+  "sources.downloadSample": { params: SourceRef, result: SourceImport, phone: "deny" },
+  "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport, phone: "deny" },
+  "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
+  "image.status": { params: NoParams, result: ImageStatus, phone: "allow" },
   "image.generate": {
     params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String) }),
     result: S.Struct({ jobId: S.String }),
+    phone: "allow",
   },
-  "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
+  "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
   // ---- setup (2026-11-07): read the machine, then plan models for it
-  "setup.probe": { params: NoParams, result: SetupProbe },
-  "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
+  "setup.probe": { params: NoParams, result: SetupProbe, phone: "deny" },
+  "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan, phone: "deny" },
   // ---- updates: status is local only; check fetches (manual or desktop timer)
-  "update.status": { params: NoParams, result: UpdateStatus },
-  "update.check": { params: NoParams, result: UpdateCheck },
-  "update.prepare": { params: S.Struct({ approval: S.String }), result: UpdatePreparation },
-  "update.commit": { params: UpdateCommitRequest, result: UpdateCommitResult },
-  "update.cancel": { params: S.Struct({ reservation: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
-  "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }) },
-} as const;
+  "update.status": { params: NoParams, result: UpdateStatus, phone: "allow" },
+  "update.check": { params: NoParams, result: UpdateCheck, phone: "deny" },
+  "update.prepare": { params: S.Struct({ approval: S.String }), result: UpdatePreparation, phone: "deny" },
+  "update.commit": { params: UpdateCommitRequest, result: UpdateCommitResult, phone: "deny" },
+  "update.cancel": { params: S.Struct({ reservation: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
+  "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }), phone: "deny" },
+} as const satisfies Record<string, MethodRow>;
 
 /** Server-to-client channels and their payload Schemas. */
 export const pushes = {
@@ -231,6 +251,9 @@ export type Payload<C extends Channel> = Pushes[C]["payload"]["Type"];
 
 export const methodNames = Object.keys(methods) as MethodName[];
 export const channelNames = Object.keys(pushes) as Channel[];
+
+/** The table's answer for the phone listener; the server and the phone client both read it here. */
+export const phoneMay = (method: MethodName): boolean => methods[method].phone === "allow";
 
 function isMethod(name: string): name is MethodName {
   return Object.hasOwn(methods, name);

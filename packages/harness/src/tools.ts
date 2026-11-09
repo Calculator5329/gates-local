@@ -67,6 +67,19 @@ export function createTools(deps: ToolsDeps) {
   };
 }
 
+/**
+ * Whether a path joined under a source could leave it, judged from the text alone. The parser
+ * follows the computer: drive, UNC and device roots mean something only on Windows, and on
+ * Linux "C:notes.txt" is a file the person may have. A ".." segment is refused everywhere,
+ * split on both separators. Windows also drops trailing dots and spaces from a name, so ".. "
+ * is a parent there and only an odd file name elsewhere.
+ */
+function leavesByText(relative: string, platform: NodeJS.Platform): boolean {
+  if ((platform === "win32" ? path.win32 : path.posix).parse(relative).root !== "") return true;
+  const parent = platform === "win32" ? /^\.\.[. ]*$/ : /^\.\.$/;
+  return relative.split(/[\\/]/).some(part => parent.test(part));
+}
+
 async function readLibrary(sources: readonly LibraryEntry[], input: Record<string, unknown>, signal: AbortSignal, realpath: Realpath, platform: NodeJS.Platform, fs: LibraryFs): Promise<ToolResult> {
   const contains = (parent: string, candidate: string) => containsPath(parent, candidate, platform);
   const requested = text(input, "path");
@@ -79,8 +92,12 @@ async function readLibrary(sources: readonly LibraryEntry[], input: Record<strin
       throw new Error(`${virtual[1]} is a SQLite source; ${platform === "win32" ? `use sql with source "${virtual[1]}"` : `use shell with sqlite3 /data/${virtual[1]}.db`}`);
     if (!source) throw new Error("Path is outside your Library; use /library/<source id>");
     const relative = virtual[2] ?? "";
-    if (relative.split(/[\\/]/).includes("..") || (source.kind === "file" && relative !== "")) throw new Error("Path is outside your Library source");
+    // Decided from the text, before anything below touches the disk: the model learns nothing
+    // about paths outside the source, and a UNC path never makes Windows reach out to its host.
+    const refused = libraryFsError(`/library/${source.id}${relative === "" ? "" : `/${relative}`}`, { code: "ENOENT" });
+    if (leavesByText(relative, platform) || (source.kind === "file" && relative !== "")) throw refused;
     candidate = path.resolve(source.path, relative);
+    if (source.kind === "file" ? !samePath(source.path, candidate, platform) : !contains(source.path, candidate)) throw refused;
   } else {
     candidate = path.resolve(requested);
     source = sources.find(s => s.kind !== "sqlite" && (s.kind === "folder" ? contains(s.path, candidate) : samePath(s.path, candidate, platform)));
