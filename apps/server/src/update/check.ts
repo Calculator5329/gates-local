@@ -68,6 +68,7 @@ interface Found {
 }
 
 export interface InspectOptions {
+  readonly signal?: AbortSignal;
   readonly root: string;
   readonly runner: Runner;
   readonly choice: ChannelChoice;
@@ -76,10 +77,13 @@ export interface InspectOptions {
 
 export type Git = (args: readonly string[], timeoutMs?: number, onStart?: (pid: number) => void) => Promise<RunResult>;
 
-export function gitIn(root: string, runner: Runner, log?: (chunk: string) => void): Git {
-  return (args, timeoutMs = LOCAL_MS, onStart) => {
+export function gitIn(root: string, runner: Runner, log?: (chunk: string) => void, signal?: AbortSignal): Git {
+  return async (args, timeoutMs = LOCAL_MS, onStart) => {
     log?.(`$ git ${args.join(" ")}\n`);
-    return runner("git", args, { cwd: root, timeoutMs, ...(log ? { onOutput: log } : {}), ...(onStart ? { onStart } : {}) });
+    signal?.throwIfAborted();
+    const result = await runner("git", args, { cwd: root, timeoutMs, ...(signal ? { signal } : {}), ...(log ? { onOutput: log } : {}), ...(onStart ? { onStart } : {}) });
+    if (result.failure === "aborted") throw signal?.reason ?? new Error("The git command was cancelled.");
+    return result;
   };
 }
 
@@ -178,7 +182,7 @@ export const isBlocked = (v: unknown): v is Blocked => typeof v === "object" && 
 const blocked = (b: Blocked): Inspection => ({ state: "blocked", blocked: b });
 
 export async function inspect(o: InspectOptions): Promise<Inspection> {
-  const git = gitIn(o.root, o.runner, o.log);
+  const git = gitIn(o.root, o.runner, o.log, o.signal);
   if (!(await hasGit(git))) return blocked({ reason: "no-git" });
   if (!(await isClone(o.root, git))) return blocked({ reason: "not-a-clone" });
   // Before "up to date" can be said: an update the last run left half done is finished by the update, not a check.

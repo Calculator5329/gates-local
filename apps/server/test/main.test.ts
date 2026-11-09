@@ -188,7 +188,7 @@ describe("server CLI", () => {
 
   // Windows cannot deliver SIGTERM (kill() there is TerminateProcess); the
   // desktop app stops the server through stdin EOF, tested above.
-  it.skipIf(process.platform === "win32")("exits on SIGTERM within 3 s", async () => {
+  it.skipIf(process.platform === "win32").each(["SIGTERM", "SIGHUP"] as const)("exits on %s within 3 s", async signal => {
     const fake = await fakeOllama();
     const tmp = cacheTmp();
     const s = launch(
@@ -201,8 +201,8 @@ describe("server CLI", () => {
       path.join(tmp, "data"),
     );
     await until("the ready line", () => s.stdout[0]);
-    s.child.kill("SIGTERM");
-    expect(await withTimeout(s.exited, 3000, "exit after SIGTERM")).toEqual({ code: 0, signal: null });
+    s.child.kill(signal);
+    expect(await withTimeout(s.exited, 3000, `exit after ${signal}`)).toEqual({ code: 0, signal: null });
   });
 
   it("GATES_LOCAL_OLLAMA_BINARY=none stops the binary search, so an ollama on PATH no longer reads as stopped", async () => {

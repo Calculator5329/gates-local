@@ -56,6 +56,8 @@ export interface ImageModule {
   /** The MainPID of the ComfyUI this app started while no image job runs (what stopIdle would stop), else undefined. */
   reclaimable(): number | undefined;
   close(): Promise<void>;
+  /** Hard shutdown deadline: running jobs cannot delay this run's owned unit stop. */
+  killRuntimeNow(): void;
 }
 
 const DEFAULT_URL = "http://127.0.0.1:8188";
@@ -424,6 +426,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       });
     },
     reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
+    killRuntimeNow() {
+      if (!owned) return;
+      const pid = owned.pid;
+      owned = undefined;
+      service.killRuntimeNow?.(pid);
+    },
     async close() {
       closed = true; clearIdle();
       const pending = [...jobs.values()];

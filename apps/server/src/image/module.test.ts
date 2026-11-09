@@ -10,6 +10,8 @@ import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
 import { createImageModule, imageFitError, isLocalHost, type ImageDeps } from "./module.ts";
 import { createImageHandlers } from "./handlers.ts";
+import { createComfyService } from "./service.ts";
+import { createServerShutdown, HARD_EXIT_MS } from "../shutdown.ts";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -17,6 +19,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 const png = Buffer.from("iVBORw0KGgo=", "base64");
+const noop = () => undefined;
 /** This machine is 192.168.1.20 and is called mybox; the hosts file maps mybox to 127.0.1.1. */
 const NAMES: Record<string, readonly string[]> = {
   "mybox": ["127.0.1.1"], "mybox.home.arpa": ["192.168.1.20"], "remote-comfy": ["10.0.0.5"],
@@ -137,6 +140,41 @@ async function fixture(options: Partial<ImageDeps> = {}) {
 }
 
 describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () => {
+  it.each(["owned", "foreign", "changed", "unreadable"])("SN-CO-06 shutdown's deadline stops only the current app-started unit (%s)", async kind => {
+    let up = kind === "foreign";
+    const stop = vi.fn();
+    const read = vi.fn(() => {
+      if (kind === "unreadable") throw new Error("Unit read timed out");
+      return kind === "changed" ? "99" : "42";
+    });
+    let f: Awaited<ReturnType<typeof fixture>>;
+    const service = createComfyService("linux", async args => {
+      if (args[1] === "start") { up = true; f.configure({ answering: true }); }
+      if (args[1] === "stop") up = false;
+      return `LoadState=loaded\nActiveState=${up ? "active" : "inactive"}\nMainPID=42\n`;
+    }, { read, stop });
+    f = await fixture({ service, idleMs: 60_000 });
+    f.configure({ answering: up, hold: true });
+    const job = await f.module.generate({ prompt: "a tree" });
+    await vi.waitFor(() => expect(f.calls).toContain("/prompt"));
+    expect(f.module.activeJobs?.()).toBe(1);
+    let release: () => void = vi.fn();
+    const stalled = new Promise<void>(resolve => { release = resolve; });
+    const idle = { close: noop };
+    const exit = vi.fn();
+    vi.useFakeTimers();
+    const shutdown = createServerShutdown({ admission: idle, stopAutomatic: noop, app: { shutdown: noop }, update: idle, imports: { close: () => stalled }, loader: idle, image: f.module, server: () => idle, store: idle, models: { close: noop, killRuntimeNow: noop }, log: noop, exit });
+    const closing = shutdown("SIGTERM");
+    try {
+      await vi.advanceTimersByTimeAsync(HARD_EXIT_MS);
+      expect(exit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(stop).toHaveBeenCalledTimes(kind === "owned" ? 1 : 0);
+      expect(read).toHaveBeenCalledTimes(kind === "foreign" ? 0 : 1);
+      f.module.killRuntimeNow?.();
+      expect(stop).toHaveBeenCalledTimes(kind === "owned" ? 1 : 0);
+      expect(read).toHaveBeenCalledTimes(kind === "foreign" ? 0 : 1);
+    } finally { vi.useRealTimers(); release(); await closing; await f.module.wait(job.jobId); }
+  });
   it("AU-01 image jobs pass admission before any job or Comfy request", async () => {
     const options = { admit: () => { throw Object.assign(new Error("Gates Local is closing to update."), { code: "update-installing" }); } };
     const f = await fixture(options);

@@ -15,6 +15,7 @@ import { acquireLock } from "./lock.ts";
 import { automaticChecks } from "./automatic.ts";
 import { openSettingsStore } from "../settings/store.ts";
 import { createUpdateAdmission } from "./admission.ts";
+import { inspect } from "./check.ts";
 
 let r: Repos;
 
@@ -99,6 +100,38 @@ describe("update.status", () => {
 });
 
 describe("update.check", () => {
+  it("SN-R2 cancelling git --version throws instead of diagnosing missing git", async () => {
+    const controller = new AbortController();
+    const runner: Runner = async () => {
+      controller.abort(new Error("Check cancelled"));
+      return { code: null, stdout: "", stderr: "Cancelled", failure: "aborted" };
+    };
+    await expect(inspect({ root: r.clone, runner, choice: "main", signal: controller.signal })).rejects.toThrow("Check cancelled");
+  });
+  it.each(["status", "fetch"])("SN-CO-03 a check closed during %s does not publish, store or log a failure", async heldCommand => {
+    let entered: () => void = vi.fn();
+    let release: () => void = vi.fn();
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    let holding = false;
+    const fake = fakePnpm();
+    const changed = vi.fn(), log = vi.fn();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, everyChange: () => true, changed, log, runner: async (command, args, options) => {
+      if (holding && args[0] === heldCommand) { entered(); await held; }
+      if (options.signal?.aborted) return { code: null, stdout: "", stderr: "Cancelled", failure: "aborted" };
+      return fake.runner(command, args, options);
+    } });
+    await update.check();
+    const previous = update.status().lastCheck;
+    holding = true; changed.mockClear(); log.mockClear();
+    const checking = update.check();
+    await waiting;
+    const closing = update.close();
+    release(); await checking; await closing;
+    expect(changed).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(update.status().lastCheck).toBe(previous);
+  });
   it("lists what is new, keeps it for status, and shares one fetch between two clicks", async () => {
     commit(r.seed, "Second");
     commit(r.seed, "Third");

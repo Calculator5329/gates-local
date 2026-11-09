@@ -624,6 +624,7 @@ a.btn{text-decoration:none}
 /* ---------- client additions (not in shell.html) ---------- */
 /* a calm line where a feature is not in this build yet (graceful degradation) */
 .na{font-size:13px;color:var(--muted-foreground)}
+.render-error{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 /* Settings › Updates: the check's answer sits between rows of the same box */
 .upd-res{border-top:1px solid var(--border);padding:12px 16px;font-size:13px;color:var(--muted-foreground);text-wrap:pretty}
 .upd-res b{color:var(--foreground);font-weight:500}

@@ -11,6 +11,31 @@ import { createSources } from "./sources/index.ts";
 
 const noop = () => undefined;
 
+it("shutdown aborts an in-flight update fetch instead of waiting for the network", async () => {
+  const repos = makeRepos();
+  for (const [key, value] of Object.entries(testEnv(repos.base))) vi.stubEnv(key, value);
+  let entered: () => void = noop;
+  let release: () => void = noop;
+  let aborted = false;
+  const fetching = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const fake = fakePnpm();
+  const update = createUpdateModule({ root: repos.clone, dataDir: repos.data, everyChange: () => true, runner: async (command, args, options) => {
+    if (args[0] === "fetch") {
+      options.signal?.addEventListener("abort", () => { aborted = true; release(); }, { once: true });
+      entered(); await held;
+    }
+    return fake.runner(command, args, options);
+  } });
+  const checking = update.check();
+  await fetching;
+  const closing = update.close();
+  try {
+    expect(aborted).toBe(true);
+    await closing;
+  } finally { release(); await checking; await closing; vi.unstubAllEnvs(); removeRepos(repos); }
+});
+
 it("AW-03 the server shutdown path cancels and joins a snapshot while an update fetch is stalled", async () => {
   const repos = makeRepos();
   for (const [key, value] of Object.entries(testEnv(repos.base))) vi.stubEnv(key, value);
@@ -36,7 +61,7 @@ it("AW-03 the server shutdown path cancels and joins a snapshot while an update 
     const outcome = sources.add({ kind: "sqlite", path: live, label: "Pending database" }).catch((error: unknown) => error);
     expect(imports.activity()).toEqual(["Import: Pending database"]);
     const exit = vi.fn<(code: number) => void>();
-    const idle = { close: async () => undefined };
+    const idle = { close: async () => undefined, killRuntimeNow: noop };
     const shutdown = createServerShutdown({ admission, stopAutomatic: () => undefined, app: { shutdown: async () => undefined }, update, imports, loader: idle, image: idle, server: () => idle, store: idle, models: { ...idle, killRuntimeNow: () => undefined }, log: () => undefined, exit });
     closing = shutdown("stdin closed");
     expect(await outcome).toBeInstanceOf(Error);

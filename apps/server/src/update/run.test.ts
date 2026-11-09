@@ -25,6 +25,79 @@ afterEach(() => {
 
 const pidIn = (file: string) => Number(readFileSync(file, "utf8").trim());
 
+it.skipIf(process.platform !== "linux").each(["orderly", "hard-exit", "early-exit", "exit-only", "updater"])("SN-CO-07 command groups end with their process (%s)", async mode => {
+  const marker = path.join(r.base, "signal-cleanup");
+  const ready = path.join(r.base, "signal-ready");
+  const groupFile = path.join(r.base, "signal-group");
+  const leaf = `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'cleaned'); ${mode === "orderly" ? "process.exit(0);" : ""} }); console.log('ready'); setInterval(() => {}, 1000);`;
+  const command = `const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}], { stdio: ['ignore', 'pipe', 'inherit'] }); process.on('SIGTERM', () => {}); child.stdout.pipe(process.stdout); child.on('exit', () => process.exit(0));`;
+  const source = pathToFileURL(path.join(import.meta.dirname, "run.ts")).href;
+  const script = `import { realRunner } from ${JSON.stringify(source)};
+    import { writeFileSync } from 'node:fs';
+    const controller = new AbortController();
+    const running = realRunner(process.execPath, ['-e', ${JSON.stringify(command)}], {
+      cwd: ${JSON.stringify(r.clone)}, signal: controller.signal,
+      onStart: pid => writeFileSync(${JSON.stringify(groupFile)}, String(pid)),
+      onOutput: chunk => { if (chunk.includes('ready')) { writeFileSync(${JSON.stringify(ready)}, 'ready'); ${mode === "exit-only" ? "process.exit(0);" : ""} } }
+    });
+    ${mode === "updater" || mode === "exit-only" ? "" : `process.on('SIGTERM', () => { controller.abort(); ${mode === "orderly" ? "void running.then(() => process.exit(0));" : mode === "hard-exit" ? "setTimeout(() => process.exit(1), 25);" : "process.exit(0);"} });`}
+    await running;`;
+  const parent = spawn(process.execPath, ["--input-type=module", "--no-warnings", "-e", script], { stdio: "ignore" });
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => parent.once("exit", (code, signal) => resolve({ code, signal })));
+  let group: number | undefined;
+  try {
+    await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 5000 });
+    group = pidIn(groupFile);
+    if (mode !== "exit-only") parent.kill("SIGTERM");
+    expect(await exited).toEqual(mode === "updater" ? { code: null, signal: "SIGTERM" } : { code: mode === "hard-exit" ? 1 : 0, signal: null });
+    await vi.waitFor(() => expect(groupExists(group ?? 0)).toBe(false), { timeout: 1000 });
+    if (mode !== "hard-exit" && mode !== "early-exit") expect(existsSync(marker)).toBe(mode === "orderly");
+  } finally {
+    if (parent.exitCode === null && parent.signalCode === null) { parent.kill("SIGKILL"); await exited; }
+    const remaining = group ?? (existsSync(groupFile) ? pidIn(groupFile) : undefined);
+    if (remaining !== undefined && groupExists(remaining)) await endTree(remaining, { platform: "linux", graceMs: 0, confirmMs: 1000, exists: groupExists, signal: (pid, signal) => { try { process.kill(-pid, signal); } catch { /* Already ended. */ } }, taskkill: async () => 0 });
+  }
+});
+
+it.skipIf(process.platform === "win32")("SN-CO-02 abort lets a SIGTERM handler clean up without sending SIGKILL", async () => {
+  const marker = path.join(r.base, "cleaned-up");
+  const controller = new AbortController();
+  const signals: NodeJS.Signals[] = [];
+  const runner = createRunner({ signal: (pid, signal) => {
+    signals.push(signal);
+    try { process.kill(-pid, signal); } catch { /* Already exited. */ }
+  } });
+  const program = `const fs = require('node:fs'); process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(marker)}, 'cleaned'); process.exit(0); }); console.log('ready'); setInterval(() => {}, 1000);`;
+  const result = await runner(process.execPath, ["-e", program], { cwd: r.clone, signal: controller.signal, onOutput: chunk => { if (chunk.includes("ready")) controller.abort(); } });
+  expect(result).toMatchObject({ failure: "aborted" });
+  expect(signals).toEqual(["SIGTERM"]);
+  expect(existsSync(marker)).toBe(true);
+});
+
+it("aborting a command stops its process group and prevents another command starting", async () => {
+  const controller = new AbortController();
+  const signals: NodeJS.Signals[] = [];
+  const runner = createRunner({ signal: (pid, signal) => {
+    signals.push(signal);
+    try { process.kill(-pid, signal); } catch { /* Already exited. */ }
+  } });
+  let pid: number | undefined;
+  let entered: () => void = vi.fn();
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const running = runner(process.execPath, ["-e", "console.log('ready'); setInterval(() => {}, 1000)"], { cwd: r.clone, signal: controller.signal, onStart: value => { pid = value; }, onOutput: chunk => { if (chunk.includes("ready")) entered(); } });
+  await ready;
+  controller.abort();
+  const result = await running;
+  expect(result).toMatchObject({ code: null, failure: "aborted" });
+  expect(result.treeStillRunning).toBeUndefined();
+  if (pid === undefined) throw new Error("The fake command did not start");
+  expect(groupExists(pid)).toBe(false);
+  if (process.platform !== "win32") expect(signals[0]).toBe("SIGTERM");
+  const start = vi.fn();
+  expect(await runner(process.execPath, ["-e", "process.exit(0)"], { cwd: r.clone, signal: controller.signal, onStart: start })).toMatchObject({ failure: "aborted" });
+  expect(start).not.toHaveBeenCalled();
+});
+
 it.runIf(process.platform === "linux" && existsSync("/usr/bin/python3")).each([false, true])("AV-04 rollback distinguishes zombie-only groups from groups with a live parent: %s", async liveParent => {
   // Keep the parent alive so this fixture can deliberately retain, then reap,
   // its own zombie. No orphan is left for the host's init process to collect.

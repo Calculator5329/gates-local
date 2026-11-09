@@ -8,6 +8,7 @@ import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, type Rt, rtOf } from "./Banner.tsx";
 import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
+import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
@@ -527,11 +528,13 @@ export function App() {
                   <Draft />
                 ) : (
                   <>
+                    <ErrorBoundary key={threadId} scope="thread">
                     {thread.kind === "ready" ? <thread.value.Timeline threadId={threadId} /> : (
                       <div className="tl" aria-busy={thread.kind === "pending" || undefined}>
                         {thread.kind === "error" ? <ScreenError /> : <div className="col"><p className="na" role="status" data-thread-loading>Loading conversation…</p></div>}
                       </div>
                     )}
+                    </ErrorBoundary>
                     <div className="cw">
                       <div className="banner-slot">
                         <UpdateNote />

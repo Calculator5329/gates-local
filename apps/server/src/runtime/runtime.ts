@@ -137,11 +137,7 @@ export type OllamaRuntime = {
   stop(): Promise<StopResult>;
   /** This runtime object started the app-owned server that is running now (not adopted from an earlier run). */
   startedByThisProcess(): boolean;
-  /**
-   * The last resort when shutdown ran out of time. Windows only: a copy there
-   * is stopped through this process's handle, so it would be left running for
-   * good. Elsewhere the next run adopts it from its record.
-   */
+  /** Stop this process's owned child immediately when shutdown runs out of time. */
   killNow(): void;
   readonly mode: RuntimeMode | undefined;
   onChange(listener: Listener<RuntimeStatus>): () => void;
@@ -563,8 +559,8 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     return start(binary, c.note);
   }
 
-  /** Windows: through the retained handle only; libuv terminates that process, so a reused PID is never hit. */
-  async function stopWindows(): Promise<StopResult> {
+  /** Stop our retained child: its handle on Windows, its detached group on Linux. */
+  async function stopSpawned(): Promise<StopResult> {
     const child = spawned;
     if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
       const check = checkOwnership(stateFile, on);
@@ -578,12 +574,16 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       return check.kind === "gone" ? { stopped: false, reason: "gone" } : { stopped: false, reason: "not-ours", detail: check.detail };
     }
     const pid = child.pid ?? 0;
+    const kill = (signal: NodeJS.Signals) => {
+      if (platform === "win32") child.kill(signal);
+      else { try { process.kill(-pid, signal); } catch { /* The group already ended. */ } }
+    };
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     const exitWithin = (ms: number) => Promise.race([exited.then(() => true), sleep(ms).then(() => false)]);
-    await unloadAll(appBaseUrl);
-    child.kill();
+    if (platform === "win32") await unloadAll(appBaseUrl);
+    kill("SIGTERM");
     if (!(await exitWithin(STOP_GRACE_MS))) {
-      child.kill("SIGKILL");
+      kill("SIGKILL");
       await exitWithin(2000);
     }
     clearRecord(stateFile);
@@ -607,19 +607,24 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
     discover: () => serial(async () => setStatus(statusFor(await classify()))),
     ensure: () => serial(ensureOnce),
     async stop() {
-      if (platform === "win32") return stopWindows();
+      if (platform === "win32" || (spawned !== undefined && spawned.pid !== undefined && spawned.exitCode === null && spawned.signalCode === null)) return stopSpawned();
       const r = await stopOwned(stateFile, undefined, on);
       if (r.stopped || r.reason !== "no-record") startedPid = undefined;
       if (r.stopped) setStatus({ state: "stopped", owner: "none", baseUrl: appBaseUrl, detail: `Stopped the app-owned Ollama (pid ${r.pid}).` });
       return r;
     },
     killNow() {
-      if (platform === "win32") spawned?.kill();
+      const child = spawned;
+      if (!child || child.exitCode !== null || child.signalCode !== null) return;
+      if (platform === "win32") child.kill("SIGKILL");
+      else if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); }
+        catch { /* The owned group already ended. */ }
+      }
     },
     startedByThisProcess() {
       if (startedPid === undefined) return false;
-      const own = checkOwnership(stateFile, on);
-      return own.kind === "ours" && own.record.pid === startedPid;
+      return spawned !== undefined && spawned.pid === startedPid && spawned.exitCode === null && spawned.signalCode === null;
     },
     mode,
     onChange(listener) {

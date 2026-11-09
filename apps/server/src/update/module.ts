@@ -119,6 +119,7 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   let lastCheck: UpdateCheck | null = null;
   let running: Promise<UpdateCheck> | undefined;
   let closed = false;
+  const controller = new AbortController();
   const admission = deps.admission ?? createUpdateAdmission();
   let offer: { token: string; fingerprint: string } | undefined;
   const version = (): UpdateVersion => (deps.version ?? readVersion)(deps.root);
@@ -143,11 +144,12 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
       const acquired = acquireLock(deps.root);
       if (!acquired.ok) return { state: "cannot-check", checkedAt, reason: "error", lines: ["An update is already running. Wait for Gates Local to open again."] };
       try {
-        return toCheck(await inspect({ root: deps.root, runner: deps.runner, choice: deps.everyChange() ? "main" : "auto" }), checkedAt);
+        return toCheck(await inspect({ root: deps.root, runner: deps.runner, choice: deps.everyChange() ? "main" : "auto", signal: controller.signal }), checkedAt);
       } finally {
         acquired.lock.release();
       }
     } catch (e) {
+      if (closed) return { state: "cannot-check", checkedAt, reason: "error", lines: [UPDATE_PAUSED] };
       log(`update check failed: ${(e as Error).message}`);
       return { state: "cannot-check", checkedAt, reason: "error", lines: [`The check stopped on an error: ${(e as Error).message}`, "Try again, or run pnpm run app-update --check in the Gates Local folder to see more."] };
     }
@@ -162,13 +164,13 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
       if (closed || admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
       running ??= runCheck().finally(() => { running = undefined; });
       const c = await running;
-      if (!background || c.state !== "cannot-check") {
+      if (!closed && (!background || c.state !== "cannot-check")) {
         lastCheck = c;
         deps.changed?.(status());
       }
       return c;
     },
-    close: async () => { closed = true; offAdmission(); await running; },
+    close: async () => { closed = true; offAdmission(); controller.abort(); await running; },
     prepare: async (approval) => {
       if (closed || admission.installing()) return { state: "blocked", message: UPDATE_PAUSED };
       if (busy().length > 0) return waiting();

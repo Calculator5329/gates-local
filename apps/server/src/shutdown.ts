@@ -8,7 +8,7 @@ export interface ShutdownResources {
   update: Closing;
   imports: Closing;
   loader: Closing;
-  image: Closing;
+  image: Closing & { killRuntimeNow(): void };
   server(): Closing | undefined;
   store: Closing;
   models: Closing & { killRuntimeNow(): void };
@@ -29,6 +29,7 @@ export function createServerShutdown(resources: ShutdownResources) {
     const timer = setTimeout(() => {
       resources.log(`shutdown took over ${HARD_EXIT_MS} ms; exiting anyway`);
       resources.models.killRuntimeNow();
+      resources.image.killRuntimeNow();
       exit(1);
     }, HARD_EXIT_MS);
     const step = async (name: string, fn: () => unknown) => {
@@ -38,9 +39,10 @@ export function createServerShutdown(resources: ShutdownResources) {
     // Begin cancellation before any drain can stall. Join snapshot workers
     // and their cleanup while a slow fetch is still pending.
     const importsClosing = step("finish imports", () => resources.imports.close());
+    const updateClosing = step("finish update check", () => resources.update.close());
     await step("cancel turns", () => resources.app.shutdown());
     await importsClosing;
-    await step("finish update check", () => resources.update.close());
+    await updateClosing;
     // A preload holds a shared GPU claim; image close needs it alone.
     await step("drain model loads", () => resources.loader.close());
     await step("close image module", () => resources.image.close());

@@ -13,12 +13,14 @@ import { appModelsDir, defaultAppDataDir, findOnPath, findSystemOllama, installD
 import { ADOPTED_WINDOWS_DETAIL, WINDOWS_APP_MODE_DETAIL, createOllamaRuntime, windowsAutomaticDetail, type OllamaRuntime, type RuntimeOptions } from "./runtime.ts";
 import { PINNED_OLLAMA_WINDOWS, pinnedOllamaFor } from "./manifest.ts";
 import { createRuntimeSwitch } from "./switch.ts";
+import { createServerShutdown } from "../shutdown.ts";
 import {
   type FakeOllama,
   FAKE_RELEASE_FORMAT,
   buildFakeRelease,
   freePort,
   freePortRun,
+  fakeOllamaScript,
   removeDir,
   spawnSleeper,
   startFakeOllama,
@@ -29,6 +31,7 @@ import {
 } from "./test-fakes.ts";
 
 const VERSION = "9.9.9-test";
+const noop = () => undefined;
 const startDir = process.cwd();
 let work: string;
 let appDataDir: string;
@@ -623,19 +626,12 @@ const alive = (pid: number) => {
   }
 };
 const started = async (platform: NodeJS.Platform, procRun?: SyncRunner) => {
-  const asset = buildFakeRelease(work);
-  const release = await startReleaseServer(asset);
-  try {
-    const sha256 = createHash("sha256").update(asset).digest("hex");
-    const manifest = { version: VERSION, url: release.url, sha256, sizeBytes: asset.length, format: FAKE_RELEASE_FORMAT, verified: true, source: "test" };
-    const rt = await runtime({ platform, arch: "x64", manifest, allowInstall: true, ...(procRun ? { procRun } : {}), externalBaseUrl: await nothingAt() });
-    expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
-    const pid = readRecord(ownedStateFile(appDataDir))?.pid;
-    expect(pid).toBeDefined();
-    return { rt, pid: pid as number };
-  } finally {
-    await release.close();
-  }
+  writeFakeBinary(installedBinary(appDataDir, VERSION));
+  const rt = await runtime({ platform, arch: "x64", ...(procRun ? { procRun } : {}), externalBaseUrl: await nothingAt() });
+  expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
+  const pid = readRecord(ownedStateFile(appDataDir))?.pid;
+  if (pid === undefined) throw new Error("Missing fake ownership record");
+  return { rt, pid };
 };
 
 describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
@@ -645,11 +641,11 @@ describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
     await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
   });
 
-  it("reaches a copy still starting, before it has answered (R-04)", async () => {
+  it.each(["linux", "win32"] as const)("reaches a %s copy still starting, before it has answered (R-04)", async platform => {
     const pidFile = path.join(work, "started-pid");
     const neverAnswers = `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => undefined, 1000);\n`;
     writeFakeBinary(installedBinary(appDataDir, VERSION), neverAnswers);
-    const rt = await runtime({ mode: "app", platform: "win32", procRun: cimFake([]), externalBaseUrl: await nothingAt(), startTimeoutMs: 3000 });
+    const rt = await runtime({ mode: "app", platform, ...(platform === "win32" ? { procRun: cimFake([]) } : {}), externalBaseUrl: await nothingAt(), startTimeoutMs: 3000 });
     const starting = rt.ensure();
     await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 2500 });
     rt.killNow();
@@ -659,10 +655,53 @@ describe("killNow, for a shutdown that ran out of time (W1-01)", () => {
     expect(alive(Number(readFileSync(pidFile, "utf8")))).toBe(false);
   });
 
-  it("leaves it running elsewhere, where the next run adopts it", async () => {
-    const { rt, pid } = await started("linux");
-    rt.killNow();
-    await new Promise((r) => setTimeout(r, 200));
-    expect(alive(pid)).toBe(true);
+  it.runIf(process.platform === "linux").each(["deadline", "orderly"])("stops the owned Linux group on %s quit and leaves a foreign runtime alone", async mode => {
+    system = await startFakeOllama();
+    const runnerFile = path.join(work, "runner-pid");
+    writeFakeBinary(installedBinary(appDataDir, VERSION), fakeOllamaScript() + `\nconst runner = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('node:fs').writeFileSync(${JSON.stringify(runnerFile)}, String(runner.pid));\n`);
+    const rt = await runtime({ platform: "linux", externalBaseUrl: await nothingAt() });
+    expect(await rt.ensure()).toMatchObject({ state: "ready", owner: "app" });
+    const pid = readRecord(ownedStateFile(appDataDir))?.pid;
+    if (pid === undefined) throw new Error("Missing fake Ollama PID");
+    const runnerPid = Number(readFileSync(runnerFile, "utf8"));
+    const identity = readProc(runnerPid);
+    if (!identity) throw new Error("The fake runner did not start");
+    if (mode === "orderly") clearRecord(ownedStateFile(appDataDir));
+    let release: () => void = noop;
+    const slow = new Promise<void>(resolve => { release = resolve; });
+    const idle = { close: noop, killRuntimeNow: noop };
+    const exit = vi.fn();
+    const shutdown = createServerShutdown({ admission: idle, stopAutomatic: noop, app: { shutdown: noop }, update: idle, imports: { close: mode === "deadline" ? () => slow : noop }, loader: idle, image: idle, server: () => idle, store: idle, models: { close: mode === "deadline" ? () => slow : () => rt.stop(), killRuntimeNow: () => rt.killNow() }, log: noop, exit });
+    const closing = shutdown("SIGTERM");
+    try {
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 4000 });
+      await vi.waitFor(() => expect(readProc(runnerPid)).toBeUndefined(), { timeout: 1000 });
+      expect(exit).toHaveBeenCalledWith(mode === "deadline" ? 1 : 0);
+      expect(await isUp(system.baseUrl)).toBe(true);
+    } finally {
+      const current = readProc(runnerPid);
+      if (current?.startTime === identity.startTime && current.command === identity.command) process.kill(runnerPid, "SIGKILL");
+      rt.killNow();
+      release(); await closing;
+    }
+  });
+
+  it.each([
+    { platform: "linux", stop: false }, { platform: "win32", stop: false }, { platform: "win32", stop: true },
+  ] as const)("SN-CO-01 retained $platform child, stop=$stop, needs no record or process query", async ({ platform, stop }) => {
+    const calls: string[] = [];
+    const { rt, pid } = await started(platform, platform === "win32" ? cimFake(calls) : undefined);
+    const file = ownedStateFile(appDataDir);
+    const record = readRecord(file);
+    if (!record) throw new Error("Missing fake ownership record");
+    try {
+      clearRecord(file);
+      const queries = calls.length;
+      expect(rt.startedByThisProcess()).toBe(true);
+      if (stop) expect(await rt.stop()).toMatchObject({ stopped: true });
+      else rt.killNow();
+      expect(calls).toHaveLength(queries);
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 1000 });
+    } finally { writeRecord(file, record); }
   });
 });

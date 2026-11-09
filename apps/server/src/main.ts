@@ -253,6 +253,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   process.stdin.resume();
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGHUP", () => void shutdown("SIGHUP"));
 
   try {
     server = await startWsServer({

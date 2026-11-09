@@ -18,12 +18,13 @@ export interface RunResult {
   readonly stdout: string;
   readonly stderr: string;
   /** Set when the command did not start (ENOENT: not installed) or ran past its time limit. */
-  readonly failure?: "not-found" | "timeout" | "spawn-error";
+  readonly failure?: "not-found" | "timeout" | "spawn-error" | "aborted";
   /** A timed-out command whose processes could not be confirmed ended. Nothing else may touch the checkout. */
   readonly treeStillRunning?: true;
 }
 
 export interface RunOptions {
+  readonly signal?: AbortSignal;
   readonly cwd: string;
   readonly timeoutMs?: number;
   /** Each chunk of stdout and stderr as it arrives (the update log). */
@@ -53,6 +54,8 @@ export function commandEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 export const TERM_GRACE_MS = 5_000;
 export const KILL_CONFIRM_MS = 5_000;
 const POLL_MS = 25;
+/** Let git's SIGTERM handler remove its locks before the server's hard exit. */
+const ABORT_GRACE_MS = 300;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -139,22 +142,33 @@ export async function endTree(pid: number, s: TreeStop = treeStop(), options: En
 const liveGroups = new Set<number>();
 const STOP_SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
 
-function onStopSignal(signal: NodeJS.Signals): void {
+function killTrackedGroups(): void {
   for (const pid of liveGroups) signalGroup(pid, "SIGKILL");
   liveGroups.clear();
+}
+
+function onStopSignal(signal: NodeJS.Signals): void {
+  // The server owns graceful shutdown; exit cleanup catches anything it leaves.
+  if (process.listeners(signal).some(listener => listener !== onStopSignal)) return;
+  killTrackedGroups();
   for (const s of STOP_SIGNALS) process.removeListener(s, onStopSignal);
   // Nobody else is handling it (the updater): die of it, as a signal normally would.
   if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
 }
 
 function trackGroup(pid: number): void {
-  if (liveGroups.size === 0) for (const s of STOP_SIGNALS) process.on(s, onStopSignal);
+  if (liveGroups.size === 0) {
+    // Run before once-listeners remove themselves during signal delivery.
+    for (const s of STOP_SIGNALS) process.prependListener(s, onStopSignal);
+    process.on("exit", killTrackedGroups);
+  }
   liveGroups.add(pid);
 }
 
 function untrackGroup(pid: number): void {
   if (!liveGroups.delete(pid) || liveGroups.size > 0) return;
   for (const s of STOP_SIGNALS) process.removeListener(s, onStopSignal);
+  process.removeListener("exit", killTrackedGroups);
 }
 
 /** The runner, with the tree-stopping steps replaceable for a test of the escalation. */
@@ -164,6 +178,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
     // Throws before anything starts when the folder is not allowed.
     guardTarget(options.cwd);
     const env = commandEnv(options.env ?? process.env);
+    if (options.signal?.aborted) return Promise.resolve({ code: null, stdout: "", stderr: "The command was cancelled.", failure: "aborted" });
     const ownGroup = process.platform !== "win32";
     return new Promise((resolve) => {
       let stdout = "";
@@ -186,21 +201,17 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       }
       const group = ownGroup ? child.pid : undefined;
       if (group !== undefined) trackGroup(group);
-      let refusedAtStart = false;
-      try {
-        if (child.pid !== undefined) options.onStart?.(child.pid);
-      } catch {
-        refusedAtStart = true;
-      }
       let settled = false;
       const finish = (code: number | null, treeStillRunning = false) => {
         if (settled) return;
         settled = true;
         if (timer !== undefined) clearTimeout(timer);
+        options.signal?.removeEventListener("abort", abort);
         if (group !== undefined) untrackGroup(group);
         resolve({ code: failure === undefined ? code : null, stdout, stderr, ...(failure === undefined ? {} : { failure }), ...(treeStillRunning ? { treeStillRunning } : {}) });
       };
       const stopTree = (why: NonNullable<RunResult["failure"]>) => {
+        if (stopping || settled) return;
         failure = why;
         stopping = true;
         // Node holds the Windows process handle until exit. Afterwards its
@@ -216,7 +227,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
           finish(null);
           return;
         }
-        void endTree(pid, s).then((ended) => {
+        void endTree(pid, why === "aborted" ? { ...s, graceMs: ABORT_GRACE_MS } : s).then((ended) => {
           // Something outside the tree can still hold a pipe open; `close` is no longer waited for.
           child.stdout.destroy();
           child.stderr.destroy();
@@ -224,6 +235,8 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
         });
       };
       const timer = options.timeoutMs === undefined ? undefined : setTimeout(() => stopTree("timeout"), options.timeoutMs);
+      const abort = () => stopTree("aborted");
+      options.signal?.addEventListener("abort", abort, { once: true });
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
@@ -245,7 +258,9 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       child.on("close", (code) => {
         if (!stopping) finish(code);
       });
-      if (refusedAtStart) stopTree("spawn-error");
+      // The hook can abort synchronously, so install its listener first.
+      try { if (child.pid !== undefined) options.onStart?.(child.pid); }
+      catch { stopTree("spawn-error"); }
     });
   };
 }
