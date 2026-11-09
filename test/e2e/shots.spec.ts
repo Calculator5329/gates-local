@@ -69,7 +69,7 @@ const SHOTS: readonly Shot[] = [
   { name: "S-23-thread-hover-actions", act: (p) => p.locator(".turn.a").last().locator(".md").hover() },
   { name: "S-24-tool-expanded", act: (p) => p.locator(".wr").first().click() },
   { name: "S-25-plus-menu", act: (p) => p.locator("#plusBtn").click() },
-  // chat-feel: a reply held mid code block (the fake waits after 46 tokens), a code block hovered, the thinking row hovered
+  // chat-feel: a reply held mid code block, a code block hovered, the composer Thinking pill hovered
   {
     name: "S-130-stream-held",
     start: "new",
@@ -82,7 +82,7 @@ const SHOTS: readonly Shot[] = [
     },
   },
   { name: "S-131-code-hover", seed: 2, act: (p) => p.locator(".turn.a .md pre").last().hover() },
-  { name: "S-132-think-hover", act: (p) => p.locator(".turn.a .think").last().hover() },
+  { name: "S-132-think-hover", act: (p) => p.locator('.cf-l button[aria-label="Thinking"]').hover() },
   // chat-feel part 2: a long model tag truncated in the composer (its tooltip has the whole tag)
   {
     name: "S-134-composer-long-name",

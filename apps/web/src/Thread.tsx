@@ -9,6 +9,7 @@ import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { imageTurnLinks } from "./image-links.ts";
 import { reveal } from "./reveal.ts";
+import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { NA, type State, setState, useStore } from "./store.ts";
@@ -244,29 +245,6 @@ function ImageJob({ msg }: { msg: Message }) {
   </div>;
 }
 
-const AsstTurn = memo(function AsstTurn({ msg, last }: { msg: Message; last: boolean }) {
-  countRender(msg.id);
-  const catalog = useStore(catalogOf);
-  const ft = useStore((s) => s.firstToken[msg.id]);
-  const name = describeModel(msg.model ?? "", catalog).name;
-  const queuedImage = msg.tools?.some(t => t.name === "image" && t.state === "done") === true;
-  const messages = useStore(s => queuedImage ? s.messages[msg.threadId] ?? EMPTY : EMPTY);
-  const allowedLinks = useMemo(() => imageTurnLinks(messages, msg.tools ?? []), [messages, msg.tools]);
-  return (
-    <div className="turn a done" tabIndex={0} aria-label="Reply">
-      {msg.thinking ? <ThinkLine secs={ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))} text={msg.thinking} /> : null}
-      {(msg.tools ?? []).filter(t => t.name !== "image" || t.state !== "done").map((t) => (
-        <ToolRow key={t.callId} step={t} />
-      ))}
-      {msg.imageJob ? <ImageJob msg={msg} /> : msg.content !== "" ? <Markdown text={msg.content} allowedLinks={allowedLinks} /> : null}
-      {(msg.imageJob ? [] : msg.images ?? []).map((p) => (
-        <ImageOut key={p} path={p} />
-      ))}
-      {msg.imageJob || (msg.content === "" && msg.tools?.every(t => t.name === "image")) ? null : <ActRow text={msg.content} meta={replyMeta(name, msg, ft)} regen={last} />}
-    </div>
-  );
-});
-
 const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
   countRender(msg.id);
   return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
@@ -289,39 +267,52 @@ function Working({ startedAt, loading, thinking }: { startedAt: number; loading:
 /** Errors whose message is already the plain sentence to show. */
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
 
-function LiveTurnView({ threadId }: { threadId: string }) {
-  const live = useStore((s) => (s.live?.threadId === threadId ? s.live : null));
+/** One component owns a reply from its first delta through its saved message. */
+const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: string; msg: Message | undefined; last: boolean }) {
+  const live = useStore((s) => (msg === undefined && s.live?.threadId === threadId ? s.live : null));
   const catalog = useStore(catalogOf);
-  const loading = useStore((s) => (s.live ? s.loads[s.live.model]?.state === "loading" : false));
-  const messages = useStore(s => s.messages[threadId] ?? EMPTY);
-  const allowedLinks = useMemo(() => imageTurnLinks(messages, live?.tools ?? []), [messages, live?.tools]);
-  if (live === null) return null;
-  const end = live.end;
-  const name = describeModel(live.model, catalog).name;
-  const running = live.tools.some((t) => t.state === "running");
-  const showThink = live.thinking !== "" && (live.text !== "" || live.tools.length > 0 || end !== undefined);
-  // whole blocks while it streams; everything once it ends for any reason
-  const shown = reveal(live.text, end === undefined);
+  const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
+  const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
+  const end = live?.end;
+  const name = describeModel(msg?.model ?? live?.model ?? "", catalog).name;
+  const text = msg?.content ?? live?.text ?? "";
+  const thinking = msg?.thinking ?? live?.thinking ?? "";
+  const tools = msg?.tools ?? live?.tools ?? [];
+  const queuedImage = tools.some(t => t.name === "image" && t.state === "done");
+  const messages = useStore(s => queuedImage ? s.messages[threadId] ?? EMPTY : EMPTY);
+  const allowedLinks = useMemo(() => imageTurnLinks(messages, tools), [messages, tools]);
+  const running = tools.some((t) => t.state === "running");
+  const streaming = live !== null && end === undefined;
+  const showThink = thinking !== "" && (!streaming || text !== "" || tools.length > 0);
+  const secs = live === null
+    ? ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))
+    : live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000));
+  const paced = usePacedText(text, streaming);
+  const pending = paced.length < text.length;
+  const shown = reveal(paced, streaming || pending);
+  if (msg === undefined && live === null) return null;
+  if (msg !== undefined) countRender(msg.id);
   return (
     <>
-      {live.pendingUser !== null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
-      <div className={`turn a${end ? " done" : ""}`} tabIndex={0} aria-label="Reply">
-        {showThink ? <ThinkLine secs={live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000))} text={live.thinking} /> : null}
-        {live.tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
+      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
+      <div className={`turn a${streaming || pending ? "" : " done"}`} tabIndex={0} aria-label="Reply" data-received={text.length} data-revealed={paced.length}>
+        {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
+        {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
           <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
         ))}
-        {shown !== "" ? <Markdown text={shown} live allowedLinks={allowedLinks} /> : null}
-        {end === undefined && live.text !== "" ? (
+        {msg?.imageJob ? <ImageJob msg={msg} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
+        {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} />)}
+        {(streaming || pending) && text !== "" ? (
           <div className="working writing" role="status">
             <span className="ph">Writing</span>
           </div>
         ) : null}
-        {end === undefined && live.text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={live.thinking !== ""} /> : null}
+        {streaming && text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
         {end?.kind === "stopped" ? (
           <div className="stopped">
             <span>Stopped after {end.secs} s</span>
             {/* off until the server has ended the stopped turn (W-02) */}
-            <button type="button" className="qa" data-regen disabled={live.ending === true} onClick={retry}>
+            <button type="button" className="qa" data-regen disabled={live?.ending} onClick={retry}>
               Retry
             </button>
           </div>
@@ -335,11 +326,11 @@ function LiveTurnView({ threadId }: { threadId: string }) {
             </button>
           </div>
         ) : null}
-        {end ? <ActRow text={live.text} meta={name} regen={false} /> : null}
+        {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? <ActRow text={text} meta={msg === undefined ? name : replyMeta(name, msg, ft)} regen={msg !== undefined && last} /> : null}
       </div>
     </>
   );
-}
+});
 
 /** From this many messages, turns out of view skip rendering work (styles.css `.col.long`). */
 const LONG_THREAD = 50;
@@ -350,13 +341,24 @@ export function Timeline({ threadId }: { threadId: string }) {
   const loading = useStore((s) => s.messages[threadId] === undefined && s.live?.threadId !== threadId);
   const loadError = useStore((s) => s.loadErrors[threadId]);
   const stopNotes = useStore((s) => s.stopNotes);
+  // A refused admission can clear pendingUser without assigning a user ID.
+  const liveOwner = useStore((s) => s.live?.threadId === threadId
+    ? s.live.userMessageId ?? `pending:${s.live.gen}`
+    : null);
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
   const bust = useStore((s) => (window.glRows?.bustMemo === true ? (s.live?.text.length ?? 0) : 0));
   const row = (m: Message) => (bust === 0 ? m : { ...m });
   const tl = useRef<HTMLDivElement>(null);
   const col = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const lastAsst = messages.findLastIndex((m) => m.role === "assistant");
+  // Image jobs have their own identity. The text reply belongs to its user
+  // turn, even when a job is inserted between that user and the live reply.
+  let owner: string | undefined;
+  const turns: { msg: Message | undefined; key: string }[] = messages.map(msg => {
+    if (msg.role === "user") owner = msg.id;
+    return { msg, key: msg.role === "user" ? msg.id : msg.imageJob ? `image:${msg.id}` : `reply:${owner ?? msg.id}` };
+  });
+  if (liveOwner !== null) turns.push({ msg: undefined, key: `reply:${liveOwner}` });
 
   // a newly opened thread starts at its end
   useLayoutEffect(() => {
@@ -388,10 +390,10 @@ export function Timeline({ threadId }: { threadId: string }) {
     <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <p className="na" role="status" data-thread-loading>Loading conversation…</p> : null}
-        {messages.map((m, i) => (
-          <Fragment key={m.id}>
-            {m.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn msg={row(m)} last={i === lastAsst && i === messages.length - 1} />}
-            {stopNotes[m.id] !== undefined ? (
+        {turns.map(({ msg: m, key }, i) => (
+          <Fragment key={key}>
+            {m?.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn threadId={threadId} msg={m === undefined ? undefined : row(m)} last={i === messages.length - 1} />}
+            {m !== undefined && stopNotes[m.id] !== undefined ? (
               <div className="stop-note" role="status">
                 {stopNotes[m.id]}
               </div>
@@ -407,7 +409,6 @@ export function Timeline({ threadId }: { threadId: string }) {
             </button>
           </div>
         ) : null}
-        <LiveTurnView threadId={threadId} />
       </div>
     </div>
   );

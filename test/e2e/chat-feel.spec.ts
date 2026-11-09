@@ -1,17 +1,17 @@
 /// <reference lib="dom" />
-// Journeys for the chat's feel: whole-block streaming, the code block's copy
-// button, the thinking row collapsed to its icon, the runtime row only when
+// Journeys for the chat's feel: steady streaming, the code block's copy
+// button, the thinking disclosure and composer pill, the runtime row only when
 // the runtime needs the user, the context size inside the model picker, and
 // GPU memory under Settings > Advanced.
 import { DRIP_REPLY } from "../fake-ollama/fake-ollama.ts";
 import { FAKE_URL } from "./env.ts";
+import { blockPrefix, type BlockSnap } from "./block-prefix.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
-interface BlockSnap {
-  readonly tag: string;
-  readonly text: string;
-  readonly items: readonly string[];
-}
+// Enabling the Image pill must never probe a real image service.
+const unavailableImage = new URL(FAKE_URL);
+unavailableImage.port = "9";
+test.use({ comfyUrl: unavailableImage.origin, video: "on", screenshot: "only-on-failure" });
 
 /** Records the last reply's blocks on every DOM change. */
 function sampleReplies(): void {
@@ -21,25 +21,13 @@ function sampleReplies(): void {
     const md = [...document.querySelectorAll(".turn.a .md")].at(-1);
     if (!md) return;
     w.glSamples.push(
-      [...md.children].map((c) => ({ tag: c.tagName, text: c.textContent ?? "", items: [...c.querySelectorAll(":scope > li")].map((li) => li.textContent ?? "") })),
+      [...md.children].map((c) => ({ tag: c.tagName, text: c.textContent ?? "" })),
     );
   };
   new MutationObserver(snap).observe(document, { subtree: true, childList: true, characterData: true });
 }
 
-/** Every block but the last equals the final one; the last equals it too, or is a list holding the first of its items. */
-function wholeBlockPrefix(sample: readonly BlockSnap[], final: readonly BlockSnap[]): boolean {
-  if (sample.length > final.length) return false;
-  return sample.every((b, i) => {
-    const f = final[i];
-    if (f === undefined || b.tag !== f.tag) return false;
-    if (b.text === f.text) return true;
-    const list = i === sample.length - 1 && (b.tag === "UL" || b.tag === "OL");
-    return list && b.items.length > 0 && b.items.length < f.items.length && b.items.every((it, j) => it === f.items[j]);
-  });
-}
-
-test("a streaming reply shows whole blocks only, then the whole answer", async ({ page, open }) => {
+test("a streaming reply grows through partial blocks, then the whole answer", async ({ page, open }) => {
   await page.addInitScript(sampleReplies);
   await open();
   await waitReady(page);
@@ -51,9 +39,10 @@ test("a streaming reply shows whole blocks only, then the whole answer", async (
 
   const samples = await page.evaluate(() => (window as unknown as { glSamples: BlockSnap[][] }).glSamples);
   const final = samples.at(-1) ?? [];
-  // the reply was seen part-way, and never with half a block
+  // Prose appears before its paragraph completes; finished blocks stay put.
   expect(samples.filter((s) => s.length > 0 && s.length < final.length).length).toBeGreaterThan(2);
-  for (const s of samples) expect(wholeBlockPrefix(s, final), JSON.stringify(s.at(-1))).toBe(true);
+  expect(samples.filter((s) => s[0]?.tag === "P" && s[0].text.length > 0 && s[0].text.length < (final[0]?.text.length ?? 0)).length).toBeGreaterThan(2);
+  for (const s of samples) expect(blockPrefix(s, final), JSON.stringify(s.at(-1))).toBe(true);
   expect(final.map((b) => b.tag)).toEqual(["P", "H2", "UL", "DIV", "TABLE", "P"]);
   // the final text is the whole answer: every word of the reply, in order
   const words = DRIP_REPLY.split(/\s+/).filter((w) => w !== "" && !/^(#+|-|```\w*|\||---)$/.test(w));
@@ -66,7 +55,7 @@ test("a streaming reply shows whole blocks only, then the whole answer", async (
   }
 });
 
-test("while a block is held the reply says Writing under the last block", async ({ page, open }) => {
+test("a paused delivery keeps Writing below the visible partial code block", async ({ page, open }) => {
   await open();
   await waitReady(page);
   // the fake stops inside the code block: paragraph, heading and list are finished
@@ -75,7 +64,7 @@ test("while a block is held the reply says Writing under the last block", async 
   const reply = page.locator(".turn.a").last();
   await expect(reply.locator(".md ul li")).toHaveCount(3);
   await page.waitForTimeout(300);
-  await expect(reply.locator(".md")).not.toContainText("df -h");
+  await expect(reply.locator(".md")).toContainText("df -h");
   await expect(reply.locator(".writing")).toHaveText("Writing");
   const [md, writing] = [await reply.locator(".md").boundingBox(), await reply.locator(".writing").boundingBox()];
   expect(writing?.y ?? 0).toBeGreaterThanOrEqual((md?.y ?? 0) + (md?.height ?? 0) - 0.5);
@@ -113,7 +102,7 @@ test.describe("code blocks", () => {
   });
 });
 
-test("a finished thinking row is its icon until hovered or focused, and the reply does not move", async ({ page, open }) => {
+test("a finished thinking row keeps its label and chevron at rest", async ({ page, open }, info) => {
   await open();
   await waitReady(page);
   await sendMessage(page, "Tell me about cron");
@@ -123,7 +112,9 @@ test("a finished thinking row is its icon until hovered or focused, and the repl
   const label = think.getByText(/^Thought for \d+ s$/);
   await expect(think.locator(".th-i")).toBeVisible();
   await expect(label).toHaveCount(1);
-  await expect(label).toBeHidden();
+  await expect(label).toBeVisible();
+  await expect(think.locator(".th-x")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("thinking-row-rest.png") });
   const before = await reply.locator(".md").boundingBox();
 
   await think.hover();
@@ -131,7 +122,7 @@ test("a finished thinking row is its icon until hovered or focused, and the repl
   expect(await reply.locator(".md").boundingBox()).toEqual(before);
 
   await page.mouse.move(5, 5);
-  await expect(label).toBeHidden();
+  await expect(label).toBeVisible();
   await think.focus();
   await expect(label).toBeVisible();
 
@@ -141,6 +132,50 @@ test("a finished thinking row is its icon until hovered or focused, and the repl
   await expect(think).toHaveAttribute("aria-expanded", "true");
   await expect(reply.locator(".think-body")).toBeVisible();
   await expect(reply.locator(".think-body")).toContainText("Answer it plainly");
+});
+
+test("composer Thinking reveals its label on hover and focus without moving its neighbours", async ({ page, open }, info) => {
+  await open();
+  await waitReady(page);
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
+  await page.getByRole("switch", { name: "Generate images" }).click();
+  await page.keyboard.press("Escape");
+  const pill = page.locator('.cf-l button[aria-label="Thinking"]');
+  const label = pill.locator(".plbl");
+  await expect(label).toBeHidden();
+  await page.screenshot({ path: info.outputPath("thinking-pill-rest.png") });
+  const model = await page.locator("#modelBtn").boundingBox();
+  const image = await page.locator('.cf-l button[aria-label="Image"]').boundingBox();
+  const send = await page.getByRole("button", { name: "Send message" }).boundingBox();
+  const collapsed = await pill.boundingBox();
+  await pill.hover();
+  await expect(label).toBeVisible();
+  await page.screenshot({ path: info.outputPath("thinking-pill-hover.png") });
+  expect((await pill.boundingBox())!.width).toBeGreaterThan(collapsed!.width);
+  expect(await page.locator("#modelBtn").boundingBox()).toEqual(model);
+  expect(await page.locator('.cf-l button[aria-label="Image"]').boundingBox()).toEqual(image);
+  expect(await page.getByRole("button", { name: "Send message" }).boundingBox()).toEqual(send);
+  await page.mouse.move(5, 5);
+  await expect(label).toBeHidden();
+  await pill.focus();
+  await expect(label).toBeVisible();
+  const on = await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }));
+  await pill.click();
+  await expect(pill).toHaveAttribute("aria-pressed", "false");
+  expect(await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }))).not.toEqual(on);
+  await expect(pill).toHaveAttribute("data-tip", /Thinking off/);
+});
+
+test.describe("phone Thinking", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test("composer Thinking remains a labelled option in the sheet", async ({ page, open }) => {
+    await open();
+    await waitReady(page);
+    await expect(page.locator('.cf-l button[aria-label="Thinking"]')).toBeHidden();
+    await page.getByRole("button", { name: "Chat options", exact: true }).click();
+    await expect(page.getByRole("menuitemcheckbox", { name: /Thinking/ })).toBeVisible();
+  });
 });
 
 test("no runtime row in the sidebar while the runtime is healthy", async ({ page, open }) => {

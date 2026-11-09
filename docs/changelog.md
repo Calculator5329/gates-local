@@ -16,6 +16,11 @@ so a theme change after Disconnect no longer cancels a newer Connect. A second
 speech change still cancels it. Reconnect snapshots reset the received baseline,
 and buffered replay restores newer settings without invalidating checks again.
 
+## 2026-11-09: Keep refused stopped sends separate from earlier replies
+
+A send stopped before the server accepts it keeps its own reply row if
+admission then fails. Earlier replies keep their identity.
+
 ## 2026-11-09: Cancel pending speech connections when a foreign save arrives
 
 A Disconnect received during reconnect now invalidates older Connect checks
@@ -194,6 +199,16 @@ All three copy controls now share the model-name fallback and show failure
 when copying fails. The temporary selection restores focus, draft selection
 and selected reply text. Desktop permission handling remains unchanged.
 
+## 2026-11-08: Reply continuity around images and Stop
+
+- Arriving image cards preserve the text reply, expanded thinking and reveal
+  progress. Saving the reply keeps the same identity too.
+- Stopped replies retain their tool-supplied link permissions after the next
+  message is sent. Invented download links stay plain text.
+- Prose containing a pipe stays visible. A possible table delimiter waits for
+  its complete row; then the visible header becomes a table without a blank
+  frame. Ordinary prose keeps appearing without waiting for a line break.
+
 ## 2026-11-08: Reverted controls no longer overwrite newer settings
 
 - Returning a reply control to its original value removes it from the draft.
@@ -346,6 +361,29 @@ and selected reply text. Desktop permission handling remains unchanged.
   144 and CSS is 12.76 KiB against 13. The budgets remain unchanged; the JS
   excess must be resolved before landing. Browser verification on the
   designated external runner is pending.
+
+## 2026-11-08: Steady reply streaming
+
+- Replies now appear at a steady pace, including when tokens arrive in
+  bursts. The pace adapts to delivery speed and targets a 120 ms tail at
+  completion. This replaces paragraph-at-a-time reveal;
+  there is one behavior and no reveal setting.
+- A reply keeps the same component and Markdown blocks when it is saved,
+  preserving expanded thinking. Completed blocks skip rendering.
+- Image cards remain visible through reply completion. Tool-supplied and
+  user-supplied links keep their permissions while text streams and after
+  saving; a later tool result updates completed blocks' link permissions too.
+- Incomplete emphasis and inline code render without flashing delimiters.
+  Ambiguous fence starts and pipe tables wait until they can render safely;
+  a table waits for its rows so its visible columns stay still.
+  Code blocks do not grow a temporary blank line at their closing
+  fence. Writing stays below the text until pacing finishes.
+
+## 2026-11-08: Thinking controls
+
+- The reply's thinking duration and chevron stay visible. The composer
+  Thinking pill reveals its label on hover or keyboard focus, after Image
+  and Context so they stay in place. Phones keep labelled Chat options.
 
 ## 2026-11-08: Settings, rebuilt page by page
 

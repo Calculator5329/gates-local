@@ -2,8 +2,8 @@
 // never sets HTML, so model text cannot inject markup. It covers what local
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
-// as whole blocks (reveal.ts); half-written input still renders as far as it goes.
-import { type ReactNode, memo, useEffect, useRef } from "react";
+// at a steady pace; incomplete inline spans render without their delimiters.
+import { type ReactNode, memo, useEffect, useRef, useState } from "react";
 import { useCopy } from "./copy.ts";
 import { linkKey } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
@@ -26,11 +26,18 @@ const cells = (line: string) =>
 
 const isRule = (line: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
 
-function parse(src: string): Block[] {
-  const lines = src.replace(/\r\n?/g, "\n").split("\n");
-  const out: Block[] = [];
+function parse(src: string): { block: Block; start: number; stable: boolean }[] {
+  const lines = src.split(/\r\n?|\n/);
+  const offsets = [0];
+  for (const m of src.matchAll(/\r\n?|\n/g)) offsets.push(m.index + m[0].length);
+  const out: { block: Block; start: number; stable: boolean }[] = [];
   let i = 0;
+  let start = 0;
+  // A partial next line can still extend a list/table/quote. Keep that
+  // predecessor mutable until the boundary is known, not just the last row.
+  const push = (block: Block, stable = i < lines.length - 1) => out.push({ block, start: offsets[start] ?? 0, stable });
   while (i < lines.length) {
+    start = i;
     const line = lines[i] ?? "";
     if (line.trim() === "") {
       i++;
@@ -40,15 +47,19 @@ function parse(src: string): Block[] {
       const lang = /^\s*```\s*([\w+#.-]*)/.exec(line)?.[1] ?? "";
       const body: string[] = [];
       i++;
-      while (i < lines.length && !/^\s*```/.test(lines[i] ?? "")) body.push(lines[i++] ?? "");
+      while (i < lines.length && !/^\s*```/.test(lines[i] ?? "")) {
+        if (i === lines.length - 1 && lines[i] === "") break;
+        body.push(lines[i++] ?? "");
+      }
+      const closed = i < lines.length && /^\s*```/.test(lines[i] ?? "");
       i++;
-      out.push({ t: "code", lang, text: body.join("\n") });
+      push({ t: "code", lang, text: body.join("\n") }, closed);
       continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
     if (h) {
-      out.push({ t: "h", level: (h[1]?.length ?? 1) as 1 | 2 | 3 | 4, text: h[2] ?? "" });
       i++;
+      push({ t: "h", level: (h[1]?.length ?? 1) as 1 | 2 | 3 | 4, text: h[2] ?? "" }, i < lines.length);
       continue;
     }
     if (line.includes("|") && isRule(lines[i + 1] ?? "")) {
@@ -57,7 +68,7 @@ function parse(src: string): Block[] {
       const rows: string[][] = [];
       while (i < lines.length && (lines[i] ?? "").includes("|") && (lines[i] ?? "").trim() !== "") rows.push(cells(lines[i++] ?? ""));
       const num = head.map((_, c) => rows.length > 0 && rows.every((r) => /^[-+]?[\d.,]+\s*%?$/.test(r[c] ?? "")));
-      out.push({ t: "table", head, rows, num });
+      push({ t: "table", head, rows, num });
       continue;
     }
     const list = /^\s*([-*+]|\d+[.)])\s+/.exec(line);
@@ -71,13 +82,13 @@ function parse(src: string): Block[] {
         else break;
         i++;
       }
-      out.push({ t: ordered ? "ol" : "ul", items });
+      push({ t: ordered ? "ol" : "ul", items });
       continue;
     }
     if (/^\s*>/.test(line)) {
       const body: string[] = [];
       while (i < lines.length && /^\s*>/.test(lines[i] ?? "")) body.push((lines[i++] ?? "").replace(/^\s*>\s?/, ""));
-      out.push({ t: "quote", text: body.join(" ") });
+      push({ t: "quote", text: body.join(" ") });
       continue;
     }
     const para: string[] = [];
@@ -88,7 +99,7 @@ function parse(src: string): Block[] {
       para.push(l.trim());
       i++;
     }
-    out.push({ t: "p", text: para.join(" ") });
+    push({ t: "p", text: para.join(" ") });
   }
   return out;
 }
@@ -101,7 +112,21 @@ function wrapUrl(url: string): ReactNode[] {
 }
 
 /** Inline spans: code, bold, italics, links and bare URLs. Anything else is text. */
-export function inline(text: string, allowedLinks?: ReadonlySet<string>): ReactNode[] {
+export function inline(text: string, partial = false, allowedLinks?: ReadonlySet<string>): ReactNode[] {
+  if (partial) {
+    // Skip closed inline code and links before looking for a pending destination.
+    // Keep just the label, whose width also matches the eventual anchor.
+    const pending = /`[^`]*(?:`|$)|\[[^\]]+\]\([^)]*\)|(\[([^\]]+)\]\([^)]*$)/g;
+    for (const m of text.matchAll(pending)) if (m[1]) return [...inline(text.slice(0, m.index), true, allowedLinks), m[2]];
+  }
+  if (partial) for (const m of text.matchAll(/`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|(\*\*|\*|`)/g)) {
+    const mark = m[1];
+    if (mark === undefined) continue;
+    const before = inline(text.slice(0, m.index), false, allowedLinks);
+    const Tag = mark === "`" ? "code" : mark === "**" ? "strong" : "em";
+    const body = text.slice(m.index + mark.length);
+    return [...before, <Tag key={before.filter((x) => typeof x === "object").length}>{mark === "**" ? body.replace(/\*$/, "") : body}</Tag>];
+  }
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
@@ -196,7 +221,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-function Table({ b, allowedLinks }: { b: Extract<Block, { t: "table" }>; allowedLinks?: ReadonlySet<string> }) {
+function Table({ b, partial, allowedLinks }: { b: Extract<Block, { t: "table" }>; partial: boolean; allowedLinks?: ReadonlySet<string> }) {
   const ref = useEdges<HTMLTableElement>(b.rows.length);
   return (
     <table ref={ref}>
@@ -204,7 +229,7 @@ function Table({ b, allowedLinks }: { b: Extract<Block, { t: "table" }>; allowed
         <tr>
           {b.head.map((cell, j) => (
             <th key={j} className={b.num[j] ? "n" : undefined}>
-              {inline(cell, allowedLinks)}
+              {inline(cell, partial, allowedLinks)}
             </th>
           ))}
         </tr>
@@ -214,7 +239,7 @@ function Table({ b, allowedLinks }: { b: Extract<Block, { t: "table" }>; allowed
           <tr key={j}>
             {b.head.map((_, col) => (
               <td key={col} className={b.num[col] ? "n" : undefined}>
-                {inline(r[col] ?? "", allowedLinks)}
+                {inline(r[col] ?? "", partial, allowedLinks)}
               </td>
             ))}
           </tr>
@@ -224,35 +249,70 @@ function Table({ b, allowedLinks }: { b: Extract<Block, { t: "table" }>; allowed
   );
 }
 
-function renderBlock(b: Block, key: number, allowedLinks?: ReadonlySet<string>): ReactNode {
+// Completed blocks retain their objects and React elements across live frames.
+const MarkdownBlock = memo(function MarkdownBlock({ b, partial, allowedLinks }: { b: Block; partial: boolean; allowedLinks?: ReadonlySet<string> }) {
   switch (b.t) {
     case "p":
-      return <p key={key}>{inline(b.text, allowedLinks)}</p>;
+      return <p>{inline(b.text, partial, allowedLinks)}</p>;
     case "h": {
       const H = `h${b.level}` as const;
-      return <H key={key}>{inline(b.text, allowedLinks)}</H>;
+      return <H>{inline(b.text, partial, allowedLinks)}</H>;
     }
     case "ul":
     case "ol": {
       const L = b.t;
       return (
-        <L key={key}>
+        <L>
           {b.items.map((it, j) => (
-            <li key={j}>{inline(it, allowedLinks)}</li>
+            <li key={j}>{inline(it, partial, allowedLinks)}</li>
           ))}
         </L>
       );
     }
     case "code":
-      return <CodeBlock key={key} lang={b.lang} code={b.text} />;
+      return <CodeBlock lang={b.lang} code={b.text} />;
     case "quote":
-      return <blockquote key={key}>{inline(b.text, allowedLinks)}</blockquote>;
+      return <blockquote>{inline(b.text, partial, allowedLinks)}</blockquote>;
     case "table":
-      return <Table key={key} b={b} allowedLinks={allowedLinks} />;
+      return <Table b={b} partial={partial} allowedLinks={allowedLinks} />;
   }
+});
+
+/** Live text is append-only. Keep a suffix mutable, since its next line
+ * can extend a paragraph/list or turn a header into a table. A replacement or
+ * historical edit explicitly resets the cache. Offsets refer to raw CRLF too. */
+export function createMarkdownParser() {
+  let source = "";
+  let offset = 0;
+  let completed: Block[] = [];
+  let blocks: Block[] = [];
+  return (text: string, appendOnly = true): { blocks: Block[]; retained: number } => {
+    if (text === source) return { blocks, retained: blocks.length };
+    if (!appendOnly || text.length <= source.length) { offset = 0; completed = []; }
+    const retained = completed.length;
+    const suffix = parse(text.slice(offset));
+    blocks = completed.concat(suffix.map((entry) => entry.block));
+    const mutable = suffix.findIndex((entry, i) => !entry.stable || i === suffix.length - 1);
+    if (mutable >= 0) {
+      offset += suffix[mutable]!.start;
+      completed = completed.concat(suffix.slice(0, mutable).map((entry) => entry.block));
+    }
+    source = text;
+    return { blocks, retained };
+  };
 }
 
-/** The reply body. `live` marks a streaming reply, whose blocks fade in as they finish. */
+/** Only the changing suffix is parsed and given new elements each live frame. */
 export const Markdown = memo(function Markdown({ text, live, allowedLinks }: { text: string; live?: boolean; allowedLinks?: ReadonlySet<string> }) {
-  return <div className={live === true ? "md live" : "md"}>{parse(text).map((b, i) => renderBlock(b, i, allowedLinks))}</div>;
+  const parser = useRef<ReturnType<typeof createMarkdownParser> | null>(null);
+  parser.current ??= createMarkdownParser();
+  const previous = useRef<{ live: boolean | undefined; allowedLinks: ReadonlySet<string> | undefined; rows: ReactNode[] }>({ live, allowedLinks, rows: [] });
+  const result = parser.current(text, live === true);
+  // A late tool result can grant or revoke a completed block's links. Rebuild
+  // its element too, so memo sees the new provenance even with unchanged text.
+  const retained = live === previous.current.live && allowedLinks === previous.current.allowedLinks ? result.retained : 0;
+  const rows = previous.current.rows.slice(0, retained);
+  for (let i = retained; i < result.blocks.length; i++) rows.push(<MarkdownBlock key={i} b={result.blocks[i]!} partial={live === true} allowedLinks={allowedLinks} />);
+  previous.current = { live, allowedLinks, rows };
+  return <div className={live === true ? "md live" : "md"}>{rows}</div>;
 });

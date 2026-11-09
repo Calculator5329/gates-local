@@ -14,6 +14,7 @@ afterEach(() => { setState({ messages: {}, threadId: null }); vi.unstubAllGlobal
 describe("an image retry button follows the accepted job", () => {
   it.each(["queued", "running", "done", "error", "cancelled"] as const)("keeps the original button disabled when the retry is %s", async (state) => {
     vi.stubGlobal("window", {});
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
     const { Timeline } = await import("./Thread.tsx");
     const base = { threadId: "thread", role: "assistant" as const, createdAt: 1, content: "a tree" };
     setState({ threadId: "thread", messages: { thread: [

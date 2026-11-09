@@ -276,27 +276,6 @@ export function Composer() {
               <span>{modelLbl}</span>
               <Icon id="down" cls="chev" />
             </button>
-            <button
-              type="button"
-              className={`pill gate${thinkNa !== null ? " unavail" : ""}`}
-              aria-pressed={thinkNa !== null ? false : think}
-              aria-label="Thinking"
-              aria-disabled={thinkNa !== null ? true : undefined}
-              data-tip={
-                thinkNa ??
-                (think
-                  ? "<b>Thinking on.</b> The model reasons first; shown as one collapsed line. Click to turn off."
-                  : "<b>Thinking off.</b> Faster first token. Click to turn on.")
-              }
-              onClick={() => {
-                if (thinkNa !== null) return;
-                setState({ think: !think });
-                closeTip();
-              }}
-            >
-              <Icon id="bulb" cls="lead" />
-              <span className="plbl">Thinking</span>
-            </button>
             {imageGen ? (
               <button
                 type="button"
@@ -327,6 +306,27 @@ export function Composer() {
                 <span>Context {Math.round(pct * 100)}% used</span>
               </button>
             )}
+            <button
+              type="button"
+              className={`pill gate thinking${thinkNa !== null ? " unavail" : ""}`}
+              aria-pressed={thinkNa !== null ? false : think}
+              aria-label="Thinking"
+              aria-disabled={thinkNa !== null ? true : undefined}
+              data-tip={
+                thinkNa ??
+                (think
+                  ? "<b>Thinking on.</b> The model reasons first; shown as one collapsed line. Click to turn off."
+                  : "<b>Thinking off.</b> Faster first token. Click to turn on.")
+              }
+              onClick={() => {
+                if (thinkNa !== null) return;
+                setState({ think: !think });
+                closeTip();
+              }}
+            >
+              <Icon id="bulb" cls="lead" />
+              <span className="plbl">Thinking</span>
+            </button>
           </div>
           <div className="cf-r">
             <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}`} textarea={ta} /></Suspense>

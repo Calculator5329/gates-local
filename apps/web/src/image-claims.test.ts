@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTools, runLoop, type ToolStep } from "../../../packages/harness/src/index.ts";
+import type { Message } from "@gates-local/contracts";
 import { openThreadStore } from "../../server/src/threads/store.ts";
 import { setState, type State } from "./store.ts";
 
@@ -14,10 +15,32 @@ vi.mock("./store.ts", async (original) => {
 });
 vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/files/image.png" }));
 afterEach(() => { setState({ live: null, messages: {}, threadId: null }); vi.unstubAllGlobals(); });
+beforeEach(() => { vi.stubGlobal("matchMedia", () => ({ matches: true })); });
 
 const FOLLOWUP = "The report total is 42.\n\nYour image is ready: [Download](https://invented.example/ship.png).\n\n![Ship](https://invented.example/ship.png)\n\nhttps://invented.example/raw\n\n[Person](https://person.example/brief) and [Report](https://tool.example/report).\n\n[Echo](https://untrusted.example/from-model)";
 
 describe("fabricated mixed-image follow-ups", () => {
+  it.each(["streaming", "completion", "saved"])("keeps a mixed report's image card and inert invented link at %s", async (stage) => {
+    vi.stubGlobal("window", {});
+    const { Timeline } = await import("./Thread.tsx");
+    const threadId = "mixed";
+    const image: Message = { id: "ship", threadId, role: "assistant", createdAt: 1, content: "a ship", imageJob: { jobId: "ship", threadId, state: "queued" } };
+    const tools: ToolStep[] = [{ callId: "image", name: "image", state: "done", summary: "Image queued", links: [] }];
+    const text = "The report total is 42. [Download](https://invented.example/ship.png) **more";
+    const live = { gen: 1, threadId, turnId: "turn", model: "model", startedAt: 1, thinking: "", text, tools, pendingUser: null };
+    const saved: Message = { id: "answer", threadId, role: "assistant", createdAt: 2, content: text, tools };
+    const check = () => {
+      const html = renderToStaticMarkup(createElement(Timeline, { threadId }));
+      expect(html).toContain('data-image-job="queued"');
+      expect(html).toContain("The report total is 42.");
+      expect(html).not.toContain('href="https://invented.example/ship.png"');
+      expect(html).not.toContain("data-tool-row");
+    };
+    setState({ threadId, messages: { [threadId]: [image] }, live });
+    if (stage !== "streaming") setState({ live: null, messages: { [threadId]: [image, saved] } });
+    if (stage === "saved") setState({ messages: { [threadId]: structuredClone([image, saved]) } });
+    check();
+  });
   it("renders a saved pre-provenance image turn exactly as the old renderer did", async () => {
     vi.stubGlobal("window", {});
     const { Timeline } = await import("./Thread.tsx");

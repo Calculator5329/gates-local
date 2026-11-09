@@ -21,6 +21,7 @@
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { STREAM_REPLY } from "./stream-reply.ts";
 
 const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
   "no-models": [],
@@ -47,6 +48,10 @@ export interface FakeOptions {
   errorAfterTokens: number;
   /** slow-drip: after this many reply tokens the stream waits until cancelled; 0 never waits. */
   holdAfterTokens: number;
+  /** slow-drip: use the long mixed-Markdown measurement fixture when nonzero. */
+  longDrip: number;
+  /** Number of reply tokens delivered together; tokenDelayMs is then the gap between bursts. */
+  burstTokens: number;
   /**
    * A cold load (preload or chat) takes this long; 0 is instant. While it runs the
    * model's memory fills the fake GPU in LOAD_STEPS steps and /api/ps leaves it out,
@@ -67,6 +72,8 @@ const DEFAULTS: FakeOptions = {
   replyWords: 60,
   errorAfterTokens: 8,
   holdAfterTokens: 0,
+  longDrip: 0,
+  burstTokens: 0,
   loadDelayMs: 0,
   showDelayMs: 0,
 };
@@ -316,7 +323,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         done: false,
       });
     }
-    for (const t of scenario === "slow-drip" ? dripTokens() : tokens(replyWords(prompt, options.replyWords))) {
+    for (const t of scenario === "slow-drip" ? (options.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : tokens(replyWords(prompt, options.replyWords))) {
       if (abort.signal.aborted) return;
       if (scenario === "slow-drip" && options.holdAfterTokens > 0 && sent >= options.holdAfterTokens) {
         await new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
@@ -328,7 +335,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       }
       line({ ...base(), message: { role: "assistant", content: t }, done: false });
       sent++;
-      await sleep(options.tokenDelayMs, abort.signal);
+      if (options.burstTokens === 0 || sent % options.burstTokens === 0) await sleep(options.tokenDelayMs, abort.signal);
     }
     if (abort.signal.aborted) return;
     // One end time for both durations, so total is exactly prompt plus decode (MP3-03).

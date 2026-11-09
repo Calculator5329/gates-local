@@ -25,6 +25,7 @@ for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]]
       await sendMessage(page, "Tell me the report total and draw a ship; https://person.example/brief");
       const reply = page.locator(".turn.a .md").last();
       const card = page.locator("[data-image-job]");
+      let originalCard: Awaited<ReturnType<typeof card.elementHandle>>;
       const check = async () => {
         await expect(reply).toContainText("The report total is 42.");
         await expect(reply).toContainText("Your image is ready");
@@ -39,12 +40,14 @@ for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]]
       };
       if (mode === "native") {
         await check();
+        originalCard = await card.elementHandle();
         await expect(page.locator(".turn.a:not(.done) .md")).toBeVisible();
         await page.screenshot({ path: info.outputPath("streaming.png"), animations: "disabled" });
         await stack.scenario("image-claims", { installed: [model], firstTokenDelayMs: 0, holdAfterTokens: 0 });
       }
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
       await check();
+      if (mode === "native") expect(await originalCard!.evaluate(el => el.isConnected), "the image card survives report completion").toBe(true);
       await page.screenshot({ path: info.outputPath("saved.png"), animations: "disabled" });
       await page.reload(); await waitReady(page);
       await check();

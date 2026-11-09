@@ -966,11 +966,11 @@ function bringBack(threadId: string): void {
   setState({ live: back });
 }
 
-/** The server saves nothing for a reply the person stopped: its words live only in the live turn, so they move into its chat before anything takes the slot. */
+/** The server saves nothing for a reply the person stopped: its words move into its chat before anything takes the slot. Finished tools retain link provenance; unfinished tools have no result to retain. */
 function keepStoppedWords(l: LiveTurn): void {
   if (l.end?.kind !== "stopped" || l.text === "") return;
   const { threadId } = l;
-  const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), model: l.model, createdAt: Date.now() };
+  const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, tools: l.tools.filter(step => step.state !== "running"), ...(l.thinking === "" ? {} : { thinking: l.thinking }), model: l.model, createdAt: Date.now() };
   const note = `Stopped after ${l.end.secs} s.`;
   setState((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
 }

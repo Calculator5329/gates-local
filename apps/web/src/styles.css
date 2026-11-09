@@ -258,10 +258,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
 .think-body{display:none;margin:0 0 4px 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground)}
 .think[aria-expanded="true"]+.think-body{display:block}
-/* a reply's finished thinking row is its bulb, muted; hover or keyboard focus shows the label in place (it already holds its room, so nothing moves) */
-.turn .think .th-l,.turn .think .th-x{visibility:hidden;opacity:0;transition:opacity .12s,visibility .12s}
-.turn .think:is(:hover,:focus-visible,[aria-expanded="true"]) :is(.th-l,.th-x){visibility:visible;opacity:1}
-.turn .think:not(:hover,:focus-visible,[aria-expanded="true"]) .th-i{color:var(--faint)}
 /* while the model reasons, the status row carries the same bulb with "Thinking · 3 s" */
 .working.thinking>.ic{width:15px;height:15px;margin:0 2px 0 4px;animation:pulse 2s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.working.thinking>.ic{animation:none}}
@@ -314,12 +310,10 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .stopask p{margin:0 0 8px}
 .stopask-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .stopask-n{display:inline-flex;align-items:center;gap:6px;margin-right:auto;font-size:13px;color:var(--muted-foreground)}
-/* a streaming reply shows whole blocks (reveal.ts): each fades in as it finishes, opacity only,
-   and a quiet "Writing" sits under the last block until the turn ends */
-.md.live>:not(ul):not(ol),.md.live li{animation:fadein .12s ease-out}
+/* Writing stays below the steadily revealed text until the final tail drains. */
 .working.writing{margin-top:2px}
 .working.writing .ph{color:var(--muted-foreground);animation:pulse 2s ease-in-out infinite}
-@media (prefers-reduced-motion:reduce){.md.live>:not(ul):not(ol),.md.live li,.working.writing .ph{animation:none}}
+@media (prefers-reduced-motion:reduce){.working.writing .ph{animation:none}}
 
 /* markdown */
 .md{font-size:var(--chat-fs);line-height:1.65;color:var(--prose);overflow-wrap:anywhere;margin-top:var(--s1)}
@@ -384,10 +378,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .vl .vd{width:7px;height:7px;border-radius:50%;flex:none}
 .vl.spill{color:var(--amber-fg)}.vl.no{color:var(--red-fg)}
 /* Ethan's pick, 2026-11-07 (replaces F38/F38b's two treatments): Thinking and Image are pills.
-   On: a filled pill, label at foreground. Off: the same pill greyed out, with the same label (never
+   On: a filled pill, icon at foreground. Off: the same pill greyed out (never
    "Thinking off"); its outline stays, so it still reads as a button. The tooltip says on or off. */
 .pill{height:30px;display:inline-flex;align-items:center;gap:7px;padding:0 12px 0 10px;border-radius:999px;font-size:14px;color:var(--foreground);margin-left:6px;transition:background-color .12s,color .12s,box-shadow .12s}
 .pill .ic{width:15px;height:15px}
+/* Last in the group: the label grows into free space, leaving Image and Context in place. */
+.pill.thinking .plbl{display:none}
+.pill.thinking:is(:hover,:focus-visible) .plbl{display:inline}
+@media (hover:none){.pill.thinking .plbl{display:inline}}
 .pill[aria-pressed="true"]{background:var(--selected)}
 .pill[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--foreground) 16%,transparent)}
 .pill[aria-pressed="false"]{color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
