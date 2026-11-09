@@ -81,8 +81,10 @@ it("VD-01: own older speech saves do not supersede a newer action; foreign saves
   expect(store.getState().voiceConnectionVersion).toBe(latest);
   held.respond(disconnected); await saving;
   expect(store.getState().voiceConnectionVersion).toBe(latest);
-  // A Disconnect from window B supersedes A even if its URL is already off.
+  // Repeating the same received speech setting is not another change.
   b.server.push("settings.changed", { ...disconnected, voiceChange: "window-b-disconnect" });
+  expect(store.getState().voiceConnectionVersion).toBe(latest);
+  b.server.push("settings.changed", { ...settings, whisperUrl: "http://127.0.0.1:18079", voiceChange: "window-b-connect" });
   expect(store.getState().voiceConnectionVersion).toBe(latest + 1);
 });
 
@@ -113,7 +115,7 @@ it.each([
       store.setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
       latest = store.getState().voiceConnectionVersion;
     }
-    if (step === "foreign") b.server.push("settings.changed", { ...disconnected, voiceChange: "other-window-disconnect" });
+    if (step === "foreign") b.server.push("settings.changed", { ...settings, whisperUrl: "http://127.0.0.1:18079", voiceChange: "other-window-connect" });
   }
   const afterReceipt = latest + Number(steps.includes("foreign"));
   expect(store.getState().voiceConnectionVersion).toBe(afterReceipt);

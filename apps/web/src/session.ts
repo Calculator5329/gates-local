@@ -148,6 +148,7 @@ async function loop(): Promise<void> {
       await c.closed;
       client = null;
       voiceWrites.clear();
+      receivedVoiceUrl = undefined;
       lostTurn();
     }
     setState((s) => ({ conn: s.conn.kind === "down" ? s.conn : { kind: "down", since: Date.now() } }));
@@ -217,6 +218,8 @@ function reasonOf(message: string): string {
 const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status"]);
 
 async function hydrate(c: Client): Promise<void> {
+  const current = getState().settings;
+  receivedVoiceUrl = current === NA ? undefined : current?.whisperUrl;
   // A push is newer than any snapshot whose request started before it. While
   // a batch is in flight, its channels' pushes wait here and replay in order
   // right after its snapshots land, so a snapshot never undoes a push (W-03).
@@ -238,12 +241,15 @@ async function hydrate(c: Client): Promise<void> {
     // Apply intent ordering at receipt, before a pending health check can
     // finish. Only the settings themselves wait behind hydration snapshots.
     const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
-    const current = getState().settings;
-    const previousUrl = current === NA ? undefined : current?.whisperUrl;
-    if (!own && (voiceChange !== undefined || previousUrl !== settings.whisperUrl)) {
+    const changed = receivedVoiceUrl !== settings.whisperUrl;
+    receivedVoiceUrl = settings.whisperUrl;
+    if (!own && changed) {
       setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
     }
-    dispatch("settings.changed", () => applySettings(settings, false, true));
+    dispatch("settings.changed", () => {
+      receivedVoiceUrl = settings.whisperUrl;
+      applySettings(settings, false, true);
+    });
   });
   try {
     await hydrateWith(on, release);
@@ -316,6 +322,7 @@ async function hydrateWith(
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   fitEpoch++;
+  receivedVoiceUrl = settings === NA ? undefined : settings?.whisperUrl;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
@@ -415,10 +422,11 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
   };
 }
 
-// Ownership is consumed at push receipt, then travels with buffered work.
-// Successful responses leave it available for a push that arrives later;
-// closing the connection retires any unmatched saves.
+// Match local saves at receipt; compare foreign speech against the received
+// stream, which can be ahead of displayed settings during hydration. Snapshots
+// reset that baseline and replay restores the newer buffered settings.
 const voiceWrites = new Set<string>();
+let receivedVoiceUrl: string | undefined;
 
 function applySettings(settings: Settings, first = false, preserveVoiceIntent = false): void {
   setState((s) => ({ ...settingsPatch(s, settings, first),

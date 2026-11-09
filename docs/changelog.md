@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09: Keep unrelated settings changes from cancelling speech connection
+
+Buffered settings pushes compare speech against the latest received address,
+so a theme change after Disconnect no longer cancels a newer Connect. A second
+speech change still cancels it. Reconnect snapshots reset the received baseline,
+and buffered replay restores newer settings without invalidating checks again.
+
 ## 2026-11-09: Cancel pending speech connections when a foreign save arrives
 
 A Disconnect received during reconnect now invalidates older Connect checks
