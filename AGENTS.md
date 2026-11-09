@@ -32,7 +32,9 @@ decision.
 - Connects no personal store on its own. Sources are read-only snapshots the
   owner adds.
 - No unattended edit of live notes. Model and dream changes are proposals.
-- No public repository, release or deploy without Ethan's explicit go.
+- The repository is public on GitHub under MIT, so nothing private goes in
+  code, docs, tests or commit messages. No release, tag or deploy without
+  Ethan's explicit go.
 
 ## Run and verify
 
@@ -69,8 +71,10 @@ decision.
   with an explicit per-request `num_ctx`, and the fit check against
   measured free VRAM.
 - `apps/desktop/`: Electron main and preload; supervises the server.
-- `apps/web/`: the client. Its look waits for Ethan's mockup picks.
-- `packages/harness/`: the turn loop and four tools (slice 4).
+- `apps/web/`: the client. Its look is settled: black and gray with green,
+  as recorded in `docs/decisions.md`.
+- `packages/harness/`: the turn loop, the tools a model can call and the
+  sandbox they run in.
 
 ## Conventions
 
@@ -82,6 +86,7 @@ decision.
 - GPU: measure free VRAM before any real load; never exceed it; never set
   `num_gpu` 0; unload what a check loaded. Whisper is never touched.
 - Git: plain `git commit`, stage only your files, never `git stash`, never
-  `worktree remove --force`, no remote until Ethan says so.
+  `worktree remove --force`. Lanes never push; a coordinating session
+  lands on `main` and pushes it.
 - Files ported from another repo start with a comment naming the origin
   path and commit, and keep the origin's shape so later fixes still merge.
