@@ -172,6 +172,15 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       16k, 32k and 64k in the picker.
       *Accept:* the numbers come from a measured load on this machine; an
       oversize job is refused, never attempted.
+      *UI stability, 2026-11-08:* Context picks retain checked reports during
+      refresh and reject replies from older memory readings. Expanded GPU
+      details stay open. Library path editors keep the resting row's size
+      below existing sources, alongside sample databases and repository
+      imports. Model downloads keep their size and sorted position through
+      progress, errors and installation. Settings controls and send notices
+      keep surrounding controls steady; uncached threads explain that their
+      conversation is loading. Initial Version metadata hydration remains
+      a follow-up.
 - [ ] <!-- workspace:id=work:1d516a86-fbdc-5de2-9546-47ae95907661 --> ComfyUI opt-in: discover or start the local install, unload app chat,
       run one image, restore chat.
       *Accept:* `pnpm verify:image` with a fake; one real image on this

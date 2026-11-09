@@ -15,6 +15,8 @@ import { addSource, checkImageStatus, dataFolder, openDataFolder, openSettings, 
 import { NA, setState, useStore } from "./store.ts";
 import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./Updates.tsx";
+import { closeTip, esc } from "./ui.tsx";
+
 const VoiceSettings = lazy(() => import("./VoiceSettings.tsx").then((m) => ({ default: m.VoiceSettings })));
 
 const Instructions = lazy(() => import("./Instructions.tsx"));
@@ -36,7 +38,7 @@ function Seg2<T extends string | number>({ value, options, onPick, label }: { va
 const THEME_WORDS: Record<Theme, string> = {
   dark: "Always dark.",
   light: "Always light.",
-  system: "System matches your desktop's light or dark setting.",
+  system: "Matches your desktop theme.",
 };
 
 const THEMES: readonly (readonly [Theme, string])[] = [
@@ -210,12 +212,10 @@ function Tools() {
   const on = settings === NA || settings?.tools === true;
   const nothingToRead = sources !== NA && sources !== undefined && sources.length === 0;
   const windows = /\bWindows\b/.test(navigator.userAgent);
-  const library = on ? (
+  const library = (
     <button type="button" className="btn outline" onClick={() => openSettings("library")}>
       Library
     </button>
-  ) : (
-    <span className="na">Off</span>
   );
   return (
     <>
@@ -323,7 +323,7 @@ function Images() {
       <Head title="Image generation">Let the assistant make images on this computer. It uses ComfyUI, a separate free program you install yourself.</Head>
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={on ? "The Image button in the message box turns it on for a chat. If the GPU is short, the chat model is unloaded while an image renders." : undefined} err={genErr}>
+          <Row label="Generate images" desc="Once enabled, use the Image button in the message box for a chat. If the GPU is short, the chat model is unloaded while an image renders." err={genErr}>
             <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />
           </Row>
         </Grp>
@@ -333,8 +333,8 @@ function Images() {
           <ImageState address={address} />
           <Row label="ComfyUI address" err={urlErr}>
             <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
-            <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
-              {testing ? "Testing…" : "Test"}
+            <button type="button" className="btn outline" disabled={testing} aria-busy={testing} onClick={() => void test()}>
+              Test
             </button>
           </Row>
         </Grp>
@@ -427,11 +427,12 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   const { noun, hint } = ADD_WORDS[kind];
   useEffect(() => input.current?.focus(), []);
   return (
-    <Row label={`Add a ${noun}`} err={err}>
+    <Row label={`Add a ${noun}`} desc={<span className={err ? "src-help act-err" : "src-help"} role={err ? "alert" : undefined} data-tip={err ? esc(err) : undefined}>{err ?? "Choose a local path to share."}</span>}>
       <input
         ref={input}
         className="inp"
         aria-label={`Add a ${noun} path`}
+        aria-invalid={err !== null}
         placeholder={hint}
         value={path}
         onChange={(e) => setPath(e.target.value)}
@@ -451,24 +452,39 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
       >
         Add
       </button>
+      <button type="button" className="btn outline" aria-label="Cancel adding source" data-tip="Cancel" onClick={close}>
+        <Icon id="x" />
+      </button>
     </Row>
   );
 }
 
-function SourceGroup({ title, desc, none, kinds, items }: { title: string; desc: string; none: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
+function SourceGroup({ title, desc, kinds, items }: { title: string; desc: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
   const [adding, setAdding] = useState<SourceKind | null>(null);
+  const entry = useRef<HTMLDivElement>(null);
+  const close = () => {
+    const kind = adding;
+    closeTip();
+    setAdding(null);
+    requestAnimationFrame(() => entry.current?.querySelector<HTMLButtonElement>(`[data-add="${kind}"]`)?.focus({ preventScroll: true }));
+  };
   const action = kinds.map((kind) => (
-    <button key={kind} type="button" className="btn outline" onClick={() => setAdding(kind)}>
+    <button key={kind} type="button" className="btn outline" data-add={kind} onClick={() => setAdding(kind)}>
       Add {ADD_WORDS[kind].noun}…
     </button>
   ));
   return (
-    <Grp title={title} desc={desc} action={action}>
-      {adding === null ? null : <AddRow key={adding} kind={adding} close={() => setAdding(null)} />}
+    <Grp title={title} desc={desc}>
       {items.map((x) => (
         <SourceRow key={x.id} src={x} />
       ))}
-      {items.length === 0 && adding === null ? <div className="src-none">{none}</div> : null}
+      <div className="src-entry" ref={entry}>
+        {adding === null ? (
+          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">Choose a local path to share.</span>}>
+            {action}
+          </Row>
+        ) : <AddRow key={adding} kind={adding} close={close} />}
+      </div>
     </Grp>
   );
 }
@@ -482,8 +498,8 @@ function Library() {
       {sources === NA ? null : (
         <>
           <LibraryImports />
-          <SourceGroup title="Files and folders" desc="Read as they are now." none="No folders or files yet. Add one and the model can read it." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
-          <SourceGroup title="SQLite databases" desc="Read from a copy made when you add one." none="No databases yet. Add a SQLite file and the model can look things up in it." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
+          <SourceGroup title="Files and folders" desc="Read as they are now." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
+          <SourceGroup title="SQLite databases" desc="Read from a copy made when you add one." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
         </>
       )}
     </>

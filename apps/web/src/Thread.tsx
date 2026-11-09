@@ -347,6 +347,7 @@ const LONG_THREAD = 50;
 /** The open thread: `.tl > .col`. Follows the end while the reader is near it (120 px). */
 export function Timeline({ threadId }: { threadId: string }) {
   const messages = useStore((s) => s.messages[threadId] ?? EMPTY);
+  const loading = useStore((s) => s.messages[threadId] === undefined && s.live?.threadId !== threadId);
   const loadError = useStore((s) => s.loadErrors[threadId]);
   const stopNotes = useStore((s) => s.stopNotes);
   // 0 unless the perf spec's negative control is on (window.glRows.bustMemo)
@@ -384,8 +385,9 @@ export function Timeline({ threadId }: { threadId: string }) {
   }, []);
 
   return (
-    <div className="tl" ref={tl}>
+    <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
+        {loading && loadError === undefined ? <p className="na" role="status" data-thread-loading>Loading conversation…</p> : null}
         {messages.map((m, i) => (
           <Fragment key={m.id}>
             {m.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn msg={row(m)} last={i === lastAsst && i === messages.length - 1} />}

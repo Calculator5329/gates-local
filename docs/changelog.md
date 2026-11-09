@@ -6,6 +6,38 @@ A Disconnect received during reconnect now invalidates older Connect checks
 immediately, while its settings still wait for hydration. Replaying those
 settings does not cancel a Connect started after the foreign save arrived.
 
+## 2026-11-08: Controls keep their space when their state changes
+
+- Library's Add folder, file and database controls become a path editor in
+  the same row. Existing sources stay above the editor. Cancel returns to
+  the original Add control, and a failed Add keeps the path and replaces
+  the helper with its error.
+- Model downloads keep a row for progress and completion. The completed
+  row stays in its sorted position until the installed list arrives. Its
+  progress bar uses the row's existing inset, and an error replaces the
+  detail instead of adding a line. The picker and first-model composer also
+  keep waiting through completion. Size and download details remain visible.
+- Expanded GPU details keep the free-memory legend, including zero free,
+  and give the estimate, GPU or system-memory use, and measurement source
+  separate lines. The picker uses catalog reports for the matching context
+  while fresh reports arrive.
+- Image generation explains its effect before and after enabling it. Test
+  keeps its label while busy, System's theme description fits on a phone,
+  and a send notice uses the existing gap above the footer without moving
+  the message box or covering reply actions. Its full text remains available
+  on focus or hover.
+- Refreshing a database no longer changes the phone path column's width.
+  Library links remain available while tools are off. An uncached thread
+  explains that its conversation is loading instead of briefly appearing empty.
+
+## 2026-11-08: GPU memory stays visible while it refreshes
+
+- Changing the default context no longer flashes Checking or closes expanded
+  GPU memory details. Reopening the model picker after a load also keeps the
+  verdicts it already checked.
+- Reports stay visible while a new memory reading is checked. Older replies
+  cannot overwrite newer readings, and a failed check still shows its error.
+
 ## 2026-11-09: Preserve speech connection choices while reconnecting
 
 An older Disconnect push buffered during reconnect no longer cancels a newer

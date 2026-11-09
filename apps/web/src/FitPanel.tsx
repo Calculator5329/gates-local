@@ -181,16 +181,14 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
             <span className="v">{ch.toFixed(1)} GB</span>
           </div>
         ) : null}
-        {un > 0 ? (
-          <div className="lg-r">
-            <span className="chip sw-free" />
-            <span className="nm">
-              {loaded ? "Currently free" : "Free after loading"}
-              {loaded ? null : <small>est.</small>}
-            </span>
-            <span className="v">{un.toFixed(1)} GB</span>
-          </div>
-        ) : null}
+        <div className="lg-r">
+          <span className="chip sw-free" />
+          <span className="nm">
+            {loaded ? "Currently free" : "Free after loading"}
+            {loaded ? null : <small>est.</small>}
+          </span>
+          <span className="v">{un.toFixed(1)} GB</span>
+        </div>
       </div>
     </>
   );
@@ -254,18 +252,13 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
       </>
     );
   }
-  if (v.k === "spill") {
-    return (
-      <div className="fp-n">
-        Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} of GPU memory is available to this model`} · {r.source === "measured" ? "measured" : `not measured at ${ctx} yet`}
-        <br />
-        An estimated {gb(v.amt)} runs from system memory, so replies are slower.
-      </div>
-    );
-  }
   return (
     <div className="fp-n">
-      Estimated {gb(r.needVramBytes)} of {gb(r.freeVramBytes)} available to this model · {loaded && r.source === "measured" ? `measured ${gb(r.needVramBytes)} on last load` : `not measured at ${ctx} yet`}
+      Est. {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
+      <br />
+      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
+      <br />
+      {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
     </div>
   );
 }

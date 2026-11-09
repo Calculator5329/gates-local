@@ -176,7 +176,7 @@ test("Theme applies the moment it is picked, and says only what the choice does"
   await theme.getByRole("button", { name: "System" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   expect(await bg()).toBe(dark);
-  await expect(row).toContainText("System matches your desktop's light or dark setting.");
+  await expect(row).toContainText("Matches your desktop theme.");
 });
 
 test("Reset settings asks first, then puts the settings back and leaves who runs Ollama alone", async ({ page, open }) => {

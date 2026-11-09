@@ -1,27 +1,34 @@
 // How a model downloads: the bar and its detail line, the catalog rows with
 // their fit and Download or Cancel download, and any other name typed in. The
 // Models page's Download tab shows these as they are, and first run and the
-// Installed tab share the detail.
+// Installed tab share the progress bar and timing words.
 import { useState } from "react";
 import type { CatalogEntry, PullProgress } from "@gates-local/contracts";
 import { shortGpu } from "./FitPanel.tsx";
-import { describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { Icon } from "./icons.tsx";
+import { nameOf, sizeText, splitTail } from "./models-rules.ts";
+import { awaitingInstall } from "./pick.ts";
 import { cancelPull, pull } from "./session.ts";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
 import { NA, type State, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
-export const isActive = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
-
-/** One download detail everywhere a download runs (F64): bar, bytes, speed, time left, Cancel download. */
-export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
+function Progress({ p, name }: { p: PullProgress; name: string }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
+  return (
+    <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
+      <i style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** First-run detail: bar, bytes, speed, time left, Cancel download. */
+export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
   const [err, run] = useAct();
   return (
     <>
-      <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
-        <i style={{ width: `${pct}%` }} />
-      </div>
+      <Progress p={p} name={name} />
       <div className="prog-l">
         <span>{etaText(p)}</span>
         {cancel ? (
@@ -44,26 +51,59 @@ export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: st
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
-/** The downloads still running for models not installed yet, one row each, under the Installed list. */
-export function DownloadingRows() {
+/** Completed pulls bridge the interval until the installed list arrives. */
+export function usePendingDownloads() {
   const pulls = useStore((s) => s.pulls);
   const models = useStore((s) => s.models);
+  // A completed pull stays here until the installed list arrives. Otherwise
+  // the row briefly vanishes between the two independent push messages.
+  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => m.name === p.name));
+}
+
+export function DownloadingRows() {
+  return usePendingDownloads().map((p) => <DownloadingRow key={p.name} p={p} />);
+}
+
+export function DownloadingRow({ p }: { p: PullProgress }) {
   const catalog = useStore(catalogOf);
-  const running = Object.values(pulls).filter((p) => isActive(p) && !(models ?? []).some((m) => m.name === p.name));
-  return running.map((p) => {
-    const d = describeModel(p.name, catalog);
-    return (
-      <div key={p.name} className="mp-row mp-dling" data-pull={p.name}>
-        <div className="mdl">
-          <span className="mn">
-            {d.name}
-            <small>{d.purpose}</small>
-          </span>
-          <DlDetail p={p} name={d.name} />
+  const n = nameOf(p.name, catalog);
+  const [head, tail] = splitTail(n.text);
+  const bytes = p.totalBytes ?? catalog?.find((c) => c.name === p.name)?.downloadBytes;
+  const size = bytes === undefined ? "Size pending" : sizeText(bytes);
+  const state = p.state === "done" ? "Finishing download" : "Downloading";
+  const [err, run] = useAct();
+  const detail = <span className="prog-l dl-status"><span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? etaText(p)}</span></span>;
+  return (
+    <div className="mp-row mp-dling" data-pull={p.name}>
+      <div className="mp-nm" data-tip={`${esc(p.name)}${n.purpose ? `<br>${esc(n.purpose)}` : ""}<br>${err ? `${esc(err)}<br>` : ""}${esc(etaText(p))}`}>
+        <div className="mp-l1">
+          {n.mono ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
+        </div>
+        {n.purpose ? <div className="mp-p">{detail}</div> : null}
+        <div className="mp-meta">
+          <span>{size}</span><span aria-hidden="true">·</span>{n.purpose ? <span>{state}</span> : detail}
         </div>
       </div>
-    );
-  });
+      <span className="mp-sz">{size}</span>
+      <span className="mp-fitc"><span className="mp-fit none">{n.purpose ? state : detail}</span></span>
+      <div className="mp-acts">
+        <button
+          type="button"
+          className="mp-kebab"
+          aria-label="Cancel download"
+          data-tip="Cancel download"
+          disabled={p.state === "done"}
+          onClick={() => {
+            closeTip();
+            void run(cancelPull(p.name));
+          }}
+        >
+          <Icon id="x" />
+        </button>
+      </div>
+      <Progress p={p} name={n.text} />
+    </div>
+  );
 }
 
 function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
@@ -71,12 +111,12 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
   const v = c.fit ? verdictOf(c.fit) : undefined;
   const cpu = useStore((s) => noGpu(s.gpu));
-  const dling = p !== undefined && isActive(p) && !installed;
+  const dling = p !== undefined && awaitingInstall(p) && !installed;
   const [err, run] = useAct();
   const action = installed ? (
     <span className="badge">Installed</span>
   ) : dling ? (
-    <button type="button" className="qa" onClick={() => void run(cancelPull(c.name))}>
+    <button type="button" className="qa" disabled={p.state === "done"} onClick={() => void run(cancelPull(c.name))}>
       Cancel download
     </button>
   ) : (
@@ -85,20 +125,13 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
     </button>
   );
   return (
-    <div className={`dlrow${dling ? " dlg" : ""}`} data-cat={c.name}>
+    <div className="dlrow" data-cat={c.name}>
       <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>`}>
         <b>{c.label}</b>
-        {dling ? (
-          <>
-            <span className="d">{c.purpose}</span>
-            <DlDetail p={p} name={c.label} cancel={false} />
-          </>
-        ) : (
-          <span className="d">
-            {c.purpose} · {gb(c.downloadBytes)} download
-          </span>
-        )}
-        <Fail err={err} />
+        <span className="d">{c.purpose}</span>
+        <div className="prog-l dl-status" data-tip={err ? esc(err) : dling ? esc(etaText(p)) : undefined}>
+          <span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? (dling ? etaText(p) : `${gb(c.downloadBytes)} download`)}</span>
+        </div>
       </div>
       {v ? (
         <div className="dl-v" data-tip={cpu ? `Estimated ${gb(v.need)} at ${k(numCtx)}, all in system memory (no supported GPU). Measured after the first load.` : `Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
@@ -111,6 +144,7 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
         <div className="dl-v" />
       )}
       <div className="dl-a">{action}</div>
+      {dling ? <Progress p={p} name={c.label} /> : null}
     </div>
   );
 }

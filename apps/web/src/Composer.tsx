@@ -9,7 +9,7 @@ import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
 import { Icon, SendArrow } from "./icons.tsx";
-import { canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
+import { awaitingInstall, canThink, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import {
   cancelQueuedEdit,
@@ -47,8 +47,9 @@ function usedTokens(s: State): number {
   return (last?.stats?.promptTokens ?? 0) + (last?.stats?.completionTokens ?? 0);
 }
 
-function verdictFor(s: Pick<State, "fits" | "numCtx">, model: string): Verdict | undefined {
-  const r = s.fits[fitKey(model, s.numCtx)];
+function verdictFor(s: Pick<State, "fits" | "numCtx" | "catalog">, model: string): Verdict | undefined {
+  const measured = s.catalog === NA ? undefined : s.catalog?.find((c) => c.name === model)?.fit;
+  const r = s.fits[fitKey(model, s.numCtx)] ?? (measured?.numCtx === s.numCtx ? measured : undefined);
   return r === undefined || r === "error" ? undefined : verdictOf(r);
 }
 
@@ -349,7 +350,7 @@ export function Composer() {
         </div>
       </form>
       {notice !== null ? (
-        <p className="na c-note" role="status">
+        <p className="na c-note" role="status" tabIndex={0} data-tip={esc(notice)}>
           {notice}
         </p>
       ) : null}
@@ -646,7 +647,7 @@ function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "cat
     groups[frees ? "spill" : (v?.k ?? "unknown")].push({ tag: m.name, name: d.name, purpose: d.purpose, v, info: m, frees });
   }
   for (const p of Object.values(s.pulls)) {
-    if (p.state !== "downloading" && p.state !== "queued" && p.state !== "verifying") continue;
+    if (!awaitingInstall(p)) continue;
     if ((s.models ?? []).some((m) => m.name === p.name)) continue;
     const d = describeModel(p.name, catalog);
     if (!hit(p.name, d.name, d.purpose)) continue;
@@ -841,10 +842,9 @@ export function Picker() {
     const installed = chatModels(getState().models ?? []);
     for (const m of installed) {
       ensureFit(m.name, numCtx);
-      // a phone's blocked row offers the largest smaller context that fits, so it needs those verdicts too
-      if (isPhone() && verdictFor({ fits, numCtx }, m.name)?.k === "no") {
-        for (const c of CONTEXT_SIZES) if (c < numCtx && (m.maxContext === undefined || c <= m.maxContext)) ensureFit(m.name, c);
-      }
+      // Context picks can reuse checked reports instead of briefly regrouping
+      // installed rows under Checking. The cache deduplicates these requests.
+      for (const c of CONTEXT_SIZES) if (m.maxContext === undefined || c <= m.maxContext) ensureFit(m.name, c);
     }
     // download and downloading rows too: the fit check gives a model not installed yet the pre-download estimate
     for (const c of catalog ?? []) if (!c.installed && !installed.some((m) => m.name === c.name)) ensureFit(c.name, numCtx);
@@ -862,7 +862,7 @@ export function Picker() {
   const families = [...new Set([...listed, ...offered.map((c) => c.label)].map(familyOf))];
   const pulling = (tag: string) => {
     const p = pulls[tag];
-    return p !== undefined && (p.state === "queued" || p.state === "downloading" || p.state === "verifying");
+    return p !== undefined && awaitingInstall(p);
   };
   const downloads = offered.filter(
     (c) => !pulling(c.name) && inFam(c.label) && (query === "" || c.name.toLowerCase().includes(query) || c.label.toLowerCase().includes(query) || c.purpose.toLowerCase().includes(query)),
@@ -996,7 +996,7 @@ export function Picker() {
   );
   const dlRows = downloads.map((c) => {
     // the fit at the picker's context, not the catalog's at the saved default
-    const v = verdictFor({ fits, numCtx }, c.name);
+    const v = verdictFor({ fits, numCtx, catalog: catalogRaw }, c.name);
     // Recommended is "runs on the GPU" at this context; with no GPU, the catalog's lightest pick while it still runs
     const recTip =
       v?.k === "gpu"

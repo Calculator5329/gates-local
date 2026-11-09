@@ -6,11 +6,11 @@
 // download flow as it was (ModelDownloads.tsx). The rules live in
 // models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { FitReport, ModelInfo } from "@gates-local/contracts";
+import type { FitReport, ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "./copy.ts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
+import { DownloadTab, DownloadingRow, DownloadingRows, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
   type ModelName,
@@ -29,7 +29,7 @@ import {
   sortRows,
   splitTail,
 } from "./models-rules.ts";
-import { canChat, notForChat } from "./pick.ts";
+import { awaitingInstall, canChat, notForChat } from "./pick.ts";
 import { ensureFit, pull } from "./session.ts";
 import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, fitKey, setState, useStore } from "./store.ts";
@@ -170,6 +170,8 @@ export function ModelsPage() {
 
 function Installed() {
   const models = useStore((s) => s.models);
+  const catalog = useStore(catalogOf);
+  const downloads = usePendingDownloads();
   const { rows, def } = useInstalledRows();
   const [filter, setFilter] = useState("");
   const [removing, setRemoving] = useState<{ row: InstalledRow; back: HTMLElement | null } | null>(null);
@@ -194,14 +196,17 @@ function Installed() {
     );
   }
   const q = filter.trim().toLowerCase();
-  const shown = q === "" ? rows : rows.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
+  // A download starts in the same sorted slot its installed row will use.
+  type ListedRow = InstalledRow | (Row & { readonly progress: PullProgress });
+  const listed = sortRows<ListedRow>([...rows, ...downloads.map((progress) => ({ name: progress.name, display: nameOf(progress.name, catalog).text, chat: true, verdict: undefined, progress }))], def);
+  const shown = q === "" ? listed : listed.filter((r) => r.display.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
   const total = models.reduce((sum, m) => sum + m.sizeBytes, 0);
   const shownDef = settingsNA ? undefined : def;
   return (
     <>
       {rows.some((r) => r.chat) ? <DefaultCard rows={rows} def={def} disabled={settingsNA} /> : null}
       {notice}
-      {filterShows(rows.length, filter) ? (
+      {filterShows(listed.length, filter) ? (
         <Field value={filter} onChange={setFilter} placeholder="Filter installed models" label="Filter installed models" cls="mp-filter" />
       ) : null}
       <div className="mp-card">
@@ -211,10 +216,9 @@ function Installed() {
           <span className="mp-fitc">On this computer</span>
           <span />
         </div>
-        {shown.map((r) => (
-          <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />
-        ))}
-        <DownloadingRows />
+        {shown.map((r) => "progress" in r ? (
+          <DownloadingRow key={r.name} p={r.progress} />
+        ) : <ModelRowView key={r.name} r={r} def={shownDef} saved={saved} onRemove={(back) => setRemoving({ row: r, back })} />)}
         {shown.length === 0 ? <div className="mp-none">No installed model matches “{filter.trim()}”.</div> : null}
       </div>
       <div className="mp-foot">{sizeText(total)} on disk</div>
@@ -530,7 +534,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
 
 function NoModels() {
   const catalog = useStore(catalogOf);
-  const downloading = useStore((s) => Object.values(s.pulls).some(isActive));
+  const downloading = useStore((s) => Object.values(s.pulls).some(awaitingInstall));
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const cpu = useStore((s) => noGpu(s.gpu));
   const [err, run] = useAct();

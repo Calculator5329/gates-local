@@ -270,7 +270,7 @@ async function hydrateWith(
   });
   on("models.changed", (models) => {
     modelsOrder.next();
-    setState({ models });
+    setState((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
     invalidateFits();
@@ -285,7 +285,7 @@ async function hydrateWith(
     invalidateFits();
   });
   on("models.pull", (p) => {
-    setState((s) => ({ pulls: { ...s.pulls, [p.name]: p } }));
+    setState((s) => ({ pulls: settlePulls({ ...s.pulls, [p.name]: p }, s.models) }));
     if (p.state === "done") void refreshModels();
   });
   on("models.load", (l) => {
@@ -315,10 +315,11 @@ async function hydrateWith(
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
+  fitEpoch++;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, threads: ordered, fits: {}, ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(s.pulls, models ?? s.models), threads: ordered, fits: { ...s.fits }, ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   restoreSaved();
@@ -388,11 +389,17 @@ async function refreshCatalog(): Promise<void> {
   if (catalog !== undefined && catalogLands(ticket)) setState({ catalog });
 }
 
+/** Completed progress bridges the list handoff, then retires so Remove cannot revive it. */
+function settlePulls(pulls: State["pulls"], models: State["models"]): State["pulls"] {
+  const installed = new Set(models?.map((m) => m.name));
+  return Object.fromEntries(Object.entries(pulls).filter(([name, p]) => p.state !== "done" || !installed.has(name)));
+}
+
 export async function refreshModels(): Promise<void> {
   const ticket = modelsOrder.next();
   const models = await call("models.refresh", {}).catch(() => undefined);
   if (models === undefined || !modelsOrder.current(ticket)) return;
-  setState({ models });
+  setState((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
   restoreSaved();
   chooseModel();
   invalidateFits();
@@ -454,14 +461,17 @@ const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : 
 
 // ---------------------------------------------------------------- fit checks
 
-const inflight = new Set<string>();
+// A report remains readable while its replacement is measured. The epoch also
+// stops an answer started before a memory change from becoming current.
+const fitChecks = new Map<string, number>();
+let fitEpoch = 0;
 
-/** Fetch the fit report for a model at a context once; the store caches it. */
+/** Check once per memory reading; keep the previous report until it answers. */
 export function ensureFit(model: string | undefined, numCtx: number): void {
   if (model === undefined) return;
   const key = fitKey(model, numCtx);
   const s = getState();
-  if (s.fits[key] !== undefined || inflight.has(key) || !chatReady(s)) return;
+  if (fitChecks.get(key) === fitEpoch || !chatReady(s)) return;
   checkFit(model, numCtx, key, 0);
 }
 
@@ -470,30 +480,35 @@ const FIT_RETRY_MS = 2000;
 const FIT_RETRY_MAX_MS = 30_000;
 
 function checkFit(model: string, numCtx: number, key: string, failures: number): void {
-  inflight.add(key);
+  const epoch = fitEpoch;
+  fitChecks.set(key, epoch);
   call("fit.check", { model, numCtx })
     .then(async (r) => {
       // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
       const frees = r.verdict === "refuse" && (await blockingFor(model, numCtx)).length > 0;
+      if (epoch !== fitEpoch) return;
       setState((st) => {
         const { [key]: _old, ...stopFrees } = st.stopFrees;
         return { fits: { ...st.fits, [key]: r }, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
       });
     })
     .catch(() => {
+      if (epoch !== fitEpoch) return;
       setState((st) => ({ fits: { ...st.fits, [key]: "error" as const } }));
-      // "error" is shown, not kept: an invalidation clears it, and otherwise the check is retried
+      // A failure ends the held verdict; retry while this reading is current.
       setTimeout(() => {
         const s = getState();
-        if (s.fits[key] === "error" && !inflight.has(key) && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
+        if (epoch === fitEpoch && s.fits[key] === "error" && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
       }, Math.min(FIT_RETRY_MAX_MS, FIT_RETRY_MS * 2 ** failures));
-    })
-    .finally(() => inflight.delete(key));
+    });
 }
 
-/** Memory changed (a load, a push, a finished turn): every verdict is checked again when next shown. */
+/** Memory changed: refresh the open chat now and other reports when shown. */
 function invalidateFits(): void {
-  setState({ fits: {} });
+  fitEpoch++;
+  setState((s) => ({ fits: { ...s.fits } }));
+  const s = getState();
+  ensureFit(s.model, s.numCtx);
 }
 
 // ---------------------------------------------------------------- threads
