@@ -16,7 +16,7 @@ import {
 } from "./constants.ts";
 import { effectiveNumCtx, estimateNeed, parseArchInfo, reportedContextLength, type EstimateOptions } from "./estimate.ts";
 import { formatBytes, formatGb } from "./format.ts";
-import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemAvailable, untilAborted } from "./gpu.ts";
+import { defaultMeminfo, defaultNvidiaSmi, gpuReadingConflict, readGpu, readMemAvailable, untilAborted } from "./gpu.ts";
 import { fetchPs, fetchShow, fetchTags, findLoaded, sameModel, type PsEntry, type PsResponse, type TagsResponse } from "./ollama.ts";
 import {
   FitError,
@@ -167,6 +167,8 @@ async function takeReadings(deps: FitDeps): Promise<Readings> {
     ]),
     signal,
   );
+  const conflict = gpuReadingConflict(gpu.unavailableDetail, ps.models.map(model => model.size_vram));
+  if (conflict !== undefined) throw new FitError("gpu-unreadable", conflict);
   return { gpu, memAvailableBytes, ps, tags };
 }
 
@@ -266,6 +268,8 @@ export interface LoadPlan {
  */
 export async function planLoad(deps: FitDeps & { model: string; numCtx: number; busy: readonly string[]; comfyPid?: number }): Promise<LoadPlan> {
   const r = await takeReadings(deps);
+  // With no GPU there is no VRAM to reclaim from another reply or ComfyUI.
+  if (r.gpu.gpuCount === 0) return { report: (await fitWithReadings(deps, deps.model, deps.numCtx, r)).report, stop: [], comfy: false };
   const others = r.ps.models.filter((m) => !sameModel(m.name, deps.model));
   const busy = deps.busy.filter((b) => !sameModel(b, deps.model));
   const isBusy = (name: string) => busy.some((b) => sameModel(b, name));
@@ -305,6 +309,8 @@ export async function measuredFit(deps: FitDeps & { model: string; numCtx: numbe
     Promise.all([fetchPs(deps.baseUrl, deps.signal), readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, deps.now ?? Date.now, deps.signal)]),
     deps.signal,
   );
+  const conflict = gpuReadingConflict(gpu.unavailableDetail, ps.models.map(model => model.size_vram));
+  if (conflict !== undefined) throw new FitError("gpu-unreadable", conflict);
   const loaded = findLoaded(ps, deps.model);
   if (!loaded) throw new FitError("not-loaded", `${deps.model} is not in /api/ps; nothing to measure`);
   return { report: measuredReport(loaded, deps.numCtx, gpu, ps.models.length), gpu };

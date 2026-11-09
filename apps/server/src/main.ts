@@ -38,13 +38,13 @@
 // always refused. PEERS also covers what that check cannot see, such as a
 // userspace-networking tailscaled where no interface carries the address.
 // With LISTEN set, a missing or malformed other knob stops the start (exit 2).
-import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
+import { createNvidiaSmiRunner } from "./fit/gpu.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
 import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
@@ -150,10 +150,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ...(smiFile
       ? {
           // A called-off fit (shutdown, a runtime switch) kills the child.
-          runNvidiaSmi: (args: readonly string[], signal?: AbortSignal) =>
-            new Promise<string>((resolve, reject) =>
-              execFile(smiFile, [...smiPre, ...args], { timeout: 10_000, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
-            ),
+          runNvidiaSmi: createNvidiaSmiRunner(smiFile, smiPre),
         }
       : {}),
     ...(meminfoPath ? { readMeminfo: (signal?: AbortSignal) => readFile(meminfoPath, { encoding: "utf8", ...(signal ? { signal } : {}) }) } : {}),

@@ -15,7 +15,9 @@ export { openFit } from "./fit-actions.ts";
 import { FIT_DOT, fitLabel } from "./models-rules.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
-  gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+  gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
+
+const GPU_UNREADABLE_TEXT = "GPU memory could not be read. Try again before loading a model.";
 
 const r1 = (bytes: number) => Math.round((bytes / 1024 ** 3) * 10) / 10;
 
@@ -199,7 +201,7 @@ function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict;
   }
   return (
     <div className="fp-n fp-numbers">
-      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
+      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? gpu?.detail ? gpuHead(gpu) : "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
       <br />
       {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : phase === "fresh" ? "Runs entirely on the GPU." : "Previously fit on the GPU."}
       <br />
@@ -213,16 +215,13 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded, phase }: { mod
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
   if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
+  if (gpu !== undefined && gpu.vendor !== "nvidia") return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
   return (
     <>
       <div className="fp-sep" />
       <div className="fp-mt">{phase === "fresh" ? "Where the memory goes" : "Previous memory check"}</div>
       {gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
-      ) : gpu.vendor === "none" ? (
-        <div className="fp-n">{NO_GPU_TEXT}</div>
-      ) : gpu.vendor === "unreadable" ? (
-        <div className="fp-n">Gates Local couldn't read the graphics card{gpu.detail ? ` (${gpu.detail})` : ""}. The estimate above uses system memory only.</div>
       ) : (
         <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={numCtx} />
       )}
@@ -288,6 +287,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
   }, [model, numCtx, max, fits, stale]);
   const cpu = noGpu(gpu);
+  const gpuNotice = gpu?.vendor === "unreadable" ? gpu.detail ?? GPU_UNREADABLE_TEXT : gpu?.vendor === "none" ? gpu.detail ?? NO_GPU_TEXT : undefined;
   const report = fits[fitKey(model, numCtx)];
   const pick = (c: ContextSize) => {
     closeTip();
@@ -329,8 +329,8 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
           {live === undefined ? null : <div className="ctx-line">{live}</div>}
         </div>
       </Row>
-      <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context</>}>
-        {fit === undefined ? <span className="fp-n">{report === "error" ? `Gates Local couldn't check ${memory} for ${name} right now.` : `Checking ${memory}…`}</span> : <FitLine r={fit} ctx={ctx} cpu={cpu} phase={phase} />}
+      <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context{gpuNotice === undefined ? null : <><br />{gpuNotice}</>}</>}>
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : <span className="fp-n">{report === "error" ? `Gates Local couldn't check ${memory} for ${name} right now.` : `Checking ${memory}…`}</span> : <FitLine r={fit} ctx={ctx} cpu={cpu} phase={phase} />}
         {action}
       </Row>
       {fit === undefined ? null : (

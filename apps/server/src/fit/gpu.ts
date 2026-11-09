@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { MIB } from "./constants.ts";
 import { FitError, type GpuSnapshot, type GpuTenant, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
@@ -16,14 +17,16 @@ export const GPU_APPS_ARGS = [
   "--format=csv,noheader,nounits",
 ] as const;
 
-export const defaultNvidiaSmi: NvidiaSmiRunner = (args, signal) =>
+export const createNvidiaSmiRunner = (file = "nvidia-smi", leadingArgs: readonly string[] = []): NvidiaSmiRunner => (args, signal) =>
   new Promise((resolve, reject) => {
     // windowsHide: the server has no console on Windows, so each run would flash one.
-    execFile("nvidia-smi", [...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout) => {
-      if (error) reject(error);
+    execFile(file, [...leadingArgs, ...args], { timeout: 10_000, maxBuffer: 4 * MIB, windowsHide: true, ...(signal ? { signal } : {}) }, (error, stdout, stderr) => {
+      if (error) reject(Object.assign(error, { stdout, stderr }));
       else resolve(stdout);
     });
   });
+
+export const defaultNvidiaSmi = createNvidiaSmiRunner();
 
 /**
  * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.freemem()
@@ -125,22 +128,90 @@ export function parseComputeApps(text: string): GpuTenant[] {
   return tenants;
 }
 
+function errorText(error: unknown): string {
+  if (typeof error !== "object" || error === null) return String(error);
+  return ["message" in error ? error.message : undefined, "stdout" in error ? error.stdout : undefined, "stderr" in error ? error.stderr : undefined]
+    .filter((part): part is string => typeof part === "string").join("\n");
+}
+
+/** Only the documented unavailable-device messages qualify, never a generic NVML/read error. See gpu-failures.md. */
+function noUsableGpu(error: unknown): { kind: "none"; detail?: string } | undefined {
+  let reason: string;
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return { kind: "none" };
+  else {
+    const text = typeof error === "string" ? error : errorText(error);
+    if (/(^|\n)\s*No devices were found\.?\s*($|\n)/i.test(text)) reason = "nvidia-smi found no NVIDIA GPU";
+    else if (/NVIDIA-SMI has failed because it couldn't communicate with (?:the )?NVIDIA driver\b/i.test(text)) reason = "nvidia-smi couldn't communicate with the NVIDIA driver";
+    else return undefined;
+  }
+  return { kind: "none", detail: `${reason}. If this computer has an NVIDIA card, its driver is not answering: fix or reinstall the NVIDIA driver. Until then models run in system memory.` };
+}
+
+type SmiRead<T> = { kind: "ok"; totals: T; apps: string } | { kind: "none"; detail?: string } | { kind: "unreadable"; detail: string };
+
+export const gpuReadFailure = (reason: string): string =>
+  `Gates Local could not read GPU memory (${reason}), so it cannot check whether a model fits. Try again. If this keeps happening, run nvidia-smi in a terminal to check the NVIDIA driver.`;
+
+/** Resident GPU bytes contradict only nvidia-smi's reported absence, never a missing executable. */
+export function gpuReadingConflict(unavailableDetail: string | undefined, residentVramBytes: readonly number[]): string | undefined {
+  return unavailableDetail !== undefined && residentVramBytes.some(bytes => bytes > 0)
+    ? gpuReadFailure("Ollama reports a model in GPU memory, but nvidia-smi found no usable NVIDIA GPU") : undefined;
+}
+
+function isSmiTimeout(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    (("code" in error && error.code === "ETIMEDOUT") ||
+      ("code" in error && error.code === null && "killed" in error && error.killed === true && "signal" in error && error.signal === "SIGTERM"));
+}
+
+function readFailure(error: unknown): string {
+  if (error instanceof FitError) return "nvidia-smi printed no GPU memory line";
+  if (isSmiTimeout(error)) return "nvidia-smi timed out";
+  // execFile prefixes its message with the full command. The readers query different columns;
+  // keep the diagnostic below that prefix so the same failure has the same words in both places.
+  return errorText(error).trim().replace(/^Command failed:[^\n]*(?:\n|$)/i, "").trim().split("\n")[0] || "nvidia-smi command failed";
+}
+
+/** Confirm output-based absence and retry quick failures after 250 ms; timeouts, missing commands and aborts never retry. */
+export async function readNvidiaSmi<T>(run: NvidiaSmiRunner, totalsArgs: readonly string[], parse: (text: string) => T, signal?: AbortSignal): Promise<SmiRead<T>> {
+  let failed = "";
+  let firstAbsence: string | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    signal?.throwIfAborted();
+    if (attempt > 0) await untilAborted(delay(250, undefined, { signal }), signal);
+    const [totals, apps] = await untilAborted(Promise.allSettled([run(totalsArgs, signal), run(GPU_APPS_ARGS, signal)]), signal);
+    signal?.throwIfAborted();
+    const timedOut = [totals, apps].some(result => result.status === "rejected" && isSmiTimeout(result.reason));
+    if (timedOut) { failed = "nvidia-smi timed out"; break; }
+    const unavailable = noUsableGpu(totals.status === "rejected" ? totals.reason : totals.value);
+    if (unavailable !== undefined) {
+      if (attempt === 0 && unavailable.detail === undefined) return unavailable;
+      if (attempt === 1 && firstAbsence !== undefined && firstAbsence === unavailable.detail) return unavailable;
+      if (attempt === 0) { firstAbsence = unavailable.detail; continue; }
+    }
+    if (firstAbsence !== undefined || unavailable !== undefined) {
+      failed = "GPU availability changed between readings";
+      break;
+    }
+    try {
+      if (totals.status === "rejected") throw totals.reason;
+      const parsed = parse(totals.value);
+      // Readable GPU memory is evidence of a card, even if its process query says no devices.
+      if (apps.status === "rejected") throw apps.reason;
+      return { kind: "ok", totals: parsed, apps: apps.value };
+    } catch (error) {
+      failed = readFailure(error);
+    }
+  }
+  return { kind: "unreadable", detail: gpuReadFailure(failed) };
+}
+
 /** `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
 export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal): Promise<GpuSnapshot> {
-  signal?.throwIfAborted();
-  let totalsText: string;
-  let appsText: string;
-  try {
-    [totalsText, appsText] = await untilAborted(Promise.all([run(GPU_TOTALS_ARGS, signal), run(GPU_APPS_ARGS, signal)]), signal);
-  } catch (error) {
-    if (signal?.aborted) throw signal.reason;
-    // No nvidia-smi at all (for example a Windows machine with no NVIDIA GPU):
-    // zero VRAM, so the fit check plans the whole model in system memory.
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, tenants: [], measuredAt: now() };
-    throw new FitError("gpu-unreadable", `nvidia-smi failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const totals = parseGpuTotals(totalsText);
-  return { ...totals, tenants: parseComputeApps(appsText), measuredAt: now() };
+  const read = await readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals, signal);
+  if (read.kind === "unreadable") throw new FitError("gpu-unreadable", read.detail);
+  if (read.kind === "none") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, ...(read.detail === undefined ? {} : { unavailableDetail: read.detail }), tenants: [], measuredAt: now() };
+  return { ...read.totals, tenants: parseComputeApps(read.apps), measuredAt: now() };
 }
 
 /** MemAvailable from /proc/meminfo, in bytes. */

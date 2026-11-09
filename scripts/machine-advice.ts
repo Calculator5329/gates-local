@@ -83,7 +83,7 @@ function imageAdvice(gpu: GpuReading): ImageAdvice {
   if (gpu.kind === "none") {
     return { use: false, why: `Found no GPU the app can read (it reads GPU memory with nvidia-smi, so NVIDIA only). On the CPU each image is slow, and its time through ComfyUI has not been measured.` };
   }
-  if (gpu.kind === "unreadable") return { use: false, why: `The GPU could not be read: ${gpu.reason}.` };
+  if (gpu.kind === "unreadable") return { use: false, why: gpu.reason };
   if (gpu.totalBytes < IMAGE_ESTIMATED_BYTES) return { use: false, why: `This GPU has ${memory(gpu.totalBytes)} of memory and an image job wants about ${need}.` };
   const base = { use: true as const, checkpoint: CHECKPOINT, lora: LORA };
   if (gpu.freeBytes >= IMAGE_ESTIMATED_BYTES) return base;
@@ -95,13 +95,13 @@ export function advise(machine: MachineReadings): Advice {
   const text = textAdvice(machine, catalog(machine, numCtx));
   const image = imageAdvice(machine.gpu);
   const warnings: string[] = [];
-  if (machine.gpu.kind === "unreadable") warnings.push(`${machine.gpu.reason}. The app will not start a chat until this is fixed, so the text pick below plans as if there were no GPU.`);
+  if (machine.gpu.kind === "unreadable") warnings.push(`${machine.gpu.reason} The app will not start a chat until this is fixed, so the text pick below plans as if there were no GPU.`);
   const total = (text.use ? text.downloadBytes : 0) + (image.use ? CHECKPOINT_DOWNLOAD_BYTES : 0);
   if (total > machine.diskFreeBytes) warnings.push(`The downloads recommended here total ${download(total)}, before ComfyUI itself, and the disk has ${memory(machine.diskFreeBytes)} free.`);
   return { numCtx, text, image, warnings };
 }
 
-/** What the app itself would see: no nvidia-smi is no GPU; an nvidia-smi that fails is a fault to report. */
+/** The app's classification: missing command or confirmed GPU absence is none; other failures are unreadable. */
 export async function readGpuReading(run: NvidiaSmiRunner = defaultNvidiaSmi): Promise<GpuReading> {
   try {
     const gpu = await readGpu(run);
@@ -115,7 +115,7 @@ export async function readGpuReading(run: NvidiaSmiRunner = defaultNvidiaSmi): P
 
 function gpuLine(gpu: GpuReading): string {
   if (gpu.kind === "none") return "None the app can read (it uses nvidia-smi, so NVIDIA only)";
-  if (gpu.kind === "unreadable") return `Could not be read: ${gpu.reason}`;
+  if (gpu.kind === "unreadable") return gpu.reason;
   return `${gpu.name ?? "NVIDIA GPU"}, ${memory(gpu.totalBytes)} total, ${memory(gpu.freeBytes)} free right now`;
 }
 

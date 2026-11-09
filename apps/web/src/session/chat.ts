@@ -470,7 +470,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       ...(where === "box" ? { draft: content, draftImages: images, draftSendId: messageId ?? null, draftSendThreadId: threadId } : {}),
       ...(where === "queue" ? { queued: from === undefined ? [...st.queued, typed] : putBack(st.queued, from) } : {}),
       ...(ask === null || consented ? {} : { stopAsk: ask, notice: null }),
-      ...(ask === null && !halted ? { notice: code === "image-input" && e instanceof Error ? e.message : where === "queue" && !here ? elsewhereNotice(st, threadId) : refusal(code, model, where) } : {}),
+      ...(ask === null && !halted ? { notice: code === "gpu-unreadable" && e instanceof Error ? `${e.message}${where === null ? "" : ` Your message is back in the ${where}.`}` : code === "image-input" && e instanceof Error ? e.message : where === "queue" && !here ? elsewhereNotice(st, threadId) : refusal(code, model, where) } : {}),
     });
     if (consented) void launch(ask, true);
     // what waited behind it does not overtake it

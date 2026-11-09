@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
-import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit } from "./fit.ts";
-import { GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable } from "./gpu.ts";
+import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit, planLoad } from "./fit.ts";
+import { createNvidiaSmiRunner, GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
+import { readGpuStatus } from "./gpu-status.ts";
 
 /** Lets queued rejections surface as unhandled before a test looks. */
 const settle = () => new Promise((r) => setTimeout(r, 30));
@@ -123,6 +124,152 @@ describe("a model's own context window", () => {
 });
 
 describe("nvidia-smi parsing", () => {
+  it("keeps stdout from the real runner's non-zero exit for classification", async () => {
+    const run = createNvidiaSmiRunner(process.execPath, ["-e", 'process.stdout.write("No devices were found\\n"); process.exit(1)', "--"]);
+    expect(await readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals)).toMatchObject({ kind: "none", detail: expect.stringContaining("nvidia-smi found no NVIDIA GPU") });
+  });
+  it.each([
+    Object.assign(new Error("spawn nvidia-smi ENOENT"), { code: "ENOENT" }),
+    Object.assign(new Error("Command failed"), { stdout: "No devices were found\n" }),
+    Object.assign(new Error("Command failed"), { stderr: "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running." }),
+    new Error("NVIDIA-SMI has failed because it couldn't communicate with Nvidia Driver"),
+    new Error("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running. This can also be happening if non-NVIDIA GPU is running as primary display, and NVIDIA GPU is in WDDM mode."),
+    "No devices were found\n",
+  ])("plans in system memory and agrees with status when no NVIDIA GPU is usable: %s", async (error) => {
+    const s = await fakeOllama();
+    let totalsReads = 0;
+    const run: NvidiaSmiRunner = async (args) => { if (args[0]?.startsWith("--query-gpu")) totalsReads++; if (typeof error === "string") return error; throw error; };
+    const missing = typeof error === "object" && "code" in error && error.code === "ENOENT";
+    const status = await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(totalsReads).toBe(missing ? 1 : 2);
+    const check = await checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(status.vendor).toBe("none");
+    if (missing) expect(status.detail).toBeUndefined();
+    else {
+      const reason = typeof error === "string" || "stdout" in error ? "nvidia-smi found no NVIDIA GPU" : "nvidia-smi couldn't communicate with the NVIDIA driver";
+      expect(status.detail).toBe(`${reason}. If this computer has an NVIDIA card, its driver is not answering: fix or reinstall the NVIDIA driver. Until then models run in system memory.`);
+    }
+    expect(check.report).toMatchObject({ verdict: "spills", freeVramBytes: 0 });
+    expect(check.report.spillRamBytes).toBe(check.report.needVramBytes);
+    expect(totalsReads).toBe(missing ? 2 : 4);
+  });
+
+  it.each(["fit", "status"])("%s refuses when no-device output is followed by a readable card", async (reader) => {
+    let reads = 0;
+    const run: NvidiaSmiRunner = async (args) => !args[0]?.startsWith("--query-gpu") ? MACHINE_APPS
+      : ++reads === 1 ? "No devices were found\n" : args[0].includes("name,") ? `RTX, ${MACHINE_GPU}` : MACHINE_GPU;
+    if (reader === "fit") await expect(readGpu(run)).rejects.toMatchObject({ code: "gpu-unreadable" });
+    else expect((await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).vendor).toBe("unreadable");
+    expect(reads).toBe(2);
+  });
+
+  it.each([
+    Object.assign(new Error("missing"), { code: "ENOENT" }),
+    new Error("No devices were found"),
+    new Error("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver"),
+  ])("distinguishes missing NVIDIA software from reported absence with resident VRAM: %s", async (error) => {
+    const s = await fakeOllama({ models: [{ name: "resident", size: 5 * GIB, size_vram: 5 * GIB }] });
+    const run: NvidiaSmiRunner = async () => { throw error; };
+    const status = await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO, residentModels: async () => [{ name: "resident", sizeVramBytes: 5 * GIB }] });
+    if ("code" in error && error.code === "ENOENT") {
+      expect(status.vendor).toBe("none");
+      expect(status.detail).toBeUndefined();
+      const deps = { baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO };
+      await expect(checkFit(deps)).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { verdict: "spills" } });
+      await expect(planLoad({ ...deps, busy: ["resident"], comfyPid: 999 })).resolves.toMatchObject({ stop: [], comfy: false, report: { verdict: "spills" } });
+      await expect(measuredFit({ ...deps, model: "resident" })).resolves.toMatchObject({ gpu: { gpuCount: 0 }, report: { source: "measured", verdict: "fits" } });
+      return;
+    }
+    expect(status.vendor).toBe("unreadable");
+    expect(status.detail).toContain("Ollama reports a model in GPU memory");
+    await expect(checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).rejects.toMatchObject({ code: "gpu-unreadable", message: status.detail });
+    await expect(measuredFit({ baseUrl: s.baseUrl, model: "resident", numCtx: 16384, runNvidiaSmi: run })).rejects.toMatchObject({ code: "gpu-unreadable", message: status.detail });
+  });
+
+  it.each([
+    "garbled table",
+    "Failed to initialize NVML: Unknown Error",
+    "Failed to initialize NVML: Driver/library version mismatch",
+    "Failed to initialize NVML: Insufficient Permissions",
+    "Unable to determine the device handle for GPU 0000:01:00.0: Unknown Error",
+    "The diagnostic contains No devices were found but does not establish GPU availability",
+    "NVIDIA driver reported an unknown error",
+  ])("retries %s once, then refuses with the same actionable words as status", async (failure) => {
+    const s = await fakeOllama();
+    let totalsReads = 0;
+    const run: NvidiaSmiRunner = async (args) => {
+      if (!args[0]?.startsWith("--query-gpu")) return MACHINE_APPS;
+      totalsReads++;
+      if (failure === "garbled table") return "GPU memory unavailable";
+      throw new Error(failure);
+    };
+    const status = await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(status.vendor).toBe("unreadable");
+    expect(totalsReads).toBe(2);
+    await expect(checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).rejects.toMatchObject({ code: "gpu-unreadable", message: status.detail });
+    expect(totalsReads).toBe(4);
+    expect(status.detail).toMatch(/^Gates Local could not read GPU memory .*so it cannot check whether a model fits\. Try again\./);
+  });
+
+  it.each([
+    { reader: "fit", query: "totals" }, { reader: "fit", query: "apps" },
+    { reader: "status", query: "totals" }, { reader: "status", query: "apps" },
+  ])("$reader runs each query once when $query hits a timeout", async ({ reader, query }) => {
+    const queries: string[] = [];
+    const run: NvidiaSmiRunner = async (args) => {
+      const command = args[0] ?? "";
+      queries.push(command);
+      const totals = command.startsWith("--query-gpu");
+      if (totals === (query === "totals")) throw Object.assign(new Error("nvidia-smi timed out"), { code: "ETIMEDOUT" });
+      return totals ? command.includes("name,") ? `RTX, ${MACHINE_GPU}` : MACHINE_GPU : MACHINE_APPS;
+    };
+    if (reader === "fit") await expect(readGpu(run)).rejects.toMatchObject({ code: "gpu-unreadable", message: expect.stringContaining("nvidia-smi timed out") });
+    else expect(await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).toMatchObject({ vendor: "unreadable", detail: expect.stringContaining("nvidia-smi timed out") });
+    expect(queries.filter(command => command.startsWith("--query-gpu"))).toHaveLength(1);
+    expect(queries.filter(command => command.startsWith("--query-compute-apps"))).toHaveLength(1);
+  });
+
+  it.each(["fit", "status"])("%s recovers from a transient malformed read", async (reader) => {
+    vi.useFakeTimers();
+    try {
+    let reads = 0;
+    const run: NvidiaSmiRunner = async (args) => !args[0]?.startsWith("--query-gpu") ? MACHINE_APPS
+      : ++reads === 1 ? "garbled" : args[0].includes("name,") ? `RTX, ${MACHINE_GPU}` : MACHINE_GPU;
+    const check = reader === "fit" ? readGpu(run) : readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    await vi.advanceTimersByTimeAsync(249);
+    expect(reads).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    if (reader === "fit") expect(await check).toMatchObject({ freeBytes: 9468 * MIB });
+    else expect(await check).toMatchObject({ vendor: "nvidia" });
+    expect(reads).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("reports a real execFile timeout identically despite the readers' different query arguments", async () => {
+    const s = await fakeOllama();
+    let reads = 0;
+    const run: NvidiaSmiRunner = async (args) => {
+      reads++;
+      throw Object.assign(new Error(`Command failed: nvidia-smi ${args.join(" ")}\n`), { code: null, killed: true, signal: "SIGTERM", stdout: "", stderr: "" });
+    };
+    const status = await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO });
+    expect(status.detail).toContain("nvidia-smi timed out");
+    await expect(checkFit({ baseUrl: s.baseUrl, model: "qwen3.5:9b", numCtx: 16384, runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).rejects.toMatchObject({ message: status.detail });
+    expect(reads).toBe(4);
+  });
+
+  it("never treats a process-query error as no GPU when memory was readable", async () => {
+    let calls = 0;
+    const run: NvidiaSmiRunner = async (args) => {
+      calls++;
+      if (args[0]?.startsWith("--query-gpu")) return args[0].includes("name,") ? `RTX, ${MACHINE_GPU}` : MACHINE_GPU;
+      throw new Error("No devices were found");
+    };
+    expect((await readGpuStatus({ runNvidiaSmi: run, readMeminfo: async () => MACHINE_MEMINFO })).vendor).toBe("unreadable");
+    await expect(readGpu(run)).rejects.toMatchObject({ code: "gpu-unreadable" });
+    expect(calls).toBe(8);
+  });
+
   it("reads this machine's totals in bytes", () => {
     const totals = parseGpuTotals(MACHINE_GPU);
     expect(totals.totalBytes).toBe(16303 * MIB);
@@ -336,6 +483,21 @@ describe("checkFit against a fake Ollama and this machine's GPU layout", () => {
       await settle();
       expect(unhandled).toEqual([]);
     });
+
+    it("aborted after a failed first attempt: starts no second attempt", async () => {
+      vi.useFakeTimers();
+      try {
+        const controller = new AbortController();
+        const reason = new Error("gone during retry pause");
+        const gpu = readGpu(broken.smi, Date.now, controller.signal).catch((error: unknown) => error);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(broken.runs).toBe(2);
+        controller.abort(reason);
+        expect(await gpu).toBe(reason);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(broken.runs).toBe(2);
+      } finally { vi.useRealTimers(); }
+    });
   });
 
   it("a model missing from /api/tags is an error by code, not a verdict", async () => {
@@ -376,6 +538,15 @@ describe("blockingModels: which busy resident models a load would push out", () 
   const GEMMA = "gemma4-abliterated:26b";
   const QWEN27 = "qwen3.8-abliterated:27b";
   const QWEN9 = "qwen3.5:9b";
+
+  it("CPU-only plans never stop another busy reply to reclaim VRAM", async () => {
+    const s = await fakeOllama({ models: [{ name: QWEN27, size: 10 * GIB, size_vram: 0, context_length: 16384 }] });
+    const base = { baseUrl: s.baseUrl, model: QWEN9, numCtx: 16384, readMeminfo: plenty, now: () => 1,
+      runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } };
+    const alone = await planLoad({ ...base, busy: [] });
+    expect(alone.report.verdict).toBe("spills");
+    expect(await planLoad({ ...base, busy: [QWEN27], comfyPid: 999 })).toEqual({ report: alone.report, stop: [], comfy: false });
+  });
 
   it("none when the model fits beside them, is resident at this num_ctx, or is the busy model itself", async () => {
     const s = await fakeOllama(resident([{ name: QWEN27, vram: 2e9 }, { name: QWEN9, vram: 8e9 }]));

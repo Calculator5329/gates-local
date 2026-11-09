@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockingTurn, FitReport, Message, Payload } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
+import { replay } from "./ordering-replay.ts";
+import { gpuReadFailure } from "../../server/src/fit/gpu.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -23,6 +25,27 @@ const BLOCKING: BlockingTurn[] = [{ threadId: "A", title: "First chat", model: "
 // the model the sample list makes the pick
 const MODEL = "gemma3:4b";
 const sends = () => b.server.calls("chat.send").map((r) => r.params as { threadId: string; content: string; model: string; stopOthers?: boolean });
+
+it("CO-06 replay: a refused GPU send shows the server explanation and restores its words", async () => {
+  const sentence = gpuReadFailure("nvidia-smi timed out");
+  await replay({
+    name: "GPU read refusal returns the message to the composer",
+    create: async () => {
+      store.setState({ draft: "keep these words" });
+      const waiting = b.server.hold("chat.send");
+      const sent = session.send(st().draft);
+      return { request: await waiting, sent };
+    },
+    events: [{ name: "send.refused", run: async w => {
+      w.request.fail("gpu-unreadable", sentence);
+      await w.sent;
+    } }],
+    check(_w, _order, complete) {
+      if (complete) expect(st()).toMatchObject({ draft: "keep these words", queued: [], live: null, notice: `${sentence} Your message is back in the box.` });
+    },
+    dispose: async () => {},
+  });
+});
 
 it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its identity after visiting %s and returning", async destination => {
   const realTimeout = globalThis.setTimeout;

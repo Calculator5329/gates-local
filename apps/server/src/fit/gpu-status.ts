@@ -5,15 +5,15 @@
 // MainPID of whisper-server.service on Linux) and other apps are protected.
 // Ollama runners carry the model names from /api/ps; a ComfyUI python that
 // listens on 8188 is "image"; used memory no process accounts for is
-// "unknown". No NVIDIA GPU (or no nvidia-smi, as on Windows here) is vendor
-// "none"; an nvidia-smi that fails is "unreadable" with the reason.
+// "unknown". Missing nvidia-smi or confirmed unavailable devices are "none";
+// failed reads and absence contradicted by resident GPU bytes are "unreadable".
 import { execFile } from "node:child_process";
 import { readdir, readFile, readlink } from "node:fs/promises";
 import os from "node:os";
 import type { GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
-import { defaultNvidiaSmi, GPU_APPS_ARGS, parseComputeApps, parseMemAvailable } from "./gpu.ts";
-import type { MeminfoReader, NvidiaSmiRunner } from "./types.ts";
+import { defaultNvidiaSmi, gpuReadingConflict, parseComputeApps, parseMemAvailable, readNvidiaSmi } from "./gpu.ts";
+import { FitError, type MeminfoReader, type NvidiaSmiRunner } from "./types.ts";
 
 export const GPU_STATUS_ARGS = ["--query-gpu=name,memory.total,memory.used,memory.free", "--format=csv,noheader,nounits"] as const;
 
@@ -69,7 +69,7 @@ function otherAppLabel(processName: string): string {
 
 const isPython = (processName: string) => /python|comfy/i.test(processBasename(processName));
 
-function parseStatusTotals(text: string): { name: string; totalBytes: number; usedBytes: number; freeBytes: number } | undefined {
+function parseStatusTotals(text: string): { name: string; totalBytes: number; usedBytes: number; freeBytes: number } {
   for (const line of text.split(/\r?\n/)) {
     const parts = line.split(",").map((p) => p.trim());
     if (parts.length < 4) continue;
@@ -77,22 +77,7 @@ function parseStatusTotals(text: string): { name: string; totalBytes: number; us
     if (total === undefined || used === undefined || free === undefined) continue;
     return { name: parts.slice(0, -3).join(","), totalBytes: total, usedBytes: used, freeBytes: free };
   }
-  return undefined;
-}
-
-type SmiRead = { kind: "ok"; totals: string; apps: string } | { kind: "none"; detail: string } | { kind: "unreadable"; detail: string };
-
-async function readSmi(run: NvidiaSmiRunner): Promise<SmiRead> {
-  try {
-    const [totals, apps] = await Promise.all([run(GPU_STATUS_ARGS), run(GPU_APPS_ARGS)]);
-    return { kind: "ok", totals, apps };
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException & { stdout?: string };
-    const text = `${err.message ?? ""} ${err.stdout ?? ""}`;
-    if (err.code === "ENOENT") return { kind: "none", detail: "No NVIDIA GPU found (nvidia-smi is not installed); models run on the CPU and system memory." };
-    if (/No devices were found/i.test(text)) return { kind: "none", detail: "nvidia-smi found no NVIDIA GPU; models run on the CPU and system memory." };
-    return { kind: "unreadable", detail: `nvidia-smi failed: ${(err.message ?? String(e)).split("\n")[0]}` };
-  }
+  throw new FitError("gpu-unreadable", "nvidia-smi printed no GPU memory line");
 }
 
 async function systemMemoryAvailable(deps: GpuStatusDeps, platform: NodeJS.Platform): Promise<number> {
@@ -124,14 +109,15 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const now = deps.now ?? Date.now;
   const run = deps.runNvidiaSmi ?? defaultNvidiaSmi;
   const [smi, memAvail, models] = await Promise.all([
-    readSmi(run),
+    readNvidiaSmi(run, GPU_STATUS_ARGS, parseStatusTotals),
     systemMemoryAvailable(deps, platform),
     (deps.residentModels ?? (async () => []))().catch(() => [] as readonly ResidentModel[]),
   ]);
   const base = { systemMemoryAvailableBytes: Math.max(0, Math.round(memAvail)), measuredAt: now() };
+  const conflict = gpuReadingConflict(smi.kind === "none" ? smi.detail : undefined, models.map(model => model.sizeVramBytes));
+  if (conflict !== undefined) return { vendor: "unreadable", occupants: [], ...base, detail: conflict };
   if (smi.kind !== "ok") return { vendor: smi.kind, occupants: [], ...base, detail: smi.detail };
-  const totals = parseStatusTotals(smi.totals);
-  if (totals === undefined) return { vendor: "unreadable", occupants: [], ...base, detail: `nvidia-smi printed no GPU memory line: ${JSON.stringify(smi.totals.slice(0, 120))}` };
+  const totals = smi.totals;
 
   const tenants = parseComputeApps(smi.apps);
   const whisperPid = platform === "linux" && deps.whisperPid ? await deps.whisperPid().catch(() => undefined) : undefined;

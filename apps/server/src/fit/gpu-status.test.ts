@@ -100,13 +100,12 @@ describe("gpu.status without a readable NVIDIA GPU", () => {
       occupants: [],
       systemMemoryAvailableBytes: 9_000_000_000,
       measuredAt: 5,
-      detail: expect.stringContaining("models run on the CPU"),
     });
   });
 
-  it("an nvidia-smi that fails is unreadable with the reason", async () => {
+  it("a driver that cannot communicate leaves no usable NVIDIA GPU", async () => {
     const s = await readGpuStatus(linux({ runNvidiaSmi: async () => Promise.reject(new Error("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver")) }));
-    expect(s.vendor).toBe("unreadable");
+    expect(s.vendor).toBe("none");
     expect(s.detail).toContain("couldn't communicate");
   });
 

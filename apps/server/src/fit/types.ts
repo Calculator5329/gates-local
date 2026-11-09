@@ -39,6 +39,8 @@ export interface GpuSnapshot {
   freeBytes: number;
   /** Number of GPUs nvidia-smi listed; the fit uses the first. */
   gpuCount: number;
+  /** Confirmed absence reported by nvidia-smi; absent when the executable is missing. */
+  unavailableDetail?: string;
   tenants: GpuTenant[];
   measuredAt: number;
 }

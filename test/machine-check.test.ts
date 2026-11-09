@@ -56,11 +56,16 @@ describe("what the machine check recommends", () => {
     expect(text).toMatchObject({ why: expect.stringContaining("qwen3.5:4b") });
   });
 
-  it("an nvidia-smi that fails: images skipped for that reason, text planned without the GPU, and a warning", () => {
-    const { text, image, warnings } = advise(machine({ kind: "unreadable", reason: "nvidia-smi failed: driver" }));
+  it("an nvidia-smi that fails: images skipped for that reason, text planned without the GPU, and a warning", async () => {
+    const gpu = await readGpuReading(broken);
+    if (gpu.kind !== "unreadable") throw new Error("expected an unreadable GPU");
+    const readings = machine(gpu);
+    const advice = advise(readings);
+    const { text, image, warnings } = advice;
     expect(text).toMatchObject({ use: true, model: "qwen3.5:4b" });
-    expect(image).toMatchObject({ use: false, why: expect.stringContaining("nvidia-smi failed: driver") });
-    expect(warnings.join(" ")).toContain("nvidia-smi failed: driver");
+    expect.soft(image).toEqual({ use: false, why: gpu.reason });
+    expect.soft(warnings[0]).toBe(`${gpu.reason} The app will not start a chat until this is fixed, so the text pick below plans as if there were no GPU.`);
+    expect.soft(formatReport(readings, advice)).not.toContain("Could not be read:");
   });
 
   it("warns when the recommended text download is larger than the free disk", () => {
@@ -78,9 +83,6 @@ describe("what the machine check recommends", () => {
 });
 
 const smi = (name: string, totals: string): NvidiaSmiRunner => async (args) => (args[0] === "--query-gpu=name" ? name : args[0]?.includes("memory") ? totals : "");
-const missing: NvidiaSmiRunner = async () => {
-  throw Object.assign(new Error("spawn nvidia-smi ENOENT"), { code: "ENOENT" });
-};
 const broken: NvidiaSmiRunner = async () => {
   throw new Error("driver mismatch");
 };
@@ -95,8 +97,13 @@ describe("reading the GPU", () => {
     });
   });
 
-  it("no nvidia-smi means no GPU the app can read", async () => {
-    await expect(readGpuReading(missing)).resolves.toEqual({ kind: "none" });
+  it.each([
+    Object.assign(new Error("spawn nvidia-smi ENOENT"), { code: "ENOENT" }),
+    new Error("No devices were found"),
+    new Error("NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running. This can also be happening if non-NVIDIA GPU is running as primary display, and NVIDIA GPU is in WDDM mode."),
+  ])("missing NVIDIA software or confirmed absence means no GPU the app can read: %s", async (error) => {
+    const run: NvidiaSmiRunner = async () => { throw error; };
+    await expect(readGpuReading(run)).resolves.toEqual({ kind: "none" });
   });
 
   it("an nvidia-smi that fails is unreadable, not no GPU", async () => {
