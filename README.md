@@ -280,6 +280,10 @@ pnpm e2e           # browser journeys against a fake Ollama (Chromium)
 pnpm shots:readme  # regenerate the images in docs/screenshots
 ```
 
+[Client ordering replays](docs/testing.md) exercise speech choices, reconnecting
+sends and Stop acknowledgements in memory. They print a pasteable event order
+when a connection choice or message invariant breaks.
+
 `pnpm e2e` and `pnpm shots:readme` run the real server against a fake
 Ollama and a fake `nvidia-smi`, so they need no GPU and no models. They
 need a Chromium. They use the one named in `GATES_LOCAL_CHROMIUM`, else

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-09: Replay client actions across reconnect and delayed delivery
+
+Ordering probes now enumerate causal interleavings against two real client
+sessions and one in-memory server. Speech choices, message visibility across
+reconnect and Stop's reply identity are checked after each event. Failures print
+a complete replay order; fake time controls reconnect without real waits.
+Enumeration on older commits rediscovered three speech ordering bugs without
+being told their order. See `docs/testing.md`.
+
 ## 2026-11-09: Keep unrelated settings changes from cancelling speech connection
 
 Buffered settings pushes compare speech against the latest received address,

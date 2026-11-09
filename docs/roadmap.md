@@ -295,6 +295,16 @@ documents Milo's measured 404/850 ms first-audio references and the latency
 targets to validate here, and explains the request identities and PCM capture
 that stage 1 leaves reusable. Manual Dictate stays available separately.
 
+## Client ordering replay
+
+2026-11-08: in-memory replay now enumerates speech Connect/Disconnect choices
+across two windows and hydration, a send across disconnect/reconnect, and Stop
+around acknowledgements. It runs the real session and store with fake transport
+and stepped time. Three speech ordering bugs were rediscovered on older commits,
+and all three are fixed. `docs/testing.md` explains
+scenario constraints and replaying a printed order. These are diagnostic probes;
+the existing suite and independent review still determine acceptance.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,
