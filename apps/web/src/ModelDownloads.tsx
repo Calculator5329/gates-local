@@ -2,16 +2,16 @@
 // their fit and Download or Cancel download, and any other name typed in. The
 // Models page's Download tab shows these as they are, and first run and the
 // Installed tab share the progress bar and timing words.
-import { useState } from "react";
-import type { CatalogEntry, PullProgress } from "@gates-local/contracts";
+import { useEffect, useState } from "react";
+import type { CatalogEntry, FitReport, PullProgress } from "@gates-local/contracts";
 import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { nameOf, sizeText, splitTail } from "./models-rules.ts";
-import { awaitingInstall, modelNameKey } from "./pick.ts";
-import { cancelPull, pull } from "./session.ts";
+import { awaitingInstall, pendingDownload } from "./pick.ts";
+import { cancelPull, ensureFit, pull } from "./session.ts";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
-import { NA, type State, useStore } from "./store.ts";
+import { NA, type State, fitKey, useStore } from "./store.ts";
 import { VLabel, closeTip, esc } from "./ui.tsx";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
@@ -57,7 +57,7 @@ export function usePendingDownloads() {
   const models = useStore((s) => s.models);
   // A completed pull stays here until the installed list arrives. Otherwise
   // the row briefly vanishes between the two independent push messages.
-  return Object.values(pulls).filter((p) => awaitingInstall(p) && !(models ?? []).some((m) => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name))));
+  return Object.values(pulls).filter((p) => pendingDownload(p, models));
 }
 
 export function DownloadingRows() {
@@ -106,10 +106,13 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
   );
 }
 
-function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
+function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
-  const v = c.fit ? verdictOf(c.fit) : undefined;
+  const v = report ? verdictOf(report) : undefined;
+  const context = report?.numCtx ?? numCtx;
+  const basis = v?.measured ? "Measured" : "Estimated";
+  const note = v?.measured ? "From the current load." : "Measured after the first load.";
   const cpu = useStore((s) => noGpu(s.gpu));
   const dling = p !== undefined && awaitingInstall(p) && !installed;
   const [err, run] = useAct();
@@ -134,14 +137,14 @@ function DlRow({ c, numCtx }: { c: CatalogEntry; numCtx: number }) {
         </div>
       </div>
       {v ? (
-        <div className="dl-v" data-tip={cpu ? `Estimated ${gb(v.need)} at ${k(numCtx)}, all in system memory (no supported GPU). Measured after the first load.` : `Estimated ${gb(v.need)} at ${k(numCtx)}, of ${gb(v.avail)} available on the GPU. Measured after the first load.`}>
+        <div className="dl-v" data-tip={cpu ? `${basis} ${gb(v.need)} at ${k(context)}, all in system memory (no supported GPU). ${note}` : `${basis} ${gb(v.need)} at ${k(context)}, of ${gb(v.avail)} available on the GPU. ${note}`}>
           <VLabel v={v} />
           <small>
-            est. {gb(v.need)} at {k(numCtx)}
+            {v.measured ? "measured" : "est."} {gb(v.need)} at {k(context)}
           </small>
         </div>
       ) : (
-        <div className="dl-v" />
+        <div className="dl-v"><small>Checking at {k(numCtx)}…</small></div>
       )}
       <div className="dl-a">{action}</div>
       {dling ? <Progress p={p} name={c.label} /> : null}
@@ -188,16 +191,24 @@ export function DownloadTab() {
   const catalog = useStore((s) => s.catalog);
   const numCtx = useStore((s) => s.numCtx);
   const gpu = useStore((s) => s.gpu);
+  const fits = useStore((s) => s.fits);
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
-  const rec = list.filter((c) => c.recommended);
-  const more = list.filter((c) => !c.recommended);
-  const allSpill = more.length > 0 && more.every((c) => c.fit?.verdict === "spills");
+  const report = (c: CatalogEntry) => {
+    const r = fits[fitKey(c.name, numCtx)];
+    return r === "error" ? undefined : r ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
+  };
+  useEffect(() => {
+    for (const c of list) ensureFit(c.name, numCtx);
+  }, [catalog, numCtx, fits]);
+  const rec = list.filter(c => c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
+  const more = list.filter(c => !rec.includes(c));
+  const allSpill = more.length > 0 && more.every(c => report(c)?.verdict === "spills");
   return (
     <>
       <p className="mp-quiet">
-        Picked for your {gpuName}. Estimated at your default context, {k(numCtx)}.
+        Picked for your {gpuName}. Memory at your current context, {k(numCtx)}.
       </p>
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
@@ -205,14 +216,14 @@ export function DownloadTab() {
       {rec.length > 0 ? (
         <Grp title="Recommended">
           {rec.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} />
           ))}
         </Grp>
       ) : null}
       {more.length > 0 ? (
         <Grp title={allSpill ? "Also available · uses system memory" : "Also available"}>
           {more.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} />
           ))}
         </Grp>
       ) : null}

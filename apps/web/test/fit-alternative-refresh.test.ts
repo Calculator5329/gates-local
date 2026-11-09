@@ -112,3 +112,37 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(details(refreshed)).toContain("<summary>Details</summary>");
   expect(details(refreshed)).not.toContain('<div aria-hidden="true" style="visibility:hidden">');
 });
+
+it("saving a checked context keeps its verdict when only the model pick advice changes", async () => {
+  session.setContext(65536);
+  store.setState(s => s.settings && s.settings !== "na" ? { settings: { ...s.settings, defaultNumCtx: 65536 } } : {});
+  const models = store.getState().models!;
+  b.server.push("models.changed", models.map(m => ({ ...m, pick: { numCtx: 65536, verdict: "fits" } })));
+  const after = render();
+  expect(after).not.toContain("Checking");
+  expect(after).toContain("at 64k");
+  expect(details(after)).toContain("Runs entirely on the GPU.");
+});
+
+it("a model load refresh keeps checked verdicts readable until its replacement answers", async () => {
+  const next = b.server.hold("fit.check");
+  b.server.push("models.load", { model, state: "ready", numCtx: 32768 });
+  const pending = render();
+  expect(pending).not.toContain("Checking");
+  expect(pending).toContain("at 32k");
+  const held = await next;
+  held.respond({ ...report, numCtx: held.params.numCtx, verdict: "refuse" });
+  await tick();
+  expect(render()).toContain("Needs ");
+});
+
+it("changed model files still invalidate checked advice", async () => {
+  b.server.push("models.changed", store.getState().models!.map(m => ({ ...m, digest: "replacement-file" })));
+  expect(render()).toContain("Checking GPU memory");
+});
+
+it("a load cannot restore advice withdrawn by a GPU change", () => {
+  b.server.push("gpu.changed", methodSamples["gpu.status"].result);
+  b.server.push("models.load", { model, state: "ready", numCtx: 32768 });
+  expect(render()).toContain("Checking GPU memory");
+});

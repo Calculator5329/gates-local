@@ -5,7 +5,7 @@
 // then draws <svg class="ic"><use href="#i-pen"/></svg> like the design does.
 
 export type IconId =
-  | "mark" | "pen" | "search" | "gear" | "down" | "left" | "arrow" | "check" | "checkc"
+  | "star" | "mark" | "pen" | "search" | "gear" | "down" | "left" | "arrow" | "check" | "checkc"
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
   | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right";
@@ -31,6 +31,7 @@ export function Sprite() {
   return (
     <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true">
       <defs>
+        <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></symbol>
         <symbol id="i-mark" viewBox="0 0 20 20">
           <path d="M3 17V5.5h14V17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
           <path d="M1.5 3h17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />

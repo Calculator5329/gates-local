@@ -82,7 +82,7 @@ test("the picker never lists the embedding model and is a connected combobox and
   await expect(page.locator("#pk-opt-0")).toHaveAttribute("aria-selected", "false");
   await expect(list.getByRole("option", { selected: true })).toHaveCount(1);
   // the 27B cannot load at 16k: an option a reader hears as unavailable
-  await expect(list.locator('.pk-r.dis[data-m="qwen3.8-abliterated:27b"] [role="option"]')).toHaveAttribute("aria-disabled", "true");
+  await expect(list.locator('.pk-r.dis[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");
 });
 
 test("the Thinking pill is on for a model that thinks and greyed with a reason for one that does not", async ({ page, open }) => {

@@ -17,6 +17,12 @@ export const POP_EL: Record<PopId, string> = { picker: "picker", plus: "plusMenu
 /** A phone-width window (styles.css: 640 px and below), where popovers are bottom sheets. */
 export const PHONE = "(max-width: 640px)";
 export const isPhone = () => matchMedia(PHONE).matches;
+
+/** Modal wrapping skips hidden, disabled and inert descendants, including a visible inactive rail. */
+export function tabStops(root: HTMLElement | null): HTMLElement[] {
+  return [...(root?.querySelectorAll<HTMLElement>("button:not(:disabled),a[href],input:not(:disabled),textarea,select,[tabindex]") ?? [])]
+    .filter(el => el.tabIndex >= 0 && el.getClientRects().length > 0 && el.closest("[inert]") === null);
+}
 /** A device with no hover (a phone or tablet): tooltips open by tap, and focus never pops the keyboard on its own. */
 export const isTouch = () => matchMedia("(hover: none)").matches;
 
@@ -42,6 +48,8 @@ export function anchorOf(id: PopId): HTMLElement | null {
 
 /** Open a popover, or close it when it is already open from the same control. */
 export function togglePop(id: FixedPopId, kb = false): void {
+  // Reopening the size control must not discard a choice awaiting its fit.
+  if (id === "picker" && getState().pop?.id === id && document.getElementById("picker")?.getAttribute("aria-busy") === "true") return;
   closeTip();
   setState((s) => ({ pop: s.pop?.id === id ? null : { id, kb } }));
 }
@@ -172,7 +180,8 @@ export function Tip() {
     };
     const show = (t: Element) => {
       cancelWait();
-      if (!t.isConnected || (getState().pop !== null && t.closest(".pop") === null)) return hide();
+      const pop = getState().pop;
+      if (!t.isConnected || (pop !== null && t.closest(`#${POP_EL[pop.id]}`) === null)) return hide();
       if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
       let html = t.getAttribute("data-tip");
       if (!html) {
@@ -191,10 +200,11 @@ export function Tip() {
       let left = r.left + r.width / 2 - w / 2;
       const picker = t.closest(".pk-foot") ? null : t.closest("#picker");
       if (picker || (t.closest(".sb") && t.classList.contains("sb-row"))) {
-        // Beside its own row (F72), so it never covers another row's name or a group heading.
+        // Outside the picker (F72): its context column also contains names and costs.
+        const side = picker?.getBoundingClientRect() ?? r;
         top = r.top + r.height / 2 - h / 2;
-        left = r.right + 8;
-        if (left + w > window.innerWidth - 6) left = r.left - w - 8;
+        left = side.right + 8;
+        if (left + w > window.innerWidth - 6) left = side.left - w - 8;
         if (picker && left < 6) {
           // No room on either side (a narrow window): outside the picker, above it or else below.
           const p = picker.getBoundingClientRect();

@@ -50,7 +50,7 @@ for (const delay of [0, 150, 600]) {
       await measure("runtime-cancel", ".set", () => page.getByRole("button", { name: "Cancel", exact: true }).click());
     }
     await section("Advanced");
-    await expect(page.locator("#gpuMemory .fp-v")).toBeVisible();
+    await expect(page.locator("#gpuMemory .fp-v:visible")).toBeVisible();
     await measure("gpu-details", "#gpuMemory", () => page.locator("#gpuMemory summary").click());
     for (const ctx of [8192, 16384, 32768, 65536]) {
       await measure(`gpu-pick-${ctx}`, "#gpuMemory", () => page.locator(`#gpuMemory [data-ctx="${ctx}"]`).click());
@@ -82,7 +82,11 @@ for (const delay of [0, 150, 600]) {
     await measure("picker-open", "#picker", () => page.locator("#modelBtn").click());
     await measure("picker-search", "#picker", () => page.locator("#pkSearch").fill("gemma"));
     await measure("picker-search-clear", "#picker", () => page.locator("#pkSearch").fill(""));
-    for (const ctx of [8192, 16384, 32768]) await measure(`picker-context-${ctx}`, "#picker", () => page.locator(`#picker [data-ctx="${ctx}"]`).click());
+    for (const ctx of [8192, 16384, 32768]) {
+      await measure(`picker-context-${ctx}`, "#picker", () => page.locator(`#picker [data-ctx="${ctx}"]`).click());
+      await expect(page.locator("#picker")).toBeHidden();
+      await measure(`picker-reopen-${ctx}`, "#picker", () => page.locator("#modelBtn").click());
+    }
     await measure("composer-model-load", ".composer", () => page.locator('#picker .pk-r[data-m="gemma4:12b"]').click());
     await measure("picker-reopen", "#picker", () => page.locator("#modelBtn").click());
     await measure("picker-close", "#picker", () => page.keyboard.press("Escape"));

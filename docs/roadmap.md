@@ -71,6 +71,12 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       `docs/design/council-rubric.md`, then tokens in `apps/web`.
       *Accept:* Ethan names the direction; a tokens file and the restyled
       shell land, checked against the picked mockups.
+      *Picker checkpoint 2026-11-08:* the owner approved the fixed T3-style
+      maker/list/context layout, memory-needed row metrics and context memory
+      bars. The picker uses real inline maker marks, favorites,
+      clean labels and a two-step phone picker. Monochrome and usable-memory
+      scale are provisional defaults while icon/bar treatments are chosen.
+      The broader visual-direction item stays open.
 
 - [ ] Packaged renderer Origin: measure what Origin the `file://` renderer's
       WebSocket upgrade carries in a real packaged Electron run and allow it

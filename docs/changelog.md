@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-11-09: Instructions status text meets the phone reading minimum
+
+- Loading, saving, saved and error messages share the same 14 px status
+  text, including the reserved empty status slot.
+
+## 2026-11-09: Checked memory advice stays visible after a pick
+
+- Saving a context preserves checked verdicts when only the default-pick
+  advice changes. Loading a model refreshes its memory answers in place;
+  a fresh refusal still replaces the previous answer. GPU and model-file
+  changes still withdraw stale advice while checking again.
+- On narrow phones, Dictate gives room to the model and context control
+  so Chat options remains reachable without overlapping controls.
+
+## 2026-11-09: Reopening the size control keeps the pending choice
+
+- Clicking the model and size control again while a fit check is pending
+  leaves the chosen size visible until its answer arrives. Escape, Back and
+  the close control still let you cancel.
+- Model-picker tooltips open inside the active picker, while tooltips behind
+  an open popover remain hidden.
+
+## 2026-11-09: Context choices wait for their memory check
+
+- Choosing a size while its first check is pending keeps that choice visible.
+  It applies once the check fits; a refusal or failed check stays explained in
+  the picker. Choosing another size replaces it, and leaving cancels it.
+- The Dictate label is easier to read on phones at the same 14 px minimum as
+  other secondary text.
+
+## 2026-11-09: Context selection survives a refresh during the click
+
+- A size control keeps its completed check if memory refreshes between the
+  press and click. Successful choices still commit the size and close the
+  picker. A newer refusal or failed check blocks the choice.
+- Matching-context catalog reports bridge the first check, and completed
+  downloads keep their 100% row until the installed list arrives.
+
+## 2026-11-09: Picker choices agree with their memory checks
+
+- A capped model's row and selection use the same effective-context check.
+  A row without a completed check cannot bypass a refusal or start a model
+  load. A displayed completed fit survives a refresh gap; a newer refusal
+  still blocks the choice. Refreshing a context check keeps keyboard focus.
+- Download estimates follow the context currently in view. Model-specific
+  context caps are stated in each estimate, and recommendations follow its fit.
+- Colliding model names show their quantization or tag. The identity suffix
+  stays outside the truncated name and is included in the accessible name.
+- Phone favorites are visible without hover. Favorites, maker controls,
+  Back and Download have 44 px targets inside the same fixed picker frame.
+  Focus wrapping skips the inactive maker rail in the context step.
+
 ## 2026-11-09: Queued messages explain a stopped first-model download
 
 When a first-model download fails or is cancelled, its queued message now says
@@ -292,6 +344,26 @@ connection checks.
 - The import row explains when a clone could not be stopped, while retaining
   its running state so replacement work cannot bypass the two-import limit.
 
+## 2026-11-08: A model picker with context costs in view
+
+- Choosing a local model now keeps makers, installed models and context
+  costs in fixed columns. Search and hover update the contents without
+  moving the picker. Favorites persist, model names stay readable, and
+  the row metric shows estimated memory needed rather than file size.
+- Real maker marks are inline and work offline, with the MIT notice in
+  `LICENSES/Lobe-Icons-MIT.txt`. Milo keeps a letter mark because the
+  selected set has no mark for it; unknown makers use a question mark.
+- Context bars use usable memory as their scale, with a marked limit,
+  dashed overflow and a text verdict. All estimates and decisions still
+  come from the existing fit check. A loaded model's own allocation is
+  included in its display scale, with its measured spill shown separately.
+  CPU-only hosts show a figure instead of a GPU gauge and keep refusals explicit.
+  The default presentation uses monochrome marks and Fits scale.
+- On a phone, choose a model and then a context length. Download models
+  opens the existing Download tab. The picker joins the deferred UI
+  chunk; the composer retains its existing send and stop behavior.
+  The picker warms after first paint and when its trigger receives pointer
+  or keyboard focus, sharing the same cached import as the first open.
 ## 2026-11-08: Preserve completed imports across registry replacement
 
 - Completed Library content survives a corrupt registry, saving a new source

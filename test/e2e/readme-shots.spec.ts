@@ -37,7 +37,7 @@ const SHOTS: readonly Shot[] = [
     act: async (p) => {
       await p.locator("#modelBtn").click();
       const picker = p.locator("#picker");
-      await expect(picker.getByText("Not enough memory", { exact: true })).toBeVisible();
+      await expect(picker.locator('.pk-r[aria-disabled="true"]').first()).toBeVisible();
       // every row's verdict has landed
       await expect(picker.getByText("Checking…")).toHaveCount(0);
     },

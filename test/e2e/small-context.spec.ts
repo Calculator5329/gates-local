@@ -58,7 +58,7 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(saved).toHaveAttribute("aria-pressed", "true");
     await expect(saved).toBeDisabled();
     await expect(gpu.locator(".ctx-line")).toContainText("Runs at 2k, the most this model takes.");
-    await expect(gpu.locator(".fp-v")).toContainText("at 2k");
+    await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
   });
 });
 
@@ -89,7 +89,7 @@ test.describe("a 2,048 model when a reply ends while Settings is open", () => {
     await replyEnded;
     // nothing on this screen marks the push being handled; a slow one can only let the old code pass, never fail the new code
     await page.waitForTimeout(500);
-    await expect(gpu.locator(".fp-v")).toContainText("at 2k");
+    await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
     await expect(gpu).not.toContainText("Checking");
   });
 });

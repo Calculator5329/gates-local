@@ -2,14 +2,17 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type KeyboardEvent, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ContextSize, ModelInfo } from "@gates-local/contracts";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
-import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
+import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
+import { MakerMark } from "./MakerMark.tsx";
+import { pickerLabels } from "./picker-models.ts";
+import { pickerScreen } from "./screen-loaders.ts";
 import { Icon, SendArrow } from "./icons.tsx";
-import { awaitingInstall, canThink, chatBlockedReason, chatModels, modelNameKey, pickRuleText, pickedModel } from "./pick.ts";
+import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { AttachmentImages } from "./attachment-images.tsx";
 import { imageReason, paste } from "./paste.ts";
@@ -21,17 +24,14 @@ import {
   ensureFit,
   firstPull,
   openSettings,
-  pickModel,
-  pull,
   queueReason,
   removeQueued,
   send,
   sendQueuedNow,
-  setContext,
   stop,
 } from "./session.ts";
 import { NA, type Queued, type State, editDraft, fitKey, getState, setState, streamingHere, useStore } from "./store.ts";
-import { PHONE, SheetHead, closePop, closeTip, esc, isPhone, isTouch, place, togglePop, useMedia } from "./ui.tsx";
+import { SheetHead, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 const Voice = lazy(() => import("./Voice.tsx").then((m) => ({ default: m.Voice })));
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
@@ -47,12 +47,6 @@ function usedTokens(s: State): number {
   if (s.view !== "thread" || s.threadId === null) return 0;
   const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "assistant" && m.stats !== undefined);
   return (last?.stats?.promptTokens ?? 0) + (last?.stats?.completionTokens ?? 0);
-}
-
-function verdictFor(s: Pick<State, "fits" | "numCtx" | "catalog">, model: string): Verdict | undefined {
-  const measured = s.catalog === NA ? undefined : s.catalog?.find((c) => c.name === model)?.fit;
-  const r = s.fits[fitKey(model, s.numCtx)] ?? (measured?.numCtx === s.numCtx ? measured : undefined);
-  return r === undefined || r === "error" ? undefined : verdictOf(r);
 }
 
 /**
@@ -132,7 +126,7 @@ export function Composer() {
   const queueable = wait !== null;
   const shownTag = first ?? model;
   const info = models?.find((m) => m.name === shownTag);
-  const name = shownTag === undefined ? "No model" : describeModel(shownTag, catalog).name;
+  const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
   // The verdict holds still: between an invalidation and the fresh answer the last one for this
   // model and context stays, and while the model loads it keeps the one from before the load
@@ -271,21 +265,6 @@ export function Composer() {
             >
               <Icon id="plus" />
             </button>
-            <button
-              type="button"
-              className="ctl gate"
-              id="modelBtn"
-              aria-haspopup="dialog"
-              aria-expanded={pop === "picker"}
-              aria-busy={loading ? true : undefined}
-              data-tip={modelTip}
-              onClick={() => togglePop("picker")}
-            >
-              {/* loading shows in the tile, never in the label: the trigger keeps its width */}
-              {shownTag === undefined ? null : <Mark name={name} busy={loading && first === undefined} />}
-              <span>{modelLbl}</span>
-              <Icon id="down" cls="chev" />
-            </button>
             {imageGen ? (
               <button
                 type="button"
@@ -340,6 +319,24 @@ export function Composer() {
           </div>
           <div className="cf-r">
             <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}`} textarea={ta} /></Suspense>
+            <button
+              type="button"
+              className="ctl gate"
+              id="modelBtn"
+              aria-haspopup="dialog"
+              aria-expanded={pop === "picker"}
+              aria-busy={loading ? true : undefined}
+              data-tip={modelTip}
+              onPointerEnter={() => void pickerScreen.load()}
+              onFocus={() => void pickerScreen.load()}
+              onClick={() => togglePop("picker")}
+            >
+              {/* loading shows in the tile, never in the label: the trigger keeps its width */}
+              {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={loading && first === undefined} />}
+              <span>{modelLbl}</span>
+              <small className="picker-trigger-ctx">{k(ctx)}</small>
+              <Icon id="down" cls="chev" />
+            </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
@@ -625,486 +622,6 @@ export function OptsMenu() {
           </span>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- model picker
-
-interface Row {
-  readonly tag: string;
-  readonly name: string;
-  readonly purpose: string;
-  readonly v: Verdict | undefined;
-  readonly downloading?: number;
-  readonly info: ModelInfo | undefined;
-  /** Refused only because another chat's reply holds the memory: pickable, and the send asks first. */
-  readonly frees?: boolean;
-}
-
-const GROUPS = ["gpu", "spill", "no", "unknown"] as const;
-type GroupKey = (typeof GROUPS)[number];
-
-function pickerRows(s: Pick<State, "models" | "pulls" | "fits" | "numCtx" | "catalog" | "stopFrees">, q: string): Record<GroupKey, Row[]> {
-  const catalog = catalogOf(s);
-  const groups: Record<GroupKey, Row[]> = { gpu: [], spill: [], no: [], unknown: [] };
-  const hit = (tag: string, name: string, purpose: string) =>
-    q === "" || tag.toLowerCase().includes(q) || name.toLowerCase().includes(q) || purpose.toLowerCase().includes(q);
-  // Embedding models never chat, so they are never a choice here.
-  for (const m of chatModels(s.models ?? [])) {
-    const d = describeModel(m.name, catalog);
-    if (!hit(m.name, d.name, d.purpose)) continue;
-    const v = verdictFor(s, m.name);
-    const frees = v?.k === "no" && s.stopFrees[fitKey(m.name, s.numCtx)] === true;
-    groups[frees ? "spill" : (v?.k ?? "unknown")].push({ tag: m.name, name: d.name, purpose: d.purpose, v, info: m, frees });
-  }
-  for (const p of Object.values(s.pulls)) {
-    if (!awaitingInstall(p)) continue;
-    if ((s.models ?? []).some((m) => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name)))) continue;
-    const d = describeModel(p.name, catalog);
-    if (!hit(p.name, d.name, d.purpose)) continue;
-    // at the picker's context, as installed rows are (the catalog's own fit is at the saved default)
-    const v = verdictFor(s, p.name);
-    groups[v?.k ?? "unknown"].push({ tag: p.name, name: d.name, purpose: d.purpose, v, downloading: pctOf(p.completedBytes, p.totalBytes), info: undefined });
-  }
-  return groups;
-}
-
-/** The quiet fit word at the end of a picker row. */
-function fitWord(v: Verdict | undefined): string {
-  if (v === undefined) return "Checking…";
-  if (v.k === "gpu") return "Fits";
-  if (v.k === "spill") return "Slower";
-  return "Not enough memory";
-}
-
-/** "Qwen 3.5 9B" → "Qwen": the rail groups models by the first word of their name. */
-const familyOf = (name: string): string => name.split(" ")[0] ?? name;
-
-/** A model's monogram tile: the first letter of its family, or a spinner in the same tile while it loads. */
-function Mark({ name, busy = false }: { name: string; busy?: boolean }) {
-  return (
-    <i className="mmark" aria-hidden="true">
-      {busy ? <Icon id="spin" cls="spin" /> : familyOf(name).charAt(0).toUpperCase()}
-    </i>
-  );
-}
-
-function ctxTip(name: string, c: number, v: Verdict | undefined): string {
-  const at = `<b>${esc(name)}</b> at ${k(c)}`;
-  if (v === undefined) return `${at}: checking GPU memory…`;
-  if (v.k === "gpu") return `${at} fits on the GPU: est. ${gb(v.need)} of ${gb(v.avail)} available.`;
-  if (v.k === "spill") return `${at} spills ${gb(v.amt)} into system memory, so replies are slower.`;
-  return `${at}: not enough memory. It needs an estimated ${gb(v.amt)} more.`;
-}
-
-function pickCtx(c: ContextSize): void {
-  closeTip();
-  setContext(c);
-}
-
-/** The picker's foot: the context size, with the highlighted model's fit at each size. */
-function CtxPick({ model }: { model: string | undefined }) {
-  const numCtx = useStore((s) => s.numCtx);
-  const fits = useStore((s) => s.fits);
-  const catalog = useStore(catalogOf);
-  const max = useStore((s) => s.models?.find((m) => m.name === model)?.maxContext);
-  const usable = CONTEXT_SIZES.filter((c) => max === undefined || c <= max);
-  useEffect(() => {
-    for (const c of usable) ensureFit(model, c);
-  }, [model, fits, max]);
-  const name = model === undefined ? "" : describeModel(model, catalog).name;
-  const capped = max !== undefined && max < numCtx;
-  // the one Tab lands on: the chosen size, or the largest this model takes when it cannot take that
-  const tabStop = usable.includes(numCtx as ContextSize) ? numCtx : usable.at(-1);
-  return (
-    <div className="pk-foot">
-      <div className="pk-ctx">
-        <span className="pk-ft" id="pkCtxL">
-          Context
-        </span>
-        <div
-          className="mini-seg"
-          role="radiogroup"
-          aria-labelledby="pkCtxL"
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-            e.preventDefault();
-            const i = usable.indexOf(numCtx as ContextSize);
-            const right = e.key === "ArrowRight";
-            // nothing chosen among these yet: Right starts at the first, Left at the last
-            const next = i < 0 ? (right ? usable[0] : usable.at(-1)) : usable[(i + (right ? 1 : -1) + usable.length) % usable.length];
-            if (next === undefined) return;
-            pickCtx(next);
-            requestAnimationFrame(() => document.querySelector<HTMLElement>(`#picker [data-ctx="${next}"]`)?.focus());
-          }}
-        >
-          {CONTEXT_SIZES.map((c) => {
-            const r = model === undefined ? undefined : fits[fitKey(model, c)];
-            const v = r === undefined || r === "error" ? undefined : verdictOf(r);
-            return (
-              <button
-                key={c}
-                type="button"
-                role="radio"
-                aria-checked={c === numCtx && !capped}
-                tabIndex={c === tabStop ? 0 : -1}
-                className={c === numCtx && !capped ? "on" : ""}
-                data-ctx={c}
-                disabled={max !== undefined && c > max}
-                data-tip={model === undefined ? `${k(c)} of context` : max !== undefined && c > max ? `<b>${esc(name)}</b> takes up to ${k(max)} of context.` : ctxTip(name, c, v)}
-                onClick={() => pickCtx(c)}
-              >
-                <span className={`vd ${v?.k ?? "off"}`} />
-                {k(c)}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <p className="pk-help">{capped ? `Runs at ${k(max)}, the most this model takes.` : "How much of the chat the model can read at once."}</p>
-    </div>
-  );
-}
-
-function rowTip(r: Row, sysBytes: number | undefined): string {
-  let tip = tagTip(r.name, r.info, r.tag);
-  if (r.frees) tip += "<br>Another chat's reply is using this memory. Sending here stops that reply and keeps what it wrote.";
-  else if (r.v) {
-    tip += "<br>";
-    if (r.v.k === "no") tip += `Estimated need ${gb(r.v.need)}. Available to this model: ${gb(r.v.avail)} of GPU${sysBytes !== undefined ? ` plus ${gb(sysBytes)} of system memory` : ""}.`;
-    else if (r.v.k === "spill") tip += `An estimated ${gb(r.v.amt)} runs from system memory, so replies are slower.`;
-    else tip += `Estimated need ${gb(r.v.need)} of ${gb(r.v.avail)} available to this model.`;
-  }
-  if (r.info) tip += `<br>${gb(r.info.sizeBytes)} on disk`;
-  return tip;
-}
-
-/** Trim the list to end 4 px under the last whole row (F55); returns whether it overflows. */
-function sizeList(list: HTMLElement): void {
-  list.style.maxHeight = "";
-  const cap = Math.min(440, window.innerHeight - 180);
-  if (list.scrollHeight <= cap + 1) return;
-  let end = 0;
-  for (const kid of Array.from(list.querySelectorAll(".pk-r, .pk-gt, .pk-dr"))) {
-    if (!(kid instanceof HTMLElement)) continue;
-    const b = kid.offsetTop + kid.offsetHeight;
-    if (b + 4 > cap) break;
-    if (!kid.classList.contains("pk-gt")) end = b;
-  }
-  list.style.maxHeight = `${end + 4}px`;
-}
-
-function thumb(list: HTMLElement, sb: HTMLElement, th: HTMLElement): void {
-  const over = list.scrollHeight > list.clientHeight + 1;
-  sb.classList.toggle("on", over);
-  if (!over) return;
-  const track = list.clientHeight - 8;
-  const h = Math.max(24, (track * list.clientHeight) / list.scrollHeight);
-  const top = ((track - h) * list.scrollTop) / (list.scrollHeight - list.clientHeight);
-  th.style.height = `${h}px`;
-  th.style.top = `${top}px`;
-}
-
-function choose(tag: string): void {
-  closePop();
-  closeTip();
-  pickModel(tag);
-  focusComposer();
-}
-
-export function Picker() {
-  const pop = useStore((s) => (s.pop?.id === "picker" ? s.pop : null));
-  const open = pop !== null;
-  const phone = useMedia(PHONE);
-  const [q, setQ] = useState("");
-  const [fam, setFam] = useState<string | null>(null);
-  const [hl, setHl] = useState(-1);
-  const [kb, setKb] = useState(false);
-  const numCtx = useStore((s) => s.numCtx);
-  const selected = useStore((s) => s.model);
-  const models = useStore((s) => s.models);
-  const fits = useStore((s) => s.fits);
-  const pulls = useStore((s) => s.pulls);
-  const loads = useStore((s) => s.loads);
-  const gpu = useStore((s) => s.gpu);
-  const cpu = noGpu(gpu);
-  const ref = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLDivElement>(null);
-  const sb = useRef<HTMLDivElement>(null);
-  const th = useRef<HTMLElement>(null);
-  const input = useRef<HTMLInputElement>(null);
-
-  // reset on each open; check every installed model's fit at this context
-  useEffect(() => {
-    if (!open) return;
-    setQ("");
-    setFam(null);
-    setHl(-1);
-    setKb(pop?.kb ?? false);
-    // on a phone or touch screen the search waits for a tap unless Ctrl+M asked for it: focus would cover the sheet with the keyboard
-    if ((isTouch() || isPhone()) && pop?.kb !== true) return;
-    const t = setTimeout(() => input.current?.focus(), 0);
-    return () => clearTimeout(t);
-  }, [open, pop?.kb]);
-  const catalogRaw = useStore((st) => st.catalog);
-  const catalog = catalogRaw === NA ? undefined : catalogRaw;
-  useEffect(() => {
-    if (!open) return;
-    const installed = chatModels(getState().models ?? []);
-    for (const m of installed) {
-      ensureFit(m.name, numCtx);
-      // Context picks can reuse checked reports instead of briefly regrouping
-      // installed rows under Checking. The cache deduplicates these requests.
-      for (const c of CONTEXT_SIZES) if (m.maxContext === undefined || c <= m.maxContext) ensureFit(m.name, c);
-    }
-    // download and downloading rows too: the fit check gives a model not installed yet the pre-download estimate
-    for (const c of catalog ?? []) if (!c.installed && !installed.some((m) => m.name === c.name)) ensureFit(c.name, numCtx);
-  }, [open, numCtx, fits, catalog]);
-  const query = q.trim().toLowerCase();
-  const stopFrees = useStore((s) => s.stopFrees);
-  const all = pickerRows({ models, pulls, fits, numCtx, catalog: catalogRaw, stopFrees }, query);
-  const inFam = (name: string) => fam === null || familyOf(name) === fam;
-  const groups = Object.fromEntries(GROUPS.map((g) => [g, all[g].filter((r) => inFam(r.name))])) as Record<GroupKey, Row[]>;
-  const sys = gpu === NA || gpu === undefined ? undefined : gpu.systemMemoryAvailableBytes;
-  const selectable = GROUPS.flatMap((g) => groups[g].filter((r) => r.downloading === undefined && (r.v?.k !== "no" || r.frees)));
-  // the rail: every family among installed and downloadable models, "All" first
-  const listed = chatModels(models ?? []).map((m) => describeModel(m.name, catalog).name);
-  const offered = (catalog ?? []).filter((c) => !c.installed && !(models ?? []).some((m) => m.name === c.name));
-  const families = [...new Set([...listed, ...offered.map((c) => c.label)].map(familyOf))];
-  const pulling = (tag: string) => {
-    const p = pulls[tag];
-    return p !== undefined && awaitingInstall(p);
-  };
-  const downloads = offered.filter(
-    (c) => !pulling(c.name) && inFam(c.label) && (query === "" || c.name.toLowerCase().includes(query) || c.label.toLowerCase().includes(query) || c.purpose.toLowerCase().includes(query)),
-  );
-  const picked = pickedModel(models)?.name;
-  const ctxModel = (hl >= 0 ? selectable[hl]?.tag : undefined) ?? selected;
-
-  useLayoutEffect(() => {
-    const anchor = document.getElementById("modelBtn");
-    if (!open || !ref.current || !list.current || !anchor) return;
-    place(ref.current, anchor, "start");
-    sizeList(list.current);
-    place(ref.current, anchor, "start");
-    if (sb.current && th.current) thumb(list.current, sb.current, th.current);
-  });
-
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      if (selectable.length === 0) return;
-      setKb(true);
-      const next = (hl + (e.key === "ArrowDown" ? 1 : -1) + selectable.length) % selectable.length;
-      setHl(next);
-      list.current?.querySelector(`[data-i="${next}"]`)?.scrollIntoView({ block: "nearest" });
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const r = selectable[hl >= 0 ? hl : 0];
-      if (r) choose(r.tag);
-    } else if (/^[1-9]$/.test(e.key) && q === "" && kb) {
-      e.preventDefault();
-      const r = selectable[Number(e.key) - 1];
-      if (r) choose(r.tag);
-    }
-  };
-
-  const rec = <span className="pk-rec" data-tip={pickRuleText(numCtx, cpu)}>Recommended</span>;
-  let idx = 0;
-  // Installed models first, best fit first; the fit word ends each row and the tooltip says the numbers.
-  const body = GROUPS.flatMap((g) =>
-    groups[g].map((r) => {
-      const ctx = ctxFor(numCtx, models, r.tag);
-      const loaded = loads[r.tag]?.state === "ready" && loads[r.tag]?.numCtx === ctx;
-      const size = r.info ? gb(r.info.sizeBytes) : "";
-      if (r.downloading !== undefined) {
-        return (
-          <div key={r.tag} className="pk-r dis" role="option" aria-selected={false} aria-disabled="true" data-tip={`${tagTip(r.name, r.info, r.tag)}<br>${ctxTip(r.name, numCtx, r.v)}<br>You can pick it when the download finishes.`}>
-            <span className="pk-c" />
-            <Mark name={r.name} />
-            <div className="pk-m">
-              <div className="pk-n">
-                <span className="pk-nm">{r.name}</span>
-              </div>
-            </div>
-            <span className="pk-v">Downloading · {r.downloading}%</span>
-          </div>
-        );
-      }
-      const tip = `${rowTip(r, sys)}${loaded ? "<br>Loaded now" : ""}`;
-      if (r.v?.k === "no" && !r.frees) {
-        // a phone offers the largest smaller context that fits, right on the row
-        const smaller = CONTEXT_SIZES.findLast((c) => {
-          if (c >= numCtx || (r.info?.maxContext !== undefined && c > r.info.maxContext)) return false;
-          const f = fits[fitKey(r.tag, c)];
-          return f !== undefined && f !== "error" && verdictOf(f).k !== "no";
-        });
-        return (
-          <div key={r.tag} className="pk-r dis" data-m={r.tag} data-tip={tip}>
-            {/* the option alone is disabled: the two buttons beside it work */}
-            <div className="pk-o" role="option" aria-selected={false} aria-disabled="true">
-              <span className="pk-c" />
-              <Mark name={r.name} />
-              <div className="pk-m">
-                <div className="pk-n">
-                  <span className="pk-nm">{r.name}</span>
-                  <small>{size}</small>
-                </div>
-                <small className="pk-est">{`Needs ${gb(r.v.amt)} more`}</small>
-              </div>
-              <span className="pk-v no">{fitWord(r.v)}</span>
-            </div>
-            <div className="pk-acts">
-              <button type="button" className="qa" data-memdet={r.tag} onClick={() => openFit(r.tag)}>
-                Memory details
-              </button>
-              {smaller !== undefined ? (
-                <button type="button" className="qa pk-sm" onClick={() => pickCtx(smaller)}>
-                  Use {k(smaller)}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        );
-      }
-      const i = idx++;
-      const sel = r.tag === selected;
-      return (
-        <button
-          key={r.tag}
-          type="button"
-          className={`pk-r${sel ? " sel" : ""}${i === hl ? " hl" : ""}`}
-          role="option"
-          id={`pk-opt-${i}`}
-          // While the arrow keys move a highlight, it is the selection a screen reader announces.
-          aria-selected={hl >= 0 ? i === hl : sel}
-          data-m={r.tag}
-          data-i={i}
-          data-tip={tip}
-          onClick={() => choose(r.tag)}
-        >
-          <span className="pk-c">{sel ? <Icon id="check" /> : null}</span>
-          <span className="pk-k">{i + 1}</span>
-          <Mark name={r.name} />
-          <div className="pk-m">
-            <div className="pk-n">
-              <span className="pk-nm">{r.name}</span>
-              <small>{size}</small>
-              {r.tag === picked && !phone ? rec : null}
-            </div>
-            {/* a phone's first line has no room for the label beside the name */}
-            {r.v !== undefined ? (
-              <small className="pk-est">
-                {`Est. ${gb(r.v.need)}`}
-                {r.tag === picked && phone ? rec : null}
-              </small>
-            ) : null}
-          </div>
-          {r.frees ? <span className="pk-v spill">Stops another chat</span> : <span className={`pk-v ${r.v?.k ?? ""}`}>{fitWord(r.v)}</span>}
-        </button>
-      );
-    }),
-  );
-  const dlRows = downloads.map((c) => {
-    // the fit at the picker's context, not the catalog's at the saved default
-    const v = verdictFor({ fits, numCtx, catalog: catalogRaw }, c.name);
-    // Recommended is "runs on the GPU" at this context; with no GPU, the catalog's lightest pick while it still runs
-    const recTip =
-      v?.k === "gpu"
-        ? `Runs on your GPU with room for ${k(numCtx)} of context.`
-        : c.recommended && c.fit?.verdict === "spills" && v?.k === "spill"
-          ? `The lightest choice: at ${k(numCtx)} it runs partly in system memory, so replies are slower.`
-          : undefined;
-    return (
-      <div key={c.name} className="pk-dr" data-dl={c.name} data-tip={`${ctxTip(c.label, numCtx, v)}<br>Estimated before download.`}>
-        <Mark name={c.label} />
-        <div className="pk-m">
-          <div className="pk-n">
-            <span className="pk-nm">{c.label}</span>
-            <small>{gb(c.downloadBytes)}</small>
-            {recTip !== undefined ? <span className="pk-rec" data-tip={recTip}>Recommended</span> : null}
-          </div>
-        </div>
-        <span className={`pk-v ${v?.k ?? ""}`}>{fitWord(v)}</span>
-        <button type="button" className="qa" disabled={v?.k === "no"} aria-label={`Download ${c.label}`} onClick={() => void pull(c.name)}>
-          Download
-        </button>
-      </div>
-    );
-  });
-
-  return (
-    <div className={`pop${open ? " open" : ""}${kb ? " kb" : ""}`} id="picker" role="dialog" aria-label="Choose a model" ref={ref}>
-      <SheetHead title="Model" sub={`Sizes at ${k(numCtx)} context`} />
-      <div className="pk-h">
-        <div className="pk-hin">
-          <Icon id="search" />
-          <input
-            ref={input}
-            id="pkSearch"
-            placeholder="Search models"
-            aria-label="Search models"
-            role="combobox"
-            aria-expanded={open}
-            aria-controls="pkList"
-            aria-autocomplete="list"
-            aria-activedescendant={hl >= 0 ? `pk-opt-${hl}` : undefined}
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setHl(-1);
-            }}
-            onKeyDown={onKey}
-          />
-        </div>
-      </div>
-      <div className="pk-body">
-        <div className="pk-rail" role="group" aria-label="Model families">
-          {[null, ...families].map((f) => (
-            <button
-              key={f ?? "all"}
-              type="button"
-              className={`pk-fam${fam === f ? " on" : ""}`}
-              aria-pressed={fam === f}
-              onClick={() => {
-                setFam(f);
-                setHl(-1);
-              }}
-            >
-              <i className="mmark" aria-hidden="true">
-                {f === null ? "All" : f.charAt(0).toUpperCase()}
-              </i>
-              <span>{f ?? "All"}</span>
-            </button>
-          ))}
-        </div>
-        <div className="pk-wrap">
-          <div
-            className="pk-list"
-            ref={list}
-            onScroll={() => {
-              if (list.current && sb.current && th.current) thumb(list.current, sb.current, th.current);
-            }}
-          >
-            <div id="pkList" role="listbox" aria-label="Models">
-              {body.length > 0 ? body : <div className="pk-empty">No installed model matches.</div>}
-            </div>
-            {dlRows.length > 0 ? (
-              <div className="pk-dl" role="group" aria-labelledby="pkDlT">
-                <div className="pk-gt" id="pkDlT">
-                  Download
-                </div>
-                {dlRows}
-              </div>
-            ) : null}
-          </div>
-          <div className="pk-sb" ref={sb} aria-hidden="true">
-            <i ref={th} />
-          </div>
-        </div>
-      </div>
-      <CtxPick model={ctxModel} />
     </div>
   );
 }

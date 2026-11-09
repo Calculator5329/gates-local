@@ -7,18 +7,18 @@
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, type Rt, rtOf } from "./Banner.tsx";
-import { Composer, OptsMenu, Picker, PlusMenu } from "./Composer.tsx";
+import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
-import { ScreenError, firstRunScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
+import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
 import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
-import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, useMedia } from "./ui.tsx";
+import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
 interface Card {
   readonly icon: IconId;
@@ -357,8 +357,8 @@ function modalBox(s: State): HTMLElement | null {
   return null;
 }
 
-function trapTab(e: KeyboardEvent, box: HTMLElement): void {
-  const items = [...box.querySelectorAll<HTMLElement>("button:not(:disabled),a[href],input:not(:disabled),textarea,select,[tabindex]")].filter((el) => el.getClientRects().length > 0 && el.tabIndex >= 0);
+function trapTab(e: Pick<KeyboardEvent, "shiftKey" | "preventDefault">, box: HTMLElement): void {
+  const items = tabStops(box);
   const first = items[0];
   const last = items.at(-1);
   const at = document.activeElement;
@@ -391,7 +391,7 @@ function onTouchEnd(e: TouchEvent): void {
   if (getState().pop !== null) closePop(true);
 }
 
-export function onKey(e: KeyboardEvent): void {
+export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "preventDefault">): void {
   const s = getState();
   if (e.key === "Tab") {
     const box = modalBox(s);
@@ -464,6 +464,7 @@ export function App() {
   const popId = useStore((s) => s.pop?.id ?? null);
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
+  const picker = useScreen(pickerScreen, popId === "picker");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
   // a phone's sheet is modal: focus moves in, except Ctrl+M's search field, which focuses itself
@@ -547,7 +548,7 @@ export function App() {
       </div>
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
       {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
-      <Picker />
+      {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       <PlusMenu />
       <OptsMenu />
       <ThreadMenu />

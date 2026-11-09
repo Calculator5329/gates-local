@@ -291,10 +291,16 @@ async function hydrateWith(
   });
   on("models.changed", (models) => {
     modelsOrder.next();
+    const previous = getState().models;
+    // Saving context changes pick advice, not the files the fit answers describe.
+    const filesChanged = previous?.length !== models.length || models.some(m => {
+      const old = previous?.find(p => p.name === m.name);
+      return !old || old.digest !== m.digest || old.sizeBytes !== m.sizeBytes || old.maxContext !== m.maxContext;
+    });
     setState((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
-    invalidateFits();
+    if (filesChanged) invalidateFits();
     flushQueued();
     // The catalog's Installed marks follow the list: a removal or a runtime
     // switch (the app's own copy has its own models) must not leave them stale.
@@ -312,7 +318,7 @@ async function hydrateWith(
   on("models.load", (l) => {
     setState((s) => ({ loads: { ...s.loads, [l.model]: l } }));
     // a failed load may have freed what it took, so it changes memory too
-    if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits();
+    if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits(false);
   });
   on("sources.changed", (sources) => setState({ sources }));
   on("image.event", (e) => {
@@ -544,9 +550,11 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
 }
 
 /** Memory changed: refresh the open chat now and other reports when shown. */
-function invalidateFits(): void {
+function invalidateFits(hideOld = true): void {
   fitEpoch++;
-  setState((s) => ({ fits: { ...s.fits }, staleFits: staleFitReports(s) }));
+  // A load refreshes the measurement in place. An external GPU/file change
+  // withdraws the old advice; a later load must not clear that pending state.
+  setState((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits }));
   const s = getState();
   ensureFit(s.model, s.numCtx);
 }

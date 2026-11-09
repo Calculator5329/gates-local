@@ -45,6 +45,12 @@ async function expectSheet(page: Page, sel: string): Promise<void> {
   expect(box).not.toBeNull();
   expect(vp).not.toBeNull();
   if (box === null || vp === null) return;
+  if (sel === "#picker") {
+    expect(Math.round(box.width), "fixed phone picker width").toBe(360);
+    expect(box.x, "picker has a safe side inset").toBeGreaterThanOrEqual(8);
+    expect(Math.round(box.y + box.height), "picker has a safe bottom inset").toBe(vp.height - 8);
+    return;
+  }
   expect(Math.round(box.x), `${sel} left edge`).toBe(0);
   expect(Math.round(box.width), `${sel} width`).toBe(vp.width);
   expect(Math.round(box.y + box.height), `${sel} bottom edge`).toBe(vp.height);
@@ -166,9 +172,11 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
   await expect(page.locator("#pkSearch")).not.toBeFocused();
   const row = page.locator('#picker .pk-r[data-m="gemma4:12b"]');
   const h = (await row.boundingBox())?.height ?? 0;
-  expect(h, "picker row height").toBeGreaterThanOrEqual(48);
+  expect(h, "picker row touch target").toBeGreaterThanOrEqual(44);
   await expect(page.locator("#picker").getByRole("button", { name: "Close" })).toBeVisible();
   await row.tap();
+  await expect(page.locator("#picker .pk-context")).toBeVisible();
+  await page.locator("#picker").getByRole("radio", { name: /^16k/ }).tap();
   await expect(page.locator("#picker")).toBeHidden();
   await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
 

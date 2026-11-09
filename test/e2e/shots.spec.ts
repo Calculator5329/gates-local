@@ -51,7 +51,7 @@ const SHOTS: readonly Shot[] = [
     name: "S-133-settings-advanced",
     act: async (p) => {
       await settings("Advanced")(p);
-      await expect(p.locator("#gpuMemory .fp-v")).toContainText("Runs on GPU");
+      await expect(p.locator("#gpuMemory .fp-v:visible")).toContainText("Runs on GPU");
       await p.mouse.move(1400, 880);
     },
   },
@@ -100,7 +100,8 @@ const SHOTS: readonly Shot[] = [
     name: "S-135-picker-context-8k",
     act: async (p) => {
       await p.locator("#modelBtn").click();
-      await p.locator("#picker").getByRole("radiogroup", { name: "Context" }).getByRole("radio", { name: "8k" }).click();
+      await p.locator('#picker [data-ctx="8192"]').click();
+      await p.locator("#modelBtn").click();
       await p.mouse.move(1400, 880);
     },
   },
@@ -358,7 +359,7 @@ const MOBILE: readonly MobileShot[] = [
     phoneOnly: true,
     act: async (p) => {
       await phoneSettings("Advanced")(p);
-      await expect(p.locator("#gpuMemory .fp-v")).toBeVisible();
+      await expect(p.locator("#gpuMemory .fp-v:visible")).toBeVisible();
     },
   },
   { name: "M-17-settings-list", phoneOnly: true, act: phoneSettings() },

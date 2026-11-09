@@ -204,7 +204,7 @@ test.describe("runtime down", () => {
   });
 });
 
-test("the picker's Context setting changes the context size; the composer has no context chip", async ({ page, open }) => {
+test("the picker's context column changes the context size shown in the model trigger", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await expect(page.locator("#fitBtn")).toHaveCount(0);
@@ -212,16 +212,17 @@ test("the picker's Context setting changes the context size; the composer has no
 
   await page.locator("#modelBtn").click();
   const picker = page.locator("#picker");
-  const ctx = picker.getByRole("radiogroup", { name: "Context" });
+  const ctx = picker.getByRole("radiogroup", { name: "Context length" });
   await expect(ctx).toBeVisible();
-  await expect(picker).toContainText("How much of the chat the model can read at once.");
-  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "true");
-  // each size carries the highlighted model's fit as a dot and a tooltip
-  await expect(ctx.getByRole("radio", { name: "16k" }).locator(".vd.gpu")).toHaveCount(1);
-  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("data-tip", /fits/i);
-  await ctx.getByRole("radio", { name: "32k" }).click();
-  await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("aria-checked", "true");
-  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "false");
+  await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("aria-checked", "true");
+  await expect(ctx.locator('[data-ctx="16384"] .pk-cost.gpu')).toHaveCount(1);
+  await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("data-tip", /fits/i);
+  await ctx.locator('[data-ctx="32768"]').click();
+  await expect(picker).toBeHidden();
+  await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("32k");
+  await page.locator("#modelBtn").click();
+  await expect(ctx.locator('[data-ctx="32768"]')).toHaveAttribute("aria-checked", "true");
+  await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
   await expect(picker).toBeHidden();
 
@@ -247,7 +248,7 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await expect(set).toContainText("Qwen 3.5 9B");
   // live: a context change elsewhere shows here
   await set.getByRole("button", { name: "32k" }).first().click();
-  await expect(set.locator(".fp-v")).toContainText("at 32k");
+  await expect(set.locator(".fp-v:visible")).toContainText("at 32k");
   // each size's fit is on its own segment, never in a sentence about a size not chosen
   await expect(set.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /at 64k/);
   await expect(set).not.toContainText("At 64k: ");

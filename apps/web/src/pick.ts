@@ -83,6 +83,10 @@ export const awaitingInstall = (p: { readonly state: string }): boolean => p.sta
 /** An omitted tag and :latest name the same model; preserve all other tags. */
 export const modelNameKey = (name: string): string => name.replace(/:latest$/, "");
 
+/** The picker and download list share the pending-to-installed handoff. */
+export const pendingDownload = (p: { readonly name: string; readonly state: string }, models: readonly Pick<ModelInfo, "name">[] | undefined): boolean =>
+  awaitingInstall(p) && !(models ?? []).some(m => m.name === p.name || (p.state === "done" && modelNameKey(m.name) === modelNameKey(p.name)));
+
 /** The download that will become the first chat model, while no installed model can chat. */
 export function firstChatPull(models: readonly ModelInfo[] | undefined, pulls: Readonly<Record<string, { name: string; state: string }>>): string | undefined {
   if ((models ?? []).some(canChat)) return undefined;

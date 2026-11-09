@@ -64,13 +64,14 @@ function longName(width: number): void {
     });
     expect(fits).toEqual({ rowOverflow: 0, inside: true });
     await row.click();
+    if (width < 700) await page.locator('#picker [data-ctx="16384"]').click();
     await expect(page.locator("#picker")).toBeHidden();
 
     const btn = page.locator("#modelBtn");
     await expect(btn).toHaveAttribute("data-tip", new RegExp(LONG_NAME));
     // the whole tag once: a tag the catalog does not know is its own name
     expect((await btn.getAttribute("data-tip"))?.split(LONG_NAME).length, "the tag appears once in the tooltip").toBe(2);
-    const label = await btn.locator("span").first().evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, ellipsis: getComputedStyle(el).textOverflow }));
+    const label = await btn.locator(":scope > span:not(.maker-mark)").evaluate((el) => ({ clipped: el.scrollWidth > el.clientWidth, ellipsis: getComputedStyle(el).textOverflow }));
     expect.soft(label).toEqual({ clipped: true, ellipsis: "ellipsis" });
 
     const after = await footer(page);
@@ -174,13 +175,15 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
   await open();
   await waitReady(page);
   await page.locator("#modelBtn").click();
-  const ctx = page.locator("#picker").getByRole("radiogroup", { name: "Context" });
-  await expect(ctx.getByRole("radio")).toHaveText(["8k", "16k", "32k", "64k"]);
+  const ctx = page.locator("#picker").getByRole("radiogroup", { name: "Context length" });
+  await expect(ctx.getByRole("radio").locator(":scope > span:first-child")).toHaveText(["8k", "16k", "32k", "64k"]);
   // the default stays 16k
-  await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "true");
-  await ctx.getByRole("radio", { name: "8k" }).click();
-  await expect(ctx.getByRole("radio", { name: "8k" })).toHaveAttribute("aria-checked", "true");
-  await expect(ctx.getByRole("radio", { name: "8k" }).locator(".vd.gpu")).toHaveCount(1);
+  await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("aria-checked", "true");
+  await ctx.locator('[data-ctx="8192"]').click();
+  await expect(page.locator("#picker")).toBeHidden();
+  await page.locator("#modelBtn").click();
+  await expect(ctx.locator('[data-ctx="8192"]')).toHaveAttribute("aria-checked", "true");
+  await expect(ctx.locator('[data-ctx="8192"] .pk-cost.gpu')).toHaveCount(1);
   await page.keyboard.press("Escape");
 
   await sendMessage(page, "A small context");

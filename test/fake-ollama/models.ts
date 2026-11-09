@@ -32,6 +32,13 @@ function model(m: Omit<FakeModel, "digest">): FakeModel {
 }
 
 export const FAKE_MODELS: readonly FakeModel[] = [
+  // Hosted quantization pair for picker identity checks; geometry is an offline example.
+  ...["Q4_K_M", "Q8_0"].map(quantization => model({
+    name: `hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:${quantization}`,
+    family: "gemma4", parameterSize: "25.8B", parameterCount: 25_800_000_000,
+    quantization, sizeBytes: Math.round(7.9 * GIB), capabilities: ["completion", "tools"],
+    blockCount: 40, headCount: 32, headCountKv: 8, keyLength: 128, contextLength: 131_072,
+  })),
   // Opt-in vision fixture that fits the measured fake GPU at the default context.
   model({
     name: "qwen3-vl:8b",

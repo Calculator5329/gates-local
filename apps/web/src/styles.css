@@ -366,13 +366,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .user-images{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
 .user-images img{width:128px;height:128px;object-fit:contain}
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
-.cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto}
+.cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:none}
 .cf-l>*{flex:none}
 /* only the model trigger gives way: its name truncates at a fixed width, the full tag is its tooltip */
-.cf-l>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px}
+.cf-r>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px}
 #modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 #modelBtn>.chev{flex:none}
-.cf-r{display:flex;align-items:center;gap:8px;flex:none}
+.cf-r{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
+.cf-r>*{flex:none}
 .composer-running{max-width:var(--composer-w);height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 4px;margin:0 auto 4px;font-size:14px;color:var(--muted-foreground)}
 .composer-running .qa{height:24px;min-width:44px}
 @media(max-width:640px),(hover:none){.composer-running,.composer-running .qa{height:44px}}
@@ -474,71 +475,15 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mi.danger b,.mi.danger .ic{color:var(--red-fg)}
 .mi .on{margin-left:auto;font-size:12px;color:var(--foreground);align-self:center}
 .msep{height:1px;background:var(--border);margin:4px -4px}
-/* model picker (F15) */
-#picker{width:min(560px,calc(100vw - 16px))}
-/* chat-feel: a family rail on the left (All first), the list, and the context control at the foot */
-.mmark{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font:600 11px/1 var(--font-mono);font-style:normal;color:var(--foreground)}
-.ctl .mmark{width:18px;height:18px;font-size:10.5px;margin-left:-2px}
-.mmark .ic{width:12px;height:12px;color:var(--muted-foreground)}
-.pk-body{display:flex;min-height:0}
-.pk-rail{flex:none;width:64px;display:flex;flex-direction:column;gap:2px;padding:6px 4px;border-right:1px solid var(--border);max-height:min(440px,calc(100vh - 180px));overflow-y:auto;scrollbar-width:none}
-.pk-fam{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;border-radius:var(--r-md);font-size:11px;line-height:1.2;color:var(--muted-foreground);transition:background-color .1s,color .1s}
-.pk-fam span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pk-fam .mmark{width:28px;height:28px;font-size:12px}
-.pk-fam:first-child .mmark{font-size:10px}
-.pk-fam:hover{background:var(--hover);color:var(--foreground)}
-.pk-fam.on{background:var(--selected);color:var(--foreground)}
-.pk-rec{margin-left:8px;font-size:12px;font-weight:500;color:var(--green-fg)}
-.pk-gt{margin-top:4px;padding:12px 8px 6px;border-top:1px solid var(--border);font-size:12.5px;font-weight:500;color:var(--muted-foreground)}
-.pk-dr{display:flex;align-items:center;gap:12px;padding:6px 8px 6px 36px}
-.pk-dr .qa{flex:none}
-.pk-foot{border-top:1px solid var(--border);padding:8px 12px 10px}
-.pk-ctx{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.pk-ft{font-size:13px;font-weight:500}
-.pk-help{margin:6px 0 0;font-size:12.5px;color:var(--muted-foreground)}
-.pk-foot .mini-seg button{display:inline-flex;align-items:center;gap:6px}
-.pk-foot .vd{width:6px;height:6px;border-radius:50%;flex:none}
-.pk-h{padding:8px 8px 0}
-.pk-hin{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:0 4px 8px}
-.pk-hin .ic{color:var(--muted-foreground)}
-.pk-hin input{flex:1;min-width:0;height:30px;border:0;outline:0;background:transparent;font-size:14px}
-.pk-hin input::placeholder{color:var(--placeholder)}
+/* Maker marks are inline vectors; the picker itself loads on demand. */
+.maker-mark{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;color:var(--foreground);font:500 11px/16px var(--font-mono)}
+.maker-mark svg{width:16px;height:16px;flex:none}
+.picker-trigger-ctx{font-size:12px;font-weight:400;color:var(--muted-foreground);flex:none;white-space:nowrap}
 .mini-seg{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;flex:none;box-shadow:inset 0 0 0 1px var(--border)}
 /* sweep: the panel's context control has the same size as Settings' (seg2): 28 px buttons, 13.5 px text */
 .mini-seg button{height:28px;padding:0 12px;border-radius:var(--r-sm);font-size:13.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;transition:color .12s,background-color .12s}
 .mini-seg button:hover{color:var(--foreground);background:var(--hover)}
 .mini-seg button.on{background:var(--popover);color:var(--foreground);box-shadow:0 0 0 1px var(--border-strong)}
-/* F55: the first view always ends between rows (sizePkList trims max-height to the last whole row),
-   the list keeps 8 px under its last row, and the thumb shows whenever the list overflows */
-/* the thumb is drawn by the page (.pk-sb), so it shows even where the platform hides scrollbars */
-.pk-wrap{position:relative;flex:1;min-width:0}
-.pk-list{position:relative;max-height:min(440px,calc(100vh - 180px));overflow-y:auto;padding:4px 4px 8px;scrollbar-width:none}
-.pk-wrap:has(.pk-sb.on) .pk-list{padding-right:12px}
-.pk-list::-webkit-scrollbar{display:none}
-.pk-sb{position:absolute;top:4px;right:3px;bottom:4px;width:4px;pointer-events:none;display:none}
-.pk-sb.on{display:block}
-.pk-sb i{position:absolute;left:0;right:0;border-radius:var(--r-sm);background:var(--scroll-thumb-hover)}
-.pk-r{width:100%;display:flex;align-items:center;gap:12px;padding:8px;border-radius:var(--r-md);text-align:left;transition:background-color .1s}
-.pk-r:hover,.pk-r.hl{background:var(--hover)}
-.pk-r.sel{background:var(--selected)}
-.pk-r.dis{cursor:not-allowed}
-.pk-r.dis .pk-n{color:var(--muted-foreground)}
-.pk-r.dis:hover{background:transparent}
-.pk-acts,.pk-o{display:contents}
-.pk-sm{display:none}
-.pk-k{display:none;width:20px;height:20px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:12px;color:var(--muted-foreground);align-items:center;justify-content:center;flex:none;font-variant-numeric:tabular-nums}
-#picker.kb .pk-k{display:inline-flex}
-.pk-m{flex:1;min-width:0}
-.pk-n{display:flex;align-items:baseline;min-width:0;font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap}
-/* a long tag truncates; its size and tag stay whole, the tooltip has the full name */
-.pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.pk-n small{flex:none;font-size:12.5px;font-weight:400;color:var(--muted-foreground);margin-left:8px;font-variant-numeric:tabular-nums}
-.pk-n .pk-rec{flex:none}
-.pk-v{font-size:13px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted-foreground)}
-/* every row reserves the 16 px check slot so the selected row never shifts (F35) */
-.pk-c{width:16px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
-.pk-c .ic{width:15px;height:15px}
-.pk-empty{padding:24px 8px;text-align:center;font-size:13px;color:var(--muted-foreground)}
 /* GPU details header (F48: the GPU name is a subtitle under the title) */
 .fp-h{display:flex;flex-direction:column;gap:1px}
 .fp-t{font-size:14px;font-weight:500}
@@ -641,7 +586,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .kl td.k{text-align:right;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
 .kl kbd{font-family:var(--font-sans);font-size:12.5px;color:var(--foreground);padding:2px 7px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--border-strong);margin-left:4px}
 /* F63: Memory details sits 12 px after the verdict on the row that does not fit */
-.pk-r .qa{flex:none}
 .sl .d+.d{margin-top:4px}
 .sl .d .link{font-size:inherit}
 /* W-07: a failed action says so in one line beside its control */
@@ -756,7 +700,7 @@ a.btn{text-decoration:none}
    at 640 and below the phone layout: one top bar, a composer pinned to the bottom, bottom sheets
    for menus and the picker, and Settings as a list screen and a section screen. */
 @supports (height:100dvh){.app{height:100dvh}}
-#menuBtn,.hdr .nb,.set-bar,.set-list,.sh-h,#optBtn,.pop-scrim,.sb-x,.a-det,.pk-est,.wr-who,.set-done{display:none}
+#menuBtn,.hdr .nb,.hdr-t,.set-bar,.set-list,.sh-h,#optBtn,.pop-scrim,.sb-x,.a-det,.wr-who,.set-done{display:none}
 .scrim{position:fixed;inset:0;z-index:45;background:rgb(0 0 0/60%)}
 @media (max-width:1023px){
 .sb{position:fixed;inset:0 auto 0 0;z-index:46;width:min(340px,85vw);background:var(--popover);padding-top:env(safe-area-inset-top);transform:translateX(-100%);visibility:hidden;transition:transform .2s,visibility 0s .2s}
@@ -797,6 +741,9 @@ a.btn{text-decoration:none}
 .send{width:44px;height:44px;padding:4px;background-clip:content-box;transform:none!important}
 #modelBtn{min-width:0}
 #modelBtn span{overflow:hidden;text-overflow:ellipsis}
+.cf-r>#modelBtn{min-width:88px;overflow:hidden}
+.cf-r>.voice{flex:0 1 116px;min-width:44px;overflow:hidden}
+.cf-r>.voice span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .draft{padding:16px 12px 0}
 .draft-in{flex:1 0 auto;display:flex;flex-direction:column}
 .hero{margin-top:auto;text-wrap:balance}
@@ -809,40 +756,19 @@ a.btn{text-decoration:none}
 .pop.menu{padding:0 4px max(8px,env(safe-area-inset-bottom))}
 .pop-scrim{display:block;z-index:49}
 .sh-h{display:flex;margin:0 -4px 4px;position:sticky;top:0;background:inherit;z-index:1}
-#picker .sh-h{margin:0}
 /* one sheet head: a grabber you can swipe, the title, a 44 px close */
 .sh-h{height:auto;padding:20px 4px 0 16px;touch-action:none}
 .sh-h::before{content:"";position:absolute;top:8px;left:50%;width:36px;height:4px;margin-left:-18px;border-radius:var(--r-sm);background:var(--border-strong)}
 .sh-h .fp-gpu{display:block}
-.pk-h{padding:4px 16px 0}
-.pk-hin{padding:0 0 8px}
-.pk-foot{padding:8px 16px 10px}
-.pk-ctx{flex-direction:column;align-items:stretch}
 .mini-seg,.seg2{display:flex;width:100%}
 .mini-seg button,.seg2 button{flex:1;height:44px;justify-content:center}
 .sv:has(.seg2){width:100%}
 .fp-row{flex-direction:column;align-items:stretch}
-.pk-list,.pk-wrap:has(.pk-sb.on) .pk-list{padding-right:8px}
-.pk-est{display:block}
-.pk-r.dis .pk-v.no{display:none}
-.pk-r.dis{flex-wrap:wrap}
 /* a download row: the fit word under the name, so the name keeps the width */
-.pk-dr{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:12px}
-.pk-dr>.mmark,.pk-dr>.qa{grid-row:1/span 2}
-.pk-dr>.pk-m,.pk-dr>.pk-v{grid-column:2}
-.pk-dr .pk-n{flex-wrap:wrap;column-gap:8px;white-space:normal}
-.pk-dr .pk-n small,.pk-dr .pk-n .pk-rec{margin-left:0}
-.pk-acts{display:flex;flex-basis:100%;gap:16px;padding-left:60px}
-.pk-acts .qa{min-height:44px;display:inline-flex;align-items:center}
-.pk-sm{display:inline-flex}
-.mi,.pk-r{min-height:48px;align-items:center}
+.fp-det{min-height:44px}
+.fp-det .th-l{color:var(--foreground)}
+.mi{min-height:48px;align-items:center}
 .mi .ic{margin-top:0}
-#picker.open{display:flex;flex-direction:column;overflow:hidden}
-.pk-body{flex:1;min-height:0}
-.pk-wrap{min-height:0;display:flex}
-.pk-rail,.pk-list{max-height:none!important}
-.pk-list{flex:1}
-.pk-hin input{height:40px;font-size:16px}
 .set-in{padding:16px 16px 32px}
 .set-list{display:block}
 .set.listing .set-in>:not(.set-list),.set:not(.listing) .set-list{display:none}
@@ -883,13 +809,13 @@ a.btn{text-decoration:none}
 .fr-m .sep{display:none}
 .fr-m .v{margin-left:0}
 /* one secondary grey, nothing under 14 px */
-.sb-group,.sb-empty,.sb-row .ago,.rt,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.u-q,.qa,.pk-n small,.pk-gt,.pk-help,.pk-v,.pk-fam,.pk-est,.mi small,.fp-n,.ctx-line,.fp-mt,.fp-gpu,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.dlrow .sl b small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.crumb,.res-note,.prog-l,.step-h .sz,.card .cd,.chipf small,.pk-empty,.kl td.k,.sh-h .fp-gpu,.mini-seg button,.seg2 button{font-size:14px}
-.pk-est{font-weight:400;color:var(--muted-foreground)}
-.ta::placeholder,.pk-hin input::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
+.voice span{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.rt,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.u-q,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.fp-gpu,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.dlrow .sl b small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.crumb,.res-note,.prog-l,.step-h .sz,.card .cd,.chipf small,.kl td.k,.sh-h .fp-gpu,.mini-seg button,.seg2 button{font-size:14px}
+.ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */
 @media (hover:none){
-.ks,.sb .ks,.pk-k{display:none}
+.ks,.sb .ks{display:none}
 .tipd{text-decoration:none}
 .u-act{visibility:hidden}
 .turn:focus-within .u-act{visibility:visible;opacity:1}
@@ -1104,12 +1030,111 @@ a.btn{text-decoration:none}
   .mp .srow .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}
   .mp .srow .inp{flex:1;min-width:0;height:44px}
 }
+
+/* Approved model picker; kept in the shared sheet to avoid duplicate CSS compression dictionaries. */
+.model-picker{display:none;position:fixed;z-index:50;width:min(608px,calc(100vw - 16px));height:392px;max-height:calc(100dvh - 16px);overflow:hidden;flex-direction:column;background:var(--popover);border:1px solid var(--popover-border);border-radius:var(--r-ctl);box-shadow:var(--popover-shadow);--r-picker:4px;}
+.model-picker.open{display:flex}
+.pk-layout{display:grid;grid-template-columns:44px 316px minmax(0,1fr);flex:1;min-height:0;overflow:hidden}
+.model-picker .pk-rail{width:44px;display:flex;flex-direction:column;gap:4px;padding:4px;overflow-y:auto;scrollbar-width:none;border-right:1px solid var(--border);background:var(--card)}
+.model-picker .pk-fam{width:36px;height:36px;min-height:36px;position:relative;display:flex;align-items:center;justify-content:center;padding:0;border-radius:var(--r-picker);color:var(--muted-foreground)}
+.model-picker .pk-fam:hover{background:var(--hover);color:var(--foreground)}
+.model-picker .pk-fam[aria-pressed=true]{color:var(--foreground)}
+.model-picker .pk-fam[aria-pressed=true]:after{content:"";position:absolute;right:-4px;top:8px;width:3px;height:20px;background:var(--foreground);border-radius:var(--r-picker) 0 0 var(--r-picker)}
+.pk-rail-line{height:1px;flex:none;background:var(--border)}
+.pk-fam>.ic,.pk-fam>.mark{width:20px;height:20px}
+.pk-fam .maker-mark,.pk-fam .maker-mark svg{width:18px;height:18px}
+.pk-main{min-width:0;min-height:0;display:flex;flex-direction:column}
+.pk-search{display:flex;align-items:center;gap:4px;min-height:42px;height:42px;margin:0 12px;padding:8px 0;border-bottom:1px solid var(--border-strong)}
+.pk-search .ic{color:var(--muted-foreground)}
+.pk-search input{width:100%;min-width:0;height:24px;line-height:24px;border:0;outline:0;background:transparent;font-size:14px}
+.pk-search input::placeholder{color:var(--muted-foreground)}
+.pk-search:focus-within{border-color:var(--muted-foreground)}
+.pk-list-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable;padding:8px 12px}
+.model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
+.model-picker .pk-r.sel{background:var(--hover)}
+.model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
+.pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) 72px;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
+.pk-name{display:flex;align-items:center;min-width:0;gap:4px}
+.pk-name .pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pk-name .pk-variant{flex:none;font-size:11px;font-weight:400;color:var(--muted-foreground);white-space:nowrap}
+.pk-name .ic{color:var(--muted-foreground)}
+.model-picker .pk-v{width:72px;overflow:hidden;white-space:nowrap;text-align:right;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.model-picker .pk-v.spill{color:var(--amber-fg)}
+.model-picker .pk-v.no{color:var(--red-fg)}
+.pk-favorite{position:absolute;left:8px;top:8px;height:18px;width:16px;opacity:0;display:flex;align-items:center;justify-content:center;color:var(--foreground)}
+.pk-favorite .ic{width:14px;height:14px}
+.pk-favorite[aria-pressed=true] .ic{fill:currentColor}
+.pk-r:hover .pk-favorite,.pk-favorite:focus-visible{opacity:1}
+.pk-r:hover .pk-select>.maker-mark,.pk-r:has(.pk-favorite:focus-visible) .pk-select>.maker-mark{visibility:hidden}
+.pk-more{height:34px;width:100%;padding:0 0 0 32px;text-align:left;font-size:14px;color:var(--muted-foreground)}
+.pk-more:disabled{cursor:default}
+.pk-more:hover:enabled{color:var(--foreground)}
+.model-picker .pk-empty{padding:24px 8px;text-align:center;font-size:12px;line-height:20px;color:var(--muted-foreground)}
+.pk-context{min-width:0;overflow:hidden;padding:0 12px;border-left:1px solid var(--border)}
+.pk-context-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:42px;border-bottom:1px solid var(--border);font-size:14px;color:var(--muted-foreground)}
+.pk-context-head>span{white-space:nowrap;flex:none}
+.pk-context-head small{min-width:0;max-width:104px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:12px;font-weight:400}
+.pk-context-rows{padding-top:8px}
+.pk-ctx-row{height:34px;width:100%;display:grid;grid-template-columns:32px minmax(0,1fr) 12px;align-items:center;gap:8px;text-align:left;font-size:14px;border-radius:var(--r-picker)}
+.pk-ctx-row:hover:enabled,.pk-ctx-row:focus-visible{background:var(--hover)}
+.pk-ctx-row:disabled{color:var(--faint);cursor:not-allowed}
+.pk-context-check{display:flex;justify-content:flex-end;align-items:center}
+.pk-cap{font-size:12px;text-align:right;font-weight:400;color:var(--muted-foreground)}
+.pk-cost{display:block;justify-self:end;width:144px;min-width:0;height:28px;color:var(--foreground);font-variant-numeric:tabular-nums}
+.pk-cost.pending{height:auto;font-size:11px;text-align:right;color:var(--muted-foreground)}
+.pk-cost-caption{height:14px;display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:10px;line-height:12px}
+.pk-cost-caption small{font-size:10px;color:var(--muted-foreground)}
+.pk-cost.spill small{color:var(--amber-fg)}
+.pk-cost.no small{color:var(--red-fg)}
+.pk-cost-track{position:relative;display:block;width:104px;height:12px;margin-top:4px}
+.pk-cost-track i{position:absolute;top:0;height:6px;display:block}
+.pk-cost-room{left:0;width:100%;background:var(--track)}
+.pk-cost-fill{left:0;background:var(--green)}
+.pk-cost-over{left:100%;background:var(--amber);border-top:1px dashed var(--foreground);border-bottom:1px dashed var(--foreground)}
+.pk-cost.no .pk-cost-over{background:var(--red)}
+.pk-cost-track .pk-cost-edge{height:12px;width:1px;left:100%;top:-3px;background:var(--foreground)}
+.pk-cost-track b{position:absolute;top:-5px;left:calc(136% - 8px);font-size:12px;font-weight:400;color:var(--amber-fg);background:var(--popover)}
+.pk-cost.no b{color:var(--red-fg)}
+.pk-detail{display:block;margin-top:16px;font-size:12px;color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px}
+.pk-help{margin:16px 0 0;font-size:12px;line-height:20px;color:var(--muted-foreground)}
+.pk-choice{font-size:14px;color:var(--amber-fg)}
+.pk-back{display:none}
+.pk-close{display:none;align-items:center;justify-content:center;width:24px;height:24px;flex:none}
+.pk-bottom{height:44px;min-height:44px;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 12px;border-top:1px solid var(--border)}
+.pk-bottom button{height:28px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted-foreground);white-space:nowrap}
+.pk-bottom .ic{height:14px;width:14px}
+.pk-bottom>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+@media(max-width:640px){
+.model-picker{width:min(360px,calc(100vw - 16px));height:392px;bottom:8px}
+.pk-layout{grid-template-columns:44px minmax(0,1fr)}
+.model-picker .pk-rail{padding:0;gap:0;border-right:0;box-shadow:inset -1px 0 var(--border)}
+.model-picker .pk-fam{width:44px;height:44px;min-height:44px}
+.model-picker .pk-fam[aria-pressed=true]:after{right:0;top:12px}
+.pk-search,.pk-context-head{height:44px;min-height:44px}
+.pk-context{display:none;border-left:0}
+.step-context .pk-main{display:none}
+.step-context .pk-context{display:block}
+.pk-back{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none}
+.pk-close{display:flex;width:44px;height:44px;margin-right:-12px}
+.pk-context-head{justify-content:flex-start;gap:4px}
+.pk-context-head small{margin-left:auto;max-width:124px}
+.model-picker .pk-r,.pk-select{height:44px;min-height:44px}
+.pk-more{height:44px}
+.pk-select{width:calc(100% - 44px);grid-template-columns:16px minmax(0,1fr) 64px;gap:4px;padding:0 4px}
+.model-picker .pk-v{width:64px}
+.pk-favorite{top:0;left:auto;right:0;width:44px;height:44px;opacity:1;color:var(--muted-foreground)}
+.pk-favorite[aria-pressed=true]{color:var(--foreground)}
+.model-picker .pk-r:hover .pk-select>.maker-mark,.model-picker .pk-r:has(.pk-favorite:focus-visible) .pk-select>.maker-mark{visibility:visible}
+.pk-bottom{height:48px;min-height:48px}
+.pk-bottom button{height:44px}
+.pk-ctx-row{height:44px}
+}
 /* Instructions (layout A): use the Settings shell; reserve space during save/read state changes. */
 .inst-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;gap:16px}
 .inst-prompt{padding:16px}.inst-check{display:flex;align-items:center;gap:8px;font-size:14px}.inst-check input{accent-color:var(--muted-foreground)}
 .inst-text.inp{display:block;width:100%;height:144px;resize:none;margin-top:16px;padding:8px 12px;line-height:1.5}
 .inst-actions{display:flex;align-items:center;gap:8px;margin-top:12px;min-width:0}.inst-actions .btn{flex:none;white-space:nowrap}
-.inst-status{flex:1;min-width:0;height:40px;margin:0;overflow:auto;font-size:13px;line-height:20px;color:var(--muted-foreground)}.inst-status.act-err{color:var(--red-fg)}
+.inst-status{flex:1;min-width:0;height:40px;margin:0;overflow:auto;font-size:14px;line-height:20px;color:var(--muted-foreground)}.inst-status.act-err{color:var(--red-fg)}
 .inst-controls,.inst-defaults{margin-top:24px}.inst-controls .srow{min-height:64px}.inst-label{border-bottom:1px dotted var(--muted-foreground);cursor:help}
 .inst-mode.inp{width:144px}.inst-number.inp{width:88px;flex:none}.inst-reset{width:52px;flex:none}.inst-model.inp{max-width:100%;width:280px}
 .inst-defaults details{padding:16px}.inst-defaults summary{cursor:pointer;font-size:14px}.inst-defaults b{font-size:13px;font-weight:500}.inst-shipped{height:96px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:12px;background:var(--code-bg);border-radius:var(--r-ctl);margin:8px 0 16px}

@@ -14,9 +14,9 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(picker).toBeVisible();
   const ctx = picker.getByRole("radiogroup", { name: "Context" });
   await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("aria-checked", "true");
-  await expect(ctx.getByRole("radio", { name: "16k" }).locator(".vd.gpu")).toHaveCount(1);
+  await expect(ctx.getByRole("radio", { name: "16k" }).locator(".pk-cost.gpu")).toHaveCount(1);
   await expect(ctx.getByRole("radio", { name: "16k" })).toHaveAttribute("data-tip", /fits on the GPU/);
-  await expect(picker).toContainText("Not enough memory");
+  await expect(picker.locator('.pk-r[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");
   await picker.locator("#pkSearch").fill("gemma");
   await picker.locator('.pk-r[data-m="gemma4:12b"]').click();
   await expect(picker).toBeHidden();
@@ -35,7 +35,7 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(panel).toBeHidden();
   await modelBtn.click();
   await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("aria-checked", "true");
-  await expect(ctx.getByRole("radio", { name: "32k" }).locator(".vd.spill")).toHaveCount(1);
+  await expect(ctx.getByRole("radio", { name: "32k" }).locator(".pk-cost.spill")).toHaveCount(1);
   await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("data-tip", /system memory/);
 });
 

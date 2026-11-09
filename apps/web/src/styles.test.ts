@@ -12,10 +12,24 @@ const values = (prop: string, sheet = css) => [...sheet.matchAll(new RegExp(`(?:
 const hex = (name: string) => [...css.matchAll(new RegExp(`--seg-${name}:#([0-9a-f]{6})`, "g"))].map((m) => parseInt(m[1] ?? "0", 16));
 
 describe("styles.css", () => {
-  it("rounds with two radii: 6 px controls and 10 px containers (a circle stays a circle; pills, switches and Settings' tighter scale are their own)", () => {
+  it("keeps the phone Dictate label at the existing 14 px secondary-text minimum", () => {
+    const phone = css.slice(css.indexOf("@media (max-width:640px)"), css.indexOf("/* touch:"));
+    expect(/(?:^|[},])\s*\.voice span(?:,|\{)(?:[^{}]*\{)?font-size:14px[;}]/m.test(phone)).toBe(true);
+  });
+  it("PK-05: declares reachable 44 px phone controls without hover-only favorite actions", () => {
+    const phone = css.slice(css.indexOf("@media(max-width:640px){\n.model-picker"), css.indexOf("/* Instructions (layout A)"));
+    const rule = (selector: string) => [...phone.matchAll(/([^{}]+)\{([^{}]+)\}/g)].find(m => m[1]?.trim().split(",").includes(selector))?.[2] ?? "";
+    for (const selector of [".model-picker .pk-fam", ".pk-favorite", ".pk-back"]) {
+      expect(rule(selector), selector).toMatch(/(?:^|;)width:44px(?:;|$)/);
+      expect(rule(selector), selector).toMatch(/(?:^|;)height:44px(?:;|$)/);
+    }
+    expect(rule(".pk-favorite")).toContain("opacity:1");
+    expect(rule(".pk-bottom button")).toContain("height:44px");
+  });
+  it("keeps the approved 4 px picker details, 6 px controls and existing 10 px containers (circles, pills, switches and Settings have their own scale)", () => {
     const tokens = [...css.replace(/\.set,\.snav\{[^}]*\}/, "").matchAll(/--r-[a-z]+:([^;]+);/g)].map((m) => (m[1] ?? "").trim());
     expect(tokens.length).toBeGreaterThan(0);
-    expect(new Set(tokens)).toEqual(new Set(["10px", "6px"]));
+    expect(new Set(tokens)).toEqual(new Set(["10px", "6px", "4px"]));
     const allowed = /^(0|50%|var\(--r-[a-z]+\))$/;
     const odd = values("border-radius", css.replace(/\.(pill|switch)\{[^}]*\}/g, "")).flatMap((v) => v.split(/\s+/)).filter((v) => !allowed.test(v));
     expect(odd).toEqual([]);

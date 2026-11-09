@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Fixes from the first review of the chat-feel lane: a failed fit check ends
 // the held verdict, Export as Markdown makes a file only from a loaded thread,
-// and a download row's fit follows the picker's context.
+// and downloads remain reachable from the picker.
 import { readFile } from "node:fs/promises";
 import type { Download, Page, WebSocketRoute } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
@@ -129,48 +129,63 @@ test.describe("a failed fit check", () => {
   });
 });
 
-const ctx = (page: Page, size: string) => page.locator("#picker").getByRole("radiogroup", { name: "Context" }).getByRole("radio", { name: size });
+const ctx = (page: Page, size: string) => page.locator("#picker").getByRole("radiogroup", { name: "Context length" }).getByRole("radio", { name: new RegExp(`^${size}`) });
 
-test.describe("picker download rows at the picker's context", () => {
-  test("changing Context from 16k to 64k, a download row's fit, Recommended and tooltip follow", async ({ page, open }) => {
+test.describe("downloads from the approved picker", () => {
+  test("the footer opens the real Download tab; estimates follow 16k to 64k and back", async ({ page, open }) => {
+    const t = await tap(page), reports = new Map<number, string>();
+    t.edit.set("fit.check", result => {
+      if (result && typeof result === "object" && "model" in result && result.model === "qwen3:14b" && "numCtx" in result && typeof result.numCtx === "number" && "verdict" in result && typeof result.verdict === "string") reports.set(result.numCtx, result.verdict);
+      return result;
+    });
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").click();
-    await page.locator("#pkSearch").fill("qwen 3 14b");
-    const dl = page.locator('#picker .pk-dr[data-dl="qwen3:14b"]');
-    await expect(ctx(page, "16k")).toHaveAttribute("aria-checked", "true");
-    await expect(dl.locator(".pk-v")).toHaveText("Fits");
-    await expect(dl.locator(".pk-rec")).toHaveAttribute("data-tip", /room for 16k/);
-
+    await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+    await expect(page.getByRole("tab", { name: /^Download/ })).toHaveAttribute("aria-selected", "true");
+    const dl = page.locator('.dlrow[data-cat="qwen3:14b"]');
+    await expect(dl).toBeVisible();
+    await expect(dl.getByRole("button", { name: "Download", exact: true })).toBeEnabled();
+    await expect(dl.locator(".dl-v .vl")).toHaveText("Runs on GPU");
+    await expect(dl.locator(".dl-v small")).toHaveText(/est\. \d+\.\d\sGB at 16k/);
+    await page.getByRole("button", { name: /^Back to chat/ }).click();
+    await page.locator("#modelBtn").click();
     await ctx(page, "64k").click();
-    await expect(ctx(page, "64k")).toHaveAttribute("aria-checked", "true");
-    await expect(dl.locator(".pk-v")).toHaveText("Slower");
-    // it no longer runs on the GPU at 64k, so nothing promises it does
-    await expect(dl.locator(".pk-rec")).toHaveCount(0);
-    await expect(dl).toHaveAttribute("data-tip", /at 64k spills/);
-
+    await expect(page.locator("#picker")).toBeHidden();
+    await page.locator("#modelBtn").click();
+    await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+    // Selecting a context now preloads the current model. Its allocation can make
+    // the offered model slower or refused; compare the UI with the actual check.
+    await expect.poll(async () => `${reports.get(65536)}:${await dl.locator(".dl-v .vl").textContent()}`)
+      .toMatch(/^(spills:Uses system memory · slower|refuse:Not enough memory at 64k)$/);
+    await expect(dl.locator(".dl-v small")).toHaveText(/est\. \d+\.\d\sGB at 64k/);
+    await expect(dl.locator(".dl-v")).toHaveAttribute("data-tip", /at 64k/);
+    await expect(dl.locator("xpath=../..").locator(".grp-t")).not.toHaveText("Recommended");
+    await page.getByRole("button", { name: /^Back to chat/ }).click();
+    await page.locator("#modelBtn").click();
     await ctx(page, "16k").click();
-    await expect(dl.locator(".pk-v")).toHaveText("Fits");
-    await expect(dl).toHaveAttribute("data-tip", /at 16k fits on the GPU/);
+    await expect(page.locator("#picker")).toBeHidden();
+    await page.locator("#modelBtn").click();
+    await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+    await expect.poll(async () => `${reports.get(16384)}:${await dl.locator(".dl-v .vl").textContent()}`)
+      .toMatch(/^(fits:Runs on GPU|spills:Uses system memory · slower|refuse:Not enough memory at 16k)$/);
+    await expect(dl.locator(".dl-v small")).toHaveText(/est\. \d+\.\d\sGB at 16k/);
   });
 
-  test("a downloading row states its fit at the picker's context", async ({ page, open }) => {
+  test("a pull started in Download appears disabled in the picker with real progress and need", async ({ page, open }) => {
     await stack.scenario("models", { pullTickMs: 1000, pullChunkBytes: 64 * 1024 * 1024 });
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").click();
+    await page.locator("#picker").getByRole("button", { name: "Download models", exact: true }).click();
+    await page.locator('.dlrow[data-cat="qwen3.5:4b"]').getByRole("button", { name: "Download", exact: true }).click();
+    await page.getByRole("button", { name: /^Back to chat/ }).click();
+    await page.locator("#modelBtn").click();
     await page.locator("#pkSearch").fill("qwen 3.5 4b");
-    await page.locator('#picker .pk-dr[data-dl="qwen3.5:4b"]').getByRole("button", { name: "Download Qwen 3.5 4B" }).click();
     const downloading = page.locator("#picker .pk-r.dis", { hasText: "Qwen 3.5 4B" });
-    await expect(downloading).toContainText("Downloading");
-    await expect(downloading).toHaveAttribute("data-tip", /at 16k fits on the GPU/);
-    const need = async () => /est\. ([\d.]+\sGB)/.exec((await downloading.getAttribute("data-tip")) ?? "")?.[1];
-    const at16 = await need();
-    expect(at16).toBeDefined();
-    await ctx(page, "64k").click();
-    await expect(downloading).toHaveAttribute("data-tip", /at 64k fits on the GPU/);
-    // the estimate itself is the one at 64k: a bigger KV cache, so a bigger need
-    await expect.poll(need).not.toBe(at16);
+    await expect(downloading).toHaveAttribute("aria-disabled", "true");
+    await expect(downloading.locator(".pk-v")).toHaveText(/\d+%/);
+    await expect(downloading).toHaveAttribute("data-tip", /GB estimated; fits on GPU/);
   });
 });
 
@@ -197,32 +212,37 @@ async function cappedAt32k(page: Page): Promise<void> {
   await page.locator("#modelBtn").click();
   await pick(page, "qwen3.5:9b");
   await ctx(page, "64k").click();
+  await expect(page.locator("#picker")).toBeHidden();
+  await page.locator("#modelBtn").click();
   await expect(ctx(page, "64k")).toHaveAttribute("aria-checked", "true");
   await pick(page, "mid-chat:32k");
-  await expect(page.locator("#picker .pk-help")).toHaveText("Runs at 32k, the most this model takes.");
+  await expect(page.locator("#modelBtn")).toContainText("32k");
   await expect(ctx(page, "64k")).toBeDisabled();
 }
 
 test.describe("the context sizes when the chosen one is more than the model takes", () => {
   test.use({ installed: ["qwen3.5:9b", "mid-chat:32k"] });
 
-  test("Tab reaches the largest size the model takes, and Left chooses it", async ({ page, open }) => {
+  test("Tab reaches the capped size and Left returns to search", async ({ page, open }) => {
     await open();
     await waitReady(page);
     await cappedAt32k(page);
     expect(await tabToSize(page)).toBe("32768");
     await page.keyboard.press("ArrowLeft");
     await expect(ctx(page, "32k")).toHaveAttribute("aria-checked", "true");
-    await expect(ctx(page, "32k")).toBeFocused();
+    await expect(page.locator("#pkSearch")).toBeFocused();
   });
 
-  test("Right from there chooses the smallest", async ({ page, open }) => {
+  test("Down from the capped size wraps to the smallest and Enter commits it", async ({ page, open }) => {
     await open();
     await waitReady(page);
     await cappedAt32k(page);
     expect(await tabToSize(page)).toBe("32768");
-    await page.keyboard.press("ArrowRight");
-    await expect(ctx(page, "8k")).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("ArrowDown");
+    await expect(ctx(page, "8k")).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#picker")).toBeHidden();
+    await expect(page.locator("#modelBtn")).toContainText("8k");
   });
 });
 

@@ -15,6 +15,25 @@ const TABLET = { viewport: { width: 800, height: 1000 }, isMobile: true, hasTouc
 
 test.use({ seed: "design", seedAt: NOW, timezoneId: "America/Chicago", locale: "en-US" });
 
+test.describe("populated model picker", () => {
+  test.use({ viewport: { width: 390, height: 749 }, isMobile: true, hasTouch: true, installed: ["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b", "qwen3.5:4b", "mistral-small3.2:24b", "mid-chat:32k", "tiny-chat:2k", "no-limit-chat:1b"] });
+  test("the picker: initial rows and Show more fit without clipping the control", async ({ page, open }) => {
+    await open(); await waitReady(page);
+    await page.locator("#modelBtn").tap();
+    const picker = page.locator("#picker");
+    const more = picker.getByRole("button", { name: "Show more", exact: true });
+    await expect(more).toBeEnabled();
+    const frame = await picker.boundingBox(), list = await picker.locator(".pk-list-scroll").boundingBox(), button = await more.boundingBox();
+    await page.screenshot({ path: test.info().outputPath("picker-phone-populated.png") });
+    expect(frame).not.toBeNull(); expect(list).not.toBeNull(); expect(button).not.toBeNull();
+    if (!frame || !list || !button) return;
+    expect(button.y + button.height, "Show more is fully inside the list viewport").toBeLessThanOrEqual(list.y + list.height);
+    await more.tap();
+    await expect(picker.getByRole("option")).toHaveCount(8);
+    expect(await picker.boundingBox()).toEqual(frame);
+  });
+});
+
 const box = async (page: Page, sel: string) => {
   const b = await page.locator(sel).first().boundingBox();
   expect(b, `${sel} has a box`).not.toBeNull();
@@ -67,6 +86,20 @@ for (const [name, use] of [["412 touch", PHONE], ["915 touch", LANDSCAPE], ["600
 test.describe("sheets on a phone", () => {
   test.use(PHONE);
 
+  test("the model picker follows the remaining viewport when a touch keyboard reduces its height", async ({ page, open }) => {
+    await open(); await waitReady(page);
+    await page.locator("#modelBtn").tap();
+    const picker = page.locator("#picker");
+    await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
+    await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
+    await page.setViewportSize({ width: 412, height: 500 });
+    const frame = await picker.boundingBox();
+    await page.screenshot({ path: test.info().outputPath("picker-phone-short-viewport.png") });
+    expect(frame).not.toBeNull();
+    if (!frame) return;
+    expect(Math.round(frame.y + frame.height), "picker stays above the reduced viewport's bottom inset").toBe(492);
+  });
+
   for (const [label, opener, sheet] of [
     ["the model picker", "#modelBtn", "#picker"],
     ["chat options", "#optBtn", "#optsMenu"],
@@ -77,7 +110,7 @@ test.describe("sheets on a phone", () => {
       await openThread(page, open, seededThread);
       if (sheet === "#threadMenu") await openDrawer(page);
       await page.locator(opener).first().tap();
-      await expect(page.locator(`${sheet} .sh-h button`)).toBeFocused();
+      await expect(page.locator(sheet === "#picker" ? "#picker .pk-close" : `${sheet} .sh-h button`)).toBeFocused();
       await expect(page.locator("#app")).toHaveAttribute("inert", "");
       for (let i = 0; i < 12; i++) {
         await page.keyboard.press("Tab");
@@ -89,10 +122,18 @@ test.describe("sheets on a phone", () => {
       await expect(page.locator(opener).first()).toBeFocused();
     });
 
-    test(`${label} has a grab handle, a 44 px close and closes on a swipe down`, async ({ page, open, seededThread }) => {
+    test(sheet === "#picker" ? "the model picker keeps its fixed frame and has a 44 px close" : `${label} has a grab handle, a 44 px close and closes on a swipe down`, async ({ page, open, seededThread }) => {
       await openThread(page, open, seededThread);
       if (sheet === "#threadMenu") await openDrawer(page);
       await page.locator(opener).first().tap();
+      if (sheet === "#picker") {
+        const frame = await box(page, sheet), close = await box(page, "#picker .pk-close");
+        expect(frame.width).toBe(360);
+        expect(Math.min(close.width, close.height), "close size").toBeGreaterThanOrEqual(44);
+        await page.locator("#picker .pk-close").tap();
+        await expect(page.locator(sheet)).toBeHidden();
+        return;
+      }
       expect(await css(page, `${sheet} .sh-h`, "width", "::before")).toBe("36px");
       const close = await box(page, `${sheet} .sh-h button`);
       expect(Math.min(close.width, close.height), "close size").toBeGreaterThanOrEqual(44);
@@ -382,8 +423,7 @@ test.describe("a new thread at 360", () => {
     await expect(page.locator(".hero-sub")).toHaveText("Runs on your computer. Nothing leaves your own network.");
     const links = page.locator(".card-links button:visible");
     await expect(links).toHaveCount(1);
-    const b = await links.first().boundingBox();
-    expect(b?.height ?? 0, "setup row height").toBeGreaterThanOrEqual(44);
+    await expect.poll(async () => (await links.first().boundingBox())?.height ?? 0, { message: "setup row height" }).toBeGreaterThanOrEqual(44);
     const nb = page.locator(".hdr").getByRole("button", { name: "New thread" });
     await expect(nb).toBeDisabled();
     await page.locator("#ta").fill("x");
@@ -418,48 +458,41 @@ test.describe("sheet content on a phone", () => {
     await expect(page.locator("#threadMenu .mi.danger use")).toHaveAttribute("href", "#i-trash");
   });
 
-  test("the picker: full-width search, an estimate in each row, one 16 px inset", async ({ page, open }) => {
+  test("the picker: search fills the model column and each row shows estimated memory", async ({ page, open }) => {
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").tap();
-    await expect(page.locator("#picker .sh-h")).toContainText(/Sizes at \d+k context/);
-    const search = await box(page, "#picker .pk-hin");
-    expect(search.x, "search left").toBe(16);
-    expect(search.width, "search width").toBe(412 - 32);
-    await expect(page.locator('#picker .pk-r[data-m="gemma4:12b"] .pk-est')).toHaveText(/^Est\. \d/);
-    const foot = await page.locator("#picker .pk-ft").boundingBox();
-    expect(foot?.x, "foot left").toBe(16);
+    const frame = await box(page, "#picker"), search = await box(page, "#picker .pk-search");
+    expect(search.x - frame.x, "rail plus search inset").toBe(57);
+    expect(search.width, "search uses the model column").toBe(frame.width - 44 - 26);
+    await expect(page.locator('#picker .pk-r[data-m="gemma4:12b"] .pk-v')).toHaveText(/^\d+\.\d\sGB$/);
     const row = await page.locator('#picker .pk-r[data-m="gemma4:12b"]').boundingBox();
-    expect(Math.round((row?.x ?? 0) + (row?.width ?? 0)), "rows' right inset").toBe(412 - 8);
+    expect((row?.x ?? 0) + (row?.width ?? 0), "rows stay in their column").toBeLessThanOrEqual(frame.x + frame.width - 12);
   });
 
-  test("a blocked row says how much more, with Memory details on its own line and a smaller context when one fits", async ({ page, open }) => {
+  test("a large model opens context choices; refused sizes stay disabled and a smaller size can be chosen", async ({ page, open }) => {
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").tap();
-    const blocked = page.locator('#picker .pk-r.dis[data-m="qwen3.8-abliterated:27b"]');
-    await expect(blocked.locator(".pk-est")).toHaveText(/^Needs \d+\.\d\sGB more$/);
-    await expect(blocked.locator(".pk-v")).toBeHidden();
-    await page.locator("#picker").evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
-    const details = await blocked.locator("[data-memdet]").boundingBox();
-    const name = await blocked.locator(".pk-nm").boundingBox();
-    expect(details?.y ?? 0, "Memory details below the name").toBeGreaterThan((name?.y ?? 0) + (name?.height ?? 0));
-    expect(details?.height ?? 0, "Memory details height").toBeGreaterThanOrEqual(44);
-    // at 64k the 12B no longer fits, and 32k does
-    await page.locator('#picker [data-ctx="65536"]').tap();
-    const twelve = page.locator('#picker .pk-r.dis[data-m="gemma4:12b"]');
-    const smaller = twelve.getByRole("button", { name: "Use 32k" });
-    await expect(smaller).toBeVisible();
-    // a screen reader hears the model as unavailable and these two as working buttons, so they sit outside the disabled option
-    await expect(smaller).toBeEnabled();
-    await expect(twelve.locator('[role="option"]')).toHaveAttribute("aria-disabled", "true");
-    await expect(twelve.locator('[role="option"] button')).toHaveCount(0);
-    await smaller.tap();
-    await expect(page.locator('#picker [data-ctx="32768"]')).toHaveAttribute("aria-checked", "true");
-    await expect(page.locator('#picker .pk-r[data-m="gemma4:12b"]:not(.dis)')).toBeVisible();
-    await blocked.getByRole("button", { name: "Memory details" }).tap();
+    await page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"] .pk-select').tap();
+    await expect(page.locator("#picker .pk-context")).toBeVisible();
+    await expect(page.locator('#picker [data-ctx="65536"]')).toBeDisabled();
+    await page.locator("#picker").getByRole("button", { name: "Memory details", exact: true }).tap();
     await expect(page.locator(".set-bar").getByRole("heading", { name: "Advanced", exact: true })).toBeVisible();
     await expect(page.locator("#gpuMemory > .fp-h .fp-t")).toHaveText("qwen3.8-abliterated:27b");
+    await page.getByRole("button", { name: "Back to Settings", exact: true }).tap();
+    await page.getByRole("button", { name: "Done", exact: true }).tap();
+    await page.locator("#modelBtn").tap();
+    await page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"] .pk-select').tap();
+    await page.locator("#picker .pk-back").tap();
+    await page.locator('#picker .pk-r[data-m="gemma4:12b"] .pk-select').tap();
+    await expect(page.locator('#picker [data-ctx="65536"]')).toBeDisabled();
+    await expect(page.locator('#picker [data-ctx="32768"]')).toBeEnabled();
+    await page.locator('#picker [data-ctx="32768"]').tap();
+    await expect(page.locator("#picker")).toBeHidden();
+    await expect(page.locator("#modelBtn")).toContainText("32k");
+    await expect(page.locator("#modelBtn")).toBeFocused();
+    await expect(page.locator("#ta")).not.toBeFocused();
   });
 });
 
@@ -523,7 +556,7 @@ test.describe("a resize out of phone width with a sheet open", () => {
     await page.keyboard.press("Control+m");
     await expect(page.locator("#pkSearch")).toBeFocused();
     await page.setViewportSize({ width: 1200, height: 900 });
-    await expect(page.locator("#picker")).not.toHaveClass(/\bopen\b/);
+    await expect(page.locator("#picker")).toBeHidden();
     await expect.poll(() => focusVisible(page)).toBe(true);
   });
 });
@@ -535,7 +568,6 @@ test.describe("sheet content at 360", () => {
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").tap();
-    await expect(page.locator("#picker .pk-rec").first()).toBeVisible();
     // the wider "Checking…" holds a row only until its fit arrives
     await expect(page.locator("#picker .pk-v", { hasText: "Checking" })).toHaveCount(0);
     // the text's own width against its box: scrollWidth rounds up and reports a name that is not cut
@@ -548,12 +580,24 @@ test.describe("sheet content at 360", () => {
         })
         .map((e) => e.textContent ?? ""),
     );
-    // a raw tag such as name:27b is long enough that an ellipsis is the honest answer
-    expect(cut.filter((name) => !name.includes(":"))).toEqual([]);
+    // Community variants may truncate; the short everyday names remain complete.
+    expect(cut.filter((name) => name === "Qwen 3.5 9B" || name === "Gemma 4 12B")).toEqual([]);
   });
 
-  test("a switch that is on paints its track, not its enlarged touch area", async ({ page, open, seededThread }) => {
+  test("a switch that is on paints its track, not its enlarged touch area", async ({ page, open, seededThread }, info) => {
     await openThread(page, open, seededThread);
+    const controls = page.locator(".cf-r");
+    for (const control of await controls.locator(":scope > button").all()) {
+      const bounds = await control.boundingBox();
+      expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    const covered = await controls.locator(":scope > button").evaluateAll(buttons => buttons.filter(button => {
+      const r = button.getBoundingClientRect();
+      return !button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+    }).map(button => button.id));
+    expect(covered, "each phone control receives its own centre tap").toEqual([]);
+    await page.screenshot({ path: info.outputPath("phone-composer-controls.png") });
     await page.locator("#optBtn").tap();
     const on = page.locator('#optsMenu .mi[aria-checked="true"] .switch');
     await expect(on).toBeVisible();
@@ -563,7 +607,7 @@ test.describe("sheet content at 360", () => {
 
 // ------------------------------------------------------------- Settings (ML-15, ML-16, ML-17, ML-20)
 
-const SETTINGS_SECTIONS = ["General", "Models", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"];
+const SETTINGS_SECTIONS = ["General", "Models", "Instructions", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"];
 
 /** The page and Settings' scrollers that are wider than the screen. */
 const sideways = (page: Page) =>
@@ -611,7 +655,7 @@ test.describe("Settings on a phone", () => {
     expect(empty === 0 || !(await row.locator(".sv").isVisible()), "the empty value column is gone").toBe(true);
   });
 
-  test("secondary text is one grey at 14 px or more", async ({ page, open, seededThread }) => {
+  test("secondary text is 14 px or more apart from approved compact picker figures", async ({ page, open, seededThread }) => {
     await openThread(page, open, seededThread);
     const sweep = () =>
       page.evaluate(() => {
@@ -627,7 +671,8 @@ test.describe("Settings on a phone", () => {
           if (el.getClientRects().length === 0 || el.closest("[inert]") !== null || el.closest(".cb, code, .mmark") !== null) continue;
           const cs = getComputedStyle(el);
           if (cs.visibility === "hidden" || cs.opacity === "0" || cs.color !== grey) continue;
-          if (parseFloat(cs.fontSize) < 14) out.push(`${el.tagName.toLowerCase()}.${el.className} ${cs.fontSize}`);
+          // The approved compact picker uses smaller secondary cost figures and footer text.
+          if (parseFloat(cs.fontSize) < 14 && el.closest(".picker-trigger-ctx,#picker .pk-v,#picker .pk-cost,#picker .pk-bottom,#picker .pk-context-head small") === null) out.push(`${el.tagName.toLowerCase()}.${el.className} ${cs.fontSize}`);
         }
         return out;
       });
@@ -644,7 +689,7 @@ test.describe("Settings on a phone", () => {
       await page.locator(".set-list").getByRole("button", { name: section }).tap();
       await expect(page.locator(".set-bar h2")).toHaveText(section);
       if (section === "Models") await expect(page.locator(".mp-row").first()).toBeVisible();
-      if (section === "Advanced") await expect(page.locator("#gpuMemory .fp-v")).toBeVisible();
+      if (section === "Advanced") await expect(page.locator("#gpuMemory .fp-v:visible")).toBeVisible();
       expect(await sweep(), section).toEqual([]);
       await page.getByRole("button", { name: "Back to Settings" }).tap();
     }
@@ -680,7 +725,7 @@ for (const [width, use] of [["412", PHONE], ["360", NARROW]] as const) {
       await waitReady(page);
       await phoneSettings(page, "Advanced");
       const gpu = page.locator("#gpuMemory");
-      await expect(gpu.locator(".fp-v")).toBeVisible();
+      await expect(gpu.locator(".fp-v:visible")).toBeVisible();
       const sizes = gpu.locator(".mini-seg button");
       expect(await sizes.count()).toBeGreaterThan(1);
       // touch targets here are 44 wide by 40 tall (styles.css, the hover:none block)

@@ -59,6 +59,25 @@ const render = (state: object) => {
 const gpuPromises = (html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
+  it("PK-02: a loaded current-context report is labeled measured", () => {
+    const name = "qwen3:14b";
+    const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };
+    const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
+      catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fits: { [`${name}@65536`]: measured } }));
+    expect(html).toMatch(/measured 9\.0(?:&#160;| | )GB at 64k/);
+    expect(html).not.toContain("Measured after the first load");
+  });
+  it("PK-02: Download uses the viewed 64k fit instead of the saved-default 16k estimate", () => {
+    const name = "qwen3:14b";
+    const at16 = { ...fit(name, "spills", 10), verdict: "fits", freeVramBytes: 12 * GIB, spillRamBytes: 0 };
+    const at64 = { ...fit(name, "spills", 15), numCtx: 65536, freeVramBytes: 12 * GIB, spillRamBytes: 3 * GIB };
+    const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
+      catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
+      fits: { [`${name}@65536`]: at64 } }));
+    expect(html).toContain("Uses system memory · slower");
+    expect(html).toMatch(/est\. 15\.0(?:&#160;| | )GB at 64k/);
+    expect(html).not.toContain("Runs on GPU");
+  });
   it("promises no GPU on either tab or with no models, and says system memory instead", () => {
     const list = render(noGpuComputer({}));
     const download = render(noGpuComputer({ addPage: true }));
