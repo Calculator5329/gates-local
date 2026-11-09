@@ -153,8 +153,10 @@ test("a message sends from the phone composer and its reply streams", async ({ p
   await send.tap();
   const reply = page.locator(".turn.a").last();
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(page.locator(".composer button.send")).toHaveCount(1);
   const stop = await page.getByRole("button", { name: "Stop" }).boundingBox();
   expect(Math.min(stop?.width ?? 0, stop?.height ?? 0), "stop size").toBeGreaterThanOrEqual(44);
+  expect(stop, "Stop occupies Send's slot").toEqual(box);
   await expect(reply.locator(".md")).toContainText("You asked: Hello from the phone", { timeout: 10_000 });
   await expect(page.locator(".working")).toHaveCount(0, { timeout: 15_000 });
   await noSideScroll(page, "after a reply");

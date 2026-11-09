@@ -4,6 +4,7 @@
 // Send or Stop, and the popovers it opens (model picker, + menu).
 import { type KeyboardEvent, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, ModelInfo } from "@gates-local/contracts";
+import { useActionPress } from "./composer-press.ts";
 import { PLACEHOLDER, rtOf } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
@@ -34,6 +35,10 @@ const Voice = lazy(() => import("./Voice.tsx").then((m) => ({ default: m.Voice }
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
 const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
 const pctOf = (done: number, total: number | undefined) => (total ? Math.round((done / total) * 100) : 0);
+
+// The first send replaces Draft's composer with the thread's in the same commit.
+// Transfer primary-action focus only to that immediate replacement.
+let primaryFocus = false;
 
 /** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
@@ -84,7 +89,10 @@ export function Composer() {
   const catalog = useStore(catalogOf);
   const imageGen = useStore(imageGenOf);
   const isStreaming = useStore(streamingHere);
-  const editing = useStore((s) => s.editingQueued !== null);
+  const editingId = useStore((s) => s.editingQueued);
+  const editing = editingId !== null;
+  const running = useStore((s) => streamingHere(s) ? (s.live?.gen ?? null) : null);
+  const touch = useMedia("(hover: none)");
   const freed = useStore((s) => s.model !== undefined && s.stopFrees[fitKey(s.model, s.numCtx)] === true);
   const wait = useStore(queueReason);
   const first = useStore(firstPull);
@@ -98,6 +106,16 @@ export function Composer() {
   const view = useStore((s) => s.view);
   const voiceThread = useStore((s) => s.threadId);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const primary = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const button = primary.current;
+    if (primaryFocus) button?.focus();
+    primaryFocus = false;
+    return () => {
+      primaryFocus = document.activeElement === button;
+      queueMicrotask(() => { primaryFocus = false; });
+    };
+  }, []);
 
   const ready = rt === "ready";
   useEffect(() => {
@@ -153,30 +171,54 @@ export function Composer() {
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
-  let sendTip = "Send (Enter)";
-  if (editing) sendTip = text ? "Update the queued message (Enter)" : "Type the message to queue";
-  else if (isStreaming && !blocked) sendTip = text ? "Queue (Enter). It sends when this reply finishes" : "Type now; it sends when this reply finishes";
-  else if (queueable) sendTip = `${text ? "Send (Enter). It goes out when " : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
+  const enter = touch ? "" : " (Enter)";
+  let sendTip = `Send${enter}`;
+  if (editing) sendTip = text ? `Update the queued message${enter}` : "Type the message to queue";
+  else if (isStreaming && !blocked) sendTip = text ? `Queue${enter}. It sends when this reply finishes` : "Type now; it sends when this reply finishes";
+  else if (queueable) sendTip = `${text ? `Send${enter}. It goes out when ` : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
   else if (noModel) sendTip = why ?? "Download a model to start chatting";
   else if (memNo) sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
   else if (!text) sendTip = "Type a message to send";
-  else if (freed) sendTip = "Send (Enter). Another chat's reply is using this memory, so it stops first";
+  else if (freed) sendTip = `Send${enter}. Another chat's reply is using this memory, so it stops first`;
   const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
   const memRefused = !blocked && !queueable && !noModel && memNo;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
+  // Touch Enter inserts a newline, so a typed draft needs the queue arrow.
+  const showStop = isStreaming && !editing && !(touch && text !== "");
 
   const submit = () => {
     if (sendDisabled) return;
     void send(draft);
   };
+  const stopThisReply = () => {
+    const s = getState();
+    if (streamingHere(s) && s.live?.gen === running) stop();
+  };
+  const action = showStop ? `stop:${running}` : editing ? `edit:${editingId}` : memRefused ? `memory:${model}:${numCtx}` : isStreaming ? `queue:${running}` : "send";
+  useLayoutEffect(() => closeTip(), [action]);
+  const primaryPress = useActionPress(!showStop && sendDisabled && !memRefused ? `off:${action}` : action, () => {
+    if (showStop) stopThisReply();
+    else if (memRefused) openFit();
+    else submit();
+  });
+  const compactStopPress = useActionPress(`stop:${running}`, () => {
+    stopThisReply();
+    primary.current?.focus();
+  });
 
   return (
     <>
       <QueueTray />
       <StopWarning />
+      {isStreaming ? (
+        <div className="composer-running" data-running-status>
+          <span>Reply running</span>
+          {!showStop ? <button type="button" className="qa" aria-label="Stop reply" data-tip="Stop this reply. Your draft stays here" {...compactStopPress}>Stop</button> : null}
+        </div>
+      ) : null}
       <form
         className={`composer${blocked ? " blocked" : ""}`}
         autoComplete="off"
@@ -291,25 +333,17 @@ export function Composer() {
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
             </button>
-            {isStreaming ? (
-              <button type="button" className="send stop" aria-label="Stop" data-tip="Stop" onClick={stop}>
-                <span className="sqr" />
-              </button>
-            ) : null}
             <button
-              type="submit"
-              className="send"
-              aria-label={sendLabel}
-              data-tip={sendTip}
-              disabled={sendDisabled && !memRefused}
-              aria-disabled={memRefused ? true : undefined}
-              onClick={(e) => {
-                if (!memRefused) return;
-                e.preventDefault();
-                openFit();
-              }}
+              ref={primary}
+              type="button"
+              className={showStop ? "send stop" : "send"}
+              aria-label={showStop ? "Stop" : sendLabel}
+              data-tip={showStop ? (touch ? "Stop. Type a message to queue it after this reply" : "Stop. Enter queues your message after this reply") : sendTip}
+              // Keep the same focusable node through empty, running and finished states.
+              aria-disabled={!showStop && sendDisabled ? true : undefined}
+              {...primaryPress}
             >
-              <SendArrow />
+              {showStop ? <span className="sqr" /> : <SendArrow />}
             </button>
           </div>
         </div>

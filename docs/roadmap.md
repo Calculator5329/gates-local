@@ -7,6 +7,17 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
+and focus/selection restoration. Browser coverage is in `test/e2e/copy.spec.ts`;
+the real desktop permission-denial case is in `test/e2e/copy-desktop.spec.ts`.
+
+*In progress 2026-11-08:* The composer uses one changing Send/Stop/Update
+button, with Queue for a touch draft during a reply. The render probe failed
+on the prior commit's two-button states. A reserved status row keeps Stop
+reachable while typing or editing. Presses stay bound to their starting action
+and reply, with held-key repeats suppressed until release. Browser interactions
+are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
+
 - [x] <!-- workspace:id=work:418c8874-a153-5afd-bc19-9d2504e5ff48 --> Scaffold the pnpm workspace (`apps/desktop`, `apps/server`, `apps/web`,
       `packages/contracts`, `packages/harness`) with `CLAUDE.md`, roadmap,
       changelog and `pnpm verify` (typecheck, lint, unit tests).

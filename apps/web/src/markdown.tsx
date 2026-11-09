@@ -3,7 +3,8 @@
 // models write: paragraphs, headings, lists, fenced code, tables, quotes,
 // inline code, bold, italics and http(s) links. A streaming reply arrives here
 // as whole blocks (reveal.ts); half-written input still renders as far as it goes.
-import { type ReactNode, memo, useEffect, useRef, useState } from "react";
+import { type ReactNode, memo, useEffect, useRef } from "react";
+import { useCopy } from "./copy.ts";
 import { linkKey } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 
@@ -171,29 +172,21 @@ function useEdges<T extends HTMLElement>(content: unknown) {
 
 /** A fenced code block: the fence's language at the top left, its own copy button at the top right (shown on hover or focus). */
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, copy] = useCopy(code);
   const pre = useEdges<HTMLPreElement>(code);
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(t);
-  }, [copied]);
   return (
     <div className="cb">
       <div className="cb-h">
         {lang !== "" ? <span className="cb-lang">{lang}</span> : null}
         <button
           type="button"
-          className={copied ? "cb-copy on" : "cb-copy"}
+          className={copied !== null ? "cb-copy on" : "cb-copy"}
           aria-label="Copy code"
-          data-tip={copied ? undefined : "Copy code"}
-          onClick={() => {
-            navigator.clipboard?.writeText(code).catch(() => undefined);
-            setCopied(true);
-          }}
+          data-tip={copied !== null ? undefined : "Copy code"}
+          onClick={copy}
         >
           <Icon id={copied ? "check" : "copy"} />
-          {copied ? <span aria-live="polite">Copied</span> : null}
+          {copied !== null ? <span role="status">{copied ? "Copied" : "Couldn't copy"}</span> : null}
         </button>
       </div>
       <pre ref={pre}>

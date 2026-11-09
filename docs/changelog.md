@@ -111,6 +111,41 @@ Desktop permissions admit only the app's own microphone audio. Setup is in
 in `docs/design/voice.md` and remains unbuilt. Real recognition quality
 remains an owner check.
 
+## 2026-11-08: Composer keys recover after a missed release
+
+Releasing Enter in another window could leave the focused composer button
+unresponsive to the next Enter or Space press. A fresh key press now works
+even after a missed release, while holding Enter still cannot cancel the
+reply it just started.
+
+## 2026-11-08: Stop without losing a draft
+
+Typing on a phone or editing a queued message hid Stop. A reserved status row
+above the composer now offers compact Stop while the primary button is Queue
+or Update, keeping the draft and the controls' positions intact.
+
+A press stays bound to the action and reply it began on. Releasing Stop after
+the reply finishes cannot send unfinished text, and holding Enter on Send
+cannot cancel the reply it starts. Changing the primary action closes its old
+tooltip. Clipboard fallback also focuses its temporary selection before copying
+and restores the original draft selection afterward.
+
+## 2026-11-08: One changing Send/Stop button
+
+The composer showed Stop beside a second send button during replies. It now
+uses one primary button: Send, Stop, or Update while editing a queued message.
+Desktop Enter still queues a draft, and Stop's tooltip explains that shortcut.
+Touch Enter stays a newline; typing during a reply offers Queue in the same slot.
+The button keeps keyboard focus through state changes and ignores the second
+click of Send's double-click when it becomes Stop.
+
+## 2026-11-08: Copy buttons report the actual result
+
+Messages and code could say Copied while leaving the clipboard unchanged.
+All three copy controls now share the model-name fallback and show failure
+when copying fails. The temporary selection restores focus, draft selection
+and selected reply text. Desktop permission handling remains unchanged.
+
 ## 2026-11-08: Reverted controls no longer overwrite newer settings
 
 - Returning a reply control to its original value removes it from the draft.

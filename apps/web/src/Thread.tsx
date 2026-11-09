@@ -3,6 +3,7 @@
 // are memoised by message, so a streaming token re-renders only the live turn.
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Message, ToolStep } from "@gates-local/contracts";
+import { useCopy } from "./copy.ts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
@@ -44,26 +45,14 @@ function useTicker(ms: number, on: boolean): number {
 
 /** Copy, with the check-mark flash (F60): the icon and tip read "Copied" for 1.2 s. */
 function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    if (!done) return;
-    const t = setTimeout(() => setDone(false), 1200);
-    return () => clearTimeout(t);
-  }, [done]);
+  const [copied, copy] = useCopy(text, 1200);
   return (
-    <button
-      type="button"
-      className="ibtn xs"
-      data-copy
-      data-tip={done ? "Copied" : "Copy"}
-      aria-label="Copy"
-      onClick={() => {
-        navigator.clipboard?.writeText(text).catch(() => undefined);
-        setDone(true);
-      }}
-    >
-      <Icon id={done ? "check" : "copy"} />
-    </button>
+    <>
+      <button type="button" className="ibtn xs" data-copy data-tip={copied ? "Copied" : "Copy"} aria-label="Copy" onClick={copy}>
+        <Icon id={copied ? "check" : "copy"} />
+      </button>
+      {copied === false ? <span className="na" role="status">Couldn't copy</span> : null}
+    </>
   );
 }
 

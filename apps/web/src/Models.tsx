@@ -7,6 +7,7 @@
 // models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { FitReport, ModelInfo } from "@gates-local/contracts";
+import { copyText } from "./copy.ts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { DownloadTab, DownloadingRows, isActive } from "./ModelDownloads.tsx";
@@ -276,25 +277,6 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
 }
 
 // ---------------------------------------------------------------- row menu
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // a browser without clipboard access: the old way
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  }
-}
 
 function RowMenu({ r, saved, onRemove }: { r: InstalledRow; saved: string | undefined; onRemove: (back: HTMLElement | null) => void }) {
   const [open, setOpen] = useState(false);

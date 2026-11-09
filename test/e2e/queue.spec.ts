@@ -47,6 +47,8 @@ test("a queued message can be edited in the composer, removed, or sent now in pl
   await rows(page).first().locator("[data-edit-queued]").click();
   await expect(page.locator("#ta")).toHaveValue("First thought");
   await expect(rows(page).first()).toContainText("Editing in the composer");
+  await expect(page.locator(".composer button.send")).toHaveCount(1);
+  await expect(page.locator(".composer button.send")).toHaveAccessibleName("Update queued message");
   await page.locator("#ta").fill("First thought, reworded");
   await page.locator("#ta").press("Enter");
   await expect(page.locator("#ta")).toHaveValue("");
