@@ -23,36 +23,17 @@ import {
 } from "@gates-local/contracts";
 import { ctxFor, describeModel, k, noGpu, titleFrom } from "./format.ts";
 import { type ModelDecision, choosable, firstChatPull, modelChoice as pickChoice, modelNameKey, newestOnly, sendableModel } from "./pick.ts";
-import { type LiveTurn, NA, type Queued, type Section, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
+import { type LiveTurn, NA, type Queued, type State, type StopAsk, chatReady, fitKey, getState, setState, streaming, streamingHere } from "./store.ts";
 import { imageReason } from "./paste.ts";
-import { settingsScreen } from "./screen-loaders.ts";
-import { syncTitleBar } from "./titlebar.ts";
+import { applyTextSize, applyTheme, serverUrl, webServerUrl } from "./session/platform.ts";
+import { createNavigation } from "./session/navigation.ts";
 
-// ---------------------------------------------------------------- desktop bridge
-// The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
-// because the web app does not import the desktop package.
-type BridgeState =
-  | { readonly status: "ready"; readonly serverUrl: string }
-  | { readonly status: "idle" | "starting" | "restarting" | "crashed" | "stopping" | "stopped" };
-
-interface DesktopBridge {
-  /** Native control colours, resolved from the page's theme tokens. */
-  syncTitleBar?(colors: { color: string; symbolColor: string }): Promise<void>;
-  getServerUrl(): Promise<string | null>;
-  onState(listener: (state: BridgeState) => void): () => void;
-  /** Starts `pnpm run app-update` and quits; missing on desktop builds from before it existed. */
-  updateAndRestart?(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
-  /** The folder the app keeps its data in; missing on desktop builds from before it existed. */
-  dataFolder?(): Promise<string>;
-  /** Opens the data folder in the file manager; a sentence if it could not. */
-  openDataFolder?(): Promise<string | null>;
-  modelsFolder?(): Promise<string | null>;
-  openModelsFolder?(): Promise<string | null>;
-}
+// Preserve the UI's action imports while implementation moves into session modules.
+export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, updateAndRestart } from "./session/platform.ts";
+export { threadFromHash } from "./session/navigation.ts";
 
 declare global {
   interface Window {
-    gatesLocal?: DesktopBridge;
     /**
      * Counters the performance spec reads. terminalFlush is that spec's
      * negative control (test/e2e/perf.spec.ts): the done event makes one
@@ -64,33 +45,6 @@ declare global {
 
 const perf: NonNullable<Window["glPerf"]> = { deltas: 0, flushes: 0 };
 window.glPerf = perf;
-
-/**
- * Where the server is: the desktop bridge, else ?server= or
- * VITE_GATES_LOCAL_SERVER, else this page's own host when the server served
- * the page (the phone listener injects the gates-local-server meta).
- */
-async function serverUrl(): Promise<string | null> {
-  if (window.gatesLocal) return window.gatesLocal.getServerUrl();
-  return webServerUrl();
-}
-
-/** Browser configuration is synchronous, so No Server can cover the first render. */
-function webServerUrl(): string | null {
-  const fromQuery = new URLSearchParams(location.search).get("server");
-  const fromEnv: unknown = import.meta.env["VITE_GATES_LOCAL_SERVER"];
-  const configured = fromQuery ?? (typeof fromEnv === "string" && fromEnv !== "" ? fromEnv : null);
-  if (configured !== null) return configured;
-  if (document.querySelector('meta[name="gates-local-server"]')?.getAttribute("content") === "same-origin") {
-    return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
-  }
-  return null;
-}
-
-/** A /files/ URL on the server; the token rides along only when the socket URL had one. */
-export function fileUrl(origin: string, token: string | null, path: string): string {
-  return `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-}
 
 /** Resolves on the bridge's next ready state, or after ms when there is no bridge. */
 function nextChance(ms: number): Promise<void> {
@@ -482,21 +436,6 @@ function applySettings(settings: Settings, first = false, preserveVoiceIntent = 
   applyTextSize(settings.textSize);
 }
 
-/** "small" or "large" on the root; the default has no attribute (styles.css --chat-fs). */
-function applyTextSize(size: Settings["textSize"]): void {
-  const root = document.documentElement;
-  if (size === undefined || size === "default") root.removeAttribute("data-text");
-  else root.setAttribute("data-text", size);
-}
-
-/** Dark or light on the root; "system" removes the attribute so the OS decides (styles.css). */
-function applyTheme(theme: Settings["theme"]): void {
-  const root = document.documentElement;
-  if (theme === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", theme);
-  syncTitleBar();
-}
-
 /** Keep the chat model valid: the settings default, else the smallest installed model (the fastest that fits). */
 function chooseModel(): void {
   setState(decided(modelChoice(getState())));
@@ -622,17 +561,6 @@ const staleFitStatus = (s: State): State["fitStatus"] => Object.fromEntries(Obje
 
 // ---------------------------------------------------------------- threads
 
-/** The open thread lives in the URL hash: #thread=<id>. */
-export function threadFromHash(): string | null {
-  const m = /^#thread=(.+)$/.exec(location.hash);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
-}
-
-function setHash(threadId: string | null): void {
-  const next = threadId === null ? " " : `#thread=${encodeURIComponent(threadId)}`;
-  if (location.hash !== next.trim()) history.replaceState(null, "", threadId === null ? location.pathname + location.search : next);
-}
-
 /** Threads cached before the last reconnect: the next visit reloads them. */
 const stale = new Set<string>();
 
@@ -648,22 +576,12 @@ let loadSeq = 0;
 /** Per thread, the ticket of the newest load whose snapshot landed: an older load's answer, snapshot or failure, never replaces it. */
 const landed = new Map<string, number>();
 
-/** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
-let navGen = 0;
-let pendingSettings: number | null = null;
-
-/** Every destination invalidates an older deferred request. */
-function beginNavigation(): number {
-  pendingSettings = null;
-  return ++navGen;
-}
-
-/** Escape and destinations outside the main view can dismiss a deferred request. */
-export function cancelPendingSettings(): boolean {
-  if (pendingSettings !== navGen) return false;
-  beginNavigation();
-  return true;
-}
+const navigation = createNavigation({
+  flushQueued, bringBack, chooseModel, loadThread, loading,
+  newChatModel: (s) => decided(pickChoice(s.models, s.model, undefined)),
+});
+export const { openThread, newThread, openSettings, leaveSettings, cancelPendingSettings, initialView, finishFirstRun } = navigation;
+const { firstRunDone } = navigation;
 
 function setLoadError(threadId: string, message: string | null): void {
   if ((getState().loadErrors[threadId] ?? null) === message) return;
@@ -690,7 +608,7 @@ function withMessage(s: State, threadId: string, msg: Message): State["messages"
 
 async function loadThread(threadId: string, force = false): Promise<void> {
   if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
-  const nav = navGen;
+  const nav = navigation.generation;
   const req = { threadId, seq: ++loadSeq, since: [] as Message[] };
   loads.add(req);
   setLoadError(threadId, null);
@@ -716,7 +634,7 @@ async function loadThread(threadId: string, force = false): Promise<void> {
     setLoadError(threadId, failure("load this conversation", e));
     // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts, loaded or still loading)
     const s = getState();
-    if (codeOf(e) === "thread-not-found" && nav === navGen && pendingSettings === null && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
+    if (codeOf(e) === "thread-not-found" && nav === navigation.generation && navigation.pendingSettings === null && s.view === "thread" && s.threadId === threadId) setState({ view: "new", threadId: null });
   } finally {
     loads.delete(req);
   }
@@ -756,62 +674,6 @@ function savedReplyFor(live: LiveTurn | null, threadId: string, messages: readon
   if (live === null || live.threadId !== threadId || live.end === undefined || live.userMessageId === undefined) return false;
   const i = messages.findIndex((m) => m.id === live.userMessageId);
   return i >= 0 && messages.slice(i + 1).some((m) => m.role === "assistant");
-}
-
-/** Leaving a chat ends an edit, which frees its message. After this task: flushQueued itself opens threads, and its own send starts first. */
-function wakeAfterEdit(): void {
-  if (getState().editingQueued !== null) queueMicrotask(flushQueued);
-}
-
-export function openThread(threadId: string): void {
-  beginNavigation();
-  wakeAfterEdit();
-  setState((s) => {
-    // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
-    const model = s.threadModels[threadId] ?? s.model;
-    return { view: "thread", threadId, addPage: false, ownerConfirm: false, ...leavingChat(s), ...(model === undefined ? {} : { model }) };
-  });
-  bringBack(threadId);
-  chooseModel();
-  setHash(threadId);
-  void loadThread(threadId);
-}
-
-export function newThread(): void {
-  beginNavigation();
-  wakeAfterEdit();
-  // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
-  setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...decided(pickChoice(s.models, s.model, undefined)) }));
-  setHash(null);
-}
-
-/** What belongs to the chat being left: its notice, its warning, and a queued message open for editing. */
-function leavingChat(s: State): Partial<State> {
-  return { notice: null, stopAsk: null, ...(s.editingQueued === null ? {} : { editingQueued: null, draft: "", draftImages: [] }) };
-}
-
-export function openSettings(section?: Section, addPage = false): void {
-  const nav = beginNavigation();
-  const show = () => {
-    if (nav !== navGen) return;
-    pendingSettings = null;
-    setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false }));
-  };
-  // The visible composer must still send into its visible thread while a chunk
-  // loads. Commit the navigation only when the screen (or its error) can render.
-  if (settingsScreen.get().kind === "pending") {
-    pendingSettings = nav;
-    void settingsScreen.load().then(show);
-  } else show();
-}
-
-export function leaveSettings(): void {
-  beginNavigation();
-  const s = getState();
-  setState({ view: s.threadId !== null ? "thread" : "new" });
-  // back to a thread with nothing on screen whose load failed meanwhile: try again
-  const id = s.threadId;
-  if (id !== null && !loading(id)) void loadThread(id);
 }
 
 function loading(threadId: string): boolean {
@@ -1772,18 +1634,6 @@ export async function cancelImage(jobId: string): Promise<ActionResult> {
   return result.ok ? null : result.message;
 }
 
-/** The app's data folder, or null outside the desktop window. */
-export async function dataFolder(): Promise<string | null> {
-  return (await window.gatesLocal?.dataFolder?.()) ?? null;
-}
-
-export async function openDataFolder(): Promise<ActionResult> {
-  return (await window.gatesLocal?.openDataFolder?.()) ?? null;
-}
-
-/** Only the desktop window can open a folder. */
-export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== undefined && window.gatesLocal.openModelsFolder !== undefined;
-
 export async function pull(name: string): Promise<ActionResult> {
   const tag = name.trim();
   if (tag === "") return null;
@@ -1882,48 +1732,4 @@ export async function dismissUpdateResult(): Promise<void> {
     return { update: { ...s.update, result: null } };
   });
   await act("update.dismissResult", {}, "hide the update note");
-}
-
-/** True in the desktop app, which can quit, update and open again; phones and browsers only check. */
-export function canUpdateHere(): boolean {
-  return typeof window.gatesLocal?.updateAndRestart === "function";
-}
-
-/** The Update and restart button: the desktop starts the updater and quits; null when it is on its way. */
-export async function updateAndRestart(): Promise<ActionResult> {
-  const bridge = window.gatesLocal;
-  if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
-  try {
-    const r = await bridge.updateAndRestart();
-    return r.ok ? null : r.message;
-  } catch (e) {
-    return `Couldn't start the update (${e instanceof Error ? e.message : String(e)}). Run pnpm run app-update in the Gates Local folder instead.`;
-  }
-}
-
-// ---------------------------------------------------------------- first run
-
-const FIRST_RUN_KEY = "gates-local.first-run-done";
-
-/** First run is a covered screen before hydration or its UI chunk can arrive. */
-export function initialView(threadId: string | null): Pick<State, "view" | "threadId"> {
-  return { view: threadId !== null ? "thread" : firstRunDone() ? "new" : "firstrun", threadId };
-}
-
-function firstRunDone(): boolean {
-  try {
-    return localStorage.getItem(FIRST_RUN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function finishFirstRun(next: "chat" | Section = "chat"): void {
-  try {
-    localStorage.setItem(FIRST_RUN_KEY, "1");
-  } catch {
-    // private windows may refuse storage; first run shows again next launch
-  }
-  if (next === "chat") newThread();
-  else openSettings(next);
 }

@@ -11,7 +11,7 @@ function watchReady(): void {
   const w = window as unknown as { glReadyModel?: string | null };
   const seen = () => {
     if (w.glReadyModel !== undefined || document.querySelector(".composer:not(.blocked)") === null) return;
-    w.glReadyModel = document.querySelector("#modelBtn span")?.textContent ?? null;
+    w.glReadyModel = document.querySelector("#modelBtn > span:not(.maker-mark)")?.textContent ?? null;
   };
   new MutationObserver(seen).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
 }
