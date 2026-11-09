@@ -37,7 +37,7 @@ it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime 
   setState({ live: null, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: reason } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html.match(/class="stop-note"/g)).toHaveLength(1);
-  expect(html).toContain(reason);
+  expect(html).toContain(`${reason} Its text is kept here and excluded from later model prompts.`);
   expect(html).not.toContain("Interrupted before this reply finished");
   expect(html).toContain("A retained partial answer");
   expect(html).toContain('aria-label="Interrupted reply"');

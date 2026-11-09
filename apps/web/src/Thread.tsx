@@ -268,6 +268,8 @@ function Working({ startedAt, loading, thinking }: { startedAt: number; loading:
 
 /** Errors whose message is already the plain sentence to show. */
 const SAYS_WHY = new Set(["context-too-small", "preempted", "runtime-changed"]);
+/** The model never sees an interrupted reply again, and nothing else on screen says so. */
+const KEPT_OUT_OF_PROMPTS = "Its text is kept here and excluded from later model prompts.";
 
 /** One component owns a reply from its first delta through its saved message. */
 const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: string; msg: Message | undefined; last: boolean }) {
@@ -332,7 +334,7 @@ const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: str
             </button>
           </div>
         ) : null}
-        {interrupted && !knownStop ? <div className="stop-note" role="status">Interrupted before this reply finished. Its text is kept here and excluded from later model prompts.</div> : null}
+        {interrupted && !knownStop ? <div className="stop-note" role="status">Interrupted before this reply finished. {KEPT_OUT_OF_PROMPTS}</div> : null}
         {!streaming && !pending && !msg?.imageJob && !(text === "" && msg?.tools?.every(t => t.name === "image")) ? <ActRow text={text} meta={msg === undefined ? name : replyMeta(name, msg, ft)} regen={msg !== undefined && last} /> : null}
       </div>
     </>
@@ -402,7 +404,7 @@ export function Timeline({ threadId }: { threadId: string }) {
             {m?.role === "user" ? <UserTurn msg={row(m)} /> : <AsstTurn threadId={threadId} msg={m === undefined ? undefined : row(m)} last={i === messages.length - 1} />}
             {m !== undefined && stopNotes[m.id] !== undefined ? (
               <div className="stop-note" role="status">
-                {stopNotes[m.id]}
+                {m.interrupted === true ? `${stopNotes[m.id]} ${KEPT_OUT_OF_PROMPTS}` : stopNotes[m.id]}
               </div>
             ) : null}
           </Fragment>

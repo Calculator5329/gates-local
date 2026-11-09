@@ -78,7 +78,7 @@ test("won't fit together: exact warning, Cancel preserves draft and running repl
   await warning(page).getByRole("button", { name: "Stop and send" }).click();
   await finished(page, "beta");
   await page.locator(".sb-row", { hasText: "alpha" }).click();
-  await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
+  await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load. Its text is kept here and excluded from later model prompts.");
   await expect(page.locator(".turn.a.interrupted .md")).toContainText("Reply 1 for alpha.");
   await shot(page, "preempted");
   const [a, b] = (await state()).turns;
