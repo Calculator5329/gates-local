@@ -26,7 +26,8 @@ function child(node: unknown, index: number): unknown {
 // This is React's actual reconciliation key, before the browser renders it.
 // The browser spec additionally checks DOM identity, thinking and pacing.
 function keys(): (string | null)[] {
-  const turns = child(child(Timeline({ threadId: "proof" }), 0), 0);
+  // The conversation's loading status comes first; the reply slots follow it.
+  const turns = child(child(Timeline({ threadId: "proof" }), 0), 1);
   if (!Array.isArray(turns)) throw new Error("Expected reply slots");
   return turns.map((turn: unknown) => {
     if (!isValidElement(turn)) throw new Error("Expected a keyed turn");
