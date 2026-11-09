@@ -3,16 +3,15 @@
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
 import { describe, expect, it } from "vitest";
 import {
-  FIT_LABELS,
   type Row,
   about,
   canBeDefault,
   filterShows,
   fitLabel,
   fitReason,
-  fitSymbol,
   nameOf,
   nextDefault,
+  optionVariants,
   shortTag,
   sizeText,
   sortRows,
@@ -46,23 +45,21 @@ const entry = (name: string, verdict: FitVerdict | undefined, more: Partial<Cata
 const row = (name: string, verdict: FitVerdict | undefined = "fits", chat = true, display = name): Row => ({ name, display, chat, verdict });
 
 describe("fit words", () => {
-  it("(b) is built: Runs well, Runs slower, Won't run here", () => {
-    expect(fitLabel("fits")).toBe("Runs well");
-    expect(fitLabel("spills")).toBe("Runs slower");
+  it("says an estimate is one, and keeps Runs for a model that really ran at that size", () => {
+    expect(fitLabel("fits")).toBe("Should run well");
+    expect(fitLabel("spills")).toBe("Should run slower");
+    expect(fitLabel("fits", true)).toBe("Runs well");
+    expect(fitLabel("spills", true)).toBe("Runs slower");
+  });
+
+  it("says a model that cannot load won't run, measured or not", () => {
     expect(fitLabel("refuse")).toBe("Won't run here");
+    expect(fitLabel("refuse", true, true)).toBe("Won't run here");
   });
 
-  it("keeps (a) and (c) one switch away", () => {
-    expect(fitLabel("fits", "a")).toBe("Runs on your GPU");
-    expect(fitLabel("refuse", "a")).toBe("Too big for this computer");
-    expect(Object.keys(FIT_LABELS)).toEqual(["a", "b", "c"]);
-  });
-
-  it("puts a symbol on the exceptions only, except in (c)", () => {
-    expect(fitSymbol("fits")).toBeNull();
-    expect(fitSymbol("spills")).toBe("slow");
-    expect(fitSymbol("refuse")).toBe("big");
-    expect(fitSymbol("fits", "c")).toBe("ok");
+  it("says system memory when there is no supported GPU", () => {
+    expect(fitLabel("spills", false, true)).toBe("Should run in system memory");
+    expect(fitLabel("spills", true, true)).toBe("Runs in system memory");
   });
 
   it("gives the reason outcome first, one number per resource", () => {
@@ -84,11 +81,15 @@ describe("fit words", () => {
 });
 
 describe("names", () => {
-  it("shows curated models by label and purpose, any other by its tag in mono", () => {
+  it("shows curated models by label and purpose, any other by a cleaned name and its Ollama id, with no invented tagline", () => {
     const cat = [entry("qwen3.5:9b", "fits", { label: "Qwen 3.5 9B", purpose: "Fast everyday answers" }), entry("mine:latest", "fits", { label: "mine", purpose: "Installed by you" })];
-    expect(nameOf("qwen3.5:9b", cat)).toEqual({ text: "Qwen 3.5 9B", purpose: "Fast everyday answers", mono: false });
-    expect(nameOf("mine:latest", cat)).toEqual({ text: "mine", purpose: "", mono: true });
-    expect(nameOf("other:7b", undefined)).toEqual({ text: "other:7b", purpose: "", mono: true });
+    expect(nameOf("qwen3.5:9b", cat)).toEqual({ text: "Qwen 3.5 9B", purpose: "Fast everyday answers" });
+    expect(nameOf("mine:latest", cat)).toEqual({ text: "mine", purpose: "", id: "mine:latest" });
+    expect(nameOf("other3:7b", undefined)).toEqual({ text: "Other 3 7B", purpose: "", id: "other3:7b" });
+  });
+
+  it("leaves the owner's path out of a cleaned hf.co name", () => {
+    expect(nameOf("hf.co/someone/qwen3.5-GGUF:9b", undefined).text).toBe("Qwen 3.5 GGUF 9B");
   });
 
   it("collapses the hf.co owner and drops :latest", () => {
@@ -136,6 +137,38 @@ describe("installed order and the default", () => {
     const sorted = sortRows([row("a"), row("b")], "a");
     expect(nextDefault(sorted, "b", "a")).toBeUndefined();
     expect(nextDefault(sortRows([row("only"), row("big", "refuse")], "only"), "only", "only")).toBeNull();
+  });
+});
+
+const options = (text: string, ...names: string[]) => names.map((name) => ({ name, label: { text } }));
+const variants = (text: string, ...names: string[]) => [...optionVariants(options(text, ...names)).values()];
+
+describe("optionVariants: what tells two options with the same name apart", () => {
+  it("shows the quant when only the quant differs", () => {
+    expect(variants("model 9B", "local/model:9b-q4_K_M", "local/model:9b-q8_0")).toEqual(["q4_K_M", "q8_0"]);
+  });
+
+  it("shows the owner when only the owner differs", () => {
+    expect(variants("custom", "a/custom:latest", "b/custom:latest")).toEqual(["a", "b"]);
+  });
+
+  it("never leaves an option with nothing to show", () => {
+    expect(variants("model", "x/model:latest", "model:latest")).toEqual(["x/model", "model"]);
+    expect(variants("model 9B", "model:9b", "model:9b-q4")).toEqual(["9b", "9b-q4"]);
+  });
+
+  it("tells every member of a larger group apart", () => {
+    const shown = variants("m", "a/m:1", "b/m:1", "c/m:2");
+    expect(new Set(shown).size).toBe(3);
+    expect(shown.every((v) => v !== "")).toBe(true);
+  });
+
+  it("gives up on shortening when that would make two read alike, and shows the whole id", () => {
+    expect(variants("x", "a/x:1", "a:x:1")).toEqual(["a/x:1", "a:x:1"]);
+  });
+
+  it("adds nothing to a name that is already unique", () => {
+    expect(optionVariants([...options("Gemma 4 12B", "gemma4:12b"), ...options("Qwen 3.5 9B", "qwen3.5:9b")]).size).toBe(0);
   });
 });
 

@@ -44,8 +44,10 @@ interface DesktopBridge {
   updateAndRestart?(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
   /** The folder the app keeps its data in; missing on desktop builds from before it existed. */
   dataFolder?(): Promise<string>;
-  /** Opens that folder in the file manager; a sentence if it could not. */
+  /** Opens the data folder in the file manager; a sentence if it could not. */
   openDataFolder?(): Promise<string | null>;
+  modelsFolder?(): Promise<string | null>;
+  openModelsFolder?(): Promise<string | null>;
 }
 
 declare global {
@@ -352,9 +354,10 @@ async function hydrateWith(
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, runningTurns: Object.fromEntries(active.map(({ threadId, turnId }) => [threadId, turnId])), fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, runningTurns: Object.fromEntries(active.map(({ threadId, turnId }) => [threadId, turnId])), fits: { ...s.fits }, staleFits: staleFitReports(s), fitStatus: staleFitStatus(s), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
+  if (settings !== NA && settings !== undefined) contextSeeded = true;
   ensureFit(getState().model, getState().numCtx);
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
@@ -413,6 +416,8 @@ const imageOrder = newestOnly();
 const updateOrder = newestOnly();
 /** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
 let thinkSeeded = false;
+/** A context choice belongs to this page session, including reconnects. */
+let contextSeeded = false;
 // A thread list asked before a newer one, or before a local create or delete, is out of date (MP5-01).
 const threadsOrder = newestOnly();
 
@@ -454,7 +459,8 @@ export async function refreshModels(): Promise<void> {
 function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
   return {
     settings,
-    ...(first ? { numCtx: settings.defaultNumCtx, ...(thinkSeeded ? {} : { think: settings.thinking }) } : {}),
+    ...(first && !contextSeeded ? { numCtx: settings.defaultNumCtx } : {}),
+    ...(first && !thinkSeeded ? { think: settings.thinking } : {}),
     ...(!settings.imageGen ? { image: false } : {}),
   };
 }
@@ -521,6 +527,7 @@ function markFitsStale(): void {
   const s = getState();
   for (const r of Object.values(s.fits)) if (r !== undefined && r !== "error") staleFits.add(r);
   if (s.catalog !== NA) for (const c of s.catalog ?? []) if (c.fit) staleFits.add(c.fit);
+  setState(state => ({ fitStatus: staleFitStatus(state) }));
 }
 
 const ownedChatModel = (o: GpuStatus["occupants"][number]) => o.kind === "chat-model" && !o.protected;
@@ -565,6 +572,7 @@ const FIT_RETRY_MAX_MS = 30_000;
 function checkFit(model: string, numCtx: number, key: string, failures: number): void {
   const epoch = fitEpoch;
   fitChecks.set(key, epoch);
+  setState(s => ({ fitStatus: { ...s.fitStatus, [key]: currentFit(s.fits[key]) === undefined || s.fits[key] === "error" ? "checking" : s.fitStatus[key] ?? "fresh" } }));
   call("fit.check", { model, numCtx })
     .then(async (r) => {
       // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
@@ -574,19 +582,21 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
       setState((st) => {
         const { [key]: _old, ...stopFrees } = st.stopFrees;
         const { [key]: _stale, ...remainingStale } = st.staleFits;
-        return { fits: { ...st.fits, [key]: r }, staleFits: remainingStale, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
+        const { [key]: _history, ...history } = st.fitHistory;
+        return { fits: { ...st.fits, [key]: r }, fitStatus: { ...st.fitStatus, [key]: "fresh" as const }, fitHistory: history, staleFits: remainingStale, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
       });
     })
     .catch(() => {
       if (epoch !== fitEpoch) return;
       setState((st) => {
         const { [key]: _stale, ...remainingStale } = st.staleFits;
-        return { fits: { ...st.fits, [key]: "error" as const }, staleFits: remainingStale };
+        const previous = st.fits[key];
+        return { fits: { ...st.fits, [key]: "error" as const }, fitStatus: { ...st.fitStatus, [key]: "error" as const }, fitHistory: previous !== undefined && previous !== "error" ? { ...st.fitHistory, [key]: previous } : st.fitHistory, staleFits: remainingStale };
       });
       // A failure ends the held verdict; retry while this reading is current.
       setTimeout(() => {
         const s = getState();
-        if (epoch === fitEpoch && s.fits[key] === "error" && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
+        if (!stopped && epoch === fitEpoch && s.fits[key] === "error" && chatReady(s)) checkFit(model, numCtx, key, failures + 1);
       }, Math.min(FIT_RETRY_MAX_MS, FIT_RETRY_MS * 2 ** failures));
     });
 }
@@ -597,7 +607,7 @@ function invalidateFits(hideOld = true): void {
   else fitEpoch++;
   // A load refreshes the measurement in place. An external GPU/file change
   // withdraws the old advice; a later load must not clear that pending state.
-  setState((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits }));
+  setState((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits, fitStatus: hideOld ? staleFitStatus(s) : s.fitStatus }));
   const s = getState();
   ensureFit(s.model, s.numCtx);
 }
@@ -607,6 +617,8 @@ const staleFitReports = (s: State): State["staleFits"] => {
   if (s.catalog !== NA) for (const c of s.catalog ?? []) if (c.fit) keys.add(fitKey(c.name, c.fit.numCtx));
   return Object.fromEntries([...keys].map(key => [key, true as const]));
 };
+
+const staleFitStatus = (s: State): State["fitStatus"] => Object.fromEntries(Object.keys(staleFitReports(s)).map(key => [key, "stale" as const]));
 
 // ---------------------------------------------------------------- threads
 
@@ -1659,6 +1671,7 @@ async function preload(model: string, numCtx: number): Promise<void> {
 }
 
 export function setContext(numCtx: ContextSize): void {
+  contextSeeded = true;
   setState({ numCtx });
 }
 
@@ -1767,6 +1780,9 @@ export async function dataFolder(): Promise<string | null> {
 export async function openDataFolder(): Promise<ActionResult> {
   return (await window.gatesLocal?.openDataFolder?.()) ?? null;
 }
+
+/** Only the desktop window can open a folder. */
+export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== undefined && window.gatesLocal.openModelsFolder !== undefined;
 
 export async function pull(name: string): Promise<ActionResult> {
   const tag = name.trim();

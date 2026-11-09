@@ -18,6 +18,7 @@ import { UpdateNote } from "./Updates.tsx";
 import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
+import { keepSheetFocus } from "./sheet-focus.ts";
 import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
 interface Card {
@@ -467,13 +468,11 @@ export function App() {
   const picker = useScreen(pickerScreen, popId === "picker");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
-  // a phone's sheet is modal: focus moves in, except Ctrl+M's search field, which focuses itself
+  // A phone's sheet stays modal through live updates; Ctrl+M's search focuses itself after opening.
   useEffect(() => {
     if (popId === null || !isPhone()) return;
-    if (popId === "picker" && getState().pop?.kb === true) return;
     const sheet = document.getElementById(POP_EL[popId]);
-    if (sheet === null || sheet.contains(document.activeElement)) return;
-    sheet.querySelector<HTMLElement>(".sh-h .ibtn")?.focus({ preventScroll: true });
+    if (sheet !== null) return keepSheetFocus(sheet);
   }, [popId]);
   useEffect(() => {
     document.addEventListener("keydown", onKey);

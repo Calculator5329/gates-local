@@ -71,7 +71,7 @@ test("Tools names only the tools the app has", async ({ page, open }) => {
   await expect(set.locator(".srow .sl b")).toHaveText(["Let the model use tools", "Read files", "Run commands", "Make images"]);
   await expect(set).not.toContainText(/\bnotes?\b/i);
   // where each permission lives is one click away
-  await set.locator(".srow", { hasText: "Read files" }).getByRole("button", { name: "Library" }).click();
+  await set.getByRole("button", { name: /^Read files/ }).click();
   await expect(set.getByRole("heading", { name: "Library" })).toBeVisible();
 });
 
@@ -166,17 +166,17 @@ test("Theme applies the moment it is picked, and says only what the choice does"
   const theme = page.getByRole("group", { name: "Theme" });
   const row = page.locator(".srow", { has: theme });
   await expect(theme.getByRole("button")).toHaveText(["Dark", "Light", "System"]);
-  await expect(row).toContainText("Always dark.");
+  await expect(row).toContainText("Always dark, whatever your desktop uses.");
 
   await theme.getByRole("button", { name: "Light" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   expect(await bg()).not.toBe(dark);
-  await expect(row).toContainText("Always light.");
+  await expect(row).toContainText("Always light, whatever your desktop uses.");
 
   await theme.getByRole("button", { name: "System" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   expect(await bg()).toBe(dark);
-  await expect(row).toContainText("Matches your desktop theme.");
+  await expect(row).toContainText("Follows your desktop's light or dark setting.");
 });
 
 test("Reset settings asks first, then puts the settings back and leaves who runs Ollama alone", async ({ page, open }) => {
@@ -201,7 +201,7 @@ test("Reset settings asks first, then puts the settings back and leaves who runs
   await expect(page.getByRole("group", { name: "Confirm reset" })).toHaveCount(0);
 });
 
-const SECTIONS = ["General", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts", "Models"] as const;
+const SECTIONS = ["General", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts", "Models", "Instructions"] as const;
 
 for (const width of [1280, 360] as const) {
   test.describe(`at ${width} px`, () => {

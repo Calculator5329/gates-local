@@ -94,15 +94,15 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   const panel = await openGpuMemory(page);
   await expect(panel).toContainText("Memory at 16k context");
   await panel.locator("summary", { hasText: "Details" }).click();
-  await expect(panel.locator(".fp-n").filter({ hasText: /^Est\./ })).toContainText(/Est\. [\d.]+\sGB; [\d.]+\sGB available on GPU\./);
+  await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB; [\d.]+\sGB available on GPU\./);
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 
-  // Context sizes explain their fit on hover; the redundant definition leaves no blank line above Details.
-  await expect(panel.getByText("How much conversation the model can keep in view.", { exact: true })).toHaveCount(0);
-  await expect(panel.locator(".ctx-line")).toHaveCount(0);
+  // F76: the definition once; the other size's result is apart from it, in that size's tooltip (S1)
+  const def = panel.locator(".srow", { hasText: "Default context" }).locator(".sl .d").first();
+  await expect(def).toContainText("tokens of conversation the model keeps in view");
   await expect(panel.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /at 32k/);
-  await panel.screenshot({ path: test.info().outputPath("gpu-memory.png") });
+  await expect(panel.getByText("tokens of conversation the model keeps in view")).toHaveCount(1);
   await page.keyboard.press("Escape");
 
   // once a reply has loaded the model, the leftover segment is what is free right now

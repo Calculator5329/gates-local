@@ -8,12 +8,14 @@ import { capturePaste, finishPaste, type PasteResult } from "./native-paste.ts";
 import { randomUUID } from "node:crypto";
 import { editMenu } from "./context-menu.ts";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState, type UpdateAndRestartResult } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
+import { modelFolderActions, serverDataDir } from "./data-dir.ts";
+import { checkOwnership } from "../../server/src/runtime/ownership.ts";
+import { ownedStateFile } from "../../server/src/runtime/paths.ts";
 import { allowsMicrophone } from "./media-permission.ts";
-import { serverDataDir } from "./data-dir.ts";
 import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
@@ -37,6 +39,14 @@ app.setPath("userData", process.env["GATES_LOCAL_USER_DATA"] ?? path.join(app.ge
 protocol.registerSchemesAsPrivileged([
   { scheme: CLIENT_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
+
+function isFolder(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function serverEntry(): string {
   const override = process.env["GATES_LOCAL_SERVER_ENTRY"];
@@ -99,6 +109,7 @@ function run(): void {
   // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
   const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot() });
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
+  const modelFolders = modelFolderActions({ ownership: () => checkOwnership(ownedStateFile(dataDir)), isFolder, openPath: folder => shell.openPath(folder) });
   let win: BrowserWindow | null = null;
   /** The client URL (with its route) to restore after a restart. */
   let lastClientUrl: string | null = null;
@@ -174,11 +185,19 @@ function run(): void {
     if (!fromOurWindow(event)) throw new Error("refused");
     return dataDir;
   });
+  ipcMain.handle(IPC.modelsFolder, (event): string | null => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    return modelFolders.modelsFolder();
+  });
+  ipcMain.handle(IPC.openModelsFolder, async (event): Promise<string | null> => {
+    if (!fromOurWindow(event)) throw new Error("refused");
+    return modelFolders.openModelsFolder();
+  });
   ipcMain.handle(IPC.openDataFolder, async (event): Promise<string | null> => {
     if (!fromOurWindow(event)) throw new Error("refused");
     // shell.openPath resolves to an error message, "" when it worked
     const failed = await shell.openPath(dataDir);
-    return failed === "" ? null : `Couldn't open the data folder: ${failed}`;
+    return failed === "" ? null : `Couldn't open the folder: ${failed}`;
   });
   const startUpdate = onceUntilFailed(async (): Promise<UpdateAndRestartResult> => {
     const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });

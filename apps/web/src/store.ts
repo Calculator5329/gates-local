@@ -153,6 +153,9 @@ export interface State {
   readonly think: boolean;
   readonly image: boolean;
   readonly fits: Readonly<Record<string, FitReport | "error">>;
+  /** Freshness is separate so historical numbers and expanded Details can stay mounted. */
+  readonly fitHistory: Readonly<Record<string, FitReport>>;
+  readonly fitStatus: Readonly<Record<string, "stale" | "checking" | "fresh" | "error">>;
   /** Retained reports awaiting a check against the latest memory reading. */
   readonly staleFits: Readonly<Record<string, true>>;
   /** By fitKey: refused only because another chat's reply holds the memory, so a send may stop it. */
@@ -220,6 +223,8 @@ const initial: State = {
   think: true,
   image: false,
   fits: {},
+  fitHistory: {},
+  fitStatus: {},
   staleFits: {},
   stopFrees: {},
   loads: {},

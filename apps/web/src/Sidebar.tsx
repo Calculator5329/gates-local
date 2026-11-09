@@ -10,14 +10,14 @@ import { NA, type Section, type State, getState, setState, streaming, useStore }
 import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
-  ["general", "General", "sliders"],
+  ["general", "General", "gear"],
   ["models", "Models", "cpu"],
   ["instructions", "Instructions", "pencil"],
   ["library", "Library", "folder"],
   ["tools", "Tools", "wrench"],
   ["images", "Image generation", "image"],
   ["runtime", "Runtime", "server"],
-  ["advanced", "Advanced", "gear"],
+  ["advanced", "Advanced", "sliders"],
   ["shortcuts", "Shortcuts", "keyboard"],
 ];
 

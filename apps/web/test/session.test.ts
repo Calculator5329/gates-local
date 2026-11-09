@@ -140,6 +140,105 @@ async function reconnect(): Promise<void> {
   await tick();
 }
 
+describe("Settings review: session choices and fit refreshes", () => {
+  it("SQ-02: a saved 16k default and an 8k chat choice keep 8k through reconnect and another chat", async () => {
+    const saved = { ...methodSamples["settings.get"].result, defaultNumCtx: 16384 as const };
+    b.server.answer("settings.get", () => saved);
+    b.server.answer("settings.update", () => saved);
+    await boot();
+    expect(await session.updateSettings({ defaultNumCtx: 16384 })).toBeNull();
+    session.setContext(8192);
+    const afterChoice = published.length;
+    await reconnect();
+    session.newThread();
+    expect(store.getState().settings).toMatchObject({ defaultNumCtx: 16384 });
+    expect(store.getState().numCtx).toBe(8192);
+    expect(published.slice(afterChoice).every(s => s.numCtx === 8192)).toBe(true);
+    await startFirstTurn();
+    expect(b.server.calls("chat.send").at(-1)?.params).toMatchObject({ numCtx: 8192 });
+  });
+
+  it("SQ-02: opening the app afresh still starts at its saved default", async () => {
+    b.server.answer("settings.get", () => ({ ...methodSamples["settings.get"].result, defaultNumCtx: 32768 }));
+    await boot();
+    expect(store.getState().numCtx).toBe(32768);
+  });
+
+  it("SQ-03: GPU pushes retain every displayed fit while requesting new reports", async () => {
+    await boot();
+    b.server.answer("fit.check", ({ model, numCtx }) => ({ ...methodSamples["fit.check"].result, model, numCtx }));
+    const keys = ["qwen3.5:9b", "gemma3:4b"] as const;
+    store.setState({ model: keys[0] });
+    for (const model of keys) session.ensureFit(model, 16384);
+    await until(() => keys.every(model => store.getState().fits[store.fitKey(model, 16384)] !== undefined), 2000, "initial fits");
+    const previous = store.getState().fits;
+    const afterInitial = published.length;
+    const refresh = b.server.hold("fit.check");
+    b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, measuredAt: 999 });
+    await tick();
+    for (const model of keys) expect(store.getState().fits[store.fitKey(model, 16384)]).toEqual(previous[store.fitKey(model, 16384)]);
+    session.ensureFit(keys[0], 16384);
+    const held = await refresh;
+    expect(held.params).toEqual({ model: keys[0], numCtx: 16384 });
+    const next = { ...methodSamples["fit.check"].result, measuredAt: 1000 };
+    held.respond(next);
+    await until(() => {
+      const report = store.getState().fits[store.fitKey(keys[0], 16384)];
+      return report !== undefined && report !== "error" && report.measuredAt === 1000;
+    }, 2000, "new fit");
+    expect(published.slice(afterInitial).every(s => keys.every(model => s.fits[store.fitKey(model, 16384)] !== undefined))).toBe(true);
+  });
+
+  it("SQ-03: a fit computed before invalidation cannot replace a newer report", async () => {
+    await boot();
+    const model = "qwen3.5:9b";
+    store.setState({ model });
+    const before = b.server.calls("fit.check").length;
+    const older = b.server.hold("fit.check");
+    session.ensureFit(model, 16384);
+    const old = await older;
+    const newer = b.server.hold("fit.check");
+    b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, measuredAt: 999 });
+    await tick();
+    session.ensureFit(model, 16384);
+    await tick();
+    expect(b.server.calls("fit.check")).toHaveLength(before + 2);
+    const next = await newer;
+    next.respond({ ...methodSamples["fit.check"].result, model, numCtx: 16384, measuredAt: 1000 });
+    await tick();
+    old.respond({ ...methodSamples["fit.check"].result, model, numCtx: 16384, measuredAt: 1 });
+    await tick();
+    expect(store.getState().fits[store.fitKey(model, 16384)]).toMatchObject({ measuredAt: 1000 });
+  });
+
+  it("SQ-03: a failed refresh keeps its last known report on screen", async () => {
+    await boot();
+    const model = "qwen3.5:9b";
+    const key = store.fitKey(model, 16384);
+    session.ensureFit(model, 16384);
+    await until(() => store.getState().fits[key] !== undefined, 2000, "initial fit");
+    const previous = store.getState().fits[key];
+    b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, measuredAt: 999 });
+    await tick();
+    const refresh = b.server.hold("fit.check");
+    session.ensureFit(model, 16384);
+    const held = await refresh;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      held.fail("unavailable", "try again");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().fitHistory[key]).toEqual(previous);
+      const retry = b.server.hold("fit.check");
+      await vi.advanceTimersByTimeAsync(2000);
+      (await retry).respond({ ...methodSamples["fit.check"].result, measuredAt: 1001 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.getState().fits[key]).toMatchObject({ measuredAt: 1001 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("Stop then Retry (W-02)", () => {
   it("Retry waits for the stopped turn's end, then the new reply ends as a normal reply", async () => {
     await boot();

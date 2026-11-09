@@ -27,8 +27,8 @@ function savedFavorites(): string[] {
 }
 
 /** Swappable presentation only. The verdict and all byte counts come from fit.check. */
-export function ContextMemory({ v, cpu, frees = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean }) {
-  if (!v) return <span className="pk-cost pending">Checking…</span>;
+export function ContextMemory({ v, cpu, frees = false, failed = false }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; failed?: boolean }) {
+  if (!v) return <span className="pk-cost pending">{failed ? "Couldn't check" : "Checking…"}</span>;
   const ruler = contextRuler(v);
   const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
   return <span className={`pk-cost ${v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
@@ -237,7 +237,7 @@ export function Picker() {
         <div className="pk-list-scroll">
           <div id="pkList" role="listbox" aria-label="Models">
             {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !fitIsCurrent(checked(r.tag)) || (r.v?.k === "no" && !r.frees) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !fitIsCurrent(checked(r.tag)) || undefined} aria-disabled={r.downloading !== undefined || (!phone && fitIsCurrent(checked(r.tag)) && r.v?.k === "no" && !r.frees)} data-m={r.tag} data-i={i} data-tip={tip(r)} onMouseMove={() => setHighlight(r.tag)}>
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : "Checking…"}</span></button>
+              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : checked(r.tag) === "error" ? "Couldn't check" : "Checking…"}</span></button>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
             {visible.length === 0 ? <div className="pk-empty">{group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
@@ -257,7 +257,7 @@ export function Picker() {
             const v = active && !stale(active.tag, c) ? report(active.tag, c) : undefined, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
             const capped = activeMax !== undefined && c > activeMax;
             const disabled = !active || active.downloading !== undefined || capped || (v?.k === "no" && !frees);
-            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} failed={active !== undefined && checked(active.tag, c) === "error"} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {choiceMessage ? <p className="pk-help pk-choice" role="status">{choiceMessage}</p> : null}

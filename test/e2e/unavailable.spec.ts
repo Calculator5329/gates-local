@@ -74,13 +74,13 @@ test("image generation with no ComfyUI says none was found, and a chat with Imag
   await open();
   await waitReady(page);
   await imageWithNoComfy(page);
-  const install = page.locator(".srow", { hasText: "Not found" });
+  const install = page.locator(".srow", { hasText: "Not connected" });
   await expect(install).toContainText(`ComfyUI did not answer at ${DEAD_COMFY}.`);
   await expect(install.getByRole("link", { name: "How to set up" })).toBeVisible();
 
   // Test saves the typed address and asks again, so the status row names the new one
   await page.getByRole("textbox", { name: "ComfyUI address" }).fill(OTHER_DEAD_COMFY);
-  await page.getByRole("button", { name: "Test", exact: true }).click();
+  await page.getByRole("button", { name: "Test connection", exact: true }).click();
   await expect(install).toContainText(`ComfyUI did not answer at ${OTHER_DEAD_COMFY}.`);
 
   await page.keyboard.press("Escape");

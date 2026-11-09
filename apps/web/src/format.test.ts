@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
 import type { FitReport, Message } from "@gates-local/contracts";
 import { CONTEXT_SIZES, ctxFor, decodeSpeed, fileSize, gb, k, otherCtxWords, replyMeta, shortAge, sourceDetail, verdictOf } from "./format.ts";
+import { homeTilde, libraryToolCanUse } from "./settings-rules.ts";
 
 const SP = String.fromCharCode(160);
+
+const src = (kind: "folder" | "file" | "sqlite", state: "ready" | "refreshing" | "error" = "ready") => ({ kind, state });
+
+describe("libraryToolCanUse: a tool is ready only with a source it can really read", () => {
+  it("Read files takes folders and files, never a SQLite database (readLibrary leaves those out)", () => {
+    expect(libraryToolCanUse("read", [src("folder")])).toBe(true);
+    expect(libraryToolCanUse("read", [src("file")])).toBe(true);
+    expect(libraryToolCanUse("read", [src("sqlite")])).toBe(false);
+  });
+
+  it("Query databases takes SQLite only (querySnapshot refuses anything else)", () => {
+    expect(libraryToolCanUse("query", [src("sqlite")])).toBe(true);
+    expect(libraryToolCanUse("query", [src("folder"), src("file")])).toBe(false);
+  });
+
+  it("Run commands sees every source in the sandbox", () => {
+    expect(libraryToolCanUse("run", [src("sqlite")])).toBe(true);
+    expect(libraryToolCanUse("run", [src("folder")])).toBe(true);
+    expect(libraryToolCanUse("run", [])).toBe(false);
+  });
+
+  it("a source that is not ready counts for nothing", () => {
+    expect(libraryToolCanUse("read", [src("folder", "error")])).toBe(false);
+    expect(libraryToolCanUse("query", [src("sqlite", "refreshing")])).toBe(false);
+    expect(libraryToolCanUse("run", [src("file", "error")])).toBe(false);
+  });
+});
 
 describe("gb", () => {
   it("keeps the number and its unit on one line", () => {
@@ -30,6 +58,25 @@ describe("shortAge, the drawer's one time format", () => {
 });
 
 const size = (sizeBytes: number) => sourceDetail({ id: "s", kind: "file", label: "notes.txt", path: "notes.txt", addedAt: 0, sizeBytes, state: "ready" });
+describe("a home folder in a path", () => {
+  it.each([
+    ["/home/u/docs/notes", "~/docs/notes"],
+    ["/home/u", "~"],
+    ["/Users/u/docs", "~/docs"],
+    ["C:\\Users\\u\\Documents", "~\\Documents"],
+    ["/data/home/u/docs", "/data/home/u/docs"],
+    ["D:\\work", "D:\\work"],
+  ])("%s reads %s", (path, want) => {
+    expect(homeTilde(path)).toBe(want);
+  });
+});
+
+describe("a Library folder's detail", () => {
+  it("has none: the size on disk of a folder entry is not the size of what is in it", () => {
+    expect(sourceDetail({ id: "s", kind: "folder", label: "docs", path: "docs", addedAt: 0, sizeBytes: 4096, state: "ready" })).toBe("");
+  });
+});
+
 describe("a Library source's size", () => {
   it("says a small file's real size, never rounds it up to 1 MB", () => {
     // A 223-byte text file showed as "1 MB" in the Library (Windows test, 2026-11-07).

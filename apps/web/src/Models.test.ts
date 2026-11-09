@@ -62,11 +62,11 @@ describe("Models on a computer with no supported GPU", () => {
   it("catalog hydration replaces the raw name consistently on the row and its More control", () => {
     const early = render(noGpuComputer({ catalog: undefined }));
     const label = early.match(/class="mp-row[^>]+aria-label="([^"]+)"/)?.[1];
-    expect(label).toBe("qwen3.5:4b");
-    const html = render(noGpuComputer({}));
+    expect(label).toBe("Qwen 3.5 4B");
+    const html = render(noGpuComputer({ catalog: catalog.map(c => ({ ...c, label: c.name === "qwen3.5:4b" ? "Everyday Qwen" : c.label })) }));
     expect(html).not.toContain(`aria-label="More for ${label}"`);
-    expect(html).toMatch(/class="mp-row[^>]+aria-label="Qwen 3.5 4B"/);
-    expect(html).toContain('aria-label="More for Qwen 3.5 4B"');
+    expect(html).toMatch(/class="mp-row[^>]+aria-label="Everyday Qwen"/);
+    expect(html).toContain('aria-label="More for Everyday Qwen"');
   });
   it("PK-02: a loaded current-context report is labeled measured", () => {
     const name = "qwen3:14b";
@@ -93,13 +93,31 @@ describe("Models on a computer with no supported GPU", () => {
     const empty = render(noGpuComputer({ models: [], fits: {} }));
     expect([...gpuPromises(list), ...gpuPromises(download), ...gpuPromises(empty)]).toEqual([]);
     expect(list).toContain(
-      "New chats start on this model. If it&#x27;s too big for this computer, they start on the best one that fits. Any chat can switch from its model menu.",
+      "New chats start on this model. If it can&#x27;t run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.",
     );
-    expect(list).toContain("Runs in system memory");
-    expect(list).not.toContain("Runs slower");
+    expect(list).toContain("Should run in system memory");
+    expect(list).not.toContain("run slower");
     expect(download).toContain("all in system memory (no supported GPU)");
-    expect(empty).toContain("runs in system memory on this computer");
+    expect(empty).toContain("should run in system memory on this computer");
     expect(empty).toContain("Download Qwen 3.5 4B");
+  });
+});
+
+describe("the Default card when the saved default cannot run", () => {
+  it("names the model new chats really start on, beside the preference", () => {
+    const html = render(
+      noGpuComputer({
+        gpu: { vendor: "nvidia", name: "Test GPU" },
+        models: [installed("huge:1t"), { ...installed("qwen3.5:4b"), pick: { numCtx: 16384 } }],
+        settings: { defaultModel: "huge:1t" },
+      }),
+    );
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Huge won&#x27;t run here, so new chats start on Qwen 3.5 4B.");
+  });
+
+  it("says nothing extra when the saved default is the one new chats start on", () => {
+    const html = render(noGpuComputer({ models: [{ ...installed("qwen3.5:4b"), pick: { numCtx: 16384 } }, installed("huge:1t")] }));
+    expect(html.replace(/<[^>]+>/g, "")).not.toContain("so new chats start on");
   });
 });
 
@@ -117,7 +135,7 @@ describe("Models with a model whose window is smaller than the default", () => {
         settings: { defaultModel: tag },
       }),
     );
-    expect(html).toContain("Runs well");
+    expect(html).toContain("Should run well");
     expect(html).not.toMatch(/supports up to|too small|unsupported|won.{1,6}t run/i);
     expect(html).toContain("run at 2k");
     expect(html).not.toContain("run at 16k");

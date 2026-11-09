@@ -38,14 +38,14 @@ export function fileSize(bytes: number): string {
   return `${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
 }
 
-/** A Library row's detail: "Refreshing…", the error, or "223 bytes · copied Nov 7". */
+/** A Library row's detail: "Refreshing…", the error, "223 bytes · copied Nov 7", or nothing for a folder (its size is the folder entry's, not its contents'). */
 export function sourceDetail(src: Source): string {
   if (src.state === "refreshing") return "Refreshing…";
   if (src.state === "error") return src.detail ?? "Couldn't read it.";
   const parts: string[] = [];
-  if (src.sizeBytes !== undefined) parts.push(fileSize(src.sizeBytes));
+  if (src.sizeBytes !== undefined && src.kind !== "folder") parts.push(fileSize(src.sizeBytes));
   if (src.snapshotAt !== undefined) parts.push(`copied ${new Date(src.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
-  return parts.join(" · ") || "Available";
+  return parts.join(" · ");
 }
 
 /** 16384 → "16k", 512 → "512". */

@@ -36,10 +36,10 @@ test.describe("a model with a 2,048 context window", () => {
     await page.keyboard.press("Control+Comma");
     await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
     const row = page.locator('.mp-row[data-dm="tiny-chat:2k"]');
-    await expect(row.locator(".mp-fitc")).toHaveText("Runs well");
+    await expect(row.locator(".mp-fitc")).toHaveText("Should run well");
     await expect(row).not.toHaveClass(/\bcant\b/);
     await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
-    await expect(page.locator(".mp-defrow")).toContainText("If it's too big for this computer");
+    await expect(page.locator(".mp-defrow")).toContainText("If it can't run here");
     await expect(page.locator(".mp-defrow")).not.toContainText("16k");
   });
 

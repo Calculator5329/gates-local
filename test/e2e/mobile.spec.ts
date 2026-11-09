@@ -80,7 +80,7 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
   await expect(page.locator(".set-list")).toBeVisible();
   await noSideScroll(page, "settings list");
-  for (const section of ["General", "Models", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"]) {
+  for (const section of ["General", "Models", "Instructions", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"]) {
     await page.locator(".set-list").getByRole("button", { name: section }).tap();
     await expect(page.locator(".set-bar h2")).toHaveText(section);
     await noSideScroll(page, `settings ${section}`);

@@ -5,6 +5,8 @@
 // matches on Windows and Linux. Both are local machine data, so neither goes
 // in the Electron profile on Windows (%APPDATA% roams) or ~/.config on Linux.
 import path from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import type { OwnershipCheck } from "../../server/src/runtime/ownership.ts";
 
 export type DataDirInput = {
   platform: NodeJS.Platform;
@@ -13,6 +15,32 @@ export type DataDirInput = {
   /** Electron's userData folder. */
   userData: string;
 };
+
+/** Main owns the lookup and rechecks it on Open; the renderer supplies no path. */
+export function modelFolderActions(o: {
+  ownership(): OwnershipCheck;
+  isFolder(folder: string): boolean;
+  openPath(folder: string): Promise<string>;
+}) {
+  const modelsFolder = (): string | null => {
+    const owned = o.ownership();
+    const folder = owned.kind === "ours" ? owned.record.modelsDir : undefined;
+    if (folder === undefined || !path.isAbsolute(folder)) return null;
+    try {
+      // Process ownership alone cannot authorize a substituted symlink or an aliased parent.
+      return o.isFolder(folder) && lstatSync(folder).isDirectory() && realpathSync(folder) === path.resolve(folder) ? folder : null;
+    } catch {
+      return null;
+    }
+  };
+  const openModelsFolder = async (): Promise<string | null> => {
+    const folder = modelsFolder();
+    if (folder === null) return null;
+    const error = await o.openPath(folder);
+    return error === "" ? null : `Couldn't open the folder: ${error}`;
+  };
+  return { modelsFolder, openModelsFolder };
+}
 
 export function serverDataDir(o: DataDirInput): string {
   const pinned = o.env["GATES_LOCAL_DATA_DIR"];

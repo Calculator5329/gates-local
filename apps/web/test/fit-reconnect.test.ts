@@ -29,7 +29,7 @@ it("TL-03: reconnect hides an old fits verdict during held hydration and recheck
     session.ensureFit(model, numCtx);
     await until(() => getState().fits[key] !== undefined);
     const cached = getState().fits[key];
-    expect(text()).toContain("Runs on GPU");
+    expect(text()).toContain("Runs well");
 
     const hydration = b.server.hold("models.list");
     let atReady: Held<"fit.check"> | undefined;
@@ -42,8 +42,8 @@ it("TL-03: reconnect hides an old fits verdict during held hydration and recheck
     // Composer runs this at the ready flip; its fit dependency is still the cached object.
     session.ensureFit(model, numCtx);
     await tick();
-    expect.soft(text()).toContain("Checking GPU memory");
-    expect.soft(text()).not.toContain("Runs on GPU");
+    expect.soft(text()).toContain("Rechecking");
+    expect.soft(text()).not.toContain("Runs well");
     expect(getState().fits[key]).toBe(cached); // the picker may retain its previous report
 
     let afterHydration: Held<"fit.check"> | undefined;
@@ -57,15 +57,15 @@ it("TL-03: reconnect hides an old fits verdict during held hydration and recheck
     // The ready-flip check belongs to the older epoch and cannot publish after hydration.
     atReady?.respond({ ...report, model, numCtx, verdict: "fits" });
     await tick();
-    expect(text()).toContain("Checking GPU memory");
+    expect(text()).toContain("Rechecking");
     expect(getState().fits[key]).toBe(cached);
     afterHydration.respond({ ...report, model, numCtx, verdict: "refuse" });
     await until(() => {
       const r = getState().fits[key];
       return r !== undefined && r !== "error" && r.verdict === "refuse";
     });
-    expect(text()).not.toContain("Runs on GPU");
-    expect(text()).not.toContain("Checking GPU memory");
+    expect(text()).not.toContain("Runs well");
+    expect(text()).not.toContain("Rechecking");
   } finally {
     disconnect();
     b.server.accepting = false;

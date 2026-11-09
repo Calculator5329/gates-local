@@ -55,7 +55,7 @@ it("does not use a catalog verdict measured at a different context", () => {
 it("a fresh check failure ends the old catalog verdict", () => {
   setState({ fits: { [fitKey(report.model, report.numCtx)]: "error" } });
   expect(context()).not.toContain("Slower");
-  expect(row()).toContain("Checking…");
+  expect(row()).toContain("Couldn&#x27;t check");
 });
 
 it("a newly opened context column only checks sizes that have never answered", () => {

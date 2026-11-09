@@ -46,7 +46,7 @@ it("does not borrow the saved default's fits verdict while the selected size is 
   expect(text()).toContain("Checking GPU memory");
   setState(s => ({ fits: { ...s.fits, [fitKey(report.model, 65536)]: "error" } }));
   expect(text()).toContain("couldn't check GPU memory");
-  expect(text()).not.toContain("Runs on GPU");
+  expect(text()).not.toContain("Runs well");
 });
 
 it("labels the clamped size that will actually be sent", () => {
@@ -65,12 +65,12 @@ it("withholds a previous fits verdict while free memory is being checked again",
     setState({ model: report.model, numCtx: 65536, fits: {}, settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 65536 } });
     session.ensureFit(report.model, 65536);
     await until(() => getState().fits[fitKey(report.model, 65536)] !== undefined);
-    expect(text()).toContain("Runs on GPU");
+    expect(text()).toContain("Runs well");
     const next = b.server.hold("fit.check");
     b.server.push("gpu.changed", methodSamples["gpu.status"].result);
     const held = await next;
-    expect(text()).toContain("Checking GPU memory");
-    expect(text()).not.toContain("Runs on GPU");
+    expect(text()).toContain("Rechecking");
+    expect(text()).not.toContain("Runs well");
     held.respond({ ...report, numCtx: 65536, verdict: "refuse" });
     await until(() => {
       const r = getState().fits[fitKey(report.model, 65536)];

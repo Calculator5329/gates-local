@@ -7,6 +7,8 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+- [ ] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes
+
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
 

@@ -1,15 +1,18 @@
 // GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
 // verdict for a model at a context, the context control, and where the memory
 // goes, from fit.check plus gpu.status when the server has it.
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { currentFit, ensureFit, setContext, updateSettings } from "./session.ts";
+import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
+import { ensureFit, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, setState, useStore } from "./store.ts";
-import { Fail, useAct } from "./settings-ui.tsx";
-import { VLabel, closeTip, esc } from "./ui.tsx";
+import { Status } from "./settings-controls.tsx";
+import { Row, useAct } from "./settings-ui.tsx";
+import { closeTip, esc } from "./ui.tsx";
 export { openFit } from "./fit-actions.ts";
+import { FIT_DOT, fitLabel } from "./models-rules.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -24,7 +27,7 @@ export function shortGpu(name: string | undefined): string {
 const runsAtMost = (max: number) => `Runs at ${k(max)}, the most this model takes.`;
 
 /** A context segment's tooltip in Settings, and whether that size cannot run. */
-function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean, pending: boolean): { tip: string | undefined; wont: boolean } {
+function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean, pending = false): { tip: string | undefined; wont: boolean } {
   if (max !== undefined && c > max) return { tip: `This model takes at most ${k(max)}.`, wont: false };
   if (pending) return { tip: "Checking…", wont: false };
   if (r === undefined || r === "error") return { tip: undefined, wont: false };
@@ -64,7 +67,8 @@ function holders(occ: readonly GpuOccupant[]): string | null {
   return `${andList(names)} hold ${total} GB. Closing ${held.length === 2 ? "both" : "them"} makes room; Gates Local never stops them.`;
 }
 
-const swOf = (o: GpuOccupant) => (o.kind === "whisper" ? "sw-whisper" : "sw-occ");
+/** A bar segment and its legend swatch: Whisper's gray, and two more so neighbours differ. */
+const swOf = (o: GpuOccupant, i: number) => (o.kind === "whisper" ? "sw-whisper" : i % 2 === 0 ? "sw-occ" : "sw-other");
 
 function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: string; v: Verdict; loaded: boolean; numCtx: number }) {
   const tot = r1(gpu.totalBytes ?? 0);
@@ -79,7 +83,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
     <>
       <div className="bar">
         {parts.map((p, i) => (
-          <i key={i} className={swOf(p.o)} style={{ width: w(p.gb) }} />
+          <i key={i} className={swOf(p.o, i)} style={{ width: w(p.gb) }} />
         ))}
         {ch > 0 ? <i className="sw-chat" style={{ width: w(ch) }} /> : null}
         {un > 0 ? <i className="sw-free" /> : null}
@@ -93,7 +97,7 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
           const n = occName(p.o);
           return (
             <div key={i} className="lg-r" data-tip={n.tip}>
-              <span className={`chip ${swOf(p.o)}`} />
+              <span className={`chip ${swOf(p.o, i)}`} />
               <span className="nm">
                 {n.nm}
                 {p.o.protected ? <Icon id="lock" /> : null}
@@ -108,20 +112,23 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
             <span className="chip sw-chat" />
             <span className="nm">
               {name}
-              <small>{loaded ? "loaded" : `est. at ${k(numCtx)}`}</small>
+              <small>{loaded ? "loaded" : `estimated at ${k(numCtx)}`}</small>
             </span>
             <span className="v">{ch.toFixed(1)} GB</span>
           </div>
         ) : null}
-        <div className="lg-r">
-          <span className="chip sw-free" />
-          <span className="nm">
-            {loaded ? "Currently free" : "Free after loading"}
-            {loaded ? null : <small>est.</small>}
-          </span>
-          <span className="v">{un.toFixed(1)} GB</span>
-        </div>
+        {un > 0 ? (
+          <div className="lg-r">
+            <span className="chip sw-free" />
+            <span className="nm">
+              {loaded ? "Currently free" : "Free after loading"}
+              {loaded ? null : <small>estimated</small>}
+            </span>
+            <span className="v">{un.toFixed(1)} GB</span>
+          </div>
+        ) : null}
       </div>
+      {occ.some((o) => o.protected) ? <div className="fp-n">A lock means another program holds that memory. Gates Local can't free it.</div> : null}
     </>
   );
 }
@@ -147,30 +154,32 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
   return (
     <>
       <div className="fp-sep" />
-      <div className="fp-mt">{loaded ? "Measured on last load" : "Speed"}</div>
-      {ttft !== undefined ? (
-        <div className="meas">
-          <div>
-            <b>{(ttft / 1000).toFixed(1)} s</b>
-            <span>first token</span>
-          </div>
-          {tps !== null ? (
-            <div>
-              <b>{tps} tok/s</b>
-              <span>generation</span>
-            </div>
-          ) : null}
+      {ttft === undefined ? (
+        <div className="fp-n" style={{ margin: 0 }}>
+          Speed: not measured yet.<span className="ph-hide"> It shows after {name} replies at {k(numCtx)}.</span>
         </div>
       ) : (
-        <div className="fp-n" style={{ margin: 0 }}>
-          Not measured yet.<span className="ph-hide"> Gates Local measures it the first time {name} loads at {k(numCtx)}.</span>
-        </div>
+        <>
+          <div className="fp-mt">{loaded ? "Measured on last load" : "Speed"}</div>
+          <div className="meas">
+            <div>
+              <b>{(ttft / 1000).toFixed(1)} s</b>
+              <span>first token</span>
+            </div>
+            {tps !== null ? (
+              <div>
+                <b>{tps} tok/s</b>
+                <span>generation</span>
+              </div>
+            ) : null}
+          </div>
+        </>
       )}
     </>
   );
 }
 
-function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
+function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean; phase: FitPhase }) {
   const ctx = k(r.numCtx);
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
@@ -186,24 +195,24 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   }
   return (
     <div className="fp-n">
-      Est. {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
+      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
       <br />
-      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
+      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : phase === "fresh" ? "Runs entirely on the GPU." : "Previously fit on the GPU."}
       <br />
       {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
     </div>
   );
 }
 
-/** Where the memory goes: the numbers Settings folds under Details and the docked panel shows open. */
-function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
+/** Where the memory goes, folded under Details in Settings. */
+function Breakdown({ model, name, numCtx, gpuRaw, report, loaded, phase }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean; phase: FitPhase }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
   if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
   return (
     <>
       <div className="fp-sep" />
-      <div className="fp-mt">Where the memory goes</div>
+      <div className="fp-mt">{phase === "fresh" ? "Where the memory goes" : "Previous memory check"}</div>
       {gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
       ) : gpu.vendor === "none" ? (
@@ -218,17 +227,16 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
   );
 }
 
-function FitLine({ v, ctx }: { v: Verdict; ctx: number }) {
+/** The model's status, in the same words and the same dot as its row in Models. */
+function FitLine({ r, ctx, cpu, phase }: { r: FitReport; ctx: number; cpu: boolean; phase: FitPhase }) {
+  const v = verdictOf(r);
   return (
-    <div className="fp-v">
-      {v.k === "no" ? (
-        <span className="vl no">
-          <span className="vd no" />
-          {`Needs ${gb(v.amt)} more at ${k(ctx)}`}
-        </span>
+    <div className="fp-v" aria-busy={phase === "checking" || phase === "stale" || undefined}>
+      {phase !== "fresh" ? <Status dot={phase === "error" ? "err" : "run"}>{fitPendingWord(phase, true)}</Status> : v.k === "no" ? (
+        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more at ${k(ctx)}`}</Status>
       ) : (
         <>
-          <VLabel v={v} />
+          <Status dot={FIT_DOT[r.verdict]}>{fitLabel(r.verdict, v.measured, cpu)}</Status>
           <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
         </>
       )}
@@ -253,89 +261,82 @@ function useFitModel(model: string, chosen?: ContextSize) {
 }
 
 /**
- * The one default-context control (S1-06): a line for the size chosen, each
- * segment's fit in its tooltip, and the GB numbers one step away under Details.
+ * The one default-context control (S1-06) as a normal row, with one live line
+ * for the size chosen and each segment's fit in its tooltip; the model's status
+ * in its own row beneath, and the GB numbers one step away under Details.
  */
-function SettingsBody({ model }: { model: string }) {
-  // The default control stays saved; the report describes the chat's actual context.
+function SettingsBody({ model, title, head, action }: { model: string; title: string; head: string; action: ReactNode }) {
+  // the control shows the saved default; this model may run below it
   const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
-  const chosen = useStore((s) => s.model === undefined ? undefined : s.numCtx);
+  const chosen = useStore(s => s.model === undefined ? undefined : s.numCtx);
   const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, chosen ?? saved);
   const fits = useStore((s) => s.fits);
-  const stale = useStore((s) => s.staleFits);
+  const stale = useStore(s => s.staleFits);
+  const fitStatus = useStore(s => s.fitStatus);
+  const fitHistory = useStore(s => s.fitHistory);
+  const catalog = useStore(s => s.catalog);
   const settingsNA = useStore((s) => s.settings === NA);
   const [err, run] = useAct();
   useEffect(() => {
-    if (CONTEXT_SIZES.some((c) => stale[fitKey(model, c)] === true)) closeTip();
+    if (CONTEXT_SIZES.some(c => stale[fitKey(model, c)] === true)) closeTip();
     // the report shown is keyed by the size asked for, even one over the model's limit; the server clamps it
     ensureFit(model, numCtx);
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
   }, [model, numCtx, max, fits, stale]);
   const cpu = noGpu(gpu);
-  const cached = fits[fitKey(model, numCtx)];
-  const fresh = currentFit(cached);
-  const report = fresh !== undefined && fresh !== "error" && fresh.numCtx !== ctx ? undefined : fresh;
-  const pending = stale[fitKey(model, numCtx)] === true || (cached !== undefined && fresh === undefined);
+  const report = fits[fitKey(model, numCtx)];
   const pick = (c: ContextSize) => {
     closeTip();
     setContext(c);
     if (!settingsNA) void run(updateSettings({ defaultNumCtx: c }));
   };
+  const memory = cpu ? "memory" : "GPU memory";
+  const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, model, numCtx);
+  const fit = reading.report?.numCtx === ctx ? reading.report : undefined;
+  // says it is an estimate until this model has really run at this size (fit.ts)
+  const phase = reading.phase;
+  const defaultSize = saved ?? numCtx;
+  const defaultFit = fitReading({ fits, fitStatus, fitHistory, catalog }, model, defaultSize);
+  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultFit.report === undefined ? undefined : defaultFit.phase !== "fresh" ? `${fitPendingWord(defaultFit.phase, true)} at ${k(defaultSize)}` : `${defaultFit.report.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultFit.report, cpu).tip ?? ""}`;
   return (
     <>
-      <div className="fp-n">Memory at {k(ctx)} context</div>
-      {cached === undefined || (cached !== "error" && cached.numCtx !== ctx) ? (
-        <div className="fp-n">Checking {cpu ? "memory" : "GPU memory"}…</div>
-      ) : cached === "error" ? (
-        <div className="fp-n">Gates Local couldn't check {cpu ? "memory" : "GPU memory"} for {name} right now.</div>
-      ) : (
-        <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
-          {/* Keep the previous verdict's footprint while its replacement is checked. */}
-          <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(cached)} ctx={ctx} /></div>
-          {pending ? <div className="fp-v" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
+      <Row label="Default context" desc={`How many tokens of conversation the model keeps in view. It's one size for all your chats: Gates Local opens at this one, and changing it in a chat changes every chat until you reopen the app. Longer keeps more in view and uses more ${memory}.`} err={err}>
+        <div className="ctx-c">
+          <span className="mini-seg" role="group" aria-label="Default context">
+            {CONTEXT_SIZES.map((c) => {
+              const f = ctxFit(c, max, currentFit({ fits, fitStatus, catalog }, model, c), cpu, stale[fitKey(model, c)] === true);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  data-ctx={c}
+                  className={`${defaultSize === c ? "on" : ""}${f.wont ? " dim" : ""}`}
+                  aria-pressed={defaultSize === c}
+                  aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
+                  disabled={max !== undefined && c > max}
+                  data-tip={f.tip}
+                  onClick={() => pick(c)}
+                >
+                  {k(c)}
+                </button>
+              );
+            })}
+          </span>
+          {live === undefined ? null : <div className="ctx-line">{live}</div>}
         </div>
-      )}
-      <div className="fp-row fp-ctl">
-        <span className="k">Default context</span>
-        <span className="mini-seg" role="group" aria-label="Default context">
-          {CONTEXT_SIZES.map((c) => {
-            const f = ctxFit(c, max, currentFit(fits[fitKey(model, c)]), cpu, stale[fitKey(model, c)] === true);
-            return (
-              <button
-                key={c}
-                type="button"
-                data-ctx={c}
-                className={`${(saved ?? numCtx) === c ? "on" : ""}${f.wont ? " dim" : ""}`}
-                aria-pressed={(saved ?? numCtx) === c}
-                aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
-                disabled={max !== undefined && c > max}
-                data-tip={f.tip}
-                onClick={() => pick(c)}
-              >
-                {k(c)}
-              </button>
-            );
-          })}
-        </span>
-      </div>
-      {err !== null || (max !== undefined && numCtx > max) ? (
-        <div className="ctx-line">
-          {max !== undefined && numCtx > max ? <span className="ctx-alt">{runsAtMost(max)}</span> : null}
-          <Fail err={err} />
-        </div>
-      ) : null}
-      {cached === undefined || cached === "error" || report === "error" ? null : (
+      </Row>
+      <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context</>}>
+        {fit === undefined ? <span className="fp-n">{report === "error" ? `Gates Local couldn't check ${memory} for ${name} right now.` : `Checking ${memory}…`}</span> : <FitLine r={fit} ctx={ctx} cpu={cpu} phase={phase} />}
+        {action}
+      </Row>
+      {fit === undefined ? null : (
         <details className="upd-more fp-more">
-          <summary>Details</summary>
-          {report === undefined && !pending ? <div className="fp-n">Checking {cpu ? "memory" : "GPU memory"}…</div> : (
-          <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
-            <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}>
-              <Numbers r={report ?? cached} v={verdictOf(report ?? cached)} name={name} gpu={gpu} loaded={loaded} />
-              <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report ?? cached} loaded={loaded} />
-            </div>
-            {pending ? <div className="fp-n" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
-          </div>
-          )}
+          <summary>
+            <Icon id="right" cls="s14" />
+            {phase === "fresh" ? "Details" : "Details · previous check"}
+          </summary>
+          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} phase={phase} />
+          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} phase={phase} />
         </details>
       )}
     </>
@@ -351,18 +352,15 @@ export function GpuMemory() {
   const gpuRaw = useStore((s) => s.gpu);
   const model = shown ?? chat;
   const head = gpuHead(gpuRaw === NA ? undefined : gpuRaw);
+  const action =
+    shown !== null && chat !== undefined ? (
+      <button type="button" className="qa" onClick={() => setState({ fitPanel: { model: null } })}>
+        Show {describeModel(chat, catalog).name}
+      </button>
+    ) : null;
   return (
     <div className="fp-set" id="gpuMemory">
-      <div className="fp-h">
-        <span className="fp-t">{model === undefined ? "No model yet" : describeModel(model, catalog).name}</span>
-        <span className="fp-gpu">{head}</span>
-        {shown !== null && chat !== undefined ? (
-          <button type="button" className="qa" onClick={() => setState({ fitPanel: { model: null } })}>
-            Show {describeModel(chat, catalog).name}
-          </button>
-        ) : null}
-      </div>
-      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <SettingsBody model={model} />}
+      {!ready ? <div className="fp-n">GPU memory is checked once Ollama is ready.</div> : model === undefined ? <div className="fp-n">Download a model to see how it fits.</div> : <SettingsBody model={model} title={describeModel(model, catalog).name} head={head} action={action} />}
     </div>
   );
 }

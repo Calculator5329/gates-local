@@ -216,7 +216,7 @@ finishes the job. Add `--check` to only see what is new.
 
 Once the project has releases (`v1.2.3` tags), it follows releases and
 never goes backwards. Until then, and whenever you pass `--channel main`
-or turn on "Get every change, not only releases" in Settings, it follows
+or turn on "Get early updates" in Settings, it follows
 every change on the main branch.
 
 It changes nothing when a tracked file has changes of yours or the copy

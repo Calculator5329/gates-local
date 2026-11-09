@@ -121,6 +121,7 @@ describe("runtimeMode app", () => {
     expect(system.requests).toEqual([]);
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
     expect(env.kind === "response" && JSON.parse(env.body)).toMatchObject({ OLLAMA_MODELS: appModelsDir(appDataDir) });
+    expect(s.modelsDir).toBe(appModelsDir(appDataDir));
     expect(rt.startedByThisProcess()).toBe(true);
   });
 
@@ -141,7 +142,8 @@ describe("runtimeMode app", () => {
       // A server restart: the record is ours and names the port to adopt.
       const pid = readRecord(ownedStateFile(appDataDir))?.pid;
       const again = await runtime({ mode: "app", appPort: base, externalBaseUrl: await nothingAt() });
-      expect(await again.ensure()).toMatchObject({ state: "ready", owner: "app", baseUrl: `http://127.0.0.1:${base + 1}` });
+      // and it still knows the folder that copy was started with
+      expect(await again.ensure()).toMatchObject({ state: "ready", owner: "app", baseUrl: `http://127.0.0.1:${base + 1}`, modelsDir: appModelsDir(appDataDir) });
       expect(again.startedByThisProcess()).toBe(false);
       expect(readRecord(ownedStateFile(appDataDir))?.pid).toBe(pid);
     } finally {

@@ -2,14 +2,15 @@
 // chat. Found: a recommended installed model and Start chatting. No Ollama: a
 // calm status with Retry. No models: download the recommended one, with
 // progress and Cancel; the chat can open to draft while it downloads.
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
 import { DlDetail } from "./ModelDownloads.tsx";
 import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
+import { currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
-import { NA, type State, fitKey, useStore } from "./store.ts";
+import { NA, type State, useStore } from "./store.ts";
 import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
@@ -45,15 +46,20 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const numCtx = useStore((s) => s.numCtx);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
-  const report = useStore((s) => s.fits[fitKey(tag, numCtx)]);
+  const fits = useStore(s => s.fits);
+  const fitStatus = useStore(s => s.fitStatus);
+  const fitHistory = useStore(s => s.fitHistory);
+  const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, tag, numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
   const ctx = info?.maxContext === undefined ? numCtx : Math.min(numCtx, info.maxContext);
-  if (have) ensureFit(tag, numCtx);
-  const fit = entry?.fit ?? (report === undefined || report === "error" ? undefined : report);
-  const v = fit ? verdictOf(fit) : undefined;
+  useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
+  const fit = reading.report;
+  const v = fit && reading.phase === "fresh" ? verdictOf(fit) : undefined;
   const d = describeModel(tag, catalog);
-  const where = cpu ? "fits in system memory" : "runs on your GPU";
-  const tip = have ? pickRuleText(numCtx, cpu) : `The first of Gates Local's recommended models that ${where} with room for ${k(numCtx)} of context.`;
+  const tip = reading.phase !== "fresh" ? "Suggested model. Current memory is being checked." : have ? pickRuleText(numCtx, cpu) : v?.k === "no" ? "Choose a smaller model or context." : cpu
+    ? `The first of Gates Local's recommended models that fits in system memory with room for ${k(numCtx)} of context.`
+    : v?.k === "spill" ? foundWords("spills", numCtx).sub
+    : `The first of Gates Local's recommended models that runs on your GPU with room for ${k(numCtx)} of context.`;
   return (
     <div className="fr-card">
       <div className="fr-m">
@@ -68,7 +74,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
           <span className="v">
             <VLabel v={v} />
           </span>
-        ) : null}
+        ) : <span className="v">{fitPendingWord(reading.phase, fit !== undefined)}</span>}
       </div>
       <div className="fr-sub">
         {d.purpose}
@@ -105,10 +111,10 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
               </td>
               <td>{k(ctx)}</td>
             </tr>
-            {v ? (
+            {fit ? (
               <tr>
                 <td>{cpu ? "Memory" : "GPU memory"}</td>
-                <td>{cpu ? `Estimated ${gb(v.need)}, all in system memory (no supported GPU)` : `Estimated ${gb(v.need)} of ${gb(v.avail)} available to this model`}</td>
+                <td>{reading.phase !== "fresh" ? `Previous check: ${gb(fit.needVramBytes)} needed; ${gb(fit.freeVramBytes)} available.` : cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} available to this model`}</td>
               </tr>
             ) : null}
           </tbody>
@@ -138,6 +144,8 @@ function NoModels() {
   // Embedding models can be installed and still leave nothing to chat with.
   const others = useStore((s) => (s.models ?? []).length);
   const cpu = useStore((s) => noGpu(s.gpu));
+  const fresh = useStore(s => entry === undefined ? undefined : currentFit(s, entry.name, s.numCtx));
+  const phase = useStore(s => entry === undefined ? "checking" : fitReading(s, entry.name, s.numCtx).phase);
   const st = (
     <>
       <span className="dot ok" />
@@ -148,8 +156,9 @@ function NoModels() {
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
   const sub =
     tooOld ??
-    (cpu
+    (fresh === undefined ? `${fitPendingWord(phase, true)} Current memory must be checked before this model can be recommended.` : fresh.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu
       ? `One model is enough. This computer has no supported GPU, so this one runs in system memory with room for ${k(numCtx)} of context. Replies are slower than on a GPU.`
+      : fresh.verdict === "spills" ? foundWords("spills", numCtx).sub
       : `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`);
   if (active !== undefined && p !== undefined) {
     return (
@@ -222,12 +231,10 @@ function NoModels() {
   );
 }
 
-/** The title and subtitle for the pick's verdict (pick.ts on the server). One line each in the card column. */
-export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false): { title: string; sub: string } {
+/** The selected model's current verdict. A refusal says nothing about the other installed models. */
+export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false, name = "This model"): { title: string; sub: string } {
   if (verdict === "refuse") {
-    return cpu
-      ? { title: "No model fits in memory", sub: `None of your models fits in this computer's memory at ${k(numCtx)} of context. Download a smaller one in Settings.` }
-      : { title: "No model fits your GPU", sub: `None of your models runs at ${k(numCtx)} of context. Download a smaller one in Settings.` };
+    return { title: "Choose another model", sub: `${name} doesn't fit at ${k(numCtx)}. Choose another model or a smaller context.` };
   }
   // no supported GPU: every model runs in system memory, so no verdict may promise a GPU
   if (cpu) return { title: "Ready to chat", sub: "This computer has no supported GPU, so models run in system memory and replies are slower. Switch models in any chat." };
@@ -241,14 +248,20 @@ function Found() {
   const picked = useStore((s) => pickedModel(s.models));
   // The composer starts on the same model (session.ts reads the same pick).
   const tag = useStore((s) => s.model ?? picked?.name);
+  const catalog = useStore(s => s.catalog === NA ? undefined : s.catalog);
+  const name = tag === undefined ? "This model" : describeModel(tag, catalog).name;
   const numCtx = useStore((s) => s.numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const words = foundWords(picked?.name === tag ? picked?.pick?.verdict : undefined, picked?.pick?.numCtx ?? numCtx, cpu);
+  const fits = useStore(s => s.fits);
+  const fresh = useStore(s => tag === undefined ? undefined : currentFit(s, tag, numCtx));
+  const phase = useStore(s => tag === undefined ? "checking" : fitReading(s, tag, numCtx).phase);
+  useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
+  const words = fresh === undefined ? { title: "Checking memory", sub: `${fitPendingWord(phase, true)} Keeping the previous numbers until a current check succeeds.` } : foundWords(fresh.verdict, numCtx, cpu, name);
   return (
     <Shell
       st={
         <>
-          <span className={`dot ${picked?.pick?.verdict === "refuse" ? "err" : "ok"}`} />
+          <span className={`dot ${fresh?.verdict === "refuse" ? "err" : fresh === undefined ? "run" : "ok"}`} />
           Ollama · {count} chat {count === 1 ? "model" : "models"}
         </>
       }
@@ -256,7 +269,7 @@ function Found() {
       sub={words.sub}
     >
       {tag !== undefined ? <RecCard tag={tag} have /> : null}
-      {picked?.pick?.verdict === "refuse" ? (
+      {fresh?.verdict === "refuse" ? (
         <Cta label="Choose a model" onGo={() => finishFirstRun("models")} link="Start chatting anyway" onLink={startChat} />
       ) : (
         <Cta label="Start chatting" onGo={startChat} link="Change defaults in Settings" onLink={() => finishFirstRun("general")} />

@@ -7,6 +7,7 @@ import type { CatalogEntry, FitReport, PullProgress } from "@gates-local/contrac
 import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
+import { fitPendingWord } from "./fit-state.ts";
 import { nameOf, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, pendingDownload } from "./pick.ts";
 import { cancelPull, ensureFit, pull } from "./session.ts";
@@ -77,7 +78,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
     <div className="mp-row mp-dling" data-pull={p.name}>
       <div className="mp-nm" data-tip={`${esc(p.name)}${n.purpose ? `<br>${esc(n.purpose)}` : ""}<br>${err ? `${esc(err)}<br>` : ""}${esc(etaText(p))}`}>
         <div className="mp-l1">
-          {n.mono ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
+          {n.id ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
         </div>
         {n.purpose ? <div className="mp-p">{detail}</div> : null}
         <div className="mp-meta">
@@ -109,7 +110,8 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
 function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
-  const v = report ? verdictOf(report) : undefined;
+  const phase = useStore(s => s.fitStatus?.[fitKey(c.name, numCtx)] ?? "fresh");
+  const v = report && phase === "fresh" ? verdictOf(report) : undefined;
   const context = report?.numCtx ?? numCtx;
   const basis = v?.measured ? "Measured" : "Estimated";
   const note = v?.measured ? "From the current load." : "Measured after the first load.";
@@ -144,7 +146,7 @@ function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report:
           </small>
         </div>
       ) : (
-        <div className="dl-v"><small>Checking at {k(numCtx)}…</small></div>
+        <div className="dl-v"><small>{fitPendingWord(phase, report !== undefined)} at {k(numCtx)}</small></div>
       )}
       <div className="dl-a">{action}</div>
       {dling ? <Progress p={p} name={c.label} /> : null}

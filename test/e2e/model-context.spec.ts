@@ -26,7 +26,7 @@ test("switching model and context updates the fit verdict and the panel", async 
   const panel = await openGpuMemory(page);
   await expect(panel).toContainText("Gemma 4 12B");
   await panel.getByRole("button", { name: "32k" }).click();
-  await expect(panel).toContainText("Uses system memory");
+  await expect(panel).toContainText("Should run slower");
 
   // the per-app breakdown reads gpu.status (the fake nvidia-smi)
   await expect(panel).toContainText("Where the memory goes");

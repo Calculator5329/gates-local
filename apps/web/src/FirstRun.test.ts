@@ -65,6 +65,7 @@ const cpuOnly = (verdict: "fits" | "spills" | "refuse") => ({
   runtime: { state: "ready", owner: "external", version: "0.40.15" },
   models: [{ name: "qwen3.5:4b", digest: "q", sizeBytes: 1, modifiedAt: "", capabilities: ["completion"], pick: { numCtx: 16384, verdict } }],
   gpu: { vendor: "none" },
+  fits: { "qwen3.5:4b@16384": { model: "qwen3.5:4b", numCtx: 16384, verdict, needVramBytes: 1, freeVramBytes: 0, spillRamBytes: 1, source: "estimate", measuredAt: 0 } },
 });
 
 describe("first run on a computer with no supported GPU", () => {
@@ -72,9 +73,34 @@ describe("first run on a computer with no supported GPU", () => {
     it(`never promises a GPU when the pick ${verdict}`, () => {
       const t = text(cpuOnly(verdict));
       expect(t).not.toMatch(/your GPU|GPU fit/);
-      expect(t).toContain(verdict === "refuse" ? "No model fits in memory" : "This computer has no supported GPU, so models run in system memory");
+      expect(t).toContain(verdict === "refuse" ? "Qwen 3.5 4B doesn't fit at 16k. Choose another model or a smaller context." : "This computer has no supported GPU, so models run in system memory");
       // the tooltip is an attribute, which text() strips (W1-03)
       expect(raw(cpuOnly(verdict))).not.toContain("fits your GPU");
     });
   }
+});
+
+it("SR-03: a recommended download that spills describes system memory in the subtitle and tooltip", () => {
+  const fit = { model: gemma.name, numCtx: 16384, verdict: "spills", needVramBytes: 2 ** 30, freeVramBytes: 0, spillRamBytes: 2 ** 30, source: "estimate", measuredAt: 0 };
+  const state = { ...oldOllama([{ ...gemma, fit }]), models: [], gpu: { vendor: "nvidia" }, fits: { [`${gemma.name}@16384`]: fit } };
+  expect(text(state)).toContain("Your best fit uses system memory, so it is slower.");
+  expect(raw(state)).toContain('data-tip="Your best fit uses system memory, so it is slower."');
+  expect(raw(state)).not.toContain("runs on your GPU with room");
+});
+
+it("SR-07: a selected model's refusal names that model when another installed model fits", () => {
+  const selected = cpuOnly("refuse");
+  const model = selected.models[0]!;
+  const state = {
+    ...selected,
+    model: model.name,
+    gpu: { vendor: "nvidia" },
+    models: [model, { ...model, name: gemma.name, pick: { numCtx: 16384, verdict: "fits" } }],
+    catalog: [{ ...gemma, name: model.name, label: "Qwen 3.5 4B", installed: true }],
+    fits: { ...selected.fits, [`${gemma.name}@16384`]: { ...selected.fits["qwen3.5:4b@16384"], model: gemma.name, verdict: "fits" } },
+  };
+  const t = text(state);
+  expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. Choose another model or a smaller context.");
+  expect(t).not.toMatch(/None of your models|Download a smaller/);
+  expect(t).toContain("Choose a model");
 });

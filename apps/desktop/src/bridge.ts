@@ -14,6 +14,8 @@ export const IPC = {
   updateAndRestart: "gates-local:update-and-restart",
   dataFolder: "gates-local:data-folder",
   openDataFolder: "gates-local:open-data-folder",
+  modelsFolder: "gates-local:models-folder",
+  openModelsFolder: "gates-local:open-models-folder",
   state: "gates-local:state",
   titleBar: "gates-local:title-bar",
 } as const;
@@ -75,6 +77,10 @@ export interface GatesLocalBridge {
   dataFolder(): Promise<string>;
   /** Open that folder in the file manager; a sentence if it could not. */
   openDataFolder(): Promise<string | null>;
+  /** Main's verified owned models folder; null when it is not known. */
+  modelsFolder(): Promise<string | null>;
+  /** Main resolves the folder again; no path crosses from the renderer. */
+  openModelsFolder(): Promise<string | null>;
 }
 
 /** The one place the server URL shape is defined. */

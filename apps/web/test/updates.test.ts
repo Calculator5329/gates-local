@@ -60,10 +60,11 @@ describe("the Updates group", () => {
     const html = view();
     expect(text(html)).toContain("Version");
     expect(html).toContain("abc1234");
-    expect(text(html)).toContain("A commit from");
+    expect(text(html)).toContain("Development build");
     expect(text(html)).toContain("Check for updates");
-    expect(text(html)).toContain("Only when you click.");
-    expect(text(html)).toContain("Get every change, not only releases");
+    expect(text(html)).toContain("Checks only when you click.");
+    expect(text(html)).toContain("Get early updates");
+    expect(text(html)).not.toMatch(/\b(?:commit|git|remote|clone|main branch)\b/i);
     expect(html).toContain('aria-checked="false"');
     expect(view({ settings: { ...SETTINGS, updateEveryChange: true } })).toContain('aria-checked="true"');
   });
@@ -74,7 +75,8 @@ describe("the Updates group", () => {
 
   it("shows only the version for a copy that is not a clone, or when the server has no updates", () => {
     const plain = text(view({ status: { ...CLONE, version: { kind: "not-a-clone" } } }));
-    expect(plain).toContain("Not a git clone");
+    expect(plain).toContain("Standalone copy");
+    expect(plain).toContain("check for updates or update itself");
     expect(plain).not.toContain("Check for updates");
     const na = text(view({ status: "na" }));
     expect(na).toContain("To update, run pnpm run app-update in the Gates Local folder.");

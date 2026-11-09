@@ -48,6 +48,8 @@ export const OwnedRecord = Schema.Struct({
   baseUrl: Schema.String,
   binary: Schema.String,
   startedAt: Schema.Number,
+  /** OLLAMA_MODELS as given to this process, so a restart that adopts it still knows. Absent in older records. */
+  modelsDir: Schema.optional(Schema.String),
 });
 export type OwnedRecord = typeof OwnedRecord.Type;
 

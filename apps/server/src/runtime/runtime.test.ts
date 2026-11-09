@@ -126,6 +126,8 @@ describe("stopped (installed, nothing answering)", () => {
 
     const env = await httpGet(`${s.baseUrl}/fake/env`, 1000);
     expect(env.kind === "response" && JSON.parse(env.body)).toEqual({ OLLAMA_MODELS: modelsDir, OLLAMA_HOST: new URL(s.baseUrl).host });
+    // the folder the status reports is the one the Ollama was really given
+    expect(s.modelsDir).toBe(modelsDir);
 
     const rec = readRecord(ownedStateFile(appDataDir));
     expect(rec?.baseUrl).toBe(s.baseUrl);

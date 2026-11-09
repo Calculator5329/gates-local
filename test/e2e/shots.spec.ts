@@ -42,6 +42,19 @@ const settings = (label: string) => async (page: Page) => {
   await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
 };
 
+/**
+ * A light shot picks Light with the real Theme control, so General shows Light
+ * chosen and says so. Where Settings can't be reached (first run, a server that
+ * isn't ready) the page can only be asked for the light tokens.
+ */
+const goLight = async (page: Page, canUseSettings: boolean) => {
+  if (!canUseSettings) return page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+  await settings("General")(page);
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.keyboard.press("Escape");
+};
+
 const SHOTS: readonly Shot[] = [
   { name: "S-01-thread", light: "S-26-light-thread" },
   { name: "S-04-new", start: "new" },
@@ -51,7 +64,7 @@ const SHOTS: readonly Shot[] = [
     name: "S-133-settings-advanced",
     act: async (p) => {
       await settings("Advanced")(p);
-      await expect(p.locator("#gpuMemory .fp-v:visible")).toContainText("Runs on GPU");
+      await expect(p.locator("#gpuMemory .fp-v:visible")).toContainText("Should run well");
       await p.mouse.move(1400, 880);
     },
   },
@@ -232,7 +245,7 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     "Image generation",
     async (p) => {
       await p.getByRole("switch", { name: "Generate images" }).click();
-      await expect(p.locator(".srow", { hasText: "Not found" })).toBeVisible();
+      await expect(p.locator(".srow", { hasText: "Not connected" })).toBeVisible();
     },
   ],
   ["runtime", "Runtime"],
@@ -286,8 +299,8 @@ for (const shot of SHOTS) {
         if (shot.start === "firstrun") await expect(page.locator(".first").getByRole("heading").first()).toBeVisible();
         else if (shot.scenario === undefined || shot.scenario === "long-name") await waitReady(page);
         else await expect(page.locator(".banner")).toBeVisible();
-        // the app is dark by default; a light shot asks for the light tokens
-        if (theme === "light") await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+        // the app is dark by default
+        if (theme === "light") await goLight(page, shot.start !== "firstrun" && (shot.scenario === undefined || shot.scenario === "long-name"));
         await shot.act?.(page);
         // let fit checks, popovers and fonts settle; animations are frozen below
         await page.evaluate(() => document.fonts.ready.then(() => undefined));

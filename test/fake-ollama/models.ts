@@ -174,6 +174,23 @@ export const FAKE_MODELS: readonly FakeModel[] = [
     keyLength: 64,
     contextLength: 32_768,
   }),
+  // Not installed by default: ids that clean up to the same name, two by quant and two by owner.
+  ...["local/model:9b-q4_K_M", "local/model:9b-q8_0", "alice/custom:latest", "bob/custom:latest"].map((name) =>
+    model({
+      name,
+      family: "tiny",
+      parameterSize: "500M",
+      parameterCount: 500_000_000,
+      quantization: "Q4_K_M",
+      sizeBytes: Math.round(0.4 * GIB),
+      capabilities: ["completion"],
+      blockCount: 12,
+      headCount: 8,
+      headCountKv: 8,
+      keyLength: 64,
+      contextLength: 32_768,
+    }),
+  ),
   // Not installed by default: a chat model whose own window is 2,048 tokens, and one that reports no maximum.
   model({
     name: "tiny-chat:2k",

@@ -29,7 +29,7 @@ test.describe("with the app's own copy chosen", () => {
     await noAppCopyHere(page);
     await open();
     await page.locator(".sb-foot .rt").click();
-    await page.getByRole("button", { name: "Use the system Ollama…" }).click();
+    await page.getByRole("button", { name: "Use the system Ollama" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Go back to the system Ollama?");
   });
 });
@@ -55,7 +55,7 @@ test.describe("with the system Ollama chosen", () => {
     await open();
     await page.locator(".sb-foot .rt").click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
-    await page.getByRole("button", { name: "Use Gates Local's own Ollama…" }).click();
+    await page.getByRole("button", { name: "Use Gates Local's Ollama" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Use Gates Local's own Ollama?");
   });
 
@@ -65,7 +65,7 @@ test.describe("with the system Ollama chosen", () => {
     await page.locator(".sb-foot .rt").click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await expect(page.locator(".set")).toContainText("Not available on this computer");
-    await expect(page.getByRole("button", { name: "Use Gates Local's own Ollama…" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Use Gates Local's Ollama" })).toHaveCount(0);
   });
 
   test("once Ollama answers on the port, Retry looks again and chat is ready (W-06)", async ({ page, open }) => {

@@ -414,6 +414,8 @@ test.describe("a new thread at 360", () => {
   test("the headline and suggestions sit on the composer, one setup row, a quiet new-thread icon", async ({ page, open }) => {
     await open();
     await waitReady(page);
+    // Library hydration replaces the initial image-only link with this combined setup row.
+    await expect(page.locator(".card-links").getByRole("button", { name: "Set up library and images…", exact: true })).toBeVisible();
     const cards = await box(page, ".cards");
     const composer = await box(page, ".composer");
     const setup = await box(page, ".card-links");
@@ -479,7 +481,7 @@ test.describe("sheet content on a phone", () => {
     await expect(page.locator('#picker [data-ctx="65536"]')).toBeDisabled();
     await page.locator("#picker").getByRole("button", { name: "Memory details", exact: true }).tap();
     await expect(page.locator(".set-bar").getByRole("heading", { name: "Advanced", exact: true })).toBeVisible();
-    await expect(page.locator("#gpuMemory > .fp-h .fp-t")).toHaveText("qwen3.8-abliterated:27b");
+    await expect(page.locator("#gpuMemory .srow:has(.fp-v) .sl b")).toHaveText("qwen3.8-abliterated:27b");
     await page.getByRole("button", { name: "Back to Settings", exact: true }).tap();
     await page.getByRole("button", { name: "Done", exact: true }).tap();
     await page.locator("#modelBtn").tap();
@@ -651,8 +653,8 @@ test.describe("Settings on a phone", () => {
     const text = (await page.locator(".set-in").innerText()).toLowerCase();
     expect(text.split("port ").length - 1, "port mentions in prose").toBe(0);
     const row = page.locator(".srow", { has: page.locator(".stat") });
-    const empty = await row.locator(".sv").count();
-    expect(empty === 0 || !(await row.locator(".sv").isVisible()), "the empty value column is gone").toBe(true);
+    // the status row carries the switch now, so its value column is never an empty one
+    await expect(row.locator(".sv").getByRole("button")).toHaveText(/^Use .*Ollama$/);
   });
 
   test("secondary text is 14 px or more apart from approved compact picker figures", async ({ page, open, seededThread }) => {

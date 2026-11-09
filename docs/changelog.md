@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-11-09: First-run memory advice
+
+- A recommended download that uses system memory says it is slower, in both
+  its introduction and tooltip.
+- When the selected model cannot run at the chosen context, first run names
+  that model and suggests another model or a smaller context. It no longer
+  claims that none of the installed models runs or asks for a new download.
+
+## 2026-11-09: Current memory verdicts and trusted folders
+
+- GPU memory spells out Estimated in its sentence, keeping the available
+  memory separate from the amount free after loading.
+- Memory updates keep historical numbers and open Details visible while
+  replacing the current verdict with Rechecking. Failed checks show a failure
+  until a retry succeeds. Settings, model lists, the picker and first-run
+  recommendations share this freshness state, including downloadable models.
+- Opening the owned models folder rechecks that it is a real directory at the
+  recorded path. A substituted symbolic link has no folder action.
+
+## 2026-11-09: Model picker keyboard focus
+
+- A phone's model picker keeps keyboard focus inside the sheet when a memory
+  check replaces a focused model with a row that cannot be selected.
+
+## 2026-11-08: Settings actions and live memory updates
+
+- Opening the models folder uses the desktop app's verified ownership record,
+  never a path supplied by the page. An unknown folder has no folder row or action.
+- A context chosen in a chat survives reconnects and stays shared across chats
+  until the app is reopened; the saved default still applies on a fresh launch.
+- Memory refreshes keep the last fit visible while a new check runs, including
+  the status and open Details. Late results from older checks cannot replace a
+  newer result, and a failed refresh keeps the last successful report visible.
 ## 2026-11-09: Keep model picks while memory is rechecked
 
 Picking a model during a memory refresh now waits for the answer instead of
@@ -696,6 +729,26 @@ and selected reply text. Desktop permission handling remains unchanged.
   excess must be resolved before landing. Browser verification on the
   designated external runner is pending.
 
+## 2026-11-08: Settings, second pass
+
+- Tools rows say whether each tool is ready for the sources it can use, and
+  the whole row goes to where that is fixed.
+- One status style on Models and Advanced: a small dot and plain text, in
+  the same words. "Should run well" until a model has really run at that
+  size, then "Runs well".
+- Default context is a normal row with one live line for the size chosen.
+- Default context says what it does: one size for all your chats.
+- Runtime can copy the Ollama address. For Gates Local's own Ollama it can
+  copy and open the models folder, using the path the server really gave it.
+  Its confirm starts with when the copy runs.
+- Updates has one Version row with Check for updates on it, in plain words.
+- Models the catalog does not know get a cleaned name above their Ollama id.
+- The Default card names the model new chats really start on when yours
+  won't run here. Options that would read alike show what differs, and each
+  has its full id as a tooltip.
+- Image generation teaches setup before the switch is on, and says Not
+  connected instead of Not found.
+- Instructions' loading and save-status text stays at least 14 px on phones.
 ## 2026-11-08: Paste privacy and messages kept through interrupted sends
 
 - Main reads copied file paths for a trusted keyboard or native-menu paste

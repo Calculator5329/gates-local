@@ -10,9 +10,11 @@ import type { FitReport, ModelInfo, PullProgress } from "@gates-local/contracts"
 import { copyText } from "./copy.ts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
+import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
 import { DownloadTab, DownloadingRow, DownloadingRows, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
+  FIT_DOT,
   type ModelName,
   type Row,
   about,
@@ -21,18 +23,19 @@ import {
   noteSettled,
   fitLabel,
   fitReason,
-  fitSymbol,
   nameOf,
   nextDefault,
+  optionVariants,
   shortTag,
   sizeText,
   sortRows,
   splitTail,
 } from "./models-rules.ts";
-import { awaitingInstall, canChat, notForChat } from "./pick.ts";
+import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { ensureFit, pull } from "./session.ts";
+import { PathText } from "./settings-controls.tsx";
 import { Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
-import { NA, type State, fitKey, setState, useStore } from "./store.ts";
+import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
@@ -40,42 +43,17 @@ const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 /** The failure of the last action a control ran; cleared when the next try starts. */
 // ---------------------------------------------------------------- names and fit
 
-/** A name on the page: curated label, or the tag in mono cut in the middle so the quant tail always shows. */
-function Name({ n, tag }: { n: ModelName; tag: string }) {
-  if (!n.mono) return <span className="mp-nmn">{n.text}</span>;
-  const [head, tail] = splitTail(n.text);
-  return (
-    <span className="mp-tag" data-tip={n.text === tag && tail === "" ? undefined : `<span class="mono">${esc(tag)}</span>`}>
-      <span className="mp-h">{head}</span>
-      {tail ? <span className="mp-t">{tail}</span> : null}
-    </span>
-  );
-}
-
-/** The fit symbol: half-filled for slower, struck for won't run. */
-function FitGlyph({ verdict }: { verdict: FitReport["verdict"] }) {
-  const sym = fitSymbol(verdict);
-  if (sym === null) return null;
-  return (
-    <svg className="mp-g" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="3" />
-      {sym === "slow" ? <path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" /> : null}
-      {sym === "big" ? <path d="M6 6l12 12" stroke="currentColor" strokeWidth="3" /> : null}
-      {sym === "ok" ? <circle cx="12" cy="12" r="4" fill="currentColor" /> : null}
-    </svg>
-  );
-}
-
-/** "Runs well" stays quiet; the exceptions carry colour, a symbol, and their reason on hover or focus. */
-function Fit({ report }: { report: FitReport | "error" | undefined }) {
+/** A dot carries the verdict and the words stay body colour; the exceptions give their reason on hover or focus. */
+function Fit({ report, phase = "fresh" }: { report: FitReport | "error" | undefined; phase?: FitPhase }) {
   const cpu = useStore((s) => noGpu(s.gpu));
+  if (phase !== "fresh") return <span className="mp-fit none">{fitPendingWord(phase, report !== undefined && report !== "error")}</span>;
   if (report === undefined) return <span className="mp-fit none">Checking…</span>;
   if (report === "error") return <span className="mp-fit none">Couldn't check</span>;
   const exception = report.verdict !== "fits";
   return (
-    <span className={`mp-fit ${report.verdict}${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report, cpu)) : undefined}>
-      <FitGlyph verdict={report.verdict} />
-      <span className="mp-w">{fitLabel(report.verdict, undefined, cpu)}</span>
+    <span className={`mp-fit${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report, cpu)) : undefined}>
+      <span className={`dot ${FIT_DOT[report.verdict]}`} />
+      <span className="mp-w">{fitLabel(report.verdict, report.source === "measured", cpu)}</span>
     </span>
   );
 }
@@ -86,6 +64,7 @@ interface InstalledRow extends Row {
   readonly info: ModelInfo;
   readonly label: ModelName;
   readonly report: FitReport | "error" | undefined;
+  readonly phase: FitPhase;
 }
 
 function useInstalledRows(): { rows: InstalledRow[]; def: string | undefined } {
@@ -93,16 +72,18 @@ function useInstalledRows(): { rows: InstalledRow[]; def: string | undefined } {
   const catalog = useStore(catalogOf);
   const numCtx = useStore((s) => s.numCtx);
   const fits = useStore((s) => s.fits);
+  const fitStatus = useStore(s => s.fitStatus);
+  const fitHistory = useStore(s => s.fitHistory);
   const def = useStore(cardDefault);
   useEffect(() => {
     for (const m of models ?? []) if (canChat(m)) ensureFit(m.name, numCtx);
   }, [models, numCtx, fits]);
   const rows = (models ?? []).map((info): InstalledRow => {
     const chat = canChat(info);
-    const checked = fits[fitKey(info.name, numCtx)];
-    const report = !chat ? undefined : (checked ?? catalog?.find((c) => c.name === info.name)?.fit);
+    const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, info.name, numCtx);
+    const report = !chat ? undefined : reading.report;
     const label = nameOf(info.name, catalog);
-    return { name: info.name, display: label.text, chat, verdict: report === undefined || report === "error" ? undefined : report.verdict, info, label, report };
+    return { name: info.name, display: label.text, chat, verdict: reading.phase === "fresh" && report !== undefined ? report.verdict : undefined, info, label, report, phase: reading.phase };
   });
   return { rows: sortRows(rows, def), def };
 }
@@ -246,7 +227,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
       {why.label}
     </span>
   ) : (
-    <Fit report={r.report} />
+    <Fit report={r.report} phase={r.phase} />
   );
   const chip = isDef ? (
     <span className="mp-chip">
@@ -262,12 +243,17 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
     >
       <div className="mp-nm">
         <div className="mp-l1">
-          <Name n={r.label} tag={r.name} />
+          <span className="mp-nmn">{r.label.text}</span>
           {chip}
         </div>
-        {r.label.purpose ? <div className="mp-p">{r.label.purpose}</div> : null}
+        {r.label.purpose ? (
+          <div className="mp-p">{r.label.purpose}</div>
+        ) : r.label.id === undefined ? null : (
+          <div className="mp-p">
+            <PathText path={r.label.id} shown={shortTag(r.label.id)} />
+          </div>
+        )}
         <div className="mp-meta">
-          {chip}
           <span>{sizeText(r.info.sizeBytes)}</span>
           <span aria-hidden="true">·</span>
           {fit}
@@ -454,6 +440,11 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const wont = chat.filter((r) => r.verdict === "refuse");
   const current = rows.find((r) => r.name === def);
   const numCtx = useStore((s) => s.numCtx);
+  const saved = useStore(savedDefault);
+  const models = useStore((s) => s.models);
+  // the server's pick (runtime/pick.ts) is the model new chats really start on
+  const picked = pickedModel(models);
+  const fallback = saved !== undefined && picked !== undefined && picked.name !== saved ? (rows.find((r) => r.name === picked.name)?.label.text ?? picked.name) : undefined;
   // the number is only worth showing when this model cannot reach the default size
   const max = current?.info.maxContext;
   const limit = max !== undefined && max < numCtx ? max : undefined;
@@ -468,6 +459,12 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   const pick = (name: string) => {
     void run(makeDefault(name)).then((ok) => ok && close());
   };
+  const variants = optionVariants(chat);
+  const variantOf = (name: string | undefined) => {
+    const v = name === undefined ? undefined : variants.get(name);
+    return v === undefined ? null : <span className="mp-var">{v}</span>;
+  };
+  const currentWords = current === undefined ? "none" : [current.label.text, variants.get(current.name)].filter(Boolean).join(" ");
   const option = (r: InstalledRow, off: boolean) => (
     <div
       key={r.name}
@@ -475,6 +472,8 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
       tabIndex={-1}
       aria-selected={r.name === def}
       aria-disabled={off}
+      aria-label={[r.label.text, r.name, sizeText(r.info.sizeBytes)].join(", ")}
+      data-tip={esc(r.name)}
       className={`mp-opt${off ? " off" : ""}`}
       onClick={() => !off && pick(r.name)}
       onKeyDown={(e) => {
@@ -486,9 +485,10 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
     >
       {r.name === def ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
       <span className="mp-nmx">
-        <Name n={r.label} tag={r.name} />
+        <span className="mp-nmn">{r.label.text}</span>
+        {variantOf(r.name)}
       </span>
-      {r.report !== undefined && r.report !== "error" && r.report.verdict !== "fits" ? <Fit report={r.report} /> : <span />}
+      {r.phase !== "fresh" || (r.report !== undefined && r.report !== "error" && r.report.verdict !== "fits") ? <Fit report={r.report} phase={r.phase} /> : <span />}
       <span className="mp-osz">{sizeText(r.info.sizeBytes)}</span>
     </div>
   );
@@ -497,9 +497,14 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
       <div className="mp-dl-l">
         <b>Default for new chats</b>
         <span>
-          New chats start on this model. If it's too big for this computer, they start on the best one that fits. Any chat can switch from its model menu.
+          New chats start on this model. If it can't run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.
           {limit === undefined ? null : ` This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
         </span>
+        {fallback === undefined ? null : (
+          <span className="mp-fb">
+            {current?.label.text} won't run here, so new chats start on <b>{fallback}</b>.
+          </span>
+        )}
         <Fail err={err} />
       </div>
       <button
@@ -508,14 +513,23 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         className={`mp-select${open ? " on" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Default for new chats: ${current?.label.text ?? "none"}`}
+        aria-label={`Default for new chats: ${currentWords}`}
         disabled={disabled}
         onClick={() => {
           closeTip();
           setOpen((o) => !o);
         }}
       >
-        <span className="mp-sv">{current ? <Name n={current.label} tag={current.name} /> : "Choose a model"}</span>
+        <span className="mp-sv">
+          {current ? (
+            <>
+              <span className="mp-nmn">{current.label.text}</span>
+              {variantOf(current.name)}
+            </>
+          ) : (
+            "Choose a model"
+          )}
+        </span>
         <Icon id="down" cls="s14" />
       </button>
       {open ? (
@@ -538,6 +552,11 @@ function NoModels() {
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const cpu = useStore((s) => noGpu(s.gpu));
   const [err, run] = useAct();
+  const fits = useStore(s => s.fits);
+  const fitStatus = useStore(s => s.fitStatus);
+  const fitHistory = useStore(s => s.fitHistory);
+  const numCtx = useStore(s => s.numCtx);
+  useEffect(() => { for (const c of catalog ?? []) ensureFit(c.name, numCtx); }, [catalog, fits, numCtx]);
   if (downloading) {
     return (
       <div className="mp-first">
@@ -547,8 +566,7 @@ function NoModels() {
       </div>
     );
   }
-  // with no supported GPU the best a model can do is load into system memory
-  const pick = catalog?.find((c) => c.recommended && c.fit?.verdict === (cpu ? "spills" : "fits"));
+  const pick = catalog?.find((c) => c.recommended && currentFit({ fits, fitStatus, fitHistory, catalog }, c.name, numCtx)?.verdict === (cpu ? "spills" : "fits"));
   return (
     <div className="mp-empty">
       <Icon id="box" cls="mp-big" />
@@ -558,7 +576,7 @@ function NoModels() {
         {pick ? (
           <>
             {" "}
-            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {cpu ? "runs in system memory" : "runs well"} on this computer.
+            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {fitLabel(pick.fit?.verdict ?? "fits", false, cpu).toLowerCase()} on this computer.
           </>
         ) : null}
       </p>

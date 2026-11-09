@@ -210,7 +210,7 @@ and the toggles are pills.
   - found and nomodels: "Details" (text only, trailing chevron) expands under the model card. It stays open while the download re-renders the card.
 - **Settings**
   - The theme switch applies at once.
-  - The default model and default context are shared with the composer. The default context lives in Advanced › GPU memory ("Default context"), with the current model's verdict at that size above it and the GB numbers under Details.
+  - The default model and default context are shared with the composer. The default context lives in Advanced › GPU memory ("Default context"), as a normal row with one live line for the size chosen, the current model's status in its own row beneath, and the GB numbers under Details.
   - The image generation switch drives the `+` menu, the Image pill and the image starter card.
   - Models: unselected radios have an outline in the secondary-icon tone (`--muted-foreground`) (F57). ~~A downloading model's radio is a dashed `--faint` ring.~~ **Superseded by F78:** a downloading row shows the tool row's spinner in the radio slot, and a row that cannot be picked dims its radio with its name (S-163, S-18).
   - Status words in lists (Settings › Models, the download page): the dot carries the state colour, the words sit at secondary ink. Light-theme amber is two steps darker for small text, and the install pulse never drops below 0.6 opacity (F74).

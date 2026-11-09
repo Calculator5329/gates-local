@@ -202,6 +202,8 @@ function tail(file: string, chars = 2000): string {
   }
 }
 
+const inFolder = (modelsDir: string | undefined) => (modelsDir === undefined ? {} : { modelsDir });
+
 export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
@@ -308,7 +310,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       const version = await adoptable(own.record);
       if (version !== undefined) {
         useAppPort(own.record.baseUrl);
-        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version } };
+        return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...inFolder(own.record.modelsDir) } };
       }
       // Otherwise its port counts as another program's; the scan below moves past it.
     }
@@ -387,7 +389,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
         // A non-Ollama on the system port is still busy, as on a fresh start.
         const busy = withBusy(note?.busy ?? []);
         if (version !== undefined) {
-          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy } };
+          return { kind: "ready", status: { state: "ready", owner: "app", baseUrl: appBaseUrl, version, ...busy, ...(own.kind === "ours" ? inFolder(own.record.modelsDir) : {}) } };
         }
         return {
           kind: "ready",
@@ -515,6 +517,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
       baseUrl: appBaseUrl,
       binary: binary.path,
       startedAt: Date.now(),
+      ...inFolder(models?.path),
     });
     startedPid = proc.pid;
     const modelsNote =
@@ -528,6 +531,7 @@ export function createOllamaRuntime(options: RuntimeOptions = {}): OllamaRuntime
           baseUrl: appBaseUrl,
           version,
           detail: `App-owned Ollama (pid ${proc.pid}, ${binary.origin === "path" ? "from PATH" : "app install"}).${modelsNote}`,
+          ...inFolder(models?.path),
         },
         note,
       ),

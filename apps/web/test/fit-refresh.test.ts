@@ -144,7 +144,7 @@ it("keeps the last report through a GPU push, then shows the refreshed refusal",
   expect(store.getState().fits[key]).toMatchObject({ verdict: "refuse" });
 });
 
-it("a refresh failure replaces the held report with the error", async () => {
+it("a refresh failure marks the held report stale with a visible error", async () => {
   session.ensureFit(model, ctx);
   const key = store.fitKey(model, ctx);
   await until(() => store.getState().fits[key] !== undefined);
@@ -154,7 +154,9 @@ it("a refresh failure replaces the held report with the error", async () => {
   const held = await next;
   expect(store.getState().fits[key]).toEqual(report);
   held.fail("internal", "test GPU unavailable");
-  await until(() => store.getState().fits[key] === "error");
+  await until(() => store.getState().fitStatus[key] === "error");
+  expect(store.getState().fitHistory[key]).toEqual(report);
+  expect(session.fitIsCurrent(store.getState().fits[key])).toBe(false);
 });
 
 it("a late answer from before a GPU change is discarded and checked again", async () => {

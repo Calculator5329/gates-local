@@ -70,7 +70,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("Settings rechecks both contexts on separate invalidation and keeps the verdict footprint while Checking", async () => {
+it("Settings rechecks both contexts on separate invalidation and keeps the verdict footprint while rechecking", async () => {
   const before = render();
   expect(button(before, 32768)).toContain('data-tip="Runs on the GPU at 32k.');
   expect(button(before, 65536)).toContain('data-tip="Runs on the GPU at 64k.');
@@ -88,16 +88,15 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(button(pending, 32768)).toContain('data-tip="Checking…');
   expect(button(pending, 65536)).toContain('data-tip="Checking…');
   expect(pending).toContain('aria-busy="true"');
-  expect(pending).toContain('aria-hidden="true" style="visibility:hidden"><div class="fp-v">');
-  expect(pending).toContain('inert="" aria-hidden="true" style="visibility:hidden"><div class="fp-v">');
-  expect(pending).toContain('style="position:absolute;inset:0"');
+  expect(pending).toContain('class="fp-v" aria-busy="true"');
+  expect(pending).toContain("Rechecking");
+  expect(pending).not.toContain("Runs well");
   const pendingDetails = details(pending);
-  expect(pendingDetails).toContain("<summary>Details</summary>");
-  // Static markup retains hidden and closed content: check the actual stale-content wrapper.
-  expect(pendingDetails).toContain('aria-busy="true" style="position:relative"');
-  expect(pendingDetails).toContain('aria-hidden="true" style="visibility:hidden"><div class="fp-n">');
-  expect(pendingDetails).toContain('inert="" aria-hidden="true" style="visibility:hidden"><div class="fp-n">');
-  expect(pendingDetails).toContain('style="position:absolute;inset:0">Checking GPU memory…');
+  expect(pendingDetails).toContain("Details · previous check");
+  // Historical numbers stay visible, explicitly labeled as history rather than current advice.
+  expect(pendingDetails).toContain("Estimated ");
+  expect(pendingDetails).toContain("Previously fit on the GPU.");
+  expect(pendingDetails).not.toContain("Runs entirely on the GPU.");
   await tick();
   expect(b.server.calls("fit.check").slice(count)).toHaveLength(contexts.length);
   const held = await Promise.all(replies);
@@ -109,7 +108,7 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(refreshed).toContain("Needs ");
   expect(refreshed).not.toContain("Checking…");
   expect(refreshed).not.toContain("ctx-def");
-  expect(details(refreshed)).toContain("<summary>Details</summary>");
+  expect(details(refreshed)).toContain("Details</summary>");
   expect(details(refreshed)).not.toContain('inert=""');
   expect(details(refreshed)).not.toContain('visibility:hidden');
 });
@@ -139,11 +138,11 @@ it("a model load refresh keeps checked verdicts readable until its replacement a
 
 it("changed model files still invalidate checked advice", async () => {
   b.server.push("models.changed", store.getState().models!.map(m => ({ ...m, digest: "replacement-file" })));
-  expect(render()).toContain("Checking GPU memory");
+  expect(render()).toContain("Rechecking");
 });
 
 it("a load cannot restore advice withdrawn by a GPU change", () => {
   b.server.push("gpu.changed", methodSamples["gpu.status"].result);
   b.server.push("models.load", { model, state: "ready", numCtx: 32768 });
-  expect(render()).toContain("Checking GPU memory");
+  expect(render()).toContain("Rechecking");
 });

@@ -1,5 +1,6 @@
 // The Instructions screen uses the existing Settings shell. Its saves reach a real
 // server and the fake Ollama; no production runtime or GPU is involved.
+import { randomUUID } from "node:crypto";
 import type { Locator, Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
@@ -108,11 +109,12 @@ test("Instructions keeps control sizes across default, custom, saving and saved 
 });
 
 test("an oversized prompt gets a plain error and no chat request", async ({ page, open }) => {
-  const before = (await bodies()).length;
+  const message = `oversized-prompt-${randomUUID()}`;
   await open(); await waitReady(page); await instructions(page); await prompt(page, "x".repeat(70000));
-  await page.keyboard.press("Escape"); await waitReady(page); await sendMessage(page, "hello");
+  await page.keyboard.press("Escape"); await waitReady(page); await sendMessage(page, message);
   await expect(page.locator(".err-line")).toContainText("system prompt is too long");
-  expect(await bodies()).toHaveLength(before);
+  // Older requests can leave the fake's bounded history while this test runs.
+  expect((await bodies()).filter(body => body.messages.some(m => m.role === "user" && m.content === message))).toEqual([]);
 });
 
 test.describe("Instructions on a phone", () => {

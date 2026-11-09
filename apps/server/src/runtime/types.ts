@@ -22,6 +22,8 @@ export type RuntimeStatus = {
   busyPorts?: readonly string[];
   /** The app has no build of Ollama to install here and no copy to run (contracts RuntimeStatus.noAppCopy). */
   noAppCopy?: boolean;
+  /** The folder the app's own running Ollama was started with (contracts RuntimeStatus.modelsDir). */
+  modelsDir?: string;
 };
 
 export type ModelInfo = {

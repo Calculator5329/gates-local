@@ -20,17 +20,12 @@ const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "n
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const changes = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 
-function versionText(v: UpdateVersion): { value: string; desc: string } {
-  switch (v.kind) {
-    case "release":
-      return { value: v.tag, desc: `Commit ${v.commit}${v.date === undefined ? "" : `, ${day(v.date)}`}.` };
-    case "commit":
-      return { value: v.commit, desc: v.date === undefined ? "A commit between releases." : `A commit from ${day(v.date)}, between releases.` };
-    case "not-a-clone":
-      return { value: "Not a git clone", desc: "This copy was not downloaded with git clone, so it cannot check for updates or update itself." };
-    case "unreadable":
-      return { value: "Unknown", desc: `Could not read the version: ${v.detail}.` };
-  }
+/** The Version row: what this copy is in plain words, the commit one hover away. */
+function versionText(v: UpdateVersion): { value?: string; desc: string; tip?: string } {
+  if (v.kind === "not-a-clone") return { value: "Standalone copy", desc: "This copy can't check for updates or update itself." };
+  if (v.kind === "unreadable") return { value: "Unknown", desc: `Could not read the version: ${v.detail}.` };
+  const name = v.kind === "release" ? v.tag : "Development build";
+  return { desc: v.date === undefined ? name : `${name} · ${day(v.date)}`, tip: v.commit };
 }
 
 const channelText = (c: "main" | "release") => (c === "release" ? "Following releases." : "Following every change on the main branch.");
@@ -128,35 +123,47 @@ export function UpdatesView(p: UpdatesViewProps) {
       </Grp>
     );
   }
-  const version = p.status === undefined ? { value: "…", desc: "Reading the version." } : versionText(p.status.version);
+  const version: ReturnType<typeof versionText> = p.status === undefined ? { value: "…", desc: "Reading the version." } : versionText(p.status.version);
   const clone = p.status !== undefined && (p.status.version.kind === "release" || p.status.version.kind === "commit");
   const check = p.status?.lastCheck ?? null;
   const settings = p.settings === NA ? undefined : p.settings;
   const every = settings?.updateEveryChange === true;
   return (
     <Grp title="Updates">
-      <Row label="Version" desc={version.desc}>
-        <span className="mono">{version.value}</span>
+      <Row
+        label="Version"
+        desc={
+          <>
+            <span tabIndex={version.tip === undefined ? undefined : 0} data-tip={version.tip}>
+              {version.desc}
+            </span>
+            {clone ? <span className="d">Checks only when you click. Nothing changes until you update.</span> : null}
+          </>
+        }
+        err={p.checkErr ?? null}
+      >
+        {clone ? (
+          <button type="button" className="btn outline" disabled={p.checking} onClick={p.onCheck}>
+            {p.checking ? (
+              <>
+                <Icon id="spin" cls="spin" /> Checking…
+              </>
+            ) : (
+              "Check for updates"
+            )}
+          </button>
+        ) : (
+          <span>{version.value}</span>
+        )}
       </Row>
       {clone ? (
         <>
-          <Row label="Check for updates" desc="Only when you click. It asks the git remote this copy was cloned from; nothing is downloaded until you update." err={p.checkErr ?? null}>
-            <button type="button" className="btn outline" disabled={p.checking} onClick={p.onCheck}>
-              {p.checking ? (
-                <>
-                  <Icon id="spin" cls="spin" /> Checking…
-                </>
-              ) : (
-                "Check for updates"
-              )}
-            </button>
-          </Row>
           {check !== null && !p.checking ? (
             <CheckResult check={check} canUpdate={p.canUpdate} onUpdate={p.onUpdate} updateErr={p.updateErr ?? null} updating={p.updating === true} />
           ) : null}
           {settings === undefined || p.settingsLocked ? null : (
-            <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
-              <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
+            <Row label="Get early updates" desc="Off: finished releases, once any are published. Until then you get the newest changes. On: always the newest changes, which may be less tested." err={p.switchErr ?? null}>
+              <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get early updates" onClick={() => p.onEveryChange(!every)} />
             </Row>
           )}
         </>

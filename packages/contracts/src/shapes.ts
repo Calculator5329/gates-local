@@ -140,6 +140,8 @@ export const RuntimeStatus = S.Struct({
   busyPorts: S.optional(S.Array(S.String)),
   /** True where the app has no build of Ollama to install and no copy to run (Windows ARM today), so no client offers one. */
   noAppCopy: S.optional(S.Boolean),
+  /** The folder the app's own running Ollama was started with. Absent whenever that isn't known for certain, as for an Ollama the app did not start. */
+  modelsDir: S.optional(S.String),
 });
 export type RuntimeStatus = typeof RuntimeStatus.Type;
 

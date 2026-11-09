@@ -1,38 +1,23 @@
 // The rules behind Settings › Models, kept pure so tests can pin them: the
-// fit words (three label sets, one switch), the installed order, the next
-// default after a removal and the name truncation.
+// fit words, the installed order, the next default after a removal and the
+// name truncation.
 import type { CatalogEntry, FitReport, FitVerdict } from "@gates-local/contracts";
+import { friendlyName } from "./format.ts";
 
 // ---------------------------------------------------------------- fit words
 
 /**
- * The three label sets the design council weighed (models-a4 fit variants).
- * (b) is built: "Runs well" stays quiet, the two exceptions carry colour and
- * a symbol. (a) and (c) are one change of FIT_SET away.
+ * The one sentence for a fit, on Models and on GPU memory. "Should" until the
+ * model has really run at that size (`measured`). With no supported GPU,
+ * whatever loads runs in system memory.
  */
-export const FIT_LABELS = {
-  a: { fits: "Runs on your GPU", spills: "Slower, uses system memory", refuse: "Too big for this computer" },
-  b: { fits: "Runs well", spills: "Runs slower", refuse: "Won't run here" },
-  c: { fits: "Runs on your GPU", spills: "Slower, uses system memory", refuse: "Too big for this computer" },
-} as const satisfies Record<string, Record<FitVerdict, string>>;
-
-export type FitSet = keyof typeof FIT_LABELS;
-export const FIT_SET: FitSet = "b";
-
-/** The word for a verdict in the chosen set. With no supported GPU, whatever loads runs in system memory. */
-export function fitLabel(verdict: FitVerdict, set: FitSet = FIT_SET, cpu = false): string {
-  if (cpu && verdict !== "refuse") return "Runs in system memory";
-  return FIT_LABELS[set][verdict];
+export function fitLabel(verdict: FitVerdict, measured = false, cpu = false): string {
+  if (verdict === "refuse") return "Won't run here";
+  return `${measured ? "Runs" : "Should run"} ${cpu ? "in system memory" : verdict === "fits" ? "well" : "slower"}`;
 }
 
-export type FitSymbol = "slow" | "big" | "ok";
-
-/** The glyph before the word: only the exceptions carry one, except in (c), where the normal case gets a muted dot. */
-export function fitSymbol(verdict: FitVerdict, set: FitSet = FIT_SET): FitSymbol | null {
-  if (verdict === "spills") return "slow";
-  if (verdict === "refuse") return "big";
-  return set === "c" ? "ok" : null;
-}
+/** The dot beside that sentence. A model too big for this machine is a limit, not a failure, so it is gray. */
+export const FIT_DOT: Record<FitVerdict, string> = { fits: "ok", spills: "warn", refuse: "off" };
 
 /** The app's GB is GiB (format.ts gb), so these numbers match every other surface. */
 const GB = 1024 ** 3;
@@ -60,17 +45,46 @@ export function fitReason(r: FitReport, cpu = false): string {
 /** The purpose the server gives an installed model it does not curate (recommended.ts OWN_MODEL_PURPOSE). */
 export const OWN_MODEL_PURPOSE = "Installed by you";
 
-/** A model's name on the page: curated models by label and purpose; any other by its tag, in mono. */
+/** A model's name on the page: curated models by label and purpose; any other by a cleaned name, with its Ollama id and no tagline. */
 export interface ModelName {
   readonly text: string;
   readonly purpose: string;
-  readonly mono: boolean;
+  readonly id?: string;
 }
 
 export function nameOf(tag: string, catalog: readonly CatalogEntry[] | undefined): ModelName {
   const c = catalog?.find((e) => e.name === tag);
-  if (c !== undefined && c.purpose !== OWN_MODEL_PURPOSE) return { text: c.label, purpose: c.purpose, mono: false };
-  return { text: shortTag(tag), purpose: "", mono: true };
+  if (c !== undefined && c.purpose !== OWN_MODEL_PURPOSE) return { text: c.label, purpose: c.purpose };
+  const short = shortTag(tag);
+  return { text: friendlyName(short.slice(short.lastIndexOf("/") + 1)), purpose: "", id: tag };
+}
+
+/**
+ * What tells apart options that would otherwise read alike, by model name:
+ * each id less the parts all of them share, so "local/model:9b-q4_K_M" and
+ * "local/model:9b-q8_0" come back as "q4_K_M" and "q8_0". Names already
+ * unique on the page get no entry.
+ */
+export function optionVariants(options: readonly { readonly name: string; readonly label: { readonly text: string } }[]): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const text of new Set(options.map((o) => o.label.text))) {
+    const names = options.filter((o) => o.label.text === text).map((o) => o.name);
+    if (names.length < 2) continue;
+    const shown = withoutSharedParts(names);
+    names.forEach((n, i) => out.set(n, new Set(shown).size === names.length ? (shown[i] ?? n) : n));
+  }
+  return out;
+}
+
+function withoutSharedParts(names: readonly string[]): string[] {
+  const parts = names.map((n) => n.split(/(?<=[/:-])/));
+  const room = Math.min(...parts.map((p) => p.length)) - 1;
+  const shared = (at: (p: readonly string[]) => string | undefined) => new Set(parts.map(at)).size === 1;
+  let head = 0;
+  while (head < room && shared((p) => p[head])) head++;
+  let tail = 0;
+  while (head + tail < room && shared((p) => p[p.length - 1 - tail])) tail++;
+  return parts.map((p) => p.slice(head, p.length - tail).join("").replace(/[/:-]$/, ""));
 }
 
 // ---------------------------------------------------------------- names that do not fit
