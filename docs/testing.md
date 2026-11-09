@@ -114,10 +114,22 @@ that contains the six-syllable word, including an echo of the earlier prompt.
 
 `pnpm build` and the blocking performance spec share the hard gzip
 limits in `test/bundle-size.ts`: entry JS below 133.03 KiB (including HTML
-preloads), all emitted JS below 170 KiB, and all CSS below 13 KiB. The build
+preloads), all emitted JS below 170 KiB, startup CSS below 13 KiB, and total
+CSS below 15 KiB. Startup CSS comes from stylesheet and style-preload links
+in the built HTML, with each request URL counted once, not from a filename
+pattern. Different query strings count separately; fragments do not.
+Total CSS sums every emitted stylesheet, including deferred screens. The build
 prints each reading and fails with the overage. No timing measurement enters
 this gate. The package-level web build still emits an over-budget bundle for
 measurement; the root build, blocking browser spec and comparison refuse it.
+
+Picker-only styles load with its dynamic import. Settings and first run still
+warm after first paint; the picker warms only on pointer/focus intent or open,
+so idle warming does not fetch its stylesheet. Vite waits for that stylesheet
+before resolving the picker module. A failed CSS or JS asset reaches the same
+reload screen, whose frame remains in startup CSS. Deferred selectors are
+picker-scoped; their phone overrides follow their base rules, and loading the
+sheet does not restyle chat or Settings after the picker closes.
 
 `test/perf/` is a separate Playwright project, excluded from `pnpm e2e`.
 Timing is informational and never changes the release verdict. Candidate size

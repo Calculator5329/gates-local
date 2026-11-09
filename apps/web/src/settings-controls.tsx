@@ -1,5 +1,6 @@
 // Deferred Settings controls live apart from the primitives the startup update notice shares.
 import { type ReactNode, useState } from "react";
+import { copyText } from "./copy.ts";
 import { homeTilde } from "./settings-rules.ts";
 import { splitTail } from "./models-rules.ts";
 import { esc } from "./ui.tsx";
@@ -21,25 +22,6 @@ export function PathText({ path, shown = homeTilde(path) }: { path: string; show
       {tail ? <span className="mp-t">{tail}</span> : null}
     </span>
   );
-}
-
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // a browser without clipboard access: the old way
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.append(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  }
 }
 
 /** A Copy button that says what happened until focus leaves it. */

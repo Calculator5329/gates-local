@@ -16,7 +16,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT, appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
-import { BUNDLE_BUDGET, bundleSize, jsWithinBudget } from "../bundle-size.ts";
+import { assertBundleBudget, bundleSize } from "../bundle-size.ts";
 
 const BUDGET = {
   firstPaintMs: 120, // measured 76 and 84 ms
@@ -38,7 +38,6 @@ const BUDGET = {
   // index-*.js plus HTML preloads; cap all JS at 170 KB. Entry measured 132.43 KB, plus 2 KB.
   // 2026-11-08 review fixes: eager setup shell, deferred navigation and two chunk
   // groups. Entry 131.0234 KB; add 2 KB and round the limit up to two decimals.
-  ...BUNDLE_BUDGET,
 };
 
 /** Tries per timing gate: the gate passes when one try is inside the budget. */
@@ -722,9 +721,7 @@ test("bundle size", () => {
   const size = bundleSize(path.join(ROOT, "apps/web/dist"));
   report("entry JS gzip", size.entryJs, "KiB");
   report("total JS gzip", size.totalJs, "KiB");
-  report("CSS gzip", size.css, "KiB");
-  expect(size.entryJs, "index JS and HTML preloads").toBeLessThan(BUDGET.entryJsGzipKb);
-  expect(size.totalJs, "all emitted JS").toBeLessThan(BUDGET.totalJsGzipKb);
-  expect(jsWithinBudget(size, BUDGET)).toBe(true);
-  expect(size.css).toBeLessThan(BUDGET.cssGzipKb);
+  report("startup CSS gzip", size.startupCss, "KiB");
+  report("total CSS gzip", size.totalCss, "KiB");
+  expect(() => assertBundleBudget(size)).not.toThrow();
 });

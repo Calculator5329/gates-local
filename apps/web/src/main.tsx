@@ -5,6 +5,10 @@ import { connect, initialView, threadFromHash } from "./session.ts";
 import { setState } from "./store.ts";
 import { syncTitleBar } from "./titlebar.ts";
 import "./styles.css";
+// Draft restoration is required before connecting. These tiny shared helpers
+// use startup's gzip dictionary instead of two separate chunk wrappers.
+import "./draft-persistence.ts";
+import "./copy.ts";
 
 syncTitleBar();
 

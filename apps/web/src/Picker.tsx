@@ -1,5 +1,6 @@
 // Structure follows T3 Code ModelPickerContent/Sidebar at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
 // The approved local-model adaptation keeps a fixed rail/list/context layout. LICENSES/T3-Code-MIT.txt.
+import "./picker.css";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, ModelInfo } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, gb, k, noGpu, verdictOf } from "./format.ts";

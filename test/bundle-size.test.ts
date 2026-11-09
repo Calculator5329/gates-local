@@ -28,7 +28,8 @@ it("counts entry plus HTML-preloaded JS once, while keeping lazy pages out of st
   expect(bundleSize(dist)).toEqual({
     entryJs: kb("chat") + kb("react") + kb("first run"),
     totalJs: kb("chat") + kb("react") + kb("first run") + kb("settings"),
-    css: kb("styles"),
+    startupCss: 0,
+    totalCss: kb("styles"),
   });
 });
 
@@ -67,10 +68,34 @@ it.runIf(process.env["GATES_LOCAL_BUNDLE_DIST"] !== undefined)("uses the product
 });
 
 it("accepts a fitting bundle and refuses each independent size limit, including nonfinite readings", () => {
-  const size = { entryJs: 132, totalJs: 169, css: 12.8 };
+  const size = { entryJs: 132, totalJs: 169, startupCss: 12.8, totalCss: 14.4 };
   expect(() => assertBundleBudget(size)).not.toThrow();
-  for (const [key, limit] of [["entryJs", BUNDLE_BUDGET.entryJsGzipKb], ["totalJs", BUNDLE_BUDGET.totalJsGzipKb], ["css", BUNDLE_BUDGET.cssGzipKb]] as const) {
+  for (const [key, limit] of [["entryJs", BUNDLE_BUDGET.entryJsGzipKb], ["totalJs", BUNDLE_BUDGET.totalJsGzipKb], ["startupCss", BUNDLE_BUDGET.startupCssGzipKb], ["totalCss", BUNDLE_BUDGET.totalCssGzipKb]] as const) {
     expect(() => assertBundleBudget({ ...size, [key]: limit })).toThrow(/Remove bytes/);
     expect(() => assertBundleBudget({ ...size, [key]: Number.NaN })).toThrow(/Remove bytes/);
   }
+});
+
+it("counts linked styles and style preloads once by HTML href, regardless of their filename", () => {
+  const dist = build(`<link href='./assets/theme.css?v=1' rel='stylesheet'>
+    <link rel=stylesheet href=./assets/theme.css?v=1#same-request>
+    <link rel="preload" as="style" href="./assets/controls.css">`, {
+    "index-a.js": "chat", "theme.css": "theme", "controls.css": "controls", "index-looking.css": "deferred",
+  });
+  expect(bundleSize(dist)).toMatchObject({
+    startupCss: kb("theme") + kb("controls"),
+    totalCss: kb("theme") + kb("controls") + kb("deferred"),
+  });
+});
+
+it("counts distinct stylesheet query URLs as separate startup downloads", () => {
+  const dist = build('<link rel="stylesheet" href="./assets/theme.css?v=1"><link rel="stylesheet" href="./assets/theme.css?v=2">', {
+    "index-a.js": "chat", "theme.css": "theme",
+  });
+  expect(bundleSize(dist)).toMatchObject({ startupCss: 2 * kb("theme"), totalCss: kb("theme") });
+});
+
+it("fails on a missing linked stylesheet instead of counting an unstyled startup as smaller", () => {
+  const dist = build('<link rel="stylesheet" href="./assets/missing.css">', { "index-a.js": "chat" });
+  expect(() => bundleSize(dist)).toThrow(/missing\.css/);
 });

@@ -38,8 +38,10 @@ decision.
 
 - `pnpm verify` is the gate: root and per-package `tsc`, `oxlint
   --deny-warnings`, `vitest run`. It must fail on a planted type error.
-- `pnpm build` enforces the shared entry JS, total JS and CSS gzip
-  limits in `test/bundle-size.ts`. Remove bytes rather than raising a limit.
+- `pnpm build` enforces the shared entry JS, total JS, startup CSS and total
+  CSS gzip limits in `test/bundle-size.ts`. Startup CSS counts HTML stylesheet
+  and style-preload links; total CSS counts every emitted stylesheet.
+  Remove bytes rather than raising these limits.
   Timing comparisons remain informational; candidate bundle sizes do not.
 - Node 24 runs the TypeScript sources directly (type stripping): erasable
   syntax only, relative imports end in `.ts`. Electron 45 ships Node

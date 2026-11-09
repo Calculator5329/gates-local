@@ -15,13 +15,11 @@ export default defineConfig({
         // The first group captures only static dependencies of the entry.
         codeSplitting: { groups: [
           { name: "shell", tags: ["$initial"] },
-          // Restoring drafts precedes the WebSocket connection. It must load
-          // even while an optional screen's download is delayed.
-          { name: "draft-storage", test: /apps[\\/]web[\\/]src[\\/]draft-persistence\.ts$/ },
           // Settings warming must not pull the conversation renderer back into
-          // startup. Its shared clipboard helper gets its own small dictionary.
+          // startup. Its clipboard helper is shared through the startup group.
           { name: "conversation", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:Thread\.tsx|markdown\.tsx|paced\.ts|reveal\.ts|image-links\.ts)$/ },
-          { name: "clipboard", test: /apps[\\/]web[\\/]src[\\/]copy\.ts$/ },
+          // Picker CSS stays with the picker, outside idle-warmed screens.
+          { name: "picker", includeDependenciesRecursively: false, test: /apps[\\/]web[\\/]src[\\/](?:Picker\.tsx|picker\.css)$/ },
           { name: "screens", test: /apps[\\/]web[\\/]src[\\/]/ },
         ] },
       },

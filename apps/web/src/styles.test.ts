@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const css = ["styles.css", "picker.css"].map(file => readFileSync(new URL(file, import.meta.url), "utf8")).join("\n");
 
 /** Every value a declaration gives `prop`, across the sheet. */
 const values = (prop: string, sheet = css) => [...sheet.matchAll(new RegExp(`(?:^|[;{\\s])${prop}:([^;}]+)`, "g"))].map((m) => (m[1] ?? "").trim());
@@ -17,7 +17,7 @@ describe("styles.css", () => {
     expect(/(?:^|[},])\s*\.voice span(?:,|\{)(?:[^{}]*\{)?font-size:14px[;}]/m.test(phone)).toBe(true);
   });
   it("PK-05: declares reachable 44 px phone controls without hover-only favorite actions", () => {
-    const phone = css.slice(css.indexOf("@media(max-width:640px){\n.model-picker"), css.indexOf("/* Instructions (layout A)"));
+    const phone = css.slice(css.indexOf("@media(max-width:640px){\n.pk-layout"));
     const rule = (selector: string) => [...phone.matchAll(/([^{}]+)\{([^{}]+)\}/g)].find(m => m[1]?.trim().split(",").includes(selector))?.[2] ?? "";
     for (const selector of [".model-picker .pk-fam", ".pk-favorite", ".pk-back"]) {
       expect(rule(selector), selector).toMatch(/(?:^|;)width:44px(?:;|$)/);

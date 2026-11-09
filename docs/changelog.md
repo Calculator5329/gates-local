@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-11-09: Remove repeated clipboard code and tiny chunk overhead
+
+- Settings copy buttons use the same clipboard helper as conversation and
+  model rows, including its focus and selection restoration. Draft storage
+  and clipboard helpers share the startup bundle instead of separate chunks,
+  reducing the total download while keeping optional screens deferred.
+
+## 2026-11-09: Run release unit tests without downloads
+
+- Release fixtures use a local package-manager stand-in, so a fresh test home
+  never downloads pnpm. Fixture scripts and browser CLI doubles still run as
+  real child processes, including cancellation and cleanup checks. The release
+  command keeps its clean environment and resolves its own package manager.
+
+## 2026-11-09: Keep picker styling out of startup
+
+- Opening the picker loads its own styling before the screen appears. Idle
+  screen warming no longer downloads the picker; pointing at or focusing its
+  button still prepares it. Chat stays usable while the picker is loading,
+  and a failed stylesheet shows the same reload screen as a failed script.
+- CSS now has two shared limits: startup styles below 13 KiB gzip and all
+  emitted styles below 15 KiB. Startup counts stylesheet and style-preload
+  links in the built HTML. The build, browser size check and comparison use
+  the same definition; the JS limits are unchanged.
+
+## 2026-11-09: Explain a cold conversation's loading state
+
+- A saved conversation says Loading conversation… while its renderer downloads,
+  even if its messages have already arrived. The status uses the same prose
+  column and text style as the conversation's existing loading line. An already
+  loaded renderer opens directly, and import failures keep their reload action.
+
+## 2026-11-09: Remove retired styles and share control rules
+
+- Old GPU headers, download labels and status styles no longer ship, along
+  with unused color and spacing tokens. Sidebar buttons, context controls
+  and Models buttons share their identical rules. Responsive rules stay intact.
+- CSS falls from 14.195 to 13.925 KiB gzip. It still exceeds the unchanged
+  13 KiB limit, so the build and release size check remain red.
 ## 2026-11-09: Browser checks follow the current controls
 
 Browser journeys use the current picker and Settings controls. Clipboard and

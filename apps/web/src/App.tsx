@@ -459,12 +459,12 @@ export function App() {
   const threadId = useStore((s) => s.threadId);
   const noServer = useStore((s) => s.conn.kind === "no-server");
   const drawer = useStore((s) => s.drawer);
-  const popOpen = useStore((s) => s.pop !== null);
   const setList = useStore((s) => s.setList);
   const popId = useStore((s) => s.pop?.id ?? null);
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
   const picker = useScreen(pickerScreen, popId === "picker");
+  const popOpen = popId !== null && (popId !== "picker" || picker.kind !== "pending");
   const thread = useScreen(threadScreen, view === "thread");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
@@ -473,7 +473,7 @@ export function App() {
     if (popId === null || !isPhone()) return;
     const sheet = document.getElementById(POP_EL[popId]);
     if (sheet !== null) return keepSheetFocus(sheet);
-  }, [popId]);
+  }, [popId, popOpen]);
   useEffect(() => {
     document.addEventListener("keydown", onKey);
     document.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -525,7 +525,11 @@ export function App() {
                   <Draft />
                 ) : (
                   <>
-                    {thread.kind === "ready" ? <thread.value.Timeline threadId={threadId} /> : <div className="tl">{thread.kind === "error" ? <ScreenError /> : null}</div>}
+                    {thread.kind === "ready" ? <thread.value.Timeline threadId={threadId} /> : (
+                      <div className="tl" aria-busy={thread.kind === "pending" || undefined}>
+                        {thread.kind === "error" ? <ScreenError /> : <div className="col"><p className="na" role="status" data-thread-loading>Loading conversation…</p></div>}
+                      </div>
+                    )}
                     <div className="cw">
                       <div className="banner-slot">
                         <UpdateNote />
@@ -547,7 +551,7 @@ export function App() {
       </div>
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
       {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
-      {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
+      {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       <PlusMenu />
       <OptsMenu />
       <ThreadMenu />

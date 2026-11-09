@@ -7,12 +7,22 @@ import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseR
 import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
 
 const scratch: string[] = [];
-afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+const originalPath = process.env["PATH"];
+afterEach(() => {
+  if (originalPath === undefined) delete process.env["PATH"]; else process.env["PATH"] = originalPath;
+  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 function fixture() {
   const dir = mkdtempSync(path.join(homedir(), ".cache", "release-test-"));
   scratch.push(dir);
   const remote = path.join(dir, "remote.git");
   const cwd = path.join(dir, "source");
+  // Outside the checkout, so the real clean environment still resolves it
+  // through PATH. Every fixture uses this local package-manager protocol.
+  const toolchain = path.join(dir, "toolchain");
+  mkdirSync(toolchain);
+  writeFileSync(path.join(toolchain, "pnpm"), readFileSync(new URL("./fixtures/release-pnpm.cjs", import.meta.url)), { mode: 0o755 });
+  process.env["PATH"] = toolchain + path.delimiter + (process.env["PATH"] ?? "");
   const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], { stdio: "ignore" });
   execFileSync("git", ["init", "--initial-branch=main", cwd], { stdio: "ignore" });

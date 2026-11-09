@@ -10,11 +10,13 @@ vi.mock("../src/screen-loaders.ts", () => loads);
 vi.mock("../src/fit-actions.ts", () => ({ closeGpuPanel: vi.fn() }));
 const { preloadScreens } = await import("../src/screens.tsx");
 
-it("warms the picker after first paint, before its first open", () => {
+it("warms Settings and first run without downloading the picker at startup", () => {
   const cancel = preloadScreens();
   expect(loads.pickerScreen.load).not.toHaveBeenCalled();
   expect(idle.work).toBeDefined();
   idle.work?.();
-  expect(loads.pickerScreen.load).toHaveBeenCalledTimes(1);
+  expect(loads.settingsScreen.load).toHaveBeenCalledTimes(1);
+  expect(loads.firstRunScreen.load).toHaveBeenCalledTimes(1);
+  expect(loads.pickerScreen.load).not.toHaveBeenCalled();
   cancel();
 });

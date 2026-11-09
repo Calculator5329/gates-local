@@ -39,18 +39,137 @@ async function expectFirstCover(page: Page) {
   expect(await page.evaluate(() => (window as unknown as { firstCover?: unknown }).firstCover)).toEqual({ cover: true, inert: true });
 }
 
-async function holdChunks(page: Page) {
+async function holdChunks(page: Page, pattern = CHUNKS) {
   let release!: () => void;
   let requested!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   const started = new Promise<void>((resolve) => { requested = resolve; });
-  await page.route(CHUNKS, async (route) => {
+  await page.route(pattern, async (route) => {
     requested();
     await held;
     await route.continue();
   });
   return { release, started };
 }
+
+test.describe("deferred conversation", () => {
+  test.use({ seed: 2 });
+  test("PL-01: a delayed conversation chunk shows loading after its messages arrive", async ({ page, open, seededThread }) => {
+    let readId: unknown;
+    let received!: () => void;
+    const messages = new Promise<void>((resolve) => { received = resolve; });
+    page.on("websocket", (socket) => {
+      socket.on("framesent", ({ payload }) => {
+        const request = JSON.parse(String(payload)) as { method?: unknown; id?: unknown };
+        if (request.method === "threads.get") readId = request.id;
+      });
+      socket.on("framereceived", ({ payload }) => {
+        const response = JSON.parse(String(payload)) as { type?: unknown; id?: unknown; result?: { messages?: unknown } };
+        if (response.type === "response" && response.id === readId && Array.isArray(response.result?.messages)) received();
+      });
+    });
+    const chunk = await holdChunks(page, /\/assets\/conversation-[^/]+\.js(?:\?.*)?$/);
+    try {
+      await open(`#thread=${seededThread ?? ""}`);
+      await waitReady(page);
+      await chunk.started;
+      await messages;
+      await capture(page, "conversation-held");
+      const status = page.locator(".tl > .col > [data-thread-loading]");
+      await expect(status).toBeVisible();
+      await expect(status).toHaveAttribute("role", "status");
+      await expect(status).toHaveText("Loading conversation…");
+      await expect(page.locator(".tl")).toHaveAttribute("aria-busy", "true");
+      const timeline = await page.locator(".tl").boundingBox();
+      const composer = await page.locator(".composer").boundingBox();
+      const column = await page.locator(".tl > .col").boundingBox();
+      chunk.release();
+      await expect(page.locator(".tl .turn")).toHaveCount(2);
+      await expect(status).toHaveCount(0);
+      expect(await page.locator(".tl").boundingBox()).toEqual(timeline);
+      expect(await page.locator(".composer").boundingBox()).toEqual(composer);
+      const loadedColumn = await page.locator(".tl > .col").boundingBox();
+      expect(loadedColumn).toMatchObject({ x: column?.x, y: column?.y, width: column?.width });
+      await capture(page, "conversation-ready");
+    } finally {
+      chunk.release();
+    }
+  });
+});
+
+for (const width of [1440, 390]) {
+  test.describe(`deferred picker CSS at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } });
+    test("waits for CSS before painting and leaves chat unchanged after closing", async ({ page, open }) => {
+      const stylesheet = /\/assets\/picker-[^/]+\.css(?:\?.*)?$/;
+      let requested = false;
+      page.on("request", request => { if (stylesheet.test(request.url())) requested = true; });
+      const css = await holdChunks(page, stylesheet);
+      try {
+        const warmed = page.waitForResponse(CHUNKS);
+        await open();
+        await waitReady(page);
+        await (await warmed).finished();
+        const settingsStyle = () => page.locator(".set").evaluate(root => [root, root.querySelector(".srow"), root.querySelector(".seg2 button")].map(node => {
+          if (node === null) throw new Error("General Settings must be complete");
+          const style = getComputedStyle(node);
+          return [style.display, style.fontSize, style.color, style.padding, style.borderRadius];
+        }));
+        await page.keyboard.press("Control+Comma");
+        await expect(page.locator(".set .seg2").first()).toBeVisible();
+        const settingsBefore = await settingsStyle();
+        await page.keyboard.press("Escape");
+        await waitReady(page);
+        const before = await stableChat(page);
+        expect(requested, "idle screen warming must not fetch picker CSS").toBe(false);
+        await page.locator("#modelBtn").click();
+        await css.started;
+        await expect(page.locator("#picker")).toHaveCount(0);
+        await expect(page.locator("#app")).not.toHaveAttribute("inert");
+        await expect(page.locator(".pop-scrim")).toHaveCount(0);
+        expect((await stableChat(page)).first).toEqual(before.first);
+        await capture(page, "css-held");
+        await page.keyboard.press("Escape");
+        const loaded = page.waitForResponse(stylesheet);
+        css.release();
+        await (await loaded).finished();
+        await expect(page.locator("#picker")).toHaveCount(0);
+        await page.locator("#modelBtn").click();
+        await expect(page.locator(".pk-layout")).toHaveCSS("display", "grid");
+        await expect(page.locator(".pk-fam").first()).toHaveCSS("width", width <= 640 ? "44px" : "36px");
+        await expect(page.locator(".pk-select").first()).toHaveCSS("height", width <= 640 ? "44px" : "34px");
+        await capture(page, "css-ready");
+        await page.keyboard.press("Escape");
+        expect((await stableChat(page)).first).toEqual(before.first);
+        await expect(page.locator('link[rel="stylesheet"][href*="picker-"]')).toHaveCount(1);
+        await page.keyboard.press("Control+Comma");
+        await expect(page.locator(".set .seg2").first()).toBeVisible();
+        expect(await settingsStyle()).toEqual(settingsBefore);
+      } finally {
+        css.release();
+      }
+    });
+  });
+}
+
+test.describe("a failed picker asset", () => {
+  test.use({ allowedErrors: [[/Failed to load resource/, /Failed to fetch dynamically imported module/, /Importing a module script failed/, /Unable to preload CSS/], { scope: "test" }] });
+  for (const asset of ["css", "js"]) {
+    test(`a failed ${asset} load offers the same styled reload screen`, async ({ page, open }) => {
+      await page.route(new RegExp(`/assets/picker-[^/]+\\.${asset}$`), route => route.fulfill({ status: 404, body: "Not found" }));
+      await open();
+      await waitReady(page);
+      await page.locator("#modelBtn").click();
+      await expect(page.locator("#picker").getByRole("alert")).toContainText("This page couldn't load. The app may have updated.");
+      await expect(page.locator("#picker").getByRole("button", { name: "Reload", exact: true })).toBeVisible();
+      await expect(page.locator("#picker")).toHaveCSS("position", "fixed");
+      await capture(page, `failed-${asset}`);
+      await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+      await expect(page.locator("#picker")).toHaveCount(0);
+      await expect(page.locator("#modelBtn")).toBeFocused();
+    });
+  }
+});
 
 /** Watch every frame while imports are held, including a single-frame blank or replacement loader. */
 async function stableChat(page: Page) {
