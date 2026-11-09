@@ -7,6 +7,27 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*Done 2026-11-09, input performance:* A 50,000-character multiline paste is one
+native undoable edit, with 69.2 ms median latency versus 19,135.0 ms in the paired
+comparison. Draft writes start on edits; recovery retains the last completed
+transaction, while unload of active or pending work is best effort. Two browser
+repetitions passed selection, Undo/Redo, subsequent typing, reload, images,
+voice and queue checks. The original reload check had a screenshot delay;
+the review follow-up removes it. Queue and first-words pacing stay unchanged.
+
+*Done 2026-11-09, persistence review:* Text edits reuse unchanged attachments;
+one transaction runs while one replaceable latest snapshot waits. Existing
+combined drafts migrate to separate metadata and attachment records atomically.
+Ten edits with 90 MiB of attachments submitted 655 string-payload bytes in the
+browser diagnostic instead of about 900 MiB. The direct-reload check now captures
+its screenshot after recovery, with the unload durability limit documented.
+
+*Done 2026-11-09, shared-scope draft review:* A text edit checks the stored
+attachment revision in its write transaction before reusing a local payload.
+Another tab's replacement or clear cannot mix its images with the last writer's
+words. Recovery probes use fresh module/store state, including the held-write
+probe. Legacy migration and the bounded metadata-only single-tab path remain.
+
 - [ ] Download rows: say Ollama is stopped instead of Rechecking when the runtime is down.
 
 - [ ] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes

@@ -102,8 +102,14 @@ test("focused priority production journeys", async ({ browser }) => {
           expect(text).toHaveLength(50_000);
           await page.evaluate(value => navigator.clipboard.writeText(value), text);
           const ta = page.locator("#ta"); await ta.focus(); const before = await ta.boundingBox();
-          await ta.evaluate(el => el.addEventListener("paste", event => { el.dataset["trustedPaste"] = String(event.isTrusted); }, { once: true }));
+          await ta.evaluate(el => {
+            let inputs = 0;
+            el.addEventListener("input", () => { inputs++; });
+            el.addEventListener("paste", event => { el.dataset["trustedPaste"] = String(event.isTrusted); }, { once: true });
+            Object.defineProperty(el, "pasteInputEvents", { get: () => inputs });
+          });
           const pasted = await timing(page, "paste-text-50000", () => ta.press("Control+v"), "paste", "#ta", text, "usable-value"); smooth("paste-text-50000", pasted);
+          add("paste-input-events", await ta.evaluate(el => Number(Reflect.get(el, "pasteInputEvents"))), "count");
           await expect(ta).toHaveValue(text); await expect(ta).toHaveAttribute("data-trusted-paste", "true"); expect((await ta.boundingBox())?.height).toBeGreaterThan(before?.height ?? 0);
           const typed = await timing(page, "type-after-paste", () => ta.press("x"), "keydown", "#ta", text + "x", "usable-value"); add("paste-input-delay", typed.inputDelays[0]!);
           await ta.fill("");

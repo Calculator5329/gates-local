@@ -1,5 +1,74 @@
 # Changelog
 
+## 2026-11-09: Tabs sharing a draft scope keep words and attachments together
+
+- Text-only writes now check `attachmentsRevision` in the small metadata row
+  inside their read/write transaction. If another tab replaced or cleared the
+  payload, the last writer saves its own complete attachment snapshot again.
+  The check never reads the separate image payload row.
+- Attachment writes assign a new revision atomically with metadata. Existing
+  combined records and format-2 records without revisions still migrate on an
+  edit. The two-record shape, one active transaction and latest-pending bound
+  are unchanged. Lifecycle commits wait until a metadata read has submitted
+  its writes, preserving best-effort unload handling.
+- Independent real-store watchers reproduced replaced-image and cleared-image
+  corruption on `a22c2e1`. Both tests now round-trip through a fresh third store;
+  the held-write test also reloads fresh state. Its ten edits still submit one
+  small follow-up write (121 string-payload bytes) and one metadata-only read.
+- Local verification passed 2,210 tests. The unpinned draft-spec run
+  `climb-input-ci03-20261109T212456.542943Z` passed legacy recovery and the two-tab
+  replacement/clear journey, with both cases reloaded through a new page state.
+- Entry/total JS grew 0.145/0.146 KiB gzip for the revision check and lifecycle
+  sequencing. Existing soft-target warnings remain; no targets or assets changed.
+
+## 2026-11-09: Attachment-heavy drafts no longer clone every image on typing
+
+- Persistence allows one transaction in flight and one replaceable latest
+  snapshot. Completion writes the latest pending edit next. Unchanged draft
+  and queued attachments are reused across text edits rather than submitted
+  again. Metadata and attachment changes still commit atomically.
+- The existing `drafts` object store now holds format-2 metadata at the scope
+  key and image payloads at `[scope, "attachments"]`. Old combined records
+  remain readable and migrate on the next edit; no database upgrade is needed.
+- A held-transaction probe with ten edits and 90 MiB of attachments submits
+  one 66-byte follow-up metadata write, with one transaction in flight. The
+  previous writer submitted ten full-record follow-ups and reached eleven
+  transactions in flight including attachment setup.
+- In `climb-input-review-checked-20261109T205933.819962Z`, ten paced edits with
+  80 MiB of draft images and 10 MiB of queued images submitted 943,721,095
+  string-payload bytes before versus 655 after. Key-to-paint median was
+  160.1 ms versus 32.0 ms; long tasks fell from ten to zero. This descriptive
+  diagnostic uses the real persistence/store modules and a native textarea,
+  excluding preview rendering and decoding, in the selected functional job.
+  It is not an exclusive timing verdict. Local verification passed 2,206
+  tests; the selected draft, paste and voice browser run passed 19 checks.
+- Entry and total JS grew 0.475 and 0.472 KiB gzip for the bounded writer,
+  attachment reuse and legacy reader. Existing soft-target warnings remain;
+  no target changed and no visual assets were added.
+- The large-paste test now reloads directly after the final key and captures
+  its screenshot only after recovery. Hidden/pagehide handlers request an
+  early commit of the active transaction. Recovery guarantees the last
+  completed transaction, not the last keystroke across every unload: reload
+  or process termination can still cut off active or pending work. Normal
+  watcher disposal drains its latest pending edit before closing storage.
+
+## 2026-11-09: Large text pastes stay editable without the long stall
+
+- A 50,000-character multiline paste uses the browser's native undoable edit.
+  In four paired rounds with five samples per arm, its median fell from
+  19,135.0 ms to 69.2 ms, above the unchanged 646.5 ms noise floor. Input events
+  fell from 6,250 to one. The implementation is `a9f733b`; the timing run is
+  `climb-input-round1-20261109T202228.578021Z`.
+- Draft writes began on edits instead of waiting 200 ms. The original reload
+  test awaited a screenshot first, so it established recovery after that delay,
+  not an unconditional immediate-reload guarantee. Native selection
+  replacement, Undo/Redo, typing, reload, images, voice insertion and queue
+  behavior passed two browser repetitions (40 checks).
+- Copy, send-to-first-words and queue timings remained within noise. The
+  steady reveal cadence stays. Entry JS shrank 0.137 KiB gzip and total JS
+  shrank 0.131 KiB; existing soft-target warnings remain. Local verification
+  and build passed. At that stage the additional per-edit writes had not been
+  benchmarked with large image attachments; the follow-up above covers them.
 ## 2026-11-09: Preserve failures during quit and bound their retained logs (IN-01, IN-02)
 
 Quit could discard a child failure during its delayed notification, and noisy

@@ -41,23 +41,14 @@ const readImage = (file: File): Promise<string> => new Promise((resolve, reject)
 
 /** Capture clipboard data during the event: browsers clear the DataTransfer after it returns. */
 export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
-  e.preventDefault();
-  const ta = e.currentTarget;
   const files = Array.from(e.clipboardData.files);
-  const text = e.clipboardData.getData("text/plain");
-  const start = ta.selectionStart, end = ta.selectionEnd;
-  const insert = (value: string) => {
-    if (!ta.isConnected || !value) return;
-    insertAtCursor(ta, value, { start, end });
-  };
-  if (!files.length) return insert(text);
+  // Native text paste is one undoable edit. Multiline insertText is slow and
+  // emits thousands of input events for a large paste.
+  if (!files.length) return;
+  e.preventDefault();
   setState(s => ({ pasting: s.pasting + 1 }));
   void (async () => {
-    switch (pasteKind([], files)) {
-      case "paths": return;
-      case "text": insert(text); return;
-      case "unavailable": setState({ notice: "This browser cannot provide file paths. Paste the full path as text." }); return;
-    }
+    if (pasteKind([], files) === "unavailable") { setState({ notice: "This browser cannot provide file paths. Paste the full path as text." }); return; }
     // Reserve slots before image reads, so overlapping pastes cannot overfill the composer.
     const room = MAX_IMAGES - getState().draftImages.length - reserved;
     const candidates = files.filter(f => f.type.startsWith("image/"));

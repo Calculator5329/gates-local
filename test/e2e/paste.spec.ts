@@ -13,6 +13,12 @@ if (process.env["GL_PASTE_MUTATION"] === "no-handler") test.beforeEach(async ({ 
 
 async function paste(page: Page, input: Clip) {
   await page.locator("#ta").focus();
+  if (input.text !== undefined && !input.images && !input.files && !input.paths && !input.html) {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.evaluate(text => navigator.clipboard.writeText(text), input.text);
+    await page.locator("#ta").press("Control+v");
+    return;
+  }
   await page.evaluate(({ clip, png }) => {
     if (clip.paths) {
       const ta = document.querySelector<HTMLTextAreaElement>("#ta")!;
@@ -56,6 +62,33 @@ test("paste text at the selection, grow, and undo", async ({ page, context, open
   await expect(ta).toHaveAttribute("data-trusted-paste", "true");
   await ta.press("Control+z");
   await expect(ta).toHaveValue("typed words");
+});
+
+test("large text paste preserves selection, undo, typing and the saved draft", async ({ page, context, open }, info) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await open(); await waitReady(page);
+  const ta = page.locator("#ta");
+  const text = "paste text line\n".repeat(3125);
+  await ta.fill("before after");
+  await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(7, 12));
+  await ta.evaluate(el => {
+    let inputs = 0;
+    el.addEventListener("input", () => { inputs++; });
+    Object.defineProperty(el, "largePasteInputEvents", { get: () => inputs });
+  });
+  await page.evaluate(value => navigator.clipboard.writeText(value), text);
+  await ta.press("Control+v");
+  await expect(ta).toHaveValue("before " + text);
+  expect(await ta.evaluate(el => Reflect.get(el, "largePasteInputEvents"))).toBe(1);
+  await ta.press("Control+z");
+  await expect(ta).toHaveValue("before after");
+  await ta.press("Control+Shift+z");
+  await expect(ta).toHaveValue("before " + text);
+  const draft = "before " + text + "x";
+  await ta.press("x");
+  await page.reload(); await waitReady(page);
+  await expect(ta).toHaveValue(draft);
+  await page.screenshot({ path: info.outputPath("large-paste.png") });
 });
 
 test("paste an image, remove it, and keep the toolbar still", async ({ page, open }) => {
