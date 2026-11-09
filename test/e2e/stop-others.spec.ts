@@ -3,12 +3,17 @@
 // the real planner says stopping it is the only way, and the real server does
 // the stopping: every assertion here is what the person would see.
 import { type Page } from "@playwright/test";
+import { decodeRequest, type Params } from "@gates-local/contracts";
+import type { FakeOllama } from "../fake-ollama/fake-ollama.ts";
+import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 const SHOTS = process.env["GL_SHOTS_DIR"];
+test.use({ video: "on", screenshot: "only-on-failure" });
 
 async function shot(page: Page, name: string): Promise<void> {
-  if (SHOTS !== undefined) await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  const repeat = test.info().repeatEachIndex;
+  if (SHOTS !== undefined) await page.screenshot({ path: `${SHOTS}/${name}${repeat === 0 ? "" : `-r${repeat}`}.png` });
 }
 
 async function pickModel(page: Page, search: string, tag: string): Promise<void> {
@@ -18,12 +23,21 @@ async function pickModel(page: Page, search: string, tag: string): Promise<void>
   await expect(page.locator("#picker")).toBeHidden();
 }
 
-/** A reply on the 12B model at 32k that keeps streaming until it is stopped. */
-async function firstChatAnswering(page: Page): Promise<void> {
+async function runtimeState(): Promise<ReturnType<FakeOllama["state"]>> {
+  const response = await fetch(`${FAKE_URL}/__fake/state`);
+  expect(response.ok).toBe(true);
+  return response.json() as Promise<ReturnType<FakeOllama["state"]>>;
+}
+
+/** A reply on the 12B model that keeps streaming until it is stopped. */
+async function firstChatAnswering(page: Page): Promise<string> {
   await stack.scenario("slow-drip", { holdAfterTokens: 46 });
   await pickModel(page, "gemma", "gemma4:12b");
   await sendMessage(page, "How do I check disk space before a download?");
   await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
+  const threadId = await page.locator(".sb-row.on").getAttribute("data-thread");
+  expect(threadId).not.toBeNull();
+  return threadId ?? "";
 }
 
 /** The second chat, on the model whose load must stop the first. */
@@ -38,7 +52,7 @@ const warning = (page: Page) => page.getByRole("alertdialog", { name: "Stop the 
 test("sending on a model that needs the memory warns, then stops the other chat, which keeps its words", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await firstChatAnswering(page);
+  const victim = await firstChatAnswering(page);
   await secondChatReady(page);
   await shot(page, "01-before-send");
 
@@ -56,7 +70,7 @@ test("sending on a model that needs the memory warns, then stops the other chat,
   await expect(page.locator("#ta")).toHaveValue("");
 
   // the chat that stopped: its words and one sentence
-  await page.locator(".sb-row", { hasText: "How do I check disk space" }).click();
+  await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
   await expect(page.locator(".turn.a.done .md ul li")).toHaveCount(3);
   await expect(page.locator(".turn.a .writing")).toHaveCount(0);
@@ -64,6 +78,11 @@ test("sending on a model that needs the memory warns, then stops the other chat,
 });
 
 test("'Don't show this again' survives a reload and later sends stop the other chat with no prompt", async ({ page, open }) => {
+  const sends: Params<"chat.send">[] = [];
+  page.on("websocket", (socket) => socket.on("framesent", (frame) => {
+    const request = decodeRequest(frame.payload);
+    if (request.ok && request.value.method === "chat.send") sends.push(request.value.params);
+  }));
   await open();
   await waitReady(page);
   await firstChatAnswering(page);
@@ -73,20 +92,36 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await shot(page, "04-dont-show-again");
   await warning(page).getByRole("button", { name: "Stop and send" }).click();
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
-  // the fake holds this reply too; nothing is running across the reload
+  await expect(page.locator(".turn.a .writing")).toBeVisible();
+  // Stop hides immediately, even before chat.send returns its turn id.
+  // Retry becomes enabled only after the server acknowledges that turn's end.
   await page.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+  await expect.poll(async () => (await runtimeState()).turns.every((turn) => turn.endedAt !== undefined)).toBe(true);
 
   await page.reload();
   await waitReady(page);
   await expect.poll(() => page.evaluate(() => localStorage.getItem("gates-local.stop-others-ok"))).toBe("1");
 
   await page.getByRole("button", { name: "New thread" }).click();
-  await firstChatAnswering(page);
+  const victim = await firstChatAnswering(page);
+  const before = await runtimeState();
+  expect(before.loaded.map((model) => model.name)).toEqual(["gemma4:12b"]);
+  const running = before.turns.findLast((turn) => turn.model === "gemma4:12b");
+  expect(running?.endedAt).toBeUndefined();
+  expect(running).toBeDefined();
   await secondChatReady(page);
   await page.locator("#ta").press("Enter");
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
   await expect(warning(page)).toHaveCount(0);
-  await page.locator(".sb-row", { hasText: "How do I check disk space" }).first().click();
+  const target = await page.locator(".sb-row.on").getAttribute("data-thread");
+  expect(target).not.toBeNull();
+  await page.locator(`.sb-row[data-thread="${victim}"]`).click();
   await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
+  await expect(page.locator(".turn.a.done .md ul li")).toHaveCount(3);
+  await expect(page.locator(".writing")).toHaveCount(0);
+  await expect.poll(() => sends.findLast((send) => send.threadId === target)?.stopOthers).toBe(true);
+  await expect.poll(async () => (await runtimeState()).turns.find((turn) => turn.id === running?.id)?.outcome).toBe("cancelled");
+  await shot(page, "05-optout-stopped-chat");
 });
