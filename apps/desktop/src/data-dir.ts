@@ -1,8 +1,8 @@
 // Where the desktop app tells the server to keep its data (`--data-dir`):
 // threads, settings, snapshots, the Ollama ownership record and serve log.
 // The app's own Ollama install and its models (many GB) live in the server's
-// shared store (runtime/paths.ts defaultAppDataDir), which this default
-// matches on Windows and Linux. Both are local machine data, so neither goes
+// store under this same data directory. Packaged defaults use a separate
+// sibling of the clone's store. Both are local machine data, so neither goes
 // in the Electron profile on Windows (%APPDATA% roams) or ~/.config on Linux.
 import path from "node:path";
 import { lstatSync, realpathSync } from "node:fs";
@@ -14,7 +14,20 @@ export type DataDirInput = {
   home: string;
   /** Electron's userData folder. */
   userData: string;
+  /** Omitted by clone-only commands, which keep their existing defaults. */
+  packaged?: boolean;
 };
+
+/** Resolve the profile before Electron takes its profile-scoped instance lock. */
+export function desktopUserDataDir(o: {
+  platform: NodeJS.Platform;
+  env: Readonly<Record<string, string | undefined>>;
+  appData: string;
+  packaged: boolean;
+}): string {
+  const paths = o.platform === "win32" ? path.win32 : path.posix;
+  return o.env["GATES_LOCAL_USER_DATA"] ?? paths.join(o.appData, o.packaged ? "gates-local-installed" : "gates-local");
+}
 
 /** Main owns the lookup and rechecks it on Open; the renderer supplies no path. */
 export function modelFolderActions(o: {
@@ -49,8 +62,8 @@ export function serverDataDir(o: DataDirInput): string {
   if (o.env["GATES_LOCAL_USER_DATA"] || o.platform === "darwin") return (o.platform === "win32" ? path.win32 : path.posix).join(o.userData, "server-data");
   if (o.platform === "win32") {
     const local = o.env["LOCALAPPDATA"];
-    return path.win32.join(local && path.win32.isAbsolute(local) ? local : path.win32.join(o.home, "AppData", "Local"), "GatesLocal");
+    return path.win32.join(local && path.win32.isAbsolute(local) ? local : path.win32.join(o.home, "AppData", "Local"), o.packaged ? "GatesLocalInstalled" : "GatesLocal");
   }
   const xdg = o.env["XDG_DATA_HOME"];
-  return path.posix.join(xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(o.home, ".local", "share"), "gates-local");
+  return path.posix.join(xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(o.home, ".local", "share"), o.packaged ? "gates-local-installed" : "gates-local");
 }

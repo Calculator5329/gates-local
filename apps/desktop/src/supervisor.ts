@@ -10,6 +10,7 @@ import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { serverUrl, type RestartResult } from "./bridge.ts";
 import type { CrashReason, SupervisorState } from "./supervisor-state.ts";
+import { boundedServerOutput, writeServerFailureReport } from "./server-failure.ts";
 
 export type { CrashReason, SupervisorState } from "./supervisor-state.ts";
 export type { RestartResult } from "./bridge.ts";
@@ -74,6 +75,7 @@ interface Launch {
   readonly port: number;
   readonly token: string;
   readonly stderrTail: string[];
+  readonly stdoutTail: string[];
   /** Set when the supervisor itself decided the launch failed (timeout, bad ready). */
   failure: CrashReason | null;
   readyTimer: NodeJS.Timeout | null;
@@ -172,7 +174,12 @@ export class Supervisor {
   }
 
   #log(line: string): void {
-    (this.#opts.log ?? ((l: string) => console.error(l)))(line);
+    (this.#opts.log ?? ((l: string) => console.error(l)))(this.#redact(line));
+  }
+
+  #redact(line: string): string {
+    const token = this.#current?.token;
+    return token ? line.replaceAll(token, "[redacted]") : line;
   }
 
   #setState(state: SupervisorState): void {
@@ -222,6 +229,7 @@ export class Supervisor {
       port,
       token,
       stderrTail: [],
+      stdoutTail: [],
       failure: null,
       readyTimer: null,
       exited: exited.promise,
@@ -233,9 +241,10 @@ export class Supervisor {
     const tailMax = this.#opts.stderrTailLines ?? DEFAULTS.stderrTailLines;
     if (child.stderr !== null) {
       createInterface({ input: child.stderr }).on("line", (line) => {
-        launch.stderrTail.push(line);
+        const output = boundedServerOutput(line, launch.token);
+        launch.stderrTail.push(output);
         if (launch.stderrTail.length > tailMax) launch.stderrTail.shift();
-        this.#log(`[server] ${line}`);
+        this.#log(`[server] ${output}`);
       });
     }
     if (child.stdout !== null) {
@@ -250,13 +259,21 @@ export class Supervisor {
     child.once("exit", (code, signal) => {
       clearReadyTimer(launch);
       child.stdin?.destroy();
-      exited.resolve();
-      if (!this.#isCurrent(id)) return;
+      if (!this.#isCurrent(id) && launch.failure === null) {
+        exited.resolve(); // An intended stop, not an observed failure.
+        return;
+      }
       const reason = launch.failure ?? { kind: "exit", code, signal };
       // Give the stderr reader a moment to flush the last lines; do not wait
       // for 'close', which never comes if a grandchild inherited the pipes.
       setTimeout(() => {
-        if (this.#isCurrent(id)) this.#crash(id, child.pid ?? null, reason, launch.stderrTail);
+        // Quit may suppress the UI notification, but not a failure already
+        // observed above. stop() also waits for this kept stderr snapshot.
+        try {
+          this.#crash(id, child.pid ?? null, reason, launch.stderrTail, this.#isCurrent(id));
+        } finally {
+          exited.resolve();
+        }
       }, 50);
     });
 
@@ -273,15 +290,18 @@ export class Supervisor {
   }
 
   #onStdout(launch: Launch, line: string): void {
+    const output = boundedServerOutput(line, launch.token);
+    launch.stdoutTail.push(output);
+    if (launch.stdoutTail.length > 20) launch.stdoutTail.shift();
     const waiting = this.#isCurrent(launch.id) && this.#state.status !== "ready" && launch.failure === null;
     const ready = waiting ? parseReady(line) : null;
     if (ready === null) {
-      this.#log(`[server:out] ${line}`);
+      this.#log(`[server:out] ${output}`);
       return;
     }
     clearReadyTimer(launch);
     if (!Number.isInteger(ready.port) || ready.port < 1 || ready.port > 65535 || (launch.port !== 0 && ready.port !== launch.port)) {
-      launch.failure = { kind: "bad-ready", line };
+      launch.failure = { kind: "bad-ready", line: output };
       void this.#terminate(launch);
       return;
     }
@@ -289,14 +309,28 @@ export class Supervisor {
     this.#setState({ status: "ready", launch: launch.id, pid, port: ready.port, url: serverUrl(ready.port, launch.token) });
   }
 
-  #crash(id: number, pid: number | null, reason: CrashReason, stderrTail: readonly string[]): void {
+  #crash(id: number, pid: number | null, reason: CrashReason, stderrTail: readonly string[], publish = true): void {
     const blockedFor = this.#restartBlockedFor();
+    const launch = this.#current?.id === id ? this.#current : null;
+    const exit = launch?.child.pid === undefined ? null : { code: launch.child.exitCode, signal: launch.child.signalCode };
+    let logPath: string | undefined;
+    try {
+      logPath = writeServerFailureReport(this.#opts.dataDir, {
+        entry: this.#opts.entry, execPath: this.#opts.execPath ?? process.execPath,
+        pid, reason, exit, stderrTail, stdoutTail: launch?.stdoutTail ?? [],
+      }, launch?.token);
+    } catch (error) {
+      this.#log(`[supervisor] could not keep the server failure report: ${String(error)}`);
+    }
+    if (!publish) return;
     this.#setState({
       status: "crashed",
       launch: id,
       pid,
       reason,
       stderrTail: [...stderrTail],
+      exit,
+      ...(logPath === undefined ? {} : { logPath }),
       restartBlockedUntil: blockedFor > 0 ? this.#now() + blockedFor : null,
     });
   }

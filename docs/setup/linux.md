@@ -8,6 +8,15 @@ window and does not run over a plain SSH or console login.
 
 Rather not do this by hand? [Let Claude Code set it up](with-claude-code.md).
 
+If you have an AppImage, it includes Node and the app, so the clone's Node
+and pnpm steps below are unnecessary. The AppImage needs FUSE 2 compatibility
+on most distributions. On Ubuntu 24.04 and newer: `sudo apt install libfuse2t64`.
+Other distributions call the compatibility package `libfuse2` or `fuse2`.
+If FUSE cannot be installed, use the documented fallback:
+`./Gates-Local.AppImage --appimage-extract-and-run` (substitute your filename).
+See [AppImage's FUSE instructions](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
+Do not disable Chromium's sandbox to launch the app.
+
 ## 1. Install Node.js 24 and pnpm 11
 
 Gates Local needs Node.js 24 or newer. Install it from your distribution, or

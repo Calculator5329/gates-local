@@ -10,6 +10,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "node scripts/build.ts",
+    "package:linux": "node scripts/package.ts",
+    "package:win": "node scripts/package.ts --win",
     "start": "node scripts/build.ts && electron .",
     "smoke": "node scripts/build.ts && node scripts/smoke.ts"
   },
@@ -17,6 +19,7 @@
     "@gates-local/contracts": "workspace:*"
   },
   "devDependencies": {
-    "electron": "^45.2.3"
+    "electron": "^45.2.3",
+    "electron-builder": "26.18.0"
   }
 }

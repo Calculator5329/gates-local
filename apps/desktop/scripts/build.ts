@@ -2,12 +2,10 @@
 // Run: node scripts/build.ts (from apps/desktop), or pnpm --filter @gates-local/desktop build.
 
 import { build, type BuildOptions } from "esbuild";
-import { rmSync } from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
 const out = path.join(root, "out");
-rmSync(out, { recursive: true, force: true });
 
 const common: BuildOptions = {
   bundle: true,

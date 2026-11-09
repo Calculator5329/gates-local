@@ -27,6 +27,10 @@ export type SupervisorState =
       readonly pid: number | null;
       readonly reason: CrashReason;
       readonly stderrTail: readonly string[];
+      /** Actual child termination, even when the reason was a ready timeout. */
+      readonly exit?: { readonly code: number | null; readonly signal: string | null } | null;
+      /** Kept failure report in the data folder; absent if writing it failed. */
+      readonly logPath?: string;
       readonly restartBlockedUntil: number | null;
     }
   | { readonly status: "stopping" }

@@ -41,6 +41,8 @@ export type BridgeState =
       readonly launch: number;
       readonly reason: CrashReason;
       readonly stderrTail: readonly string[];
+      readonly exit?: { readonly code: number | null; readonly signal: string | null } | null;
+      readonly logPath?: string;
       /** Epoch ms until which Restart is refused by the loop guard, or null. */
       readonly restartBlockedUntil: number | null;
     }
@@ -101,6 +103,8 @@ export function toBridgeState(state: SupervisorState): BridgeState {
         launch: state.launch,
         reason: state.reason,
         stderrTail: state.stderrTail,
+        ...(state.exit === undefined ? {} : { exit: state.exit }),
+        ...(state.logPath === undefined ? {} : { logPath: state.logPath }),
         restartBlockedUntil: state.restartBlockedUntil,
       };
     case "starting":

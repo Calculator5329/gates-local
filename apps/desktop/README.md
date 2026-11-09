@@ -44,10 +44,13 @@ The coordinator's `apps/server/src/main.ts` must follow this; the fake in
      explicit port is used as given. If the bind fails, print why on
      stderr and exit non-zero; the user gets the error view and Restart
      picks a fresh port.
-   - `--data-dir`: created by the supervisor before spawn. Default
-     `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local`
-     (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on
-     macOS (see `src/data-dir.ts`).
+   - `--data-dir`: created by the supervisor before spawn. Developer defaults
+     are `%LOCALAPPDATA%\GatesLocal` on Windows and `$XDG_DATA_HOME/gates-local`
+     (`~/.local/share/gates-local`) on Linux. Packaged builds instead use
+     `%LOCALAPPDATA%\GatesLocalInstalled` and `$XDG_DATA_HOME/gates-local-installed`.
+     macOS uses `<userData>/server-data` (see `src/data-dir.ts`). Packaged
+     Electron profiles use `gates-local-installed`; developer profiles keep
+     `gates-local`, so both can run at once. No clone data is migrated.
 2. **Token.** In the environment as `GATES_LOCAL_SERVER_TOKEN` (64 hex
    characters, `crypto.randomBytes(32)`, new on every launch). Not in argv:
    `/proc/<pid>/cmdline` is readable by every local user, the environment
@@ -62,7 +65,22 @@ The coordinator's `apps/server/src/main.ts` must follow this; the fake in
    explicit port, or an invalid port, is treated as a failed launch. No ready
    line within 20 s: the supervisor stops the process and reports `ready-timeout`.
 4. **stderr** is logged line by line; the last 20 lines appear in the
-   error view.
+   error view. A crash also keeps `server-failure-<stamp>-<id>.json` in the
+   data folder, with the reason, actual child exit code/signal and the last
+   20 stdout/stderr lines. The error view gives its path and opens that folder.
+   The report excludes the environment and redacts the per-launch token.
+   Reports survive quit and restart; include the relevant file in a bug report.
+   An exit observed before quit is kept even when shutdown suppresses the crash
+   notification; an intended stop writes no failure report. Each report is at
+   most 64 KiB of UTF-8 JSON, including escaping, with an 8 KiB stdout budget
+   and the remaining output budget given to the end of stderr. Long path/error
+   metadata fields have 2 KiB budgets. Tokens are redacted before truncation;
+   UTF-16 pairs and redaction markers are kept whole. Retained input lines are
+   capped at the same 64 KiB budget before entering the 20-line tails.
+   Rotation keeps at most five reports (320 KiB total), removing older ones
+   and oversized legacy reports before writing the next. Only generated-name,
+   single-link regular files with a recognized report header are eligible;
+   notes, JSON without that header, links and directories are left alone.
 5. **SIGTERM** exits within 3 s (stop what the server owns, e.g. an
    app-owned Ollama, first). After 3 s the supervisor sends SIGKILL.
 6. **Parent death.** stdin is a pipe the supervisor keeps open and never
@@ -221,9 +239,9 @@ refuses to start with `LISTEN` set.
 
 | Variable | Default | Use |
 | --- | --- | --- |
-| `GATES_LOCAL_SERVER_ENTRY` | `apps/server/src/main.ts` (packaged: `<resources>/server/main.ts`, provisional) | Server entry passed to the child. |
-| `GATES_LOCAL_DATA_DIR` | `%LOCALAPPDATA%\GatesLocal` on Windows, `$XDG_DATA_HOME/gates-local` (`~/.local/share/gates-local`) on Linux, `<userData>/server-data` on macOS or when `GATES_LOCAL_USER_DATA` is set | `--data-dir`: threads, settings, snapshots, the Ollama ownership record and serve log. The app's own Ollama install and models stay in the server's shared store (`%LOCALAPPDATA%\GatesLocal`, `~/.local/share/gates-local`) whatever this is set to, so this does not move model downloads to another disk. |
-| `GATES_LOCAL_USER_DATA` | `~/.config/gates-local` | Electron userData (smoke runs use a temp dir). |
+| `GATES_LOCAL_SERVER_ENTRY` | `apps/server/src/main.ts` (packaged: `<resources>/server/main.mjs`) | Server entry passed to the child. |
+| `GATES_LOCAL_DATA_DIR` | Developer: `%LOCALAPPDATA%\GatesLocal` / `$XDG_DATA_HOME/gates-local`. Packaged: `%LOCALAPPDATA%\GatesLocalInstalled` / `$XDG_DATA_HOME/gates-local-installed`. macOS or an explicit profile: `<userData>/server-data`. | Overrides `--data-dir`: threads, settings, snapshots, owned runtime install, models, ownership record and serve log all follow it. |
+| `GATES_LOCAL_USER_DATA` | Electron appData plus `gates-local` for developers, `gates-local-installed` for packaged builds | Overrides the Electron profile and its single-instance lock. Unless a data-dir override wins, server data goes in this profile's `server-data` subdirectory. |
 | `GATES_LOCAL_WEB` | built client on `gates-local://app` | `dev` loads Vite on 5187 (run `pnpm --filter @gates-local/web dev`). |
 | `GATES_LOCAL_WEB_URL` | none | Exact client URL; wins over `GATES_LOCAL_WEB`. |
 

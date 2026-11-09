@@ -85,7 +85,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] Picker: cancel a pending row or size pick when the open thread changes,
       so Ctrl+N during a memory check does not apply it to the new chat.
 
-- [ ] Packaged renderer Origin: measure what Origin the `file://` renderer's
+- [x] <!-- workspace:id=work:47a64e0b-8d3e-5763-8022-def80b846256 --> Packaged renderer Origin: measure what Origin the `file://` renderer's
       WebSocket upgrade carries in a real packaged Electron run and allow it
       in `apps/server/src/main.ts`.
       *Accept:* the packaged app connects; a page from any other origin
@@ -94,7 +94,18 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       unpackaged dist run, so the client moved to its own scheme,
       `gates-local://app` (`apps/desktop/src/client-protocol.ts`). In that run
       the app's upgrade got 101 and `file://`, `null`, `http://evil.example`
-      and `gates-local://other` got 403. The packaged half waits on packaging.
+      and `gates-local://other` got 403.
+      *Completed 2026-11-09:* the real Linux AppImage sends
+      `Origin: gates-local://app` and gets 101; all four foreign origins
+      still get 403 with a valid token. Run `installer-linux-first-run`;
+      first-run screen and packaged update refusal observed. Extraction
+      mode with the test sandbox disabled; normal desktop launch remains
+      unverified. See `docs/releasing.md`.
+      *Windows verified 2026-11-09:* the actual installed NSIS build returned
+      bridge `ready`, rendered the missing-runtime first-run screen, sent
+      `gates-local://app` with 101 and refused all four foreign origins with
+      403. This was a non-interactive SSH run; desktop launch and SmartScreen
+      remain unobserved.
 - [ ] First-run model pick on real models: `chooseModel()` takes the smallest
       installed model, so on this machine the first run recommends
       `nomic-embed-text` (an embedding model, `/api/show` capabilities
@@ -398,12 +409,90 @@ send was stopped at admission.
       selected models ready, whisper unchanged through success and failure.
       *Accept:* `pnpm release:smoke` on this machine plus a try-it packet for
       Ethan. Packaging does not authorize a release or publication.
+      *Status 2026-11-09:* a Linux AppImage reaches first run against an
+      isolated stopped-runtime setup. Real Ollama/ComfyUI handoff remains open.
+      Build-to-build replacement preserves the measured settings, thread,
+      completed-message fixture, profile marker and model-file fixture in
+      per-user XDG storage. Ordinary execution in the test environment fails
+      before Electron because `libfuse.so.2` is missing; tested workaround
+      still needs extraction mode and `--no-sandbox`.
 - [ ] Release gate: after a step exits normally, stop its owned process group
       and keep the scratch directory if shutdown stays unconfirmed.
       *Accept:* a step that leaves a same-group process behind gets it stopped.
-- [ ] Packaged releases (AppImage, Windows installer, auto-update) once
+- [ ] <!-- workspace:id=work:83589d17-fd67-55b2-b660-ed14c924768c --> Packaged releases (AppImage, Windows installer, auto-update) once
       Ethan picks that path. `pnpm run app-update` covers git clones only;
       a packaged copy says it cannot update itself.
+      *Startup diagnostics 2026-11-09:* failed launches now keep the child exit,
+      stderr and a token-redacted report after quit. The smoke retains those
+      details on failure. Offline candidates were recorded before the one
+      authorized native diagnostic run; its result is recorded below.
+      *Status 2026-11-09:* `pnpm package:linux` builds an unsigned AppImage
+      with the server and Node runtime included. Packaged first run and
+      update refusal observed. Linux two-build persistence is measured with
+      Gates data overrides unset. `pnpm package:win` builds an unsigned NSIS
+      installer natively on Windows; cross-building failed in portable Wine
+      (`ntdll.dll`, `c0000135`). Native installed first run, Origin admission
+      and two-build persistence passed in the corrected-wait round below.
+      SmartScreen and double-click observations
+      require separate interactive authorization. Packaged auto-update is separate follow-up work;
+      no release, upload or tag authorized. See `docs/releasing.md`.
+      *PK-01 completed 2026-11-09:* packaged profile and data defaults are
+      separate from the unchanged clone defaults. The diagnostic check
+      failed first, then passed twice. A real developer instance stayed
+      open during the packaged `0.0.3-test` to `0.0.4-test` upgrade; both
+      packaged launches used their own defaults without Gates path
+      overrides, retained their data and left developer data/profile
+      unchanged. No clone-to-installed migration is performed.
+      *Limited native round 2026-11-09:* approved PowerShell SSH was used
+      without an exclusive slot. The first build step stopped on a harness
+      Node-expression quoting error before dependency installation or
+      packaging. No native installer, install, smoke or upgrade result is
+      claimed. The isolated PowerShell environment excluded development
+      tools, but native known-folder APIs still returned real user paths.
+      The new lane directory was removed; SmartScreen, double-click launch
+      and uninstaller/HKCU behavior remain unobserved.
+      *Native retry 2026-11-09:* native dependency install and NSIS build
+      passed; unsigned `0.0.6-native` silently installed at its default
+      per-user path with no development tools on PATH. All package targets
+      were absent beforehand. Main/profile/data paths matched the packaged
+      defaults and SQLite was created, but the smoke did not observe ready.
+      The later diagnostic found its wait returned prematurely.
+      First-run/Origin checks and upgrade remain open; no app
+      retry was made. Own uninstall removed app files, Start Menu shortcut
+      and NSIS HKCU keys, retaining data/profile as configured. Only the
+      recorded-new leftovers and lane cache were then removed. SmartScreen
+      and real double-click launch remain unobserved.
+      *Diagnostic native round 2026-11-09:* unsigned `0.0.7-native` built and
+      silently installed at its default per-user location after all targets
+      were recorded absent. The retained bridge state was `starting`; the
+      child printed ready/listening while the driver closed. The async
+      Playwright wait returned prematurely on a Promise. `expect.poll` fixes
+      that local reproduction, but the corrected Windows smoke was not rerun.
+      End-to-end readiness, first run, Origin and upgrade remain unproven.
+      Own uninstall and recorded-new cleanup completed after waiting for the
+      exclusive run; all package objects and the lane cache were confirmed absent.
+      *Corrected-wait Windows round completed 2026-11-09:* one persistent
+      systemd user unit built and tested `0.0.8-native` then `0.0.9-native`
+      from committed source, with no data/profile overrides and no development
+      tools on PATH. All package targets were absent before install. Both
+      bridges reached ready; first run and Origin admission passed. Installing
+      the second build over the first preserved settings, the thread,
+      completed-message fixture, profile marker and file fixture; the newer
+      renderer displayed the message. Own uninstall removed app files and
+      NSIS HKCU keys, retaining data/profile as configured. Only recorded-new
+      leftovers and the lane cache were then removed. GPU-process warnings
+      were retained; interactive desktop, SmartScreen and real model/runtime
+      operation remain unproven. See `docs/releasing.md` for the exact limits.
+      *IN-01/IN-02 fixed 2026-11-09:* an observed exit is now retained across
+      quit without classifying intentional termination as a crash. Managed
+      reports are bounded to five files of at most 64 KiB, keeping stderr's end
+      and redacting before truncation. Only recognized generated report files
+      are rotated. Failing-first Node probes cover the race, size/retention,
+      Unicode/token cuts and unrelated-file preservation. No new Windows or
+      packaged run was used. Still open from that review: output from the
+      server with no line ending is buffered without a limit until a newline
+      arrives, and a server that fails during an intentional shutdown leaves
+      no report.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
       Prepared on lane/readme: README, `docs/setup/linux.md` and the

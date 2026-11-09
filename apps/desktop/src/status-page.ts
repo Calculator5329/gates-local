@@ -82,6 +82,7 @@ export function renderStatusPage(view: StatusView): string {
       "The Gates Local server stopped",
       `<p>${escapeHtml(describeCrash(state.reason))}</p>
 ${tail}
+${state.logPath === undefined ? "" : `<p>A failure report is kept at <code>${escapeHtml(state.logPath)}</code>. Include it when reporting this problem.</p><p><button data-action="openDataFolder">Open data folder</button></p>`}
 ${blocked}
 <p><button data-action="restart">Restart</button></p>
 <p id="action-status" role="status"></p>`,

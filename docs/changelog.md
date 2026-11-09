@@ -1,5 +1,141 @@
 # Changelog
 
+## 2026-11-09: Preserve failures during quit and bound their retained logs (IN-01, IN-02)
+
+Quit could discard a child failure during its delayed notification, and noisy
+failures could leave unlimited large reports. An observed failure now finishes
+its kept stderr snapshot before shutdown completes, while an intentional stop
+still writes no failure report. Report storage keeps five files of at most
+64 KiB each, prioritizing stderr's end and retaining exit code and signal.
+Token redaction happens before truncation; rotation only touches recognized
+generated reports and leaves unrelated files and links alone. Real Node-child
+probes failed first and then passed, including the quit race, large escaped
+output, token fragments and retention. Windows evidence was not rerun.
+
+## 2026-11-09: Verify the installed Windows app through an upgrade
+
+The corrected smoke now observes completed bridge readiness in the actual
+installed app. Its packaged renderer painted the missing-runtime first-run
+screen, connected with `gates-local://app` and rejected four foreign Origins.
+Installing `0.0.9-native` over `0.0.8-native` preserved settings, a thread,
+completed-message fixture, profile marker and file fixture at the packaged
+defaults, with no Node, pnpm or Git on the run PATH. Both app launches exited 0.
+
+Own uninstall removed app files, shortcut and NSIS HKCU keys while retaining
+data/profile as configured. Cleanup removed only recorded-new test data and
+the lane cache. The lifecycle ran in a persistent unit and respected perf and
+exclusive jobs. GPU-process warnings remain in the receipts; SmartScreen,
+interactive desktop launch and real model use were not observed. The earlier
+local poller reproduction ran only Node with fake state reads, without a browser.
+
+## 2026-11-09: Diagnose the Windows smoke's premature readiness assertion
+
+The new native run retained `starting` at the assertion, then captured the
+server's ready/listening output while closing. The smoke's async Playwright
+predicate returned early on a truthy Promise. It now uses `expect.poll`; a local
+reproduction against the installed poller failed first and the replacement
+passed twice. No further Windows app launch was made, so first run, Origin and
+upgrade remain unproven. The unsigned installer built and silently installed
+at its default per-user location. See `docs/releasing.md` for identity and limits.
+Own uninstall and recorded-new data/profile cleanup completed after the exclusive
+run finished; all tracked package targets and the lane folder were confirmed gone.
+
+## 2026-11-09: Keep server startup failures after the app closes
+
+A failed installed start previously lost its exit detail and stderr on quit,
+and the packaged smoke discarded the crash state. The supervisor now keeps a
+token-redacted failure report in the data folder, including the actual child
+termination even after a readiness timeout. The error screen points to it;
+the packaged probe saves the state, kept report and Electron stderr on failure.
+Focused tests failed first and passed twice. The diagnostic round above found
+a premature harness assertion, rather than a captured product startup crash.
+
+## 2026-11-09: Native Windows installer lifecycle is measured; startup remains open
+
+The native build produced an unsigned x64 NSIS installer. A silent install
+with a system-only PATH succeeded at its default per-user location after
+all package paths and keys were recorded absent. The installed app selected
+its separate packaged profile and data directory, and created SQLite, but
+failed the server-readiness check before first-run and Origin validation.
+The app was not retried and no Windows upgrade is claimed.
+
+Its own uninstaller removed app files, the Start Menu shortcut and NSIS
+HKCU keys, while retaining data/profile folders as configured. Cleanup then
+removed only this run's recorded-new data/profile folders and lane cache.
+No existing data, desktop shortcut or model service was touched. SmartScreen
+and a real double-click launch remain unobserved. See `docs/releasing.md`
+for the artifact hash, environment, paths, results and unresolved startup boundary.
+
+## 2026-11-09: Linux AppImage guidance keeps the sandbox enabled
+
+The release and Linux setup guides now name the FUSE 2 compatibility
+package, give the Ubuntu 24.04+ one-line fix, and document AppImage's
+`--appimage-extract-and-run` fallback. They no longer recommend adding
+`--no-sandbox` to a user's launch command. Earlier disabled-sandbox runs
+remain labeled as test evidence.
+
+The limited native Windows SSH round stopped at its first failure: a
+PowerShell-to-Node quoting error in the harness before dependency install
+or packaging. No installer or app was launched. The isolated process
+environment excluded Node/pnpm/Git, but native known-folder APIs still
+returned the real user paths. The lane directory was removed. Native
+packaging, installation, smoke, upgrade, uninstall and SmartScreen behavior
+remain unproven; `docs/releasing.md` records the exact boundary.
+
+## 2026-11-09: Installed copies no longer reuse a developer app or its data
+
+PK-01: an AppImage could focus an already-open developer instance because
+both took the same profile lock. Sequential launches also shared threads,
+settings and owned-runtime state. Packaged builds now select their own
+`gates-local-installed` profile before locking, and their own data folder
+(`gates-local-installed` on Linux, `GatesLocalInstalled` on Windows).
+Developer defaults and explicit profile/data overrides keep their prior
+behavior. No clone data is copied into the installed app.
+
+The path probe failed first, then passed twice. A real developer instance
+stayed open while packaged builds `0.0.3-test` and `0.0.4-test` used their
+defaults with no Gates path overrides. The upgrade retained its measured
+data and the developer app's store and profile remained unchanged.
+This used Linux extraction mode and `--no-sandbox`; Windows desktop and
+normal Linux launch limitations remain as documented in `docs/releasing.md`.
+
+## 2026-11-09: Replacing the Linux AppImage keeps measured user data
+
+The `0.0.1-test` to `0.0.2-test` replacement keeps settings, a thread and
+completed-message fixture, a profile localStorage marker and a model-file
+fixture. Neither Gates data-directory override is set: the app resolves
+per-user XDG storage outside the replaced image. The newer renderer shows
+the saved message. No real model or future schema migration was tested.
+
+Normal AppImage execution without extraction or a supplied `--no-sandbox`
+fails before Electron in the test Linux environment: `libfuse.so.2` is
+missing. The known working path still needs the test's extraction and
+sandbox flags. The FUSE requirement and sandbox limits are documented.
+
+`pnpm package:win` now prepares unsigned per-user NSIS packaging, with
+executable resources retained. Its Linux cross-build fails while portable
+Wine generates the uninstaller (`ntdll.dll`, `c0000135`); the output is an
+intermediate, not an installable Windows artifact. Native Windows build,
+installation and SmartScreen checks need an approved Windows desktop route.
+The existing runner and its public control command only execute in WSL.
+
+Packaging also uses the lockfile-resolved Electron version and includes
+bundled JavaScript dependency licenses. No publication or integration occurred.
+
+## 2026-11-09: Linux packaging reaches the first-run screen
+
+A development AppImage now includes Electron, the local server and web
+client, so launching it does not start Node or pnpm from the user's PATH.
+`pnpm package:linux` builds it without publishing. Packaging dependencies
+are desktop development dependencies; `pnpm start` and clone updates keep
+their existing path.
+
+In the test machine's Linux environment, the actual AppImage reached the
+stopped-Ollama first-run screen. The measured renderer Origin got 101 and
+four foreign origins still got 403. Its update action truthfully refused
+to update a packaged copy. This used an isolated profile, extraction mode
+and the test sandbox disabled; normal desktop launch, real models, Windows
+installation and data persistence across builds remain unverified.
 ## 2026-11-09: Stopped replies show their specific reason once
 
 A reply stopped for another model or a runtime switch keeps its partial

@@ -27,6 +27,7 @@ describe("status page", () => {
         launch: 1,
         reason: { kind: "exit", code: null, signal: "SIGKILL" },
         stderrTail: ["<script>alert(1)</script>"],
+        logPath: "data/server-failure-<example>.json",
         restartBlockedUntil: null,
       },
     });
@@ -35,6 +36,8 @@ describe("status page", () => {
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(html).not.toContain("<script>alert(1)");
     expect(html).toContain("window.gatesLocal[button.dataset.action]");
+    expect(html).toContain("server-failure-&lt;example&gt;.json");
+    expect(html).toContain('data-action="openDataFolder"');
   });
 
   it("says when the restart guard is holding Restart back", () => {

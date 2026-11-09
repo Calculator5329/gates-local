@@ -12,7 +12,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { IPC, describeCrash, toBridgeState, type BridgeState, type UpdateAndRestartResult } from "./bridge.ts";
 import { CLIENT_ORIGIN, CLIENT_SCHEME, clientResponse, originOf, sameClient } from "./client-protocol.ts";
-import { modelFolderActions, serverDataDir } from "./data-dir.ts";
+import { desktopUserDataDir, modelFolderActions, serverDataDir } from "./data-dir.ts";
 import { checkOwnership } from "../../server/src/runtime/ownership.ts";
 import { ownedStateFile } from "../../server/src/runtime/paths.ts";
 import { allowsMicrophone } from "./media-permission.ts";
@@ -36,7 +36,7 @@ const desktopDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopDir, "..", "..");
 
 app.setName("gates-local");
-app.setPath("userData", process.env["GATES_LOCAL_USER_DATA"] ?? path.join(app.getPath("appData"), "gates-local"));
+app.setPath("userData", desktopUserDataDir({ platform: process.platform, env: process.env, appData: app.getPath("appData"), packaged: app.isPackaged }));
 // Must run before ready. Standard + secure gives the scheme a real origin
 // (gates-local://app) and lets the module scripts and fetch load from it.
 protocol.registerSchemesAsPrivileged([
@@ -54,8 +54,7 @@ function isFolder(p: string): boolean {
 function serverEntry(): string {
   const override = process.env["GATES_LOCAL_SERVER_ENTRY"];
   if (override !== undefined && override !== "") return path.resolve(override);
-  // Packaged layout is provisional until packaging lands.
-  if (app.isPackaged) return path.join(process.resourcesPath, "server", "main.ts");
+  if (app.isPackaged) return path.join(process.resourcesPath, "server", "main.mjs");
   return path.resolve(desktopDir, "..", "server", "src", "main.ts");
 }
 
@@ -101,7 +100,7 @@ function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<Upd
 }
 
 function run(): void {
-  const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData") });
+  const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
   // pnpm run app-update reads this to refuse while the app is open.
   try {
     writeRunning(dataDir, process.pid, Date.now());

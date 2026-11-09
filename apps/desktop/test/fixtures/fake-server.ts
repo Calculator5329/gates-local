@@ -97,9 +97,19 @@ switch (mode) {
     break;
   }
   case "exit-early":
+    if (process.env["FAKE_ECHO_TOKEN"]) process.stderr.write(`token ${token}\n`);
     process.stderr.write("fatal: cannot open database\n");
     process.exit(3);
     break;
+  case "large-failure": {
+    const label = process.env["FAKE_REPORT_LABEL"] ?? "0";
+    const noise = '\0é🙂"\\Z'.repeat(100_000) + `G${token}H`.repeat(5_000);
+    const stdout = process.env["FAKE_BAD_READY"] ? JSON.stringify({ ready: true, port: 0, noise }) : `${noise}G${token}H🙂éEND-STDOUT:${label}`;
+    process.stdout.write(`${stdout}\n`, () => {
+      process.stderr.write(`${noise}G${token}H🙂éEND-STDERR:${label}\n`, () => process.exit(3));
+    });
+    break;
+  }
   default:
     process.stderr.write(`unknown FAKE_MODE ${mode}\n`);
     process.exit(2);

@@ -3,4 +3,6 @@ packages:
   - packages/*
 allowBuilds:
   electron: true
+  # Squirrel is an unused electron-builder backend; AppImage/NSIS do not need its install script.
+  electron-winstaller: false
   esbuild: true

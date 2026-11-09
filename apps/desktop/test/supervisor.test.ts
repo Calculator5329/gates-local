@@ -1,14 +1,141 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { toBridgeState } from "../src/bridge.ts";
 import { findFreePort, Supervisor, TOKEN_ENV, type SupervisorOptions, type SupervisorState } from "../src/supervisor.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-server.ts");
 const HOST = join(import.meta.dirname, "fixtures", "host.ts");
+
+// Observe the real child exit, then quit before the supervisor's stderr-flush timer.
+vi.mock("node:child_process", async original => {
+  const actual = await original<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
+
+describe("kept server failure evidence", () => {
+  it("IN-02 bounds a large invalid ready line while retaining its failure kind and child termination", async () => {
+    const { supervisor } = setup("large-failure", { env: { ...process.env, FAKE_MODE: "large-failure", FAKE_BAD_READY: "1" } });
+    const state = await supervisor.start();
+    if (state.status !== "crashed" || !state.logPath) throw new Error("Expected a kept failure");
+    expect(state.reason.kind).toBe("bad-ready");
+    const text = readFileSync(state.logPath, "utf8");
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    const kept = JSON.parse(text);
+    expect(kept.reason.kind).toBe("bad-ready");
+    expect(kept.exit).toEqual(state.exit);
+    expect(kept.exit.signal).toBe("SIGTERM");
+  });
+
+  it("IN-02 bounds report bytes and count, preserves stderr's end and redaction, and only rotates its own files", async () => {
+    const env = { ...process.env, FAKE_MODE: "large-failure", FAKE_REPORT_LABEL: "0" };
+    const { supervisor, dataDir } = setup("large-failure", { env, restartLimit: { max: 10, windowMs: 60_000 } });
+    const note = join(dataDir, "server-failure-notes.json");
+    const lookalike = join(dataDir, "server-failure-1700000000000-aaaaaaaaaaaa.json");
+    const link = join(dataDir, "server-failure-1700000000000-bbbbbbbbbbbb.json");
+    const hardlink = join(dataDir, "server-failure-1700000000000-cccccccccccc.json");
+    const directory = join(dataDir, "server-failure-1700000000000-dddddddddddd.json");
+    writeFileSync(note, "user notes");
+    writeFileSync(lookalike, JSON.stringify({ memo: "not a failure report" }));
+    symlinkSync(note, link);
+    linkSync(note, hardlink);
+    mkdirSync(directory);
+    const legacy = join(dataDir, "server-failure-1700000000000-eeeeeeeeeeee.json");
+    writeFileSync(legacy, JSON.stringify({ time: "2023-11-14T22:13:20.000Z", entry: "old-server", execPath: "node", pid: 1, reason: { kind: "exit", code: 3, signal: null }, exit: { code: 3, signal: null }, stderrTail: ["Z".repeat(1024 * 1024)], stdoutTail: [] }, null, 2));
+    // Shares the old header's first two fields, and is oversized so rotation would remove a real report.
+    const headerTwin = join(dataDir, "server-failure-1700000000000-ffffffffffff.json");
+    writeFileSync(headerTwin, JSON.stringify({ time: "2023-11-14T22:13:20.000Z", entry: "my notes", memo: "Z".repeat(1024 * 1024) }, null, 2));
+    const reports: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      env.FAKE_REPORT_LABEL = String(i);
+      if (i > 0) expect(supervisor.restart()).toEqual({ ok: true });
+      const state = i === 0 ? await supervisor.start() : await supervisor.settled();
+      if (state.status !== "crashed" || !state.logPath) throw new Error("Expected a kept real-child failure");
+      reports.push(state.logPath);
+      const text = readFileSync(state.logPath, "utf8");
+      expect.soft(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(64 * 1024);
+      const kept = JSON.parse(text);
+      expect(kept).toMatchObject({ reason: { kind: "exit", code: 3, signal: null }, exit: { code: 3, signal: null } });
+      const end = `🙂éEND-STDERR:${i}`;
+      const stderr = kept.stderrTail.join("\n");
+      expect(stderr.endsWith(end)).toBe(true);
+      expect(stderr).toContain("[redacted]");
+      expect(stderr).not.toContain("\ufffd");
+      // After removing the redaction markers and fixture label, no hex token
+      // fragments may remain, even at a byte/Unicode truncation boundary.
+      for (const output of [stderr, state.stderrTail.join("\n")]) {
+        const withoutMarkers = output.replaceAll("[redacted]", "").replaceAll(end, "");
+        expect.soft(/[a-f0-9]/.test(withoutMarkers)).toBe(false);
+      }
+    }
+    expect.soft(reports.filter(file => existsSync(file))).toEqual(reports.slice(-5));
+    expect.soft(existsSync(legacy)).toBe(false);
+    expect(readFileSync(note, "utf8")).toBe("user notes");
+    expect(readFileSync(lookalike, "utf8")).toBe(JSON.stringify({ memo: "not a failure report" }));
+    expect.soft(existsSync(headerTwin)).toBe(true);
+    expect(readFileSync(link, "utf8")).toBe("user notes");
+    expect(readFileSync(hardlink, "utf8")).toBe("user notes");
+    expect(existsSync(directory)).toBe(true);
+  }, 15_000);
+
+  it("IN-01 keeps an exit observed before quit while the crash callback is pending", async () => {
+    const { supervisor, dataDir, states } = setup("exit-early");
+    const started = supervisor.start();
+    const child = vi.mocked(spawn).mock.results.at(-1)?.value;
+    if (!child) throw new Error("No real child was spawned");
+    await once(child, "exit");
+    expect(child.exitCode).toBe(3);
+    expect(supervisor.state.status).toBe("starting");
+    await supervisor.stop();
+    expect((await started).status).toBe("stopped");
+    const reports = readdirSync(dataDir).filter(name => name.startsWith("server-failure-"));
+    expect(reports).toHaveLength(1);
+    const kept = JSON.parse(readFileSync(join(dataDir, reports[0]!), "utf8"));
+    expect(kept).toMatchObject({ reason: { kind: "exit", code: 3, signal: null }, exit: { code: 3, signal: null } });
+    expect(kept.stderrTail).toContain("fatal: cannot open database");
+    expect(states.map(state => state.status)).toEqual(["starting", "stopping", "stopped"]);
+  });
+
+  it("IN-01 does not keep a crash report for a child forcibly killed by stop", async () => {
+    const { supervisor, dataDir } = setup("ignore-term", { stopTimeoutMs: 30 });
+    expect((await supervisor.start()).status).toBe("ready");
+    await supervisor.stop();
+    expect(supervisor.state.status).toBe("stopped");
+    expect(readdirSync(dataDir).filter(name => name.startsWith("server-failure-"))).toEqual([]);
+  });
+  it("keeps a report after quit with the child exit and stderr, without its token", async () => {
+    const { supervisor, dataDir } = setup("exit-early", { env: { ...process.env, FAKE_MODE: "exit-early", FAKE_ECHO_TOKEN: "1" } });
+    const state = await supervisor.start();
+    expect(state.status).toBe("crashed");
+    if (state.status !== "crashed") return;
+    const bridge = toBridgeState(state);
+    await supervisor.stop();
+    expect(bridge).toMatchObject({ exit: { code: 3, signal: null }, logPath: expect.any(String) });
+    const files = readdirSync(dataDir).filter(name => name.startsWith("server-failure-"));
+    expect(files).toHaveLength(1);
+    const text = readFileSync(join(dataDir, files[0]!), "utf8");
+    const kept = JSON.parse(text);
+    expect(kept).toMatchObject({ reason: { kind: "exit", code: 3 }, exit: { code: 3, signal: null } });
+    expect(text).toContain("fatal: cannot open database");
+    expect(text).toContain("[redacted]");
+    expect(text).not.toContain(launches(dataDir)[0]!.token);
+  });
+
+  it("keeps the actual termination separately from a readiness timeout", async () => {
+    const { supervisor, dataDir } = setup("never-ready", { readyTimeoutMs: 200 });
+    const state = await supervisor.start();
+    const files = readdirSync(dataDir).filter(name => name.startsWith("server-failure-"));
+    expect(files).toHaveLength(1);
+    const kept = JSON.parse(readFileSync(join(dataDir, files[0]!), "utf8"));
+    expect(state).toMatchObject({ reason: { kind: "ready-timeout", timeoutMs: 200 }, exit: { code: null, signal: "SIGTERM" } });
+    expect(kept).toMatchObject({ reason: { kind: "ready-timeout" }, exit: { code: null, signal: "SIGTERM" } });
+    expect(kept.stderrTail).toContain("loading models...");
+  });
+});
 
 /** 'gone' only when /proc has no entry: a zombie counts as still there. Windows has no /proc and no zombies. */
 function procState(pid: number): "gone" | "zombie" | "alive" {
@@ -258,6 +385,7 @@ describe("Supervisor", () => {
     await supervisor.stop();
     await started;
     expect(states.map((s) => s.status)).toEqual(["starting", "stopping", "stopped"]);
+    expect(readdirSync(dataDir).filter(name => name.startsWith("server-failure-"))).toEqual([]);
   });
 
   it("refuses restart unless crashed, and rate-limits restart loops", async () => {

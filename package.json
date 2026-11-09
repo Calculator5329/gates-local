@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "pnpm --filter @gates-local/web build && node scripts/check-bundle.ts",
+    "package:linux": "pnpm build && pnpm --filter @gates-local/desktop package:linux",
+    "package:win": "pnpm build && pnpm --filter @gates-local/desktop package:win",
     "start": "pnpm --filter @gates-local/web build && pnpm --filter @gates-local/desktop start",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --no-bail typecheck",
     "lint": "oxlint --deny-warnings apps packages scripts test",
