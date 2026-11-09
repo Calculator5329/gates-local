@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09: Preserve speech connection choices while reconnecting
+
+An older Disconnect push buffered during reconnect no longer cancels a newer
+Connect after its save response arrives. Pushes carry their ownership through
+hydration, regardless of push/response order. Foreign saves still cancel pending
+connection checks.
+
 ## 2026-11-09: Keep an unconfirmed Windows clone contained
 
 - Cancel and Timeout check the Windows tree-kill result and worker exit

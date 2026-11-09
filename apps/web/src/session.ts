@@ -147,6 +147,7 @@ async function loop(): Promise<void> {
       await hydrate(c).catch(() => undefined);
       await c.closed;
       client = null;
+      voiceWrites.clear();
       lostTurn();
     }
     setState((s) => ({ conn: s.conn.kind === "down" ? s.conn : { kind: "down", since: Date.now() } }));
@@ -227,11 +228,18 @@ async function hydrate(c: Client): Promise<void> {
     held = next;
     for (const run of waiting.splice(0)) run();
   };
+  const dispatch = (channel: Channel, run: () => void) => {
+    if (held === "all" || (held !== "none" && held.has(channel))) waiting.push(run);
+    else run();
+  };
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
-    c.subscribe(channel, (p) => {
-      if (held === "all" || (held !== "none" && held.has(channel))) waiting.push(() => handler(p));
-      else handler(p);
-    });
+    c.subscribe(channel, (p) => dispatch(channel, () => handler(p)));
+  c.subscribe("settings.changed", ({ voiceChange, ...settings }) => {
+    // Capture provenance at receipt. Replaying a buffered push must not
+    // reclassify an older local save after its response has settled.
+    const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
+    dispatch("settings.changed", () => applySettings(settings, false, voiceChange, own));
+  });
   try {
     await hydrateWith(on, release);
   } finally {
@@ -267,7 +275,6 @@ async function hydrateWith(
     void refreshCatalog();
   });
   on("threads.changed", () => void refreshThreads());
-  on("settings.changed", ({ voiceChange, ...settings }) => applySettings(settings, false, voiceChange));
   on("gpu.changed", (gpu) => {
     setState({ gpu });
     invalidateFits();
@@ -396,14 +403,14 @@ function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<S
   };
 }
 
-// The server sends each save's push before its response on the same socket.
-// Keep provenance until that response, so an older local completion is not a
-// new intent. Foreign saves still supersede checks, even if the URL is equal.
+// Ownership is consumed at push receipt, then travels with buffered work.
+// Successful responses leave it available for a push that arrives later;
+// closing the connection retires any unmatched saves.
 const voiceWrites = new Set<string>();
 
-function applySettings(settings: Settings, first = false, voiceChange?: string): void {
+function applySettings(settings: Settings, first = false, voiceChange?: string, own = false): void {
   setState((s) => ({ ...settingsPatch(s, settings, first),
-    ...(voiceChange === undefined ? {} : { voiceConnectionVersion: s.voiceConnectionVersion + Number(!voiceWrites.has(voiceChange)) }),
+    ...(voiceChange === undefined ? {} : { voiceConnectionVersion: s.voiceConnectionVersion + Number(!own) }),
   }));
   applyTheme(settings.theme);
   applyTextSize(settings.textSize);
@@ -1458,10 +1465,12 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
     if (!options.voiceActionStarted) setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
     voiceWrites.add(voiceChange);
   }
+  let saved = false;
   try {
     const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what);
     if (!r.ok) return r.message;
-    applySettings(r.value, false, voiceChange);
+    saved = true;
+    applySettings(r.value, false, voiceChange, true);
     // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
     if ("imageGen" in patch || "comfyUrl" in patch) {
       void probe("image.status", {}).then((imageStatus) => {
@@ -1469,7 +1478,7 @@ export async function updateSettings(patch: SettingsPatch, options: { voiceActio
       });
     }
     return null;
-  } finally { if (voiceChange !== undefined) voiceWrites.delete(voiceChange); }
+  } finally { if (!saved && voiceChange !== undefined) voiceWrites.delete(voiceChange); }
 }
 
 /** Save or reset one model; apply only the settings the server accepted. */

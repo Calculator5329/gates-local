@@ -86,6 +86,41 @@ it("VD-01: own older speech saves do not supersede a newer action; foreign saves
   expect(store.getState().voiceConnectionVersion).toBe(latest + 1);
 });
 
+it.each([
+  ["push", "response", "connect"],
+  ["response", "connect", "push"],
+  ["push", "connect", "foreign", "response"],
+  ["response", "connect", "foreign", "push"],
+].map((steps) => ({ steps })))("VE-01: hydration preserves speech ownership across $steps", async ({ steps }) => {
+  const settings = { ...methodSamples["settings.get"].result, whisperUrl: "http://127.0.0.1:18078" };
+  const disconnected = { ...settings, whisperUrl: undefined };
+  b.server.answer("settings.get", () => settings);
+  await boot();
+  // Reconnect with the first hydration batch held. Its settings snapshot is
+  // already off, so this probe isolates the buffered push's provenance.
+  b.server.answer("settings.get", () => disconnected);
+  const models = b.server.hold("models.list");
+  b.server.socket.close();
+  const hydration = await models;
+  const pending = b.server.hold("settings.update");
+  const saving = session.updateSettings({ whisperUrl: null });
+  const save = await pending;
+  let latest = -1;
+  for (const step of steps) {
+    if (step === "push") b.server.push("settings.changed", { ...disconnected, voiceChange: save.params.voiceChange });
+    if (step === "response") { save.respond(disconnected); await saving; }
+    if (step === "connect") {
+      store.setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+      latest = store.getState().voiceConnectionVersion;
+    }
+    if (step === "foreign") b.server.push("settings.changed", { ...disconnected, voiceChange: "other-window-disconnect" });
+  }
+  expect(store.getState().voiceConnectionVersion).toBe(latest);
+  hydration.respond(MODELS);
+  await until(hydrated, 2000, "hydration replay"); await tick();
+  expect(store.getState().voiceConnectionVersion).toBe(latest + Number(steps.includes("foreign")));
+});
+
 /** Send "hi" from a new thread and wait until chat.send answered turn-1. */
 async function startFirstTurn(): Promise<void> {
   void session.send("hi");
