@@ -10,8 +10,7 @@ interface Probe {
 declare global { interface Window { perfJourney: Probe } }
 
 /** Instrument the browser only. No production hook; no automation round-trip in elapsed time. */
-export async function install(page: Page, firstRun = false) {
-  await page.addInitScript((setup) => {
+export function browserProbe(setup: boolean) {
     if (setup) localStorage.removeItem("gates-local.first-run-done");
     else localStorage.setItem("gates-local.first-run-done", "1");
     const sockets: WebSocket[] = [];
@@ -31,7 +30,11 @@ export async function install(page: Page, firstRun = false) {
         frames = []; tasks = []; inputs = []; begin = 0;
         observer = new PerformanceObserver(list => { for (const entry of list.getEntries()) if (entry.startTime >= begin) tasks.push(entry.duration); });
         observer.observe({ type: "longtask" });
+        let collecting = false;
+        const onKey = (input: KeyboardEvent) => { if (collecting) inputs.push(Math.max(0, performance.now() - input.timeStamp)); };
+        document.addEventListener("keydown", onKey, true);
         const start = (input?: Event) => {
+          collecting = true;
           begin = event === "navigation" ? 0 : input?.timeStamp ?? performance.now();
           if (input) inputs.push(Math.max(0, performance.now() - input.timeStamp));
           let previous = performance.now();
@@ -46,6 +49,8 @@ export async function install(page: Page, firstRun = false) {
             disconnected ||= sockets.at(-1)?.readyState !== NativeSocket.OPEN;
             const match = mode === "absent" ? !visible
               : mode === "value" ? visible && (el as HTMLTextAreaElement).value === text
+              : mode === "usable-value" ? visible && (el as HTMLTextAreaElement).value === text && !(el as HTMLTextAreaElement).disabled && document.activeElement === el
+              : mode === "compact-text" ? inView && (el?.textContent ?? "").replace(/\s/g, "").includes(text)
               : mode === "count" ? document.querySelectorAll(selector).length === Number(text)
               : mode === "less-than" ? document.querySelectorAll(selector).length < Number(text)
               : mode === "ready" ? visible && !(el as HTMLTextAreaElement).disabled && !document.querySelector(".composer.blocked")
@@ -56,19 +61,31 @@ export async function install(page: Page, firstRun = false) {
             requestAnimationFrame(() => requestAnimationFrame(() => {
               for (const entry of observer?.takeRecords() ?? []) if (entry.startTime >= begin) tasks.push(entry.duration);
               observer?.disconnect();
+              collecting = false;
+              document.removeEventListener("keydown", onKey, true);
               resolve({ elapsed: performance.now() - begin, frames, longTasks: tasks, inputDelays: inputs });
             }));
           };
           requestAnimationFrame(check);
         };
-        if (event === "navigation" || event === "now") start();
+        if (event.startsWith("mutation:")) {
+          const from = event.slice("mutation:".length);
+          if (document.querySelector(from)) throw new Error(`Measurement begin marker already exists: ${from}`);
+          const starter = new MutationObserver(() => {
+            if (document.querySelector(from)) { starter.disconnect(); start(); }
+          });
+          starter.observe(document, { childList: true, subtree: true, attributes: true });
+        } else if (event === "navigation" || event === "now") start();
         else document.addEventListener(event, start, { capture: true, once: true });
       },
     };
     window.perfJourney = probe;
     // Armed before the production entry runs, including a cold startup slowdown.
     probe.arm("navigation", setup ? ".fr h1" : "#ta", setup ? "Ready to chat" : "", setup ? "text" : "ready");
-  }, firstRun);
+}
+
+export async function install(page: Page, firstRun = false) {
+  await page.addInitScript(browserProbe, firstRun);
 }
 
 export async function measure(page: Page, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text"): Promise<Observation> {

@@ -16,7 +16,7 @@ const gpu = path.join(run, "gpu.json");
 const data = path.join(run, "data");
 const prepared = process.env["GL_PERF_FIXTURE"];
 if (!prepared) throw new Error("The performance fixture must be prepared before server startup");
-const { short, long, thousands, huge } = restoreFixture(prepared, data);
+const ids = restoreFixture(prepared, data);
 // Prepare with the shared harness, not a target's potentially older fixture API.
 const libraryFixture = prepareLibraryFixture(run);
 
@@ -49,7 +49,7 @@ await start(["test/e2e/library-server.ts", "--port", String(SERVER_PORT), "--dat
 }, /"ready":true/);
 const control = createServer((req, res) => {
   if (req.url === "/health") { res.writeHead(200).end("ok"); return; }
-  if (req.url === "/seed") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ short, long, thousands, huge })); return; }
+  if (req.url === "/seed") { res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(ids)); return; }
   res.writeHead(404).end();
 });
 control.listen(CONTROL_PORT, new URL(FAKE_URL).hostname);

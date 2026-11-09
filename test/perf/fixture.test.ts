@@ -21,6 +21,13 @@ describe("prepared performance data", () => {
       expect(a.listThreads()).toHaveLength(400);
       expect(a.getThread(ids.long).messages).toHaveLength(200);
       expect(a.getThread(ids.thousands).messages).toHaveLength(2000);
+      const byTitle = (title: string) => a.listThreads().find(thread => thread.title === title)?.id;
+      const hover = byTitle("Perf hover 2000");
+      expect(hover).toBeDefined();
+      if (!hover) throw new Error("Missing never-visited hover fixture");
+      expect(a.getThread(hover).messages).toHaveLength(2000);
+      expect(a.getThread(hover).messages.at(-1)?.content).toContain("Perf hover 2000");
+      expect(a.getThread(ids.long).messages.at(-1)?.content).toContain("Perf long 200");
       expect(a.getThread(ids.huge).messages[0]?.content).toContain("const item3999");
       expect(a.getThread(ids.huge).messages[0]?.content).toContain("| Row 299 | Value 299 |");
       a.createThread({ title: "Only in the first block" });

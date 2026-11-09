@@ -178,6 +178,69 @@ are never replaced. `--self` compares the prepared base with itself. A shorter
 diagnostic uses `--rounds 4 --samples 2`; its eight-sample p95 is usually the
 maximum, not a precise tail estimate. Keep each job under 15 minutes.
 
+For hill-climbing, use the focused priority set. Prepare the current main
+locally, then submit the prepared inputs and this harness in one exclusive
+browser job with a display and a 900-second bound:
+
+```sh
+pnpm perf:compare --prepare main main --out perf-inputs-climb
+```
+
+The exact command inside that job is:
+
+```sh
+pnpm perf:compare --prepared perf-inputs-climb --self --only priority --rounds 4 --samples 2 --out perf-results-climb
+```
+
+Use fresh input/output directory names on each invocation. The full priority
+baseline uses eight repetitions per arm to stay within fifteen minutes; p95
+is usually the maximum and remains descriptive. For an individual climb, use
+a narrower `--only` group and increase `--samples` to 5 or more within the same
+job budget; the full set at three repetitions per arm exceeded that budget.
+`--only` also accepts any comma
+separated subset of `startup,send,threads,parallel,clipboard,voice,queue,reconnect,first-run`.
+Unknown names fail before a browser starts. Omit `--self` and prepare different
+commits to measure a climb. Omit `--only` for the established broad journey.
+Only selected groups execute, and first run is skipped unless selected.
+The selection is retained in every round and the comparison report.
+
+Priority workloads add cold/warm clicks and 350 ms hover-to-click paths at
+200/2,000 messages, switching between two genuinely streaming replies, copying
+a message and 4,000-line code block, a trusted 50,000-character text paste and
+immediate input, fake-microphone dictation, five consecutive queued sends and
+completion-to-next-token queue handoff. The 400-thread fixture uses separate
+never-visited hover targets. Distinct last-message markers and exact message
+counts prevent a stale conversation from ending a switch. Parallel switches
+wait for text already emitted by the selected request before the click.
+The parallel prompts keep the existing fake producing at least 600 reply
+tokens at its unchanged 24 ms cadence, so four switches cannot outlast the
+short original eight-block reply. Both turns must remain live during switches.
+Each action settles through two animation frames before its timer is armed;
+the hover dwell and setup are excluded from click-to-paint latency.
+
+Clipboard copying uses the native Chromium Clipboard API with permission;
+paste writes through that API and sends Control+V, checking a trusted paste
+event. This exercises the browser's clipboard route, not the desktop app's
+Electron bridge or cross-application system clipboard interoperability.
+It does not establish which clipboard backend headless Chromium uses.
+Voice uses the same prerecorded sine-wave microphone and fake Whisper HTTP
+protocol as the voice browser specs. Start and stop-to-transcript timings cover
+the application's handling, audio encoding and loopback transport, not real
+transcription speed. A second, explicitly held fake response allows a keypress
+while transcription is pending; its arrival window reports frames, long tasks
+and input dispatch delay. That controlled window is not an ASR latency metric.
+Queue handoff starts on the first reply's completed DOM state and ends when the
+next reply's first words paint; the unchanged fake's 40 ms token delay remains.
+
+For a self-comparison baseline, report median, p95 and the unchanged scorer's
+noise floor per action. A detectable improvement must exceed both that floor
+and the upper end of the paired bootstrap interval, with the resulting interval
+below zero. Express this empirical threshold in milliseconds and as a fraction
+of the baseline median. It is not a power guarantee; improvements below zero
+latency are impossible, and zero long-task counts cannot improve further.
+Keep all too-noisy labels. More repetitions and the settling window are cheap
+noise controls; they do not change the analysis or turn timing into a gate.
+
 Journeys cover ordinary chat, picker and Settings actions, 200/2,000-message
 threads, a 4,000-line code block and 300-row table, a 400-thread sidebar,
 concurrent streams and reconnect. Image paste is unsupported at this version.

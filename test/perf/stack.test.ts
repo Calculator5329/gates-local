@@ -16,7 +16,7 @@ test("the shared perf stack gives both legacy and fixture-requiring Library serv
   const scratch = mkdtempSync(path.join(cache, "stack-"));
   try {
     const template = path.join(scratch, "template"); mkdirSync(template);
-    writeFileSync(path.join(template, "fixture.json"), JSON.stringify({ short: "a", long: "b", thousands: "c", huge: "d" }));
+    writeFileSync(path.join(template, "fixture.json"), JSON.stringify({ short: "a", long: "b", thousands: "c", huge: "d", hoverLong: "e", hoverThousands: "f" }));
     for (const requiresFixture of [true, false]) {
       const target = path.join(scratch, requiresFixture ? "current" : "legacy");
       mkdirSync(path.join(target, "test/fake-ollama"), { recursive: true });

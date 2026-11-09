@@ -10,12 +10,16 @@ import { bundleSizeWarnings, bundleSize } from "../bundle-size.ts";
 import { prepareFixture } from "./fixture.ts";
 import { firstRunTimes } from "./first-run.ts";
 import { ownProcesses } from "./processes.ts";
+import { selectJourneys } from "./selection.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   prepare: { type: "boolean" }, prepared: { type: "string" }, out: { type: "string", default: "perf-results" },
   rounds: { type: "string", default: "5" }, samples: { type: "string", default: "3" },
   self: { type: "boolean" }, analyze: { type: "string" },
+  only: { type: "string" },
 } });
+const selected = selectJourneys(values.only);
+const includeFirstRun = selected === undefined || selected.includes("first-run");
 const out = path.resolve(values.out);
 const rounds = Number(values.rounds), samples = Number(values.samples);
 if (!Number.isInteger(rounds) || rounds < 4 || !Number.isInteger(samples) || samples < 1) throw new Error("Use at least four rounds and one sample");
@@ -27,7 +31,7 @@ type Bundles = { base: ReturnType<typeof bundleSize>; candidate: ReturnType<type
 function report(runs: Runs, commits: Inputs, count: number, repetitions: number, bundles: Bundles) {
   const changes = compare(runs.base, runs.candidate);
   const bundleWarnings = { base: bundleSizeWarnings(bundles.base), candidate: bundleSizeWarnings(bundles.candidate) };
-  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, bundles, bundleWarnings, changes }, null, 2) + "\n", { flag: "wx" });
+  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, only: runs.base[0]?.only, bundles, bundleWarnings, changes }, null, 2) + "\n", { flag: "wx" });
   const lines = ["Timing is informational. Slower means a measured signal, never a release failure.", "", "| Action | Unit | Base median | Base p95 | Candidate median | Delta | Noise floor | Signal |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", ...changes.map(c => `| ${c.action} | ${c.unit} | ${c.base.median.toFixed(2)} | ${c.base.p95.toFixed(2)} | ${c.candidate.median.toFixed(2)} | ${c.delta.toFixed(2)} | ${c.noiseFloor.toFixed(2)} | ${c.signal}${c.tooNoisy ? "; too noisy for small changes" : ""} |`)];
   lines.push("", "Bundle sizes are informational soft targets (KiB gzip).");
   for (const arm of ["base", "candidate"] as const) {
@@ -114,12 +118,15 @@ for (let round = 0; round < rounds; round++) {
     await command(["pnpm", "exec", "playwright", "test", "-c", "test/perf/playwright.config.ts"], ROOT, {
       ...process.env, GL_PERF_TARGET: subjects[arm], GL_PERF_FIXTURE: fixtures[arm], GL_PERF_COMMIT: inputs[arm], GL_PERF_ARM: arm,
       GL_PERF_ROUND: String(round + 1), GL_PERF_SAMPLES: String(samples), GL_PERF_OUT: runOut,
+      GL_PERF_ONLY: selected?.join(",") ?? "",
     });
     const run = JSON.parse(readFileSync(path.join(runOut, "run.json"), "utf8")) as Run;
-    if (run.commit !== inputs[arm] || run.metrics.length === 0) throw new Error("Incomplete run record");
-    const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined, shutdown.signal);
-    writeFileSync(path.join(runOut, "first-run.json"), JSON.stringify(firstRun, null, 2) + "\n", { flag: "wx" });
-    run.metrics.push(firstRun);
+    if (run.commit !== inputs[arm] || (run.metrics.length === 0 && !includeFirstRun)) throw new Error("Incomplete run record");
+    if (includeFirstRun) {
+      const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined, shutdown.signal);
+      writeFileSync(path.join(runOut, "first-run.json"), JSON.stringify(firstRun, null, 2) + "\n", { flag: "wx" });
+      run.metrics.push(firstRun);
+    }
     runs[arm].push(run);
   }
 }

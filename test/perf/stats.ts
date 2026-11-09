@@ -15,6 +15,8 @@ export interface Run {
   browser: string;
   fake: { firstTokenDelayMs: number; tokenDelayMs: number; burstTokens: number; thinking: false; loadDelayMs: number; longMarkdown: { tokenDelayMs: number; burstTokens: number }; concurrentParallelLimit?: number };
   metrics: Metric[];
+  only?: readonly string[];
+  workload?: { hoverDwellMs: number; pasteCharacters: number; settleFrames: number; parallelTokenDelayMs: number; parallelBurstTokens: number; clipboard: string; voice: string };
 }
 
 /** Nearest-rank quantiles; small-sample p95 is descriptive, often the maximum. */

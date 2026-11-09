@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-09: Priority baseline fits the browser job budget
+
+- The full set uses two repetitions per arm per round after the three-repeat
+  arm took about two minutes. Individual focused groups can take more samples;
+  the baseline retains its coarse p95 and unchanged noise labels.
+
+## 2026-11-09: Parallel switch measurements retain two live replies
+
+- Longer test prompts keep the existing fake reply active through four
+  switches without changing its token cadence or weakening current-text checks.
+  The baseline uses three repetitions per arm per round to fit the job budget.
+
+## 2026-11-09: Priority actions have focused performance journeys
+
+- Dedicated journeys time conversation visits and hover, parallel reply
+  switches, native browser copy/paste, fake dictation and queued handoff.
+  They verify the selected text and clipboard contents, with setup excluded
+  from the action timer. Voice measures application handling rather than ASR.
+
+## 2026-11-09: Performance workloads can be selected before a comparison
+
+- A validated `--only` selection makes room for more repetitions of the
+  priority workloads. Separate cold hover fixtures and current-text end
+  markers keep stale views from counting as completed switches. The scorer
+  and its too-noisy rule are unchanged.
+
 ## 2026-11-09: Pending download replies keep their own errors
 
 A late progress update from an older download cannot discard a pending
@@ -26,6 +52,7 @@ reads fail or time out. Retrying through a typed model name clears its
 earlier row error, and installation from another window cannot leave that
 error beside Installed. Legend tips close when their entry moves, changes
 text or disappears, while unrelated updates keep a valid tip open.
+
 ## 2026-11-09: Bundle size targets warn without blocking work
 
 - Gzip overages now report the size, target and amount over in builds and
