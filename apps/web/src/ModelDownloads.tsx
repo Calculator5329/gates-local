@@ -7,7 +7,7 @@ import type { CatalogEntry, FitReport, PullProgress } from "@gates-local/contrac
 import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { fitPendingWord } from "./fit-state.ts";
+import { fitPendingWord, fitReading } from "./fit-state.ts";
 import { nameOf, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, pendingDownload } from "./pick.ts";
 import { cancelPull, ensureFit, pull } from "./session.ts";
@@ -110,7 +110,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
 function DlRow({ c, numCtx, report }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined }) {
   const p = useStore((s) => s.pulls[c.name]);
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => m.name === c.name));
-  const phase = useStore(s => s.fitStatus?.[fitKey(c.name, numCtx)] ?? "fresh");
+  const phase = useStore(s => fitReading(s, c.name, numCtx).phase);
   const v = report && phase === "fresh" ? verdictOf(report) : undefined;
   const context = report?.numCtx ?? numCtx;
   const basis = v?.measured ? "Measured" : "Estimated";
@@ -194,6 +194,7 @@ export function DownloadTab() {
   const numCtx = useStore((s) => s.numCtx);
   const gpu = useStore((s) => s.gpu);
   const fits = useStore((s) => s.fits);
+  const fitStatus = useStore(s => s.fitStatus);
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
@@ -201,12 +202,13 @@ export function DownloadTab() {
     const r = fits[fitKey(c.name, numCtx)];
     return r === "error" ? undefined : r ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
   };
+  const phase = (c: CatalogEntry) => fitReading({ fits, fitStatus, catalog }, c.name, numCtx).phase;
   useEffect(() => {
     for (const c of list) ensureFit(c.name, numCtx);
   }, [catalog, numCtx, fits]);
-  const rec = list.filter(c => c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
+  const rec = list.filter(c => phase(c) === "fresh" && c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
   const more = list.filter(c => !rec.includes(c));
-  const allSpill = more.length > 0 && more.every(c => report(c)?.verdict === "spills");
+  const allSpill = more.length > 0 && more.every(c => phase(c) === "fresh" && report(c)?.verdict === "spills");
   return (
     <>
       <p className="mp-quiet">

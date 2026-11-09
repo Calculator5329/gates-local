@@ -84,6 +84,40 @@ for (const view of ["settings", "models", "picker"]) {
   });
 }
 
+it("PL-03: a held retry keeps Couldn't check visible until it succeeds", async () => {
+  render("settings");
+  const key = store.fitKey(model, 16384);
+  await until(() => store.getState().fits[key] !== undefined);
+  await tick();
+  const first = b.server.hold("fit.check");
+  b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, freeBytes: 0 });
+  const held = await first;
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    held.fail("unavailable", "cannot measure");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render("settings")).toContain("Couldn't check");
+    await vi.advanceTimersByTimeAsync(0);
+    const changedMemory = b.server.hold("fit.check");
+    b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, freeBytes: 1 });
+    expect(render("settings")).toContain("Rechecking");
+    const changed = await changedMemory;
+    expect(changed.params).toEqual({ model, numCtx: 16384 });
+    changed.fail("unavailable", "still unavailable");
+    await vi.advanceTimersByTimeAsync(0);
+    const retry = b.server.hold("fit.check");
+    await vi.advanceTimersByTimeAsync(2000);
+    const pending = await retry;
+    expect(render("settings")).toContain("Couldn't check");
+    expect(render("settings")).not.toContain("Rechecking");
+    pending.respond({ ...report, model, numCtx: 16384, verdict: "fits" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render("settings")).toMatch(/(?:Runs|Should run) well/);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("SR-02: Settings refreshes the displayed requested 16k key for an 8k-capped model without a manual ensureFit", async () => {
   store.setState({ models: [{ ...installed, maxContext: 8192 }], numCtx: 16384 });
   render("settings");

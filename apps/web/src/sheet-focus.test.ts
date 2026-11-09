@@ -3,15 +3,26 @@ import { keepSheetFocus } from "./sheet-focus.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("keeps focus in the modal when a fit result replaces the focused model button", () => {
+it.each([
+  ["legacy sheet", ".sh-h .ibtn", true, false],
+  ["picker model step", ".pk-close", true, false],
+  ["picker context step", ".pk-back", false, true],
+] as const)("PL-02: restores focus to a visible control on the %s", (_name, expected, closeVisible, backVisible) => {
   const body = {};
   const doc = { activeElement: body };
-  const close = { focus: () => { doc.activeElement = close; } };
+  const control = (selector: string, visible: boolean) => ({
+    selector,
+    getClientRects: () => visible ? [{}] : [],
+    focus() { if (visible) doc.activeElement = this; },
+  });
+  const buttons = expected === ".sh-h .ibtn" ? [control(expected, true)] : [control(".pk-close", closeVisible), control(".pk-back", backVisible)];
+  const close = buttons.find(button => button.selector === expected)!;
   const model = {};
-  let children: object[] = [close, model];
+  let children: object[] = [...buttons, model];
   const sheet = {
     contains: (node: unknown) => children.includes(node as object),
-    querySelector: () => close,
+    querySelector: (selector: string) => buttons.find(button => button.selector === selector) ?? null,
+    querySelectorAll: (selector: string) => buttons.filter(button => selector.split(",").map(s => s.trim()).includes(button.selector)),
   };
   let changed = vi.fn<() => void>();
   const disconnect = vi.fn();
@@ -23,14 +34,12 @@ it("keeps focus in the modal when a fit result replaces the focused model button
   });
   const stop = keepSheetFocus(sheet as unknown as HTMLElement);
   expect(doc.activeElement).toBe(close);
-  // Tab 10 lands on a model; a delayed fit replaces its button with a refused row.
   doc.activeElement = model;
-  children = [close];
+  children = [...buttons];
   doc.activeElement = body;
   changed();
-  expect(sheet.contains(doc.activeElement), "removing a focused row must not leave focus on body").toBe(true);
-  // An update that leaves a control focused must not steal it.
-  children = [close, model];
+  expect(doc.activeElement, "removing a focused control must return to a visible control").toBe(close);
+  children.push(model);
   doc.activeElement = model;
   changed();
   expect(doc.activeElement).toBe(model);

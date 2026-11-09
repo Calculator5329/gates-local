@@ -2,6 +2,7 @@
 
 ## 2026-11-09: First-run memory advice
 
+- Memory advice waits for a check, failures stay visible through retries, and phone sheets keep focus when their controls change.
 - A recommended download that uses system memory says it is slower, in both
   its introduction and tooltip.
 - When the selected model cannot run at the chosen context, first run names

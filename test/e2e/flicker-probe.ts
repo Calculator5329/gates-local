@@ -61,7 +61,7 @@ export async function burst(page: Page, surface: string, selector: string, actio
         });
       }
       const text = el?.innerText ?? "";
-      w.flickerFrames?.push({ at: performance.now() - start, text, boxes, checking: /Checking[^\n]*…/.test(text), verdicts: [...(el?.querySelectorAll(".fp-v, .vl, .mp-fit, .pk-v") ?? [])].map((n) => n.textContent ?? ""), elements: [...(el?.querySelectorAll("button, input, details, [role=alert]") ?? [])].map((n) => `${n.tagName}:${n.getAttribute("aria-label") ?? n.textContent}`) });
+      w.flickerFrames?.push({ at: performance.now() - start, text, boxes, checking: /checking[^\n]*…/i.test(text), verdicts: [...(el?.querySelectorAll(".fp-v, .vl, .mp-fit, .pk-v") ?? [])].map((n) => n.textContent ?? ""), elements: [...(el?.querySelectorAll("button, input, details, [role=alert]") ?? [])].map((n) => `${n.tagName}:${n.getAttribute("aria-label") ?? n.textContent}`) });
       if (active) requestAnimationFrame(sample);
     };
     sample();

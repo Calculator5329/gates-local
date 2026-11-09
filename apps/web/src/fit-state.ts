@@ -10,7 +10,7 @@ export function fitReading(s: FitState, model: string, numCtx: number): { report
   const entry = s.catalog === NA ? undefined : s.catalog?.find(c => c.name === model)?.fit;
   const raw = s.fits[key] ?? (entry?.numCtx === numCtx ? entry : undefined);
   const report = raw === "error" ? s.fitHistory?.[key] : raw;
-  return { report, phase: s.fitStatus?.[key] ?? (raw === "error" ? "error" : report === undefined ? "checking" : "fresh") };
+  return { report, phase: s.fitStatus?.[key] ?? (raw === "error" ? "error" : s.fits[key] === undefined ? "checking" : "fresh") };
 }
 
 export function currentFit(s: FitState, model: string, numCtx: number): FitReport | undefined {

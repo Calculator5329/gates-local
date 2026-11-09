@@ -59,6 +59,25 @@ const render = (state: object) => {
 const gpuPromises = (html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
+  it("PL-01: catalog-only downloads wait for a checked verdict before recommendation and memory grouping", () => {
+    const offered = entry("qwen3.5:4b", "Qwen 3.5 4B", "spills", 6);
+    const pending = render(noGpuComputer({ models: [], addPage: true, fits: {}, catalog: [offered] }));
+    expect(pending).toContain("Qwen 3.5 4B");
+    expect(pending).toContain("Rechecking");
+    expect(pending).not.toContain('class="vl spill"');
+    expect(pending).not.toContain('class="grp-t">Recommended');
+    expect(pending).not.toContain("Also available · uses system memory");
+    const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
+    expect(checked).toContain('class="vl spill"');
+    expect(checked).toContain('class="grp-t">Recommended');
+    expect(checked).not.toContain("Rechecking");
+  });
+
+  it("PL-01: embedding models without catalog reports have no pending chat-fit advice", () => {
+    const html = render(noGpuComputer({ models: [{ ...installed("embed:latest"), capabilities: ["embedding"] }], catalog: [], fits: {} }));
+    expect(html).toContain("Embedding model, not for chat");
+    expect(html).not.toMatch(/Checking|Rechecking/);
+  });
   it("catalog hydration replaces the raw name consistently on the row and its More control", () => {
     const early = render(noGpuComputer({ catalog: undefined }));
     const label = early.match(/class="mp-row[^>]+aria-label="([^"]+)"/)?.[1];
@@ -90,7 +109,7 @@ describe("Models on a computer with no supported GPU", () => {
   it("promises no GPU on either tab or with no models, and says system memory instead", () => {
     const list = render(noGpuComputer({}));
     const download = render(noGpuComputer({ addPage: true }));
-    const empty = render(noGpuComputer({ models: [], fits: {} }));
+    const empty = render(noGpuComputer({ models: [] }));
     expect([...gpuPromises(list), ...gpuPromises(download), ...gpuPromises(empty)]).toEqual([]);
     expect(list).toContain(
       "New chats start on this model. If it can&#x27;t run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.",

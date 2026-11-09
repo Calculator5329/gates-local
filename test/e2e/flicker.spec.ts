@@ -12,7 +12,7 @@ for (const delay of [0, 150, 600]) {
     const gpu = await openGpuMemory(page);
     await expect(gpu.locator(".fp-v:visible")).toBeVisible();
     await gpu.locator("summary").click();
-    await expect(gpu.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /.+/);
+    await expect(gpu.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /^(Runs on the GPU|Runs in system memory|Slower|Won't fit)/);
     const frames = await burst(page, `gpu-context-${delay}`, "#gpuMemory", () => gpu.locator('[data-ctx="32768"]').click());
     const metrics = memoryMetrics(frames);
     console.log(`FLICKER gpu-context-${delay} ${JSON.stringify(metrics)}`);

@@ -572,7 +572,7 @@ const FIT_RETRY_MAX_MS = 30_000;
 function checkFit(model: string, numCtx: number, key: string, failures: number): void {
   const epoch = fitEpoch;
   fitChecks.set(key, epoch);
-  setState(s => ({ fitStatus: { ...s.fitStatus, [key]: currentFit(s.fits[key]) === undefined || s.fits[key] === "error" ? "checking" : s.fitStatus[key] ?? "fresh" } }));
+  setState(s => ({ fitStatus: { ...s.fitStatus, [key]: failures > 0 ? "error" : currentFit(s.fits[key]) === undefined || s.fits[key] === "error" ? "checking" : s.fitStatus[key] ?? "fresh" } }));
   call("fit.check", { model, numCtx })
     .then(async (r) => {
       // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
