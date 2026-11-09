@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { CONTROL_PORT, FAKE_PORT, FAKE_URL, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "../e2e/env.ts";
 import { restoreFixture } from "./fixture.ts";
+import { prepareLibraryFixture } from "../e2e/library-fixture.ts";
 
 const target = process.env["GL_PERF_TARGET"] ?? ROOT;
 const cache = path.join(homedir(), ".cache", "gates-local-perf");
@@ -16,6 +17,8 @@ const data = path.join(run, "data");
 const prepared = process.env["GL_PERF_FIXTURE"];
 if (!prepared) throw new Error("The performance fixture must be prepared before server startup");
 const { short, long, thousands, huge } = restoreFixture(prepared, data);
+// Prepare with the shared harness, not a target's potentially older fixture API.
+const libraryFixture = prepareLibraryFixture(run);
 
 const children: ChildProcess[] = [];
 async function start(args: string[], env: NodeJS.ProcessEnv, ready: RegExp): Promise<ChildProcess> {
@@ -41,6 +44,7 @@ await start(["test/e2e/library-server.ts", "--port", String(SERVER_PORT), "--dat
   GATES_LOCAL_RUNTIME: "discover-only",
   GATES_LOCAL_OLLAMA_BINARY: "none",
   GATES_LOCAL_UPDATE_TEST_ROOT: run,
+  GL_E2E_LIBRARY_FIXTURE: libraryFixture,
   XDG_DATA_HOME: path.join(run, "xdg"),
 }, /"ready":true/);
 const control = createServer((req, res) => {

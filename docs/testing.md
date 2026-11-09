@@ -204,11 +204,26 @@ After an analysis correction, `--analyze SAVED_COMPARISON --out FRESH_DIRECTORY`
 recomputes from the original round files without rerunning browsers or
 overwriting either the raw measurements or the earlier analysis.
 
-Later release wiring: after existing correctness checks, prepare the previous
-released commit and candidate, run this comparison as an exclusive browser job,
-and attach its artifacts and exit code to the release report. A slower signal
-is informational; a tool failure means measurements unavailable. Neither changes
-the release verdict. No release script is changed here.
+Release checks run in one exclusive browser job, including the correctness
+checks and the comparisons that follow them. The release runner already holds
+that reservation; release-check does not acquire a nested one. After correctness
+and the existing timing project, release-check prepares the newest annotated
+stable `vX.Y.Z` tag that is an ancestor of the exact candidate, then runs four
+paired rounds with two samples per arm. Preparation and measurement share an 880-second bound,
+followed by bounded process shutdown if needed.
+
+Before the first release, the stated base is
+`a369f0a3b7280f33802d6f816287546814da99eb` (the first corrected scorer).
+`--performance-base <full-sha>` can state another first-release base; an existing
+qualifying release tag takes precedence. Lightweight tags and annotated tags
+outside the candidate's history are ignored. The report records the resolved
+base, tag or fallback reason, candidate, sampling plan, command exit code/signal and timeout.
+Raw rounds, screenshots, `comparison.json`, `comparison.md` and partial outputs
+stay in `<report>.artifacts/performance`; the command log sits alongside them.
+A slower signal is informational. Command failure or missing, malformed or
+mismatched comparison outputs mean measurements unavailable. Neither changes
+the release verdict, and release-tag never reads the comparison. Whole-check
+cancellation and unconfirmed process cleanup still fail the check.
 
 ## Client ordering replays
 

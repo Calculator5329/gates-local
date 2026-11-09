@@ -1,5 +1,5 @@
 // Informational only: timing signals never set the process exit code.
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { compare, type Run } from "./stats.ts";
 import { assertBundleBudget, bundleSize } from "../bundle-size.ts";
 import { prepareFixture } from "./fixture.ts";
 import { firstRunTimes } from "./first-run.ts";
+import { ownProcesses } from "./processes.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   prepare: { type: "boolean" }, prepared: { type: "string" }, out: { type: "string", default: "perf-results" },
@@ -80,16 +81,18 @@ const cache = path.join(homedir(), ".cache", "gates-local-perf");
 mkdirSync(cache, { recursive: true });
 const scratch = mkdtempSync(path.join(cache, "compare-"));
 const subjects = { base: path.join(scratch, "base"), candidate: path.join(scratch, "candidate") };
-let active: ReturnType<typeof spawn> | undefined;
+const shutdown = new AbortController();
+const processes = ownProcesses(shutdown.signal);
 async function command(args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
-  const child = spawn(args[0]!, args.slice(1), { cwd, env, stdio: "inherit" });
-  active = child;
-  const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1))); });
-  active = undefined;
-  if (code !== 0) throw new Error(`${args[0]} exited ${code}; no timing verdict produced`);
+  const child = processes.spawn(args[0]!, args.slice(1), { cwd, env, stdio: "inherit" });
+  try {
+    const code = await new Promise<number>((resolve, reject) => { child.once("error", reject); child.once("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 128 : 1))); });
+    shutdown.signal.throwIfAborted();
+    if (code !== 0) throw new Error(`${args[0]} exited ${code}; no timing verdict produced`);
+  } finally { await processes.stop(child); }
 }
-process.on("SIGTERM", () => { active?.kill("SIGTERM"); process.exitCode = 143; });
-process.on("SIGINT", () => { active?.kill("SIGINT"); process.exitCode = 130; });
+process.on("SIGTERM", () => { shutdown.abort(); process.exitCode = 143; });
+process.on("SIGINT", () => { shutdown.abort(); process.exitCode = 130; });
 for (const arm of ["base", "candidate"] as const) {
   mkdirSync(subjects[arm]);
   execFileSync("tar", ["-xf", path.join(source, values.self ? "base.tar" : `${arm}.tar`), "-C", subjects[arm]]);
@@ -112,11 +115,13 @@ for (let round = 0; round < rounds; round++) {
     });
     const run = JSON.parse(readFileSync(path.join(runOut, "run.json"), "utf8")) as Run;
     if (run.commit !== inputs[arm] || run.metrics.length === 0) throw new Error("Incomplete run record");
-    const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined);
+    const firstRun = await firstRunTimes(subjects[arm], fixtures[arm], samples, round === 0 && arm === "candidate" ? path.join(runOut, "first-run.png") : undefined, shutdown.signal);
     writeFileSync(path.join(runOut, "first-run.json"), JSON.stringify(firstRun, null, 2) + "\n", { flag: "wx" });
     run.metrics.push(firstRun);
     runs[arm].push(run);
   }
 }
+shutdown.signal.throwIfAborted();
+await processes.close();
 const bundles = { base: bundleSize(path.join(subjects.base, "apps/web/dist")), candidate: bundleSize(path.join(subjects.candidate, "apps/web/dist")) };
 report(runs, inputs, rounds, samples, bundles);

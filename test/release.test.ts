@@ -248,11 +248,112 @@ test.each([
 test("RJ tagging never reads timing information", async () => {
   const f = fixture();
   Object.defineProperty(f.report,"timing",{get:()=>{throw new Error("tagging read timing");}});
+  Object.defineProperty(f.report,"performance",{get:()=>{throw new Error("tagging read performance");}});
   Object.defineProperty(f.report.tests,"timing",{get:()=>{throw new Error("tagging read timing totals");}});
   f.report.steps.push({name:"timing",blocking:true,status:"failed",exitCode:124,durationMs:1});
   f.report.failures.push({step:"timing",test:"legacy timing",message:"not part of the blocking verdict"});
   await expect(checkTag(f.cwd,"v1.0.0",f.report)).resolves.toMatchObject({commit:f.sha});
 });
+
+function performanceFixture(action = "") {
+  const f = protocolFixture(['if (name === "e2e") fs.writeFileSync("correctness-passed", "yes");']);
+  writeFileSync(path.join(f.cwd, "perf.cjs"), [
+    'const fs = require("node:fs"), path = require("node:path");',
+    'const args = process.argv.slice(2);',
+    'if (!fs.existsSync("correctness-passed")) throw new Error("comparison ran before correctness");',
+    'const out = args[args.indexOf("--out") + 1]; fs.mkdirSync(out, { recursive: true });',
+    'if (args.includes("--prepare")) { fs.writeFileSync(path.join(out, "commits.json"), JSON.stringify({ base: args[1], candidate: args[2] })); process.exit(0); }',
+    'if (args[args.indexOf("--rounds") + 1] !== "4" || args[args.indexOf("--samples") + 1] !== "2") throw new Error("unexpected sampling plan");',
+    'const commits = JSON.parse(fs.readFileSync(path.join(args[args.indexOf("--prepared") + 1], "commits.json")));',
+    'fs.writeFileSync(path.join(out, "partial.txt"), "retained tool diagnostic");',
+    action,
+    'fs.writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, informational: true, commits, changes: [{ action: "picker", signal: "slower" }] }));',
+    'fs.writeFileSync(path.join(out, "comparison.md"), "picker: slower; informational");',
+  ].join("\n"));
+  f.git("add", "perf.cjs"); f.git("commit", "-m", "comparison protocol fixture"); f.git("push", "origin", "main");
+  return { ...f, sha: f.git("rev-parse", "HEAD") };
+}
+
+test.each(["released", "first release"])("release comparison records its exact base and retains slower results (%s)", async (mode) => {
+  const f = performanceFixture();
+  if (mode === "released") {
+    f.git("tag", "v0.9.0", "HEAD~2"); f.git("tag", "-a", "v0.10.0", "HEAD~1", "-m", "previous release");
+    f.git("tag", "v99.0.0-rc.1"); f.git("push", "origin", "--tags");
+  }
+  const base = f.git("rev-parse", mode === "released" ? "HEAD~1" : "HEAD~2");
+  const reportPath = path.join(f.dir, "performance.json");
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath, performanceBase: f.git("rev-parse", "HEAD~2") });
+  expect(report.status).toBe("passed");
+  expect(report).toMatchObject({ performance: { status: "available", base, candidate: f.sha, baseSource: mode === "released" ? "release" : "fallback", exitCode: 0 } });
+  if (mode === "released") expect(report.performance).toMatchObject({ releaseTag: "v0.10.0" });
+  else expect(report.performance).toMatchObject({ note: expect.stringMatching(/no.*release/i) });
+  expect(JSON.parse(readFileSync(reportPath + ".artifacts/performance/comparison.json", "utf8"))).toMatchObject({ commits: { base, candidate: f.sha }, changes: [{ signal: "slower" }] });
+  expect(readFileSync(reportPath + ".artifacts/performance/comparison.md", "utf8")).toContain("slower");
+  expect(report.scratchRemoved).toBe(true);
+  await expect(checkTag(f.cwd, "v1.0.0", report)).resolves.toMatchObject({ commit: f.sha });
+}, 30_000);
+
+test.each(["lightweight", "off-branch"])("release comparison ignores %s stable-shaped tags before selecting a release", async mode => {
+  const f = performanceFixture();
+  const base = f.git("rev-parse", "HEAD~1");
+  f.git("tag", "-a", "v1.0.0", base, "-m", "previous release");
+  if (mode === "lightweight") f.git("tag", "v9.0.0", base);
+  else {
+    const unrelated = f.git("commit-tree", "HEAD^{tree}", "-m", "unrelated history");
+    f.git("tag", "-a", "v9.0.0", unrelated, "-m", "off-branch tag");
+  }
+  f.git("push", "origin", "--tags");
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "qualified-base.json"), performanceBase: f.sha });
+  expect(report.status).toBe("passed");
+  expect(report.performance).toMatchObject({ base, baseSource: "release", releaseTag: "v1.0.0" });
+  f.git("tag", "-d", "v1.0.0"); f.git("push", "origin", ":refs/tags/v1.0.0");
+  const fallback = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "fallback-base.json"), performanceBase: f.sha });
+  expect(fallback.performance).toMatchObject({ base: f.sha, baseSource: "fallback" });
+}, 30_000);
+
+test.each([
+  ["command failure", "process.exit(17);", 17],
+  ["missing report", "process.exit(0);", 0],
+  ["wrong commits", 'commits.candidate = "0".repeat(40);', 0],
+  ["malformed report", 'fs.writeFileSync(path.join(out, "comparison.json"), "not JSON"); process.exit(0);', 0],
+] as const)("release comparison tool failure is unavailable, never a verdict (%s)", async (_name, action, exitCode) => {
+  const f = performanceFixture(action);
+  const reportPath = path.join(f.dir, "unavailable.json");
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath, performanceBase: f.sha });
+  expect(report.status).toBe("passed");
+  expect(report).toMatchObject({ performance: { status: "unavailable", exitCode, note: expect.any(String) } });
+  expect(readFileSync(reportPath + ".artifacts/performance/partial.txt", "utf8")).toContain("diagnostic");
+  await expect(checkTag(f.cwd, "v1.0.0", report)).resolves.toMatchObject({ commit: f.sha });
+}, 30_000);
+
+test.each(["timeout", "cancel"])("release comparison preserves bounded shutdown and whole-check cancellation (%s)", async (mode) => {
+  const f = performanceFixture();
+  const marker = path.join(f.dir, "performance-ready");
+  const file = path.join(f.cwd, "perf.cjs");
+  writeFileSync(file, readFileSync(file, "utf8").replace('const commits = JSON.parse', `fs.writeFileSync(${JSON.stringify(marker)}, "ready"); setInterval(() => {}, 1000);\nconst commits = JSON.parse`));
+  f.git("add", "perf.cjs"); f.git("commit", "-m", "bounded comparison fixture"); f.git("push", "origin", "main");
+  const abort = new AbortController();
+  const watcher = watch(f.dir);
+  const ready = new Promise<void>(resolve => watcher.on("change", () => { if (existsSync(marker)) resolve(); }));
+  const checked = runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.git("rev-parse", "HEAD"), reportPath: path.join(f.dir, "bounded-performance.json"), performanceBase: f.sha, performanceTimeoutMs: mode === "timeout" ? 1000 : undefined, signal: abort.signal });
+  try {
+    await Promise.race([ready, checked.then(() => { throw new Error("comparison exited before readiness"); })]);
+    if (mode === "cancel") abort.abort();
+    const report = await checked;
+    expect(report.status).toBe(mode === "timeout" ? "passed" : "failed");
+    expect(report.performance).toMatchObject({ status: "unavailable", timedOut: mode === "timeout" });
+    expect(report.scratchRemoved).toBe(true);
+    if (mode === "cancel") expect(report.interrupted).toBe(true);
+    else await expect(checkTag(f.cwd, "v1.0.0", report)).resolves.toMatchObject({ commit: f.git("rev-parse", "HEAD") });
+  } finally { watcher.close(); abort.abort(); await checked; }
+}, 30_000);
+
+test("release comparison states its default first-release base even when that commit is unavailable", async () => {
+  const f = protocolFixture();
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "missing-base.json") });
+  expect(report.status).toBe("passed");
+  expect(report.performance).toMatchObject({ status: "unavailable", baseSource: "fallback", base: "a369f0a3b7280f33802d6f816287546814da99eb", exitCode: null, note: expect.stringMatching(/No previous release tag.*a369f0a/) });
+}, 30_000);
 
 test("RJ blocking functional failure still fails the release", async () => {
   const f = protocolFixture(['if (name === "e2e") { fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify({stats:{expected:0,unexpected:1,flaky:0,skipped:0},suites:[{specs:[{title:"functional companion",tests:[{results:[{status:"failed",errors:[{message:"rendered only 399 messages"}]}]}]}]}]})); process.exit(1); }']);
@@ -260,6 +361,7 @@ test("RJ blocking functional failure still fails the release", async () => {
   expect(report.status).toBe("failed");
   expect(report.failures.some(failure=>failure.message.includes("399 messages"))).toBe(true);
   expect(report.timing).toBeUndefined();
+  expect(report.performance).toBeUndefined();
   await expect(checkTag(f.cwd,"v1.0.0",report)).rejects.toThrow(/failed/);
 },30_000);
 
@@ -275,6 +377,7 @@ test("RJ build failure blocks before the browser project", async () => {
   expect(report.status).toBe("failed");
   expect(report.steps.find(step=>step.name==="build")?.status).toBe("failed");
   expect(report.steps.some(step=>step.name==="e2e")).toBe(false);
+  expect(report.performance).toBeUndefined();
 },30_000);
 
 test("RJ timing has its own bound and its timeout is informational", async () => {

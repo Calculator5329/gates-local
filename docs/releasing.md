@@ -26,6 +26,28 @@ uses the timing report to decide the verdict. A timing crash, missing,
 stale or empty report, assertion failure or timeout cannot pass or fail
 the release. Timing thresholds are unchanged.
 
+Run the whole release check as one exclusive browser job. After correctness
+and timing, it also compares the newest annotated stable release tag whose
+commit is an ancestor of the candidate with that candidate
+using `perf:compare --prepare`, then four paired rounds of two samples each.
+Preparation and measurement share an 880-second limit. Before any release tag
+exists, the report states base `a369f0a3b7280f33802d6f816287546814da99eb`;
+`--performance-base <full-sha>` overrides that first-release base. The
+`performance` field records the exact commits, base selection, exit code,
+signal, timeout and retained artifact paths. Slower results remain informational;
+a tool failure or invalid/missing output means measurements unavailable.
+Neither changes the verdict or tag eligibility. See [testing](testing.md) for
+the sampling and noise model. The enclosing runner reserves exclusive access;
+the check does not request a second reservation inside that job. Lightweight
+tags and tags outside the candidate's history do not qualify as releases;
+when none qualify, the stated fallback base is used.
+
+Comparison commands and first-run servers share owned-process cleanup.
+Cancellation stops first-run's detached stack and preview groups even during
+startup or measurement, with bounded escalation before the release supervisor
+can kill the comparison. Cleanup confirms every owned group member stopped
+and unregisters completed groups; later signals never target those old groups.
+
 The blocking project retains cold-load readiness/console-error checks,
 all 400 rendered messages and complete typed input while idle, streaming
 and busy. `pnpm e2e` runs that project; `pnpm e2e:timing` runs the

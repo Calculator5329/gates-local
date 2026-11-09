@@ -10,6 +10,22 @@ import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
 export interface Totals { passed: number; failed: number; skipped: number }
 export interface Step { name: string; blocking: boolean; status: "passed" | "failed"; exitCode: number; durationMs: number }
 export interface Failure { step: string; test: string; message: string }
+export interface PerformanceComparison {
+  status: "available" | "unavailable";
+  candidate: string;
+  base?: string;
+  baseSource?: "release" | "fallback";
+  releaseTag?: string;
+  note?: string;
+  exitCode: number | null;
+  signal?: NodeJS.Signals | null;
+  timedOut?: boolean;
+  artifacts: string;
+  reportPath: string;
+  logPath: string;
+  rounds: number;
+  samples: number;
+}
 export interface ReleaseReport {
   schemaVersion: 1;
   commit: string;
@@ -22,12 +38,17 @@ export interface ReleaseReport {
   steps: Step[];
   tests: { unit: Totals; e2e: Totals };
   failures: Failure[];
+  // Eligibility deliberately never reads or validates informational payloads.
   timing?: unknown;
+  performance?: unknown;
   interrupted?: boolean;
   scratchRemoved?: boolean;
   limits?: string[];
 }
-export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number }
+export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number }
+
+// The first corrected comparison scorer is the stated base before the first release.
+const FIRST_PERFORMANCE_BASE = "a369f0a3b7280f33802d6f816287546814da99eb";
 
 const BLOCKING = ["clone", "checkout", "install", "verify", "build", "e2e"];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -343,6 +364,53 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
       const timing = await execute([...playwright, "test", "-c", "test/e2e/playwright.config.ts", "--project=timing", "--forbid-only", "--reporter=list,json"], clone, path.join(artifacts, "timing.log"), options.timingTimeoutMs ?? 120_000);
       report.timing = { completed: timing.completed, exitCode: timing.exitCode, signal: timing.terminationSignal, timedOut: timing.timedOut, reportPath: timingReport };
     } catch { /* Timing execution errors are informational too. */ }
+    if (options.signal?.aborted) throw new Error("Release check interrupted");
+
+    // The enclosing release job holds exclusive browser access throughout.
+    // Do not request a nested reservation. Keep outputs outside the disposable clone.
+    active = "performance";
+    const performanceDir = path.join(artifacts, "performance");
+    const inputs = path.join(scratch, "performance-inputs");
+    const performance: PerformanceComparison = {
+      status: "unavailable", candidate: report.commit, exitCode: null,
+      artifacts: performanceDir, reportPath: path.join(performanceDir, "comparison.json"),
+      logPath: path.join(artifacts, "performance.log"), rounds: 4, samples: 2,
+    };
+    report.performance = performance;
+    const deadline = Date.now() + (options.performanceTimeoutMs ?? 880_000);
+    try {
+      mkdirSync(performanceDir);
+      writeFileSync(performance.logPath, `Candidate: ${report.commit}\n`, { flag: "wx" });
+      const releaseTags = git(clone, "for-each-ref", "--merged", report.commit, "--format=%(refname:strip=2) %(objecttype)", "refs/tags")
+        .split("\n").filter(line => line.endsWith(" tag")).map(line => line.slice(0, -4));
+      const releaseTag = newestRelease(releaseTags);
+      performance.baseSource = releaseTag ? "release" : "fallback";
+      if (releaseTag) performance.releaseTag = releaseTag;
+      else performance.note = `No previous release tag; using the stated fallback base ${options.performanceBase ?? FIRST_PERFORMANCE_BASE}.`;
+      const fallback = options.performanceBase ?? FIRST_PERFORMANCE_BASE;
+      if (!releaseTag && !/^[a-f0-9]{40}$/.test(fallback)) throw new Error("--performance-base must be a full 40-character commit sha; measurements unavailable.");
+      performance.base = releaseTag ? git(clone, "rev-parse", "--verify", `refs/tags/${releaseTag}^{commit}`) : fallback;
+      git(clone, "rev-parse", "--verify", `${performance.base}^{commit}`);
+      appendFileSync(performance.logPath, `Base: ${performance.base} (${performance.baseSource}${releaseTag ? ` ${releaseTag}` : ""})\n`);
+      const commands = [
+        ["pnpm", "perf:compare", "--prepare", performance.base, report.commit, "--out", inputs],
+        ["pnpm", "perf:compare", "--prepared", inputs, "--rounds", String(performance.rounds), "--samples", String(performance.samples), "--out", performanceDir],
+      ];
+      for (const command of commands) {
+        const result = await execute(command, clone, performance.logPath, Math.max(1, deadline - Date.now()));
+        performance.exitCode = result.exitCode;
+        performance.signal = result.terminationSignal;
+        performance.timedOut = result.timedOut;
+        if (!result.completed || result.code) throw new Error(`Comparison command failed (${result.exitCode ?? result.terminationSignal ?? "no exit"}${result.timedOut ? "; timed out" : ""}); measurements unavailable.`);
+      }
+      const measured: unknown = JSON.parse(readFileSync(performance.reportPath, "utf8"));
+      if (!record(measured) || measured["schema"] !== 1 || measured["informational"] !== true || !record(measured["commits"])
+        || measured["commits"]["base"] !== performance.base || measured["commits"]["candidate"] !== report.commit
+        || !existsSync(path.join(performanceDir, "comparison.md"))) throw new Error("Comparison outputs are missing, invalid, or name different commits; measurements unavailable.");
+      performance.status = "available";
+    } catch (error) {
+      performance.note = [performance.note, errorText(error)].filter(Boolean).join(" ");
+    }
     if (options.signal?.aborted) throw new Error("Release check interrupted");
     report.status = "passed";
   } catch (error) {

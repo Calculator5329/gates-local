@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-09: Release comparisons stop their servers and use qualifying releases
+
+- Canceling or timing out a comparison now stops its detached first-run server
+  groups during startup and measurement, including surviving descendants.
+  Finished groups are unregistered so later cancellation cannot target them.
+- Comparison bases come from annotated release tags in the candidate's history.
+  Lightweight and off-branch tags cannot displace a release or suppress fallback.
+
+## 2026-11-09: Performance comparisons prepare offline Library data
+
+- The shared performance harness prepares its own Library sample and Git
+  repository before starting either archived server. Comparisons can run an
+  older server that ignores this fixture and a newer server that requires it,
+  without depending on the target commit's fixture-preparation API.
+
+## 2026-11-09: Release reports include a comparison with the previous release
+
+- After correctness passes, the exclusive release job compares the previous
+  stable release with the candidate and retains its measurements and exit code.
+  Before the first release, the report names the chosen fallback commit.
+  Slower measurements stay informational; tool failures say measurements are
+  unavailable and leave the correctness verdict unchanged.
+
 ## 2026-11-09: Completed deletes succeed even when image cleanup fails
 
 Thread and message deletion now log an image-cleanup failure after the row

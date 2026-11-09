@@ -50,6 +50,8 @@ if (command === "--version") {
   const metadata = local.resolve("playwright/package.json");
   const cli = JSON.parse(readFileSync(metadata, "utf8")).bin.playwright;
   run(process.execPath, [path.resolve(path.dirname(metadata), cli), ...args.slice(1)]);
+} else if (command === "perf:compare") {
+  run(process.execPath, ["perf.cjs", ...args]);
 } else if (command === "verify" || command === "build") {
   const script = pkg.scripts?.[command];
   if (typeof script !== "string") throw new Error("Missing fixture script");

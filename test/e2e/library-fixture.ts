@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export function prepareLibraryFixture(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "library-browser-"));
+export function prepareLibraryFixture(parent = tmpdir()): string {
+  const root = mkdtempSync(path.join(parent, "library-browser-"));
   const file = path.join(root, "sample.db");
   const db = new DatabaseSync(file);
   db.exec("CREATE TABLE albums (title TEXT); INSERT INTO albums VALUES ('Fixture album');"); db.close();
