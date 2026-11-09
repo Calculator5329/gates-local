@@ -107,6 +107,22 @@ describe("openThreadStore", () => {
 });
 
 describe("migrate", () => {
+  it.each([4, 5])("repairs an earlier paste database at version %s without losing messages", version => {
+    const path = join(dir, `paste-v${version}.db`);
+    const db = raw(path);
+    for (const step of MIGRATIONS.slice(0, 3)) step.up(db);
+    db.exec(`ALTER TABLE messages ADD COLUMN context_notice TEXT; PRAGMA user_version = ${version}`);
+    db.prepare("INSERT INTO threads VALUES ('kept', 'Kept', 1, 1)").run();
+    db.prepare("INSERT INTO messages (id,thread_id,role,content,created_at,context_notice) VALUES ('old','kept','user','Keep my words',1,'A notice')").run();
+    db.close();
+    const repaired = store(path);
+    expect(repaired.getThread("kept").messages[0]).toMatchObject({ content: "Keep my words", contextNotice: "A notice" });
+    repaired.saveImageJob({ jobId: "new-image", threadId: "kept", state: "queued" }, "Draw this");
+    const check = raw(path);
+    expect(check.prepare("PRAGMA table_info(messages)").all().map(row => row["name"])).toEqual(expect.arrayContaining(["context_notice", "image_job_json"]));
+    expect(pragma(check, "user_version")).toBe(LATEST_VERSION);
+    check.close();
+  });
   it("applies a later step on top of version 1", () => {
     const path = join(dir, "m.db");
     const db = raw(path);

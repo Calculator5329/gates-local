@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-09: Keep recovered sends safe through navigation
+
+Opening Settings or visiting another thread no longer changes a recovered
+message's send identity. Returning to its original thread retries that message;
+sending it in another thread or editing its words creates a new identity.
+
+## 2026-11-09: Keep uncertain sends safe to retry
+
+- Retrying an unconfirmed send returns its saved message instead of sending
+  it twice. A stalled request returns the words and attachments for retry.
+- Editing a recovered message keeps the new words when the original send
+  later succeeds. Pressing Enter twice while a new chat is created sends once.
+- Copied paths go only to the composer and draft where the paste began.
+- Updates reopen earlier chat-image databases without losing their messages.
+
 ## 2026-11-09: Check a real model through chat
 
 An opt-in smoke now starts an isolated, cached small Ollama model and exercises
@@ -479,6 +494,54 @@ and selected reply text. Desktop permission handling remains unchanged.
   144 and CSS is 12.76 KiB against 13. The budgets remain unchanged; the JS
   excess must be resolved before landing. Browser verification on the
   designated external runner is pending.
+
+## 2026-11-08: Paste privacy and messages kept through interrupted sends
+
+- Main reads copied file paths for a trusted keyboard or native-menu paste
+  and pushes them to the focused composer. The renderer cannot request them.
+  Paths containing decoded C0 or DEL controls are skipped with a
+  plain explanation.
+- GIF, JPEG, PNG and WebP containers are checked for complete headers and
+  structure, including dimensions and a 40 megapixel decoded canvas/frame
+  limit, before storage. Animated PNG frame bounds, sequence and required
+  frame data are checked too. Conflicting or duplicate WebP payload chunks
+  are refused. This uses no image decoder or added library.
+- Image context accounting uses dimensions, conservative patch geometry and
+  reported maximum resize metadata instead of the earlier fixed estimate.
+  A 4,096-token floor covers small or fixed-size image encoders. GPU fit,
+  memory rules and Ollama GPU placement are unchanged.
+- Unconfirmed text and image sends return to the composer or a visible held
+  queue without overwriting newer typing. A late confirmation removes that
+  copy. Saved messages keep their image files; deleting the last saved
+  reference removes the file. Unreferenced uploads get 24 hours before a
+  startup sweep. Failed admission collects only files it created.
+- If earlier images become unavailable, the model gets a short marker and
+  the reply shows a separate plain notice. Saved message text is unchanged.
+  The notice also survives a later tool round dropping an image followed by
+  a stopped or failed reply, including stopped words kept when switching chats.
+
+## 2026-11-08: Paste into chat (browser acceptance pending)
+
+- The desktop gets T3-style native editing menus, plus Copy Image, Copy
+  Link and spelling suggestions where applicable. Copied file-manager
+  items insert absolute paths as text without reading those files.
+- Pasted images become removable thumbnails and travel through the chat
+  request to Ollama. They stay with saved user messages, Retry, editing,
+  queues and device-local drafts. Reloaded queues wait on hold.
+- T3's image-first precedence applies to mixed text/image clips. File
+  paths take priority as the owner's explicit exception. Browser file
+  pastes explain when a real path is unavailable.
+- Up to eight images, 10 MiB each; larger images are compressed using
+  T3's quality ladder, with a 50 MiB source limit. Small images keep their
+  original bytes. The authenticated socket cap is 128 MiB to carry eight
+  base64 payloads; saved threads contain paths rather than image bytes.
+- Earlier user images are resent while their turns remain in the context
+  window. Each reserves an estimated 2,048 tokens in plain and tool turns;
+  actual token usage remains Ollama's report. Generated assistant images
+  are not resent as vision input. Switching to a text-only model omits
+  earlier images, and attaching new images requires a vision model.
+- Browser and real desktop acceptance is pending on the external runner.
+  The JS bundle exceeds its existing budget; the budget is unchanged.
 
 ## 2026-11-08: Steady reply streaming
 

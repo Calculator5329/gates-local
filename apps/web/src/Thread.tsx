@@ -12,6 +12,7 @@ import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
+import { AttachmentImages } from "./attachment-images.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -86,7 +87,7 @@ function ActRow({ text, meta, regen }: { text: string; meta: string; regen: bool
   );
 }
 
-function UserBubble({ text, time }: { text: string; time: string }) {
+function UserBubble({ text, time, images = [] }: { text: string; time: string; images?: readonly string[] | undefined }) {
   return (
     <div className="turn u" tabIndex={0} aria-label="Your message">
       <div className="u-row">
@@ -99,7 +100,7 @@ function UserBubble({ text, time }: { text: string; time: string }) {
             data-tip="Edit"
             aria-label="Edit"
             onClick={() => {
-              setState({ draft: text });
+              setState({ draft: text, draftImages: images });
               focusComposer(true);
             }}
           >
@@ -107,7 +108,7 @@ function UserBubble({ text, time }: { text: string; time: string }) {
           </button>
           <CopyButton text={text} />
         </div>
-        <div className="bubble">{text}</div>
+        <div className="bubble">{images.length ? <div className="user-images"><AttachmentImages images={images} /></div> : null}{text}</div>
       </div>
     </div>
   );
@@ -247,7 +248,7 @@ function ImageJob({ msg }: { msg: Message }) {
 
 const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
   countRender(msg.id);
-  return <UserBubble text={msg.content} time={turnTime(msg.createdAt)} />;
+  return <UserBubble text={msg.content} images={msg.images} time={turnTime(msg.createdAt)} />;
 });
 
 /** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. While the model reasons, its icon is the thinking row's bulb. */
@@ -274,6 +275,7 @@ const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: str
   const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
   const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
   const end = live?.end;
+  const contextNotice = msg?.contextNotice ?? live?.contextNotice;
   const name = describeModel(msg?.model ?? live?.model ?? "", catalog).name;
   const text = msg?.content ?? live?.text ?? "";
   const thinking = msg?.thinking ?? live?.thinking ?? "";
@@ -294,13 +296,14 @@ const AsstTurn = memo(function AsstTurn({ threadId, msg, last }: { threadId: str
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
-      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} time={turnTime(live.startedAt)} /> : null}
+      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null}
       <div className={`turn a${streaming || pending ? "" : " done"}`} tabIndex={0} aria-label="Reply" data-received={text.length} data-revealed={paced.length}>
         {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
         {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
           <ToolRow key={t.callId} step={t} stopped={end !== undefined} />
         ))}
         {msg?.imageJob ? <ImageJob msg={msg} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
+        {contextNotice ? <p className="na" role="status">{contextNotice}</p> : null}
         {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} />)}
         {(streaming || pending) && text !== "" ? (
           <div className="working writing" role="status">

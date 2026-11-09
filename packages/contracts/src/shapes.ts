@@ -61,6 +61,8 @@ export const ImageEvent = S.Struct({
 export type ImageEvent = typeof ImageEvent.Type;
 
 export const Message = S.Struct({
+  /** Context omissions, outside the saved message text. */
+  contextNotice: S.optional(S.String),
   id: S.String,
   threadId: S.String,
   role: Role,
@@ -71,7 +73,7 @@ export const Message = S.Struct({
   stats: S.optional(MessageStats),
   /** Tool calls the assistant made in this turn, in order. */
   tools: S.optional(S.Array(ToolStep)),
-  /** Images made in this turn, as paths relative to the server's data dir ("images/<jobId>.png"); the server serves them over HTTP. */
+  /** Attached user images or generated assistant images, relative to the server data dir; served over authenticated HTTP. */
   images: S.optional(S.Array(S.String)),
   imageJob: S.optional(ImageEvent),
 });
@@ -161,12 +163,14 @@ export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it
   // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
   S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message }),
-  S.Struct({ type: S.Literal("delta"), text: S.String }),
+  // An empty delta can carry context metadata without becoming reply text.
+  S.Struct({ type: S.Literal("delta"), text: S.String, contextNotice: S.optional(S.String) }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
   // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
   S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
   S.Struct({
     type: S.Literal("error"),
+    contextNotice: S.optional(S.String),
     code: S.String,
     message: S.String,
     /**

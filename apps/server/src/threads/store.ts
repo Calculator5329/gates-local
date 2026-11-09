@@ -26,6 +26,9 @@ export interface ThreadStoreOptions {
 }
 
 export interface ThreadStore {
+  getMessage(messageId: string): Message | undefined;
+  deleteMessage(threadId: string, messageId: string): void;
+  imageReferences(): Map<string, number>;
   readonly dbPath: string;
   listThreads(): Thread[];
   createThread(input?: { title?: string }): Thread;
@@ -86,16 +89,17 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     deleteThread: db.prepare("DELETE FROM threads WHERE id = ?"),
     touchThread: db.prepare("UPDATE threads SET updated_at = MAX(updated_at, ?) WHERE id = ?"),
     messageExists: db.prepare("SELECT 1 AS hit FROM messages WHERE id = ?"),
+    getMessage: db.prepare("SELECT * FROM messages WHERE id = ?"),
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
                              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, context_notice)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, image_job_json
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, image_job_json, context_notice
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
     insertImageCard: db.prepare("INSERT INTO messages (id, thread_id, role, content, created_at, image_job_json) VALUES (?, ?, 'assistant', ?, ?, ?) ON CONFLICT(id) DO NOTHING"),
@@ -129,6 +133,28 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
 
   return {
     dbPath,
+
+    getMessage(messageId) {
+      guard(); checkId("messageId", messageId);
+      const row = stmt.getMessage.get(messageId);
+      return row ? messageFromRow(row) : undefined;
+    },
+
+    deleteMessage(threadId, messageId) {
+      guard(); checkId("messageId", messageId); loadThread(threadId);
+      db.prepare("DELETE FROM messages WHERE id = ? AND thread_id = ?").run(messageId, threadId);
+    },
+    imageReferences() {
+      guard();
+      const refs = new Map<string, number>();
+      const add = (image: string) => refs.set(image, (refs.get(image) ?? 0) + 1);
+      for (const row of db.prepare("SELECT images_json FROM messages WHERE images_json IS NOT NULL").all()) {
+        const value: unknown = JSON.parse(str(row, "images_json"));
+        if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) throw new Error("Stored image references could not be read.");
+        for (const image of value) add(image);
+      }
+      return refs;
+    },
 
     listThreads() {
       guard();
@@ -202,8 +228,9 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           msg.images === undefined ? null : JSON.stringify(msg.images),
           s?.evalDurationMs ?? null,
           s?.promptEvalDurationMs ?? null,
+          msg.contextNotice ?? null,
         );
-        stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
+          stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
       });
     },
@@ -321,6 +348,8 @@ function checkNewMessage(input: unknown, now: () => number): Message {
     throw new InvalidInputError("createdAt", "expected integer milliseconds since epoch");
   }
   const msg: Message = { id, threadId, role: role as Role, content, createdAt };
+  const contextNotice = checkOptionalString("contextNotice", v["contextNotice"]);
+  if (contextNotice !== undefined) msg.contextNotice = contextNotice;
   const thinking = checkOptionalString("thinking", v["thinking"]);
   if (thinking !== undefined) msg.thinking = thinking;
   const model = checkOptionalString("model", v["model"]);
@@ -436,6 +465,8 @@ function messageFromRow(row: Row): Message {
   if (tools !== undefined) msg.tools = JSON.parse(tools) as ToolStepRecord[];
   const images = optStr(row, "images_json");
   if (images !== undefined) msg.images = JSON.parse(images) as string[];
+  const notice = optStr(row, "context_notice");
+  if (notice !== undefined) msg.contextNotice = notice;
   const job = optStr(row, "image_job_json");
   if (job !== undefined) msg.imageJob = S.decodeUnknownSync(ImageEvent)(JSON.parse(job));
   return msg;

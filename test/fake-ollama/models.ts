@@ -32,6 +32,21 @@ function model(m: Omit<FakeModel, "digest">): FakeModel {
 }
 
 export const FAKE_MODELS: readonly FakeModel[] = [
+  // Opt-in vision fixture that fits the measured fake GPU at the default context.
+  model({
+    name: "qwen3-vl:8b",
+    family: "qwen3vl",
+    parameterSize: "8.8B",
+    parameterCount: 8_800_000_000,
+    quantization: "Q4_K_M",
+    sizeBytes: Math.round(6 * GIB),
+    capabilities: ["completion", "vision"],
+    blockCount: 32,
+    headCount: 32,
+    headCountKv: 8,
+    keyLength: 128,
+    contextLength: 131_072,
+  }),
   model({
     name: "qwen3.5:9b",
     family: "qwen35",

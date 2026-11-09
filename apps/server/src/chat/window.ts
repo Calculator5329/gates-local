@@ -14,13 +14,19 @@ const replyRoom = (numCtx: number) => Math.min(Math.ceil(numCtx / 4), REPLY_ROOM
 /** A tool result is not cut below this many characters: less tells the model nothing. */
 const MIN_OBSERVATION_CHARS = 200;
 const WINDOW_FULL = "\n[cut: this model's context window is full]";
+export const OMITTED_IMAGE = "[An image was here and is unavailable to this reply.]";
+export const IMAGE_CONTEXT_NOTICE = "Some earlier images are unavailable to this reply. Their places are marked in the context sent to the model.";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4) + MESSAGE_FRAMING_TOKENS;
+/** Conservative reservation, not a measured tokenizer count; Ollama reports actual usage after the turn. */
+const imageTokens = (m: { images?: readonly string[]; imageTokens?: readonly number[] }) => m.imageTokens?.reduce((sum, cost) => sum + cost, 0) ?? (m.images?.length ?? 0) * 4096;
+const imageCount = (m: { images?: readonly string[]; imageTokens?: readonly number[] }) => Math.max(m.images?.length ?? 0, m.imageTokens?.length ?? 0);
+const turnTokens = (m: TurnMessage) => estimateTokens(m.content) + imageTokens(m);
 
 /** 2048 → "2k", 512 → "512". */
 export const contextWords = (numCtx: number): string => (numCtx < 1024 ? String(numCtx) : `${Math.round(numCtx / 1024)}k`);
 
-export type Windowed = { ok: true; messages: TurnMessage[] } | { ok: false; message: string };
+export type Windowed = { ok: true; messages: TurnMessage[]; omittedImages?: number } | { ok: false; message: string };
 
 /**
  * The newest messages that fit in `numCtx`, system messages always kept.
@@ -28,30 +34,32 @@ export type Windowed = { ok: true; messages: TurnMessage[] } | { ok: false; mess
  * definitions, a system block added later).
  */
 export function fitToWindow(messages: readonly TurnMessage[], numCtx: number, overhead = 0): Windowed {
-  const budget = numCtx - replyRoom(numCtx) - overhead;
+  const markerRoom = messages.slice(0, -1).some(m => imageCount(m) > 0) ? estimateTokens(OMITTED_IMAGE) : 0;
+  const budget = numCtx - replyRoom(numCtx) - overhead - markerRoom;
   const system = messages.filter((m) => m.role === "system");
   const talk = messages.filter((m) => m.role !== "system");
-  let used = system.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+  let used = system.reduce((sum, m) => sum + turnTokens(m), 0);
   if (used > budget) {
     return { ok: false, message: `The system prompt is too long for this model's ${contextWords(numCtx)} context. Shorten it in Settings or choose a model with more context.` };
   }
   const last = talk.at(-1);
-  if (last !== undefined && used + estimateTokens(last.content) > budget) {
-    return { ok: false, message: `This message is too long for this model, which keeps about ${contextWords(numCtx)} tokens in view. Shorten it or pick a model with more context.` };
+  if (last !== undefined && used + turnTokens(last) > budget) {
+    return { ok: false, message: imageCount(last) ? `This message and its images do not fit this model's ${contextWords(numCtx)} context. Remove some images or pick more context.` : `This message is too long for this model, which keeps about ${contextWords(numCtx)} tokens in view. Shorten it or pick a model with more context.` };
   }
   let first = talk.length;
   while (first > 0) {
-    const cost = estimateTokens(talk[first - 1]?.content ?? "");
+    const cost = turnTokens(talk[first - 1]!);
     if (used + cost > budget) break;
     used += cost;
     first -= 1;
   }
   // A chat the model sees starts with what was asked, never with a reply to something it cannot see.
   while (first < talk.length - 1 && talk[first]?.role === "assistant") first += 1;
-  return { ok: true, messages: [...system, ...talk.slice(first)] };
+  const omittedImages = talk.slice(0, first).reduce((sum, m) => sum + imageCount(m), 0);
+  return { ok: true, messages: [...system, ...(omittedImages ? [{ role: "user" as const, content: OMITTED_IMAGE, imageTokens: [0] }] : []), ...talk.slice(first)], ...(omittedImages ? { omittedImages } : {}) };
 }
 
-const messageTokens = (m: ModelMessage) => estimateTokens(m.content) + (m.tool_calls ? Math.ceil(JSON.stringify(m.tool_calls).length / 4) : 0);
+const messageTokens = (m: ModelMessage) => estimateTokens(m.content) + imageTokens(m) + (m.tool_calls ? Math.ceil(JSON.stringify(m.tool_calls).length / 4) : 0);
 const tokensOf = (messages: readonly ModelMessage[]) => messages.reduce((sum, m) => sum + messageTokens(m), 0);
 
 /**
@@ -62,7 +70,8 @@ const tokensOf = (messages: readonly ModelMessage[]) => messages.reduce((sum, m)
  * spent outside `history` (tool definitions).
  */
 export function fitRound(history: readonly ModelMessage[], turnStart: number, numCtx: number, overhead = 0): readonly ModelMessage[] | undefined {
-  const budget = numCtx - replyRoom(numCtx) - overhead;
+  const markerRoom = history.slice(0, turnStart - 1).some(m => imageCount(m) > 0) ? estimateTokens(OMITTED_IMAGE) : 0;
+  const budget = numCtx - replyRoom(numCtx) - overhead - markerRoom;
   if (tokensOf(history) <= budget) return history;
   const before = history.slice(0, turnStart);
   const system = before.filter((m) => m.role === "system");
@@ -85,5 +94,6 @@ export function fitRound(history: readonly ModelMessage[], turnStart: number, nu
     used += messageTokens(cut) - messageTokens(message);
     turn[index] = cut;
   }
-  return used <= budget ? [...system, ...older.slice(first), ...asked, ...turn] : undefined;
+  const omittedImages = older.slice(0, first).reduce((sum, m) => sum + imageCount(m), 0);
+  return used <= budget ? [...system, ...(omittedImages ? [{ role: "user" as const, content: OMITTED_IMAGE, imageTokens: [0] }] : []), ...older.slice(first), ...asked, ...turn] : undefined;
 }

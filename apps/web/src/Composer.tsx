@@ -11,6 +11,8 @@ import { CONTEXT_SIZES, type Verdict, ctxFor, describeModel, gb, k, modelFacts, 
 import { Icon, SendArrow } from "./icons.tsx";
 import { awaitingInstall, canThink, chatBlockedReason, chatModels, modelNameKey, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
+import { AttachmentImages } from "./attachment-images.tsx";
+import { imageReason, paste } from "./paste.ts";
 import {
   cancelQueuedEdit,
   cancelStopAsk,
@@ -84,6 +86,9 @@ export function Composer() {
   const think = useStore((s) => s.think);
   const image = useStore((s) => s.image);
   const draft = useStore((s) => s.draft);
+  const draftVersion = useStore((s) => s.draftVersion);
+  const images = useStore((s) => s.draftImages);
+  const pasting = useStore((s) => s.pasting);
   const notice = useStore((s) => s.notice);
   const fit = useStore((s) => (s.model === undefined ? undefined : s.fits[fitKey(s.model, s.numCtx)]));
   const models = useStore((s) => s.models);
@@ -141,7 +146,8 @@ export function Composer() {
   const kept = held.current?.at === fitAt ? held.current.v : undefined;
   const v = loading ? (kept ?? fresh) : (fresh ?? kept);
   if (!loading && fresh !== undefined) held.current = { at: fitAt, v: fresh };
-  const text = draft.trim();
+  const text = draft.trim() || images.length > 0;
+  const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
@@ -182,13 +188,15 @@ export function Composer() {
   else if (memNo) sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
   else if (!text) sendTip = "Type a message to send";
   else if (freed) sendTip = `Send${enter}. Another chat's reply is using this memory, so it stops first`;
-  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text;
+  if (imageNo !== null) sendTip = esc(imageNo);
+  if (pasting) sendTip = "Preparing pasted images. They will be ready in a moment.";
+  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || pasting > 0;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
-  const memRefused = !blocked && !queueable && !noModel && memNo;
+  const memRefused = !blocked && !queueable && !noModel && memNo && imageNo === null && !pasting;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
   // Touch Enter inserts a newline, so a typed draft needs the queue arrow.
-  const showStop = isStreaming && !editing && !(touch && text !== "");
+  const showStop = isStreaming && !editing && !(touch && text);
 
   const submit = () => {
     if (sendDisabled) return;
@@ -228,15 +236,17 @@ export function Composer() {
           submit();
         }}
       >
-        <div className="att" />
+        <div className="att"><AttachmentImages images={images} removable /></div>
         <textarea
           ref={ta}
           id="ta"
+          data-draft-version={draftVersion}
           className="ta"
           rows={1}
           placeholder={placeholder}
           aria-label="Message"
           value={draft}
+          onPaste={paste}
           // the warning is about the words it was raised for
           onChange={(e) => editDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -389,7 +399,7 @@ function QueueTray() {
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued message ${i + 1} of ${n}, not sent`}>
             <Icon id="clock" cls="s14" />
-            <span className="qt-t">{q.text}</span>
+            <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
             <span className="qt-s" role="status">
               {queueWords(q, editing)}
             </span>

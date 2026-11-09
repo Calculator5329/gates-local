@@ -10,6 +10,15 @@ export interface Migration {
   up: (db: DatabaseSync) => void;
 }
 
+// Nullable additions from parallel builds must not depend on which version-4
+// shape arrived first. Repair them under the same write lock on every open.
+function ensureMessageColumns(db: DatabaseSync): void {
+  const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
+  for (const name of ["image_job_json", "context_notice"]) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} TEXT`);
+  }
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -70,7 +79,12 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 4,
-    up: (db) => db.exec("ALTER TABLE messages ADD COLUMN image_job_json TEXT"),
+    up: ensureMessageColumns,
+  },
+  {
+    version: 5,
+    // Compatibility with databases already stamped by the earlier paste build.
+    up: ensureMessageColumns,
   },
 ];
 
@@ -104,6 +118,7 @@ export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly M
       const current = readUserVersion(db);
       if (current > latest) throw new StoreVersionTooNewError(dbPath, current, latest);
       if (current === latest) {
+        ensureMessageColumns(db);
         db.exec("COMMIT");
         return current;
       }

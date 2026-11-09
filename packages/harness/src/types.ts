@@ -20,6 +20,8 @@ export interface ToolStep {
 export interface ModelMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
+  images?: readonly string[];
+  imageTokens?: readonly number[];
   tool_name?: string;
   tool_calls?: readonly { function: { name: string; arguments: Record<string, unknown> } }[];
 }

@@ -150,7 +150,8 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     }
     res.writeHead(426, { "Content-Type": "text/plain" }).end("WebSocket only\n");
   });
-  const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 });
+  // Eight 10 MiB pasted images expand to about 107 MiB in base64. Saved threads carry paths only.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
   let nextClientId = 1;
 

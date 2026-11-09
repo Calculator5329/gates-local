@@ -199,6 +199,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     log: (line) => log(`update ${line}`),
   });
   const app: App = createApp({
+    dataDir,
     libraryImports,
     update,
     image,

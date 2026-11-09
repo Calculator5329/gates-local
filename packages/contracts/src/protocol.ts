@@ -92,6 +92,7 @@ export const methods = {
   "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }) },
   "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread },
   "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }) },
+  "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }) },
   "models.list": { params: NoParams, result: S.Array(ModelInfo) },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo) },
   "runtime.status": { params: NoParams, result: RuntimeStatus },
@@ -104,6 +105,10 @@ export const methods = {
       content: S.String,
       model: S.String,
       numCtx: NumCtx,
+      /** A new send chooses its saved user-message id; retries reuse it. */
+      messageId: S.optional(S.String.check(S.isMaxLength(200))),
+      /** Up to eight pasted image data URLs (10 MiB each), or this thread's saved user-image paths for Retry. */
+      images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
       /** Thinking for this turn; omitted means the settings default. */
       think: S.optional(S.Boolean),
       /** Tool calls for this turn; omitted means the settings default. */
@@ -130,7 +135,7 @@ export const methods = {
        */
       askFirst: S.optional(S.Boolean),
     }),
-    result: S.Struct({ turnId: S.String, userMessage: Message }),
+    result: S.Struct({ turnId: S.String, userMessage: Message, replayed: S.optional(S.Boolean) }),
   },
   /**
    * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans

@@ -2,13 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { streamToolTurn } from "./tools.ts";
-import { estimateTokens } from "./window.ts";
+import * as toolTransport from "./tools.ts";
+import { estimateTokens, OMITTED_IMAGE } from "./window.ts";
 import { createSources } from "../sources/index.ts";
 import { createApp } from "../app.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
+const { streamToolTurn } = toolTransport;
 
 const dirs: string[] = [];
 const scratch = (prefix: string) => {
@@ -58,6 +59,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   const lease = createGpuLease();
   const fake = fakeImage(lease, store, gate);
   const chatBodies: { tools?: { function: { name: string } }[] }[] = [];
+  const pushed: unknown[] = [];
   let atSecond: ReturnType<GpuLease["status"]> | undefined;
   const fetcher = vi.fn(async (url, init) => {
     const pathname = new URL(String(url)).pathname;
@@ -73,9 +75,9 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
   const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, lease,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
-    push: () => {}, fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
+    push: (channel, payload) => pushed.push({ channel, payload }), fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
-  return { app, store, lease, fake, chatBodies, atSecond: () => atSecond, close: async () => { await app.shutdown(); store.close(); vi.unstubAllGlobals(); } };
+  return { app, store, lease, fake, chatBodies, pushed, atSecond: () => atSecond, close: async () => { await app.shutdown(); store.close(); vi.unstubAllGlobals(); } };
 };
 /** An Ollama reply that never comes; it rejects when the turn aborts the request. */
 const hang = (signal: AbortSignal | undefined) => new Promise<Response>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
@@ -92,6 +94,58 @@ const system = async (platform: NodeJS.Platform) => {
   return bodies[0]!.messages[0]!.content;
 };
 describe("tool chat transport", () => {
+  it("does not treat a quoted marker in ordinary text as a dropped image", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const omitted = vi.fn();
+    const events = [];
+    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: `Explain this text: ${OMITTED_IMAGE}` }], numCtx: 16384, sources: [], fetch: answering(bodies), execute: noRun, onImageOmitted: omitted })) events.push(event);
+    expect(omitted).not.toHaveBeenCalled();
+    expect(events.at(-1)).not.toHaveProperty("message.contextNotice");
+  });
+
+  it("reports images dropped in a later round even when the reply then fails", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const omitted = vi.fn();
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (bodies.length > 1) throw new Error("synthetic interrupted reply");
+      return ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true }]);
+    });
+    const events = [];
+    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "old chart", images: ["aW1hZ2U="], imageTokens: [4096] }, { role: "assistant", content: "a".repeat(2000) }, { role: "user", content: "read it" }], numCtx: 8192, sources: [], fetch: fetcher, execute: async () => ({ output: "z".repeat(10000), summary: "Read" }), onImageOmitted: omitted })) events.push(event);
+    expect(JSON.stringify(bodies[0])).toContain('"images"');
+    expect(JSON.stringify(bodies[1])).toContain("image was here and is unavailable");
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(omitted).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a later image-omission notice on a stopped reply's terminal event", async () => {
+    let markReady: (() => void) | undefined;
+    const ready = new Promise<void>(resolve => { markReady = resolve; });
+    const stream = vi.spyOn(toolTransport, "streamToolTurn").mockImplementation(async function* (input) {
+      input.onImageOmitted?.();
+      yield { type: "delta", text: "Partial answer" } as const;
+      markReady?.();
+      await new Promise<void>(resolve => {
+        if (input.signal?.aborted) resolve();
+        else input.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      yield { type: "error", code: "cancelled", message: "stopped" } as const;
+    });
+    const t = await imageApp(() => ndjson([{ message: { content: "unused" }, done: true }]));
+    try {
+      const thread = t.store.createThread();
+      const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
+      await ready;
+      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
+      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "delta", text: "", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
+      expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "error", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
+      expect(t.store.getThread(thread.id).messages.map(message => message.content)).toEqual(["read"]);
+    } finally { await t.close(); stream.mockRestore(); }
+  });
+
   it("chooses native tool_calls from /api/show and carries think and num_ctx", async () => {
     const requests: Record<string, unknown>[] = [];
     const fetcher = vi.fn(async (url, init) => {
@@ -100,12 +154,13 @@ describe("tool chat transport", () => {
       return requests.length === 1 ? ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true, done_reason: "stop" }]) : ndjson([{ message: { content: "All done" }, done: true, total_duration: 2_000_000_000, eval_duration: 250_000_000, prompt_eval_duration: 40_000_000, eval_count: 5 }]);
     });
     const events = [];
-    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "read" }], numCtx: 16384, think: false, sources: [], fetch: fetcher, execute: async () => ({ output: "text", summary: "Read your file" }) })) events.push(e);
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "read", images: ["aW1hZ2U="] }], numCtx: 16384, think: false, sources: [], fetch: fetcher, execute: async () => ({ output: "text", summary: "Read your file" }) })) events.push(e);
     expect(requests[0]).toMatchObject({ tools: expect.any(Array), think: false, options: { num_ctx: 16384 } });
     expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "All done", tools: [{ state: "done" }] } });
     // Decode time rides through the tool loop separately from the wall time.
     expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
+    for (const request of requests) expect(request["messages"]).toContainEqual({ role: "user", content: "read", images: ["aW1hZ2U="] });
   });
   it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

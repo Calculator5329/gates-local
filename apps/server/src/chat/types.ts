@@ -25,12 +25,15 @@ export interface Message {
   stats?: MessageStats;
   tools?: import("../../../../packages/harness/src/types.ts").ToolStep[];
   images?: string[];
+  contextNotice?: string;
 }
 
 /** What the model is sent. Thinking from earlier turns is not resent. */
 export interface TurnMessage {
   role: Role;
   content: string;
+  images?: readonly string[];
+  imageTokens?: readonly number[];
 }
 
 export type ChatErrorCode =

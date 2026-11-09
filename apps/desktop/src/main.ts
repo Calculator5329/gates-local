@@ -2,7 +2,11 @@
 // by scripts/build.ts. See README.md for the server contract and the
 // renderer's reconnect duties.
 
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, Menu, net, protocol, session, shell, type IpcMainInvokeEvent } from "electron";
+import { parseClipboardPaths, pathClipboardTypes } from "./clipboard.ts";
+import { capturePaste, finishPaste, type PasteResult } from "./native-paste.ts";
+import { randomUUID } from "node:crypto";
+import { editMenu } from "./context-menu.ts";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -202,6 +206,49 @@ function run(): void {
       }),
     );
     const contents = window.webContents;
+    // Only main can start this operation. There is no renderer clipboard request channel.
+    const paste = async () => {
+      const started = performance.now();
+      const id = randomUUID();
+      const inPasteWorld = (code: string): Promise<unknown> => contents.executeJavaScriptInIsolatedWorld(1004, [{ code }]);
+      if (!isClientUrl(contents.getURL()) || !window.isFocused() || await inPasteWorld(capturePaste(id)) !== true) { contents.paste(); return; }
+      if (performance.now() - started > 750) { await inPasteWorld(finishPaste(id)); return; }
+      const deliver = (result?: PasteResult) => inPasteWorld(finishPaste(id, performance.now() - started <= 750 && isClientUrl(contents.getURL()) && window.isFocused() ? result : undefined));
+      const copied: string[] = [];
+      let skipped = false;
+      try {
+        // Electron 45 maps Windows CF_HDROP to file:// URIs in this privileged read.
+        for (const item of await clipboard.read()) {
+          for (const format of pathClipboardTypes(item.types)) {
+            const parsed = parseClipboardPaths(await (await item.getType(format)).text(), process.platform);
+            skipped ||= parsed.skipped;
+            if (parsed.paths.length) { copied.push(...parsed.paths); break; }
+          }
+        }
+        const delivered = await deliver({ paths: [...new Set(copied)], skipped });
+        if (delivered === true && !copied.length && !skipped) contents.paste();
+      } catch { await deliver({ paths: [], skipped: false, failed: true }); }
+    };
+    const trustedPaste = () => { void paste().catch(() => undefined); };
+    contents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown" || input.key.toLowerCase() !== "v" || !(input.control || input.meta) || input.alt || input.isComposing) return;
+      event.preventDefault();
+      if (!input.isAutoRepeat) trustedPaste();
+    });
+    contents.on("context-menu", (event, params) => {
+      event.preventDefault();
+      const template = editMenu(params).map(item => item.role === "paste" ? {
+        label: "Paste", enabled: item.enabled, accelerator: "CmdOrCtrl+V",
+        click: trustedPaste,
+      } : item);
+      if (params.mediaType === "image") template.unshift({ label: "Copy Image", click: () => contents.copyImageAt(params.x, params.y) }, { type: "separator" });
+      if (/^https?:\/\//i.test(params.linkURL)) template.unshift({ label: "Copy Link", click: () => { void clipboard.writeText(params.linkURL); } }, { type: "separator" });
+      if (params.misspelledWord) template.unshift(
+        ...(params.dictionarySuggestions.length ? params.dictionarySuggestions.slice(0, 5).map(label => ({ label, click: () => contents.replaceMisspelling(label) })) : [{ label: "No suggestions", enabled: false }]),
+        { type: "separator" },
+      );
+      if (template.length) Menu.buildFromTemplate(template).popup({ window });
+    });
     // The window never opens another window or leaves the client. A web
     // link (the Ollama library, a link in a reply) opens in the system browser.
     guardNavigation(contents, {

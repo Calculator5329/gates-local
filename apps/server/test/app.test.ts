@@ -7,7 +7,7 @@ import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, createApp } from "../src/app.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
@@ -139,6 +139,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   let server: WsServer | undefined;
   const lease = opts.image ? createGpuLease() : undefined;
   const app = createApp({
+    dataDir: dir,
     store,
     runtime,
     catalog,
@@ -204,6 +205,113 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
 
 const events = (r: Rig, turnId: string) =>
   r.pushes.filter((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId).map((p) => (p.payload as Payload<"chat.event">).event);
+
+it("vision paste reaches the model, saves paths, and survives Retry and thread reload", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = await r.client.call("threads.create", { title: "Pasted images" });
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const first = await r.client.call("chat.send", { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
+  expect(first.userMessage.images?.[0]).toMatch(/^images\/paste-.*\.png$/);
+  const loaded = await r.client.call("threads.get", { threadId: thread.id });
+  expect(loaded.messages[0]?.images).toEqual(first.userMessage.images);
+  const again = await r.client.call("chat.send", { threadId: thread.id, content: "look again", model: MODEL, numCtx: 16384, images: first.userMessage.images });
+  await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
+  const body = r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body;
+  expect(body).toMatchObject({ messages: [{ role: "user", content: "look", images: [png] }, { role: "assistant" }, { role: "user", content: "look again", images: [png] }], options: { num_ctx: 16384 } });
+  expect((body as { options: unknown }).options).not.toHaveProperty("num_gpu");
+});
+
+it("the server refuses pasted images on non-vision models before a load or saved message", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] } });
+  const thread = await r.client.call("threads.create", { title: "Pasted images" });
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  await expect(r.client.call("chat.send", { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("cannot see images") });
+  expect(r.store.getThread(thread.id).messages).toEqual([]);
+  expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toEqual([]);
+});
+
+it("an image-only turn uses T3's model prompt while the saved message stays image-only", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = r.store.createThread();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const sent = await r.client.call("chat.send", { threadId: thread.id, content: "", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+  expect(sent.userMessage.content).toBe("");
+  expect(r.ollama.requests.find(q => q.path === "/api/chat")?.body).toMatchObject({ messages: [{ content: "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]", images: [png] }] });
+});
+
+it.each([false, true])("PC-03: retrying after a lost acknowledgement returns the saved message without a second turn (finished: %s)", async finished => {
+  const r = await rig();
+  const thread = r.store.createThread();
+  const input = { threadId: thread.id, messageId: "public-lost-ack", content: "saved before disconnect", model: MODEL, numCtx: 16384 };
+  const first = await r.client.call("chat.send", input);
+  if (finished) await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
+  const retry = await r.client.call("chat.send", input);
+  await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
+  expect(r.store.getThread(thread.id).messages.filter(m => m.role === "user")).toHaveLength(1);
+  expect(retry.userMessage.id).toBe(first.userMessage.id);
+  expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toHaveLength(1);
+  await expect(r.client.call("chat.send", { ...input, content: "different words" })).rejects.toMatchObject({ code: "image-input" });
+});
+
+it("tells the model and person when a text-only follow-up omits earlier images", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = r.store.createThread();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const first = await r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
+  r.setShow(res => json(res, 200, { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] }));
+  const next = await r.client.call("chat.send", { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
+  await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "done");
+  expect(JSON.stringify(r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body)).toContain("image was here and is unavailable");
+  expect(events(r, next.turnId)).toContainEqual(expect.objectContaining({ type: "done", message: expect.objectContaining({ contextNotice: expect.stringContaining("image") }) }));
+  expect(r.store.getThread(thread.id).messages[0]?.content).toBe("chart");
+});
+
+it("thread deletion removes its unshared pasted image file", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = r.store.createThread();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const sent = await r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+  const filename = path.join(path.dirname(r.store.dbPath), sent.userMessage.images![0]!);
+  expect(existsSync(filename)).toBe(true);
+  await r.client.call("threads.delete", { threadId: thread.id });
+  expect(existsSync(filename)).toBe(false);
+});
+
+it("a shared image survives until the last saved message is removed", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const first = r.store.createThread(), second = r.store.createThread();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const sent = await r.client.call("chat.send", { threadId: first.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+  const images = [...sent.userMessage.images!], filename = path.join(path.dirname(r.store.dbPath), images[0]!);
+  const copy = r.store.appendMessage({ threadId: second.id, role: "user", content: "shared", images });
+  await r.client.call("threads.delete", { threadId: first.id });
+  expect(existsSync(filename)).toBe(true);
+  await r.client.call("messages.delete", { threadId: second.id, messageId: copy.id });
+  expect(existsSync(filename)).toBe(false);
+});
+
+it("failed admission leaves no new image file", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = r.store.createThread();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
+  const append = vi.spyOn(r.store, "appendMessage").mockImplementationOnce(() => { throw new Error("synthetic database write failure"); });
+  await expect(r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toThrow("synthetic database write failure");
+  append.mockRestore();
+  expect(readdirSync(path.join(path.dirname(r.store.dbPath), "images"))).toEqual([]);
+});
+
+it("a draft referencing an image that is gone is refused in plain words before saving", async () => {
+  const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
+  const thread = r.store.createThread();
+  await expect(r.client.call("chat.send", { threadId: thread.id, content: "keep my words", model: MODEL, numCtx: 16384, images: ["images/paste-00000000-0000-4000-8000-000000000000.png"] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("Paste it again; your words are kept") });
+  expect(r.store.getThread(thread.id).messages).toEqual([]);
+  expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toEqual([]);
+});
 
 async function rejection(p: Promise<unknown>): Promise<WireError> {
   try {

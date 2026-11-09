@@ -6,7 +6,7 @@
 // deltas to its turn buffer. Ends with exactly one done or one error event.
 import { Schema as S } from "effect";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
-import { fitToWindow } from "./window.ts";
+import { fitToWindow, IMAGE_CONTEXT_NOTICE } from "./window.ts";
 import { ollamaSettings, type TurnSettings } from "../settings/turn.ts";
 
 export interface StreamTurnInput {
@@ -24,6 +24,8 @@ export interface StreamTurnInput {
   newId?: () => string;
   now?: () => number;
   fetch?: typeof fetch;
+  /** The caller retains this notice even when the stream stops without a completed message. */
+  onImageOmitted?: () => void;
 }
 
 const ChatChunk = S.Struct({
@@ -51,7 +53,7 @@ const decodeChunk = S.decodeUnknownSync(ChatChunk);
 export function chatRequestBody(input: Pick<StreamTurnInput, "model" | "messages" | "numCtx" | "think" | "settings">): Record<string, unknown> {
   return {
     model: input.model,
-    messages: input.messages.map(({ role, content }) => ({ role, content })),
+    messages: input.messages.map(({ role, content, images }) => ({ role, content, ...(images?.length ? { images } : {}) })),
     stream: true,
     ...(input.think === undefined ? {} : { think: input.think }),
     ...ollamaSettings(input.settings, input.numCtx),
@@ -88,6 +90,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
     yield fail("context-too-small", windowed.message);
     return;
   }
+  if (windowed.omittedImages) input.onImageOmitted?.();
   const { signal } = input;
   if (signal?.aborted) {
     yield fail("cancelled", "cancelled before the request was sent");
@@ -179,6 +182,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
             threadId: input.threadId ?? "",
             role: "assistant",
             content,
+            ...(windowed.omittedImages ? { contextNotice: IMAGE_CONTEXT_NOTICE } : {}),
             ...(thinking ? { thinking } : {}),
             model: parsed.model ?? input.model,
             createdAt: (input.now ?? Date.now)(),

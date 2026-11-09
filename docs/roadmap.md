@@ -7,6 +7,12 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+Known limit: reloading in the seconds while a send is being accepted can lose
+that message. Keep the message recoverable across that reload in a future pass.
+
+Follow-up: Ignore pasted images that finish loading after the draft is replaced.
+Follow-up: Remove a confirmed retry from background replies so it no longer looks active.
+
 *In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
 and focus/selection restoration. Browser coverage is in `test/e2e/copy.spec.ts`;
 the real desktop permission-denial case is in `test/e2e/copy-desktop.spec.ts`.

@@ -65,6 +65,10 @@ async function collect(input: Partial<StreamTurnInput> & { baseUrl: string }): P
 }
 
 describe("request body", () => {
+  it("carries image bytes to Ollama instead of dropping them", () => {
+    const messages = [{ role: "user" as const, content: "look", images: ["aGVsbG8="] }];
+    expect(chatRequestBody({ model: "m", messages, numCtx: 16384 })).toMatchObject({ messages });
+  });
   it("always carries options.num_ctx and stream true; think only when set", () => {
     const body = chatRequestBody({ model: "m", messages: [{ role: "user", content: "x" }], numCtx: 32768 });
     expect(body).toEqual({ model: "m", messages: [{ role: "user", content: "x" }], stream: true, options: { num_ctx: 32768 } });

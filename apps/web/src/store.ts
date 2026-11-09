@@ -36,6 +36,7 @@ export type Section = "general" | "models" | "instructions" | "library" | "tools
 
 /** The reply being written now, or the last one that stopped before it finished. */
 export interface LiveTurn {
+  readonly contextNotice?: string;
   /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
   readonly gen: number;
   readonly threadId: string;
@@ -51,6 +52,7 @@ export interface LiveTurn {
   readonly tools: readonly ToolStep[];
   /** The user's text, shown until chat.send returns the saved message. */
   readonly pendingUser: string | null;
+  readonly pendingImages?: readonly string[];
   /** Set once the turn ended without a saved message. */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
   /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
@@ -59,6 +61,8 @@ export interface LiveTurn {
 
 /** A message typed during setup, the first download or a reply being written; it sends when that is over. */
 export interface Queued {
+  readonly messageId?: string;
+  readonly images?: readonly string[];
   readonly id: string;
   readonly threadId: string;
   readonly text: string;
@@ -74,6 +78,8 @@ export interface Queued {
 
 /** A send waiting for a yes, because the load it needs would stop these chats' replies. */
 export interface StopAsk {
+  readonly messageId?: string;
+  readonly images?: readonly string[];
   readonly blocking: readonly BlockingTurn[];
   readonly content: string;
   readonly model: string;
@@ -88,6 +94,8 @@ export interface StopAsk {
 }
 
 export interface State {
+  readonly draftSendId: string | null;
+  readonly draftSendThreadId: string | null;
   readonly conn: Conn;
   readonly serverOrigin: string | null;
   readonly fileToken: string | null;
@@ -125,6 +133,8 @@ export interface State {
   /** On a phone, Settings shows its section list as its own screen instead of a section. */
   readonly setList: boolean;
   readonly draft: string;
+  readonly draftImages: readonly string[];
+  readonly pasting: number;
   /** Changes on replacement or clear, not ordinary typing within this draft. */
   readonly draftVersion: number;
   /** Tracks new speech actions; older local save completions do not supersede them. */
@@ -170,6 +180,8 @@ export interface State {
 export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
 
 const initial: State = {
+  draftSendId: null,
+  draftSendThreadId: null,
   conn: { kind: "connecting" },
   serverOrigin: null,
   fileToken: null,
@@ -194,6 +206,8 @@ const initial: State = {
   drawer: false,
   setList: false,
   draft: "",
+  draftImages: [],
+  pasting: 0,
   draftVersion: 0,
   voiceConnectionVersion: 0,
   renaming: false,
@@ -244,6 +258,10 @@ const voiceUrl = (settings: State["settings"]) => settings === NA ? undefined : 
 function publish(patch: Partial<State> | ((s: State) => Partial<State>), typing: boolean): void {
   const p = typeof patch === "function" ? patch(state) : patch;
   const next = { ...state, ...p };
+  const edited = (p.draft !== undefined && p.draft !== state.draft) ||
+    (p.draftImages !== undefined && p.draftImages !== state.draftImages) ||
+    (p.editingQueued !== undefined && p.editingQueued !== state.editingQueued);
+  const draftSendId = p.draftSendId !== undefined ? p.draftSendId : edited ? null : state.draftSendId;
   // Programmatic draft writes are replacements, including a failed send's
   // restored text. All callers pass this boundary, so no async producer has
   // to enumerate Send, Queue, Edit, Clear and navigation separately.
@@ -252,6 +270,8 @@ function publish(patch: Partial<State> | ((s: State) => Partial<State>), typing:
     (p.threadId !== undefined && p.threadId !== state.threadId) ||
     (p.view !== undefined && (p.view === "new" || p.view !== state.view));
   state = { ...next,
+    draftSendId,
+    draftSendThreadId: draftSendId === null ? null : p.draftSendThreadId !== undefined ? p.draftSendThreadId : state.draftSendThreadId,
     draftVersion: state.draftVersion + Number(replaced),
     voiceConnectionVersion: p.voiceConnectionVersion ?? state.voiceConnectionVersion + Number(voiceUrl(next.settings) !== voiceUrl(state.settings)),
   };

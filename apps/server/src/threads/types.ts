@@ -37,6 +37,7 @@ export interface ToolStepRecord {
 export const TOOL_STATES: readonly ToolStepRecord["state"][] = ["running", "done", "error"];
 
 export interface Message {
+  contextNotice?: string;
   id: string;
   threadId: string;
   role: Role;
@@ -59,6 +60,7 @@ export interface ThreadWithMessages {
 
 /** What appendMessage accepts: a Message whose id and createdAt are optional. */
 export interface NewMessage {
+  contextNotice?: string;
   id?: string;
   threadId: string;
   role: Role;

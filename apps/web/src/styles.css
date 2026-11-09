@@ -334,6 +334,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* empty state (F09) */
 .draft{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;padding:24px 24px 9vh}
 .draft-in{width:100%;max-width:var(--composer-w);margin:0 auto}
+.draft-in:has(.att:not(:empty)){transform:translateY(-38px)}
 .hero{font-size:24px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px;text-align:center}
 .hero-sub{font-size:15px;color:var(--muted-foreground);text-align:center;margin:0 0 24px}
 .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:16px}
@@ -357,8 +358,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .composer:focus-within{box-shadow:inset 0 0 0 1px var(--border-strong),var(--composer-shadow)}
 .ta{display:block;width:100%;border:0;outline:0;background:transparent;resize:none;color:var(--foreground);font:inherit;font-size:var(--chat-fs);line-height:24px;padding:14px 16px 6px;min-height:44px;max-height:220px;overflow-y:auto}
 .ta::placeholder{color:var(--placeholder)}
-.att{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 0}
+.att{display:flex;height:76px;overflow-x:auto;gap:8px;padding:12px 16px 0}
 .att:empty{display:none}
+.attachment{display:inline-flex;position:relative;flex:none}
+.attachment img{width:64px;height:64px;object-fit:cover;border:1px solid var(--border);border-radius:var(--r-sm)}
+.attachment .ibtn{position:absolute;right:0;top:0;background:var(--popover);color:var(--foreground)}
+.user-images{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.user-images img{width:128px;height:128px;object-fit:contain}
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
 .cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto}
 .cf-l>*{flex:none}
