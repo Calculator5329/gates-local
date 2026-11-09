@@ -116,9 +116,14 @@ const TASKKILL_NOT_FOUND = 128;
  * grace. Windows has no process groups here: `taskkill /T /F` walks the tree
  * from the root, and only the root can be confirmed afterwards.
  */
-export async function endTree(pid: number, s: TreeStop = treeStop()): Promise<boolean> {
+export interface EndTreeOptions {
+  /** Startup may leave helpers behind a dead root; exit 128 cannot certify that tree. */
+  readonly requireWindowsTreeKill?: boolean;
+}
+export async function endTree(pid: number, s: TreeStop = treeStop(), options: EndTreeOptions = {}): Promise<boolean> {
   if (s.platform === "win32") {
     const code = await s.taskkill(["/PID", String(pid), "/T", "/F"]);
+    if (code === TASKKILL_NOT_FOUND && options.requireWindowsTreeKill === true) return false;
     if (code !== 0 && code !== TASKKILL_NOT_FOUND) return false;
     return goneWithin(pid, s.confirmMs, s.exists);
   }
@@ -154,6 +159,7 @@ function untrackGroup(pid: number): void {
 
 /** The runner, with the tree-stopping steps replaceable for a test of the escalation. */
 export function createRunner(stop: Partial<TreeStop> = {}): Runner {
+  const s = { ...treeStop(), ...stop };
   return (command, args, options) => {
     // Throws before anything starts when the folder is not allowed.
     guardTarget(options.cwd);
@@ -197,12 +203,20 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       const stopTree = (why: NonNullable<RunResult["failure"]>) => {
         failure = why;
         stopping = true;
+        // Node holds the Windows process handle until exit. Afterwards its
+        // PID can belong to someone else, even while a helper keeps stdio open.
+        if (s.platform === "win32" && (child.exitCode !== null || child.signalCode !== null)) {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          finish(null, true);
+          return;
+        }
         const pid = child.pid;
         if (pid === undefined) {
           finish(null);
           return;
         }
-        void endTree(pid, { ...treeStop(), ...stop }).then((ended) => {
+        void endTree(pid, s).then((ended) => {
           // Something outside the tree can still hold a pipe open; `close` is no longer waited for.
           child.stdout.destroy();
           child.stderr.destroy();

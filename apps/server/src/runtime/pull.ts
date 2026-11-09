@@ -24,6 +24,7 @@ export interface PullManager {
 export const PULL_STOPPED_MESSAGE = "Download stopped because the runtime changed.";
 
 export interface PullManagerOptions {
+  admit?(): void;
   baseUrl: () => string | undefined;
   push: (progress: PullProgress) => void;
   /** After a download finishes: refresh the model list and the catalog. */
@@ -221,6 +222,7 @@ export function createPullManager(options: PullManagerOptions): PullManager {
 
   return {
     pull(name) {
+      options.admit?.();
       const existing = find(name);
       if (existing) return existing.progress;
       const job: Job = {

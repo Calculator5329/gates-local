@@ -172,7 +172,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-row .live{width:7px;height:7px;border-radius:50%;background:var(--foreground);animation:breathe 1.4s ease-in-out infinite;flex:none;margin-right:2px}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(.6)}}
 .sb-empty{padding:12px 10px;font-size:13px;color:var(--muted-foreground)}
-.sb-foot{flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.sb-foot{position:relative;flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+.sb-update{position:absolute;right:8px;bottom:12px;width:32px;height:32px;color:var(--amber);background:var(--sidebar)}
+.sb-update.failed{color:var(--red)}
 .rt{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--muted-foreground);width:100%;text-align:left;transition:background-color .12s}
 .rt:hover{background:var(--hover)}
 .rt .dot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -180,6 +182,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .rt .pct{font-size:12px;color:var(--foreground);font-variant-numeric:tabular-nums}
 .rt>.ic{width:14px;height:14px;margin:0 -3px 0 -3px;color:var(--muted-foreground)}
 .dot.off{background:var(--faint)}.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.run{background:var(--amber);animation:pulse 1.6s infinite steps(6)}
+.sb-set{padding-right:44px}
 .sb-set .ks{margin-left:auto;font-size:12px;color:var(--muted-foreground);display:inline-flex;align-items:baseline;gap:5px}
 .sb-set .ks b{font-size:14px;font-weight:600;line-height:1}   /* the comma key reads as a key (F52) */
 
@@ -431,6 +434,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .banner .bt{font-weight:500}
 .banner .bm{color:var(--muted-foreground);margin-top:2px}
 .banner .bm .mono{font-size:12.5px;color:var(--foreground)}
+.upd-note{min-width:0;overflow-wrap:anywhere}
 .banner .ba{display:flex;gap:8px;margin-top:12px}
 /* the one tooltip-trigger style: a dotted underline only on text that opens a tooltip on hover and focus (F44) */
 .tipd{text-decoration:underline dotted;text-decoration-color:var(--faint);text-underline-offset:3px;cursor:default}
@@ -505,7 +509,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* ---------- settings (F20) ---------- */
 /* S1-20: groups 6 px, controls 4 px; switches stay round */
 .set,.snav{--r-xl:6px;--r-lg:6px;--r-md:6px;--r-ctl:4px;--r-sm:4px}
-.set{flex:1;min-width:0;min-height:0;overflow-y:auto}
+.set{flex:1;min-width:0;min-height:0;overflow-y:auto;scrollbar-gutter:stable}
+.set>.banner{margin:16px 48px 0;overflow-wrap:anywhere}
 .set .mono{overflow-wrap:anywhere}
 .set-in{max-width:836px;margin:0;padding:16px 48px 48px}
 .set-h{margin-bottom:24px}
@@ -740,6 +745,7 @@ a.btn{text-decoration:none}
 .mi{min-height:48px;align-items:center}
 .mi .ic{margin-top:0}
 .set-in{padding:16px 16px 32px}
+.set>.banner{margin:16px 16px 0}
 .set-list{display:block}
 .set.listing .set-in>:not(.set-list),.set:not(.listing) .set-list{display:none}
 .sl-r{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 16px;text-align:left}

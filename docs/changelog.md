@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-09: Phone resets preserve desktop update preferences
+
+Reset settings on a phone still resets its other settings, while leaving
+automatic update checks and the update channel unchanged. Desktop settings
+updates retain control of both preferences.
 ## 2026-11-09: Runtime journeys control their discovery ports
 
 - Wrong-service journeys use a fresh fake-backed port and checked-free app
@@ -408,6 +413,95 @@ and completed downloads still settle against their installed tag. Expanded
 GPU Details stays open and keeps its space while refreshing, showing Checking
 in place of the previous memory report.
 
+## 2026-11-09: Manual update recovery repairs the chosen commit
+
+- A checkout moved by hand on the same branch keeps that commit and runs
+  install and both builds before recovery clears. Failed or interrupted
+  repairs retain their state and commands for that same commit.
+- On Windows, command timeouts never kill an already exited root whose
+  helper holds stdio open. The updater retains the uncertain command's
+  record; import workers wait for their child pipes to close.
+
+## 2026-11-09: Windows recovery recognizes a later boot and a manual repair
+
+- Stopping a failed startup requires a positively matching current process
+  identity. A failed lookup no longer authorizes killing that PID.
+- Update records retain Windows' last boot time alongside uptime. A later
+  boot releases recovery even after the new uptime passes the saved value;
+  unreadable evidence stays unconfirmed. Hand-moved checkouts clear their
+  old recovery record before the stale-process refusal.
+- Recovery advice describes unconfirmed termination and requests Restart,
+  because a Fast Startup shutdown may preserve the same kernel boot.
+
+## 2026-11-09: Recovery uses the restored desktop executable
+
+- Rollback resolves Electron from the restored install, instead of keeping
+  the failed version's executable path in memory. On Windows, an already
+  vanished or unidentified root cannot certify that its helpers stopped;
+  uncertain termination keeps dependency replacement blocked.
+- Shutdown begins snapshot cancellation before waiting on an update check,
+  and joins snapshot cleanup even while that check is pending.
+- Long rollback errors and their complete log paths wrap inside chat notes.
+
+## 2026-11-09: Updates recover from a failed first startup
+
+- An update stays unfinished until the new server is ready. If it crashes
+  or times out during startup, the updater stops its owned process tree,
+  restores and rebuilds the previous commit, and starts that version once.
+- Phone updates are read-only. A disconnected desktop handoff expires if
+  the app does not quit. Imports join admission and the activity list;
+  approval waits for them, and shutdown joins cancelled snapshot workers.
+- Interrupted-reply storage no longer advances the shipped schema version,
+  so the previous reader can reopen the same data after rollback.
+- The Settings update note sits above the content. Showing and dismissing
+  it keeps the content's horizontal position and width.
+
+## 2026-11-09: Clone update and rollback proved in an isolated app
+
+The update control now has virtual-screen evidence through the real bridge,
+server and detached updater, using throwaway clones and a local bare remote.
+All three focused browser tests and eight real-transaction checks passed.
+The approved commit reopened after install and both builds; a deliberately
+bad web build restored the old commit; manual pull/install/start worked.
+Unfinished reply text reopened with its durable interruption label.
+
+The measured closed-window gaps were 4.293 seconds for success and 5.782
+seconds for rollback, with cached offline dependencies and fake services.
+There is no progress window during that gap. These are single observations;
+Windows remains unproven. Product acceptance evidence is in
+`docs/evidence/auto-update-runtime.md`.
+
+## 2026-11-08: Update confirmation binds the work and exact commit
+
+- A server reservation now revalidates the shown activity and target, then
+  atomically pauses new replies, image jobs and model downloads across all
+  clients. Changed work or a changed target requires renewed confirmation.
+  Failed handoffs release the pause; committed installs cannot expire into
+  accepting new work. A late renderer cancellation cannot undo main's handoff.
+- The desktop bridge and detached command carry the full approved commit.
+  A changed remote target refuses installation and reopens the existing app.
+  Older bridges cannot silently discard the target. Manual updating remains.
+- Saved unfinished assistant text has a durable interrupted marker, visible
+  after reopening and excluded from later model prompts. The nullable database
+  column preserves existing messages without rewriting them.
+- Update fixtures retain announced state through cancellation and explicitly
+  assert that the enabled button returns. The runtime acceptance harness uses
+  independent throwaway clones and a local bare remote.
+
+## 2026-11-08: Updates visible from the main window (runtime proof pending)
+
+Updates were hidden in Settings and needed a manual check. The desktop now
+checks the clone's git remote after 15 seconds and hourly, unless "Check for
+updates automatically" is off. Nothing installs without a click. A fixed
+button beside Settings names the target and changes, shows closing and
+retry states, and uses the same action as Settings. Background check errors
+stay silent; requested checks report their errors. Browsers and phones keep
+the manual check and computer-install instructions.
+
+Restart confirmation names running replies (including other clients), image
+jobs, model downloads, and local drafts or queued messages. Shutdown saves
+the reply already shown. Model download resume behavior is unchanged.
+The existing transaction, rollback, install log and next-start note remain.
 ## 2026-11-09: Timing records no longer decide releases
 
 - Only unit verification, the build and functional browser checks decide

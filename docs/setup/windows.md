@@ -187,7 +187,16 @@ pnpm start
 
 In the app, open Settings › General › Updates, click "Check for updates" and
 then "Update and restart". The window closes, the new version installs and
-the app opens again.
+the app opens again. The desktop also checks this clone's git remote with
+`git fetch` and `git ls-remote` 15 seconds after startup, then hourly,
+without installing anything. "Check for updates automatically" in the same
+group defaults on; off prevents future automatic git processes and network
+requests (an existing check finishes). Computer browsers can check on
+request; the phone listener has update status only. An update button beside Settings names the target and changes in
+its tooltip. Running replies, image jobs and model downloads bring up a
+confirmation before restart; active imports must finish first. Partial replies and model download parts are
+kept; start a model download again to resume it. Save drafts and queued
+messages before continuing. Offline automatic checks stay silent.
 
 A copy from before that button existed has to update once by hand, and this
 path always works. Close the app, then, from the clone:
@@ -200,10 +209,37 @@ pnpm start
 
 `pnpm run app-update` does the same update from a terminal, goes back to the
 version you had if a step fails, and says what is new first; add `--check` to
-only see what is new.
+only see what is new. A terminal update also opens the app to verify that
+its server is ready. Initialization failure or a 60-second startup timeout
+restores and starts the previous version once.
 
 Your threads and settings stay where they are. If a newer build changed the
-thread database, an older build refuses to open it rather than change it.
+thread database incompatibly, an older build refuses to open it rather than
+change it. The optional interrupted-reply column preserves the shipped
+store version so it does not prevent rollback.
+
+Recovery stops if it cannot confirm the failed app's whole tree ended. On
+Windows, a root process that already disappeared is not that confirmation:
+its helpers may still hold files. Keep the app closed and restart Windows
+before retrying in that case. Rollback resolves Electron again from the
+restored dependency install.
+Later updater attempts keep this restriction. New process records retain
+Windows' last boot time, so a later boot proves restart even if its uptime
+has already passed the old value. A lower uptime is additional evidence for
+older records. Missing or unreadable evidence is not proof of restart.
+Choose **Restart**: a Fast Startup shutdown may retain the same kernel boot,
+in which case unchanged boot evidence keeps recovery blocked. See
+[Microsoft's Fast Startup explanation](https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/fast-startup-causes-system-hibernation-shutdown-fail).
+
+If you repair the checkout by moving HEAD to the previous or a newer commit,
+the next updater keeps that commit, installs its packages and runs both
+builds before clearing recovery. It does not wait for reboot evidence from
+the old transaction. If that repair fails, its saved state and commands refer
+to the commit you chose; it does not reset to the failed update's old target.
+Switching branches clears the old transaction without installing anything.
+Stop the app and its helpers before repairing files or reinstalling
+dependencies by hand. The manual pull, install and start path above still
+works.
 
 ## 7. Uninstalling
 

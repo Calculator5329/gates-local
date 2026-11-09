@@ -1,14 +1,15 @@
 // Settings › General › Updates: each state of the group and the note after an
 // update, rendered to markup from props, and the session's promise that the
-// check runs only on a click (hydrate and opening Settings never call it).
+// browser check runs only on a click; automatic checks belong to the desktop server.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Settings, UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "./harness.ts";
+import type { State } from "../src/store.ts";
 
-type Updates = typeof import("../src/Updates.tsx");
+type Updates = typeof import("../src/Updates.tsx") & typeof import("../src/SettingsUpdates.tsx");
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
 
@@ -21,7 +22,7 @@ let disconnect: (() => void) | undefined;
 beforeEach(async () => {
   b = installBrowser();
   vi.resetModules();
-  ui = await import("../src/Updates.tsx");
+  ui = { ...await import("../src/Updates.tsx"), ...await import("../src/SettingsUpdates.tsx") };
   session = await import("../src/session.ts");
   store = await import("../src/store.ts");
   disconnect = undefined;
@@ -29,6 +30,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   disconnect?.();
+  vi.stubGlobal("gatesLocal", undefined);
   b.server.accepting = false;
   for (const s of b.server.sockets) s.close();
   await tick();
@@ -37,6 +39,7 @@ afterEach(async () => {
 
 const SETTINGS: Settings = methodSamples["settings.get"].result;
 const CLONE: UpdateStatus = { version: { kind: "commit", commit: "abc1234", date: Date.UTC(2026, 10, 7) }, result: null, lastCheck: null };
+const OFFERED: UpdateStatus = { ...CLONE, lastCheck: { state: "available", checkedAt: 1, channel: "main", current: "abc1234", target: "bbbbbbb", targetCommit: "b".repeat(40), total: 1, changes: ["Approved B"] }, approval: "approval-b", activity: [] };
 const AT = Date.UTC(2026, 10, 7, 12, 0);
 
 const props = (over: Partial<Parameters<Updates["UpdatesView"]>[0]> = {}) => ({
@@ -56,15 +59,46 @@ const withCheck = (lastCheck: UpdateCheck) => ({ status: { ...CLONE, lastCheck }
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
 describe("the Updates group", () => {
-  it("shows the version, the check button with words saying it runs only on a click, and the switch", () => {
+  it("AV-05 the notice belongs to Settings scrolling content instead of its horizontal sibling", async () => {
+    disconnect = session.connect();
+    await until(() => store.getState().imageStatus !== undefined && store.getState().conn.kind === "open");
+    const { settingsScreen } = await import("../src/screen-loaders.ts");
+    await settingsScreen.load();
+    session.openSettings();
+    store.setState({ update: { ...CLONE, result: { at: 1, outcome: "updated", line: "Approved commit is ready." } } });
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const useStore = vi.spyOn(store, "useStore").mockImplementation(<T,>(select: (state: State) => T) => select(store.getState()));
+    try {
+      const { App } = await import("../src/App.tsx");
+      const html = renderToStaticMarkup(createElement(App));
+      const parents: string[][] = [];
+      let noticeParents: string[][] | undefined;
+      for (const token of html.match(/<[^>]*>|[^<]+/g) ?? []) {
+        if (token.startsWith("</")) parents.pop();
+        else if (/^<[a-z]/i.test(token) && !/^<(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(token) && !token.endsWith("/>")) parents.push(/\bclass="([^"]*)"/.exec(token)?.[1]?.split(" ") ?? []);
+        else if (token.includes("Gates Local updated")) { noticeParents = [...parents]; break; }
+      }
+      expect(noticeParents, "The actual app renders its update notice").toBeDefined();
+      expect(noticeParents?.some(classes => classes.includes("set")), "AV-05 notice must share the Settings scrolling surface").toBe(true);
+    } finally { useStore.mockRestore(); }
+  });
+  it("AV-01 a phone status offer exposes no update or preference controls", () => {
+    const html = view({ status: { ...OFFERED, canControl: false }, canUpdate: false });
+    expect(text(html)).toContain("bbbbbbb");
+    expect(text(html)).toContain("computer");
+    expect(html).not.toContain('>Check for updates</button>');
+    expect(html).not.toContain('role="switch"');
+  });
+  it("names the automatic schedule and both preferences", () => {
     const html = view();
     expect(text(html)).toContain("Version");
     expect(html).toContain("abc1234");
-    expect(text(html)).toContain("Development build");
+    expect(text(html)).toContain("A commit from");
     expect(text(html)).toContain("Check for updates");
-    expect(text(html)).toContain("Checks only when you click.");
-    expect(text(html)).toContain("Get early updates");
-    expect(text(html)).not.toMatch(/\b(?:commit|git|remote|clone|main branch)\b/i);
+    expect(text(html)).toContain("15 seconds after startup, then hourly");
+    expect(html).toContain('aria-label="Check for updates automatically"');
+    expect(html).toContain('aria-checked="true"');
+    expect(text(html)).toContain("Get every change, not only releases");
     expect(html).toContain('aria-checked="false"');
     expect(view({ settings: { ...SETTINGS, updateEveryChange: true } })).toContain('aria-checked="true"');
   });
@@ -75,7 +109,7 @@ describe("the Updates group", () => {
 
   it("shows only the version for a copy that is not a clone, or when the server has no updates", () => {
     const plain = text(view({ status: { ...CLONE, version: { kind: "not-a-clone" } } }));
-    expect(plain).toContain("Standalone copy");
+    expect(plain).toContain("Not a git clone");
     expect(plain).toContain("check for updates or update itself");
     expect(plain).not.toContain("Check for updates");
     const na = text(view({ status: "na" }));
@@ -156,6 +190,40 @@ describe("the note after an update", () => {
 });
 
 describe("the check runs only on a click", () => {
+  it("AU-02 an older bridge cannot silently discard the checked target", () => {
+    vi.stubGlobal("gatesLocal", { getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart: async () => ({ ok: true }) });
+    expect(session.canUpdateHere()).toBe(false);
+  });
+  it("AU-01 changed work at server confirmation shows the new list and cancel installs nothing", async () => {
+    const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
+    const confirm = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    vi.stubGlobal("confirm", confirm);
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    b.server.answer("update.status", () => ({ ...OFFERED, activity: ["1 running reply"] }));
+    b.server.answer("update.prepare", () => ({ state: "changed", status: { ...OFFERED, approval: "approval-new-work", activity: ["1 running reply", "model download: new-model"] } }));
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    await session.updateAndRestart();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("model download: new-model"));
+    expect(updateAndRestart).not.toHaveBeenCalled();
+    expect(store.getState().updateInstalling).toBe(false);
+  });
+
+  it("AU-02 a new remote target requires its own approval and keeps the full target in the handoff", async () => {
+    const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    b.server.answer("update.status", () => OFFERED);
+    const newer = { ...OFFERED, approval: "approval-c", lastCheck: { state: "available" as const, checkedAt: 2, channel: "main" as const, current: "abc1234", target: "ccccccc", targetCommit: "c".repeat(40), total: 2, changes: ["Unapproved C", "Approved B"] } };
+    b.server.answer("update.prepare", () => ({ state: "changed", status: newer }));
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    await session.updateAndRestart();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("ccccccc"));
+    expect(updateAndRestart).not.toHaveBeenCalled();
+  });
   it("hydrate reads the status, opening Settings checks nothing, and the button checks once", async () => {
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
@@ -199,9 +267,71 @@ describe("the check runs only on a click", () => {
 
   it("the desktop bridge's Update and restart is used when it is there", async () => {
     const updateAndRestart = vi.fn(async () => ({ ok: false as const, message: "This folder is not a git clone of Gates Local, so it cannot update itself." }));
-    vi.stubGlobal("gatesLocal", { getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    b.server.answer("update.status", () => OFFERED);
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
     expect(session.canUpdateHere()).toBe(true);
     expect(await session.updateAndRestart()).toBe("This folder is not a git clone of Gates Local, so it cannot update itself.");
     expect(updateAndRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms work in other windows and keeps the app open when cancelled", async () => {
+    const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    b.server.answer("update.status", () => ({ ...OFFERED, activity: ["2 running replies (including other windows)", "model download: alpha:7b", "1 image generation job"] }));
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    expect(await session.updateAndRestart()).toBeNull();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("model download: alpha:7b"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("2 running replies"));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 image generation job"));
+    expect(updateAndRestart).not.toHaveBeenCalled();
+    expect(store.getState().updateInstalling).toBe(false);
+    expect(store.getState().updateError).toBeNull();
+  });
+
+  it("one click updates idle work; Settings and sidebar share installation state", async () => {
+    const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirm);
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    b.server.answer("update.status", () => OFFERED);
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    const first = session.updateAndRestart();
+    const second = session.updateAndRestart();
+    expect(await Promise.all([first, second])).toEqual([null, null]);
+    expect(updateAndRestart).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(updateAndRestart).toHaveBeenCalledWith({ reservation: "reservation-1", targetCommit: "b".repeat(40) });
+    expect(store.getState().updateInstalling).toBe(true);
+    const count = b.server.calls("update.check").length;
+    await session.checkForUpdates();
+    expect(b.server.calls("update.check")).toHaveLength(count);
+  });
+
+  it("a successful background check reaches every window through the shared channel", async () => {
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    const update = { ...CLONE, lastCheck: methodSamples["update.check"].result };
+    b.server.push("update.changed", update);
+    await tick();
+    expect(store.getState().update).toEqual(update);
+    expect(b.server.calls("update.check")).toHaveLength(0);
+  });
+
+  it("an automatic update arriving during hydration survives the older status snapshot", async () => {
+    const held = b.server.hold("update.status");
+    disconnect = session.connect();
+    const request = await held;
+    const newer = { ...CLONE, lastCheck: methodSamples["update.check"].result };
+    b.server.push("update.changed", newer);
+    await tick();
+    request.respond(CLONE);
+    await until(hydrated, 2000, "hydration");
+    expect(store.getState().update).toEqual(newer);
   });
 });

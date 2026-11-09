@@ -47,6 +47,56 @@ function pragma(db: DatabaseSync, name: string): unknown {
 }
 
 describe("openThreadStore", () => {
+  it("AV-02 opens both v4 variants without losing interrupted text or image support", () => {
+    const file = join(dir, "interrupted-v4.db");
+    const previous = raw(file);
+    migrate(previous, file, MIGRATIONS.slice(0, 3));
+    previous.exec("ALTER TABLE messages ADD COLUMN interrupted INTEGER; PRAGMA user_version = 4; INSERT INTO threads VALUES ('old', 'Old thread', 1, 1); INSERT INTO messages (id, thread_id, role, content, created_at, interrupted) VALUES ('partial', 'old', 'assistant', 'Still unfinished', 1, 1)");
+    previous.close();
+    const current = store(file);
+    expect(current.getThread("old").messages[0]).toMatchObject({ interrupted: true, content: "Still unfinished" });
+    current.saveImageJob({ jobId: "image", threadId: "old", state: "queued" }, "A tree");
+    current.close();
+    expect(store(file).getThread("old").messages).toHaveLength(2);
+    const db = raw(file); expect(pragma(db, "user_version")).toBe(LATEST_VERSION); db.close();
+  });
+  it("AV-02 the previous build can open and append after the new build adds interrupted text", () => {
+    const file = join(dir, "rollback.db");
+    const current = store(file);
+    const thread = current.createThread();
+    current.appendMessage({ threadId: thread.id, role: "assistant", content: "An unfinished answer", interrupted: true });
+    current.close();
+    const old = raw(file);
+    try {
+      // The merged main reader supports versions 1..5 and selects named columns.
+      // Interrupted text adds no further version beyond that reader's guard.
+      expect(() => migrate(old, file, MIGRATIONS.slice(0, 5))).not.toThrow();
+      expect(old.prepare("SELECT content FROM messages WHERE thread_id = ?").all(thread.id)).toMatchObject([{ content: "An unfinished answer" }]);
+      old.prepare("INSERT INTO messages (id, thread_id, role, content, created_at) VALUES ('old-write', ?, 'user', 'From the previous build', 2)").run(thread.id);
+    } finally { old.close(); }
+    expect(store(file).getThread(thread.id).messages).toHaveLength(2);
+  });
+  it("AU-03 additively loads messages written by the version-3 schema", () => {
+    const file = join(dir, "legacy-v3.db");
+    const db = raw(file);
+    migrate(db, file, MIGRATIONS.slice(0, 3));
+    db.exec("INSERT INTO threads VALUES ('old', 'Old thread', 1, 1)");
+    db.exec("INSERT INTO messages (id, thread_id, role, content, created_at) VALUES ('answer', 'old', 'assistant', 'A completed old reply', 1)");
+    db.close();
+    const reopened = store(file);
+    expect(reopened.getThread("old").messages[0]).toEqual({ id: "answer", threadId: "old", role: "assistant", content: "A completed old reply", createdAt: 1 });
+  });
+  it("AU-03 keeps an interrupted marker beside partial text after reopening", () => {
+    const file = join(dir, "interrupted.db");
+    const first = store(file);
+    const thread = first.createThread();
+    const partial = { threadId: thread.id, role: "assistant" as const, content: "Half an answer", interrupted: true as const };
+    first.appendMessage(partial);
+    first.close();
+    const reopened = store(file);
+    expect(reopened.getThread(thread.id).messages[0]).toMatchObject({ content: "Half an answer", interrupted: true });
+  });
+
   it("creates the parent directory, WAL mode and the latest schema", () => {
     const path = join(dir, "nested", "deeper", "threads.db");
     store(path);

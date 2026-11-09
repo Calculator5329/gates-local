@@ -236,6 +236,9 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       lastCheck: null,
     },
   },
+  "update.prepare": { params: { approval: "approval-1" }, result: { state: "ready", reservation: "reservation-1", targetCommit: "b".repeat(40) } },
+  "update.commit": { params: { reservation: "reservation-1", targetCommit: "b".repeat(40), release: "main-release-1" }, result: { accepted: true, release: "main-release-1" } },
+  "update.cancel": { params: { reservation: "reservation-1" }, result: { cancelled: true } },
   "update.check": {
     params: {},
     result: {
@@ -277,6 +280,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
   "models.pull": [pull, { name: "qwen3.5:14b", state: "error", completedBytes: 0, message: "no space left" }],
+  "update.changed": [methodSamples["update.status"].result],
   "models.load": [
     { model: "qwen3.5:9b", numCtx: 16384, state: "loading" },
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },

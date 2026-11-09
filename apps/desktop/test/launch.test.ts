@@ -69,7 +69,7 @@ describe("server child environment", () => {
 
   it("without GATES_LOCAL_WEB_LISTEN nothing phone-related is added", () => {
     const env = serverEnv({ env: { PATH: "/bin" }, clientOrigin: "gates-local://app", webRoot: "/opt/gl/web" });
-    expect(env).toEqual({ PATH: "/bin", GATES_LOCAL_ALLOWED_ORIGINS: "gates-local://app" });
+    expect(env).toEqual({ PATH: "/bin", GATES_LOCAL_ALLOWED_ORIGINS: "gates-local://app", GATES_LOCAL_DESKTOP: "1" });
   });
 
   it("keeps extra allowed origins and adds the client's", () => {

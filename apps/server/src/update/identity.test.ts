@@ -42,6 +42,23 @@ describe("a process's start time", () => {
 });
 
 describe("whether a saved command has ended", () => {
+  it("AW-04 legacy Windows records retain the uptime fallback without trusting root disappearance", () => {
+    expect(treeGone(saved, { ...up, platform: "win32", exists: () => false, requireWholeWindowsTree: true })).toBe(false);
+    expect(treeGone(saved, { ...up, platform: "win32", exists: () => true, startOf: () => "another root", requireWholeWindowsTree: true })).toBe(false);
+    expect(treeGone(saved, { platform: "win32", uptime: () => 500, exists: () => false, requireWholeWindowsTree: true })).toBe(true);
+  });
+  it("AW-04 a later boot proves restart even when its uptime has passed the saved uptime", () => {
+    const record = { ...saved, boot: "133000000000000000" };
+    expect(treeGone(record, { ...up, platform: "win32", requireWholeWindowsTree: true, bootTime: () => "133000100000000000" })).toBe(true);
+    for (const boot of ["133000000000000000", "132999900000000000", "invalid", null]) {
+      expect(treeGone(record, { ...up, platform: "win32", requireWholeWindowsTree: true, bootTime: () => boot })).toBe(false);
+    }
+    expect(treeGone(saved, { ...up, platform: "win32", requireWholeWindowsTree: true, bootTime: () => "133000100000000000" })).toBe(false);
+  });
+
+  it("AW-04 records Windows boot evidence with the process for later recovery", () => {
+    expect(processRecord(4242, { platform: "win32", startOf: () => "owned-start", uptime: () => 1000, bootTime: () => "133000000000000000" })).toEqual({ pid: 4242, start: "owned-start", uptime: 1000, boot: "133000000000000000" });
+  });
   it("not while the group is there and its leader is the same process", () => {
     expect(treeGone(saved, { ...up, exists: () => true, startOf: () => "when it began" })).toBe(false);
   });

@@ -1,4 +1,5 @@
-import { isValidElement } from "react";
+import { createElement, isValidElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 import type { State } from "./store.ts";
 
@@ -17,6 +18,18 @@ import { Timeline } from "./Thread.tsx";
 import { setState } from "./store.ts";
 
 afterEach(() => { setState({ messages: {}, live: null }); vi.unstubAllGlobals(); });
+
+it("retains interrupted text and its unfinished label in the shared live-to-saved reply slot", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({ live: null, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  expect(html).toContain('class="turn a interrupted"');
+  expect(html).toContain('aria-label="Interrupted reply"');
+  expect(html).toContain("A retained partial answer");
+  expect(html).toContain("excluded from later model prompts");
+  expect(html).not.toContain('class="turn a done"');
+});
 
 function child(node: unknown, index: number): unknown {
   if (!isValidElement<{ children: unknown }>(node)) throw new Error("Expected an element");

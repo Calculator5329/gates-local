@@ -15,20 +15,22 @@
 // changes the checkout is saved there too while it runs, so a later run waits
 // for one that outlived the updater or could not be stopped.
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { type Blocked, type Channel, type ChannelChoice, type Commit, type Git, type Inspection, changedFiles, gitIn, inspect, isBlocked } from "./check.ts";
-import { processRecord, treeGone } from "./identity.ts";
+import { type Blocked, type Channel, type ChannelChoice, type Commit, type Git, type Inspection, changedFiles, gitIn, inspect, isBlocked, labelOf } from "./check.ts";
+import { createProcessRecorder, treeGone, type ProcessRecord } from "./identity.ts";
 import { acquireLock, lockHolder, stateDir } from "./lock.ts";
 import { lastLines, type RunResult, type Runner } from "./run.ts";
 import { type Transaction, clearTransaction, readTransaction, saveTransaction } from "./transaction.ts";
 
-export type Step = "switch" | "install" | "build-web" | "build-desktop";
+export type Step = "switch" | "install" | "build-web" | "build-desktop" | "start";
 
 export const STEP_WORDS: Record<Step, string> = {
   switch: "switching to the new version",
   install: "installing packages",
   "build-web": "building the app window",
   "build-desktop": "building the desktop app",
+  start: "starting the new version",
 };
 
 const INSTALL_MS = 20 * 60_000;
@@ -49,6 +51,7 @@ export const BUILD_DESKTOP_ARGS = ["--filter", "@gates-local/desktop", "build"] 
 
 export type Refusal =
   | Blocked
+  | { readonly reason: "target-changed"; readonly approved: string; readonly target: Commit }
   | { readonly reason: "app-running"; readonly pid: number; readonly file: string }
   | { readonly reason: "no-pnpm" }
   /** Another update holds this checkout. */
@@ -68,7 +71,7 @@ export type UpdateRun =
   | { readonly outcome: "refused"; readonly refusal: Refusal }
   | { readonly outcome: "up-to-date"; readonly inspection: Extract<Inspection, { state: "up-to-date" }> }
   | { readonly outcome: "available"; readonly inspection: Extract<Inspection, { state: "available" }> }
-  | { readonly outcome: "updated"; readonly channel: Channel; readonly from: Commit; readonly to: Commit; readonly changes: number }
+  | { readonly outcome: "updated" | "awaiting-start"; readonly channel: Channel; readonly from: Commit; readonly to: Commit; readonly changes: number }
   | {
       readonly outcome: "stopped" | "rollback-failed";
       readonly channel: Channel;
@@ -81,6 +84,8 @@ export type UpdateRun =
     };
 
 export interface UpdateOptions {
+  /** Desktop approval pins an exact checked commit. Omitted by the manual command. */
+  readonly approvedCommit?: string;
   readonly root: string;
   readonly runner: Runner;
   readonly choice: ChannelChoice;
@@ -93,6 +98,8 @@ export interface UpdateOptions {
   readonly say: (line: string) => void;
   /** Every command and its output, for the log file. */
   readonly log: (chunk: string) => void;
+  /** Starts the owned app, waits for server readiness, and ends its tree on failure. */
+  readonly startApp?: (startup: { readonly token: string; readonly commit: string }, onStart: (pid: number) => void) => Promise<RunResult>;
 }
 
 const ok = (r: RunResult) => r.code === 0;
@@ -146,6 +153,7 @@ interface Context {
   readonly pnpm: (args: readonly string[], ms: number, onStart?: (pid: number) => void) => Promise<RunResult>;
   /** False once another run has taken the checkout: nothing more may change. */
   readonly ours: () => boolean;
+  readonly recordProcess: (pid: number) => ProcessRecord;
 }
 
 /**
@@ -158,7 +166,7 @@ interface Context {
  * command whose number then cannot be saved is ended at once. Either way this
  * throws CannotSave, which ends the run with a refusal.
  */
-async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>): Promise<RunResult> {
+async function changing(c: Context, t: Transaction, run: (onStart: (pid: number) => void) => Promise<RunResult>, persistAfter = true): Promise<RunResult> {
   const { root } = c.o;
   const cannotSave = (e: unknown, pid: number | null) => new CannotSave({ reason: "cannot-save", target: t.to.label, detail: (e as Error).message, pid });
   if (c.ours()) {
@@ -172,14 +180,14 @@ async function changing(c: Context, t: Transaction, run: (onStart: (pid: number)
   const result = await run((pid) => {
     if (!c.ours()) return;
     try {
-      saveTransaction(root, { ...t, running: processRecord(pid) });
+      saveTransaction(root, { ...t, running: c.recordProcess(pid) });
     } catch (error) {
       unsaved = { error, pid };
       throw error;
     }
   });
   if (unsaved !== undefined) throw cannotSave(unsaved.error, result.treeStillRunning === true ? unsaved.pid : null);
-  if (result.treeStillRunning !== true && c.ours()) {
+  if (persistAfter && result.treeStillRunning !== true && c.ours()) {
     try {
       saveTransaction(root, t);
     } catch (e) {
@@ -236,7 +244,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
     o.log(`$ ${pnpmLine(args)}\n`);
     return o.runner(o.pnpm.command, [...o.pnpm.prefix, ...args], { cwd: o.root, shell: o.pnpm.shell, timeoutMs, onOutput: o.log, ...(onStart ? { onStart } : {}) });
   };
-  const c: Context = { o, git, pnpm, ours };
+  const c: Context = { o, git, pnpm, ours, recordProcess: createProcessRecorder() };
 
   if (!o.checkOnly) {
     // On Windows a running app holds electron.exe and the install would stop half way.
@@ -245,6 +253,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
     if (!ok(await pnpm(["--version"], 60_000))) return refused({ reason: "no-pnpm" });
     const unfinished = readTransaction(o.root);
     if (unfinished !== null) {
+      if (o.approvedCommit !== undefined && unfinished.to.commit !== o.approvedCommit) return refused({ reason: "target-changed", approved: o.approvedCommit, target: unfinished.to });
       const recovered = await recover(c, unfinished);
       if (recovered !== null) return recovered;
     }
@@ -253,6 +262,7 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
   o.say("Checking for updates…");
   const found = await inspect({ root: o.root, runner: o.runner, choice: o.choice, log: o.log });
   if (found.state === "blocked") return refused(found.blocked);
+  if (o.approvedCommit !== undefined && found.target.commit !== o.approvedCommit) return refused({ reason: "target-changed", approved: o.approvedCommit, target: found.target });
   if (found.state === "up-to-date") return { outcome: "up-to-date", inspection: found };
   if (o.checkOnly) return { outcome: "available", inspection: found };
 
@@ -286,18 +296,17 @@ async function transact(o: UpdateOptions, ours: () => boolean): Promise<UpdateRu
  * Takes up what a cut-off run left. Null means nothing is left to do and the
  * update goes on as usual.
  *
- * First, a command that may still be running holds everything off. Then what
- * the checkout is on says how far it got. On the new commit: the install and
+ * A command that may still be running holds recovery off unless the person
+ * has moved HEAD themselves. On the new commit: the install and
  * builds may not have finished, so they run (and go back if they fail). On
  * the old commit after a start back: going back runs again. On the old commit
  * otherwise: it did not move, and the saved state goes only once the files
- * and git agree nothing was left half done. Anywhere else, or on another
- * branch, the person has moved it themselves (the manual `git pull` path),
- * and that stands.
+ * and git agree nothing was left half done. A hand-moved HEAD on the same
+ * branch keeps that commit and repairs its install and builds; a branch
+ * switch clears the old record without installing anything.
  */
 async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   const { o, git } = c;
-  if (t.running !== undefined && !treeGone(t.running)) return refused({ reason: "still-running", pid: t.running.pid, target: t.to.label });
   const now = await git(["rev-parse", "HEAD"]);
   const branch = await git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
   // git is not usable: inspect says why, and refuses while the file is there.
@@ -305,11 +314,14 @@ async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   const head = now.stdout.trim();
   const onNew = head === t.to.commit;
   const onOld = head === t.from.commit;
-  if (branch.stdout.trim() !== t.branch || (!onNew && !onOld)) {
+  if (ok(branch) && branch.stdout.trim() !== t.branch) {
     if (!c.ours()) return lostLock();
     settle(c);
     return null;
   }
+  const repair = (!onNew && !onOld) || (t.phase === "launch" && onOld && !onNew);
+  if (!repair && t.running !== undefined && !treeGone(t.running, { requireWholeWindowsTree: true })) return refused({ reason: "still-running", pid: t.running.pid, target: t.to.label });
+  if (!ok(branch)) return null;
   const left = await leftBehind(c);
   if (isBlocked(left)) return refused(left);
   // A merge moves the commit last, so on the new commit going forward the files are all there and any difference is the person's.
@@ -317,11 +329,17 @@ async function recover(c: Context, t: Transaction): Promise<UpdateRun | null> {
   if (left.gitLock !== null || left.merging || (left.files.length > 0 && !mergeFinished)) return partial(t.to, left);
   if (left.files.length > 0) return refused({ reason: "local-changes", files: left.files });
   if (!c.ours()) return lostLock();
-  if (onOld && t.phase === "forward") {
+  if (repair) {
+    const here = { commit: head, label: await labelOf(git, head) };
+    o.say(`Repairing the install at ${here.label} without moving your commit…`);
+    return installAndBuild(c, { channel: t.channel, branch: t.branch, from: here, to: here, changes: 0 });
+  }
+  if (onOld && !onNew && t.phase === "forward") {
     settle(c);
     return null;
   }
   const move: Move = { channel: t.channel, branch: t.branch, from: t.from, to: t.to, changes: t.changes };
+  if (t.phase === "launch") return goBack(c, { ...move, step: "start", reason: "The new version did not finish its first start." });
   if (onOld && t.phase === "back") return goBack(c, { ...move, step: t.step, reason: t.reason });
   o.say(`The update to ${t.to.label} did not finish. Finishing it…`);
   return installAndBuild(c, move);
@@ -361,7 +379,17 @@ async function installAndBuild(c: Context, m: Move): Promise<UpdateRun> {
     if (!ok(r)) return goBack(c, { ...m, step, reason: reasonOf(r, "pnpm") });
   }
   if (!c.ours()) return lostLock();
-  settle(c);
+  const startApp = c.o.startApp;
+  const token = startApp === undefined ? undefined : randomUUID();
+  const launch: Transaction = { ...m, phase: "launch", ...(token === undefined ? {} : { startupToken: token }) };
+  if (startApp === undefined || token === undefined) {
+    saveTransaction(c.o.root, launch);
+    return { outcome: "awaiting-start", channel: m.channel, from: m.from, to: m.to, changes: m.changes };
+  }
+  const r = await changing(c, launch, onStart => startApp({ token, commit: m.to.commit }, onStart), false);
+  if (r.treeStillRunning === true) return stillRunning(c, m.to);
+  if (!ok(r)) return goBack(c, { ...m, step: "start", reason: reasonOf(r, "The new version") });
+  if (readTransaction(c.o.root) !== null) return goBack(c, { ...m, step: "start", reason: "The new version did not acknowledge server readiness." });
   return { outcome: "updated", channel: m.channel, from: m.from, to: m.to, changes: m.changes };
 }
 
@@ -404,7 +432,9 @@ async function goBack(c: Context, f: Failed): Promise<UpdateRun> {
   if (changed === "unknown") return failedBack();
   if (changed !== null) return refused(changed);
   if (!c.ours()) return lostLock();
-  o.say(`The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
+  o.say(f.from.commit === f.to.commit
+    ? `Repairing ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Retrying the repair at this commit…`
+    : `The update to ${f.to.label} stopped at ${STEP_WORDS[f.step]}. Going back to ${f.from.label}…`);
   const back: Transaction = { channel: f.channel, branch: f.branch, from: f.from, to: f.to, changes: f.changes, phase: "back", step: f.step, reason: f.reason };
   // --keep is safe here: the copy was just found to be exactly as this run left it.
   const reset = await changing(c, back, (onStart) => git(["reset", "--keep", f.from.commit], undefined, onStart));

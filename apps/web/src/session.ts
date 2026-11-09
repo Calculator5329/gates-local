@@ -18,13 +18,14 @@ import { createFit, staleFitReports, staleFitStatus } from "./session/fit.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyTextSize, applyTheme, serverUrl, webServerUrl } from "./session/platform.ts";
 import { createNavigation } from "./session/navigation.ts";
+import { createUpdates } from "./session/updates.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
 
 // Preserve the UI's action imports while implementation moves into session modules.
 export { threadMarkdown } from "./session/threads.ts";
 export { queueReason, firstPull, cancelStopAsk, canRetry, removeQueued, editQueued } from "./session/chat.ts";
-export { type ActionResult, failure, isNA } from "./session/connection.ts";
-export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere, updateAndRestart } from "./session/platform.ts";
+export { type ActionCall, type ActionResult, failure, isNA } from "./session/connection.ts";
+export { fileUrl, dataFolder, openDataFolder, canOpenFolder, canUpdateHere } from "./session/platform.ts";
 export { threadFromHash } from "./session/navigation.ts";
 
 export const applyServerEvent = createServerState(getState, setState);
@@ -39,6 +40,9 @@ const connection = createConnection({ applyServerEvent,
 });
 export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
+const updatesSession = createUpdates({ applyServerEvent, act });
+export const { checkForUpdates, dismissUpdateResult, updateAndRestart } = updatesSession;
+const { updateOrder } = updatesSession;
 
 const threadSession = createThreads({ applyServerEvent,
   call, codeOf, failure,
@@ -80,7 +84,7 @@ const { settingsPatch } = settingsSession;
 // ---------------------------------------------------------------- hydrate and pushes
 
 /** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status"]);
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status", "update.changed"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -125,6 +129,7 @@ async function hydrateWith(
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
   on("sources.changed", (sources) => applyServerEvent({ sources }));
+  on("update.changed", updatesSession.receiveUpdate);
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
   });
@@ -165,8 +170,7 @@ async function hydrateWith(
 
   const catalogTicket = catalogOrder.next();
   const updateTicket = updateOrder.next();
-  // update.status reads the .git folder and a local file; the check that
-  // fetches runs only from the Check for updates button (checkForUpdates).
+  // update.status reads local files; the desktop server owns automatic checks.
   const [gpu, catalog, sources, imageStatus, update] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
@@ -190,7 +194,6 @@ async function hydrateWith(
 }
 
 const imageOrder = newestOnly();
-const updateOrder = newestOnly();
 
 const navigation = createNavigation({
   flushQueued, bringBack, chooseModel, loadThread, loading,
@@ -249,36 +252,4 @@ export async function removeSource(id: string): Promise<ActionResult> {
 export async function refreshSource(id: string): Promise<ActionResult> {
   const r = await act("sources.refresh", { id }, "refresh this source");
   return r.ok ? null : r.message;
-}
-
-// ---------------------------------------------------------------- updates
-
-/**
- * The Check for updates button, and nothing else, calls this: the server
- * fetches from the clone's remote. The answer (up to date, the changes, or
- * why it cannot check) lands in update.lastCheck; a failed call comes back
- * as the sentence to show.
- */
-export async function checkForUpdates(): Promise<ActionResult> {
-  if (getState().updateChecking) return null;
-  setState({ updateChecking: true });
-  const r = await act("update.check", {}, "check for updates");
-  applyServerEvent((s) => {
-    if (r.ok && s.update !== undefined && s.update !== NA) {
-      updateOrder.next(); // A completed check is newer than an in-flight hydration snapshot.
-      return { updateChecking: false, update: { ...s.update, lastCheck: r.value } };
-    }
-    return { updateChecking: false };
-  });
-  return r.ok ? null : r.message;
-}
-
-/** Hide the last update's result; the server forgets it too, so other windows lose it on their next start. */
-export async function dismissUpdateResult(): Promise<void> {
-  setState((s) => {
-    if (s.update === undefined || s.update === NA) return {};
-    updateOrder.next();
-    return { update: { ...s.update, result: null } };
-  });
-  await act("update.dismissResult", {}, "hide the update note");
 }

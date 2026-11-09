@@ -11,7 +11,7 @@ import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, write
 import path from "node:path";
 import type { Step } from "./apply.ts";
 import type { Channel, Commit } from "./check.ts";
-import type { ProcessRecord } from "./identity.ts";
+import { isWindowsBootTime, type ProcessRecord } from "./identity.ts";
 import { stateDir } from "./lock.ts";
 
 export const TRANSACTION_FILE = "gates-local-update.json";
@@ -30,6 +30,7 @@ interface Common {
 
 export type Transaction =
   | (Common & { readonly phase: "forward" })
+  | (Common & { readonly phase: "launch"; readonly startupToken?: string })
   /** A step failed and the run started back to `from`. */
   | (Common & { readonly phase: "back"; readonly step: Step; readonly reason: string });
 
@@ -71,14 +72,16 @@ export function clearTransaction(root: string): void {
   flushDir(path.dirname(file));
 }
 
-const STEPS: ReadonlySet<string> = new Set(["switch", "install", "build-web", "build-desktop"]);
+const STEPS: ReadonlySet<string> = new Set(["switch", "install", "build-web", "build-desktop", "start"]);
 const isString = (v: unknown): v is string => typeof v === "string" && v !== "";
 const isCommit = (v: unknown): v is Commit => typeof v === "object" && v !== null && isString((v as Commit).commit) && isString((v as Commit).label);
 
-function isProcess(v: unknown): v is ProcessRecord {
-  if (typeof v !== "object" || v === null) return false;
-  const { pid, start, uptime } = v as ProcessRecord;
-  return Number.isInteger(pid) && pid > 0 && (start === null || isString(start)) && typeof uptime === "number";
+function processOf(v: unknown): ProcessRecord | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  const row = v as Record<string, unknown>;
+  const { pid, start, uptime, boot } = row;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0 || !(start === null || isString(start)) || typeof uptime !== "number") return undefined;
+  return { pid, start, uptime, ...(isWindowsBootTime(boot) ? { boot } : {}) };
 }
 
 function parse(text: string): Transaction | null {
@@ -91,9 +94,11 @@ function parse(text: string): Transaction | null {
   const { version, channel, branch, from, to, changes, phase, step, reason, running } = v;
   if (version !== 1 || (channel !== "main" && channel !== "release") || !isString(branch) || !isCommit(from) || !isCommit(to)) return null;
   if (typeof changes !== "number" || !Number.isInteger(changes) || changes < 0) return null;
-  if (running !== undefined && !isProcess(running)) return null;
-  const common: Common = { channel, branch, from, to, changes, ...(running === undefined ? {} : { running }) };
+  const process = running === undefined ? undefined : processOf(running);
+  if (running !== undefined && process === undefined) return null;
+  const common: Common = { channel, branch, from, to, changes, ...(process === undefined ? {} : { running: process }) };
   if (phase === "forward") return { ...common, phase };
+  if (phase === "launch" && (v["startupToken"] === undefined || isString(v["startupToken"]))) return { ...common, phase, ...(v["startupToken"] === undefined ? {} : { startupToken: v["startupToken"] }) };
   if (phase === "back" && isString(step) && STEPS.has(step) && typeof reason === "string") return { ...common, phase, step: step as Step, reason };
   return null;
 }

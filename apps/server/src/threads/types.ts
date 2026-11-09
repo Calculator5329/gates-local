@@ -50,6 +50,7 @@ export interface Message {
   tools?: ToolStepRecord[];
   /** Paths of images the turn made, inside the app data dir. */
   images?: string[];
+  interrupted?: true;
   imageJob?: ImageEvent;
 }
 
@@ -73,4 +74,5 @@ export interface NewMessage {
   tools?: ToolStepRecord[];
   /** Paths of images the turn made, inside the app data dir. */
   images?: string[];
+  interrupted?: true;
 }

@@ -32,6 +32,7 @@ import { serveClient } from "../web/static.ts";
 export interface HandlerContext {
   /** Stable per connection, for handlers that track who started what. */
   readonly clientId: number;
+  readonly listener?: "desktop" | "phone";
   readonly signal?: AbortSignal;
 }
 
@@ -155,6 +156,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   // Eight 10 MiB pasted images expand to about 107 MiB in base64. Saved threads carry paths only.
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
+  const phoneClients = new WeakSet<WebSocket>();
   // Before the snapshot, active replies are recovered from that snapshot and
   // completed ones from RPC history. Keeping no chat backlog bounds idle clients.
   const chatClients = new WeakSet<WebSocket>();
@@ -206,7 +208,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
         return refuse(socket, 403, "Forbidden", SECURITY_HEADERS);
       }
       if (new URL(req.url ?? "/", "http://loopback").pathname !== "/ws") return refuse(socket, 404, "Not Found", SECURITY_HEADERS);
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
+      wss.handleUpgrade(req, socket, head, (ws) => { phoneClients.add(ws); wss.emit("connection", ws, req); });
     });
     phoneHttp.on("clientError", (_e, socket) => socket.destroy());
   }
@@ -217,7 +219,16 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (req.id === undefined) return log(`dropped frame with no usable id: ${req.error.code}: ${req.error.message}`);
       return send(ws, encodeErrorResponse(req.id, req.error.code, req.error.message));
     }
-    const { id, method, params } = req.value;
+    const { id, method } = req.value;
+    if (ctx.listener === "phone" && method.startsWith("update.") && method !== "update.status") {
+      return send(ws, encodeErrorResponse(id, "forbidden", "Updates can only be controlled from the computer running Gates Local."));
+    }
+    let params: unknown = req.value.params;
+    if (ctx.listener === "phone" && req.value.method === "settings.update") {
+      // Reset still succeeds on phones, but desktop update preferences stay put.
+      const { updateAutomatic: _automatic, updateEveryChange: _channel, ...phonePatch } = req.value.params;
+      params = phonePatch;
+    }
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
     if (handler === undefined) return send(ws, encodeErrorResponse(id, "not-implemented", `${method} has no handler`));
     let result: unknown;
@@ -241,7 +252,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     if (options.onClientReady === undefined) chatClients.add(ws);
     options.onClientCount?.(clients.size);
     const controller = new AbortController();
-    const ctx: HandlerContext = { clientId: nextClientId++, signal: controller.signal };
+    const ctx: HandlerContext = { clientId: nextClientId++, listener: phoneClients.has(ws) ? "phone" : "desktop", signal: controller.signal };
     ws.on("message", (data, isBinary) => {
       if (!chatClients.has(ws)) {
         try {

@@ -124,6 +124,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(patch.tools === undefined ? {} : { tools: patch.tools }),
     ...(patch.imageGen === undefined ? {} : { imageGen: patch.imageGen }),
     ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
+    ...(patch.updateAutomatic === undefined ? {} : { updateAutomatic: patch.updateAutomatic }),
     ...(patch.textSize === undefined ? {} : { textSize: patch.textSize }),
   };
 }

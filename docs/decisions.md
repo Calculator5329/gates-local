@@ -1,5 +1,66 @@
 # Decisions
 
+## 2026-11-09 · Updates finish at server readiness and imports cannot be interrupted
+
+Only the desktop listener may control updates. The phone listener exposes
+status, with no preparation, commit, check, cancellation or global-dismiss
+RPC. A committed handoff expires five seconds after its desktop connection
+is lost if the app stays open. Server shutdown keeps admission closed.
+
+Imports share admission and the confirmation activity list. A running
+import blocks approval until it finishes. Shutdown cancels and joins its
+worker before cleanup. The lifecycle includes background work after an RPC
+returns a job id, through snapshot/registry persistence and cleanup.
+
+Build completion is not update success. Keep the transaction and checkout
+lock through first launch. The app acknowledges the exact target and launch
+token only after its supervised server reports ready. Startup failure or a
+60-second timeout stops that owned process tree, restores and builds the old
+commit, and launches it once. The terminal updater verifies startup too.
+
+The interrupted column is an idempotent nullable addition, without a new
+schema version. Both earlier version-4 layouts remain readable, including
+the image-card and interrupted-message variants. This preserves the
+previous reader's version guard and ignores extra columns on rollback.
+
+## 2026-11-08 · Update approval is a server reservation, not a renderer check
+
+At confirmation, the server must re-fetch the target and compare the exact
+target and activity snapshot the person saw. Changed work or a changed
+target requires another confirmation. Successful preparation atomically
+closes admission at the reply, image-job and model-download producers,
+including calls from other clients and image tools. All clients see a
+paused-work line. A failed or abandoned handoff releases admission.
+
+Electron main must independently consume that reservation before starting
+the updater, and carry the full checked commit to the detached command.
+Cancellation authority transfers to main so a delayed renderer cancellation
+cannot reopen admission after the updater has started. The bridge advertises
+the approval protocol and uses a new IPC channel; older bridges cannot
+silently ignore the target. The detached updater refuses a different target
+without installing it, then reopens the old app for renewed approval. The
+manual command keeps its existing latest-target behavior when no exact
+target was supplied.
+
+Unfinished assistant replies keep their text with a durable interrupted
+marker. The database change adds a nullable column; older messages remain
+readable as completed messages. The UI must label marked text as interrupted.
+Later model requests exclude unfinished assistant messages, while retaining
+the user questions and completed replies. This deliberately favors a fresh
+answer over presenting an incomplete answer as authoritative context.
+
+## 2026-11-08 · Visible desktop update control, existing transaction
+
+Keep the clone updater rather than introducing packaged releases or
+electron-updater. Follow T3's sidebar footer placement, actionable states
+and restart confirmation. The desktop server owns one automatic check at
+15 seconds and hourly thereafter; browsers and phones never schedule one.
+Checks contact the clone's configured git remote with fetch and ls-remote.
+"Check for updates automatically" defaults on and off prevents future
+automatic git processes and network requests; an in-flight check finishes.
+Nothing installs without a click. "Get every change, not only releases"
+keeps its existing meaning. Source installs still close the window during
+install/build; no predownload stage is added in this round.
 ## 2026-11-08 · Local dictation first, voice conversation designed next
 
 **Decided:** add an optional whisper.cpp client, off until connected in

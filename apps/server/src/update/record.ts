@@ -62,7 +62,7 @@ export function takeRecord(dataDir: string): UpdateRecord | undefined {
   const channel = raw["channel"] === "main" || raw["channel"] === "release" ? raw["channel"] : undefined;
   const from = commit(raw["from"]);
   const to = commit(raw["to"]);
-  const step = ["switch", "install", "build-web", "build-desktop"].includes(String(raw["step"])) ? (raw["step"] as Step) : undefined;
+  const step = ["switch", "install", "build-web", "build-desktop", "start"].includes(String(raw["step"])) ? (raw["step"] as Step) : undefined;
   const commands = Array.isArray(raw["commands"]) ? raw["commands"].filter((c): c is string => typeof c === "string") : undefined;
   return {
     at: raw["at"],

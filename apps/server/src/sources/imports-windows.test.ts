@@ -128,6 +128,7 @@ it.each(["same", "unknown", "reused", "gone"])("restart preserves containment wi
     const next = createLibraryImports({ sources }); s.managers.push(next);
     const clone = (name: string) => next.handlers["sources.clone"]({ url: `https://github.com/example/${name}` });
     if (identity === "same" || identity === "unknown") {
+      expect(next.activity().toSorted()).toEqual(jobs.map(job => `Import: ${job.label}`).toSorted());
       for (const job of jobs) expect(existsSync(path.join(s.dataDir, "library-imports", job.id))).toBe(true);
       expect(next.snapshot().jobs.map(job => job.key)).toEqual(expect.arrayContaining(jobs.map(job => job.key)));
       expect(next.snapshot().jobs).toHaveLength(2);
@@ -138,6 +139,7 @@ it.each(["same", "unknown", "reused", "gone"])("restart preserves containment wi
       next.handlers["sources.cancelImport"]({ id: jobs[0]!.id });
     }
     for (const job of jobs) expect(existsSync(path.join(s.dataDir, "library-imports", job.id))).toBe(false);
+    expect(next.activity()).toEqual([]);
     expect(commands.execFile).toHaveBeenCalledTimes(2); // Recovery never kills a saved or recycled PID.
     expect(() => clone("three")).not.toThrow(); expect(() => clone("four")).not.toThrow();
     await vi.waitFor(() => expect(s.workers).toHaveLength(4));

@@ -1,14 +1,13 @@
 // Settings › General › Updates on the server: update.status, update.check
 // and update.dismissResult.
 //
-// Nothing here runs on its own. The server takes the last update's result
-// file when it starts (a local file), and status reads the version from the
-// .git folder; neither starts a git process or touches the network. Only
-// update.check runs git (fetch and ls-remote), and only when a client asks,
-// which the web does on a click. Installing is never done from here: the
+// Status reads local files only. The desktop server's one automatic timer
+// and manual update.check share a fetch and the checkout's install lock.
+// Background failures stay silent. Installing is never done from here: the
 // desktop app starts `pnpm run app-update` and quits (apps/desktop).
-import type { UpdateCheck, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
-import type { Handlers } from "../ws/server.ts";
+import type { UpdateCheck, UpdateCommitRequest, UpdateCommitResult, UpdatePreparation, UpdateResult, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
+import { randomUUID } from "node:crypto";
+import type { HandlerContext, Handlers } from "../ws/server.ts";
 import type { Blocked, Inspection } from "./check.ts";
 import { inspect } from "./check.ts";
 import { refusalLines, stoppedLine } from "./cli.ts";
@@ -16,6 +15,8 @@ import { STEP_WORDS } from "./apply.ts";
 import { type UpdateRecord, takeRecord } from "./record.ts";
 import type { Runner } from "./run.ts";
 import { readVersion, type VersionInfo } from "./version.ts";
+import { acquireLock } from "./lock.ts";
+import { createUpdateAdmission, UPDATE_PAUSED, type UpdateAdmission } from "./admission.ts";
 
 export interface UpdateModuleDeps {
   /** The clone the server runs from. */
@@ -27,11 +28,20 @@ export interface UpdateModuleDeps {
   readonly now?: () => number;
   readonly log?: (line: string) => void;
   readonly version?: (root: string) => VersionInfo;
+  readonly activity?: () => readonly string[];
+  /** Work that must finish, rather than being interrupted by an install. */
+  readonly uninterruptible?: () => readonly string[];
+  readonly changed?: (status: UpdateStatus) => void;
+  readonly admission?: UpdateAdmission;
 }
 
 export interface UpdateModule {
   status(): UpdateStatus;
-  check(): Promise<UpdateCheck>;
+  check(background?: boolean): Promise<UpdateCheck>;
+  close(): Promise<void>;
+  prepare(approval: string): Promise<UpdatePreparation>;
+  commit(request: UpdateCommitRequest, disconnected?: AbortSignal): UpdateCommitResult;
+  cancel(reservation: string): { cancelled: boolean };
   dismissResult(): { dismissed: boolean };
 }
 
@@ -41,13 +51,17 @@ const changesWord = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
 export function resultLine(r: UpdateRecord): string {
   const to = r.to?.label ?? "the new version";
   const from = r.from?.label ?? "the version it was on";
+  const repair = r.from !== undefined && r.to !== undefined && r.from.commit === r.to.commit;
   switch (r.outcome) {
     case "updated":
+      if (repair) return `Repaired ${to}.`;
       return r.changes === undefined ? `Updated to ${to}.` : `Updated to ${to}, ${changesWord(r.changes)}.`;
     case "stopped":
-      return r.step === undefined ? `The update to ${to} stopped: ${r.reason ?? "no reason was given"}. Gates Local is still on ${from}.` : stoppedLine(to, r.step, r.reason ?? "no reason was given", from);
+      return r.step === undefined ? `${repair ? "The repair of" : "The update to"} ${to} stopped: ${r.reason ?? "no reason was given"}. Gates Local is still on ${from}.` : stoppedLine(to, r.step, r.reason ?? "no reason was given", from, repair);
     case "rollback-failed":
-      return `The update to ${to} stopped at ${r.step === undefined ? "a step" : STEP_WORDS[r.step]}: ${r.reason ?? "no reason was given"}, and going back to ${from} did not finish. Run the commands below in the Gates Local folder.`;
+      return repair
+        ? `Repairing ${to} stopped at ${r.step === undefined ? "a step" : STEP_WORDS[r.step]}: ${r.reason ?? "no reason was given"}. Retrying the repair did not finish either. Run the commands below in the Gates Local folder.`
+        : `The update to ${to} stopped at ${r.step === undefined ? "a step" : STEP_WORDS[r.step]}: ${r.reason ?? "no reason was given"}, and going back to ${from} did not finish. Run the commands below in the Gates Local folder.`;
     case "refused":
       return `The update stopped: ${r.reason ?? "no reason was given"}`;
   }
@@ -84,6 +98,7 @@ function toCheck(i: Inspection, checkedAt: number): UpdateCheck {
     channel: i.channel,
     current: i.head.label,
     target: i.target.label,
+    targetCommit: i.target.commit,
     total: i.total,
     changes: i.changes,
     ...(i.notes === undefined ? {} : { notes: i.notes }),
@@ -103,41 +118,93 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
   let result: UpdateResult | null = record === undefined ? null : toResult(record);
   let lastCheck: UpdateCheck | null = null;
   let running: Promise<UpdateCheck> | undefined;
+  let closed = false;
+  const admission = deps.admission ?? createUpdateAdmission();
+  let offer: { token: string; fingerprint: string } | undefined;
   const version = (): UpdateVersion => (deps.version ?? readVersion)(deps.root);
+  const status = (): UpdateStatus => {
+    // Main may acknowledge first startup after this server constructed its
+    // modules. Pick up that success note before serving the new client.
+    try { const ready = takeRecord(deps.dataDir); if (ready !== undefined) result = toResult(ready); }
+    catch (error) { log(`could not read the startup result: ${(error as Error).message}`); }
+    const activity = deps.activity?.() ?? [];
+    const installing = admission.installing();
+    if (!installing && lastCheck?.state === "available" && lastCheck.targetCommit !== undefined) {
+      const fingerprint = JSON.stringify([lastCheck.targetCommit, lastCheck.target, lastCheck.notes, lastCheck.changes, admission.revision(), activity]);
+      if (offer?.fingerprint !== fingerprint) offer = { token: randomUUID(), fingerprint };
+    } else offer = undefined;
+    return { version: version(), result, lastCheck, activity, installing, ...(offer ? { approval: offer.token } : {}) };
+  };
+  const offAdmission = admission.onChange(() => deps.changed?.(status()));
 
   const runCheck = async (): Promise<UpdateCheck> => {
     const checkedAt = now();
     try {
-      return toCheck(await inspect({ root: deps.root, runner: deps.runner, choice: deps.everyChange() ? "main" : "auto" }), checkedAt);
+      const acquired = acquireLock(deps.root);
+      if (!acquired.ok) return { state: "cannot-check", checkedAt, reason: "error", lines: ["An update is already running. Wait for Gates Local to open again."] };
+      try {
+        return toCheck(await inspect({ root: deps.root, runner: deps.runner, choice: deps.everyChange() ? "main" : "auto" }), checkedAt);
+      } finally {
+        acquired.lock.release();
+      }
     } catch (e) {
       log(`update check failed: ${(e as Error).message}`);
       return { state: "cannot-check", checkedAt, reason: "error", lines: [`The check stopped on an error: ${(e as Error).message}`, "Try again, or run pnpm run app-update --check in the Gates Local folder to see more."] };
     }
   };
 
-  return {
-    status: () => ({ version: version(), result, lastCheck }),
+  const busy = () => deps.uninterruptible?.() ?? [];
+  const waiting = () => ({ state: "blocked" as const, message: `Wait for ${busy().join(", ")} to finish before updating.` });
+  const update: UpdateModule = {
+    status,
     // Two clicks (or two windows) share one fetch.
-    check: () => {
-      running ??= runCheck().then((c) => {
+    check: async (background = false) => {
+      if (closed || admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
+      running ??= runCheck().finally(() => { running = undefined; });
+      const c = await running;
+      if (!background || c.state !== "cannot-check") {
         lastCheck = c;
-        running = undefined;
-        return c;
-      });
-      return running;
+        deps.changed?.(status());
+      }
+      return c;
     },
+    close: async () => { closed = true; offAdmission(); await running; },
+    prepare: async (approval) => {
+      if (closed || admission.installing()) return { state: "blocked", message: UPDATE_PAUSED };
+      if (busy().length > 0) return waiting();
+      if (status().approval !== approval) return { state: "changed", status: status() };
+      // Re-fetch, then compare activity and reserve in this same synchronous
+      // continuation. Every producer calls admission before registering work.
+      await update.check();
+      const latest = status();
+      if (busy().length > 0) return waiting();
+      if (latest.approval !== approval || latest.lastCheck?.state !== "available" || latest.lastCheck.targetCommit === undefined) return { state: "changed", status: latest };
+      const targetCommit = latest.lastCheck.targetCommit;
+      const reservation = admission.reserve(targetCommit);
+      return { state: "ready", reservation, targetCommit };
+    },
+    commit: ({ reservation, targetCommit, release: requestedRelease }, disconnected) => {
+      const release = admission.commit(reservation, targetCommit, requestedRelease, disconnected);
+      return release === null ? { accepted: false } : { accepted: true, release };
+    },
+    cancel: (reservation) => ({ cancelled: admission.cancel(reservation) }),
     dismissResult: () => {
       const dismissed = result !== null;
       result = null;
+      deps.changed?.(status());
       return { dismissed };
     },
   };
+  return update;
 }
 
 export function createUpdateHandlers(update: UpdateModule) {
   return {
-    "update.status": () => update.status(),
+    "update.status": (_params?: object, context?: HandlerContext) => ({ ...update.status(), canControl: context?.listener !== "phone" }),
     "update.check": () => update.check(),
+    "update.prepare": ({ approval }) => update.prepare(approval),
+    "update.commit": (request, context) => update.commit(request, context.signal),
+    "update.cancel": ({ reservation }) => update.cancel(reservation),
     "update.dismissResult": () => update.dismissResult(),
   } satisfies Partial<Handlers>;
 }

@@ -166,7 +166,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       cap to the model.
 - [x] Source updates for a git clone: `pnpm run app-update` (`--check`,
       `--channel main|release`) and Settings › General › Updates (version,
-      a check that runs only on a click, "Update and restart" in the
+      manual checks plus desktop automatic checks, "Update and restart" in the
       desktop app, the result on the next start).
       *Accept:* a failed install or build leaves the clone on the commit it
       had, installed and built again; tracked changes and local commits
@@ -180,6 +180,19 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       review round: a live owner is never taken over, a process that could
       not be stopped holds later runs off, a going-back never resets over
       work done during the update, and a part-way checkout is named.
+      *Extended 2026-11-08 (code and unit checks only):* desktop checks the
+      clone's git remote after 15 seconds, then hourly; the default-on
+      automatic-check preference can disable future git processes and
+      network requests. No automatic installs. A fixed sidebar slot beside
+      Settings offers the update, with shared retry and interruption
+      confirmation. Browser/window proof and restart-gap timing await the
+      runner. The JavaScript bundle currently exceeds its existing budget.
+      *Runtime proof 2026-11-09:* three focused browser tests and eight real
+      source-update checks passed through the approved virtual-screen runner
+      using throwaway clones/local remotes only. Success, failed-build
+      rollback, interrupted text after reopening and manual start were
+      exercised. Closed-window gaps: 4.293 s success, 5.782 s rollback with
+      cached offline dependencies and fake services. Windows remains unproven.
 
 ## Next: slices 2 to 4
 

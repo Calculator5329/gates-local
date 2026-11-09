@@ -187,11 +187,29 @@ these controls under the same rule as adding a folder.
 ## Updating
 
 In the app, Settings › General › Updates shows the version and has a
-"Check for updates" button. It checks only when you click it. In the desktop
-app, "Update and restart" closes the window, installs the new version and
-opens the app again. The next start shows how it went. On a phone or in a
-browser you see the version and the check, and install from the computer
-the app runs on.
+"Check for updates" button. The desktop app also checks 15 seconds after
+startup, then hourly. Settings › General › Updates › "Check for updates
+automatically" turns that off (default on). A button beside Settings in the
+main window appears when an update is available, with its version and changes
+in the tooltip. Nothing installs without a click. "Update and restart"
+closes the window while dependencies install and the app builds, and
+opens the app again. The next start shows how it went. In a computer browser
+you can check, and install from the desktop app.
+The phone listener exposes update status only; check and install from the
+computer. Before restarting, running replies, image jobs and model
+downloads bring up a confirmation naming what will stop, including work in
+other windows. The server rechecks the target and running work at confirmation;
+if either changed, it asks again. Once approved, new replies, image jobs and
+model downloads and imports pause on every client until the update ends.
+Active imports are named and must finish before an update can start. The desktop
+installs only the full commit that was approved; a later remote change stops
+installation and asks for renewed approval. Older desktop sessions need closing
+and reopening once to use this approval handoff; the manual command still works.
+Replies written so far are saved with an interrupted marker and are excluded
+from later model prompts. Existing completed messages remain readable.
+Model download parts remain
+and downloading that model again resumes it. Save drafts and queued messages
+before continuing.
 
 A copy from before this button existed has to update once by hand. Close
 Gates Local, then run this in its folder:
@@ -210,8 +228,11 @@ pnpm run app-update
 
 It says what is new and installs it: it fetches from the clone's git
 remote, moves to the new version, runs `pnpm install` and builds the app.
-If a step fails, it goes back to the version you had, builds that again
-and tells you where it stopped. If it is cut off, run it again and it
+It then opens the app and waits for its server to become ready. The update
+transaction stays unfinished until that acknowledgement. If a build or the
+first startup fails, or startup takes over 60 seconds, it restores and builds
+the version you had, starts it once, and tells you where it stopped.
+If it is cut off, run it again and it
 finishes the job. Add `--check` to only see what is new.
 
 Once the project has releases (`v1.2.3` tags), it follows releases and
@@ -250,11 +271,17 @@ These are all the network calls the code makes:
   WebSocket on `127.0.0.1`, with a token that changes on every launch.
 - **Links.** A link you click opens in your web browser. The app never
   loads it itself.
-- **Updates.** Only when you click "Check for updates" or "Update and
-  restart", or run `pnpm run app-update`: `git fetch` and `git ls-remote`
+- **Updates.** The desktop app checks 15 seconds after startup, then hourly
+  by default. Turn off "Check for updates automatically" in Settings ›
+  General › Updates to prevent future automatic git processes and network
+  requests (a check already running finishes). Browsers and phones never
+  schedule checks. Automatic checks, "Check for updates", "Update and
+  restart", and `pnpm run app-update` use `git fetch` and `git ls-remote`
   to the remote your copy was cloned from (GitHub for a clone of this
   repository). Updating also runs `pnpm install`, which downloads packages
-  from the npm registry. Nothing checks for updates on its own.
+  from the npm registry. Checks fetch git objects and tags only; packages
+  install only after you choose to update. Offline background checks stay
+  silent; a failed check you requested explains the failure.
 
 Installing is separate: `pnpm install` downloads packages from the npm
 registry, and the first `pnpm start` downloads the Electron binary from

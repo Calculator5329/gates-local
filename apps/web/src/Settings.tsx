@@ -17,7 +17,7 @@ import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
 import { Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
-import { Updates } from "./Updates.tsx";
+import { Updates } from "./SettingsUpdates.tsx";
 import { closeTip, esc } from "./ui.tsx";
 
 const VoiceSettings = lazy(() => import("./VoiceSettings.tsx").then((m) => ({ default: m.VoiceSettings })));

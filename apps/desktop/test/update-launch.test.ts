@@ -4,16 +4,65 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { launchMode } from "../src/launch.ts";
+import { createUpdateAdmission } from "../../server/src/update/admission.ts";
 import { RUNNING_FILE, clearRunning, readRunning, writeRunning } from "../src/running.ts";
-import { cannotUpdate, nodeCommand, onceUntilFailed, relaunchEnv, updaterLaunch } from "../src/update-launch.ts";
+import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
 
 const REPO = path.resolve("/srv/gates-local");
 const DATA = path.resolve("/srv/data");
 const base = { repoRoot: REPO, pid: 4242, dataDir: DATA, cwd: path.join(REPO, "apps", "desktop"), env: {}, exists: () => false };
 
 describe("the updater launch", () => {
+  it("AV-01 bounds a detached handoff and removes its deadline from the reopened app", () => {
+    const env = approvedHandoffEnv({ PATH: "/bin" }, 100);
+    expect(env[APPROVAL_DEADLINE_ENV]).toBe("105");
+    expect(relaunchEnv(env)).toEqual({ PATH: "/bin" });
+  });
+  it("AU-01 main cannot spawn without a live server reservation and releases failed handoffs", async () => {
+    const request = { reservation: "lease", targetCommit: "a".repeat(40) };
+    const start = vi.fn(async () => ({ ok: true as const }));
+    const cancel = vi.fn<UpdateControl["cancel"]>(async () => undefined);
+    const control = { commit: vi.fn<UpdateControl["commit"]>(async () => ({ accepted: false })), cancel };
+    expect((await launchApprovedUpdate(request, control, start)).ok).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledWith("lease");
+    control.commit.mockImplementation(async (input) => ({ accepted: true, release: input.release }));
+    const failed = await launchApprovedUpdate(request, control, async () => ({ ok: false, message: "spawn failed" }));
+    expect(failed).toEqual({ ok: false, message: "spawn failed" });
+    expect(cancel).toHaveBeenCalledTimes(4);
+    expect(cancel.mock.calls[2]?.[0]).toBe(control.commit.mock.calls[1]?.[0].release);
+    expect(await launchApprovedUpdate(request, control, start)).toEqual({ ok: true });
+    expect(start).toHaveBeenCalledWith(request.targetCommit);
+    expect(cancel).toHaveBeenCalledTimes(4);
+  });
+  it("AU-01 a lost commit acknowledgement cannot strand the server pause", async () => {
+    const admission = createUpdateAdmission();
+    const targetCommit = "a".repeat(40);
+    const reservation = admission.reserve(targetCommit);
+    const start = vi.fn(async () => ({ ok: true as const }));
+    const control: UpdateControl = {
+      commit: async (input) => { admission.commit(input.reservation, input.targetCommit, input.release); throw new Error("reply lost"); },
+      cancel: async (token) => admission.cancel(token),
+    };
+    expect((await launchApprovedUpdate({ reservation, targetCommit }, control, start)).ok).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+    expect(admission.installing()).toBe(false);
+    expect(() => admission.admit()).not.toThrow();
+  });
+  it("AU-02 the bridge requires a full target and a reservation, not a short label", () => {
+    expect(validUpdateRequest({ reservation: "lease", targetCommit: "a".repeat(40) })).toBe(true);
+    expect(validUpdateRequest({ reservation: "lease", targetCommit: "aaaaaaa" })).toBe(false);
+    expect(validUpdateRequest({ targetCommit: "a".repeat(40) })).toBe(false);
+  });
+  it("AU-02 carries the full approved commit into the detached updater", () => {
+    const approvedCommit = "a".repeat(40);
+    const input = { ...base, argv: ["/x/electron", "."], approvedCommit };
+    const plan = updaterLaunch(input);
+    expect(plan.args).toContain("--target-commit");
+    expect(plan.args[plan.args.indexOf("--target-commit") + 1]).toBe(approvedCommit);
+  });
   it("passes the pid, the data folder and the way the app was started", () => {
     const plan = updaterLaunch({ ...base, argv: ["/x/electron", "."] });
     expect(plan).toEqual({

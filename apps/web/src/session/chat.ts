@@ -651,7 +651,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         if (contextNotice) applyServerEvent(s => s.live ? { live: { ...s.live, contextNotice } } : {});
         holdQueue(threadId);
         const why = stopReason(event);
-        if (event.code === "cancelled") {
+        if (event.code === "cancelled" && event.partial === undefined) {
           applyServerEvent((s) =>
             s.live && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs: Math.round((Date.now() - s.live.startedAt) / 1000) } } } : {},
           );

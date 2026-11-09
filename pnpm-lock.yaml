@@ -34,6 +34,10 @@ importers:
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2))
 
   apps/desktop:
+    dependencies:
+      '@gates-local/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       electron:
         specifier: ^45.2.3

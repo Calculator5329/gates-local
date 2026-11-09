@@ -5,6 +5,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { BRIDGE_KEY, IPC, type BridgeState, type GatesLocalBridge, type RestartResult, type UpdateAndRestartResult } from "./bridge.ts";
 
 const bridge: GatesLocalBridge = {
+  updateApprovalVersion: 1,
   syncTitleBar: async (colors) => { await ipcRenderer.invoke(IPC.titleBar, colors); },
   getState: async () => (await ipcRenderer.invoke(IPC.getState)) as BridgeState,
   getServerUrl: async () => {
@@ -22,7 +23,7 @@ const bridge: GatesLocalBridge = {
   reloadClient: async () => {
     await ipcRenderer.invoke(IPC.reloadClient);
   },
-  updateAndRestart: async () => (await ipcRenderer.invoke(IPC.updateAndRestart)) as UpdateAndRestartResult,
+  updateAndRestart: async (request) => (await ipcRenderer.invoke(IPC.updateAndRestart, request)) as UpdateAndRestartResult,
   dataFolder: async () => (await ipcRenderer.invoke(IPC.dataFolder)) as string,
   openDataFolder: async () => (await ipcRenderer.invoke(IPC.openDataFolder)) as string | null,
   modelsFolder: async () => (await ipcRenderer.invoke(IPC.modelsFolder)) as string | null,

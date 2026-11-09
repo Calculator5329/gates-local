@@ -22,6 +22,7 @@ export const codeOf = (e: unknown): string => (e instanceof WireError ? e.code :
 export type ActionResult = string | null;
 
 type Acted<M extends MethodName> = { readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string };
+export type ActionCall = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string) => Promise<Acted<M>>;
 
 /** "Couldn't <what> because <reason>; <todo>." in plain words, never the raw stack. */
 export function failure(what: string, e: unknown, todo = "try again"): string {

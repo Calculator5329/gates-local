@@ -1,5 +1,5 @@
 // Desktop bridge, server discovery and browser appearance effects.
-import type { Settings } from "@gates-local/contracts";
+import type { Settings, UpdateInstallRequest } from "@gates-local/contracts";
 import { syncTitleBar } from "../titlebar.ts";
 
 // The preload's window.gatesLocal (apps/desktop/src/preload.ts). Declared here
@@ -9,12 +9,13 @@ type BridgeState =
   | { readonly status: "idle" | "starting" | "restarting" | "crashed" | "stopping" | "stopped" };
 
 interface DesktopBridge {
+  readonly updateApprovalVersion?: 1;
   /** Native control colours, resolved from the page's theme tokens. */
   syncTitleBar?(colors: { color: string; symbolColor: string }): Promise<void>;
   getServerUrl(): Promise<string | null>;
   onState(listener: (state: BridgeState) => void): () => void;
   /** Starts `pnpm run app-update` and quits; missing on desktop builds from before it existed. */
-  updateAndRestart?(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+  updateAndRestart?(request: UpdateInstallRequest): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
   /** The folder the app keeps its data in; missing on desktop builds from before it existed. */
   dataFolder?(): Promise<string>;
   /** Opens the data folder in the file manager; a sentence if it could not. */
@@ -85,17 +86,5 @@ export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== 
 
 /** True in the desktop app, which can quit, update and open again; phones and browsers only check. */
 export function canUpdateHere(): boolean {
-  return typeof window.gatesLocal?.updateAndRestart === "function";
-}
-
-/** The Update and restart button: the desktop starts the updater and quits; null when it is on its way. */
-export async function updateAndRestart(): Promise<string | null> {
-  const bridge = window.gatesLocal;
-  if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
-  try {
-    const r = await bridge.updateAndRestart();
-    return r.ok ? null : r.message;
-  } catch (e) {
-    return `Couldn't start the update (${e instanceof Error ? e.message : String(e)}). Run pnpm run app-update in the Gates Local folder instead.`;
-  }
+  return window.gatesLocal?.updateApprovalVersion === 1 && typeof window.gatesLocal.updateAndRestart === "function";
 }

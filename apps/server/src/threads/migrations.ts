@@ -12,7 +12,7 @@ export interface Migration {
 
 // Nullable additions from parallel builds must not depend on which version-4
 // shape arrived first. Repair them under the same write lock on every open.
-function ensureMessageColumns(db: DatabaseSync): void {
+function addMessageColumns(db: DatabaseSync): void {
   const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
   for (const name of ["image_job_json", "context_notice"]) {
     if (!columns.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} TEXT`);
@@ -79,16 +79,27 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 4,
-    up: ensureMessageColumns,
+    up: addMessageColumns,
   },
   {
     version: 5,
     // Compatibility with databases already stamped by the earlier paste build.
-    up: ensureMessageColumns,
+    up: addMessageColumns,
   },
 ];
 
 export const LATEST_VERSION: number = MIGRATIONS.length;
+
+/** Nullable extensions keep the previous build's version guard and named projections usable. */
+export function ensureMessageColumns(db: DatabaseSync): void {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    addMessageColumns(db);
+    const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
+    if (!columns.has("interrupted")) db.exec("ALTER TABLE messages ADD COLUMN interrupted INTEGER CHECK (interrupted IS NULL OR interrupted = 1)");
+    db.exec("COMMIT");
+  } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+}
 
 function readUserVersion(db: DatabaseSync): number {
   const row = db.prepare("PRAGMA user_version").get();
@@ -118,7 +129,7 @@ export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly M
       const current = readUserVersion(db);
       if (current > latest) throw new StoreVersionTooNewError(dbPath, current, latest);
       if (current === latest) {
-        ensureMessageColumns(db);
+        addMessageColumns(db);
         db.exec("COMMIT");
         return current;
       }

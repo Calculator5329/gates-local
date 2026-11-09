@@ -20,7 +20,10 @@ import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
 import { clearRunning, writeRunning } from "./running.ts";
-import { cannotUpdate, onceUntilFailed, updaterLaunch, type UpdaterLaunch } from "./update-launch.ts";
+import { approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, onceUntilFailed, updaterLaunch, validUpdateRequest, type UpdaterLaunch } from "./update-launch.ts";
+import { withUpdateControl } from "./update-control.ts";
+import type { UpdateInstallRequest } from "@gates-local/contracts";
+import { acknowledgeStartup, reportStartupFailure, STARTUP_TOKEN_ENV } from "../../server/src/update/startup.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 import { iconFile, windowOptions } from "./window.ts";
@@ -84,9 +87,9 @@ if (!app.requestSingleInstanceLock({ background: mode.background })) {
 }
 
 /** Starts the updater on its own, outside this app's process group, so it outlives the quit. */
-function startDetached(plan: UpdaterLaunch): Promise<UpdateAndRestartResult> {
+function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<UpdateAndRestartResult> {
   return new Promise((resolve) => {
-    const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env: process.env, detached: true, stdio: "ignore", windowsHide: true });
+    const child = spawn(plan.command, [...plan.args], { cwd: plan.cwd, env, detached: true, stdio: "ignore", windowsHide: true });
     child.once("error", (e) =>
       resolve({ ok: false, message: `The updater could not be started (${e.message}). Install Node 24 on your PATH, or run pnpm run app-update in the Gates Local folder.` }),
     );
@@ -132,6 +135,10 @@ function run(): void {
   }
 
   function route(state: SupervisorState): void {
+    try {
+      if (state.status === "ready") acknowledgeStartup(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV]);
+      if (state.status === "crashed") reportStartupFailure(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV], "The new version failed before its server became ready.");
+    } catch (error) { console.error(`[desktop] could not acknowledge update startup: ${(error as Error).message}`); }
     if (win === null || win.isDestroyed()) return;
     win.webContents.send(IPC.state, toBridgeState(state));
     switch (state.status) {
@@ -199,20 +206,25 @@ function run(): void {
     const failed = await shell.openPath(dataDir);
     return failed === "" ? null : `Couldn't open the folder: ${failed}`;
   });
-  const startUpdate = onceUntilFailed(async (): Promise<UpdateAndRestartResult> => {
+  const startUpdate = onceUntilFailed(async (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
     const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });
     if (refused !== null) return { ok: false, message: refused };
-    const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync });
-    const started = await startDetached(plan);
-    if (!started.ok) return started;
-    console.error(`[desktop] updater started; quitting so it can update ${repoRoot}`);
-    // Let the reply reach the renderer before the window goes.
-    setTimeout(() => app.quit(), 200);
-    return started;
+    const state = supervisor.state;
+    if (state.status !== "ready") return { ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." };
+    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, async (approvedCommit) => {
+      const plan = updaterLaunch({ repoRoot, pid: process.pid, dataDir, argv: process.argv, cwd: process.cwd(), env: process.env, exists: existsSync, approvedCommit });
+      const started = await startDetached(plan, approvedHandoffEnv(process.env));
+      if (started.ok) {
+        console.error(`[desktop] approved updater started; quitting so it can update ${repoRoot}`);
+        setTimeout(() => app.quit(), 200);
+      }
+      return started;
+    })).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
   });
-  ipcMain.handle(IPC.updateAndRestart, (event): Promise<UpdateAndRestartResult> => {
+  ipcMain.handle(IPC.updateAndRestart, (event, request: unknown): Promise<UpdateAndRestartResult> => {
     if (!fromOurWindow(event)) throw new Error("refused");
-    return startUpdate();
+    if (!validUpdateRequest(request)) return Promise.resolve({ ok: false, message: "An exact checked commit and current server approval are required. Check for updates again." });
+    return startUpdate(request);
   });
 
   supervisor.subscribe(route);

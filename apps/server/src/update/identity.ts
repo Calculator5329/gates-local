@@ -46,16 +46,37 @@ export function startOf(pid: number, platform: NodeJS.Platform = process.platfor
   }
 }
 
+/** Windows FILETIME text stays exact in JSON; unusable evidence proves nothing. */
+export const isWindowsBootTime = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d{0,19}$/.test(value);
+
+export function windowsBootTime(run: Exec = exec): string | null {
+  try {
+    const value = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()"]).trim();
+    return isWindowsBootTime(value) ? value : null;
+  } catch { return null; }
+}
+
 /** A command the updater started, as saved in the transaction. */
 export interface ProcessRecord {
   readonly pid: number;
   readonly start: string | null;
   /** The computer's uptime when this was saved. It only ever goes down across a restart. */
   readonly uptime: number;
+  /** LastBootUpTime as UTC FILETIME. Absent on older records or an unreadable lookup. */
+  readonly boot?: string;
 }
 
-export function processRecord(pid: number): ProcessRecord {
-  return { pid, start: startOf(pid), uptime: uptime() };
+export function processRecord(pid: number, o: TreeCheck = {}): ProcessRecord {
+  const platform = o.platform ?? process.platform;
+  const boot = platform === "win32" ? (o.bootTime ?? windowsBootTime)() : null;
+  return { pid, start: o.startOf ? o.startOf(pid) : startOf(pid, platform), uptime: (o.uptime ?? uptime)(), ...(isWindowsBootTime(boot) ? { boot } : {}) };
+}
+
+/** Capture boot evidence before spawning children, once per updater/launcher. */
+export function createProcessRecorder(o: TreeCheck = {}): (pid: number) => ProcessRecord {
+  const platform = o.platform ?? process.platform;
+  const boot = platform === "win32" ? (o.bootTime ?? windowsBootTime)() : null;
+  return pid => processRecord(pid, { ...o, platform, bootTime: () => boot });
 }
 
 export interface TreeCheck {
@@ -63,6 +84,9 @@ export interface TreeCheck {
   readonly exists?: (pid: number) => boolean;
   readonly startOf?: (pid: number) => string | null;
   readonly uptime?: () => number;
+  readonly bootTime?: () => string | null;
+  /** A saved desktop launch may retain helpers after its Windows root disappears. */
+  readonly requireWholeWindowsTree?: boolean;
 }
 
 /**
@@ -72,7 +96,16 @@ export interface TreeCheck {
  */
 export function treeGone(r: ProcessRecord, o: TreeCheck = {}): boolean {
   if ((o.uptime ?? uptime)() < r.uptime) return true;
-  const exists = o.exists ?? ((o.platform ?? process.platform) === "win32" ? isAlive : groupExists);
+  const platform = o.platform ?? process.platform;
+  if (platform === "win32" && isWindowsBootTime(r.boot)) {
+    const current = (o.bootTime ?? windowsBootTime)();
+    if (isWindowsBootTime(current) && BigInt(current) > BigInt(r.boot)) return true;
+  }
+  // A later updater has no owned taskkill acknowledgement or job handle.
+  // Until boot evidence or uptime proves a restart, neither root absence nor PID reuse can
+  // certify a saved Windows desktop launch's descendants have stopped.
+  if (o.requireWholeWindowsTree === true && platform === "win32") return false;
+  const exists = o.exists ?? (platform === "win32" ? isAlive : groupExists);
   if (!exists(r.pid)) return true;
   // A number still in use as a group is never handed out again, so a different process there means the group ended.
   const now = r.start === null ? null : (o.startOf ?? startOf)(r.pid);

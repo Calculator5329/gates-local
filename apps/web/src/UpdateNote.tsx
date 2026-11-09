@@ -8,7 +8,7 @@ import { NA, useStore } from "./store.ts";
 export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; onDismiss: () => void }) {
   const ok = result.outcome === "updated";
   return (
-    <div className="banner" role={ok ? "status" : "alert"}>
+    <div className="banner upd-note" role={ok ? "status" : "alert"}>
       <Icon id={ok ? "checkc" : "alert"} cls={ok ? undefined : "warn"} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="bt">{ok ? "Gates Local updated" : "The update did not finish"}</div>
@@ -36,6 +36,8 @@ export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; on
 }
 
 export function UpdateNote() {
-  const result = useStore((s) => (s.update === undefined || s.update === NA ? null : s.update.result));
+  const status = useStore((s) => s.update);
+  if (status !== undefined && status !== NA && status.installing === true) return <div className="banner" role="status">Gates Local is preparing an update. New replies, image jobs, model downloads and imports are paused until it opens again.</div>;
+  const result = status === undefined || status === NA ? null : status.result;
   return result === null ? null : <UpdateNoteView result={result} onDismiss={() => void dismissUpdateResult()} />;
 }

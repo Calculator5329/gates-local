@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runUpdate } from "./apply.ts";
+import { acknowledgeStartup } from "./startup.ts";
 import { UpdateGuardError } from "./guard.ts";
 import { LOCK_FILE, acquireLock, lockHolder, stateDir } from "./lock.ts";
 import type { Runner } from "./run.ts";
@@ -178,7 +179,10 @@ describe("taking over from a dead owner", () => {
 });
 
 const update = (fake: ReturnType<typeof fakePnpm> = fakePnpm()) =>
-  runUpdate({ root: r.clone, runner: fake.runner, choice: "auto", pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined });
+  runUpdate({ root: r.clone, runner: fake.runner, choice: "auto", pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined, startApp: async ({ token }) => {
+    acknowledgeStartup(r.clone, r.data, token);
+    return { code: 0, stdout: "", stderr: "" };
+  } });
 
 describe("a run that loses the lock", () => {
   it("stops before its next change and leaves the new owner's state alone", async () => {

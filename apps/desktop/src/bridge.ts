@@ -3,6 +3,7 @@
 // sandboxed preload cannot load Node built-ins.
 
 import type { CrashReason, SupervisorState } from "./supervisor-state.ts";
+import type { UpdateInstallRequest } from "@gates-local/contracts";
 
 export type { CrashReason, SupervisorState } from "./supervisor-state.ts";
 
@@ -11,7 +12,7 @@ export const IPC = {
   getState: "gates-local:get-state",
   restart: "gates-local:restart",
   reloadClient: "gates-local:reload-client",
-  updateAndRestart: "gates-local:update-and-restart",
+  updateAndRestart: "gates-local:install-approved-update",
   dataFolder: "gates-local:data-folder",
   openDataFolder: "gates-local:open-data-folder",
   modelsFolder: "gates-local:models-folder",
@@ -56,6 +57,7 @@ export type UpdateAndRestartResult = { readonly ok: true } | { readonly ok: fals
 
 /** `window.gatesLocal` in the renderer. */
 export interface GatesLocalBridge {
+  readonly updateApprovalVersion: 1;
   /** Match native window controls to the renderer's resolved theme tokens. */
   syncTitleBar(colors: { color: string; symbolColor: string }): Promise<void>;
   /** Current state; resolves immediately. */
@@ -72,7 +74,7 @@ export interface GatesLocalBridge {
    * Start `pnpm run app-update` in the background and quit; it waits for this
    * app to close, updates the clone and opens the app again.
    */
-  updateAndRestart(): Promise<UpdateAndRestartResult>;
+  updateAndRestart(request: UpdateInstallRequest): Promise<UpdateAndRestartResult>;
   /** The folder the app keeps its data in, for Settings › Advanced. */
   dataFolder(): Promise<string>;
   /** Open that folder in the file manager; a sentence if it could not. */

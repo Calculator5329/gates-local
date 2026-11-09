@@ -15,6 +15,9 @@ const stop = () => {
   stopping = true;
   if (!git) process.exit(1);
   if (process.platform !== "win32") { process.kill(-process.pid, "SIGKILL"); return; }
+  // Once the handle has exited the PID may be reused. Let close join any
+  // helper still holding stdio, keeping this worker's ownership record alive.
+  if (git.exitCode !== null || git.signalCode !== null) return;
   if (git.pid === undefined) process.exit(1);
   // Keep the recorded worker alive if Git could not be stopped. Its identity
   // must not disappear while the child can still write the import's staging.

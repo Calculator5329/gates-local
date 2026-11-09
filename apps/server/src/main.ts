@@ -47,6 +47,7 @@ import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
+import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
 import { createLibraryImports, type ImportsDeps } from "./sources/imports.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
@@ -54,15 +55,17 @@ import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
+import { automaticChecks } from "./update/automatic.ts";
+import { createUpdateAdmission } from "./update/admission.ts";
 import { realRunner } from "./update/run.ts";
 import { createVoiceModule } from "./voice/module.ts";
+import { createServerShutdown } from "./shutdown.ts";
 
 /** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
-const HARD_EXIT_MS = 2500;
 
 // The Vite dev client. The desktop app serves the built client on
 // gates-local://app and adds that origin through GATES_LOCAL_ALLOWED_ORIGINS
@@ -156,11 +159,13 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   };
 
   let server: WsServer | undefined;
+  const admission = createUpdateAdmission();
   // One lease for the process: chat turns and loads share it, image jobs hold it alone.
   const gpuLease = createGpuLease();
   let services: ModelServices;
   try {
     services = await createModelServices({
+      admit: admission.admit,
       dataDir,
       push: (channel, payload) => server?.push(channel, payload),
       runtime: {
@@ -179,6 +184,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   }
   const { runtime, catalog } = services;
   const image = createImageModule({
+    admit: admission.admit,
     dataDir, store, lease: gpuLease,
     log: (line) => log(`image ${line}`),
     push: (channel, payload) => server?.push(channel, payload),
@@ -188,17 +194,29 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
     ollamaUrl: () => runtime.baseUrl(),
   });
-  const sources = createSources({ dataDir, log: (line) => log(`sources ${line}`) });
-  const libraryImports = createLibraryImports({ ...options.imports, sources });
-  // Reads the last update's result file and nothing else at start; git runs only on update.check.
+  const imports = createImportActivity(admission);
+  const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
+  const libraryImports = createLibraryImports({ ...options.imports, sources, activity: imports });
+  // One automatic checker for the supervised desktop server; browser-only servers never fetch on a timer.
   const update = createUpdateModule({
+    admission,
     root: REPO_ROOT,
     dataDir,
     runner: realRunner,
     everyChange: () => services.settings.get().updateEveryChange === true,
+    changed: (status) => server?.push("update.changed", status),
+    activity: () => [
+      ...imports.activity(),
+      ...libraryImports.activity(),
+      ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
+      ...services.pulls.pending().map((p) => `model download: ${p.name}`),
+      ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
+    ],
+    uninterruptible: () => [...imports.activity(), ...libraryImports.activity()],
     log: (line) => log(`update ${line}`),
   });
   const app: App = createApp({
+    admit: admission.admit,
     dataDir,
     libraryImports,
     update,
@@ -219,35 +237,20 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     models: services,
     log,
   });
+  const stopAutomatic = automaticChecks({
+    desktop: process.env["GATES_LOCAL_DESKTOP"] === "1",
+    enabled: () => services.settings.get().updateAutomatic !== false,
+    check: () => update.check(true),
+    onChange: (listener) => services.settings.onChange((next, previous) => {
+      if (next.updateAutomatic !== previous.updateAutomatic) listener();
+    }),
+  });
 
-  let stopping = false;
-  const shutdown = async (why: string) => {
-    if (stopping) return;
-    stopping = true;
-    log(`shutting down (${why})`);
-    setTimeout(() => {
-      log(`shutdown took over ${HARD_EXIT_MS} ms; exiting anyway`);
-      services.killRuntimeNow();
-      process.exit(1);
-    }, HARD_EXIT_MS);
-    const step = async (name: string, fn: () => unknown) => {
-      try {
-        await fn();
-      } catch (e) {
-        log(`${name} failed: ${(e as Error).message}`);
-      }
-    };
-    await step("cancel turns", () => app.shutdown());
-    // A cold preload holds a shared GPU claim for minutes; image.close() needs the GPU alone.
-    await step("drain model loads", () => services.loader.close());
-    await step("close image module", () => image.close());
-    await step("close ws", () => server?.close());
-    await step("close store", () => store.close());
-    // Only an app-owned Ollama this process started (and that still matches
-    // its record) is stopped. In discover-only mode nothing was started.
-    await step("close models", () => services.close({ stopRuntime: !discoverOnly }));
-    process.exit(0);
-  };
+  const shutdown = createServerShutdown({
+    admission, stopAutomatic, app, update, imports, loader: services.loader, image,
+    server: () => server, store, log,
+    models: { close: () => services.close({ stopRuntime: !discoverOnly }), killRuntimeNow: () => services.killRuntimeNow() },
+  });
   process.stdin.on("end", () => void shutdown("stdin closed"));
   process.stdin.resume();
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
@@ -270,7 +273,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     const where = phone === null ? `127.0.0.1:${port}` : `127.0.0.1:${port} and unix:${phone.socketPath}`;
     die(`cannot listen on ${where}: ${(e as Error).message}`, 1);
   }
-  if (stopping) return;
+  if (shutdown.stopping()) return;
   process.stdout.write(`${JSON.stringify({ ready: true, port: server.port })}\n`);
   log(`listening on 127.0.0.1:${server.port}; data in ${dataDir}; runtime ${discoverOnly ? "discover-only" : "managed"}`);
   if (phone !== null) log(`phone listener on unix:${String(server.phoneSocket)} for ${phone.origin}, serving ${phone.webRoot}`);

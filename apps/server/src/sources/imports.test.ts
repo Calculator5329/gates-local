@@ -11,6 +11,8 @@ import { createSources } from "./index.ts";
 import { createLibraryImports } from "./imports.ts";
 import { cloneRepository, githubRepo, importSize, REPO_BYTES, runGit, type GitTransport } from "./clone.ts";
 import { SAMPLES, type PinnedSample } from "./samples.ts";
+import { createImportActivity } from "./activity.ts";
+import { createUpdateAdmission } from "../update/admission.ts";
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -74,6 +76,41 @@ const pendingClone: GitTransport = call => {
   return new Promise((_resolve, reject) => call.signal.addEventListener("abort", () => reject(call.signal.reason), { once: true }));
 };
 const stopped = (imports: ReturnType<typeof createLibraryImports>) => vi.waitFor(() => expect(imports.snapshot().jobs.every(job => ["ready", "error", "cancelled"].includes(job.state))).toBe(true));
+
+describe("update admission integration", () => {
+  it.each(["sample", "repository"] as const)("AV-03 refuses a new %s import before allocation or transport", async kind => {
+    const s = setup(); const admission = createUpdateAdmission();
+    const activity = createImportActivity(admission);
+    admission.reserve("a".repeat(40));
+    const get = fake(s.bytes); const transport = vi.fn(pendingClone);
+    const options = { sources: s.sources, samples: [s.sample], fetch: get, git: transport, activity };
+    const imports = createLibraryImports(options);
+    try {
+      const start = () => kind === "sample" ? imports.handlers["sources.downloadSample"]({ id: s.sample.id }) : imports.handlers["sources.clone"]({ url: "https://github.com/example/refused" });
+      expect(start).toThrow("closing to update");
+      expect(imports.snapshot().jobs).toEqual([]);
+      expect(get).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
+      expect(readdirSync(path.join(s.dataDir, "library-imports"))).toEqual([]);
+    } finally { imports.close(); await stopped(imports); await activity.close(); }
+  });
+
+  it("AV-03 a returned sample job remains named through transport cancellation and cleanup", async () => {
+    const s = setup(); const activity = createImportActivity(createUpdateAdmission());
+    const get: typeof fetch = vi.fn((_url, options) => new Promise<Response>((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true })));
+    const options = { sources: s.sources, samples: [s.sample], fetch: get, activity };
+    const imports = createLibraryImports(options);
+    try {
+      const job = imports.handlers["sources.downloadSample"]({ id: s.sample.id });
+      expect(job.state).toBe("downloading");
+      expect(activity.activity()).toEqual([`Import: ${s.sample.label}`]);
+      await activity.close();
+      expect(imports.snapshot().jobs.find(value => value.id === job.id)?.state).toMatch(/error|cancelled/);
+      expect(activity.activity()).toEqual([]);
+      expect(s.sources.list()).toEqual([]);
+      expect(readdirSync(path.join(s.dataDir, "library-imports"))).toEqual([]);
+    } finally { imports.close(); await stopped(imports); }
+  });
+});
 
 describe("review round 1", () => {
   it("refuses a third active import before allocating work, and releases capacity after cancellation (DD-01)", async () => {

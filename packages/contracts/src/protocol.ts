@@ -29,6 +29,9 @@ import {
   Thread,
   UpdateCheck,
   UpdateStatus,
+  UpdatePreparation,
+  UpdateCommitResult,
+  UpdateCommitRequest,
 } from "./shapes.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -182,14 +185,18 @@ export const methods = {
   // ---- setup (2026-11-07): read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan },
-  // ---- updates (2026-11-07): status is local only; check fetches, and only runs on a click
+  // ---- updates: status is local only; check fetches (manual or desktop timer)
   "update.status": { params: NoParams, result: UpdateStatus },
   "update.check": { params: NoParams, result: UpdateCheck },
+  "update.prepare": { params: S.Struct({ approval: S.String }), result: UpdatePreparation },
+  "update.commit": { params: UpdateCommitRequest, result: UpdateCommitResult },
+  "update.cancel": { params: S.Struct({ reservation: S.String }), result: S.Struct({ cancelled: S.Boolean }) },
   "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }) },
 } as const;
 
 /** Server-to-client channels and their payload Schemas. */
 export const pushes = {
+  "update.changed": { payload: UpdateStatus },
   "chat.event": { payload: S.Struct({ turnId: S.String, threadId: S.String, event: ChatEvent }) },
   "runtime.changed": { payload: RuntimeStatus },
   "models.changed": { payload: S.Array(ModelInfo) },

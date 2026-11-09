@@ -1,6 +1,6 @@
 // SQLite thread store (node:sqlite, so no native dependency; it runs under
-// Electron 45's Node as well). Only completed messages are written here; a
-// streaming turn lives in a TurnBuffer (turn-buffer.ts) until it finishes.
+// Electron 45's Node as well). Completed messages and explicitly marked
+// interrupted replies persist; streaming text otherwise stays in memory.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -15,7 +15,7 @@ import {
   StoreClosedError,
   ThreadNotFoundError,
 } from "./errors.ts";
-import { migrate } from "./migrations.ts";
+import { ensureMessageColumns, migrate } from "./migrations.ts";
 import { ROLES, TOOL_STATES, type Message, type MessageStats, type NewMessage, type Role, type Thread, type ThreadWithMessages, type ToolStepRecord } from "./types.ts";
 
 export interface ThreadStoreOptions {
@@ -76,6 +76,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     db.exec("PRAGMA synchronous = FULL");
     db.exec("PRAGMA foreign_keys = ON");
     migrate(db, dbPath);
+    ensureMessageColumns(db);
   } catch (err) {
     db.close();
     throw err;
@@ -93,13 +94,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
                              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, context_notice)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, image_job_json, context_notice
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
     insertImageCard: db.prepare("INSERT INTO messages (id, thread_id, role, content, created_at, image_job_json) VALUES (?, ?, 'assistant', ?, ?, ?) ON CONFLICT(id) DO NOTHING"),
@@ -228,9 +229,10 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           msg.images === undefined ? null : JSON.stringify(msg.images),
           s?.evalDurationMs ?? null,
           s?.promptEvalDurationMs ?? null,
+          msg.interrupted === true ? 1 : null,
           msg.contextNotice ?? null,
         );
-          stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
+        stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
       });
     },
@@ -360,6 +362,10 @@ function checkNewMessage(input: unknown, now: () => number): Message {
   if (tools !== undefined) msg.tools = tools;
   const images = checkImages(v["images"]);
   if (images !== undefined) msg.images = images;
+  if (v["interrupted"] !== undefined) {
+    if (v["interrupted"] !== true || role !== "assistant") throw new InvalidInputError("interrupted", "only an unfinished assistant reply can be marked interrupted");
+    msg.interrupted = true;
+  }
   return msg;
 }
 
@@ -449,6 +455,7 @@ function messageFromRow(row: Row): Message {
     createdAt: num(row, "created_at"),
   };
   const thinking = optStr(row, "thinking");
+  if (row["interrupted"] === 1) msg.interrupted = true;
   if (thinking !== undefined) msg.thinking = thinking;
   const model = optStr(row, "model");
   if (model !== undefined) msg.model = model;

@@ -7,10 +7,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILD_DESKTOP_ARGS, BUILD_WEB_ARGS, INSTALL_ARGS, runUpdate } from "./apply.ts";
-import { runCli } from "./cli.ts";
+import { runCli, type Relaunch } from "./cli.ts";
+import { acknowledgeStartup } from "./startup.ts";
 import { UpdateGuardError } from "./guard.ts";
 import { RECORD_FILE } from "./record.ts";
-import { groupExists, realRunner, type Runner } from "./run.ts";
+import { createRunner, endTree, groupExists, realRunner, type Runner } from "./run.ts";
 import { type Repos, commit, fakePnpm, git, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
 import { TRANSACTION_FILE, readTransaction } from "./transaction.ts";
 
@@ -37,9 +38,13 @@ afterEach(() => {
 
 const isPnpm = (args: readonly string[], want: readonly string[]) => args.join(" ") === want.join(" ");
 
-async function cli(argv: string[], fake = fakePnpm()) {
+async function cli(argv: string[], fake = fakePnpm(), handoff: { approvalBeforeUptime?: number; uptime?: () => number } = {}) {
   const lines: string[] = [];
-  const relaunch = vi.fn();
+  const relaunch = vi.fn((spec: Relaunch) => {
+    spec.onStart?.(process.pid);
+    if (spec.startup) acknowledgeStartup(r.clone, r.data, spec.startup.token);
+    return { pid: process.pid, stop: async () => true };
+  });
   const code = await runCli({
     root: r.clone,
     argv: ["--data-dir", r.data, ...argv],
@@ -51,16 +56,81 @@ async function cli(argv: string[], fake = fakePnpm()) {
     print: (line) => lines.push(line),
     now: () => 1_762_500_000_000,
     platform: "linux",
+    ...handoff,
   });
   return { code, lines, text: lines.join("\n"), relaunch, fake };
 }
 
 const update = (fake = fakePnpm(), choice: "auto" | "main" | "release" = "auto") =>
-  runUpdate({ root: r.clone, runner: fake.runner, choice, pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined });
+  runUpdate({ root: r.clone, runner: fake.runner, choice, pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined, startApp: async ({ token }) => {
+    acknowledgeStartup(r.clone, r.data, token);
+    return { code: 0, stdout: "", stderr: "" };
+  } });
 
 const record = () => JSON.parse(readFileSync(path.join(r.data, RECORD_FILE), "utf8")) as Record<string, unknown>;
 
 describe("checking and updating", () => {
+  it("AV-01 an updater whose handoff expired cannot install after admission reopened", async () => {
+    const before = head(r.clone);
+    const approved = commit(r.seed, "Approved before the desktop stalled"); publish(r.seed);
+    const run = await cli(["--wait-pid", "99999999", "--restart", "--target-commit", approved], fakePnpm(), { approvalBeforeUptime: 1, uptime: () => 2 });
+    expect(run.code).toBe(1);
+    expect(head(r.clone)).toBe(before);
+    expect(run.fake.calls).toEqual([]);
+    expect(run.relaunch).not.toHaveBeenCalled();
+    expect(existsSync(path.join(r.data, RECORD_FILE))).toBe(false);
+  });
+  it("AV-04 a successful launcher alone cannot finish an unacknowledged transaction", async () => {
+    const before = head(r.clone); commit(r.seed, "Builds without a ready acknowledgement"); publish(r.seed);
+    const fake = fakePnpm();
+    const options = { root: r.clone, runner: fake.runner, choice: "main" as const, pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined, startApp: async () => ({ code: 0, stdout: "", stderr: "" }) };
+    expect(await runUpdate(options)).toMatchObject({ outcome: "stopped", step: "start" });
+    expect(head(r.clone)).toBe(before);
+  });
+  it.each(["initialization crashed", "startup timed out"])("AV-04 rolls back a build that never reaches server readiness: %s", async reason => {
+    const before = head(r.clone);
+    commit(r.seed, "Builds but cannot start"); publish(r.seed);
+    const fake = fakePnpm();
+    const startApp = vi.fn(async () => ({ code: 1, stdout: "", stderr: reason }));
+    const options = { root: r.clone, runner: fake.runner, choice: "main" as const, pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined, startApp };
+    expect(await runUpdate(options)).toMatchObject({ outcome: "stopped", step: "start", reason });
+    expect(head(r.clone)).toBe(before);
+    expect(startApp).toHaveBeenCalledTimes(1);
+    expect(readTransaction(r.clone)).toBeNull();
+  });
+  it("AU-02 refuses a remote commit that was not the approved full target", async () => {
+    const before = head(r.clone);
+    const approvedCommit = commit(r.seed, "Approved B");
+    const newer = commit(r.seed, "Unapproved C");
+    publish(r.seed);
+    const fake = fakePnpm();
+    const options = { root: r.clone, runner: fake.runner, choice: "main" as const, pnpm: fake.pnpm, appRunning: () => null, checkOnly: false, say: () => undefined, log: () => undefined, approvedCommit };
+    expect(await runUpdate(options)).toMatchObject({ outcome: "refused", refusal: { reason: "target-changed", target: { commit: newer } } });
+    expect(head(r.clone)).toBe(before);
+    expect(fake.calls.filter((call) => call.args[0] === "install")).toHaveLength(0);
+  });
+
+  it("AU-02 installs exactly the approved commit through the detached CLI option", async () => {
+    const approved = commit(r.seed, "Approved B");
+    publish(r.seed);
+    const run = await cli(["--target-commit", approved]);
+    expect(run.code).toBe(0);
+    expect(head(r.clone)).toBe(approved);
+    expect(record()).toMatchObject({ outcome: "updated", to: { commit: approved } });
+  });
+
+  it("AU-02 the detached CLI refuses a changed target and reopens the old app", async () => {
+    const before = head(r.clone);
+    const approved = commit(r.seed, "Approved B");
+    commit(r.seed, "Unapproved C");
+    publish(r.seed);
+    const run = await cli(["--wait-pid", "99999999", "--restart", "--target-commit", approved]);
+    expect(run.code).toBe(1);
+    expect(head(r.clone)).toBe(before);
+    expect(record()).toMatchObject({ outcome: "refused", reason: expect.stringContaining("target changed") });
+    expect(run.relaunch).toHaveBeenCalledTimes(1);
+  });
+
   it("says up to date when the clone has the newest commit, and runs no install or build", async () => {
     const run = await cli([]);
     expect(run.code).toBe(0);
@@ -499,7 +569,7 @@ describe("an update that was cut off", () => {
     expect(run.fake.calls.slice(1).map((c) => c.head)).toEqual([old, old, old]);
   });
 
-  it("does not undo the manual path: a clone pulled by hand after a crash just carries on", async () => {
+  it("AW-05 reinstalls and builds a clone pulled by hand after a crash without moving its commit", async () => {
     commit(r.seed, "Newer");
     publish(r.seed);
     await expect(update(crashing(fakePnpm(), isCommand(INSTALL_ARGS)))).rejects.toThrow("the power went out");
@@ -508,9 +578,50 @@ describe("an update that was cut off", () => {
     git(r.clone, "pull", "--quiet", "--ff-only");
     expect(head(r.clone)).toBe(newest);
     const run = await cli([]);
-    expect(run.text).toContain("is up to date");
+    expect(run.code).toBe(0);
+    expect(run.text).toContain("Repaired");
     expect(head(r.clone)).toBe(newest);
-    expect(run.fake.calls.map((c) => c.args.join(" "))).toEqual(["--version"]);
+    expect(run.fake.calls.map(c => c.args)).toEqual([["--version"], INSTALL_ARGS, BUILD_WEB_ARGS, BUILD_DESKTOP_ARGS]);
+    expect(run.fake.calls.every(c => c.head === newest)).toBe(true);
+    expect(readTransaction(r.clone)).toBeNull();
+  });
+
+  it("AW-05 a failed repair keeps the hand-moved commit and gives commands for that commit", async () => {
+    commit(r.seed, "Newer"); publish(r.seed);
+    await expect(update(crashing(fakePnpm(), isCommand(INSTALL_ARGS)))).rejects.toThrow("the power went out");
+    const repaired = commit(r.clone, "Chosen manual repair");
+    const fake = fakePnpm(args => isPnpm(args, INSTALL_ARGS));
+    const run = await cli([], fake);
+    expect(run.code).toBe(1);
+    expect(record()).toMatchObject({ outcome: "rollback-failed", from: { commit: repaired }, to: { commit: repaired } });
+    expect(head(r.clone)).toBe(repaired);
+    expect(resets(fake)).toEqual([`git reset --keep ${repaired}`]);
+    expect(fake.calls.map(c => c.args)).toEqual([["--version"], INSTALL_ARGS, INSTALL_ARGS]);
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "back", from: { commit: repaired }, to: { commit: repaired } });
+    expect(run.text).toContain("Repairing");
+    expect(run.text).toContain("Retrying the repair did not finish either");
+    expect(run.text).not.toContain("Going back");
+    for (const words of [`git reset --keep ${repaired}`, ...[INSTALL_ARGS, BUILD_WEB_ARGS, BUILD_DESKTOP_ARGS].map(args => `pnpm ${args.join(" ")}`)]) expect(run.text).toContain(words);
+    const retry = await cli([]);
+    expect(retry.code).toBe(1);
+    expect(retry.text).toContain("The repair of");
+    expect(retry.text).not.toContain("Going back");
+    expect(readTransaction(r.clone)).toBeNull();
+    expect(head(r.clone)).toBe(repaired);
+  });
+
+  it("AW-05 a repair interrupted during its builds runs install and both builds again", async () => {
+    commit(r.seed, "Newer"); publish(r.seed);
+    await expect(update(crashing(fakePnpm(), isCommand(INSTALL_ARGS)))).rejects.toThrow("the power went out");
+    const repaired = commit(r.clone, "Chosen manual repair");
+    await expect(update(crashing(fakePnpm(), isCommand(BUILD_WEB_ARGS)))).rejects.toThrow("the power went out");
+    expect(readTransaction(r.clone)).toMatchObject({ phase: "forward", from: { commit: repaired }, to: { commit: repaired } });
+    const run = await cli([]);
+    expect(run.code).toBe(0);
+    expect(run.text).toContain("Repaired");
+    expect(run.fake.calls.map(call => call.args)).toEqual([["--version"], INSTALL_ARGS, BUILD_WEB_ARGS, BUILD_DESKTOP_ARGS]);
+    expect(head(r.clone)).toBe(repaired);
+    expect(readTransaction(r.clone)).toBeNull();
   });
 
   it("leaves another branch alone: it was switched to by hand after the crash", async () => {
@@ -565,6 +676,36 @@ const pnpmWords = (fake: ReturnType<typeof fakePnpm>) => fake.calls.map((c) => c
 const resets = (fake: ReturnType<typeof fakePnpm>) => fake.commands.filter((c) => c.startsWith("git reset"));
 
 describe.skipIf(process.platform === "win32")("a step that would not stop", () => {
+  it("AW-02 an exited Windows command retains its record and blocks a non-launch retry", async () => {
+    commit(r.seed, "Newer"); publish(r.seed);
+    const fake = fakePnpm();
+    const taskkill = vi.fn(async () => 128);
+    const windows = createRunner({ platform: "win32", exists: () => false, taskkill });
+    let group: number | undefined;
+    const runner: Runner = (command, args, options) => {
+      if (!isCommand(INSTALL_ARGS)(command, args)) return fake.runner(command, args, options);
+      return windows("sh", ["-c", "sleep 5 &"], { ...options, timeoutMs: 200, onStart: pid => { group = pid; options.onStart?.(pid); } });
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      const first = await update({ ...fake, runner });
+      expect(first).toMatchObject({ outcome: "refused", refusal: { reason: "still-running", pid: group } });
+      expect(readTransaction(r.clone)).toMatchObject({ phase: "forward", running: { pid: group } });
+      expect(taskkill).not.toHaveBeenCalled();
+      Object.defineProperty(process, "platform", { ...descriptor, value: "win32" });
+      const check = await cli(["--check"]);
+      expect.soft(check.text).toContain("not been confirmed stopped");
+      expect.soft(check.text).toContain("Restart");
+      const retry = await update(fake);
+      expect.soft(retry).toMatchObject({ outcome: "refused", refusal: { reason: "still-running", pid: group } });
+      expect.soft(readTransaction(r.clone)).toMatchObject({ phase: "forward", running: { pid: group } });
+      expect(fake.calls.map(call => call.args)).toEqual([["--version"], ["--version"]]);
+    } finally {
+      Object.defineProperty(process, "platform", descriptor);
+      if (group !== undefined) await endTree(group);
+    }
+  });
+
   it("keeps refusing until its processes have ended, never goes back beside them and does not reopen the app", async () => {
     const target = commit(r.seed, "Newer");
     publish(r.seed);

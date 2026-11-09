@@ -17,6 +17,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type SocketTestHooks, listenOwnerSocket } from "../src/web/socket.ts";
 import { type Handlers, type WsServer, startWsServer } from "../src/ws/server.ts";
+import { createSettingsHandlers } from "../src/settings/handlers.ts";
+import { openSettingsStore } from "../src/settings/store.ts";
 
 const reusedIdentity = vi.hoisted(() => ({ socketPath: "", inodes: new Set<string>(), equalTimes: false }));
 vi.mock("node:fs", async (importOriginal) => {
@@ -96,6 +98,70 @@ function fixture(): Fixture {
 function handlers(): Partial<Handlers> {
   return { "threads.list": () => methodSamples["threads.list"].result } as Partial<Handlers>;
 }
+
+it("AV-01 phone updates are status-only while the desktop listener retains its controls", async () => {
+  const fx = fixture();
+  let mutations = 0;
+  const server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [],
+    handlers: {
+      "update.status": () => methodSamples["update.status"].result,
+      "update.prepare": () => { mutations++; return { state: "blocked", message: "probe" }; },
+      "update.commit": () => { mutations++; return { accepted: false }; },
+      "update.check": () => { mutations++; return methodSamples["update.check"].result; },
+      "update.cancel": () => { mutations++; return { cancelled: false }; },
+      "update.dismissResult": () => { mutations++; return { dismissed: false }; },
+    },
+    phone: { socketPath: fx.socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot },
+  });
+  cleanups.push(() => server.close());
+  const client = await opened(phoneSocket(fx.socketPath, SERVE, ORIGIN));
+  expect(await client.call("update.status", {})).toEqual(methodSamples["update.status"].result);
+  for (const method of ["update.prepare", "update.commit", "update.check", "update.cancel", "update.dismissResult"] as const) {
+    await expect(client.call(method, methodSamples[method].params as never)).rejects.toMatchObject({ code: "forbidden" });
+  }
+  expect(mutations).toBe(0);
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?token=${TOKEN}`);
+  cleanups.push(() => socket.terminate());
+  const desktop = await opened(socket);
+  expect(await desktop.call("update.prepare", { approval: "probe" })).toEqual({ state: "blocked", message: "probe" });
+  expect(mutations).toBe(1);
+});
+
+it("UB-01 phone Reset preserves desktop update preferences while desktop Reset can change them", async () => {
+  const fx = fixture();
+  const settings = await openSettingsStore({ dataDir: fx.dataDir, systemOllamaAnswers: async () => false });
+  settings.update({ updateAutomatic: false, updateEveryChange: true, theme: "light", tools: false, defaultNumCtx: 8192 });
+  const pushes: unknown[] = [];
+  const server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [],
+    handlers: createSettingsHandlers({ settings, push: (_channel, payload) => pushes.push(payload) }),
+    phone: { socketPath: fx.socketPath, origin: ORIGIN, user: USER, webRoot: fx.webRoot },
+  });
+  cleanups.push(() => server.close());
+  const phone = await opened(phoneSocket(fx.socketPath, SERVE, ORIGIN));
+  const before = settings.get();
+  const file = path.join(fx.dataDir, "settings.json");
+  const saved = readFileSync(file, "utf8");
+  const preferences = { updateAutomatic: true, updateEveryChange: false };
+  expect.soft(await phone.call("settings.update", preferences)).toEqual(before);
+  expect.soft(settings.get()).toBe(before);
+  expect.soft(readFileSync(file, "utf8")).toBe(saved);
+  expect.soft(pushes).toEqual([]);
+
+  // The same fields sent by Advanced > Reset, including its non-update settings.
+  const reset = { defaultModel: null, defaultNumCtx: 16384, thinking: true, theme: "dark", tools: true, imageGen: false, comfyUrl: null, whisperUrl: null, ...preferences, textSize: "default", systemPrompt: null, modelSettings: null } as const;
+  const kept = { updateAutomatic: false, updateEveryChange: true, theme: "dark", tools: true, defaultNumCtx: 16384 };
+  expect.soft(await phone.call("settings.update", reset)).toMatchObject(kept);
+  expect.soft(settings.get()).toMatchObject(kept);
+  expect.soft(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ settings: kept });
+  expect.soft(pushes.at(-1)).toMatchObject(kept);
+
+  settings.update({ updateAutomatic: false, updateEveryChange: true, theme: "light" });
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?token=${TOKEN}`);
+  cleanups.push(() => socket.terminate());
+  const desktop = await opened(socket);
+  expect(await desktop.call("settings.update", reset)).toMatchObject({ ...kept, ...preferences });
+  expect(settings.get()).toMatchObject({ ...kept, ...preferences });
+});
 
 function startRaw(fx: Fixture, logs: string[] = [], socketPath = fx.socketPath, peers?: readonly string[]): Promise<WsServer> {
   return startWsServer({

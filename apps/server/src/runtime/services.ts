@@ -50,6 +50,7 @@ export interface ModelServices {
 }
 
 export interface ModelServicesOptions {
+  readonly admit?: () => void;
   readonly dataDir: string;
   /** Bound late: the ws server exists after the handlers. */
   readonly push: Push;
@@ -163,6 +164,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     log,
   });
   pulls = createPullManager({
+    ...(options.admit ? { admit: options.admit } : {}),
     baseUrl: () => runtime.baseUrl(),
     push: (p) => options.push("models.pull", p),
     onDone: async () => {

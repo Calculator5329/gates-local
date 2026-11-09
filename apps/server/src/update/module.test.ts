@@ -11,6 +11,10 @@ import { RECORD_FILE, writeRecord } from "./record.ts";
 import type { Runner } from "./run.ts";
 import { type Repos, commit, fakePnpm, head, makeRepos, publish, removeRepos, testEnv } from "./testing.ts";
 import { saveTransaction } from "./transaction.ts";
+import { acquireLock } from "./lock.ts";
+import { automaticChecks } from "./automatic.ts";
+import { openSettingsStore } from "../settings/store.ts";
+import { createUpdateAdmission } from "./admission.ts";
 
 let r: Repos;
 
@@ -36,6 +40,22 @@ const encodes = (method: "update.status" | "update.check" | "update.dismissResul
 };
 
 describe("update.status", () => {
+  it("AV-03 named active imports refuse approval until they finish", async () => {
+    commit(r.seed, "Approved update"); publish(r.seed);
+    const imports = ["Import: Default data"];
+    const admission = createUpdateAdmission();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, admission, activity: () => imports, uninterruptible: () => imports });
+    await update.check();
+    const offered = update.status();
+    expect(offered.activity).toEqual(["Import: Default data"]);
+    expect(await update.prepare(offered.approval ?? "")).toEqual({ state: "blocked", message: "Wait for Import: Default data to finish before updating." });
+    expect(admission.installing()).toBe(false);
+    imports.length = 0;
+    const ready = await update.prepare(update.status().approval ?? "");
+    expect(ready.state).toBe("ready");
+    if (ready.state === "ready") update.cancel(ready.reservation);
+    await update.close();
+  });
   it("reads the version without running anything, and shows the last result once", () => {
     writeRecord(r.data, { at: 5, outcome: "updated", to: { commit: "a".repeat(40), label: "v0.2.0" }, changes: 3 });
     const c = counting();
@@ -132,9 +152,164 @@ describe("update.check", () => {
       expect(check).toMatchObject({ state: "cannot-check", reason: "error" });
       expect(check.state === "cannot-check" && check.lines[0]).toMatch(/outside the test root/);
       encodes("update.check", check);
-      expect(c.commands).toEqual(["git --version"]);
+      expect(c.commands).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+});
+
+describe("automatic checks share the updater engine", () => {
+  it("AU-01 unchanged approval reserves atomically, broadcasts pause, and cancel reopens", async () => {
+    commit(r.seed, "Approved update"); publish(r.seed);
+    const admission = createUpdateAdmission();
+    const changed = vi.fn();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, admission, changed });
+    await update.check();
+    const approval = update.status().approval;
+    if (!approval) throw new Error("missing fixture approval");
+    const ready = await update.prepare(approval);
+    expect(ready.state).toBe("ready");
+    if (ready.state !== "ready") throw new Error("fixture not reserved");
+    expect(() => admission.admit()).toThrow("closing to update");
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: true }));
+    const committed = update.commit({ reservation: ready.reservation, targetCommit: ready.targetCommit, release: "main-release" });
+    expect(committed.accepted).toBe(true);
+    if (!committed.accepted) throw new Error("fixture not committed");
+    expect(update.cancel(ready.reservation)).toEqual({ cancelled: false });
+    expect(update.cancel(committed.release)).toEqual({ cancelled: true });
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: false }));
+    expect(() => admission.admit()).not.toThrow();
+  });
+
+  it("AU-01 changed work during the recheck requires a new dialog and reserves nothing", async () => {
+    commit(r.seed, "Approved update"); publish(r.seed);
+    const admission = createUpdateAdmission();
+    const activity = ["1 running reply"];
+    let holdFetch = false;
+    let release: () => void = vi.fn();
+    let announce: () => void = vi.fn();
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { announce = resolve; });
+    const c = counting();
+    const runner: Runner = async (command, args, options) => {
+      if (holdFetch && args[0] === "fetch") { announce(); await held; }
+      return c.runner(command, args, options);
+    };
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner, everyChange: () => true, admission, activity: () => activity });
+    await update.check();
+    const approval = update.status().approval;
+    if (!approval) throw new Error("missing fixture approval");
+    holdFetch = true;
+    const preparing = update.prepare(approval);
+    await started;
+    admission.admit();
+    activity.push("model download: new-model");
+    release();
+    const result = await preparing;
+    expect(result).toMatchObject({ state: "changed", status: { activity: ["1 running reply", "model download: new-model"] } });
+    expect(admission.installing()).toBe(false);
+    expect(() => admission.admit()).not.toThrow();
+  });
+
+  it("AU-01 equal activity counts cannot hide replacement work and two clients share only one reservation", async () => {
+    commit(r.seed, "Approved update"); publish(r.seed);
+    const admission = createUpdateAdmission();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, admission, activity: () => ["1 running reply"] });
+    await update.check();
+    const old = update.status().approval;
+    if (!old) throw new Error("missing fixture approval");
+    admission.admit();
+    expect((await update.prepare(old)).state).toBe("changed");
+    expect(admission.installing()).toBe(false);
+    const approval = update.status().approval;
+    if (!approval) throw new Error("missing fixture approval");
+    const results = await Promise.all([update.prepare(approval), update.prepare(approval)]);
+    expect(results.filter((result) => result.state === "ready")).toHaveLength(1);
+    const ready = results.find((result) => result.state === "ready");
+    if (ready?.state === "ready") update.cancel(ready.reservation);
+  });
+
+  it("AU-02 a remote advance returns the new full target for approval without reserving", async () => {
+    commit(r.seed, "Approved B"); publish(r.seed);
+    const admission = createUpdateAdmission();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, admission });
+    await update.check();
+    const approval = update.status().approval;
+    if (!approval) throw new Error("missing fixture approval");
+    const newer = commit(r.seed, "Unapproved C"); publish(r.seed);
+    expect(await update.prepare(approval)).toMatchObject({ state: "changed", status: { lastCheck: { targetCommit: newer } } });
+    expect(admission.installing()).toBe(false);
+  });
+
+  it("off means no git process and no network, and the preference survives reopening", async () => {
+    const settings = await openSettingsStore({ dataDir: r.data, systemOllamaAnswers: async () => false });
+    settings.update({ updateAutomatic: false });
+    const reopened = await openSettingsStore({ dataDir: r.data, systemOllamaAnswers: async () => false });
+    expect(reopened.get().updateAutomatic).toBe(false);
+    const c = counting();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: c.runner, everyChange: () => false });
+    vi.useFakeTimers();
+    const stop = automaticChecks({ desktop: true, enabled: () => reopened.get().updateAutomatic !== false, check: () => update.check(true), onChange: (l) => reopened.onChange(l) });
+    try {
+      await vi.advanceTimersByTimeAsync(7_200_000);
+      expect(c.commands).toEqual([]);
+      expect(update.status().lastCheck).toBeNull();
+    } finally { stop(); vi.useRealTimers(); }
+  });
+
+  it("cannot fetch while the install owns the checkout lock", async () => {
+    const held = acquireLock(r.clone);
+    expect(held.ok).toBe(true);
+    if (!held.ok) throw new Error("fixture lock failed");
+    try {
+      const c = counting();
+      const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: c.runner, everyChange: () => false });
+      expect((await update.check(true)).state).toBe("cannot-check");
+      expect(c.commands).toEqual([]);
+      expect(update.status().lastCheck).toBeNull();
+    } finally { held.lock.release(); }
+  });
+
+  it("offline automatic checks preserve the last answer and push no failure; a click reports it", async () => {
+    const c = counting();
+    let offline = false;
+    const changed = vi.fn();
+    const runner: Runner = (command, args, options) => {
+      if (offline) throw new Error("offline");
+      return c.runner(command, args, options);
+    };
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner, everyChange: () => false, changed });
+    const good = await update.check(true);
+    expect(changed).toHaveBeenCalledTimes(1);
+    offline = true;
+    expect((await update.check(true)).state).toBe("cannot-check");
+    expect(update.status().lastCheck).toEqual(good);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect((await update.check()).state).toBe("cannot-check");
+    expect(update.status().lastCheck?.state).toBe("cannot-check");
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("shutdown drains a check, excludes installs until it ends, and refuses later checks", async () => {
+    let release: () => void = vi.fn();
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const c = counting();
+    const runner: Runner = async (command, args, options) => { await hold; return c.runner(command, args, options); };
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner, everyChange: () => false });
+    const check = update.check(true);
+    expect(acquireLock(r.clone).ok).toBe(false);
+    let drained = false;
+    const closing = update.close().then(() => { drained = true; });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release();
+    await Promise.all([check, closing]);
+    const count = c.commands.length;
+    expect((await update.check()).state).toBe("cannot-check");
+    expect(c.commands).toHaveLength(count);
+    const lock = acquireLock(r.clone);
+    expect(lock.ok).toBe(true);
+    if (lock.ok) lock.lock.release();
   });
 });

@@ -188,11 +188,13 @@ refuses to start with `LISTEN` set.
   - `onState(listener): () => void`
   - `restart(): Promise<RestartResult>`
   - `reloadClient(): Promise<void>`
-  - `updateAndRestart(): Promise<UpdateAndRestartResult>`: Settings ›
+  - `updateAndRestart({ reservation, targetCommit }): Promise<UpdateAndRestartResult>`: Settings ›
     Updates. Main starts `node scripts/update.ts --wait-pid <its pid>
     --restart …` detached (`src/update-launch.ts`) and quits; the updater
-    waits for that pid to exit, updates, leaves the result in the data
-    folder for the next start and opens the app again with the same
+    waits for that pid to exit, updates, and keeps the transaction through
+    first server readiness. Main acknowledges that state; initialization
+    failure or a 60-second timeout restores the previous version and starts
+    it once. The app opens with the same
     working folder and arguments. `{ ok: false, message }` when this copy
     is packaged or not a git clone, or node could not be started.
 - `<data dir>/desktop.pid.json` (`src/running.ts`): written once main holds

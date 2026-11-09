@@ -240,6 +240,15 @@ describe("Settings review: session choices and fit refreshes", () => {
 });
 
 describe("Stop then Retry (W-02)", () => {
+  it("AU-03 a saved interrupted partial replaces live text even for cancelled errors", async () => {
+    await boot();
+    await startFirstTurn();
+    const partial = { ...asstMsg("interrupted-reply", "t1", "Half an answer"), interrupted: true as const };
+    chat("turn-1", { type: "error", code: "cancelled", message: "Gates Local is closing", partial });
+    await tick();
+    expect(store.getState().messages["t1"]?.at(-1)).toMatchObject({ id: partial.id, interrupted: true });
+    expect(store.getState().live).toBeNull();
+  });
   it("Retry waits for the stopped turn's end, then the new reply ends as a normal reply", async () => {
     await boot();
     await startFirstTurn();

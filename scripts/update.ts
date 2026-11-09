@@ -6,16 +6,15 @@
 //
 // Not named update, upgrade or up: those are pnpm's own commands, and
 // `pnpm update` would rewrite the lockfile.
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import { serverDataDir } from "../apps/desktop/src/data-dir.ts";
 import { readRunning } from "../apps/desktop/src/running.ts";
-import { relaunchEnv } from "../apps/desktop/src/update-launch.ts";
+import { APPROVAL_DEADLINE_ENV } from "../apps/desktop/src/update-launch.ts";
+import { createRelaunch } from "../apps/desktop/src/update-relaunch.ts";
 import type { Pnpm } from "../apps/server/src/update/apply.ts";
-import { type Relaunch, runCli } from "../apps/server/src/update/cli.ts";
+import { runCli } from "../apps/server/src/update/cli.ts";
 import { isAlive } from "../apps/server/src/update/wait.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -35,13 +34,7 @@ function pnpmCommand(): Pnpm {
   return { command: "pnpm", prefix: [], shell: process.platform === "win32" };
 }
 
-/** Electron from this clone's install, found after the update so a new version's path is used. */
-function relaunch({ cwd, args }: Relaunch): void {
-  const electron = createRequire(path.join(root, "apps", "desktop", "package.json"))("electron") as unknown;
-  if (typeof electron !== "string" || !existsSync(electron)) throw new Error("Electron is not installed in this clone");
-  const child = spawn(electron, [...args], { cwd, env: relaunchEnv(env), detached: true, stdio: "ignore" });
-  child.unref();
-}
+const relaunch = createRelaunch({ root, env });
 
 const defaultDataDir = serverDataDir({
   platform: process.platform,
@@ -58,4 +51,5 @@ process.exitCode = await runCli({
   pnpm: pnpmCommand(),
   appRunning: (dataDir) => readRunning(dataDir, isAlive),
   relaunch,
+  ...(env[APPROVAL_DEADLINE_ENV] === undefined ? {} : { approvalBeforeUptime: Number(env[APPROVAL_DEADLINE_ENV]) }),
 });

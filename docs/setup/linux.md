@@ -197,15 +197,24 @@ Close the app, then, from the clone:
 
 ```sh
 pnpm run app-update
-pnpm start
 ```
 
 `pnpm run app-update` lists what is new (at most 20 changes, or a
 release's notes), moves the clone to it, runs `pnpm install` and builds the
-app. `pnpm run app-update --check` only lists. The app's Settings ›
-General › Updates does the same: "Check for updates" checks when you
-click it, never on its own, and "Update and restart" closes the window,
-updates and opens the app again.
+app, opens it, and waits for a ready server. A failed first startup restores
+and starts the previous build once. `pnpm run app-update --check` only lists. The app's Settings ›
+General › Updates does the same. The desktop app also checks this clone's
+git remote (`git fetch` and `git ls-remote`) 15 seconds after startup and
+hourly after that, sharing one check across windows. Turn off "Check for
+updates automatically" there to stop future automatic git processes and
+network requests; a check in progress finishes. It defaults on. Browsers
+can check when asked; the phone listener exposes status only. Nothing installs without a click.
+The update button beside Settings names the target and changes in its
+tooltip. "Update and restart" confirms running replies, image jobs and model
+downloads first. Active imports must finish before installation. It then closes the window during install and build and opens
+the app again. Partial replies are saved; downloaded model parts are kept
+and downloading the same model again resumes them. Save drafts and queued
+messages before restarting. Offline background checks show no failure.
 
 Which version it moves to:
 

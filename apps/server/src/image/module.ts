@@ -15,6 +15,7 @@ import { createComfyService, type ComfyService } from "./service.ts";
 import { IMAGE_ESTIMATED_BYTES } from "./workflow.ts";
 
 export interface ImageDeps extends ComfyClientDeps {
+  admit?(): void;
   dataDir: string;
   lease: GpuLease;
   store: ThreadStore;
@@ -39,6 +40,8 @@ export interface ImageDeps extends ComfyClientDeps {
 }
 
 export interface ImageModule {
+  /** Queued and running jobs, including jobs waiting for GPU memory. */
+  activeJobs?(): number;
   current(): ImageStatus;
   status(): Promise<ImageStatus>;
   generate(params: Params<"image.generate">): Promise<{ jobId: string }>;
@@ -267,9 +270,11 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const module: ImageModule = {
     current: () => status,
+    activeJobs: () => jobs.size,
     status: discover,
     async generate(params) {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
+      deps.admit?.();
       let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "" };
       if (params.threadId) deps.store.getThread(params.threadId);
       const jobId = randomUUID();

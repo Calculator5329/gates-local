@@ -514,6 +514,7 @@ export function App() {
           <div className="work">
             {isSet ? (
               <div className={`set${setList ? " listing" : ""}`}>
+                <UpdateNote />
                 <div className="set-in">
                   <SettingsList />
                   {settings.kind === "ready" ? <settings.value.SettingsView /> : <ScreenError />}

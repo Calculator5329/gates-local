@@ -2,6 +2,7 @@
 // shell starts a grandchild that holds stdout open, which is what a pnpm
 // subprocess does, so ending only the immediate process leaves `close` unfired.
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,7 +25,54 @@ afterEach(() => {
 
 const pidIn = (file: string) => Number(readFileSync(file, "utf8").trim());
 
+it.runIf(process.platform === "linux" && existsSync("/usr/bin/python3")).each([false, true])("AV-04 rollback distinguishes zombie-only groups from groups with a live parent: %s", async liveParent => {
+  // Keep the parent alive so this fixture can deliberately retain, then reap,
+  // its own zombie. No orphan is left for the host's init process to collect.
+  const parent = spawn("/usr/bin/python3", ["-u", "-c", `import os,sys\n${liveParent ? "os.setsid()\n" : ""}pid=os.fork()\nif pid == 0:\n ${liveParent ? "pass" : "os.setsid()"}\n os._exit(0)\nprint(pid, os.getpid(), flush=True)\nsys.stdin.readline()\nos.waitpid(pid, 0)\n`], { stdio: ["pipe", "pipe", "pipe"] });
+  const exited = once(parent, "exit");
+  let output = "";
+  parent.stdout.on("data", chunk => { output += String(chunk); });
+  try {
+    await vi.waitFor(() => expect(output.trim()).toMatch(/^\d+ \d+$/));
+    const [pid, parentPid] = output.trim().split(" ").map(Number);
+    if (pid === undefined || parentPid === undefined) throw new Error("Missing fixture process IDs");
+    await vi.waitFor(() => expect(readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1)?.[0]).toBe("Z"));
+    const group = liveParent ? parentPid : pid;
+    expect(() => process.kill(-group, 0)).not.toThrow();
+    expect(groupExists(group)).toBe(liveParent);
+    if (!liveParent) expect(await endTree(group)).toBe(true);
+  } finally { parent.stdin.end("\n"); await exited; }
+});
+
+it.runIf(process.platform === "linux" && existsSync("/usr/bin/python3"))("AV-04 a zombie leader cannot hide its live descendant from rollback", async () => {
+  // The collector adopts and reaps both processes, even after the group
+  // leader exits. Its pipe keeps the descendant alive until cleanup.
+  const program = "import ctypes,os,sys\nassert ctypes.CDLL(None).prctl(36,1,0,0,0) == 0\nr,w=os.pipe()\nleader=os.fork()\nif leader == 0:\n os.setsid()\n os.close(w)\n worker=os.fork()\n if worker == 0:\n  print('worker',os.getpid(),flush=True)\n  os.read(r,1)\n  os._exit(0)\n os._exit(0)\nos.close(r)\nprint('leader',leader,flush=True)\nsys.stdin.readline()\nos.close(w)\nos.waitpid(leader,0)\nos.waitpid(-1,0)\n";
+  const collector = spawn("/usr/bin/python3", ["-u", "-c", program], { stdio: ["pipe", "pipe", "pipe"] });
+  const exited = once(collector, "exit");
+  let output = "";
+  collector.stdout.on("data", chunk => { output += String(chunk); });
+  try {
+    await vi.waitFor(() => expect(output).toMatch(/worker \d+/));
+    await vi.waitFor(() => expect(output).toMatch(/leader \d+/));
+    const leader = Number(/leader (\d+)/.exec(output)?.[1]);
+    await vi.waitFor(() => expect(readFileSync(`/proc/${leader}/stat`, "utf8").split(") ").at(-1)?.[0]).toBe("Z"));
+    expect(groupExists(leader)).toBe(true);
+  } finally { collector.stdin.end("\n"); await exited; }
+});
+
 describe.skipIf(process.platform === "win32")("a command that runs past its time limit", { timeout: 20_000 }, () => {
+  it("AW-02 Windows timeout never taskkills an exited root whose descendant holds its pipe", async () => {
+    const taskkill = vi.fn(async () => 128);
+    const runner = createRunner({ platform: "win32", exists: () => false, taskkill });
+    let group: number | undefined;
+    try {
+      const result = await runner("sh", ["-c", "sleep 5 &"], { cwd: r.clone, timeoutMs: 200, onStart: pid => { group = pid; } });
+      expect.soft(taskkill).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ code: null, failure: "timeout", treeStillRunning: true });
+    } finally { if (group !== undefined) await endTree(group); }
+  });
+
   it("ends the grandchild holding the pipes too, and answers within a bound", async () => {
     const file = path.join(r.base, "grandchild.pid");
     const started = performance.now();
@@ -84,6 +132,10 @@ describe.skipIf(process.platform === "win32")("a command that runs past its time
 
 describe("ending a process tree", () => {
   const base: TreeStop = { platform: "linux", graceMs: 40, confirmMs: 40, exists: () => true, signal: () => undefined, taskkill: async () => 0 };
+
+  it("AW-02 Windows startup cannot confirm a tree when the root disappears before taskkill", async () => {
+    expect(await endTree(4242, { ...base, platform: "win32", exists: () => false, taskkill: async () => 128 }, { requireWindowsTreeKill: true })).toBe(false);
+  });
 
   it("POSIX: SIGTERM, then SIGKILL only when the group outlasts the grace", async () => {
     const sent: string[] = [];

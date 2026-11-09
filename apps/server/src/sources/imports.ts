@@ -4,6 +4,7 @@ import path from "node:path";
 import type { SourceImport, SourceImports } from "@gates-local/contracts";
 import type { Handlers } from "../ws/server.ts";
 import type { Sources } from "./index.ts";
+import type { ImportActivity } from "./activity.ts";
 import { IMPORT_MS, cloneRepository, githubRepo, importSize, runGit, type GitTransport } from "./clone.ts";
 import { readWindowsProc } from "../runtime/ownership.ts";
 import { isAlive } from "../update/wait.ts";
@@ -19,6 +20,7 @@ export interface ImportsDeps {
   git?: GitTransport;
   timeoutMs?: number;
   now?: () => number;
+  activity?: Pick<ImportActivity, "begin">;
 }
 export type LibraryImports = ReturnType<typeof createLibraryImports>;
 
@@ -120,9 +122,12 @@ export function createLibraryImports(deps: ImportsDeps) {
       if (job && (job.state !== "error" || now() - ended >= FAILED_RETRY_MS)) evictions.add(id);
     }
     if (jobs.size - evictions.size >= MAX_IMPORT_JOBS) throw new Error("The Library import history is full of recent failures. Retry an existing import or wait five minutes.");
-    const slot = deps.sources.allocateOwned();
+    const scope = deps.activity?.begin(`Import: ${label}`);
+    let slot: ReturnType<Sources["allocateOwned"]>;
+    try { slot = deps.sources.allocateOwned(); }
+    catch (error) { scope?.finish(); throw error; }
     const controller = new AbortController();
-    const signal = controller.signal;
+    const signal = scope ? AbortSignal.any([controller.signal, scope.signal]) : controller.signal;
     const job: SourceImport = { id: slot.id, key, label, kind, state: kind === "sample" ? "downloading" : "cloning", bytes: 0, ...(sample ? { total: sample.sizeBytes } : {}) };
     for (const id of evictions) { jobs.delete(id); finishedAt.delete(id); }
     jobs.set(slot.id, job);
@@ -166,7 +171,7 @@ export function createLibraryImports(deps: ImportsDeps) {
         }
         signal.throwIfAborted();
         update(slot.id, { state: "adding" });
-        const source = await deps.sources.addOwned(slot, { kind: sample ? "sqlite" : "folder", label, sizeBytes: sourceBytes, managed: { kind, key } });
+        const source = await deps.sources.addOwned(slot, { kind: sample ? "sqlite" : "folder", label, sizeBytes: sourceBytes, managed: { kind, key } }, signal);
         added = source.id;
         signal.throwIfAborted();
         update(slot.id, { state: "ready", sourceId: source.id });
@@ -184,6 +189,7 @@ export function createLibraryImports(deps: ImportsDeps) {
         if (monitor) clearInterval(monitor);
         running.delete(slot.id);
         finishedAt.set(slot.id, now());
+        scope?.finish();
       }
     })();
     return { ...job };
@@ -194,5 +200,8 @@ export function createLibraryImports(deps: ImportsDeps) {
     "sources.clone": ({ url }) => { const key = githubRepo(url); return begin("repository", key, key.slice("https://github.com/".length)); },
     "sources.cancelImport": ({ id }) => { checkRecovered(); const controller = running.get(id); controller?.abort(new DOMException("Cancelled. Nothing was added; retry whenever you like.", "AbortError")); return { cancelled: controller !== undefined }; },
   } satisfies Partial<Handlers>;
-  return { handlers, snapshot, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
+  // Recovered workers belong to a previous server. Keep them in the update
+  // snapshot until their identity is confirmed gone; never try to kill them.
+  const activity = (): readonly string[] => { checkRecovered(); return [...recovered.values()].map(({ job }) => `Import: ${job.label}`); };
+  return { handlers, snapshot, activity, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
 }

@@ -10,9 +10,15 @@
 // app-menu launcher), found again after the install so a new Electron
 // version's path is used.
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { uptime } from "node:os";
+import { HANDOFF_GRACE_MS } from "../../server/src/update/admission.ts";
 import { BACKGROUND_ENV, BACKGROUND_FLAG } from "./launch.ts";
+import type { UpdateCommitRequest, UpdateCommitResult, UpdateInstallRequest } from "@gates-local/contracts";
+import type { UpdateAndRestartResult } from "./bridge.ts";
 
 export interface UpdaterLaunchInput {
+  readonly approvedCommit?: string;
   /** The clone: apps/desktop/../.. */
   readonly repoRoot: string;
   readonly pid: number;
@@ -22,6 +28,13 @@ export interface UpdaterLaunchInput {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly exists: (file: string) => boolean;
+}
+
+export const APPROVAL_DEADLINE_ENV = "GATES_LOCAL_UPDATE_APPROVAL_BEFORE_UPTIME";
+
+/** Bound the detached wait before the server can reopen admission. Uptime is shared across processes. */
+export function approvedHandoffEnv(env: NodeJS.ProcessEnv, nowUptime = uptime()): NodeJS.ProcessEnv {
+  return { ...env, [APPROVAL_DEADLINE_ENV]: String(nowUptime + HANDOFF_GRACE_MS / 1000) };
 }
 
 export interface UpdaterLaunch {
@@ -52,6 +65,7 @@ export function updaterLaunch(o: UpdaterLaunchInput): UpdaterLaunch {
       "--restart",
       "--data-dir",
       o.dataDir,
+      ...(o.approvedCommit === undefined ? [] : ["--target-commit", o.approvedCommit]),
       "--relaunch-cwd",
       o.cwd,
       // One token each: as a separate word, a value like --disable-gpu reads as an option and stops the updater.
@@ -70,6 +84,7 @@ export function relaunchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next = { ...env };
   delete next[BACKGROUND_ENV];
   delete next["ELECTRON_RUN_AS_NODE"];
+  delete next[APPROVAL_DEADLINE_ENV];
   return next;
 }
 
@@ -78,10 +93,10 @@ export function relaunchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * (two IPC calls can both arrive before a spawn reports). A success stays, as
  * the app is quitting; a failure or a throw lets the next click try again.
  */
-export function onceUntilFailed<R extends { readonly ok: boolean }>(start: () => Promise<R>): () => Promise<R> {
+export function onceUntilFailed<R extends { readonly ok: boolean }, A extends readonly unknown[] = []>(start: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
   let current: Promise<R> | null = null;
-  return () => {
-    current ??= start().then(
+  return (...args) => {
+    current ??= start(...args).then(
       (r) => {
         if (!r.ok) current = null;
         return r;
@@ -93,6 +108,38 @@ export function onceUntilFailed<R extends { readonly ok: boolean }>(start: () =>
     );
     return current;
   };
+}
+
+export interface UpdateControl {
+  commit(request: UpdateCommitRequest): Promise<UpdateCommitResult>;
+  cancel(reservation: string): Promise<unknown>;
+}
+
+export function validUpdateRequest(value: unknown): value is UpdateInstallRequest {
+  return typeof value === "object" && value !== null && "reservation" in value && typeof value.reservation === "string" && value.reservation !== "" && "targetCommit" in value && typeof value.targetCommit === "string" && /^[a-f0-9]{40}$/.test(value.targetCommit);
+}
+
+/** Main validates the server reservation before spawning; every failed handoff releases it. */
+export async function launchApprovedUpdate(request: UpdateInstallRequest, control: UpdateControl, start: (approvedCommit: string) => Promise<UpdateAndRestartResult>): Promise<UpdateAndRestartResult> {
+  let started = false;
+  const release = randomUUID();
+  let result: UpdateAndRestartResult;
+  try {
+    const committed = await control.commit({ ...request, release });
+    if (!committed.accepted || committed.release !== release) result = { ok: false, message: "The update approval expired or changed. Check for updates again and review the target." };
+    else { result = await start(request.targetCommit); started = result.ok; }
+  } catch {
+    result = { ok: false, message: "Could not start the approved update. Gates Local is staying open; check for updates again to retry." };
+  }
+  if (!started) {
+    try {
+      // Either the commit was accepted (release) or it never happened
+      // (reservation). Lost acknowledgements are safe in either case.
+      await control.cancel(release);
+      await control.cancel(request.reservation);
+    } catch { result = { ok: false, message: "The update did not start, and its pause could not be released. Close and reopen Gates Local to resume work." }; }
+  }
+  return result;
 }
 
 /** Why "Update and restart" cannot start here, or null when it can. */

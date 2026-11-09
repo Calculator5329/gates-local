@@ -172,6 +172,8 @@ export interface State {
   readonly update: Maybe<UpdateStatus>;
   /** A "Check for updates" click waiting for its answer. */
   readonly updateChecking: boolean;
+  readonly updateInstalling: boolean;
+  readonly updateError: string | null;
   /** Action methods that answered not-implemented once (models.load, models.pull, …). */
   readonly unavailable: Readonly<Record<string, true>>;
   /** A one-line note the client shows under the composer after a refused send. */
@@ -236,6 +238,8 @@ const initial: State = {
   imageStatus: undefined,
   update: undefined,
   updateChecking: false,
+  updateInstalling: false,
+  updateError: null,
   unavailable: {},
   notice: null,
   loadErrors: {},

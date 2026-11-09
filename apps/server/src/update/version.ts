@@ -1,7 +1,7 @@
 // The version this copy runs, read straight from the .git folder: the
 // release tag when HEAD is one, else the short commit, with the commit's
 // date. No git process and no network, so the server can show it at start
-// and Settings can show it on open; only "Check for updates" runs git.
+// and Settings can show it on open. Manual and desktop automatic checks run git.
 //
 // It reads what a clone holds: HEAD, loose refs, packed-refs, loose objects
 // and pack files (index v2, with delta chains). Anything it cannot read
@@ -311,6 +311,14 @@ function commitDate(repo: Repo, commit: string): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Full local HEAD for startup acknowledgement; no git process or network. */
+export function readHeadCommit(root: string): string | undefined {
+  try {
+    const repo = openRepo(root);
+    return repo === null ? undefined : resolveRef(repo, "HEAD", packedRefs(repo));
+  } catch { return undefined; }
 }
 
 export function readVersion(root: string): VersionInfo {

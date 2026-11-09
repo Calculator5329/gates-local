@@ -12,6 +12,7 @@
 // again with --relaunch-cwd and the --relaunch-arg list it was given.
 import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from "node:fs";
 import path from "node:path";
+import { uptime } from "node:os";
 import { parseArgs } from "node:util";
 import { type Pnpm, type Refusal, type UpdateRun, STEP_WORDS, runUpdate } from "./apply.ts";
 import type { ChannelChoice, Inspection } from "./check.ts";
@@ -19,6 +20,7 @@ import { UpdateGuardError } from "./guard.ts";
 import { type UpdateRecord, writeRecord } from "./record.ts";
 import { realRunner, type Runner } from "./run.ts";
 import { waitForExit } from "./wait.ts";
+import { waitForStartup, type StartupProcess } from "./startup.ts";
 
 export const REPO_URL = "https://github.com/Calculator5329/gates-local.git";
 /** How long the detached updater waits for the app to close. */
@@ -28,6 +30,8 @@ const KEEP_LOGS = 10;
 export interface Relaunch {
   readonly cwd: string;
   readonly args: readonly string[];
+  readonly startup?: { readonly token: string; readonly commit: string };
+  readonly onStart?: (pid: number) => void;
 }
 
 export interface CliDeps {
@@ -40,12 +44,15 @@ export interface CliDeps {
   /** The running app from the pid file in this data folder, or null. */
   readonly appRunning: (dataDir: string) => { readonly pid: number; readonly file: string } | null;
   /** Opens the app again; throws when it cannot. */
-  readonly relaunch: (spec: Relaunch) => void;
+  readonly relaunch: (spec: Relaunch) => StartupProcess | void | Promise<StartupProcess | void>;
   readonly alive?: (pid: number) => boolean;
   readonly print?: (line: string) => void;
   readonly now?: () => number;
   readonly platform?: NodeJS.Platform;
   readonly closeWaitMs?: number;
+  readonly startupTimeoutMs?: number;
+  readonly approvalBeforeUptime?: number;
+  readonly uptime?: () => number;
 }
 
 const USAGE = [
@@ -109,6 +116,8 @@ function changedLines(r: Extract<Refusal, { reason: "changed-during-update" }>):
 /** The plain-language lines for a refusal; the last says nothing was changed where that is true. */
 export function refusalLines(r: Refusal): string[] {
   switch (r.reason) {
+    case "target-changed":
+      return [`The update target changed. You approved ${r.approved}, but the target is now ${r.target.label} (${r.target.commit}).`, "Nothing was installed. Check for updates again and review the new target before approving it."];
     case "no-git":
       return ["Git was not found. Gates Local updates itself with git.", "Install it from https://git-scm.com/downloads, open a new terminal and try again."];
     case "not-a-clone":
@@ -147,8 +156,8 @@ export function refusalLines(r: Refusal): string[] {
     case "unfinished":
       if (r.runningPid !== null) {
         return [
-          `The last update, to ${r.target}, did not finish, and a step of it is still running (process ${r.runningPid}).`,
-          "End that process or restart the computer first, and keep Gates Local closed until then: that step may still be replacing its files.",
+          `The last update, to ${r.target}, did not finish. Its process tree has not been confirmed stopped (process ${r.runningPid}).`,
+          "End that process and its helpers, or use Restart before retrying. On Windows, a Fast Startup shutdown may keep the same boot. Keep Gates Local closed until then.",
           "Then run `pnpm run app-update`: it finishes the update or says what is in the way.",
           `Or by hand, once it has ended: ${BY_HAND}`,
         ];
@@ -164,9 +173,9 @@ export function refusalLines(r: Refusal): string[] {
       return ["Another update took over this copy while this one was held up, so this one stopped.", "Run `pnpm run app-update` once that one has finished, to see where the copy stands."];
     case "still-running":
       return [
-        `The update to ${r.target} has a step that ran too long and could not be stopped${r.pid === null ? "" : ` (process ${r.pid})`}.`,
-        `Nothing else will run until it has ended. End ${r.pid === null ? "it" : "that process"}, or restart the computer, then run \`pnpm run app-update\`.`,
-        "Keep Gates Local closed until then: that step may still be replacing its files.",
+        `The update to ${r.target} has processes that have not been confirmed stopped${r.pid === null ? "" : ` (process ${r.pid})`}.`,
+        `The updater will not replace files until they have ended or a restart is proved. End ${r.pid === null ? "those processes" : "that process and its helpers"}, or restart the computer using Restart, then run \`pnpm run app-update\`.`,
+        "On Windows, a Fast Startup shutdown may keep the same boot. Keep Gates Local closed while its files may still be held.",
         `Or by hand, once it has ended: ${BY_HAND}`,
       ];
     case "cannot-save":
@@ -211,8 +220,8 @@ function changeLines(i: Extract<Inspection, { state: "available" }>): string[] {
 const channelLine = (c: "main" | "release") => (c === "release" ? "Following releases." : "Following every change on the main branch.");
 
 /** The stopped-at line both the command and the app show. */
-export function stoppedLine(to: string, step: keyof typeof STEP_WORDS, reason: string, from: string): string {
-  return `The update to ${to} stopped at ${STEP_WORDS[step]}: ${reason}. Gates Local is still on ${from}.`;
+export function stoppedLine(to: string, step: keyof typeof STEP_WORDS, reason: string, from: string, repair = false): string {
+  return `${repair ? "The repair of" : "The update to"} ${to} stopped at ${STEP_WORDS[step]}: ${reason}. Gates Local is still on ${from}.`;
 }
 
 /** Returns the exit code. */
@@ -228,6 +237,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
         channel: { type: "string" },
         "data-dir": { type: "string" },
         "wait-pid": { type: "string" },
+        "target-commit": { type: "string" },
         restart: { type: "boolean" },
         "relaunch-cwd": { type: "string" },
         "relaunch-arg": { type: "string", multiple: true },
@@ -251,8 +261,18 @@ export async function runCli(deps: CliDeps): Promise<number> {
     return 2;
   }
   const waitPid = values["wait-pid"] === undefined ? undefined : Number(values["wait-pid"]);
+  const approvedCommit = values["target-commit"];
+  if (approvedCommit !== undefined && !/^[a-f0-9]{40}$/.test(approvedCommit)) {
+    print("--target-commit must be the full 40-character checked commit.");
+    return 2;
+  }
   if (waitPid !== undefined && (!Number.isInteger(waitPid) || waitPid <= 0)) {
     print(`--wait-pid must be a process id, not "${values["wait-pid"]}"`);
+    return 2;
+  }
+  const approvalDeadline = deps.approvalBeforeUptime;
+  if (approvalDeadline !== undefined && (!Number.isFinite(approvalDeadline) || approvalDeadline <= 0 || approvedCommit === undefined || waitPid === undefined)) {
+    print("The desktop update handoff is invalid. Check for updates again before approving it.");
     return 2;
   }
   const checkOnly = values.check === true;
@@ -271,10 +291,11 @@ export async function runCli(deps: CliDeps): Promise<number> {
       say(`Could not save the result for the app (${(e as Error).message}).`);
     }
   };
-  const reopen = () => {
-    if (!restart) return;
+  let attemptedStartup = false;
+  const reopen = async () => {
+    if (!restart && !attemptedStartup) return;
     try {
-      deps.relaunch(relaunch);
+      await deps.relaunch(relaunch);
       say("Opening Gates Local again.");
     } catch (e) {
       say(`Could not open Gates Local again (${(e as Error).message}). Start it from your app menu or with pnpm start.`);
@@ -284,7 +305,14 @@ export async function runCli(deps: CliDeps): Promise<number> {
   try {
     if (waitPid !== undefined) {
       say("Waiting for Gates Local to close…");
-      const closed = await waitForExit(waitPid, { timeoutMs: deps.closeWaitMs ?? CLOSE_WAIT_MS, ...(deps.alive ? { alive: deps.alive } : {}) });
+      const remaining = () => approvalDeadline === undefined ? Infinity : (approvalDeadline - (deps.uptime ?? uptime)()) * 1000;
+      const closed = await waitForExit(waitPid, { timeoutMs: Math.min(deps.closeWaitMs ?? CLOSE_WAIT_MS, Math.max(0, remaining())), ...(deps.alive ? { alive: deps.alive } : {}) });
+      if (remaining() <= 0) {
+        // This updater no longer owns admission. Do not reopen or overwrite a
+        // later attempt's result, even when the old desktop has finally quit.
+        say("The desktop update approval expired before Gates Local closed. Nothing was installed. Check for updates again and approve the current activity.");
+        return 1;
+      }
       if (!closed) {
         say(`Gates Local (process ${waitPid}) did not close within ${Math.round((deps.closeWaitMs ?? CLOSE_WAIT_MS) / 1000)} s. Nothing was changed.`);
         record({ outcome: "refused", reason: "Gates Local did not close, so the update did not start" });
@@ -303,8 +331,17 @@ export async function runCli(deps: CliDeps): Promise<number> {
         pnpm: deps.pnpm,
         appRunning: () => deps.appRunning(dataDir),
         checkOnly,
+        ...(approvedCommit === undefined ? {} : { approvedCommit }),
         say,
         log: (chunk) => log?.write(chunk),
+        startApp: async (startup, onStart) => {
+          attemptedStartup = true;
+          try {
+            const app = await deps.relaunch({ ...relaunch, startup, onStart });
+            if (app === undefined) return { code: 1, stdout: "", stderr: "The new version did not return an owned startup process." };
+            return await waitForStartup({ root: deps.root, dataDir, ...startup, app, ...(deps.startupTimeoutMs === undefined ? {} : { timeoutMs: deps.startupTimeoutMs }), ...(deps.alive === undefined ? {} : { alive: deps.alive }) });
+          } catch (error) { return { code: 1, stdout: "", stderr: `Could not start the new version: ${(error as Error).message}`, ...(typeof error === "object" && error !== null && "treeStillRunning" in error && error.treeStillRunning === true ? { treeStillRunning: true } : {}) }; }
+        },
       });
     } catch (e) {
       // The test guard's refusal is the test's to see.
@@ -312,7 +349,7 @@ export async function runCli(deps: CliDeps): Promise<number> {
       say(`The updater stopped on an error it did not expect: ${(e as Error).message}`);
       if (log) say(`The full log is in ${log.file}`);
       record({ outcome: "refused", reason: (e as Error).message });
-      reopen();
+      await reopen();
       return 1;
     }
     switch (run.outcome) {
@@ -321,12 +358,12 @@ export async function runCli(deps: CliDeps): Promise<number> {
         for (const line of lines) say(line);
         if (waitPid !== undefined) record({ outcome: "refused", reason: lines.join(" ") });
         // Not while something may still be replacing what the app runs from.
-        if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason) && !(run.refusal.reason === "cannot-save" && run.refusal.pid !== null)) reopen();
+        if (!["busy", "lost-lock", "still-running"].includes(run.refusal.reason) && !(run.refusal.reason === "cannot-save" && run.refusal.pid !== null)) await reopen();
         return 1;
       }
       case "up-to-date":
         say(`Gates Local is up to date (${run.inspection.head.label}). ${channelLine(run.inspection.channel)}`);
-        reopen();
+        await reopen();
         return 0;
       case "available":
         for (const line of changeLines(run.inspection)) say(line);
@@ -334,24 +371,26 @@ export async function runCli(deps: CliDeps): Promise<number> {
         say("To install it, close Gates Local and run: pnpm run app-update");
         return 0;
       case "updated":
-        say(`Updated to ${run.to.label}, ${run.changes === 1 ? "1 change" : `${run.changes} changes`}.`);
-        if (!restart) say("Start Gates Local from your app menu or with pnpm start.");
-        record({ outcome: "updated", channel: run.channel, from: run.from, to: run.to, changes: run.changes });
-        reopen();
+        say(run.from.commit === run.to.commit ? `Repaired ${run.to.label}.` : `Updated to ${run.to.label}, ${run.changes === 1 ? "1 change" : `${run.changes} changes`}.`);
+        // The ready app wrote and consumed its own success note. It is
+        // already open; launching it again would hide startup failures.
+        return 0;
+      case "awaiting-start":
+        say(`Built ${run.to.label}. Start Gates Local to finish the update; success is recorded only after its server is ready.`);
         return 0;
       case "stopped":
-        say(stoppedLine(run.to.label, run.step, run.reason, run.from.label));
+        say(stoppedLine(run.to.label, run.step, run.reason, run.from.label, run.from.commit === run.to.commit));
         if (log) say(`The full log is in ${log.file}`);
         record({ outcome: "stopped", channel: run.channel, from: run.from, to: run.to, step: run.step, reason: run.reason });
-        reopen();
+        await reopen();
         return 1;
       case "rollback-failed":
-        say(`The update to ${run.to.label} stopped at ${STEP_WORDS[run.step]}: ${run.reason}.`);
-        say(`Going back to ${run.from.label} did not finish either. Gates Local may not start until you run these commands in ${deps.root}:`);
+        say(`${run.from.commit === run.to.commit ? "Repairing" : "The update to"} ${run.to.label} stopped at ${STEP_WORDS[run.step]}: ${run.reason}.`);
+        say(`${run.from.commit === run.to.commit ? "Retrying the repair" : `Going back to ${run.from.label}`} did not finish either. Gates Local may not start until you run these commands in ${deps.root}:`);
         for (const c of run.commands ?? []) say(`  ${c}`);
         if (log) say(`The full log is in ${log.file}`);
         record({ outcome: "rollback-failed", channel: run.channel, from: run.from, to: run.to, step: run.step, reason: run.reason, commands: run.commands ?? [] });
-        reopen();
+        await reopen();
         return 1;
       default:
         return run satisfies never;

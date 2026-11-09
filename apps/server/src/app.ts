@@ -97,6 +97,7 @@ export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 type WireEvent = Payload<"chat.event">["event"];
 
 export interface AppDeps {
+  readonly admit?: () => void;
   readonly dataDir?: string;
   readonly store: ThreadStore;
   readonly runtime: Pick<OllamaRuntime, "status" | "baseUrl" | "onChange" | "ensure">;
@@ -325,7 +326,7 @@ export function createApp(deps: AppDeps): App {
       if (turn.text !== "" || turn.thinking !== "" || turn.steps.size > 0) {
         try {
           const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
-          partial = store.appendMessage({ threadId, role: "assistant", content: turn.text, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
+          partial = store.appendMessage({ threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
         } catch (e) {
           log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
         }
@@ -559,9 +560,11 @@ export function createApp(deps: AppDeps): App {
 
     "chat.send": async ({ threadId, content, model, numCtx, messageId, images = [], tools, think, image, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
+      deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
       if (deleting.has(threadId)) throw threadGoing(threadId);
-      const prior = store.getThread(threadId).messages; // thread-not-found before anything is reserved
+      // Keep unfinished text for the person, but never present it to a model as a completed answer.
+      const prior = store.getThread(threadId).messages.filter(m => m.role !== "assistant" || m.interrupted !== true);
       const saved = messageId === undefined ? undefined : store.getMessage(messageId);
       if (saved) {
         if (saved.threadId !== threadId || saved.role !== "user" || saved.content !== content) throw new AppError("image-input", "This send identity belongs to a different message. Your words were not sent; edit them and try again.");
@@ -775,7 +778,7 @@ export function createApp(deps: AppDeps): App {
       offImports?.();
       deps.libraryImports?.close();
       const pending = [...turns.values()];
-      for (const t of pending) t.controller.abort();
+      for (const t of pending) t.halt(new AppError("cancelled", "Gates Local is closing. The reply written so far was saved."));
       await Promise.all(pending.map((t) => t.ended));
     },
   };

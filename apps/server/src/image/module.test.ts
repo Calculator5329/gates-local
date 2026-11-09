@@ -137,6 +137,13 @@ async function fixture(options: Partial<ImageDeps> = {}) {
 }
 
 describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () => {
+  it("AU-01 image jobs pass admission before any job or Comfy request", async () => {
+    const options = { admit: () => { throw Object.assign(new Error("Gates Local is closing to update."), { code: "update-installing" }); } };
+    const f = await fixture(options);
+    await expect(f.module.generate({ prompt: "Do not start" })).rejects.toMatchObject({ code: "update-installing" });
+    expect(f.module.activeJobs?.()).toBe(0);
+    expect(f.calls).toEqual([]);
+  });
   it("rolls back the retry card if linking the original attempt fails", async () => {
     const f = await fixture(); const thread = f.store.createThread();
     f.store.saveImageJob({ jobId: "failed", threadId: thread.id, state: "error" }, "a tree");

@@ -97,7 +97,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; onTerminal?: () => void } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -145,6 +145,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     store,
     runtime,
     catalog,
+    ...(opts.admit ? { admit: opts.admit } : {}),
     ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
@@ -1124,6 +1125,14 @@ describe("threads.delete and the image jobs its turns queued", () => {
 });
 
 describe("chat.cancel and threads.delete during a turn", () => {
+  it("AU-01 every client's chat.send passes the server admission boundary", async () => {
+    const r = await rig({ admit: () => { throw Object.assign(new Error("Gates Local is closing to update. Try again after it reopens."), { code: "update-installing" }); } });
+    const thread = await r.client.call("threads.create", {});
+    const error = await rejection(r.client.call("chat.send", { threadId: thread.id, content: "Do not start", model: MODEL, numCtx: 16384 }));
+    expect(error).toMatchObject({ code: "update-installing", message: expect.stringContaining("closing to update") });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.store.getThread(thread.id).messages).toHaveLength(0);
+  });
   it("cancel mid-stream ends the turn with a cancelled error and persists nothing of the reply", async () => {
     const r = await rig();
     r.setChat(slowReply);
@@ -1171,6 +1180,33 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("shutting-down");
+  });
+
+  it("shutdown for an update saves the reply already shown before reopening", async () => {
+    const r = await rig();
+    r.setChat(slowReply);
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
+    await r.app.shutdown();
+    const shown = events(r, sent.turnId).filter((e) => e.type === "delta").map((e) => e.text).join("");
+    expect(shown.length).toBeGreaterThan(0);
+    expect(r.store.getThread(t.id).messages.at(-1)).toMatchObject({ role: "assistant", content: shown });
+    expect(r.store.getThread(t.id).messages.at(-1)).toMatchObject({ interrupted: true });
+  });
+
+  it("AU-03 excludes durable interrupted assistant text from the next model prompt", async () => {
+    const r = await rig();
+    const t = r.store.createThread();
+    r.store.appendMessage({ threadId: t.id, role: "user", content: "An earlier question" });
+    const partial = { threadId: t.id, role: "assistant" as const, content: "UNFINISHED_SENTINEL", interrupted: true as const };
+    r.store.appendMessage(partial);
+    let requested: unknown;
+    r.setChat((res, body) => { requested = body; quickReply(res, body); });
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "Continue with a fresh question", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    expect(JSON.stringify(requested)).toContain("An earlier question");
+    expect(JSON.stringify(requested)).not.toContain("UNFINISHED_SENTINEL");
   });
 });
 

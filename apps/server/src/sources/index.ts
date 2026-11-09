@@ -13,16 +13,16 @@ import type { SourceImport } from "@gates-local/contracts";
 export interface Sources {
   list(): Source[];
   entries(): LibraryEntry[];
-  add(input: { kind: Source["kind"]; path: string; label?: string }): Promise<Source>;
+  add(input: { kind: Source["kind"]; path: string; label?: string }, signal?: AbortSignal): Promise<Source>;
   remove(id: string): void;
-  refresh(id: string): Promise<Source>;
+  refresh(id: string, signal?: AbortSignal): Promise<Source>;
   onChange(listener: (sources: Source[]) => void): () => void;
   allocateOwned(): OwnedSlot;
   discardOwned(id: string): void;
   rememberWorker(job: SourceImport, worker: WorkerIdentity): void;
   forgetWorker(id: string): void;
   heldImports(): HeldImport[];
-  addOwned(slot: OwnedSlot, input: { kind: "sqlite" | "folder"; label: string; sizeBytes?: number; managed: NonNullable<Source["managed"]> }): Promise<Source>;
+  addOwned(slot: OwnedSlot, input: { kind: "sqlite" | "folder"; label: string; sizeBytes?: number; managed: NonNullable<Source["managed"]> }, signal?: AbortSignal): Promise<Source>;
 }
 
 const decodeRegistry = S.decodeUnknownSync(S.Array(Source));
@@ -38,12 +38,21 @@ const { DatabaseSync } = require("node:sqlite");
 const live = new DatabaseSync(workerData.live, { readOnly: true, timeout: 5000, allowExtension: false });
 try { live.prepare("VACUUM INTO ?").run(workerData.pending); } finally { live.close(); }
 `;
-function vacuumInto(live: string, pending: string): Promise<void> {
+function vacuumInto(live: string, pending: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(VACUUM_WORKER, { eval: true, workerData: { live, pending } });
     let failure: Error | undefined;
+    const abort = () => { void worker.terminate().catch((error: unknown) => { failure = error instanceof Error ? error : new Error(String(error)); }); };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     worker.once("error", (e: unknown) => { failure = e instanceof Error ? e : new Error(String(e)); });
-    worker.once("exit", code => failure ? reject(failure) : code === 0 ? resolve() : reject(new Error(`Snapshot worker exited ${code}`)));
+    worker.once("exit", code => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) reject(new Error("Import interrupted while Gates Local is closing."));
+      else if (failure) reject(failure);
+      else if (code === 0) resolve();
+      else reject(new Error(`Snapshot worker exited ${code}`));
+    });
   });
 }
 
@@ -249,13 +258,15 @@ export function createSources(deps: SourcesDeps): Sources {
       for (const { name } of copies) if (archive.placed()) unlinkIfAny(archive, name);
     } finally { archive.close(); }
   };
-  const materialize = async (source: Source): Promise<Source> => {
+  const materialize = async (source: Source, signal?: AbortSignal): Promise<Source> => {
+    signal?.throwIfAborted();
     const canonical = checkPath(source);
     if (source.kind !== "sqlite") return { ...source, path: canonical, state: "ready", sizeBytes: statSync(canonical).size, detail: undefined };
     if (!snapshots.placed()) throw moved();
     const pending = `${source.id}.${randomUUID()}.pending.db`;
     try {
-      await vacuumInto(canonical, snapshots.at(pending));
+      await vacuumInto(canonical, snapshots.at(pending), signal);
+      signal?.throwIfAborted();
       if (!snapshots.placed()) throw moved();
       const copy = openEntry(snapshots, pending, platform);
       try {
@@ -273,9 +284,10 @@ export function createSources(deps: SourcesDeps): Sources {
     return source;
   };
   /** Every addition, including verified imports, takes this same snapshot and registry path. */
-  const register = async (input: Source, complete?: () => void): Promise<Source> => {
+  const register = async (input: Source, complete?: () => void, signal?: AbortSignal): Promise<Source> => {
     try {
-      const materialized = await materialize(input);
+      const materialized = await materialize(input, signal);
+      signal?.throwIfAborted();
       const source = input.managed?.kind === "repository" && input.sizeBytes !== undefined ? { ...materialized, sizeBytes: input.sizeBytes } : materialized;
       complete?.(); // Completion must be durable before registry persistence can expose it.
       sources = [...sources, source]; save(); return { ...source };
@@ -295,18 +307,20 @@ export function createSources(deps: SourcesDeps): Sources {
       if (s.state !== "ready") return false;
       try { return checkPath(s) === s.path; } catch { return false; }
     }).map(s => ({ id: s.id, kind: s.kind, label: s.label, path: s.path, ...(s.kind === "sqlite" ? { snapshotPath: snapshotPath(s.id) } : {}) })),
-    async add(input) {
+    async add(input, signal) {
+      signal?.throwIfAborted();
       const canonical = checkPath({ kind: input.kind, path: input.path });
-      return register({ id: randomUUID(), kind: input.kind, path: canonical, label: input.label?.trim() || path.basename(canonical), addedAt: now(), state: "refreshing" });
+      return register({ id: randomUUID(), kind: input.kind, path: canonical, label: input.label?.trim() || path.basename(canonical), addedAt: now(), state: "refreshing" }, undefined, signal);
     },
     allocateOwned: () => owned.allocate(),
     discardOwned: id => owned.discard(id),
     rememberWorker: (job, worker) => owned.rememberWorker(job, worker),
     forgetWorker: id => owned.forgetWorker(id),
     heldImports: () => owned.heldImports(),
-    async addOwned(slot, input) {
+    async addOwned(slot, input, signal) {
+      signal?.throwIfAborted();
       if (!owned.owns({ id: slot.id, path: slot.path })) throw new Error("This Library import is not owned by the app.");
-      return register({ id: slot.id, path: slot.path, ...input, addedAt: now(), state: "refreshing" }, () => owned.complete(slot.id));
+      return register({ id: slot.id, path: slot.path, ...input, addedAt: now(), state: "refreshing" }, () => owned.complete(slot.id), signal);
     },
     remove(id) {
       const source = find(id);
@@ -315,11 +329,12 @@ export function createSources(deps: SourcesDeps): Sources {
       sources = sources.filter(s => s.id !== id); save(); removeSnapshots(id);
       if (appOwned) owned.finishRemoval(id);
     },
-    async refresh(id) {
+    async refresh(id, signal) {
+      signal?.throwIfAborted();
       const old = find(id);
       sources = sources.map(s => s.id === id ? { ...s, state: "refreshing" } : s); save();
       let source: Source;
-      try { source = await materialize(old); }
+      try { source = await materialize(old, signal); }
       catch (e) { source = { ...old, state: "error", detail: (e as Error).message }; }
       // Removed while the snapshot was being made: drop what it wrote.
       if (!sources.some(s => s.id === id)) { removeSnapshots(id); throw new Error(`Library source ${id} was removed during its refresh`); }

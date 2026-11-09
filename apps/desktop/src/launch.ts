@@ -60,6 +60,7 @@ export interface ServerEnvInput {
  */
 export function serverEnv({ env, clientOrigin, webRoot }: ServerEnvInput): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
+  out["GATES_LOCAL_DESKTOP"] = "1";
   if (clientOrigin !== null) {
     const extra = (env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "").split(",").map((o) => o.trim()).filter((o) => o !== "");
     out["GATES_LOCAL_ALLOWED_ORIGINS"] = [...extra, clientOrigin].join(",");

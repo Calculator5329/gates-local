@@ -186,7 +186,7 @@ export async function inspect(o: InspectOptions): Promise<Inspection> {
   if (unfinished !== null) {
     // Only asks whether the command is there; any advice has to start with it if it is.
     const { running } = unfinished;
-    return blocked({ reason: "unfinished", target: unfinished.to.label, runningPid: running !== undefined && !treeGone(running) ? running.pid : null });
+    return blocked({ reason: "unfinished", target: unfinished.to.label, runningPid: running !== undefined && !treeGone(running, { requireWholeWindowsTree: true }) ? running.pid : null });
   }
   const upstream = await upstreamOf(git);
   if (isBlocked(upstream)) return blocked(upstream);

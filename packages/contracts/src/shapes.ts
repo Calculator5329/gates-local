@@ -75,6 +75,8 @@ export const Message = S.Struct({
   tools: S.optional(S.Array(ToolStep)),
   /** Attached user images or generated assistant images, relative to the server data dir; served over authenticated HTTP. */
   images: S.optional(S.Array(S.String)),
+  /** Saved unfinished assistant text, not a completed answer. Absent on older messages. */
+  interrupted: S.optional(S.Literal(true)),
   imageJob: S.optional(ImageEvent),
 });
 export type Message = typeof Message.Type;
@@ -286,6 +288,8 @@ export const Settings = S.Struct({
   whisperUrl: S.optional(S.String),
   /** Updates take every change on the main branch, not only releases. Unset means off. */
   updateEveryChange: S.optional(S.Boolean),
+  /** Desktop-only automatic git checks. Unset means on. Never installs automatically. */
+  updateAutomatic: S.optional(S.Boolean),
   /** Unset means "default". */
   textSize: S.optional(TextSize),
   /** Unset uses the installed model's system prompt. */
@@ -305,6 +309,7 @@ export const SettingsPatch = S.Struct({
   comfyUrl: S.optional(S.NullOr(S.String)),
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
+  updateAutomatic: S.optional(S.Boolean),
   textSize: S.optional(TextSize),
   systemPrompt: S.optional(S.NullOr(S.String)),
   /** Reset all model overrides in one atomic settings update. Individual edits use settings.model.update. */
@@ -500,6 +505,8 @@ export const UpdateCheck = S.Union([
     channel: UpdateChannel,
     current: S.String,
     target: S.String,
+    /** Exact commit checked by the server; older servers omitted it. */
+    targetCommit: S.optional(S.String),
     /** Every commit between current and target. */
     total: Count,
     /** Commit subjects, newest first, at most 20. */
@@ -528,7 +535,32 @@ export const UpdateStatus = S.Struct({
   version: UpdateVersion,
   /** Present until update.dismissResult. */
   result: S.NullOr(UpdateResult),
-  /** The last check since the server started; null until someone clicks Check. */
+  /** The last manual check or successful automatic check since startup. */
   lastCheck: S.NullOr(UpdateCheck),
+  /** Work the desktop's restart would interrupt, including other clients. */
+  activity: S.optional(S.Array(S.String)),
+  /** Server-owned approval for this target and exact activity snapshot. */
+  approval: S.optional(S.String),
+  installing: S.optional(S.Boolean),
+  /** Phone listeners expose update status without update controls. */
+  canControl: S.optional(S.Boolean),
 });
 export type UpdateStatus = typeof UpdateStatus.Type;
+
+export const UpdateInstallRequest = S.Struct({ reservation: S.String, targetCommit: S.String });
+export type UpdateInstallRequest = typeof UpdateInstallRequest.Type;
+export const UpdateCommitRequest = S.Struct({ reservation: S.String, targetCommit: S.String, release: S.String });
+export type UpdateCommitRequest = typeof UpdateCommitRequest.Type;
+
+export const UpdateCommitResult = S.Union([
+  S.Struct({ accepted: S.Literal(false) }),
+  S.Struct({ accepted: S.Literal(true), release: S.String }),
+]);
+export type UpdateCommitResult = typeof UpdateCommitResult.Type;
+
+export const UpdatePreparation = S.Union([
+  S.Struct({ state: S.Literal("ready"), reservation: S.String, targetCommit: S.String }),
+  S.Struct({ state: S.Literal("changed"), status: UpdateStatus }),
+  S.Struct({ state: S.Literal("blocked"), message: S.String }),
+]);
+export type UpdatePreparation = typeof UpdatePreparation.Type;

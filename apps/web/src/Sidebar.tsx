@@ -8,6 +8,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread } from "./session.ts";
 import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
 import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
+import { SidebarUpdate } from "./Updates.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "gear"],
@@ -318,6 +319,7 @@ export function Sidebar() {
       </div>
       {inSettings ? <SettingsNav /> : <ChatNav />}
       <div className="sb-foot">
+        {inSettings ? null : <SidebarUpdate />}
         <DownloadRow />
         <RuntimeRow />
         {inSettings ? null : (

@@ -23,6 +23,14 @@ async function until(pred: () => boolean, ms = 2000): Promise<void> {
 }
 
 describe("models.pull", () => {
+  it("AU-01 downloads pass admission before queuing or making a request", () => {
+    const options = { baseUrl: () => undefined, push: () => undefined, admit: () => { throw Object.assign(new Error("Gates Local is closing to update."), { code: "update-installing" }); } };
+    const manager = createPullManager(options);
+    try {
+      expect(() => manager.pull("test-model")).toThrow("closing to update");
+      expect(manager.pending()).toHaveLength(0);
+    } finally { manager.stop(); }
+  });
   it("streams progress at most 4 times a second with a smoothed rate, then refreshes once done", async () => {
     let t = 0;
     server = await startFakeServer({
