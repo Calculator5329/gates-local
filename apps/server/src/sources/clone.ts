@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, lstat, opendir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,8 +43,8 @@ export async function importSize(root: string, signal: AbortSignal): Promise<num
 
 export interface GitCall {
   args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
-  /** Test-only observation of the owned worker; never supplied by the wire or production main. */
-  onWorkerStart?: (pid: number) => void;
+  /** Persist identity before allowing the Windows worker to start Git. Not supplied by the wire. */
+  onWorkerStart?: (pid: number, token: string) => void;
   onStopUnconfirmed?: () => void;
 }
 export type GitTransport = (call: GitCall) => Promise<string>;
@@ -51,7 +52,8 @@ export type GitTransport = (call: GitCall) => Promise<string>;
 /** Parent-owned process group, bounded output and bounded cancellation. No shell. */
 export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, onStopUnconfirmed }) => new Promise((resolve, reject) => {
   signal.throwIfAborted();
-  const worker = spawn(process.execPath, [fileURLToPath(new URL("./git-worker.ts", import.meta.url)), JSON.stringify(args), cwd], { env, detached: process.platform !== "win32", windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+  const token = randomUUID();
+  const worker = spawn(process.execPath, [fileURLToPath(new URL("./git-worker.ts", import.meta.url)), JSON.stringify(args), cwd, token], { env, detached: process.platform !== "win32", windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
   let error = "";
   let failure: Error | undefined;
@@ -103,6 +105,7 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
     }
   };
   signal.addEventListener("abort", cancel, { once: true });
+  worker.stdin.on("error", () => { failure = new Error("The Git worker's start pipe closed. Retry."); cancel(); });
   worker.stdout.on("data", (chunk: Buffer) => {
     if (stopping) return;
     output += chunk.toString();
@@ -120,7 +123,7 @@ export const runGit: GitTransport = ({ args, cwd, env, signal, onWorkerStart, on
   });
   worker.once("spawn", () => {
     if (worker.pid === undefined || stopping) return;
-    try { onWorkerStart?.(worker.pid); }
+    try { onWorkerStart?.(worker.pid, token); if (process.platform === "win32") worker.stdin.write("start\n"); }
     catch (e) { failure = e instanceof Error ? e : new Error("The git worker could not start."); cancel(); }
   });
 });

@@ -4,7 +4,10 @@ import path from "node:path";
 import type { SourceImport, SourceImports } from "@gates-local/contracts";
 import type { Handlers } from "../ws/server.ts";
 import type { Sources } from "./index.ts";
-import { IMPORT_MS, cloneRepository, githubRepo, importSize, type GitTransport } from "./clone.ts";
+import { IMPORT_MS, cloneRepository, githubRepo, importSize, runGit, type GitTransport } from "./clone.ts";
+import { readWindowsProc } from "../runtime/ownership.ts";
+import { isAlive } from "../update/wait.ts";
+import { UNCONFIRMED_WORKER, type WorkerIdentity } from "./owned.ts";
 import { SAMPLES, SAMPLE_LICENSE, type PinnedSample } from "./samples.ts";
 import { openDir, openChild, unlinkIfAny, type Dir } from "./anchored.ts";
 import { rmdirSync } from "node:fs";
@@ -22,6 +25,14 @@ export type LibraryImports = ReturnType<typeof createLibraryImports>;
 const MAX_ACTIVE_IMPORTS = 2;
 const MAX_IMPORT_JOBS = 20;
 const FAILED_RETRY_MS = 5 * 60_000;
+
+/** A launch token in the OS command line distinguishes this worker from a recycled PID. */
+function workerGone(worker: WorkerIdentity): boolean {
+  if (!isAlive(worker.pid)) return true;
+  const current = readWindowsProc(worker.pid);
+  // Missing command information is uncertainty, not evidence of termination.
+  return current !== undefined && current.command !== "" && !current.command.includes(worker.token);
+}
 
 /** Download only the pinned bytes; redirects, oversize and underlength are refused before add. */
 async function download(sample: PinnedSample, file: string, signal: AbortSignal, progress: (bytes: number) => void, get: typeof fetch) {
@@ -74,18 +85,32 @@ export function createLibraryImports(deps: ImportsDeps) {
   const samples = deps.samples ?? SAMPLES;
   const jobs = new Map<string, SourceImport>();
   const running = new Map<string, AbortController>();
+  const recovered = new Map(deps.sources.heldImports().map(held => [held.job.id, held]));
+  for (const { job, worker } of recovered.values()) jobs.set(job.id, { ...job, state: "cloning", detail: worker ? UNCONFIRMED_WORKER : job.detail });
   const finishedAt = new Map<string, number>();
   const now = deps.now ?? Date.now;
   const listeners = new Set<(value: SourceImports) => void>();
   const snapshot = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl })), jobs: [...jobs.values()].map(j => ({ ...j })) });
   const emit = () => { const value = snapshot(); for (const listener of listeners) listener(value); };
   const update = (id: string, patch: Partial<SourceImport>) => { const old = jobs.get(id); if (old) { jobs.set(id, { ...old, ...patch }); emit(); } };
+  const checkRecovered = () => {
+    for (const [id, held] of recovered) {
+      if (!held.worker || !workerGone(held.worker)) continue;
+      deps.sources.forgetWorker(id);
+      deps.sources.discardOwned(id);
+      recovered.delete(id);
+      finishedAt.set(id, now());
+      update(id, { state: "cancelled", detail: "The interrupted import has stopped. Retry whenever you like." });
+    }
+  };
+  checkRecovered();
   const begin = (kind: SourceImport["kind"], key: string, label: string, sample?: PinnedSample): SourceImport => {
+    checkRecovered();
     const existing = deps.sources.list().find(s => s.managed?.kind === kind && s.managed.key.toLowerCase() === key.toLowerCase());
     if (existing) return { id: existing.id, key, label, kind, state: "ready", bytes: existing.sizeBytes ?? 0, sourceId: existing.id };
-    const active = [...jobs.values()].find(j => j.kind === kind && j.key.toLowerCase() === key.toLowerCase() && running.has(j.id));
+    const active = [...jobs.values()].find(j => j.kind === kind && j.key.toLowerCase() === key.toLowerCase() && (running.has(j.id) || recovered.has(j.id)));
     if (active) return { ...active };
-    if (running.size >= MAX_ACTIVE_IMPORTS) throw new Error("The Library can run 2 imports at once. Wait for one to finish or cancel one, then retry.");
+    if (running.size + recovered.size >= MAX_ACTIVE_IMPORTS) throw new Error("The Library can run 2 imports at once. Wait for one to finish or cancel one, then retry.");
     // Reserve history space before starting work. Recent failures can only be
     // replaced by their own Retry; when all slots are protected, refuse new work.
     const evictions = new Set([...jobs.values()].filter(j => j.kind === kind && j.key.toLowerCase() === key.toLowerCase()).map(j => j.id));
@@ -120,7 +145,19 @@ export function createLibraryImports(deps: ImportsDeps) {
           await writeFile(path.join(slot.work, "LICENSE.txt"), SAMPLE_LICENSE, { mode: 0o600, flag: "wx" });
         }
         else {
-          const bytes = await cloneRepository({ url: key, work: slot.work, destination: slot.path, signal, progress, onStopUnconfirmed: () => update(slot.id, { detail: "This import could not be stopped. Restart the app to retry." }), ...(deps.git ? { git: deps.git } : {}) });
+          const git: GitTransport = async call => {
+            let remembered = false;
+            try {
+              return await (deps.git ?? runGit)({ ...call, onWorkerStart: (pid, token) => {
+                if (process.platform === "win32") {
+                  // No Git work starts unless its stable identity is durably saved.
+                  deps.sources.rememberWorker(job, { pid, token }); remembered = true;
+                }
+                call.onWorkerStart?.(pid, token);
+              } });
+            } finally { if (remembered) deps.sources.forgetWorker(slot.id); }
+          };
+          const bytes = await cloneRepository({ url: key, work: slot.work, destination: slot.path, signal, progress, onStopUnconfirmed: () => update(slot.id, { detail: UNCONFIRMED_WORKER }), git });
           sourceBytes = bytes;
           if (monitor) clearInterval(monitor);
           signal.throwIfAborted();
@@ -155,7 +192,7 @@ export function createLibraryImports(deps: ImportsDeps) {
     "sources.imports": () => snapshot(),
     "sources.downloadSample": ({ id }) => { const sample = samples.find(s => s.id === id); if (!sample) throw new Error("This sample is not available."); return begin("sample", id, sample.label, sample); },
     "sources.clone": ({ url }) => { const key = githubRepo(url); return begin("repository", key, key.slice("https://github.com/".length)); },
-    "sources.cancelImport": ({ id }) => { const controller = running.get(id); controller?.abort(new DOMException("Cancelled. Nothing was added; retry whenever you like.", "AbortError")); return { cancelled: controller !== undefined }; },
+    "sources.cancelImport": ({ id }) => { checkRecovered(); const controller = running.get(id); controller?.abort(new DOMException("Cancelled. Nothing was added; retry whenever you like.", "AbortError")); return { cancelled: controller !== undefined }; },
   } satisfies Partial<Handlers>;
   return { handlers, snapshot, onChange(listener: (value: SourceImports) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }, close() { for (const c of running.values()) c.abort(new DOMException("The app closed during the import. Retry.", "AbortError")); } };
 }

@@ -81,3 +81,20 @@ test.describe("while an import is interrupted", () => {
   await button.click(); await expect(button).toHaveText("Added"); await shot(page, info, "restart-retried");
   });
 });
+
+for (const width of [1440, 390]) for (const mode of ["cancelled", "failed"] as const) {
+  test(`Library Retry after leaving Settings returns to the ${mode} repository at ${width}px (DG-02)`, async ({ page, open }, info) => {
+    await page.setViewportSize({ width, height: 900 }); await open(); await library(page);
+    const input = page.getByRole("textbox", { name: "Public GitHub repository URL" });
+    const button = page.locator(".srow", { has: input }).getByRole("button");
+    const key = `https://github.com/example/retry-${mode}`;
+    await input.fill(key); await button.click(); await expect(button).toHaveText("Cancel");
+    if (mode === "cancelled") { await button.click(); await expect(button).toHaveText("Retry"); }
+    await page.keyboard.press("Escape"); await waitReady(page);
+    await library(page); await expect(input).toHaveValue(""); await expect(button).toHaveText("Retry");
+    await shot(page, info, "retry-returned");
+    await button.click(); await expect(input).toHaveValue(key); await expect(button).toHaveText("Added");
+    await expect(page.getByRole("button", { name: `More for example/retry-${mode}` })).toBeVisible();
+    await shot(page, info, "retry-added");
+  });
+}

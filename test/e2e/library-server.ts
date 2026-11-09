@@ -23,6 +23,7 @@ git("init", "--quiet"); git("config", "user.name", "Library fixture"); git("conf
 writeFileSync(path.join(seed, "README.md"), "A small public documentation fixture"); git("add", "."); git("commit", "--quiet", "-m", "Fixture");
 const bare = path.join(root, "fixture.git"); git("clone", "--bare", seed, bare);
 let northwindAttempts = 0;
+let failedClone = false;
 await main({ imports: {
   samples,
   fetch: async (input, init) => {
@@ -43,6 +44,7 @@ await main({ imports: {
   },
   git: async call => {
     if (call.args.includes("clone")) await setTimeout(1800, undefined, { signal: call.signal });
+    if (!failedClone && call.args.includes("https://github.com/example/retry-failed")) { failedClone = true; throw new Error("This repository is unavailable. Retry."); }
     return runGit({ ...call, args: ["-c", "protocol.file.allow=always", ...call.args.map(a => a.startsWith("https://github.com/") ? `file://${bare}` : a)], env: { ...call.env, GIT_ALLOW_PROTOCOL: "file" } });
   },
 } });

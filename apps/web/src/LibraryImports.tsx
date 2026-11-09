@@ -58,7 +58,10 @@ export default function LibraryImports() {
       {added ? "Added" : busy(job) ? "Cancel" : pending === key ? "Starting…" : job?.state === "error" || job?.state === "cancelled" ? "Retry" : word}
     </button>
   );
-  const repoJob = value?.jobs.findLast(j => j.kind === "repository");
+  const lastRepoJob = value?.jobs.findLast(j => j.kind === "repository");
+  const entered = url.trim().replace(/\.git\/?$|\/$/g, "").toLowerCase();
+  const repoJob = busy(lastRepoJob) || entered === "" || entered === lastRepoJob?.key.toLowerCase() ? lastRepoJob : undefined;
+  const repoUrl = repoJob && ["error", "cancelled"].includes(repoJob.state) ? repoJob.key : url;
   return (
     <>
       <Grp title="Sample databases" desc="Download a small database to try a Library query.">
@@ -75,7 +78,7 @@ export default function LibraryImports() {
       <Grp title="Clone a repository" desc="A public GitHub repository, read as a Library folder.">
         <Row label="GitHub URL" desc="Up to 64 MiB and 10,000 files." >
           <input className="inp import-url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
-          {action("repository", repoJob, ready("repository", url), () => void start("repository", () => libraryRequest("sources.clone", { url })), "Clone")}
+          {action("repository", repoJob, ready("repository", url), () => { setUrl(repoUrl); void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })); }, "Clone")}
         </Row>
         {repoJob ? <div className="src-none">{repoJob.label}{status(repoJob, ready("repository", repoJob.key))}</div> : null}
       </Grp>

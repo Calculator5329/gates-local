@@ -167,7 +167,16 @@ a crash. Completed copies absent from the registry remain on disk for manual
 recovery, but are not listed or reclaimed automatically.
 On Windows, Cancel and Timeout keep an import's files and slot until its
 process tree is confirmed stopped. If stopping fails, the job says so and
-keeps its slot until it exits or the app restarts.
+keeps its slot across app restarts. The app saves the worker's PID and unique
+launch token before Git starts, checks its command line on recovery, and
+never kills a recovered process. An unreadable identity keeps the slot held;
+a gone worker or reused
+PID frees it. Pressing Cancel rechecks a recovered worker. Restarting Windows
+ends the old worker and lets the app clean its staging and offer Retry.
+If a worker record is damaged, its row names the import ID. After restarting
+Windows, move that ID's folder and matching `.worker.json` record together
+out of `library-imports` in the app data folder to preserve them and free
+the slot. Restarting the app alone does not confirm that a worker ended.
 At most two imports run at once; the app retains at most 20 jobs,
 reserving space for running jobs. Failed attempts stay available for Retry
 for at least five minutes unless you retry them; new work is refused while

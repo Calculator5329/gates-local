@@ -385,6 +385,7 @@ describe("repository imports", () => {
     // this calls the worker directly to test its parent-death contract in isolation.
     const child = spawn(process.execPath, [path.join(import.meta.dirname, "git-worker.ts"), JSON.stringify(["-c", "alias.wait=!node -e 'console.log(process.pid); setTimeout(()=>{},1000)'", "wait"]), s.root], { detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
     child.stderr.resume();
+    if (process.platform === "win32") child.stdin.write("start\n");
     const [data] = await once(child.stdout, "data");
     expect(Number(String(data).trim())).toBeGreaterThan(0);
     child.stdin.end();

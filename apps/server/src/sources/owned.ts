@@ -3,10 +3,17 @@ import { closeSync, constants, fsyncSync, mkdirSync, openSync, readFileSync, ren
 import path from "node:path";
 import { openChild, openDir, unlinkIfAny, type Dir } from "./anchored.ts";
 import type { Source } from "@gates-local/contracts";
+import { SourceImport } from "@gates-local/contracts";
+import { Schema as S } from "effect";
 
 export interface OwnedSlot { readonly id: string; readonly path: string; readonly work: string; }
 const ID = /^[0-9a-f]{8}-[0-9a-f-]{27}$/;
 const intentName = (id: string) => id + ".remove.json";
+const workerName = (id: string) => id + ".worker.json";
+export const UNCONFIRMED_WORKER = "This import could not be stopped. Restart Windows to end its old worker, then retry.";
+export interface WorkerIdentity { pid: number; token: string; }
+export interface HeldImport { job: SourceImport; worker: WorkerIdentity | null; }
+const decodeWorker = S.decodeUnknownSync(S.Struct({ job: SourceImport, worker: S.Struct({ pid: S.Number, token: S.String }) }));
 
 /** Atomic, flushed lifecycle records. Directory fsync is available on POSIX. */
 function syncDir(dir: Dir) {
@@ -59,6 +66,7 @@ export function ownedSources(dataDir: string) {
   };
   const erase = (id: string) => {
     placed(); slot(id);
+    if (root.lstat(workerName(id))) throw new Error("This import's worker must be confirmed stopped before its files can be removed.");
     const dir = openChild(root, id, process.platform);
     if (dir) {
       try { empty(dir); } finally { dir.close(); }
@@ -71,6 +79,8 @@ export function ownedSources(dataDir: string) {
     return typeof value === "object" && value !== null && "id" in value && value.id === id && "action" in value && value.action === "remove";
   };
   const discard = (id: string) => {
+    placed(); slot(id);
+    if (root.lstat(workerName(id))) return;
     const held = opened(id);
     if (!held) return;
     // Legacy copies with content are ambiguous and must survive. A directory
@@ -117,6 +127,27 @@ export function ownedSources(dataDir: string) {
       syncDir(root);
     },
     discard,
+    rememberWorker(job: SourceImport, worker: WorkerIdentity) {
+      placed(); slot(job.id);
+      writeRecord(root, workerName(job.id), { job, worker });
+    },
+    forgetWorker(id: string) { placed(); slot(id); unlinkIfAny(root, workerName(id)); syncDir(root); },
+    heldImports(): HeldImport[] {
+      placed();
+      return root.names().flatMap<HeldImport>(name => {
+        if (!name.endsWith(".worker.json")) return [];
+        const id = name.slice(0, -".worker.json".length);
+        if (!ID.test(id)) return [];
+        try {
+          const record = decodeWorker(readRecord(root, name));
+          if (record.job.id !== id || record.job.kind !== "repository" || !Number.isSafeInteger(record.worker.pid) || record.worker.pid <= 0 || record.worker.pid > 0x7fffffff || !ID.test(record.worker.token)) throw new Error("Invalid worker record");
+          return [record];
+        } catch {
+          // An unreadable ownership record never authorizes cleanup or reuse.
+          return [{ worker: null, job: { id, key: id, label: "Interrupted repository import " + id, kind: "repository" as const, state: "cloning" as const, bytes: 0, detail: "The worker record could not be read. Restart Windows before moving this import's staging folder and worker record aside." } }];
+        }
+      });
+    },
     recover(): string[] {
       placed();
       const removals: string[] = [];

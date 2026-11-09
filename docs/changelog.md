@@ -6,6 +6,16 @@ An older Disconnect push buffered during reconnect no longer cancels a newer
 Connect after its save response arrives. Pushes carry their ownership through
 hydration, regardless of push/response order. Foreign saves still cancel pending
 connection checks.
+## 2026-11-09: Retry the displayed repository and retain interrupted workers
+
+- Leaving Library and returning no longer loses the repository behind Retry.
+  Failed and cancelled clones retry their own saved URL; entering another URL
+  still starts a separate clone.
+- An unconfirmed Windows worker keeps its staging and import slot across app
+  restarts. Git waits for its identity record to be saved before starting.
+  Recovery checks a unique launch token, leaves unknown identities held and
+  never kills a recovered process. Restarting Windows ends the old worker;
+  restarting the app alone does not free the slot.
 
 ## 2026-11-09: Keep an unconfirmed Windows clone contained
 

@@ -7,7 +7,8 @@ import { Source } from "@gates-local/contracts";
 import { canonicalPathSync, containsPath } from "../../../../packages/harness/src/paths.ts";
 import type { LibraryEntry } from "../../../../packages/harness/src/types.ts";
 import { lstatIfAny, openChild, openDir, openEntry, sameFile, unlinkIfAny, type Dir } from "./anchored.ts";
-import { ownedSources, type OwnedSlot } from "./owned.ts";
+import { ownedSources, type OwnedSlot, type HeldImport, type WorkerIdentity } from "./owned.ts";
+import type { SourceImport } from "@gates-local/contracts";
 
 export interface Sources {
   list(): Source[];
@@ -18,6 +19,9 @@ export interface Sources {
   onChange(listener: (sources: Source[]) => void): () => void;
   allocateOwned(): OwnedSlot;
   discardOwned(id: string): void;
+  rememberWorker(job: SourceImport, worker: WorkerIdentity): void;
+  forgetWorker(id: string): void;
+  heldImports(): HeldImport[];
   addOwned(slot: OwnedSlot, input: { kind: "sqlite" | "folder"; label: string; sizeBytes?: number; managed: NonNullable<Source["managed"]> }): Promise<Source>;
 }
 
@@ -297,6 +301,9 @@ export function createSources(deps: SourcesDeps): Sources {
     },
     allocateOwned: () => owned.allocate(),
     discardOwned: id => owned.discard(id),
+    rememberWorker: (job, worker) => owned.rememberWorker(job, worker),
+    forgetWorker: id => owned.forgetWorker(id),
+    heldImports: () => owned.heldImports(),
     async addOwned(slot, input) {
       if (!owned.owns({ id: slot.id, path: slot.path })) throw new Error("This Library import is not owned by the app.");
       return register({ id: slot.id, path: slot.path, ...input, addedAt: now(), state: "refreshing" }, () => owned.complete(slot.id));
