@@ -6,6 +6,7 @@ const probe = vi.hoisted(() => ({
   state: {} as Record<string, unknown>, phone: false, root: undefined as unknown,
   states: [] as unknown[], cursor: 0, refs: 0, refValues: [] as { current: unknown }[], effects: [] as (() => unknown)[],
   pick: vi.fn(), context: vi.fn(), ensure: vi.fn(), close: vi.fn(),
+  stale: new Set<unknown>(), held: new Set<unknown>(),
 }));
 vi.mock("react", async original => ({
   ...await original<typeof import("react")>(),
@@ -24,7 +25,8 @@ vi.mock("./store.ts", () => ({
   NA: "na", fitKey: (m: string, c: number) => `${m}@${c}`, getState: () => probe.state,
   useStore: (select: (s: unknown) => unknown) => select(probe.state), setState: vi.fn(), streamingHere: () => false,
 }));
-vi.mock("./session.ts", () => ({ ensureFit: probe.ensure, pickModel: probe.pick, setContext: probe.context }));
+vi.mock("./session.ts", () => ({ ensureFit: probe.ensure, pickModel: probe.pick, setContext: probe.context, currentFit: (r: unknown) => probe.stale.has(r) ? undefined : r,
+  fitIsCurrent: (r: unknown) => r !== undefined && r !== "error" && !probe.stale.has(r) && !probe.held.has(r) && Object.values(probe.state.fits ?? {}).includes(r) }));
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: vi.fn() }));
 vi.mock("./ui.tsx", async original => ({
   ...await original<typeof import("./ui.tsx")>(), useMedia: () => probe.phone, isPhone: () => probe.phone,
@@ -56,6 +58,8 @@ const tag = "capped-chat:8k", gib = 1024 ** 3;
 const fit = (verdict: "fits" | "refuse", numCtx = 8192) => ({ model: tag, numCtx, verdict, needVramBytes: 20 * gib, freeVramBytes: 12 * gib, spillRamBytes: 0, source: "estimate", measuredAt: 0 });
 
 beforeEach(() => {
+  probe.stale.clear();
+  probe.held.clear();
   vi.clearAllMocks(); probe.phone = false; probe.states = []; probe.root = undefined; probe.refValues = [];
   probe.state = { pop: { id: "picker", kb: true }, model: "other:1b", numCtx: 16384,
     models: [{ name: tag, maxContext: 8192, sizeBytes: gib, capabilities: ["completion"] }],
@@ -98,7 +102,7 @@ it.each(["refused", "pending"])("PK-01: a non-enumerated cap's %s 48k check cann
   probe.state.models = [{ name: tag, maxContext: 49152, capabilities: ["completion"] }];
   probe.state.fits = { [`${tag}@32768`]: fit("fits", 32768), ...(status === "refused" ? { [`${tag}@49152`]: fit("refuse", 49152) } : {}) };
   const row = find(render(), p => p["data-m"] === tag);
-  expect(row.props["aria-disabled"]).toBe(true);
+  expect(row.props["aria-disabled"]).toBe(status === "refused");
   call(find(row, p => p.className === "pk-select"), "onClick");
   expect(probe.pick).not.toHaveBeenCalled();
 });
@@ -113,24 +117,33 @@ it("PK-01: a fitting 48k cap uses that check while retaining the valid 64k prefe
   expect(probe.pick).toHaveBeenCalledWith(tag);
 });
 
-it("PK-01: the displayed completed fit remains clickable during a same-key refresh", () => {
-  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+it("PK-01: the displayed completed fit waits during a same-key refresh", () => {
+  const cached = fit("fits");
+  probe.state.fits = { [`${tag}@8192`]: cached };
   const row = find(render(), p => p["data-m"] === tag);
+  probe.held.add(cached);
   probe.state.fits = {};
   call(find(row, p => p.className === "pk-select"), "onClick");
-  expect(probe.pick).toHaveBeenCalledWith(tag);
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
 });
 
-it("a size click commits and closes when a refresh rerenders between pointer press and click", () => {
+it("a size click waits, then commits when a refresh rerenders between pointer press and click", () => {
   probe.state.models = [{ name: tag, maxContext: 131072, capabilities: ["completion"] }];
   probe.state.fits = { [`${tag}@16384`]: fit("fits", 16384), [`${tag}@65536`]: fit("fits", 65536) };
   const pressed = find(render(), p => p["data-ctx"] === 65536);
   expect(pressed.props["aria-disabled"]).toBe(false);
   // The trace shows an enabled 64k control at pointer input, then a GPU update
   // clears fits and React replaces its click handler before the click finishes.
+  for (const r of Object.values(probe.state.fits ?? {})) probe.held.add(r);
   probe.state.fits = {};
   const clicked = find(render(), p => p["data-ctx"] === 65536);
   call(clicked, "onClick");
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@65536`]: fit("fits", 65536) };
+  settle();
   expect(probe.context).toHaveBeenCalledWith(65536);
   expect(probe.pick).toHaveBeenCalledWith(tag);
   expect(probe.close).toHaveBeenCalledTimes(1);
@@ -145,13 +158,115 @@ it.each([false, true])("an explicit failed check blocks an older fitting choice 
   expect(probe.pick).not.toHaveBeenCalled();
 });
 
-it("a matching catalog check is usable while its first fresh check is pending", () => {
+it("a matching catalog check waits, then picks after its first current answer", () => {
   probe.state.numCtx = 8192;
   probe.state.catalog = [{ name: tag, label: "Local model", fit: fit("fits") }];
   const row = find(render(), p => p["data-m"] === tag);
   expect(row.props["aria-disabled"]).toBe(false);
   call(find(row, p => p.className === "pk-select"), "onClick");
-  expect(probe.pick).toHaveBeenCalledWith(tag);
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+});
+
+it.each(["held", "stale"] as const)("a %s row click waits for the current answer and preserves the 64k preference on a 48k cap", status => {
+  probe.state.numCtx = 65536;
+  probe.state.models = [{ name: tag, maxContext: 49152, capabilities: ["completion"] }];
+  const cached = fit("fits", 49152);
+  probe.state.fits = { [`${tag}@49152`]: cached };
+  probe[status].add(cached);
+  call(find(find(render(), p => p["data-m"] === tag), p => p.className === "pk-select"), "onClick");
+  expect(probe.pick).not.toHaveBeenCalled();
+  expect(find(render(), p => p["data-m"] === tag).props["aria-busy"]).toBe(true);
+  expect(probe.ensure).toHaveBeenCalledWith(tag, 49152);
+  probe.state.fits = { [`${tag}@49152`]: fit("fits", 49152) };
+  settle(); settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  expect(probe.context).toHaveBeenCalledExactlyOnceWith(65536);
+});
+
+it.each(["refuse", "error", "close"])("a pending row is cancelled by %s before a later fit", result => {
+  call(find(find(render(), p => p["data-m"] === tag), p => p.className === "pk-select"), "onClick");
+  expect(find(render(), p => p["data-m"] === tag).props["aria-busy"]).toBe(true);
+  if (result === "close") probe.state.pop = null;
+  else probe.state.fits = { [`${tag}@8192`]: result === "error" ? "error" : fit("refuse") };
+  settle();
+  if (result === "refuse") expect(find(render(), p => p["data-m"] === tag).props.className).toContain(" dis");
+  probe.state.pop = { id: "picker", kb: true };
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).not.toHaveBeenCalled();
+});
+
+it.each(["1", "Enter"])("keyboard %s waits for a current answer instead of dropping the pick", key => {
+  call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key, ctrlKey: key === "1", preventDefault: vi.fn() });
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+});
+
+it.each(["fits", "catalog"])("PK-01: a stale %s report cannot pick, and a size waits for its fresh answer", source => {
+  probe.state.numCtx = 8192;
+  const cached = fit("fits");
+  if (source === "fits") probe.state.fits = { [`${tag}@8192`]: cached };
+  else probe.state.catalog = [{ name: tag, label: "Local model", fit: cached }];
+  probe.stale.add(cached);
+  const row = find(render(), p => p["data-m"] === tag);
+  expect(row.props["aria-disabled"]).toBe(false);
+  expect(row.props["aria-busy"]).toBe(true);
+  call(find(row, p => p.className === "pk-select"), "onClick");
+  expect(probe.pick).not.toHaveBeenCalled();
+  call(find(render(), p => p["data-ctx"] === 8192), "onClick");
+  settle();
+  expect(probe.pick).not.toHaveBeenCalled();
+  expect(probe.close).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  expect(probe.context).toHaveBeenCalledExactlyOnceWith(8192);
+});
+
+it.each([false, true])("Use at on a sub-8k cap waits for the current check on phone %s", phone => {
+  probe.phone = phone;
+  vi.stubGlobal("requestAnimationFrame", (cb: () => void) => cb());
+  probe.state.models = [{ name: tag, maxContext: 2048, capabilities: ["completion"] }];
+  const cached = fit("fits", 2048);
+  probe.state.fits = { [`${tag}@2048`]: cached };
+  probe.held.add(cached);
+  call(find(render(), p => p.className === "pk-detail" && String(p.children).startsWith("Use at")), "onClick");
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${tag}@2048`]: fit("fits", 2048) };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+});
+
+it("a newer row replaces the pending row before the older answer arrives", () => {
+  const other = "other-chat:8k";
+  probe.state.models = [{ name: tag, maxContext: 8192, capabilities: ["completion"] }, { name: other, maxContext: 8192, capabilities: ["completion"] }];
+  for (const name of [tag, other]) call(find(find(render(), p => p["data-m"] === name), p => p.className === "pk-select"), "onClick");
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  expect(probe.pick).not.toHaveBeenCalled();
+  probe.state.fits = { [`${other}@8192`]: { ...fit("fits"), model: other } };
+  settle();
+  expect(probe.pick).toHaveBeenCalledExactlyOnceWith(other);
+});
+
+it.each(["refuse", "error"] as const)("PK-02: a later fit commits only the promised retry after %s", result => {
+  call(find(render(), p => p["data-ctx"] === 8192), "onClick");
+  probe.state.fits = { [`${tag}@8192`]: result === "error" ? "error" : fit("refuse") };
+  settle();
+  expect(find(render(), p => p.role === "status").props.children).toContain(result === "error" ? "retry" : "Choose another size");
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  settle();
+  if (result === "error") expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
+  else {
+    expect(probe.pick).not.toHaveBeenCalled();
+    expect(probe.close).not.toHaveBeenCalled();
+    expect(nodes(render()).some(node => node.props.role === "status")).toBe(false);
+  }
 });
 
 it("a catalog check at a different context cannot authorize the choice", () => {

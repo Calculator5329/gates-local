@@ -378,3 +378,36 @@ it.each([true, false])("speech cancels Connect at foreign receipt (tagged=%s)", 
 it("speech ignores unrelated foreign settings during hydration", () => run(foreignSpeech(true)));
 it("a message stays visible and sends once across reconnect", () => run(sendReconnect()));
 it("Stop applies only to its original reply around acknowledgements", () => run(stopSend()));
+
+it("TL-01: active-turn hydration restores ongoing replies and orders terminal events around its snapshot", async () => {
+  for (const ending of ["running", "offline", "during-hydration"] as const) {
+    const reconnect = "socket.reconnect";
+    await run({
+      name: `active turns: ${ending}`,
+      create: async () => {
+        const w = await OrderingWorld.create(false);
+        w.server.answer("turns.active", () => [...w.server.turns].map(([turnId, message]) => ({ turnId, threadId: message.threadId })));
+        w.server.turns.set("existing", { id: "user-existing", threadId: "t1", role: "user", content: "hello", createdAt: 1 });
+        await w.step(() => w.server.chatPush("existing", w.a.socket));
+        expect(w.a.store.getState().runningTurns).toEqual({ t1: "existing" });
+        await w.drop();
+        if (ending === "offline") w.server.turns.delete("existing");
+        return w;
+      },
+      events: [
+        event(reconnect, [], w => w.reconnect()),
+        ...hydrationEvents(reconnect),
+        ...(ending === "during-hydration" ? [event("server.done", [reconnect], w => w.step(() => {
+          w.server.chatPush("existing", w.a.socket, true);
+          w.server.turns.delete("existing");
+        }))] : []),
+      ],
+      check: (w, prefix) => {
+        if (!prefix.includes("hydration.snapshot") || !prefix.includes("hydration.release") ||
+          (ending === "during-hydration" && !prefix.includes("server.done"))) return;
+        expect(w.a.store.getState().runningTurns).toEqual(ending === "running" ? { t1: "existing" } : {});
+      },
+      dispose,
+    });
+  }
+});

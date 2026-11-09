@@ -35,6 +35,7 @@ const defaults: Record<string, unknown> = {
   "threads.list": [{ id: "A", title: "A", createdAt: 1, updatedAt: 1 }],
   "threads.get": { messages: [] },
   "turns.blocking": [],
+  "turns.active": [],
   "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
 };
 

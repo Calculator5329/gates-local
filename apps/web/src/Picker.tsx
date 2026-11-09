@@ -9,7 +9,7 @@ import { Icon } from "./icons.tsx";
 import { chatModels, pendingDownload } from "./pick.ts";
 import { contextRuler, makerOf, pickerLabel, pickerLabels, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { ensureFit, openSettings, pickModel, setContext } from "./session.ts";
+import { currentFit, ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
 import { NA, fitKey, getState, useStore } from "./store.ts";
 import { PHONE, closePop, closeTip, esc, isTouch, place, tabStops, useMedia } from "./ui.tsx";
 
@@ -68,9 +68,12 @@ export function Picker() {
   // error or newer report replaces the old answer; closing the picker drops this cache.
   const checks = useRef(fits);
   const requested = useRef<ContextChoice | null>(null);
+  const refused = useRef<ContextChoice | null>(null);
+  const pendingRow = useRef<string | null>(null);
   checks.current = { ...checks.current, ...fits };
   const keyFor = (tag: string, c = numCtx) => fitKey(tag, ctxFor(c, models, tag));
   const checked = (tag: string, c = numCtx) => checks.current[keyFor(tag, c)] ?? catalog?.find(m => m.name === tag && m.fit?.numCtx === ctxFor(c, models, tag))?.fit;
+  const stale = (tag: string, c = numCtx) => currentFit(checked(tag, c)) === undefined;
   const report = (tag: string, c = numCtx) => {
     const r = checked(tag, c);
     return r && r !== "error" ? verdictOf(r) : undefined;
@@ -110,8 +113,22 @@ export function Picker() {
     // An explicit size choice waits for its first answer. Refusals and errors
     // stay visible; a late answer cannot commit a cancelled or replaced choice.
     if (!row || row.downloading !== undefined || (row.info?.maxContext !== undefined && choice.size > row.info.maxContext)) return;
-    if (result && result !== "error" && result.verdict !== "refuse") finish(row, choice.size);
+    if (result && result !== "error" && fitIsCurrent(result)) {
+      if (result.verdict === "refuse") refused.current = choice;
+      else if (refused.current === choice) keepChoice(null);
+      else { requested.current = null; finish(row, choice.size); }
+    }
   }, [choice, pop, fits, models]);
+  useEffect(() => {
+    if (!pop || getState().pop !== pop) { pendingRow.current = null; return; }
+    const row = rows.find(r => r.tag === pendingRow.current);
+    if (!row) { pendingRow.current = null; return; }
+    const result = checked(row.tag);
+    if (result === "error") { pendingRow.current = null; return; }
+    if (!fitIsCurrent(result)) return;
+    pendingRow.current = null;
+    if (result?.verdict !== "refuse") finish(row);
+  }, [fits, models, pop]);
   useLayoutEffect(() => {
     if (!pop) return;
     if (isTouch() && !pop.kb) ref.current?.querySelector<HTMLButtonElement>(".pk-close")?.focus({ preventScroll: true });
@@ -124,16 +141,18 @@ export function Picker() {
     else place(root, anchor, "start");
   });
   function finish(row: Row, c?: ContextSize) {
+    if (!fitIsCurrent(checked(row.tag, c))) return;
     const chosenCtx = c ?? CONTEXT_SIZES.find(n => n === ctxFor(numCtx, models, row.tag)) ?? numCtx;
     const key = keyFor(row.tag, chosenCtx), state = getState(), shown = checked(row.tag, chosenCtx), current = state.fits[key];
     // A completed visible check survives a refresh gap; a known refusal at either point wins.
     if (row.downloading !== undefined || !shown || shown === "error" || (shown.verdict === "refuse" && !stopFrees[key])) return;
     if (current === "error" || (current?.verdict === "refuse" && !state.stopFrees[key])) return;
-    keepChoice(null);
     closeTip(); setContext(chosenCtx); pickModel(row.tag); closePop();
     focusComposer();
   }
   function keepChoice(next: ContextChoice | null) {
+    pendingRow.current = null;
+    refused.current = null;
     requested.current = next;
     setChoice(next);
   }
@@ -141,7 +160,7 @@ export function Picker() {
     if (row.downloading !== undefined || (row.info?.maxContext !== undefined && size > row.info.maxContext)) return;
     keepChoice({ tag: row.tag, size });
     const result = getState().fits[keyFor(row.tag, size)] ?? checked(row.tag, size);
-    if (result && result !== "error" && result.verdict !== "refuse") finish(row, size);
+    if (result && result !== "error" && result.verdict !== "refuse" && fitIsCurrent(result)) finish(row, size);
     ensureFit(row.tag, ctxFor(size, models, row.tag));
   }
   function choose(row: Row) {
@@ -149,7 +168,11 @@ export function Picker() {
     setHighlight(row.tag);
     if (row.downloading !== undefined) return;
     if (phone) { setStep("context"); requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(".pk-back")?.focus({ preventScroll: true })); }
-    else finish(row);
+    else chooseRow(row);
+  }
+  function chooseRow(row: Row) {
+    if (fitIsCurrent(checked(row.tag))) finish(row);
+    else { pendingRow.current = row.tag; ensureFit(row.tag, ctxFor(numCtx, models, row.tag)); }
   }
   function backToModels(search: boolean) {
     keepChoice(null);
@@ -193,14 +216,14 @@ export function Picker() {
   }
   const free = gpu && gpu !== NA ? gpu.freeBytes : undefined;
   const choiceReport = choice ? checked(choice.tag, choice.size) : undefined;
-  const waiting = choice !== null && !choiceReport;
+  const waiting = choice !== null && !fitIsCurrent(choiceReport);
   const choosing = choice !== null && choiceReport !== "error" && choiceReport?.verdict !== "refuse" && active?.tag === choice.tag && (activeMax === undefined || choice.size <= activeMax);
   const choiceMessage = !choice ? null : !rows.some(r => r.tag === choice.tag) ? "This model is no longer installed. Choose another model."
     : activeMax !== undefined && choice.size > activeMax ? `${k(choice.size)} exceeds this model's limit. Choose another size.`
     : choiceReport === "error" ? `Couldn't check ${k(choice.size)}. Your choice is kept while we retry.`
-    : choiceReport?.verdict === "refuse" ? `${k(choice.size)} needs more memory. Choose another size.`
+    : refused.current === choice || choiceReport?.verdict === "refuse" ? `${k(choice.size)} needs more memory. Choose another size.`
     : `Choosing ${k(choice.size)}. Checking memory…`;
-  const tip = (row: Row) => `<b>${esc(row.label)}</b> · <span class="mono">${esc(row.tag)}</span>${row.info ? `<br>${gb(row.info.sizeBytes)} on disk` : ""}${row.v ? `<br>${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}` : "<br>Checking memory…"}`;
+  const tip = (row: Row) => `<b>${esc(row.label)}</b> · <span class="mono">${esc(row.tag)}</span>${row.info ? `<br>${gb(row.info.sizeBytes)} on disk` : ""}${row.v && !stale(row.tag) ? `<br>${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}` : "<br>Checking memory…"}`;
   return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} aria-busy={choosing || undefined} onKeyDown={keys}>
     <div className="pk-layout">
       <nav className="pk-rail" aria-label="Model makers" inert={phone && step === "context"}>
@@ -213,8 +236,8 @@ export function Picker() {
         <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { keepChoice(null); setQuery(e.target.value); setHighlight(null); }} onKeyDown={modelKeys} /><button className="pk-close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>
         <div className="pk-list-scroll">
           <div id="pkList" role="listbox" aria-label="Models">
-            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !r.v || (r.v.k === "no" && !r.frees) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-disabled={r.downloading !== undefined || (!phone && (!r.v || (r.v.k === "no" && !r.frees)))} data-m={r.tag} data-i={i} data-tip={tip(r)} onMouseMove={() => setHighlight(r.tag)}>
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : "Checking…"}</span></button>
+            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !fitIsCurrent(checked(r.tag)) || (r.v?.k === "no" && !r.frees) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !fitIsCurrent(checked(r.tag)) || undefined} aria-disabled={r.downloading !== undefined || (!phone && fitIsCurrent(checked(r.tag)) && r.v?.k === "no" && !r.frees)} data-m={r.tag} data-i={i} data-tip={tip(r)} onMouseMove={() => setHighlight(r.tag)}>
+              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : "Checking…"}</span></button>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
             {visible.length === 0 ? <div className="pk-empty">{group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
@@ -231,7 +254,7 @@ export function Picker() {
           buttons[(i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
         }}>
           {CONTEXT_SIZES.map(c => {
-            const v = active ? report(active.tag, c) : undefined, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
+            const v = active && !stale(active.tag, c) ? report(active.tag, c) : undefined, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
             const capped = activeMax !== undefined && c > activeMax;
             const disabled = !active || active.downloading !== undefined || capped || (v?.k === "no" && !frees);
             return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
@@ -239,7 +262,7 @@ export function Picker() {
         </div>
         {choiceMessage ? <p className="pk-help pk-choice" role="status">{choiceMessage}</p> : null}
         {!choiceMessage && activeMax !== undefined && activeMax < numCtx ? <p className="pk-help">Runs at {k(activeMax)}, the most this model takes.</p> : null}
-        {activeMax !== undefined && activeMax < 8192 && active ? <button className="pk-detail" disabled={!active.v || (active.v.k === "no" && !active.frees)} onClick={() => finish(active)}>Use at {k(activeMax)}</button> : null}
+        {activeMax !== undefined && activeMax < 8192 && active ? <button className="pk-detail" disabled={fitIsCurrent(checked(active.tag)) && active.v?.k === "no" && !active.frees} onClick={() => { keepChoice(null); chooseRow(active); }}>Use at {k(activeMax)}</button> : null}
         {active?.v?.k === "no" ? <button className="pk-detail" onClick={() => { closePop(); openFit(active.tag); }}>Memory details</button> : null}
       </section>
     </div>

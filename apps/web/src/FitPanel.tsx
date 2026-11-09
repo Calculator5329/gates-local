@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { ensureFit, setContext, updateSettings } from "./session.ts";
+import { currentFit, ensureFit, setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, fitKey, setState, useStore } from "./store.ts";
 import { Fail, useAct } from "./settings-ui.tsx";
 import { VLabel, closeTip, esc } from "./ui.tsx";
@@ -257,9 +257,10 @@ function useFitModel(model: string, chosen?: ContextSize) {
  * segment's fit in its tooltip, and the GB numbers one step away under Details.
  */
 function SettingsBody({ model }: { model: string }) {
-  // the control shows the saved default; this model may run below it
+  // The default control stays saved; the report describes the chat's actual context.
   const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
-  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, saved);
+  const chosen = useStore((s) => s.model === undefined ? undefined : s.numCtx);
+  const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, chosen ?? saved);
   const fits = useStore((s) => s.fits);
   const stale = useStore((s) => s.staleFits);
   const settingsNA = useStore((s) => s.settings === NA);
@@ -271,8 +272,10 @@ function SettingsBody({ model }: { model: string }) {
     for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
   }, [model, numCtx, max, fits, stale]);
   const cpu = noGpu(gpu);
-  const report = fits[fitKey(model, numCtx)];
-  const pending = stale[fitKey(model, numCtx)] === true;
+  const cached = fits[fitKey(model, numCtx)];
+  const fresh = currentFit(cached);
+  const report = fresh !== undefined && fresh !== "error" && fresh.numCtx !== ctx ? undefined : fresh;
+  const pending = stale[fitKey(model, numCtx)] === true || (cached !== undefined && fresh === undefined);
   const pick = (c: ContextSize) => {
     closeTip();
     setContext(c);
@@ -280,14 +283,15 @@ function SettingsBody({ model }: { model: string }) {
   };
   return (
     <>
-      {report === undefined ? (
+      <div className="fp-n">Memory at {k(ctx)} context</div>
+      {cached === undefined || (cached !== "error" && cached.numCtx !== ctx) ? (
         <div className="fp-n">Checking {cpu ? "memory" : "GPU memory"}…</div>
-      ) : report === "error" ? (
+      ) : cached === "error" ? (
         <div className="fp-n">Gates Local couldn't check {cpu ? "memory" : "GPU memory"} for {name} right now.</div>
       ) : (
         <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
           {/* Keep the previous verdict's footprint while its replacement is checked. */}
-          <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(report)} ctx={ctx} /></div>
+          <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}><FitLine v={verdictOf(cached)} ctx={ctx} /></div>
           {pending ? <div className="fp-v" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
         </div>
       )}
@@ -295,14 +299,14 @@ function SettingsBody({ model }: { model: string }) {
         <span className="k">Default context</span>
         <span className="mini-seg" role="group" aria-label="Default context">
           {CONTEXT_SIZES.map((c) => {
-            const f = ctxFit(c, max, fits[fitKey(model, c)], cpu, stale[fitKey(model, c)] === true);
+            const f = ctxFit(c, max, currentFit(fits[fitKey(model, c)]), cpu, stale[fitKey(model, c)] === true);
             return (
               <button
                 key={c}
                 type="button"
                 data-ctx={c}
-                className={`${numCtx === c ? "on" : ""}${f.wont ? " dim" : ""}`}
-                aria-pressed={numCtx === c}
+                className={`${(saved ?? numCtx) === c ? "on" : ""}${f.wont ? " dim" : ""}`}
+                aria-pressed={(saved ?? numCtx) === c}
                 aria-label={f.wont ? `${k(c)}, won't fit` : undefined}
                 disabled={max !== undefined && c > max}
                 data-tip={f.tip}
@@ -320,16 +324,18 @@ function SettingsBody({ model }: { model: string }) {
           <Fail err={err} />
         </div>
       ) : null}
-      {report === undefined || report === "error" ? null : (
+      {cached === undefined || cached === "error" || report === "error" ? null : (
         <details className="upd-more fp-more">
           <summary>Details</summary>
+          {report === undefined && !pending ? <div className="fp-n">Checking {cpu ? "memory" : "GPU memory"}…</div> : (
           <div aria-busy={pending || undefined} style={pending ? { position: "relative" } : undefined}>
             <div inert={pending || undefined} aria-hidden={pending || undefined} style={pending ? { visibility: "hidden" } : undefined}>
-              <Numbers r={report} v={verdictOf(report)} name={name} gpu={gpu} loaded={loaded} />
-              <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report} loaded={loaded} />
+              <Numbers r={report ?? cached} v={verdictOf(report ?? cached)} name={name} gpu={gpu} loaded={loaded} />
+              <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={report ?? cached} loaded={loaded} />
             </div>
             {pending ? <div className="fp-n" style={{ position: "absolute", inset: 0 }}>Checking {cpu ? "memory" : "GPU memory"}…</div> : null}
           </div>
+          )}
         </details>
       )}
     </>

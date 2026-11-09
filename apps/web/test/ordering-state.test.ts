@@ -15,10 +15,10 @@ vi.mock("react", async (original) => ({
 }));
 
 const MODEL = "gemma3:4b", OLD_MODEL = "qwen3:14b", CTX = 16384;
-const KEY = `${MODEL}@${CTX}`;
+const FIT_CTX = 32768, KEY = `${MODEL}@${FIT_CTX}`;
 const initialModels = methodSamples["models.list"].result;
 const remainingModels = initialModels.filter((model) => model.name !== OLD_MODEL);
-const report = (verdict: FitReport["verdict"], measuredAt: number): FitReport => ({ ...methodSamples["fit.check"].result, model: MODEL, numCtx: CTX, verdict, measuredAt });
+const report = (verdict: FitReport["verdict"], measuredAt: number): FitReport => ({ ...methodSamples["fit.check"].result, model: MODEL, numCtx: FIT_CTX, verdict, measuredAt });
 const noop = () => {};
 const frame = (socket: string, name: string): ReplayFrame => ({ socket, event: name });
 const before = (order: readonly string[], a: string, b: string) => order.indexOf(a) < order.indexOf(b);
@@ -55,10 +55,14 @@ const run = async (scenario: ReplayScenario<World>): Promise<void> => { await re
 
 function fitEpoch(): ReplayScenario<World> {
   return {
-    name: "fitEpoch: delayed verdict and blocker preflight cross a memory change", create: World.create, dispose,
+    name: "fitEpoch: delayed verdict and blocker preflight cross a memory change", create: async () => {
+      const w = await World.create();
+      await w.wire.step(() => w.wire.a.store.setState({ numCtx: FIT_CTX }));
+      return w;
+    }, dispose,
     witnesses: [["fit.request", "gpu.change", "gpu.push-B", "gpu.push-A", "fit.old.ready", "fit.old.response", "fit.new.ready", "fit.new.response", "blockers.old.ready", "blockers.old.response"]],
     events: [
-      event("fit.request", [], (w) => w.capture("fit.old", "fit.check", () => w.wire.a.session.ensureFit(MODEL, CTX), report("refuse", 1))),
+      event("fit.request", [], (w) => w.capture("fit.old", "fit.check", () => w.wire.a.session.ensureFit(MODEL, FIT_CTX), report("refuse", 1))),
       // Input story: an already-requested fit crosses a later GPU reading.
       event("gpu.change", ["fit.request"], noop, { emit: () => [frame("A", "gpu.push-A"), frame("B", "gpu.push-B")] }),
       // gpu.changed calls invalidateFits, advancing fitEpoch and requesting a replacement.

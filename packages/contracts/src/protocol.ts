@@ -137,6 +137,11 @@ export const methods = {
     }),
     result: S.Struct({ turnId: S.String, userMessage: Message, replayed: S.optional(S.Boolean) }),
   },
+  /** Authoritative running replies when a client connects or reconnects; later changes use chat.event. */
+  "turns.active": {
+    params: NoParams,
+    result: S.Array(S.Struct({ turnId: S.String, threadId: S.String })),
+  },
   /**
    * The running turns that would have to stop for `model` at `numCtx` to load as the fit plans
    * it; empty when none (same model, or it fits beside them). Reads only; never loads.

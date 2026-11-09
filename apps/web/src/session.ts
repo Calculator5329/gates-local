@@ -6,6 +6,8 @@ import {
   type Channel,
   type Client,
   type ContextSize,
+  type FitReport,
+  type GpuStatus,
   type Message,
   type BlockingTurn,
   type MethodName,
@@ -156,6 +158,7 @@ async function loop(): Promise<void> {
       setState({ conn: { kind: "open" } });
       await hydrate(c).catch(() => undefined);
       await c.closed;
+      markFitsStale();
       client = null;
       voiceWrites.clear();
       receivedVoiceUrl = undefined;
@@ -308,8 +311,9 @@ async function hydrateWith(
   });
   on("threads.changed", () => void refreshThreads());
   on("gpu.changed", (gpu) => {
+    const retain = onlyIdleOwnedModelsChanged(getState(), gpu);
     setState({ gpu });
-    invalidateFits();
+    invalidateFits(!retain);
   });
   on("models.pull", (p) => {
     setState((s) => ({ pulls: settlePulls({ ...s.pulls, [p.name]: p }, s.models) }));
@@ -333,23 +337,25 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadsOrder.next();
-  const [status, listed, threads, settings, pendingPulls] = await Promise.all([
+  const [status, listed, threads, settings, active, pendingPulls] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
     probe("settings.get", {}),
+    call("turns.active", {}),
     probe("models.pulls", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
-  fitEpoch++;
+  markFitsStale();
   receivedVoiceUrl = settings === NA ? undefined : settings?.whisperUrl;
   setState((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadsOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, runningTurns: Object.fromEntries(active.map(({ threadId, turnId }) => [threadId, turnId])), fits: { ...s.fits }, staleFits: staleFitReports(s), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
+  ensureFit(getState().model, getState().numCtx);
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyTextSize(settings === NA || settings === undefined ? undefined : settings.textSize);
@@ -507,6 +513,41 @@ const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : 
 // stops an answer started before a memory change from becoming current.
 const fitChecks = new Map<string, number>();
 let fitEpoch = 0;
+const staleFits = new WeakSet<FitReport>();
+const answeredAt = new WeakMap<FitReport, number>();
+
+function markFitsStale(): void {
+  fitEpoch++;
+  const s = getState();
+  for (const r of Object.values(s.fits)) if (r !== undefined && r !== "error") staleFits.add(r);
+  if (s.catalog !== NA) for (const c of s.catalog ?? []) if (c.fit) staleFits.add(c.fit);
+}
+
+const ownedChatModel = (o: GpuStatus["occupants"][number]) => o.kind === "chat-model" && !o.protected;
+const gpuOccupantKey = (g: GpuStatus, owned: boolean) => g.occupants.filter(o => ownedChatModel(o) === owned)
+  .map(o => JSON.stringify([o.kind, o.label, Math.round(o.bytes / 1024 ** 2), o.protected])).toSorted().join("|");
+
+/** Only decides whether old words stay on screen; every pick still needs a current fit.check answer. */
+function onlyIdleOwnedModelsChanged(s: State, next: GpuStatus): boolean {
+  const before = s.gpu;
+  if (!before || before === NA || before.vendor !== "nvidia" || next.vendor !== "nvidia" ||
+    before.name !== next.name || before.totalBytes !== next.totalBytes || before.detail !== next.detail ||
+    before.freeBytes === undefined || next.freeBytes === undefined || streaming(s) || Object.keys(s.runningTurns).length > 0 ||
+    Object.values(s.loads).some(load => load.state === "loading")) return false;
+  if (gpuOccupantKey(before, true) === gpuOccupantKey(next, true) || gpuOccupantKey(before, false) !== gpuOccupantKey(next, false)) return false;
+  const beforeOwned = before.occupants.filter(ownedChatModel).reduce((sum, o) => sum + o.bytes, 0);
+  const nextOwned = next.occupants.filter(ownedChatModel).reduce((sum, o) => sum + o.bytes, 0);
+  // nvidia-smi rounds free memory to MiB; a larger unexplained loss is an external change.
+  return Math.abs(before.freeBytes + beforeOwned - next.freeBytes - nextOwned) <= 1024 ** 2;
+}
+
+/** Memory details must wait for this reading instead of claiming an old report still fits. */
+export function currentFit(report: FitReport | "error" | undefined): FitReport | "error" | undefined {
+  return report !== undefined && report !== "error" && staleFits.has(report) ? undefined : report;
+}
+
+export const fitIsCurrent = (r: FitReport | "error" | undefined) =>
+  r !== undefined && r !== "error" && answeredAt.get(r) === fitEpoch;
 
 /** Check once per memory reading; keep the previous report until it answers. */
 export function ensureFit(model: string | undefined, numCtx: number): void {
@@ -529,17 +570,18 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
       // the verdict never counts memory a running reply holds: refused may only mean "stop that reply first"
       const frees = r.verdict === "refuse" && (await blockingFor(model, numCtx)).length > 0;
       if (epoch !== fitEpoch) return;
+      answeredAt.set(r, epoch);
       setState((st) => {
         const { [key]: _old, ...stopFrees } = st.stopFrees;
-        const { [key]: _stale, ...staleFits } = st.staleFits;
-        return { fits: { ...st.fits, [key]: r }, staleFits, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
+        const { [key]: _stale, ...remainingStale } = st.staleFits;
+        return { fits: { ...st.fits, [key]: r }, staleFits: remainingStale, stopFrees: frees ? { ...stopFrees, [key]: true as const } : stopFrees };
       });
     })
     .catch(() => {
       if (epoch !== fitEpoch) return;
       setState((st) => {
-        const { [key]: _stale, ...staleFits } = st.staleFits;
-        return { fits: { ...st.fits, [key]: "error" as const }, staleFits };
+        const { [key]: _stale, ...remainingStale } = st.staleFits;
+        return { fits: { ...st.fits, [key]: "error" as const }, staleFits: remainingStale };
       });
       // A failure ends the held verdict; retry while this reading is current.
       setTimeout(() => {
@@ -551,7 +593,8 @@ function checkFit(model: string, numCtx: number, key: string, failures: number):
 
 /** Memory changed: refresh the open chat now and other reports when shown. */
 function invalidateFits(hideOld = true): void {
-  fitEpoch++;
+  if (hideOld) markFitsStale();
+  else fitEpoch++;
   // A load refreshes the measurement in place. An external GPU/file change
   // withdraws the old advice; a later load must not clear that pending state.
   setState((s) => ({ fits: { ...s.fits }, staleFits: hideOld ? staleFitReports(s) : s.staleFits }));
@@ -559,7 +602,11 @@ function invalidateFits(hideOld = true): void {
   ensureFit(s.model, s.numCtx);
 }
 
-const staleFitReports = (s: State): State["staleFits"] => Object.fromEntries(Object.keys(s.fits).map((key) => [key, true as const]));
+const staleFitReports = (s: State): State["staleFits"] => {
+  const keys = new Set(Object.keys(s.fits));
+  if (s.catalog !== NA) for (const c of s.catalog ?? []) if (c.fit) keys.add(fitKey(c.name, c.fit.numCtx));
+  return Object.fromEntries([...keys].map(key => [key, true as const]));
+};
 
 // ---------------------------------------------------------------- threads
 

@@ -547,6 +547,9 @@ export function createApp(deps: AppDeps): App {
       }
     },
 
+    "turns.active": () => [...turns.values()]
+      .filter((turn) => turn.started && !turn.terminal && !turn.controller.signal.aborted)
+      .map(({ turnId, threadId }) => ({ turnId, threadId })),
     "turns.blocking": async ({ model, numCtx }) => {
       if (![...turns.values()].some((t) => t.started)) return [];
       const baseUrl = runtime.baseUrl();

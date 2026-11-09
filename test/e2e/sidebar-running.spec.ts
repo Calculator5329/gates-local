@@ -101,6 +101,37 @@ test("a start received from another client marks its off-screen thread and its s
   }
 });
 
+test("a window opened after start and reloaded during the reply restores its running mark", async ({ page, open, seededThread }) => {
+  await stack.scenario("slow-drip", { holdAfterTokens: 12 });
+  await open(`#thread=${seededThread ?? ""}`);
+  await waitReady(page);
+  await sendMessage(page, "Keep answering while another window opens");
+  await page.waitForFunction(() => ((window as unknown as { glPerf?: { deltas: number } }).glPerf?.deltas ?? 0) > 0);
+  const observer = await page.context().newPage();
+  const errors: string[] = [];
+  observer.on("pageerror", error => errors.push(error.message));
+  observer.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+  try {
+    await observer.goto(appUrl(`#thread=${seededThread ?? ""}`));
+    await waitReady(observer);
+    await select(observer, SECOND);
+    await expect(mark(observer, FIRST)).toBeVisible();
+    await observer.reload();
+    await waitReady(observer);
+    await expect(observer.locator(".hdr h2")).toHaveText(SECOND);
+    await expect(mark(observer, FIRST)).toBeVisible();
+    await observer.screenshot({ path: test.info().outputPath("late-window-running.png") });
+    await stop(page);
+    await expect(mark(observer, FIRST)).toHaveCount(0);
+    await observer.reload();
+    await waitReady(observer);
+    await expect(mark(observer, FIRST)).toHaveCount(0);
+  } finally {
+    await observer.close();
+    expect(errors, "late window's console errors").toEqual([]);
+  }
+});
+
 test.describe("running marks on a phone", () => {
   test.use({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true });
 

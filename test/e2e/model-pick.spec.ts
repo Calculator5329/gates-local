@@ -114,6 +114,8 @@ test("the Thinking pill is on for a model that thinks and greyed with a reason f
   // a turn on the model that cannot think still answers (the server leaves think out)
   await sendMessage(page, "Hello gemma");
   await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Hello gemma");
+  // The terminal event invalidates fit advice; finish the reply before choosing again.
+  await expect(page.locator(".turn.a").last()).toHaveClass(/\bdone\b/);
 
   await pickModel(page, "qwen", "qwen3.5:9b");
   await expect(pill).not.toHaveAttribute("aria-disabled", /./);

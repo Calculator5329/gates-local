@@ -2,12 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const mock = vi.hoisted(() => ({ state: undefined as unknown }));
+const mock = vi.hoisted(() => ({ state: undefined as unknown, stale: false }));
 vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, fitKey: (m: string, c: number) => `${m}@${c}`, streamingHere: () => false }));
-vi.mock("./session.ts", () => Object.fromEntries(["ensureFit", "pickModel", "pull", "openSettings", "setContext", "firstPull", "queueReason"].map(name => [name, () => undefined])));
+vi.mock("./session.ts", () => ({ ...Object.fromEntries(["ensureFit", "pickModel", "pull", "openSettings", "setContext", "firstPull", "queueReason"].map(name => [name, () => undefined])), currentFit: (r: unknown) => mock.stale ? undefined : r, fitIsCurrent: (r: unknown) => r !== undefined && r !== "error" && !mock.stale }));
 const { Picker, ContextMemory } = await import("./Picker.tsx");
 
-function markup() {
+function markup(stale = false) {
+  mock.stale = stale;
   const tag = "milo-e4b-v4:latest", gib = 1024 ** 3;
   mock.state = {
     pop: { id: "picker", kb: true }, numCtx: 16384, model: tag,
@@ -19,6 +20,15 @@ function markup() {
   return renderToStaticMarkup(createElement(Picker));
 }
 describe("approved model picker", () => {
+  it("TL-04: a stale report shows Checking instead of Fits, tint or settled tooltips", () => {
+    const html = markup(true);
+    const context = html.match(/<button[^>]*data-ctx="16384"[\s\S]*?<\/button>/)?.[0];
+    expect(context).toBeDefined();
+    expect(context).toContain("Checking…");
+    expect(context).not.toContain("Fits");
+    expect(html).not.toContain('class="pk-v gpu"');
+    expect(html).not.toMatch(/fits on (?:the )?GPU/);
+  });
   it("shows a CPU cost without a fictional GPU scale", () => {
     const v = { k: "spill" as const, chip: "system memory", word: "Uses system memory", detail: "", amt: 7 * 1024 ** 3, need: 7 * 1024 ** 3, avail: 0, measured: false };
     const html = renderToStaticMarkup(createElement(ContextMemory, { v, cpu: true }));

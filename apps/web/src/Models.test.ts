@@ -59,6 +59,15 @@ const render = (state: object) => {
 const gpuPromises = (html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
+  it("catalog hydration replaces the raw name consistently on the row and its More control", () => {
+    const early = render(noGpuComputer({ catalog: undefined }));
+    const label = early.match(/class="mp-row[^>]+aria-label="([^"]+)"/)?.[1];
+    expect(label).toBe("qwen3.5:4b");
+    const html = render(noGpuComputer({}));
+    expect(html).not.toContain(`aria-label="More for ${label}"`);
+    expect(html).toMatch(/class="mp-row[^>]+aria-label="Qwen 3.5 4B"/);
+    expect(html).toContain('aria-label="More for Qwen 3.5 4B"');
+  });
   it("PK-02: a loaded current-context report is labeled measured", () => {
     const name = "qwen3:14b";
     const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };

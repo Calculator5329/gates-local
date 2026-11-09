@@ -52,6 +52,30 @@ test("memory no process claims is called Other in the panel, in words and in its
   await expect(page.locator("#tip")).not.toContainText("Not attributed");
 });
 
+test("Memory details follow the chat's 64k choice without changing its saved 16k default", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  await page.locator("#modelBtn").click();
+  const picker = page.locator("#picker");
+  await picker.getByRole("radio", { name: "64k", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const panel = await openGpuMemory(page);
+  await expect(panel).toContainText("Memory at 64k context");
+  await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator('[data-ctx="65536"]')).toHaveAttribute("aria-pressed", "false");
+  await panel.locator("summary", { hasText: "Details" }).click();
+  await expect(panel.locator("details")).toHaveAttribute("open", "");
+  await expect(panel.locator(".fp-v")).toContainText("64k");
+  await expect(panel.locator("details")).toContainText("Where the memory goes");
+  await page.screenshot({ path: test.info().outputPath("memory-selected-64k-default-16k.png") });
+  await page.keyboard.press("Escape");
+  await page.locator("#modelBtn").click();
+  await expect(picker.getByRole("radio", { name: "64k", exact: true })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await openGpuMemory(page);
+  await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");
+});
+
 test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {
   await open();
   await waitReady(page);

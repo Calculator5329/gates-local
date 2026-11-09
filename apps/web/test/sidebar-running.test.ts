@@ -97,6 +97,17 @@ function marked(): string[] {
 }
 
 describe("sidebar running replies", () => {
+  it("hydrates a reply that started before this window connected", async () => {
+    disconnect?.();
+    b.server.answer("turns.active", () => [{ threadId: "A", turnId: "already-running" }]);
+    store.setState({ imageStatus: undefined });
+    disconnect = session.connect();
+    await until(() => store.getState().imageStatus !== undefined, 2000, "second hydration");
+    expect(marked()).toEqual(["A"]);
+    chat("already-running", "A", { type: "done", message: reply("A"), stopReason: "stop" });
+    expect(marked()).toEqual([]);
+  });
+
   it("keeps the first row marked after opening another thread without sending", async () => {
     await answering("A");
     expect(marked()).toEqual(["A"]);

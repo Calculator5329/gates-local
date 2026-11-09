@@ -184,6 +184,8 @@ for (const width of [1280, 360]) {
       await openModels(page);
       const rows = page.locator(".mp-row[data-dm], .mp-row[data-em]");
       await expect(rows).toHaveCount(4);
+      // Catalog hydration replaces raw tags with friendly names before we capture them.
+      await expect(page.getByRole("button", { name: "More for Qwen 3.5 9B", exact: true })).toHaveCount(1);
 
       for (const row of await rows.all()) {
         const label = await row.getAttribute("aria-label");

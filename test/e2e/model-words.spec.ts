@@ -8,6 +8,36 @@ import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.
 type Box = { top: number; bottom: number; left: number; right: number };
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
+/** Hold real catalog/fit answers until the pointer is on the initially visible picker. */
+async function holdPickerReports(page: Page) {
+  let holding = true;
+  const held: Array<() => void> = [];
+  const received = new Set<string>();
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+    const server = ws.connectToServer();
+    const methods = new Map<unknown, string>();
+    ws.onMessage(message => {
+      const req = JSON.parse(String(message)) as { id?: unknown; method?: string };
+      if (req.method === "models.catalog" || req.method === "fit.check") methods.set(req.id, req.method);
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const res = JSON.parse(String(message)) as { type?: string; id?: unknown };
+      const method = res.type === "response" ? methods.get(res.id) : undefined;
+      if (method !== undefined) {
+        methods.delete(res.id);
+        received.add(method);
+      }
+      if (holding && method !== undefined) held.push(() => ws.send(message));
+      else ws.send(message);
+    });
+  });
+  return {
+    received,
+    release: () => { holding = false; for (const send of held.splice(0)) send(); },
+  };
+}
+
 /** Hover every picker row; for each, the tip's box and the boxes it must leave clear. */
 async function rowTips(page: Page): Promise<{ tag: string; tip: Box; row: Box; others: Box[] }[]> {
   const rows = page.locator("#picker .pk-r[data-tip]");
@@ -36,13 +66,25 @@ async function rowTips(page: Page): Promise<{ tag: string; tip: Box; row: Box; o
 for (const width of [1440, 760]) {
   test(`a picker row's tooltip leaves every other row name and heading clear at ${width} px (F72)`, async ({ page, open }) => {
     await page.setViewportSize({ width, height: 900 });
+    const reports = await holdPickerReports(page);
     await open();
     await waitReady(page);
+    await expect.poll(() => reports.received.has("models.catalog")).toBe(true);
     await page.locator("#modelBtn").click();
-    await expect(page.locator("#picker")).toBeVisible();
+    const picker = page.locator("#picker");
+    await expect(picker).toBeVisible();
+    await picker.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
+    const before = await picker.boundingBox();
+    await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
+    reports.release();
+    await expect(picker.locator(".pk-dl")).toBeVisible();
+    await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
+    expect(await picker.boundingBox(), "catalog and fit replies keep the picker under the resting pointer").toEqual(before);
+    await expect(page.locator("#tip.open")).toBeVisible();
     for (const t of await rowTips(page)) {
       for (const o of t.others) expect(meets(t.tip, o), `${t.tag}: tip ${JSON.stringify(t.tip)} covers ${JSON.stringify(o)}`).toBe(false);
     }
+    await page.screenshot({ path: test.info().outputPath(`picker-stable-${width}.png`) });
   });
 }
 
@@ -50,7 +92,9 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await open();
   await waitReady(page);
   const panel = await openGpuMemory(page);
-  await expect(panel.locator(".fp-n").first()).toHaveText(/^Estimated [\d.]+\sGB of [\d.]+\sGB available to this model · /);
+  await expect(panel).toContainText("Memory at 16k context");
+  await panel.locator("summary", { hasText: "Details" }).click();
+  await expect(panel.locator(".fp-n").filter({ hasText: /^Est\./ })).toContainText(/Est\. [\d.]+\sGB; [\d.]+\sGB available on GPU\./);
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 

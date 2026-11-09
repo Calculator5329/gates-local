@@ -619,14 +619,19 @@ describe("a model that fits only once the other chat stops", () => {
   it("is marked sendable when stopping the turn makes room", async () => {
     b.server.answer("fit.check", () => report("refuse"));
     b.server.answer("turns.blocking", () => BLOCKING);
+    b.server.push("gpu.changed", methodSamples["gpu.status"].result);
     session.ensureFit(MODEL, 16384);
     await until(() => st().stopFrees[store.fitKey(MODEL, 16384)] === true, 2000, "the mark");
   });
 
   it("stays refused when nothing is in the way", async () => {
     b.server.answer("fit.check", () => report("refuse"));
+    b.server.push("gpu.changed", methodSamples["gpu.status"].result);
     session.ensureFit(MODEL, 16384);
-    await until(() => st().fits[store.fitKey(MODEL, 16384)] !== undefined, 2000, "the fit");
+    await until(() => {
+      const fit = st().fits[store.fitKey(MODEL, 16384)];
+      return fit !== undefined && fit !== "error" && fit.verdict === "refuse";
+    }, 2000, "the refused fit");
     await tick(5);
     expect(st().stopFrees[store.fitKey(MODEL, 16384)]).toBeUndefined();
   });

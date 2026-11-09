@@ -110,7 +110,8 @@ it("Settings rechecks both contexts on separate invalidation and keeps the verdi
   expect(refreshed).not.toContain("Checking…");
   expect(refreshed).not.toContain("ctx-def");
   expect(details(refreshed)).toContain("<summary>Details</summary>");
-  expect(details(refreshed)).not.toContain('<div aria-hidden="true" style="visibility:hidden">');
+  expect(details(refreshed)).not.toContain('inert=""');
+  expect(details(refreshed)).not.toContain('visibility:hidden');
 });
 
 it("saving a checked context keeps its verdict when only the model pick advice changes", async () => {

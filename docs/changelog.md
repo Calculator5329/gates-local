@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-09: Keep model picks while memory is rechecked
+
+Picking a model during a memory refresh now waits for the answer instead of
+losing the click. Only a fresh check can apply a model or context choice;
+catalog estimates and advice kept visible after a load cannot apply it.
+A refusal or check error cancels a waiting row, closing cancels it, and a
+newer pick replaces it. Keyboard picks follow the same rules.
+
+## 2026-11-09: Picker choices wait for current memory advice
+
+Outdated memory advice now says Checking instead of Fits. Pending rows report
+that they are unavailable until their fresh check arrives. A size choice waits
+for a fresh answer, and a refusal requires another choice instead of applying
+it later without a click. Retry after a check error still keeps the choice.
+Idle models loaded by the app refresh quietly when reclaimable GPU room is
+unchanged; outside allocations and busy models still withdraw old advice.
+
+## 2026-11-09: Recheck chat memory as soon as reconnect hydration finishes
+
+GPU Memory shows Checking after a connection drops instead of reusing an old
+GPU-fit verdict while reconnecting. The open chat gets a fresh memory check
+after its settings and models return, including when a slower check from the
+connection's first moments is still pending.
+
+## 2026-11-09: Keep the model picker under the pointer while checks finish
+
+The picker reserves its list space before catalog and fit results arrive, so
+it no longer jumps across the composer while you hover a model. The tooltip
+delay stays in place, and a resting pointer can finish opening its tooltip.
+
+## 2026-11-09: Running replies survive reconnect, memory details follow the chat
+
+A second window and a reconnected window now mark replies already running,
+and remove marks for replies that ended while disconnected. GPU Memory describes
+the context selected for the chat, labels its actual size, and waits for a fresh
+memory check before showing a verdict. Inspecting a chat's memory leaves the
+saved default context alone.
+
 ## 2026-11-09: Keep fixture creation out of server readiness
 
 Performance comparisons prepare their test data once per build and copy a

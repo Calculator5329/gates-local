@@ -97,7 +97,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; onTerminal?: () => void } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -153,6 +153,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
           storedAtDonePush.push(store.getThread(threadId).messages.length);
           app.replayTurns((channel, payload) => { if (channel === "chat.event") replayedAtDone.push(payload as Payload<"chat.event">); });
         }
+        if (event.type === "done" || event.type === "error") opts.onTerminal?.();
       }
       server?.push(c, p);
     },
@@ -434,7 +435,8 @@ describe("chat.send", () => {
   });
 
   it("streams every event, persists the done message before pushing done, and returns at once", async () => {
-    const r = await rig();
+    let terminalSnapshot: unknown;
+    const r = await rig({ onTerminal: () => { terminalSnapshot = r.app.handlers["turns.active"]?.({}, { clientId: 1 }); } });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let seenBody: unknown;
@@ -449,11 +451,14 @@ describe("chat.send", () => {
     // returned before any reply byte; the start push came first, for every client (PH-02)
     expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
     expect(r.app.activeTurns()).toBe(1);
+    expect(await r.client.call("turns.active", {})).toEqual([{ threadId: t.id, turnId: sent.turnId }]);
 
     // The store already has the user message; the turn is streaming.
     expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user"]);
     release();
     const done = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    // A reconnect can read during asynchronous stream cleanup, after the last event.
+    expect(await terminalSnapshot).toEqual([]);
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
     expect(r.replayedAtDone).toEqual([]);
@@ -478,6 +483,7 @@ describe("chat.send", () => {
     expect(got.messages[1]?.id).toBe(done.event.message.id);
     await r.waitFor("threads.changed", (p) => p.threadId === t.id);
     expect(r.app.activeTurns()).toBe(0);
+    expect(await r.client.call("turns.active", {})).toEqual([]);
   });
 
   it("sends the whole thread as history on the next turn", async () => {

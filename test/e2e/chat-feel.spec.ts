@@ -266,6 +266,7 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await page.locator("#modelBtn").click();
   await page.locator("#pkSearch").fill("gemma");
   await page.locator('#picker .pk-r[data-m="gemma4:12b"]').click();
+  await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.locator(".set").getByRole("button", { name: "64k" }).first().click();

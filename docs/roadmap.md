@@ -78,6 +78,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       scale are provisional defaults while icon/bar treatments are chosen.
       The broader visual-direction item stays open.
 
+- [ ] Picker: cancel a pending row or size pick when the open thread changes,
+      so Ctrl+N during a memory check does not apply it to the new chat.
+
 - [ ] Packaged renderer Origin: measure what Origin the `file://` renderer's
       WebSocket upgrade carries in a real packaged Electron run and allow it
       in `apps/server/src/main.ts`.

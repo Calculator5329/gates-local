@@ -1052,6 +1052,7 @@ a.btn{text-decoration:none}
 .pk-list-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable;padding:8px 12px}
 .model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
 .model-picker .pk-r.sel{background:var(--hover)}
+.model-picker .pk-r[aria-busy=true] .pk-select{cursor:progress;color:var(--muted-foreground)}
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
 .pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) 72px;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
 .pk-name{display:flex;align-items:center;min-width:0;gap:4px}
