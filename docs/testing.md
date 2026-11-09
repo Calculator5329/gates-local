@@ -244,6 +244,14 @@ The virtual-display smoke completed all stages during this climb. The default
 headless path failed before a page target appeared on both the candidate and
 the unchanged starting commit; those failures are retained, not counted as passes.
 
+`node test/perf/next-compare.ts --prepared INPUTS ...` runs the browser priority
+groups except first-run with a shuffle-test scorer, per-action CPU cost, exact
+work counters and one CPU profile per action. It does not run first-run or
+desktop-launch, and refuses a selection that names either.
+[Measuring performance changes](perf-method.md) explains it, gives the change
+size one job can see for each row, and has the climb steps and the release
+history.
+
 Priority workloads add cold/warm clicks and 350 ms hover-to-click paths at
 200/2,000 messages, switching between two genuinely streaming replies, copying
 a message and 4,000-line code block, a trusted 50,000-character text paste and

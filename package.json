@@ -24,6 +24,7 @@
     "verify:gpu": "vitest run apps/server/src/gpu",
     "e2e": "playwright test -c test/e2e/playwright.config.ts --project=e2e",
     "perf:compare": "node test/perf/compare.ts",
+    "perf:next": "node test/perf/next-compare.ts",
     "e2e:timing": "playwright test -c test/e2e/playwright.config.ts --project=timing",
     "e2e:shots": "playwright test -c test/e2e/playwright.config.ts --project=shots",
     "shots:readme": "playwright test -c test/e2e/playwright.config.ts --project=readme",

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-09: A performance comparison that counts work and says what it cannot see
+
+- `pnpm perf:next` (`test/perf/next-compare.ts`) runs the priority journeys
+  for a base and a candidate build and records, per action, wall time, main
+  thread CPU time, and counts that do not depend on the clock: React commits
+  and rendered components, layouts, requests, bytes, WebSocket frames and DOM
+  elements. One profile per action is kept from the first round.
+- A count that is identical across at least two runs in each arm is scored as
+  exact, so a change of one is a real change. Times are scored with a
+  shuffle test inside each round. Nothing here gates a release.
+- `docs/perf-method.md` says what one job under 15 minutes can see, measured
+  on a same-build job: 10 % or less on 6 of 27 priority actions (by wall or
+  CPU time), 12 % to 80 % on the rest, and a change of one on exact counts.
+  It also says which rows are worth dropping and how to run a climb with it.
+- The tool refuses instead of guessing: a journey group it does not
+  implement, a recording whose samples do not divide into repetitions, an
+  empty result, and a page where the React counting hook is missing.
+- `docs/perf-history.md` starts a per-release table from the first job.
+- The older `pnpm perf:compare` stays for first-run and desktop launch.
+
 ## 2026-11-09: Thread menus cancel pending hover loads before export
 
 - Opening a row's menu by button, keyboard or right-click cancels hover intent;
