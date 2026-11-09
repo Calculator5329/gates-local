@@ -135,6 +135,8 @@ export interface App {
   readonly handlers: AppHandlers;
   /** Turns streaming now (or reserved and starting). */
   activeTurns(): number;
+  /** Send only this client's current in-flight words before it starts receiving newer events. */
+  replayTurns(target: Push): void;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */
   shutdown(): Promise<void>;
 }
@@ -159,6 +161,12 @@ interface Turn {
    * Set inside the load gate when its fit passes, before the user message is saved.
    */
   started: boolean;
+  terminal: boolean;
+  start?: Extract<WireEvent, { type: "start" }>;
+  text: string;
+  thinking: string;
+  contextNotice?: string;
+  readonly steps: Map<string, ToolStep>;
 }
 
 /**
@@ -230,6 +238,10 @@ export function createApp(deps: AppDeps): App {
         wake(HALTED);
       },
       started: false,
+      terminal: false,
+      text: "",
+      thinking: "",
+      steps: new Map(),
     };
     turns.set(turn.turnId, turn);
     byThread.set(threadId, turn);
@@ -287,38 +299,33 @@ export function createApp(deps: AppDeps): App {
   const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean; contextNotice?: string; settings?: TurnSettings } = {}) => {
     const { turnId, threadId, controller } = turn;
     // Exactly the text that reached the client: the reply a halted turn saves.
-    let sentText = "";
-    let sentThinking = "";
-    let contextNotice = options.contextNotice;
-    const sentTools = new Map<string, ToolStep>();
-    // The one terminal event (error or done) went out: nothing follows it, a halt included.
-    let over = false;
+    turn.contextNotice = options.contextNotice;
     let noticeSent = false;
     const imageOmitted = () => {
-      contextNotice = IMAGE_CONTEXT_NOTICE;
-      if (noticeSent || over || controller.signal.aborted) return;
+      turn.contextNotice = IMAGE_CONTEXT_NOTICE;
+      if (noticeSent || turn.terminal || controller.signal.aborted) return;
       noticeSent = true;
       // Send metadata before words using the trimmed context, without marking a first token.
-      push("chat.event", { turnId, threadId, event: { type: "delta", text: "", contextNotice } });
+      push("chat.event", { turnId, threadId, event: { type: "delta", text: "", contextNotice: turn.contextNotice } });
     };
     const emit = (event: WireEvent) => {
-      if (over) return;
-      if (event.type === "error" || event.type === "done") over = true;
+      if (turn.terminal) return;
+      if (event.type === "error" || event.type === "done") turn.terminal = true;
       // Only text means the model answered; an error, cancel or end goes through end() below.
       if (event.type === "delta" || event.type === "thinking") load?.firstToken();
-      if (event.type === "delta") sentText += event.text;
-      if (event.type === "thinking") sentThinking += event.text;
-      if (event.type === "tool") sentTools.set(event.step.callId, event.step);
-      push("chat.event", { turnId, threadId, event: event.type === "error" && contextNotice ? { ...event, contextNotice } : event });
+      if (event.type === "delta") turn.text += event.text;
+      if (event.type === "thinking") turn.thinking += event.text;
+      if (event.type === "tool") turn.steps.set(event.step.callId, event.step);
+      push("chat.event", { turnId, threadId, event: event.type === "error" && turn.contextNotice ? { ...event, contextNotice: turn.contextNotice } : event });
     };
     /** halt() ended the turn: save the text and thinking sent so far, then its one terminal event. */
     const endHalted = (reason: AppError) => {
-      if (over) return;
+      if (turn.terminal) return;
       let partial: Message | undefined;
-      if (sentText !== "" || sentThinking !== "") {
+      if (turn.text !== "" || turn.thinking !== "" || turn.steps.size > 0) {
         try {
-          const tools = [...sentTools.values()];
-          partial = store.appendMessage({ threadId, role: "assistant", content: sentText, ...(sentThinking === "" ? {} : { thinking: sentThinking }), ...(tools.some(t => t.name === "image" && t.state === "done") ? { tools } : {}), model, stats: { numCtx }, ...(contextNotice ? { contextNotice } : {}) });
+          const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
+          partial = store.appendMessage({ threadId, role: "assistant", content: turn.text, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
         } catch (e) {
           log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
         }
@@ -362,7 +369,7 @@ export function createApp(deps: AppDeps): App {
         onImageOmitted: imageOmitted,
         ...(think === undefined ? {} : { think }),
       };
-      if (contextNotice) imageOmitted();
+      if (turn.contextNotice) imageOmitted();
       const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);
       const iterator = events[Symbol.asyncIterator]();
       let dropped = false;
@@ -378,7 +385,7 @@ export function createApp(deps: AppDeps): App {
           const event = step.value;
           if (event.type !== "done") {
             emit(event);
-            if (over) return;
+            if (turn.terminal) return;
             continue;
           }
           // A cancel that lands with the done line still wins: nothing persists.
@@ -388,7 +395,7 @@ export function createApp(deps: AppDeps): App {
           }
           let saved;
           try {
-            const notice = contextNotice ?? event.message.contextNotice;
+            const notice = turn.contextNotice ?? event.message.contextNotice;
             saved = store.appendMessage({ ...event.message, ...(notice ? { contextNotice: notice } : {}) });
           } catch (e) {
             const code = (e as { code?: unknown }).code;
@@ -639,7 +646,8 @@ export function createApp(deps: AppDeps): App {
           if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
         } else if (askFirst === true && [...turns.values()].some((t) => t.started)) {
           // Before the claim and the gate, where this send would otherwise wait behind that reply; fit refuses it.
-          await planned(reclaimableComfy());
+          const ahead = await planned(reclaimableComfy());
+          if (ahead.report.verdict === "refuse" && !ahead.comfy) throw refusal(ahead.report);
         }
         // Waits while an image job holds the GPU; admit's load gate runs inside this claim.
         const claim = async () => {
@@ -719,7 +727,8 @@ export function createApp(deps: AppDeps): App {
         started = true;
         turn.started = true;
         // Before the answer, so every client (also one that did not send this) knows the turn first.
-        push("chat.event", { turnId: turn.turnId, threadId, event: { type: "start", model, userMessage } });
+        turn.start = { type: "start", model, userMessage };
+        push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
         void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, image, contextNotice, settings });
         return { turnId: turn.turnId, userMessage };
       } finally {
@@ -745,6 +754,16 @@ export function createApp(deps: AppDeps): App {
   return {
     handlers,
     activeTurns: () => turns.size,
+    replayTurns(target) {
+      for (const turn of turns.values()) {
+        if (turn.start === undefined || turn.terminal) continue;
+        const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event });
+        send(turn.start);
+        if (turn.thinking !== "") send({ type: "thinking", text: turn.thinking });
+        for (const step of turn.steps.values()) send({ type: "tool", step });
+        if (turn.text !== "" || turn.contextNotice) send({ type: "delta", text: turn.text, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
+      }
+    },
     async shutdown() {
       closing = true;
       offRuntime();

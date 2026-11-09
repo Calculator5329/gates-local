@@ -360,7 +360,7 @@ export function Composer() {
         </div>
       </form>
       {notice !== null ? (
-        <p className="na c-note" role="status" tabIndex={0} data-tip={esc(notice)}>
+        <p className={`na c-note${memNo ? " no" : ""}`} role="status" tabIndex={0} data-tip={esc(notice)}>
           {notice}
         </p>
       ) : null}

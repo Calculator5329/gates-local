@@ -137,6 +137,21 @@ describe("models.load", () => {
     expect(generates(s)).toBe(0);
   });
 
+  it("reselecting an owned resident model at the same context never queues an empty generate behind its reply", async () => {
+    const s = await fakeOllama([]);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    await loader.load("m:latest", 16384);
+    const turn = loader.reserve("m:latest");
+    await turn.admit(16384);
+    await loader.load("m:latest", 16384);
+    expect(generates(s)).toBe(1);
+    expect(pushes.at(-1)).toMatchObject({ state: "ready", numCtx: 16384 });
+    turn.end();
+    await loader.load("m:latest", 32768);
+    expect(generates(s)).toBe(2);
+  });
+
   it("R-03: an HTTP 200 whose body carries an error (or no done: true) is a failed load, nothing owned", async () => {
     let body: unknown = { error: "model requires more system memory (12.0 GiB) than is available (4.0 GiB)" };
     const s = await fakeOllama([], [], { "POST /api/generate": (_b, res) => json(res, 200, body) });

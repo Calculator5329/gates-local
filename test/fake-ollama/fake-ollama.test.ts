@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GPU_STATUS_ARGS } from "../../apps/server/src/fit/gpu-status.ts";
-import { startFakeOllama, type FakeOllama } from "./fake-ollama.ts";
+import { startFakeOllama, threadReply, type FakeOllama } from "./fake-ollama.ts";
 
 const HERE = import.meta.dirname;
 
@@ -19,6 +19,8 @@ async function ndjson(res: Response): Promise<Record<string, unknown>[]> {
 const post = (fake: FakeOllama, p: string, body: unknown, method = "POST") =>
   fetch(`${fake.url}${p}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
+const contentOf = (lines: Record<string, unknown>[]) => lines.map((l) => (l["message"] as { content?: string } | undefined)?.content ?? "").join("");
+
 describe("fake ollama", () => {
   let fake: FakeOllama;
   beforeEach(async () => {
@@ -31,6 +33,82 @@ describe("fake ollama", () => {
     expect(await (await fetch(`${fake.url}/api/version`)).json()).toEqual({ version: "0.40.4" });
     const tags = (await (await fetch(`${fake.url}/api/tags`)).json()) as { models: { name: string }[] };
     expect(tags.models.map((m) => m.name)).toEqual(["qwen3.5:9b", "gemma4:12b", "qwen3.8-abliterated:27b"]);
+  });
+
+  for (const parallelLimit of [1, 2]) {
+    it(`threads: ${parallelLimit} slot(s) record independent lifetimes and exact words`, async () => {
+      fake.setScenario("threads", { parallelLimit, holdAfterTokens: 20, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+      const request = (prompt: string) => post(fake, "/api/chat", { model: "qwen3.5:9b", think: false, options: { num_ctx: 8192 }, messages: [{ role: "user", content: prompt }] }).then(ndjson);
+      const first = request("alpha");
+      await vi.waitFor(() => expect(fake.state().turns[0]?.tokens).toBe(20));
+      const second = request("beta");
+      await vi.waitFor(() => expect(fake.state().turns).toHaveLength(2));
+      if (parallelLimit === 1) expect(fake.state().turns[1]?.startedAt).toBeUndefined();
+      else await vi.waitFor(() => expect(fake.state().turns[1]?.tokens).toBe(20));
+      await post(fake, "/__fake/release", { id: 1 });
+      const a = await first;
+      await vi.waitFor(() => expect(fake.state().turns[1]?.tokens).toBe(20));
+      await post(fake, "/__fake/release", { id: 2 });
+      const b = await second;
+      expect(contentOf(a)).toBe(threadReply("alpha")); expect(contentOf(b)).toBe(threadReply("beta"));
+      const [one, two] = fake.state().turns;
+      expect(one?.outcome).toBe("done"); expect(two?.outcome).toBe("done");
+      if (parallelLimit === 1) expect(two?.startedAt).toBeGreaterThanOrEqual(one?.endedAt ?? Infinity);
+      else expect(two?.firstTokenAt).toBeLessThan(one?.endedAt ?? 0);
+    });
+  }
+
+  it("threads: a new context waits, then replaces the resident copy without changing the first reply", async () => {
+    fake.setScenario("threads", { parallelLimit: 2, holdAfterTokens: 20, tokenDelayMs: 0, firstTokenDelayMs: 0, loadDelayMs: 40 });
+    const request = (prompt: string, num_ctx: number) => post(fake, "/api/chat", { model: "qwen3.5:9b", think: false, options: { num_ctx }, messages: [{ role: "user", content: prompt }] }).then(ndjson);
+    const first = request("alpha", 8192);
+    await vi.waitFor(() => expect(fake.state().turns[0]?.tokens).toBe(20));
+    const second = request("beta", 16384);
+    await vi.waitFor(() => expect(fake.state().turns).toHaveLength(2));
+    expect(fake.state().loaded[0]?.numCtx).toBe(8192);
+    expect(fake.state().turns[1]?.startedAt).toBeUndefined();
+    await post(fake, "/__fake/release", { id: 1 }); await first;
+    await vi.waitFor(() => expect(fake.state().turns[1]?.tokens).toBe(20));
+    expect(fake.state().loaded[0]?.numCtx).toBe(16384);
+    await post(fake, "/__fake/release", { id: 2 }); await second;
+    expect(fake.state().loads.map((l) => l.numCtx)).toEqual([8192, 16384]);
+    const { turns, loads } = fake.state();
+    expect(loads[1]?.startedAt).toBeGreaterThanOrEqual(turns[0]?.endedAt ?? Infinity);
+    expect(turns[1]?.firstTokenAt).toBeGreaterThanOrEqual(loads[1]?.endedAt ?? Infinity);
+    expect((loads[1]?.endedAt ?? 0) - (loads[1]?.startedAt ?? 0)).toBeGreaterThan(0);
+  });
+
+  it("threads: /api/ps names each model and its own KV memory", async () => {
+    fake.setScenario("threads", { installed: ["tiny-chat:2k", "mid-chat:32k"], tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    for (const model of ["tiny-chat:2k", "mid-chat:32k"]) {
+      await (await post(fake, "/api/chat", { model, options: { num_ctx: 2048 }, messages: [{ role: "user", content: model }] })).text();
+    }
+    const ps = await (await fetch(`${fake.url}/api/ps`)).json() as { models: { name: string; size_vram: number; context_length: number }[] };
+    expect(ps.models.map((m) => m.name)).toEqual(["tiny-chat:2k", "mid-chat:32k"]);
+    for (const m of ps.models) {
+      expect(m.context_length).toBe(2048);
+      expect(m.size_vram).toBe(fake.state().loaded.find((l) => l.name === m.name)?.sizeBytes);
+    }
+  });
+
+  it("threads: an aborted cold load never appears resident", async () => {
+    fake.setScenario("threads", { loadDelayMs: 500 });
+    const controller = new AbortController();
+    const loading = fetch(`${fake.url}/api/chat`, { method: "POST", body: JSON.stringify({ model: "qwen3.5:9b", messages: [{ role: "user", content: "alpha" }] }), signal: controller.signal }).catch(() => undefined);
+    await vi.waitFor(() => expect(fake.state().loads).toHaveLength(1));
+    controller.abort(); await loading;
+    await vi.waitFor(() => expect(fake.state().loads[0]?.cancelled).toBe(true));
+    expect(fake.state().loaded).toEqual([]);
+    expect(fake.state().turns[0]?.outcome).toBe("cancelled");
+  });
+
+  it("threads: releasing before the pause is reached advances that request instead of losing the release", async () => {
+    fake.setScenario("threads", { firstTokenDelayMs: 300, tokenDelayMs: 0, holdAfterTokens: 20 });
+    const reply = post(fake, "/api/chat", { model: "gemma4:12b", messages: [{ role: "user", content: "early release" }] }).then(ndjson).catch(() => []);
+    await vi.waitFor(() => expect(fake.state().turns).toHaveLength(1));
+    await post(fake, "/__fake/release", { id: 1 });
+    await vi.waitFor(() => expect(fake.state().turns[0]?.outcome).toBe("done"), { timeout: 1000 });
+    expect((await reply).at(-1)).toMatchObject({ done: true });
   });
 
   const hello = async () =>
@@ -119,6 +197,11 @@ describe("fake ollama", () => {
     );
     const call = lines.find((l) => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls);
     expect(call?.["message"]).toMatchObject({ tool_calls: [{ function: { name: "list_files" } }] });
+    const continued = await ndjson(await post(fake, "/api/chat", {
+      model: "gemma4:12b", tools: [{ type: "function", function: { name: "list_files" } }],
+      messages: [{ role: "user", content: "use a tool please" }, { role: "tool", content: "result" }],
+    }));
+    expect(continued.some((l) => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(false);
   });
 
   it("breaks the stream with an error in the mid-stream-error scenario", async () => {

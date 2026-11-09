@@ -309,6 +309,15 @@ const preempted = (partial?: Message): Payload<"chat.event">["event"] => ({
   neededBy: "qwen3:14b",
 });
 
+it("keeps a terminal omission notice beside an off-screen partial reply", async () => {
+  const turn = await answering("A");
+  chat(turn, "A", { type: "delta", text: "Partial answer" });
+  await tick();
+  await answering("B");
+  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", contextNotice: "Some earlier images are unavailable." });
+  expect((st().messages["A"] ?? []).at(-1)).toMatchObject({ content: "Partial answer", contextNotice: "Some earlier images are unavailable." });
+});
+
 it.each([false, true])("keeps omission notices beside stopped words (notice before stop: %s)", async earlyNotice => {
   const turn = await answering("A");
   if (earlyNotice) {
@@ -548,19 +557,60 @@ describe("a turn left running behind another chat", () => {
 });
 
 describe("picking a model while another is answering", () => {
-  it("loads now when nothing would have to stop", async () => {
+  it.each([false, true])("a replayed parked acknowledgement frees its slot and the automatic queue (finished before acknowledgement: %s)", async finishedFirst => {
+    const waiting = b.server.hold("chat.send");
+    const sending = session.send("recovered A");
+    const request = await waiting;
+    const second = await answering("B");
+    await session.send("after B");
+    const userMessage = userMsg(request.params.messageId!, "A", "recovered A");
+    chat("original-A", "A", { type: "start", model: MODEL, userMessage });
+    chat("original-A", "A", { type: "delta", text: "original reply" });
+    const finish = () => chat("original-A", "A", { type: "done", message: asstMsg("answer-A", "A", "original reply"), stopReason: "stop" });
+    if (finishedFirst) finish();
+    request.respond({ turnId: `saved-${userMessage.id}`, userMessage, replayed: true });
+    await sending;
+    if (!finishedFirst) {
+      expect(session.repliesInProgress(st(), "A")).toBe(1);
+      finish();
+    }
+    expect.soft(session.repliesInProgress(st(), "A")).toBe(0);
+    chat(second, "B", { type: "done", message: asstMsg("answer-B", "B"), stopReason: "stop" });
+    await until(() => sends().some(send => send.content === "after B"), 1000, "queued words after replayed acknowledgement");
+    expect(sends().map(send => send.content)).toEqual(["recovered A", "hello B", "after B"]);
+  });
+
+  it("Send now interrupts only its thread and sends without waiting for a parked reply", async () => {
+    const a = await answering("A");
+    const images = ["data:image/png;base64,cGl4ZWw="];
+    store.setState({ draftImages: images });
+    await session.send("send now");
+    const id = st().queued[0]?.id;
+    const messageId = st().queued[0]?.messageId;
+    expect(id).toBeDefined();
+    await answering("B");
+    session.openThread("A");
+    session.sendQueuedNow(id ?? "");
+    chat(a, "A", { type: "error", code: "cancelled", message: "stopped" });
+    await until(() => sends().length === 3, 1000, "the explicit Send now");
+    expect(sends()[2]).toMatchObject({ threadId: "A", content: "send now" });
+    expect(b.server.calls("chat.send")[2]?.params).toMatchObject({ images, messageId });
+    expect(b.server.calls("chat.cancel").map((r) => r.params)).toEqual([{ turnId: a }]);
+  });
+
+  it("loads another model now when nothing would have to stop", async () => {
     await answering("A");
-    session.pickModel(MODEL);
+    session.pickModel("qwen3:14b");
     await until(() => b.server.calls("models.load").length === 1, 2000, "the load");
   });
 
   it("does not sit behind the answer: no load until the send", async () => {
     await answering("A");
     b.server.answer("turns.blocking", () => BLOCKING);
-    session.pickModel(MODEL);
+    session.pickModel("qwen3:14b");
     await until(() => b.server.calls("turns.blocking").length === 2, 2000, "the question");
     await tick(5);
-    expect(st().model).toBe(MODEL);
+    expect(st().model).toBe("qwen3:14b");
     expect(b.server.calls("models.load")).toHaveLength(0);
   });
 });

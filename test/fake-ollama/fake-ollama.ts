@@ -13,14 +13,16 @@
 //   embed-only        only nomic-embed-text: nothing can chat; /api/pull can add one
 //   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
 //                     a code block, a table) over about 2 s; holdAfterTokens > 0
-//                     pauses the reply there until the request is cancelled
+//                     pauses until /__fake/release or cancellation
 //   long-name         the three models plus a long Hugging Face GGUF tag
+//   threads           prompt-labelled paragraphs with independent request timing
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
+import { createScheduler } from "./scheduler.ts";
 import { STREAM_REPLY } from "./stream-reply.ts";
 
 const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
@@ -31,7 +33,7 @@ const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
 };
 const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "image-turn", "image-claims"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface FakeOptions {
@@ -46,7 +48,7 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
-  /** slow-drip: after this many reply tokens the stream waits until cancelled; 0 never waits. */
+  /** slow-drip/threads: pause after this many tokens until released or cancelled; 0 never pauses. */
   holdAfterTokens: number;
   /** slow-drip: use the long mixed-Markdown measurement fixture when nonzero. */
   longDrip: number;
@@ -60,6 +62,10 @@ export interface FakeOptions {
   loadDelayMs: number;
   /** Delay before /api/show answers: holds the server's fit survey (and so its chat pick). */
   showDelayMs: number;
+  /** Concurrent requests per runner at the same context. */
+  parallelLimit: number;
+  /** Idle runners are evicted to make room; active runners must finish first. */
+  capacityBytes: number;
 }
 
 const LOAD_STEPS = 6;
@@ -76,6 +82,8 @@ const DEFAULTS: FakeOptions = {
   burstTokens: 0,
   loadDelayMs: 0,
   showDelayMs: 0,
+  parallelLimit: 1,
+  capacityBytes: 12 * 1024 ** 3,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -118,14 +126,35 @@ export interface FakeRequest {
   readonly body: unknown;
 }
 
+export interface FakeTurn {
+  readonly id: number;
+  readonly model: string;
+  readonly numCtx: number;
+  readonly prompt: string;
+  readonly receivedAt: number;
+  startedAt?: number;
+  firstTokenAt?: number;
+  endedAt?: number;
+  outcome?: "done" | "cancelled" | "error";
+  tokens: number;
+}
+
+export interface FakeLoad {
+  readonly model: string;
+  readonly numCtx: number;
+  readonly startedAt: number;
+  endedAt?: number;
+  cancelled?: boolean;
+}
+
 /** Scenario options: the timing knobs, plus the installed models when a test picks them. */
-export type ScenarioOptions = Partial<FakeOptions> & { installed?: readonly string[] };
+export type ScenarioOptions = Partial<FakeOptions> & { installed?: readonly string[]; prompts?: Record<string, Partial<FakeOptions>> };
 
 export interface FakeOllama {
   readonly url: string;
   readonly port: number;
   setScenario(scenario: Scenario, options?: ScenarioOptions): void;
-  state(): { scenario: Scenario; options: FakeOptions; installed: string[]; loaded: LoadedEntry[]; requests: FakeRequest[] };
+  state(): { scenario: Scenario; options: FakeOptions; installed: string[]; loaded: LoadedEntry[]; requests: FakeRequest[]; turns: FakeTurn[]; loads: FakeLoad[] };
   close(): Promise<void>;
 }
 
@@ -181,6 +210,11 @@ export function replyWords(prompt: string, count: number): string[] {
   return words.slice(0, Math.max(count, head.length));
 }
 
+/** Multiple blocks make partial progress visible without waiting for completion. */
+export function threadReply(prompt: string): string {
+  return Array.from({ length: 8 }, (_, i) => `Reply ${i + 1} for ${prompt}. These words belong to this request.`).join("\n\n");
+}
+
 /** Joins words the way the stream sends them: a space before each word except punctuation. */
 function tokens(words: readonly string[]): string[] {
   return words.map((w, i) => (i === 0 || /^[.,]$/.test(w) ? w : ` ${w}`));
@@ -202,6 +236,11 @@ const tagEntry = (m: FakeModel) => ({
   details: { format: "gguf", family: m.family, families: [m.family], parameter_size: m.parameterSize, quantization_level: m.quantization },
 });
 
+const entryFor = (m: FakeModel, numCtx: number): LoadedEntry => {
+  const kv = m.blockCount * m.headCountKv * m.keyLength * 2 * 2 * numCtx;
+  return { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv };
+};
+
 export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOllama> {
   let scenario: Scenario = start.scenario ?? "models";
   let options: FakeOptions = { ...DEFAULTS, ...start.options };
@@ -210,6 +249,15 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   /** Loads still filling memory: on the GPU, not yet in /api/ps. */
   let filling: LoadedEntry[] = [];
   const requests: FakeRequest[] = [];
+  const turns: FakeTurn[] = [];
+  const loads: FakeLoad[] = [];
+  let promptOptions: Record<string, Partial<FakeOptions>> = {};
+  const releases = new Map<number, () => void>();
+  const released = new Set<number>();
+  const scheduler = createScheduler(() => [...loaded, ...filling], (names) => {
+    loaded = loaded.filter((l) => !names.includes(l.name));
+    writeGpu();
+  });
 
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
@@ -218,36 +266,43 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   writeGpu();
 
   const setScenario = (next: Scenario, opts: ScenarioOptions = {}) => {
-    const { installed: names, ...timing } = opts;
+    const { installed: names, prompts = {}, ...timing } = opts;
+    promptOptions = prompts;
     scenario = next;
-    const preset = next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : next === "slow-drip" ? { tokenDelayMs: 20 } : {};
+    const preset = next === "slow-first-token" ? { firstTokenDelayMs: 2500 } : next === "slow-drip" ? { tokenDelayMs: 20 } : next === "threads" ? { errorAfterTokens: -1 } : {};
     options = { ...DEFAULTS, ...start.options, ...preset, ...timing };
     installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? installedFor(next)));
     loaded = [];
     filling = [];
+    turns.length = 0;
+    loads.length = 0;
+    released.clear();
     writeGpu();
   };
-  if (scenario === "slow-first-token" || scenario === "slow-drip") setScenario(scenario, start.options);
+  if (scenario === "slow-first-token" || scenario === "slow-drip" || scenario === "threads") setScenario(scenario, start.options);
 
   const isInstalled = (name: string): FakeModel | undefined => {
     const m = findFakeModel(name);
     return m && installed.has(m.name) ? m : undefined;
   };
 
-  const load = async (m: FakeModel, numCtx: number, signal: AbortSignal) => {
-    const kv = m.blockCount * m.headCountKv * m.keyLength * 2 * 2 * numCtx;
-    const entry = { name: m.name, numCtx, sizeBytes: m.sizeBytes + kv };
+  const load = async (m: FakeModel, numCtx: number, signal: AbortSignal, timing: FakeOptions) => {
+    const entry = entryFor(m, numCtx);
     const warm = loaded.some((l) => l.name === m.name && l.numCtx === numCtx);
-    if (!warm && options.loadDelayMs > 0) {
+    const record: FakeLoad | undefined = warm ? undefined : { model: m.name, numCtx, startedAt: Date.now() };
+    if (record) loads.push(record);
+    if (!warm && timing.loadDelayMs > 0) {
       // the old copy goes first, then the new one fills memory a step at a time
       loaded = loaded.filter((l) => l.name !== m.name);
       for (let i = 1; i <= LOAD_STEPS && !signal.aborted; i++) {
         filling = [...filling.filter((l) => l.name !== m.name), { ...entry, sizeBytes: Math.round((entry.sizeBytes * i) / LOAD_STEPS) }];
         writeGpu();
-        await sleep(options.loadDelayMs / LOAD_STEPS, signal);
+        await sleep(timing.loadDelayMs / LOAD_STEPS, signal);
       }
       filling = filling.filter((l) => l.name !== m.name);
     }
+    if (record) { record.endedAt = Date.now(); record.cancelled = signal.aborted; }
+    if (signal.aborted) { writeGpu(); return; }
     loaded = [...loaded.filter((l) => l.name !== m.name), entry];
     writeGpu();
   };
@@ -263,97 +318,126 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     const numCtx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
     const abort = new AbortController();
     res.on("close", () => abort.abort());
-    await load(m, numCtx, abort.signal);
-    if (abort.signal.aborted) return;
     const messages = field(body, "messages");
     const last = Array.isArray(messages) ? messages.findLast((x) => field(x, "role") === "user") : undefined;
     const prompt = str(last, "content") ?? "";
-    const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
-    const tools = field(body, "tools");
+    // Capture settings per request. A control change must never rewrite an active stream.
+    const timing = { ...options, ...promptOptions[prompt] };
+    const mode = scenario;
+    const turn: FakeTurn = { id: turns.length + 1, model: m.name, numCtx, prompt, receivedAt: Date.now(), tokens: 0 };
+    turns.push(turn);
+    const release = await scheduler.acquire(entryFor(m, numCtx), abort.signal, timing.parallelLimit, timing.capacityBytes);
+    if (!release) { turn.endedAt = Date.now(); turn.outcome = "cancelled"; return; }
+    try {
+      turn.startedAt = Date.now();
+      await load(m, numCtx, abort.signal, timing);
+      if (abort.signal.aborted) return;
+      const thinks = think === true || (think === undefined && m.capabilities.includes("thinking"));
+      const tools = field(body, "tools");
 
-    res.writeHead(200, { "content-type": "application/x-ndjson" });
-    const line = (v: unknown) => res.write(`${JSON.stringify(v)}\n`);
-    const base = () => ({ model: m.name, created_at: new Date().toISOString() });
-    const started = Date.now();
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      const line = (v: unknown) => {
+        const message = field(v, "message");
+        if (str(message, "content") || str(message, "thinking") || Array.isArray(field(message, "tool_calls"))) turn.firstTokenAt ??= Date.now();
+        return res.write(`${JSON.stringify(v)}\n`);
+      };
+      const base = () => ({ model: m.name, created_at: new Date().toISOString() });
+      const started = Date.now();
 
-    await sleep(options.firstTokenDelayMs, abort.signal);
-    // A timer can fire a millisecond early by Date.now; the wait is at least the delay.
-    const short = started + options.firstTokenDelayMs - Date.now();
-    if (short > 0) await sleep(short, abort.signal);
-    // Everything before the first token is load and prompt time; decode starts here.
-    const decodeFrom = Date.now();
-    if (scenario === "image-claims") {
-      const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool" || String(field(x, "content")).startsWith("Tool output follows."));
-      if (!observed) {
-        const system = Array.isArray(messages) ? String(field(messages.find(x => field(x, "role") === "system"), "content")) : "";
-        const library = system.slice(system.lastIndexOf("Library sources"));
-        const report = / at (\/library\/[^\s]+)/.exec(library)?.[1] ?? "/library/missing";
-        const calls = [{ name: "image", arguments: { prompt: "a ship" } }, { name: "read", arguments: { path: report, url: "https://invented.example/ship.png" } }];
-        const native = Array.isArray(tools);
-        line({ ...base(), message: native ? { role: "assistant", content: "", tool_calls: calls.map(fn => ({ function: fn })) } : { role: "assistant", content: calls.map(call => `<tool_call>${JSON.stringify(call)}</tool_call>`).join("") }, done: true });
-      } else {
-        const content = "The report total is 42.\n\nYour image is ready: [Download](https://invented.example/ship.png).\n\n![Ship](https://invented.example/ship.png)\n\nhttps://invented.example/raw\n\n[Person](https://person.example/brief) and [Report](https://tool.example/report).\n\n";
-        line({ ...base(), message: { role: "assistant", content }, done: false });
-        while (options.holdAfterTokens > 0 && !abort.signal.aborted) await sleep(20, abort.signal);
-        if (abort.signal.aborted) return;
-        line({ ...base(), message: { role: "assistant", content: "" }, done: true });
+      await sleep(timing.firstTokenDelayMs, abort.signal);
+      // A timer can fire a millisecond early by Date.now; the wait is at least the delay.
+      const short = started + timing.firstTokenDelayMs - Date.now();
+      if (short > 0) await sleep(short, abort.signal);
+      // Everything before the first token is load and prompt time; decode starts here.
+      const decodeFrom = Date.now();
+      if (mode === "image-claims") {
+        const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool" || String(field(x, "content")).startsWith("Tool output follows."));
+        if (!observed) {
+          const system = Array.isArray(messages) ? String(field(messages.find(x => field(x, "role") === "system"), "content")) : "";
+          const library = system.slice(system.lastIndexOf("Library sources"));
+          const report = / at (\/library\/[^\s]+)/.exec(library)?.[1] ?? "/library/missing";
+          const calls = [{ name: "image", arguments: { prompt: "a ship" } }, { name: "read", arguments: { path: report, url: "https://invented.example/ship.png" } }];
+          const native = Array.isArray(tools);
+          line({ ...base(), message: native ? { role: "assistant", content: "", tool_calls: calls.map(fn => ({ function: fn })) } : { role: "assistant", content: calls.map(call => `<tool_call>${JSON.stringify(call)}</tool_call>`).join("") }, done: true });
+        } else {
+          const content = "The report total is 42.\n\nYour image is ready: [Download](https://invented.example/ship.png).\n\n![Ship](https://invented.example/ship.png)\n\nhttps://invented.example/raw\n\n[Person](https://person.example/brief) and [Report](https://tool.example/report).\n\n";
+          line({ ...base(), message: { role: "assistant", content }, done: false });
+          while (options.holdAfterTokens > 0 && !abort.signal.aborted) await sleep(20, abort.signal);
+          if (abort.signal.aborted) return;
+          line({ ...base(), message: { role: "assistant", content: "" }, done: true });
+        }
+        turn.outcome = "done";
+        res.end(); return;
       }
-      res.end(); return;
-    }
-    if (scenario === "image-turn") {
-      const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool");
-      line({ ...base(), message: observed
-        ? { role: "assistant", content: "Here's an image of a Star Trek ship: ![Star Trek Ship](https://example.com/invented.png)" }
-        : { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a Star Trek ship" } } }] }, done: true });
-      res.end(); return;
-    }
-    let sent = 0;
-    if (thinks) {
-      for (const t of tokens(THINKING)) {
-        if (abort.signal.aborted) return;
-        line({ ...base(), message: { role: "assistant", content: "", thinking: t }, done: false });
-        await sleep(options.tokenDelayMs, abort.signal);
+      if (mode === "image-turn") {
+        const observed = Array.isArray(messages) && messages.some(x => field(x, "role") === "tool");
+        line({ ...base(), message: observed
+          ? { role: "assistant", content: "Here's an image of a Star Trek ship: ![Star Trek Ship](https://example.com/invented.png)" }
+          : { role: "assistant", content: "", tool_calls: [{ function: { name: "image", arguments: { prompt: "a Star Trek ship" } } }] }, done: true });
+        turn.outcome = "done";
+        res.end(); return;
       }
-    }
-    if (Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt)) {
-      const fn = field(field(tools[0], "function"), "name");
+      let sent = 0;
+      if (thinks) {
+        for (const t of tokens(THINKING)) {
+          if (abort.signal.aborted) return;
+          line({ ...base(), message: { role: "assistant", content: "", thinking: t }, done: false });
+          await sleep(timing.tokenDelayMs, abort.signal);
+        }
+      }
+      if (Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt) && (!Array.isArray(messages) || !messages.some((msg) => field(msg, "role") === "tool"))) {
+        const image = /\b(draw|image|ship)\b/i.test(prompt) ? tools.find((tool) => field(field(tool, "function"), "name") === "image") : undefined;
+        const fn = field(field(image ?? tools[0], "function"), "name");
+        line({
+          ...base(),
+          message: { role: "assistant", content: "", tool_calls: [{ function: { name: typeof fn === "string" ? fn : "read", arguments: fn === "image" ? { prompt } : { path: "~/docs" } } }] },
+          done: false,
+        });
+      }
+      for (const t of mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords))) {
+        if (abort.signal.aborted) return;
+        if ((mode === "slow-drip" || mode === "threads") && timing.holdAfterTokens > 0 && sent === timing.holdAfterTokens && !released.has(turn.id)) {
+          await new Promise<void>((resolve) => {
+            const done = () => { releases.delete(turn.id); abort.signal.removeEventListener("abort", done); resolve(); };
+            releases.set(turn.id, done);
+            abort.signal.addEventListener("abort", done, { once: true });
+          });
+          if (abort.signal.aborted) return;
+        }
+        if ((mode === "mid-stream-error" || (mode === "threads" && timing.errorAfterTokens >= 0)) && sent >= timing.errorAfterTokens) {
+          turn.outcome = "error";
+          line({ error: "an error was encountered while running the model: unexpected EOF" });
+          return void res.end();
+        }
+        line({ ...base(), message: { role: "assistant", content: t }, done: false });
+        sent++;
+        turn.tokens = sent;
+        if (timing.burstTokens === 0 || sent % timing.burstTokens === 0) await sleep(timing.tokenDelayMs, abort.signal);
+      }
+      if (abort.signal.aborted) return;
+      // One end time for both durations, so total is exactly prompt plus decode (MP3-03).
+      const ended = Date.now();
+      const promptMs = Math.max(1, decodeFrom - started);
+      const evalMs = Math.max(1, ended - decodeFrom);
       line({
         ...base(),
-        message: { role: "assistant", content: "", tool_calls: [{ function: { name: typeof fn === "string" ? fn : "read", arguments: { path: "~/docs" } } }] },
-        done: false,
+        message: { role: "assistant", content: "" },
+        done: true,
+        done_reason: "stop",
+        total_duration: (promptMs + evalMs) * 1e6,
+        prompt_eval_duration: promptMs * 1e6,
+        eval_duration: evalMs * 1e6,
+        prompt_eval_count: 24 + prompt.length,
+        eval_count: sent,
       });
+      turn.outcome = "done";
+      res.end();
+    } finally {
+      turn.endedAt = Date.now();
+      turn.outcome ??= "cancelled";
+      released.delete(turn.id);
+      release();
     }
-    for (const t of scenario === "slow-drip" ? (options.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : tokens(replyWords(prompt, options.replyWords))) {
-      if (abort.signal.aborted) return;
-      if (scenario === "slow-drip" && options.holdAfterTokens > 0 && sent >= options.holdAfterTokens) {
-        await new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
-        return;
-      }
-      if (scenario === "mid-stream-error" && sent >= options.errorAfterTokens) {
-        line({ error: "an error was encountered while running the model: unexpected EOF" });
-        return void res.end();
-      }
-      line({ ...base(), message: { role: "assistant", content: t }, done: false });
-      sent++;
-      if (options.burstTokens === 0 || sent % options.burstTokens === 0) await sleep(options.tokenDelayMs, abort.signal);
-    }
-    if (abort.signal.aborted) return;
-    // One end time for both durations, so total is exactly prompt plus decode (MP3-03).
-    const ended = Date.now();
-    const promptMs = Math.max(1, decodeFrom - started);
-    const evalMs = Math.max(1, ended - decodeFrom);
-    line({
-      ...base(),
-      message: { role: "assistant", content: "" },
-      done: true,
-      done_reason: "stop",
-      total_duration: (promptMs + evalMs) * 1e6,
-      prompt_eval_duration: promptMs * 1e6,
-      eval_duration: evalMs * 1e6,
-      prompt_eval_count: 24 + prompt.length,
-      eval_count: sent,
-    });
-    res.end();
   }
 
   async function pull(body: unknown, res: ServerResponse): Promise<void> {
@@ -401,6 +485,14 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         return json(res, 200, { scenario });
       }
       if (route === "GET /__fake/state") return json(res, 200, api.state());
+      if (route === "POST /__fake/release") {
+        const id = field(body, "id");
+        for (const turn of turns) if (id === undefined || id === turn.id) {
+          released.add(turn.id);
+          releases.get(turn.id)?.();
+        }
+        return json(res, 200, { released: true });
+      }
 
       if (scenario === "wrong-service") {
         res.writeHead(url.pathname === "/" ? 200 : 404, { "content-type": "text/html" });
@@ -443,7 +535,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           } else {
             const abort = new AbortController();
             res.on("close", () => abort.abort());
-            await load(m, Number(field(field(body, "options"), "num_ctx") ?? 4096), abort.signal);
+            const ctx = Number(field(field(body, "options"), "num_ctx") ?? 4096);
+            const timing = { ...options };
+            const release = await scheduler.acquire(entryFor(m, ctx), abort.signal, timing.parallelLimit, timing.capacityBytes);
+            if (release) {
+              try { await load(m, ctx, abort.signal, timing); } finally { release(); }
+            }
           }
           return json(res, 200, { model: m.name, created_at: new Date().toISOString(), response: "", done: true, done_reason: unload ? "unload" : "load" });
         }
@@ -476,7 +573,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     url: `http://127.0.0.1:${port}`,
     port,
     setScenario,
-    state: () => ({ scenario, options, installed: [...installed], loaded: [...loaded], requests: [...requests] }),
+    state: () => ({ scenario, options, installed: [...installed], loaded: [...loaded], requests: [...requests], turns: turns.map((t) => ({ ...t })), loads: loads.map((l) => ({ ...l })) }),
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

@@ -8,6 +8,7 @@ export async function fakeComfy() {
   let complete = false, missingModel = false;
   let n = 0;
   const active = new Set<string>();
+  const runs: { id: string; startedAt: number; endedAt?: number }[] = [];
   const sockets = new Set<Duplex>();
   const server = createServer(async (req, res) => {
     for await (const _ of req) { /* consume the body */ }
@@ -19,7 +20,7 @@ export async function fakeComfy() {
         CheckpointLoaderSimple: { input: { required: { ckpt_name: [missingModel ? [] : ["sdxl_lightning_4step.safetensors"]] } } },
         LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
       }; break;
-      case "/prompt": { const id = `p${++n}`; active.add(id); body = { prompt_id: id }; break; }
+      case "/prompt": { const id = `p${++n}`; active.add(id); runs.push({ id, startedAt: Date.now() }); body = { prompt_id: id }; break; }
       case "/queue": body = { queue_running: [...active].map(id => [1, id]), queue_pending: [] }; break;
       case "/interrupt": active.clear(); break;
       case "/view":
@@ -28,6 +29,8 @@ export async function fakeComfy() {
       default:
         if (url.pathname.startsWith("/history/") && complete) {
           const id = url.pathname.slice("/history/".length); active.delete(id);
+          const run = runs.find((entry) => entry.id === id);
+          if (run) run.endedAt ??= Date.now();
           body = { [id]: { outputs: { "8": { images: [{ filename: "ship.png" }] } } } };
         }
     }
@@ -46,6 +49,7 @@ export async function fakeComfy() {
   if (address === null || typeof address === "string") throw new Error("fake ComfyUI did not bind");
   return {
     url: `http://127.0.0.1:${address.port}`,
+    state: () => runs.map((run) => ({ ...run })),
     finish: () => { complete = true; },
     missing: () => { missingModel = true; },
     restore: (finish = true) => { missingModel = false; complete = finish; },

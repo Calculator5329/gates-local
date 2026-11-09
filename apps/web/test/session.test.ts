@@ -198,14 +198,19 @@ describe("Stop then Retry (W-02)", () => {
     session.retry();
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(1);
+    expect(store.getState().live).toMatchObject({ turnId: null, pendingUser: "hi", end: { kind: "stopped" }, ending: true });
+    expect(b.server.calls("chat.cancel")).toHaveLength(0);
+    expect(session.canRetry(store.getState())).toBe(false);
     h1.respond({ turnId: "turn-1", userMessage: userMsg("m1") });
     await tick();
     expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([{ turnId: "turn-1" }]);
     session.retry(); // still waiting for turn-1's terminal event
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(1);
+    expect(session.canRetry(store.getState())).toBe(false);
     chat("turn-1", { type: "error", code: "cancelled", message: "cancelled" });
     await tick();
+    expect(session.canRetry(store.getState())).toBe(true);
     session.retry();
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(2);
@@ -619,6 +624,151 @@ async function secondClient(): Promise<{ session: Session; store: Store }> {
   await tick();
   return { session: s2, store: st2 };
 }
+
+describe("background turn endings", () => {
+  it.each([false, true])("TE-01: pending parked send stays unique and frees the automatic queue (completion before acknowledgment: %s)", async (doneFirst) => {
+    await boot();
+    const aHold = b.server.hold("chat.send");
+    void session.send("A");
+    const a = await aHold;
+    session.newThread();
+    b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
+    const bHold = b.server.hold("chat.send");
+    void session.send("B");
+    const second = await bHold;
+    second.respond({ turnId: "turn-B", userMessage: userMsg("uB", "t2", "B") });
+    await tick();
+    await session.send("queued after B");
+    expect(store.getState().queued).toHaveLength(1);
+    chat("turn-A", { type: "start", model: a.params.model, userMessage: userMsg("uA", "t1", "A") });
+    chat("turn-A", { type: "delta", text: "one two" });
+    expect.soft(session.repliesInProgress(store.getState(), "t1")).toBe(1);
+    const finishA = () => chat("turn-A", { type: "done", message: asstMsg("aA", "t1", "one two"), stopReason: "stop" });
+    const next = b.server.hold("chat.send");
+    const finishB = () => chat("turn-B", { type: "done", message: asstMsg("aB", "t2", "B finished"), stopReason: "stop" }, "t2");
+    if (doneFirst) {
+      finishA(); finishB();
+      await tick();
+      expect(b.server.calls("chat.send")).toHaveLength(2);
+    }
+    a.respond({ turnId: "turn-A", userMessage: userMsg("uA", "t1", "A") });
+    await tick();
+    if (!doneFirst) finishA();
+    await tick();
+    expect.soft(session.repliesInProgress(store.getState(), "t1")).toBe(0);
+    expect.soft(session.repliesInProgress(store.getState(), "t2")).toBe(1);
+    if (!doneFirst) finishB();
+    await tick();
+    expect(b.server.calls("chat.send").map((call) => call.params)).toMatchObject([{ content: "A" }, { content: "B" }, { content: "queued after B" }]);
+    (await next).respond({ turnId: "turn-queued", userMessage: userMsg("uQ", "t2", "queued after B") });
+    await tick();
+    expect(store.getState().queued).toHaveLength(0);
+    expect(session.repliesInProgress(store.getState(), "t1")).toBe(0);
+    expect(session.repliesInProgress(store.getState(), "t2")).toBe(1);
+  });
+
+  it("TE-01: rejecting a pending parked send replays the other client's buffered start and words", async () => {
+    await boot();
+    const aHold = b.server.hold("chat.send");
+    void session.send("A");
+    const a = await aHold;
+    session.newThread();
+    b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
+    const bHold = b.server.hold("chat.send");
+    void session.send("B");
+    const second = await bHold;
+    second.respond({ turnId: "turn-B", userMessage: userMsg("uB", "t2", "B") });
+    await tick();
+    chat("foreign-A", { type: "start", model: a.params.model, userMessage: userMsg("foreign", "t1", "Another client's question") });
+    chat("foreign-A", { type: "delta", text: "The other client's words" });
+    a.fail("turn-active", "Another client already started this reply");
+    await tick();
+    expect(session.repliesInProgress(store.getState(), "t1")).toBe(1);
+    session.openThread("t1");
+    await tick(); b.frame();
+    expect(store.getState().live).toMatchObject({ turnId: "foreign-A", text: "The other client's words" });
+  });
+
+  it("keeps both sidebar running marks when another reply takes the live slot, and clears each at its end", async () => {
+    await boot(); await startFirstTurn();
+    expect(session.repliesInProgress(store.getState(), "t1")).toBe(1);
+    session.newThread();
+    b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
+    const held = b.server.hold("chat.send");
+    void session.send("another thread");
+    const pending = await held;
+    pending.respond({ turnId: "turn-2", userMessage: userMsg("other-user", "t2", "another thread") });
+    await tick();
+    expect(session.repliesInProgress(store.getState(), "t1")).toBe(1);
+    expect(session.repliesInProgress(store.getState(), "t2")).toBe(1);
+    chat("turn-1", { type: "done", message: asstMsg("done"), stopReason: "stop" });
+    await tick();
+    expect(session.repliesInProgress(store.getState(), "t1")).toBe(0);
+    expect(session.repliesInProgress(store.getState(), "t2")).toBe(1);
+    session.stop();
+    expect(session.repliesInProgress(store.getState(), "t2")).toBe(0);
+  });
+
+  it("does not preload a model that is already answering when picked in another thread", async () => {
+    await boot(); await startFirstTurn();
+    const model = store.getState().live?.model;
+    expect(model).toBeDefined();
+    session.newThread();
+    session.setContext(8192);
+    session.pickModel(model ?? "");
+    await tick();
+    expect(b.server.calls("models.load")).toHaveLength(0);
+  });
+
+  for (const code of ["cancelled", "stream-error"]) {
+    it(`keeps words and thinking when a parked reply ends with ${code}`, async () => {
+      await boot();
+      await startFirstTurn();
+      chat("turn-1", { type: "thinking", text: "Reasoning before words" });
+      chat("turn-1", { type: "delta", text: "Keep these partial words" });
+      await tick(); b.frame();
+      session.newThread();
+      b.server.answer("threads.create", () => ({ ...methodSamples["threads.create"].result, id: "t2" }));
+      const send = b.server.hold("chat.send");
+      void session.send("another thread");
+      const pending = await send;
+      pending.respond({ turnId: "turn-2", userMessage: userMsg("other-user", "t2", "another thread") });
+      await tick();
+      chat("turn-1", { type: "error", code, message: "The reply ended" });
+      await tick();
+      session.openThread("t1");
+      await tick();
+      const kept = store.getState().messages["t1"]?.find((m) => m.content === "Keep these partial words");
+      expect(kept).toMatchObject({ thinking: "Reasoning before words" });
+      expect(kept === undefined ? undefined : store.getState().stopNotes[kept.id]).toMatch(code === "cancelled" ? /Stopped after/ : /didn't finish/);
+    });
+  }
+
+  it("tracks another client's start while its thread is off screen and restores its words", async () => {
+    await boot();
+    chat("other-turn", { type: "start", model: "qwen3:14b", userMessage: userMsg("other-user") });
+    chat("other-turn", { type: "thinking", text: "Thinking off screen" });
+    chat("other-turn", { type: "delta", text: "Words off screen" });
+    await tick();
+    session.openThread("t1");
+    await tick(); b.frame();
+    expect(store.getState().live).toMatchObject({ turnId: "other-turn", text: "Words off screen", thinking: "Thinking off screen" });
+  });
+
+  it("a failed off-screen reply in an uncached thread keeps its question and earlier history", async () => {
+    await boot();
+    const latest = userMsg("latest-user", "foreign", "latest question");
+    const before = [userMsg("past-user", "foreign", "earlier question"), asstMsg("past-reply", "foreign", "earlier answer"), latest];
+    b.server.answer("threads.get", () => ({ ...methodSamples["threads.get"].result, messages: before }));
+    chat("foreign-turn", { type: "start", model: "qwen3:14b", userMessage: latest }, "foreign");
+    chat("foreign-turn", { type: "delta", text: "unfinished answer" }, "foreign");
+    chat("foreign-turn", { type: "error", code: "stream-error", message: "stream ended" }, "foreign");
+    await tick();
+    session.openThread("foreign");
+    await tick();
+    expect(store.getState().messages["foreign"]?.map((m) => m.content)).toEqual(["earlier question", "earlier answer", "latest question", "unfinished answer"]);
+  });
+});
 
 describe("the same thread open in two clients (PH-02)", () => {
   it("a reply started in one streams in both before it finishes", async () => {

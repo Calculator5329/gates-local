@@ -9,7 +9,16 @@ vi.mock("./store.ts", async (original) => {
   return { ...actual, useStore: <T,>(selector: (s: State) => T) => selector(actual.getState()) };
 });
 vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/files/image.png" }));
-afterEach(() => { setState({ messages: {}, threadId: null }); vi.unstubAllGlobals(); });
+afterEach(() => { setState({ messages: {}, threadId: null, live: null, imageStatus: undefined }); vi.unstubAllGlobals(); });
+
+it("names image generation while a chat is waiting to be admitted behind it", async () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const { Timeline } = await import("./Thread.tsx");
+  setState({ threadId: "chat", live: { gen: 1, threadId: "chat", turnId: null, model: "tiny-chat:2k", startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: "hello" },
+    imageStatus: { state: "busy", owner: "external" } });
+  expect(renderToStaticMarkup(createElement(Timeline, { threadId: "chat" }))).toContain("Waiting for image generation");
+});
 
 describe("an image retry button follows the accepted job", () => {
   it.each(["queued", "running", "done", "error", "cancelled"] as const)("keeps the original button disabled when the retry is %s", async (state) => {

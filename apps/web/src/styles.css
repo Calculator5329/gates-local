@@ -747,6 +747,7 @@ a.btn{text-decoration:none}
 .md blockquote{margin:10px 0;padding-left:14px;border-left:2px solid var(--border-strong);color:var(--muted-foreground)}
 /* port additions: the notice above the composer and the header rename field */
 .c-note{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);width:calc(100% - 48px);max-width:var(--composer-w);margin:0;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--background)}
+.c-note.no{color:var(--red-fg)}
 .hdr .hdr-in{flex:1;min-width:0;width:auto;font-family:var(--font-sans);font-size:14px;font-weight:500}
 .err-line{display:flex;align-items:center;gap:8px;font-size:13px;line-height:24px;color:var(--red-fg)}
 

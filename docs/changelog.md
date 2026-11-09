@@ -75,6 +75,20 @@ large-thread, large-reply, concurrent-stream and reconnect cases. It alternates
 two production builds in one job, keeps raw samples and reports each action's
 noise floor. Results are informational and do not change the release verdict.
 
+## 2026-11-09: Resume a reply after a brief connection loss
+
+- A reply still running on the server resumes in the same page when the
+  connection returns. Its words, Stop button and running mark return without
+  doubling the text already received. Replies stopped here stay stopped.
+
+## 2026-11-09: Keep replies single across overlapping sends and reconnects
+
+- Starting a second chat while the first send is still being accepted keeps
+  one reply in each chat. Queued messages continue after those replies finish,
+  including when a reply finishes before its send is acknowledged.
+- A joining client receives the current reply's words once. A reply that
+  finishes while that client connects comes from the saved conversation.
+
 ## 2026-11-09: Measure open GPU Details through a refresh
 
 GPU refresh checks now target the visible verdict, open Details, and measure
@@ -603,6 +617,21 @@ and selected reply text. Desktop permission handling remains unchanged.
   earlier images, and attaching new images requires a vision model.
 - Browser and real desktop acceptance is pending on the external runner.
   The JS bundle exceeds its existing budget; the budget is unchanged.
+
+## 2026-11-08: Replies across threads
+
+- Every running reply keeps its sidebar mark when another chat starts replying.
+  A chat waiting behind an image says it is waiting for image generation.
+- Leaving a running chat, opening a second client or reloading now restores its
+  in-flight words, thinking and tool rows. A stopped or failed background reply
+  keeps its partial words in the current session; a runtime switch also saves
+  tool-only partials. A failed reply in a previously unopened chat keeps its
+  question and earlier messages too.
+- Send now interrupts its own chat and can send while another chat continues.
+  Automatic queued messages still wait until the client's other replies finish.
+- Picking a model already answering avoids a redundant preload. A request waiting
+  for Ollama says so before thinking starts, and a memory refusal uses red.
+  A send that cannot fit refuses before waiting behind another cold load.
 
 ## 2026-11-08: Steady reply streaming
 

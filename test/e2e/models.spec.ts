@@ -6,6 +6,8 @@
 import type { Page } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
+test.use({ video: "on" });
+
 const openModels = async (page: Page) => {
   await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
@@ -176,7 +178,7 @@ for (const width of [1280, 360]) {
   test.describe(`at ${width} px`, () => {
     test.use({ scenario: "embed-smallest", viewport: { width, height: 800 } });
 
-    test("each installed row keeps its actions control inside the row and does not overflow", async ({ page, open }) => {
+    test("each installed row keeps its actions control inside the row and does not overflow", async ({ page, open }, info) => {
       await open();
       await waitReady(page);
       await openModels(page);
@@ -198,6 +200,7 @@ for (const width of [1280, 360]) {
         expect(scroll, `${label}: row content fits the row`).toBeLessThanOrEqual(client);
         expect(r.x + r.width, `${label}: row inside the window`).toBeLessThanOrEqual(width);
       }
+      await page.screenshot({ path: info.outputPath("models.png"), animations: "disabled" });
     });
   });
 }

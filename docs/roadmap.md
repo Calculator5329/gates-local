@@ -348,6 +348,10 @@ cover connected failure, Cancel, editing, removal, retry and a live download
 during a disconnect. All four stopped-download wording checks were watched red.
 RS-03 remains dropped.
 
+Stop during a replayed-send acknowledgment is ignored once, a reply that a second
+Stop does cancel: return the real active turn id on replay and cancel it when the
+send was stopped at admission.
+
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

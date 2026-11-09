@@ -324,7 +324,9 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expect(r.chats()).toBe(1);
     expect(r.app.activeTurns()).toBe(0);
     expectRuntimeChangedEnd(r.events);
-    expect(r.store.getThread(r.thread.id).messages.map((m) => m.role)).toEqual(["user"]);
+    const kept = r.store.getThread(r.thread.id).messages;
+    expect(kept.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(kept[1]).toMatchObject({ content: "", tools: [{ name: "image", state: "error" }] });
     await r.done();
   });
 
@@ -367,6 +369,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toHaveLength(1);
     expectRuntimeChangedEnd(r.events);
+    expect(r.store.getThread(r.thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "", tools: [{ name: "image", state: "error" }] });
     const seen = r.events.length;
     // The stuck operation finishes in the background: its result is dropped, its job taken back.
     tool.resolve();
@@ -959,7 +962,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     comfy.close();
   });
 
-  it("R5-02: a cold X holding the load gate, and Y short even with X gone: Y refuses at once and X keeps its load", async () => {
+  it.each([{ stopOthers: true }, { askFirst: true }] as const)("a cold X holding the load gate: impossible Y refuses before waiting (%j)", async (consent) => {
     const lease = createGpuLease();
     const xAsked = signalled();
     let yAsked = false;
@@ -982,7 +985,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     );
     const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settledWithin(xAsked.promise, 1000)).toEqual({ resolved: undefined });
-    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), 1000);
+    const sent = await settledWithin(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, ...consent }, ctx)), 1000);
     expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
     expect(r.events.filter((e) => e.turnId === x.turnId && (e.type === "error" || e.type === "done"))).toEqual([]);
     expect(yAsked).toBe(false);

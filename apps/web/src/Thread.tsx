@@ -255,11 +255,12 @@ const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
 function Working({ startedAt, loading, thinking }: { startedAt: number; loading: boolean; thinking: boolean }) {
   const now = useTicker(250, true);
   const cpu = useStore((s) => noGpu(s.gpu));
+  const imageBusy = useStore((s) => s.live?.turnId === null && s.imageStatus !== NA && s.imageStatus?.state === "busy");
   const secs = Math.floor((now - startedAt) / 1000);
   return (
     <div className={thinking ? "working thinking" : "working"}>
       {thinking ? <Icon id="bulb" /> : <Icon id="spin" cls="spin" />}
-      <span className="ph">{loading ? (cpu ? "Loading into memory…" : "Loading into GPU memory…") : "Thinking"}</span>
+      <span className="ph">{imageBusy ? "Waiting for image generation…" : loading ? (cpu ? "Loading into memory…" : "Loading into GPU memory…") : thinking ? "Thinking" : "Waiting for Ollama…"}</span>
       <span className="el">{secs >= 1 ? `· ${secs} s` : ""}</span>
     </div>
   );

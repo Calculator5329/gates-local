@@ -92,6 +92,7 @@ interface Rig {
   pushes: Array<{ channel: Channel; payload: unknown }>;
   /** Stored message count of the thread at the moment each done event left app.ts (in process, before the socket). */
   storedAtDonePush: number[];
+  replayedAtDone: Payload<"chat.event">[];
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
 }
 
@@ -135,10 +136,11 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   cleanups.push(() => catalog.stop()); // no discovery retry outlives the test (MP2-04)
   const gpu: Gpu = { freeMib: 15000, memAvailableKb: 30_000_000 };
   const storedAtDonePush: number[] = [];
+  const replayedAtDone: Payload<"chat.event">[] = [];
 
   let server: WsServer | undefined;
   const lease = opts.image ? createGpuLease() : undefined;
-  const app = createApp({
+  const app: App = createApp({
     dataDir: dir,
     store,
     runtime,
@@ -147,7 +149,10 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     push: (c, p) => {
       if (c === "chat.event") {
         const { threadId, event } = p as Payload<"chat.event">;
-        if (event.type === "done") storedAtDonePush.push(store.getThread(threadId).messages.length);
+        if (event.type === "done") {
+          storedAtDonePush.push(store.getThread(threadId).messages.length);
+          app.replayTurns((channel, payload) => { if (channel === "chat.event") replayedAtDone.push(payload as Payload<"chat.event">); });
+        }
       }
       server?.push(c, p);
     },
@@ -158,7 +163,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     log: () => undefined,
   });
   cleanups.push(() => app.shutdown());
-  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], handlers: app.handlers, log: () => undefined });
+  server = await startWsServer({ port: 0, token: TOKEN, allowedOrigins: [], handlers: app.handlers, onClientReady: (push) => app.replayTurns(push), log: () => undefined });
   const ws = server;
   cleanups.push(() => ws.close());
 
@@ -200,7 +205,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, waitFor };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, waitFor };
 }
 
 const events = (r: Rig, turnId: string) =>
@@ -262,7 +267,12 @@ it("tells the model and person when a text-only follow-up omits earlier images",
   const first = await r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
   r.setShow(res => json(res, 200, { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] }));
+  r.setChat(slowReply);
   const next = await r.client.call("chat.send", { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
+  await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "delta" && p.event.contextNotice !== undefined);
+  const replayed: Payload<"chat.event">[] = [];
+  r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
+  expect(replayed).toContainEqual(expect.objectContaining({ turnId: next.turnId, event: expect.objectContaining({ type: "delta", contextNotice: expect.stringContaining("image") }) }));
   await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "done");
   expect(JSON.stringify(r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body)).toContain("image was here and is unavailable");
   expect(events(r, next.turnId)).toContainEqual(expect.objectContaining({ type: "done", message: expect.objectContaining({ contextNotice: expect.stringContaining("image") }) }));
@@ -352,6 +362,77 @@ describe("threads.*", () => {
 });
 
 describe("chat.send", () => {
+  it.each([false, true])("TE-02: a reply starting before the first request crosses the snapshot boundary once (already finished: %s)", async (finishedFirst) => {
+    const r = await rig();
+    let response: ServerResponse | undefined;
+    r.setChat((res) => {
+      response = res;
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(piece("one "));
+    });
+    const thread = await r.client.call("threads.create", { title: "join before start" });
+    const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
+    cleanups.push(() => socket.terminate());
+    const newcomer = createClient(socket as unknown as SocketLike);
+    const joined: Payload<"chat.event">[] = [];
+    newcomer.subscribe("chat.event", (event) => joined.push(event));
+    await new Promise<void>((resolve) => socket.once("open", resolve));
+    const receivedEarlierFrames = () => new Promise<void>((resolve) => { socket.once("pong", () => resolve()); socket.ping(); });
+    const sent = await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "delta");
+    await receivedEarlierFrames();
+    expect.soft(joined.length).toBe(0);
+    const reply = response;
+    if (reply === undefined) throw new Error("No held model response");
+    const finish = () => { reply.write(piece("two ")); reply.end(doneLine); };
+    if (finishedFirst) {
+      finish();
+      await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "done");
+      await receivedEarlierFrames();
+    }
+    // This is the newcomer's first request; its chat subscriptions are already installed.
+    await newcomer.call("threads.get", { threadId: thread.id });
+    if (!finishedFirst) {
+      finish();
+      await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "done");
+    }
+    const history = await newcomer.call("threads.get", { threadId: thread.id });
+    expect(history.messages.map((message) => [message.role, message.content])).toEqual([["user", "hello"], ["assistant", "one two "]]);
+    if (finishedFirst) {
+      // A completed reply comes from durable history, with no stale live replay.
+      expect(joined.length).toBe(0);
+    } else {
+      expect.soft(joined.filter((event) => event.event.type === "start")).toHaveLength(1);
+      expect(joined.flatMap((event) => event.event.type === "delta" ? [event.event.text] : []).join("")).toBe("one two ");
+      expect(joined.filter((event) => event.event.type === "done")).toHaveLength(1);
+    }
+  });
+
+  it("a late client receives an in-flight snapshot once, without replaying words to existing clients", async () => {
+    const r = await rig();
+    r.setChat(slowReply);
+    const thread = await r.client.call("threads.create", { title: "late join" });
+    await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.event.type === "delta");
+    const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
+    cleanups.push(() => socket.terminate());
+    const client = createClient(socket as unknown as SocketLike);
+    const joined: Payload<"chat.event">[] = [];
+    client.subscribe("chat.event", (event) => joined.push(event));
+    await new Promise<void>((resolve) => socket.once("open", resolve));
+    await client.call("threads.list", {});
+    await vi.waitFor(() => expect(joined.filter((p) => p.event.type === "start")).toHaveLength(1), { timeout: 1000 });
+    await vi.waitFor(() => expect(joined.some((p) => p.event.type === "done")).toBe(true), { timeout: 2000 });
+    const words = joined.flatMap((p) => p.event.type === "delta" ? [p.event.text] : []).join("");
+    expect(words).toBe("one two three four ");
+    const originalWords = r.pushes.flatMap((p) => {
+      if (p.channel !== "chat.event") return [];
+      const event = (p.payload as Payload<"chat.event">).event;
+      return event.type === "delta" ? [event.text] : [];
+    }).join("");
+    expect(originalWords).toBe(words);
+  });
+
   it("streams every event, persists the done message before pushing done, and returns at once", async () => {
     const r = await rig();
     let release!: () => void;
@@ -375,6 +456,7 @@ describe("chat.send", () => {
     const done = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     // The assistant message was in the store when the done event was pushed.
     expect(r.storedAtDonePush).toEqual([2]);
+    expect(r.replayedAtDone).toEqual([]);
 
     expect(events(r, sent.turnId).map((e) => e.type)).toEqual(["start", "delta", "delta", "done"]);
     if (done.event.type !== "done") throw new Error("unreachable");

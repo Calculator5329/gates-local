@@ -5,7 +5,7 @@
 // it reports "ready" and is never preloaded or claimed. An /api/ps that
 // cannot be read is not "nothing loaded": the load refuses rather than claim
 // a model that may be someone else's. Otherwise it runs the fit check and,
-// unless it refuses, preloads with an empty /api/generate.
+// unless it refuses or is already resident at that context, preloads with an empty /api/generate.
 // A chat turn reserves its model synchronously (so models.remove sees it at
 // once), then admit() decides, before the chat request goes out, whether the
 // turn is a cold load: "loading" is pushed then and "ready" at the first
@@ -323,6 +323,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       if (afterFit) return finish(afterFit);
       numCtx = report.numCtx;
       if (report.verdict === "refuse") return finish({ model, numCtx, state: "error", message: report.message ?? `${model} at num_ctx ${numCtx} does not fit.` });
+      // Empty generate uses a runner slot too. A redundant preload could wait
+      // behind its reply while holding the load gate needed by another chat.
+      if (here.models.get(tag)?.contextLength === numCtx) return finish({ model, numCtx, state: "ready" });
       notice = openNotice(model, numCtx);
       try {
         await preload(baseUrl, model, numCtx, signal);

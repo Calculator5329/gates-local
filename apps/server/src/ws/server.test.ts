@@ -11,7 +11,7 @@ import {
 import { methodSamples, pushSamples } from "@gates-local/contracts/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { type Handlers, type WsServer, startWsServer } from "./server.ts";
+import { type Handlers, type WsServer, type WsServerOptions, startWsServer } from "./server.ts";
 
 const TOKEN = "per-launch-secret";
 const APP_ORIGIN = "http://127.0.0.1:5187";
@@ -33,12 +33,13 @@ function sampleHandlers(seen: Array<[string, unknown]>): Handlers {
   return out as unknown as Handlers;
 }
 
-async function start(handlers: Partial<Handlers>, extra: { logs?: string[] } = {}): Promise<WsServer> {
+async function start(handlers: Partial<Handlers>, extra: { logs?: string[]; onClientReady?: WsServerOptions["onClientReady"] } = {}): Promise<WsServer> {
   const server = await startWsServer({
     port: 0,
     token: TOKEN,
     allowedOrigins: [APP_ORIGIN],
     handlers,
+    onClientReady: extra.onClientReady,
     log: (line) => extra.logs?.push(line),
   });
   open.push(server);
@@ -103,6 +104,36 @@ function rawFrames(ws: WebSocket) {
 }
 
 describe("round trip over a real socket", () => {
+  it("TE-02: a failed snapshot closes the client before dispatch or live chat delivery", async () => {
+    let dispatched = 0;
+    const logs: string[] = [];
+    const server = await start({ "threads.list": () => { dispatched++; return []; } }, {
+      logs, onClientReady: () => { throw new Error("snapshot unavailable"); },
+    });
+    const connected = await client(server);
+    await expect(connected.client.call("threads.list", {})).rejects.toMatchObject({ code: "closed" });
+    expect(dispatched).toBe(0);
+    expect(logs.some((line) => line.includes("snapshot unavailable"))).toBe(true);
+  });
+
+  it("TE-02: a quiet client gets current chat state, never a backlog of pre-request broadcasts", async () => {
+    const payload = { threadId: "thread", turnId: "turn", event: { type: "delta" as const, text: "current" } };
+    const server = await start({ "threads.list": () => [] }, { onClientReady: (push) => push("chat.event", payload) });
+    const quiet = await client(server);
+    const chat: unknown[] = [], changed: unknown[] = [];
+    quiet.client.subscribe("chat.event", (event) => chat.push(event));
+    quiet.client.subscribe("threads.changed", (event) => changed.push(event));
+    for (let i = 0; i < 10_000; i++) server.push("chat.event", { ...payload, event: { type: "delta", text: "old" } });
+    server.push("threads.changed", { threadId: "thread" });
+    // Ping is not a request: the quiet client remains before the boundary.
+    await new Promise<void>((resolve) => { quiet.ws.once("pong", () => resolve()); quiet.ws.ping(); });
+    expect.soft(chat.length).toBe(0);
+    expect(changed).toEqual([{ threadId: "thread" }]);
+    await quiet.client.call("threads.list", {});
+    expect(chat.length).toBe(1);
+    expect(chat).toEqual([payload]);
+  });
+
   it.each(methodNames)("%s", async (method: MethodName) => {
     const seen: Array<[string, unknown]> = [];
     const server = await start(sampleHandlers(seen));

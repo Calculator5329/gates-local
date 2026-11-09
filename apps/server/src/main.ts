@@ -260,6 +260,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: { ...app.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
       onClientCount: (n) => services.gpu.clientsChanged(n),
+      onClientReady: (push) => app.replayTurns(push),
       dataDir,
       log: (line) => log(`ws ${line}`),
       ...(phone === null ? {} : { phone }),
