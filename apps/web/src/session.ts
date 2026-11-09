@@ -50,7 +50,7 @@ const threadSession = createThreads({ applyServerEvent,
   navigationGeneration: () => navigation.generation,
   pendingSettings: () => navigation.pendingSettings,
 });
-export const { reloadThread, renameThread, deleteThread, preloadThread } = threadSession;
+export const { reloadThread, renameThread, deleteThread, waitForThreadDeletion, preloadThread } = threadSession;
 const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
 
 const fitSession = createFit({ applyServerEvent, call, blockingFor, isStopped: () => connection.stopped });

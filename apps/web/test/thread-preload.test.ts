@@ -82,6 +82,37 @@ it("does not fetch during a sweep or for the active thread, and keeps hover hist
   expect(store.getState().messages["a"]).toEqual([message("a")]);
 });
 
+it.each([true, false])("a thread menu suppresses hover work (menu opened before hover: %s)", async (alreadyOpen) => {
+  const openMenu = () => store.setState({ pop: { id: "thread", thread: "a", kb: false } });
+  if (alreadyOpen) openMenu();
+  session.preloadThread("a");
+  if (!alreadyOpen) { await vi.advanceTimersByTimeAsync(80); openMenu(); }
+  await dwell();
+  expect(gets()).toEqual([]);
+  store.setState({ pop: null }); await dwell();
+  expect(gets()).toEqual([]);
+  session.preloadThread("a"); await dwell();
+  expect(gets()).toEqual([{ threadId: "a" }]);
+});
+
+it.each([true, false])("an export's deletion wait settles after the thread's action (delete succeeds: %s)", async (succeeds) => {
+  store.setState({ threads: [snapshot("a").thread] });
+  const holding = browser.server.hold("threads.delete");
+  const deletion = session.deleteThread("a");
+  const held = await holding;
+  let settled = false;
+  const waiting = session.waitForThreadDeletion("a").then(() => { settled = true; });
+  await session.waitForThreadDeletion("other");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(settled).toBe(false);
+  if (succeeds) held.respond({ threadId: "a" });
+  else held.fail("internal", "delete failed");
+  await deletion; await waiting;
+  expect(settled).toBe(true);
+  expect(store.getState().threads.some(t => t.id === "a")).toBe(!succeeds);
+  await session.waitForThreadDeletion("a");
+});
+
 it("joins an in-flight preload on click, but only one speculative request can be outstanding", async () => {
   const holding = browser.server.hold("threads.get");
   session.preloadThread("a"); await dwell();

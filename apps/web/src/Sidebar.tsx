@@ -122,6 +122,7 @@ const closeSearch = () => setState({ searchOpen: false, search: "" });
 
 /** The row's thread actions, anchored to its button or to a context-menu point. */
 function openThreadMenu(thread: string, at: { x: number; y: number } | undefined, kb: boolean): void {
+  preloadThread(null);
   closeTip();
   setState({ pop: { id: "thread", kb, thread, ...(at === undefined ? {} : { at }) } });
 }

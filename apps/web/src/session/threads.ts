@@ -136,7 +136,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (threadId === null) return;
     const ready = () => {
       const s = getState();
-      return s.conn.kind === "open" && s.threadId !== threadId &&
+      return s.conn.kind === "open" && s.pop?.id !== "thread" && s.threadId !== threadId &&
         !(s.messages[threadId] !== undefined && !stale.has(threadId)) && !previews.has(threadId);
     };
     if (!ready()) return;
@@ -274,7 +274,22 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     if (t !== "") await threadAction("rename", threadId, () => call("threads.rename", { threadId, title: t }));
   }
 
-  async function deleteThread(threadId: string): Promise<void> {
+  const deletions = new Map<string, Promise<void>>();
+
+  /** Export must let a delete already requested for this thread settle before making a file. */
+  function waitForThreadDeletion(threadId: string): Promise<void> {
+    return deletions.get(threadId) ?? Promise.resolve();
+  }
+
+  function deleteThread(threadId: string): Promise<void> {
+    const pending = deletions.get(threadId);
+    if (pending !== undefined) return pending;
+    const deletion = performDelete(threadId).finally(() => deletions.delete(threadId));
+    deletions.set(threadId, deletion);
+    return deletion;
+  }
+
+  async function performDelete(threadId: string): Promise<void> {
     if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }))) return;
     invalidatePreload(threadId);
     // A snapshot sent before this confirmed deletion cannot resurrect it.
@@ -338,7 +353,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
     refreshThreads, noteMessage, loadThread, restoreSaved, reloadThread, loading,
     preloadThread,
     threadsChanged(threadId: string) { invalidatePreload(threadId); void refreshThreads(); },
-    renameThread, deleteThread, createThread, untrackedDone, imageSaved,
+    renameThread, deleteThread, waitForThreadDeletion, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
     listOrder: threadsOrder,
     markOtherThreadsStale(s: State) {

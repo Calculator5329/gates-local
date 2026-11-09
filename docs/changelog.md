@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-09: Thread menus cancel pending hover loads before export
+
+- Opening a row's menu by button, keyboard or right-click cancels hover intent;
+  an open thread menu suppresses further hover loads. Starting export cancels it
+  too, so advancing a timeout cannot start an extra speculative history request.
+- Export still reads current server history. If deletion was requested while it
+  loaded, export waits for that deletion to settle within its existing timeout
+  before checking the thread and making a file. Browser checks cover deletion
+  with hover history already cached or still in flight, including a history
+  response arriving before the delete confirmation.
 ## 2026-11-09: Unit tests wait for state and clean up, and a query stops when its server died early
 
 - Each test run gets one scratch folder and removes it at the end. Run

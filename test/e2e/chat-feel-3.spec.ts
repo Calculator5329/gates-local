@@ -56,7 +56,7 @@ async function tap(page: Page): Promise<Tap> {
     });
     server.onMessage((m) => {
       const res = parse(m);
-      const method = res?.type === "response" ? (methodOf.get(res.id) ?? "") : "";
+      const method = res?.type === "response" ? (methodOf.get(res.id) ?? "") : res?.type === "push" ? channelOf(res) : "";
       const change = edit.get(method);
       const frame = change === undefined ? m : rewritten(m, change);
       const deliver = () => { pending.delete(res?.id); ws.send(frame); };
@@ -92,6 +92,10 @@ async function tap(page: Page): Promise<Tap> {
 function rewritten(m: string | Buffer, change: (result: unknown) => unknown): string {
   const frame = JSON.parse(String(m)) as { result?: unknown };
   return JSON.stringify({ ...frame, result: change(frame.result) });
+}
+
+function channelOf(frame: object): string {
+  return "channel" in frame && typeof frame.channel === "string" ? frame.channel : "";
 }
 
 function parse(m: string | Buffer): { type?: unknown; id?: unknown; method?: unknown } | undefined {
@@ -376,4 +380,41 @@ test.describe("Export as Markdown from the thread menu", () => {
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     expect(files).toHaveLength(0);
   });
+
+  for (const preload of ["in flight", "cached"] as const) {
+    test(`deleting during export ignores hover history ${preload}`, async ({ page, open, seededThread }) => {
+      const t = await tap(page);
+      await open(`#thread=${seededThread ?? ""}`);
+      await waitReady(page);
+      await expect(page.locator(".tl .turn").first()).toBeVisible();
+      const files = downloads(page);
+      if (preload === "in flight") t.hold.add("threads.get");
+      const before = t.calls.get("threads.get") ?? 0;
+      await row(page, OTHER).hover();
+      await expect.poll(() => t.calls.get("threads.get") ?? 0).toBe(before + 1);
+      if (preload === "in flight") await expect.poll(() => t.queued("threads.get")).toBe(1);
+      else await expect.poll(() => t.pending.size).toBe(0);
+
+      // Hold the export independently: a completed hover is never its source.
+      t.hold.add("threads.get");
+      await exportRow(page, OTHER);
+      const held = preload === "in flight" ? 2 : 1;
+      await expect.poll(() => t.queued("threads.get")).toBe(held);
+      // Model a delete requested before history arrives but confirmed after it.
+      t.hold.add("threads.delete");
+      t.hold.add("threads.changed");
+      await row(page, OTHER).click({ button: "right" });
+      await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+      await expect.poll(() => t.queued("threads.delete")).toBe(1);
+      expect(t.release("threads.get")).toBe(held);
+      await expect.poll(() => t.pending.size).toBe(1);
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      expect(files).toHaveLength(0);
+      expect(t.release("threads.delete")).toBe(1);
+      expect(t.release("threads.changed")).toBe(1);
+      await expect(row(page, OTHER)).toHaveCount(0);
+      await expect(page.locator('.c-note[role="status"]')).toContainText("it was deleted");
+      expect(files).toHaveLength(0);
+    });
+  }
 });

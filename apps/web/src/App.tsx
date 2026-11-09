@@ -15,7 +15,7 @@ import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
-import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
+import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
@@ -295,12 +295,14 @@ const EXPORT_WAIT_MS = 8000;
  * meanwhile, says so instead.
  */
 async function exportFromMenu(id: string): Promise<void> {
+  preloadThread(null);
   const title = getState().threads.find((t) => t.id === id)?.title ?? "this thread";
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<"late">((done) => {
     timer = setTimeout(() => done("late"), EXPORT_WAIT_MS);
   });
-  const got = await Promise.race([call("threads.get", { threadId: id }), late])
+  const read = call("threads.get", { threadId: id }).finally(() => waitForThreadDeletion(id));
+  const got = await Promise.race([read, late])
     .catch(() => "failed" as const)
     .finally(() => clearTimeout(timer));
   const fail = (why: string) => setState({ notice: `Couldn't export “${title}”: ${why}` });
