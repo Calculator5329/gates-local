@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-09: Hover refreshes replace stale visited history after reconnect
+
+- A completed hover read no longer marks an older displayed history current.
+  Clicking the thread installs the fresh preview before clearing its stale marker.
+- StrictMode and grapheme pacing checks now deliver text after mount and require
+  intermediate frames. Very large hover transfers remain a roadmap follow-up.
+
+## 2026-11-09: Returning to a live reply shows its received words
+
+- Returning to a streaming reply shows the text already received immediately;
+  subsequent arrivals keep their steady pacing. Saved replies no longer set up
+  reduced-motion listeners for text that is already complete.
+- Resting a mouse pointer on a thread for 160 ms prepares its history. A click
+  reuses that snapshot or joins its pending read. Active rows, brief pointer
+  sweeps and touch-only listeners do not fetch speculative history.
+- The speculative cache holds at most two histories, 4,000 messages total and
+  one million serialized characters, with one read in flight. Thread changes,
+  new messages, images and reconnects invalidate it; a late load cannot revive
+  a confirmed deletion. An already sent read drains when hover is cancelled.
 ## 2026-11-09: A reply that is stopped, fails or is cut off keeps its words
 
 - Every way a turn ends goes through one function in `apps/server/src/app.ts`.

@@ -5,7 +5,7 @@ import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState } fr
 import { rtInfo, rtOf } from "./Banner.tsx";
 import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
-import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread } from "./session.ts";
+import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread, preloadThread } from "./session.ts";
 import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
 import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 import { SidebarUpdate } from "./Updates.tsx";
@@ -144,6 +144,7 @@ function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
 const pendingThreadOf = (s: State) => (streaming(s) && s.live?.turnId === null ? s.live.threadId : null);
 
 function ThreadList() {
+  useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
   const on = useStore((s) => (s.view === "thread" ? s.threadId : null));
@@ -172,6 +173,10 @@ function ThreadList() {
               className={`sb-row${on === t.id ? " on" : ""}${menuFor === t.id ? " menu-open" : ""}`}
               data-thread={t.id}
               data-tipt={t.title}
+              onPointerEnter={e => {
+                if (e.pointerType === "mouse" && matchMedia("(hover: hover) and (pointer: fine)").matches) preloadThread(t.id);
+              }}
+              onPointerLeave={() => preloadThread(null)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
             >
               <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}>

@@ -85,7 +85,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
    * after it was sent: they are newer than its snapshot and replay over it by
    * id, so a reply saved meanwhile is not lost (WF-02).
    */
-  const loads = new Set<{ readonly threadId: string; readonly seq: number; readonly since: Message[] }>();
+  const loads = new Set<{ readonly threadId: string; readonly seq: number; readonly since: Message[]; readonly preload?: Preload | undefined }>();
 
   /** Each thread load's ticket, in the order they were sent. */
   let loadSeq = 0;
@@ -96,11 +96,74 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   const unrestored = new Set<string>();
 
   const creatingDrafts = new Set<number>();
+  // Speculation never enters the displayed store. Two histories, 4,000
+  // messages and one million serialized characters bound what hover retains.
+  const previews = new Map<string, { messages: readonly Message[]; size: number }>();
+  interface Preload {
+    readonly threadId: string;
+    cancelled: boolean;
+    used: boolean;
+    navigation?: number;
+    completion: Promise<void>;
+  }
+  let preloading: Preload | null = null;
+  let intent: ReturnType<typeof setTimeout> | undefined;
+
+  function invalidatePreload(threadId: string): void {
+    previews.delete(threadId);
+    if (preloading !== null && preloading.threadId === threadId) preloading.cancelled = true;
+  }
+
+  function keepPreview(threadId: string, messages: readonly Message[]): void {
+    if (messages.length > 4000) return;
+    const size = JSON.stringify(messages).length;
+    if (size > 1_000_000) return;
+    previews.delete(threadId);
+    previews.set(threadId, { messages, size });
+    while (previews.size > 2 || [...previews.values()].reduce((n, p) => n + p.size, 0) > 1_000_000 ||
+      [...previews.values()].reduce((n, p) => n + p.messages.length, 0) > 4000) {
+      const oldest = previews.keys().next().value;
+      if (oldest === undefined) break;
+      previews.delete(oldest);
+    }
+  }
+
+  /** Leaving cancels intent and discards an unused result. A sent RPC drains
+   * in its single slot: the wire has no cancellation method for reads. */
+  function preloadThread(threadId: string | null): void {
+    clearTimeout(intent);
+    if (preloading !== null && !preloading.used && preloading.threadId !== threadId) preloading.cancelled = true;
+    if (threadId === null) return;
+    const ready = () => {
+      const s = getState();
+      return s.conn.kind === "open" && s.threadId !== threadId &&
+        !(s.messages[threadId] !== undefined && !stale.has(threadId)) && !previews.has(threadId);
+    };
+    if (!ready()) return;
+    intent = setTimeout(() => {
+      if (!ready() || preloading !== null) return;
+      const p: Preload = { threadId, cancelled: false, used: false, completion: Promise.resolve() };
+      preloading = p;
+      p.completion = fetchThread(threadId, p);
+    }, 160);
+  }
+
+  function installHistory(threadId: string, messages: readonly Message[]): void {
+    stale.delete(threadId);
+    applyServerEvent((s) => ({
+      messages: { ...s.messages, [threadId]: messages },
+      ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
+      ...savedModel(s, threadId, messages),
+    }));
+    if (getState().models === undefined) unrestored.add(threadId);
+    setLoadError(threadId, null);
+  }
 
   async function refreshThreads(): Promise<void> {
     const ticket = threadsOrder.next();
     const threads = await call("threads.list", {}).catch(() => undefined);
     if (threads === undefined || !threadsOrder.current(ticket)) return;
+    for (const id of previews.keys()) if (!threads.some(t => t.id === id)) invalidatePreload(id);
     applyServerEvent((s) => {
       const open = s.threadId !== null && threads.some((t) => t.id === s.threadId);
       const threadModels = Object.fromEntries(Object.entries(s.threadModels).filter(([id]) => threads.some((t) => t.id === id)));
@@ -110,40 +173,60 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   /** A message this client learned outside a thread load: the loads in flight for its thread replay it. */
   function noteMessage(threadId: string, msg: Message): void {
+    previews.delete(threadId);
     for (const l of loads) if (l.threadId === threadId) l.since.push(msg);
   }
 
   async function loadThread(threadId: string, force = false): Promise<void> {
     if (!force && getState().messages[threadId] !== undefined && !stale.has(threadId)) return;
+    if (!force) {
+      const preview = previews.get(threadId);
+      if (preview !== undefined) {
+        previews.delete(threadId);
+        installHistory(threadId, preview.messages);
+        return;
+      }
+      const p = preloading;
+      if (p?.threadId === threadId && !p.cancelled) {
+        p.used = true;
+        p.navigation = navigationGeneration();
+        setLoadError(threadId, null);
+        await p.completion;
+        // A change received during that read invalidates it, even after a
+        // click joined it. Fetch current truth instead of publishing the old snapshot.
+        if (p.cancelled) await loadThread(threadId);
+        return;
+      }
+    }
+    await fetchThread(threadId);
+  }
+
+  async function fetchThread(threadId: string, preload?: Preload): Promise<void> {
     const nav = navigationGeneration();
-    const req = { threadId, seq: ++loadSeq, since: [] as Message[] };
+    const req = { threadId, seq: ++loadSeq, since: [] as Message[], preload };
     loads.add(req);
-    setLoadError(threadId, null);
-    const older = () => req.seq < (landed.get(threadId) ?? 0);
+    if (preload === undefined || preload.used) setLoadError(threadId, null);
+    const older = () => preload?.cancelled === true || req.seq < (landed.get(threadId) ?? 0);
     try {
       const { messages: snapshot } = await call("threads.get", { threadId });
       if (older()) return;
       landed.set(threadId, req.seq);
-      stale.delete(threadId);
       const messages = req.since.reduce(upsertMessage, snapshot);
-      applyServerEvent((s) => ({
-        messages: { ...s.messages, [threadId]: messages },
-        ...(savedReplyFor(s.live, threadId, messages) ? { live: null } : {}),
-        ...savedModel(s, threadId, messages),
-      }));
-      if (getState().models === undefined) unrestored.add(threadId);
-      setLoadError(threadId, null);
+      if (preload !== undefined && !preload.used) keepPreview(threadId, messages);
+      else installHistory(threadId, messages);
     } catch (e) {
       if (older()) return;
+      if (preload !== undefined && !preload.used) return;
       // a failure lands too: an older answer that comes after it must not clear or replace its error
       landed.set(threadId, req.seq);
       // a cached thread keeps its content; either way the open thread says why and offers Retry
       setLoadError(threadId, failure("load this conversation", e));
       // a thread that is gone leaves the screen, only while it is still on screen and nobody navigated since (Settings over it counts, loaded or still loading)
       const s = getState();
-      if (codeOf(e) === "thread-not-found" && nav === navigationGeneration() && pendingSettings() === null && s.view === "thread" && s.threadId === threadId) applyServerEvent({ view: "new", threadId: null });
+      if (codeOf(e) === "thread-not-found" && (preload?.navigation ?? nav) === navigationGeneration() && pendingSettings() === null && s.view === "thread" && s.threadId === threadId) applyServerEvent({ view: "new", threadId: null });
     } finally {
       loads.delete(req);
+      if (preload !== undefined && preloading === preload) preloading = null;
     }
   }
 
@@ -160,7 +243,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   function loading(threadId: string): boolean {
-    return [...loads].some((l) => l.threadId === threadId);
+    return [...loads].some((l) => l.threadId === threadId && (l.preload === undefined || l.preload.used));
   }
 
   let actionNotice: { readonly key: string; readonly message: string } | undefined;
@@ -193,6 +276,9 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   async function deleteThread(threadId: string): Promise<void> {
     if (!await threadAction("delete", threadId, () => call("threads.delete", { threadId }))) return;
+    invalidatePreload(threadId);
+    // A snapshot sent before this confirmed deletion cannot resurrect it.
+    landed.set(threadId, ++loadSeq);
     threadsOrder.next();
     applyServerEvent((s) => {
       const { [threadId]: _gone, ...messages } = s.messages;
@@ -243,16 +329,21 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
    * in flight from replacing the one with the image (WF3-01).
    */
   function imageSaved(threadId: string): void {
+    invalidatePreload(threadId);
     const s = getState();
     if (s.messages[threadId] !== undefined || s.threadId === threadId || loading(threadId)) void loadThread(threadId, true);
   }
 
   return {
     refreshThreads, noteMessage, loadThread, restoreSaved, reloadThread, loading,
+    preloadThread,
+    threadsChanged(threadId: string) { invalidatePreload(threadId); void refreshThreads(); },
     renameThread, deleteThread, createThread, untrackedDone, imageSaved,
     creatingDraft: (version: number) => creatingDrafts.has(version),
     listOrder: threadsOrder,
     markOtherThreadsStale(s: State) {
+      previews.clear();
+      if (preloading !== null) preloading.cancelled = true;
       for (const id of Object.keys(s.messages)) if (id !== s.threadId) stale.add(id);
     },
   };

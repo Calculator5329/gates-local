@@ -50,8 +50,8 @@ const threadSession = createThreads({ applyServerEvent,
   navigationGeneration: () => navigation.generation,
   pendingSettings: () => navigation.pendingSettings,
 });
-export const { reloadThread, renameThread, deleteThread } = threadSession;
-const { refreshThreads, noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
+export const { reloadThread, renameThread, deleteThread, preloadThread } = threadSession;
+const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
 
 const fitSession = createFit({ applyServerEvent, call, blockingFor, isStopped: () => connection.stopped });
 export const { currentFit, fitIsCurrent, ensureFit } = fitSession;
@@ -126,7 +126,7 @@ async function hydrateWith(
   on("chat.event", onChatEvent);
   on("runtime.changed", modelsSession.runtimeChanged);
   on("models.changed", modelsSession.modelsChanged);
-  on("threads.changed", () => void refreshThreads());
+  on("threads.changed", ({ threadId }) => threadSession.threadsChanged(threadId));
   on("gpu.changed", fitSession.gpuChanged);
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);

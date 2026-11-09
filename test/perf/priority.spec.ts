@@ -2,7 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import path from "node:path";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { install, measure, type Observation } from "./probe.ts";
@@ -21,6 +21,9 @@ selected.delete("desktop-launch");
 const samples = Number(process.env["GL_PERF_SAMPLES"] ?? 5);
 const values = new Map<string, { unit: "ms" | "count"; samples: number[] }>();
 const hoverDwellMs = 350;
+declare global { interface Window { threadMotionQueries: number; threadHeightReads: number } }
+const profilers = new WeakMap<Page, CDPSession>();
+let profileIndex = 0;
 const add = (name: string, value: number, unit: "ms" | "count" = "ms") => {
   const metricRow = values.get(name) ?? { unit, samples: [] }; metricRow.samples.push(value); values.set(name, metricRow);
 };
@@ -31,7 +34,20 @@ function smooth(name: string, o: Observation) {
 async function quiet(page: Page) { await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))); }
 async function timing(page: Page, name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text") {
   await quiet(page);
-  const o = await measure(page, trigger, event, selector, text, mode); add(name, o.elapsed); return o;
+  const profiler = profilers.get(page);
+  await profiler?.send("Profiler.start");
+  const o = await measure(page, trigger, event, selector, text, mode); add(name, o.elapsed);
+  if (profiler) {
+    const profile = await profiler.send("Profiler.stop");
+    const out = process.env["GL_PERF_OUT"] ?? "perf-results";
+    mkdirSync(out, { recursive: true });
+    writeFileSync(path.join(out, `${++profileIndex}-${name}.cpuprofile`), JSON.stringify(profile.profile));
+    console.log("Profile", name, await page.evaluate(() => {
+      const rows = (window as Window & { glRows?: { renders: Record<string, number> } }).glRows?.renders ?? {};
+      return { rows: Object.keys(rows).length, renders: Object.values(rows).reduce((a, b) => a + b, 0), nodes: document.querySelectorAll(".tl *").length };
+    }));
+  }
+  return o;
 }
 async function scenario(scenarioName = "slow-drip", options: Record<string, unknown> = {}) {
   const response = await fetch(`${FAKE_URL}/__fake/scenario`, { method: "POST", body: JSON.stringify({ scenario: scenarioName, firstTokenDelayMs: 40, tokenDelayMs: 8, burstTokens: 8, loadDelayMs: 0, ...options }) });
@@ -58,7 +74,36 @@ test("focused priority production journeys", async ({ browser }) => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark", permissions: ["clipboard-read", "clipboard-write", "microphone"] });
       try {
         const page = await context.newPage(); await install(page);
+        await page.addInitScript(() => {
+          const match = window.matchMedia.bind(window);
+          window.threadMotionQueries = 0;
+          window.matchMedia = query => {
+            if (query === "(prefers-reduced-motion: reduce)") window.threadMotionQueries++;
+            return match(query);
+          };
+          window.threadHeightReads = 0;
+          const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+          const get = descriptor?.get;
+          if (!get) throw new Error("Missing native scrollHeight getter");
+          Object.defineProperty(Element.prototype, "scrollHeight", {
+            ...descriptor,
+            get: function(this: Element) {
+              if (this.classList.contains("tl") && this.firstElementChild?.classList.contains("long")) window.threadHeightReads++;
+              return get.call(this);
+            },
+          });
+        });
+        let historyRequests = 0;
+        page.on("websocket", socket => socket.on("framesent", frame => {
+          const request = JSON.parse(String(frame.payload)) as { method?: string };
+          if (request.method === "threads.get") historyRequests++;
+        }));
         const cdp = await context.newCDPSession(page); await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+        if (process.env["GL_PERF_PROFILE"] === "1") {
+          await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 100 }); profilers.set(page, cdp);
+          await page.addInitScript(() => { (window as Window & { glRows?: { renders: Record<string, number> } }).glRows = { renders: {} }; });
+          cdp.on("Network.webSocketFrameSent", event => { const request = JSON.parse(event.response.payloadData) as { method?: string }; if (request.method === "threads.get") console.log("History request"); });
+        }
         await page.goto(appUrl());
         const cold = await page.evaluate(() => window.perfJourney.result); if (selected.has("startup")) add("cold-composer", cold.elapsed);
         await ready(page);
@@ -74,7 +119,13 @@ test("focused priority production journeys", async ({ browser }) => {
                 const button = await row(page, id);
                 if (pathName === "hover") { await button.hover(); await page.waitForTimeout(hoverDwellMs); }
                 const action = `thread-${count}-${warmth}-${pathName}`;
+                const requestsBeforeClick = historyRequests;
+                const beforeClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
                 const observation = await timing(page, action, () => button.click(), "click", ".tl .turn:last-child .md", title);
+                add(`${action}.history-requests`, historyRequests - requestsBeforeClick, "count");
+                const afterClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
+                add(`${action}.motion-queries`, afterClick.motion - beforeClick.motion, "count");
+                add(`${action}.height-reads`, afterClick.height - beforeClick.height, "count");
                 if (warmth === "cold" && pathName === "click") add(`open-thread-${count}`, observation.elapsed);
                 smooth(action, observation);
                 await expect(page.locator(".tl .turn")).toHaveCount(count);

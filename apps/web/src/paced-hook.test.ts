@@ -44,12 +44,20 @@ beforeEach(() => {
 afterEach(() => { hooks.replay(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it("resumes frames after StrictMode replays mount effects", () => {
-  render("Returning to a streaming reply");
+  const text = "Returning to a streaming reply";
+  expect(render("")).toBe("");
+  expect(render(text)).toBe("");
+  expect(frames.size).toBe(1);
   hooks.replay(); hooks.flush();
+  expect(frames.size).toBe(1);
   frame(30);
-  expect(render("Returning to a streaming reply").length).toBeGreaterThan(0);
-  render("Returning to a streaming reply", false); frame(200); frame(340);
-  expect(render("Returning to a streaming reply", false)).toBe("Returning to a streaming reply");
+  const shown = render(text);
+  expect(shown.length).toBeGreaterThan(0);
+  expect(shown.length).toBeLessThan(text.length);
+  expect(frames.size).toBe(1);
+  render(text, false); frame(200); frame(340);
+  expect(render(text, false)).toBe(text);
+  expect(frames.size).toBe(0);
 });
 
 it.each([
@@ -58,11 +66,21 @@ it.each([
 ])("never reveals half a grapheme, including clusters crossing the local window (%#)", (text) => {
   const boundaries = new Set([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map((s) => s.index));
   boundaries.add(text.length);
-  render(text);
+  expect(render("")).toBe("");
+  expect(render(text)).toBe("");
+  expect(frames.size).toBe(1);
+  const intermediate = new Set<number>();
+  let shown = "";
   for (let time = 10; time < 10000; time += 10) {
     frame(time);
-    expect(boundaries.has(render(text).length), `cut at ${render(text).length}`).toBe(true);
+    shown = render(text);
+    expect(boundaries.has(shown.length), `cut at ${shown.length}`).toBe(true);
+    if (shown.length > 0 && shown.length < text.length) intermediate.add(shown.length);
+    if (shown === text) break;
   }
+  expect(intermediate.size).toBeGreaterThan(2);
+  expect(shown).toBe(text);
+  expect(frames.size).toBe(0);
 });
 
 it("segments near the reveal boundary rather than scanning the reply", () => {

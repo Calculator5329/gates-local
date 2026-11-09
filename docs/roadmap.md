@@ -44,6 +44,7 @@ that message. Keep the message recoverable across that reload in a future pass.
 
 Follow-up: Ignore pasted images that finish loading after the draft is replaced.
 Follow-up: Remove a confirmed retry from background replies so it no longer looks active.
+Follow-up (TC-02): Add a server-side size limit or eligibility check before hover-preloading very large thread histories.
 
 *In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
 and focus/selection restoration. Browser coverage is in `test/e2e/copy.spec.ts`;

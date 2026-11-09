@@ -258,6 +258,20 @@ short original eight-block reply. Both turns must remain live during switches.
 Each action settles through two animation frames before its timer is armed;
 the hover dwell and setup are excluded from click-to-paint latency.
 
+Visit rows for 200 and 2,000 messages also record `.history-requests`,
+`.motion-queries` and `.height-reads`. These count work surrounding the click
+measurement: sent history reads, reduced-motion media queries and native
+timeline `scrollHeight` accesses while the long-thread style is active. Hover
+requests sent during the 350 ms setup dwell are outside the request counter;
+zero click-window reads means the read moved earlier, not that the whole visit
+sent no request. These counters do not change the scorer or its noise labels.
+
+`GL_PERF_PROFILE=1` on a direct focused journey writes one CPU profile per
+action beside its run JSON and logs row renders and DOM descendants. Use this
+only for attribution on an authorized browser runner, with a small sample
+count; profiling overhead makes those readings unsuitable for the ordinary
+comparison. Normal comparisons leave CPU profiling off.
+
 Clipboard copying uses the native Chromium Clipboard API with permission;
 paste writes through that API and sends Control+V, checking a trusted paste
 event. This exercises the browser's clipboard route, not the desktop app's

@@ -52,23 +52,26 @@ function graphemeCut(text: string, cut: number): number {
   }
 }
 
-/** Historical replies render immediately. Only a live reply owns a pacing loop. */
+/** Received words are ready on mount, including a live prefix restored on a
+ * thread switch. Only subsequent arrivals enter the pacing reservoir. */
 export function usePacedText(text: string, streaming: boolean): string {
-  const [reduced, setReduced] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
-  const [shown, setShown] = useState(streaming ? "" : text);
+  const [reduced, setReduced] = useState(() => streaming && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const [shown, setShown] = useState(text);
   const pace = useRef<Pace | null>(null);
-  pace.current ??= createPace(streaming ? 0 : text.length, performance.now());
+  pace.current ??= createPace(text.length, performance.now());
   const state = pace.current;
   const latest = useRef({ text, streaming });
   latest.current = { text, streaming };
   const raf = useRef(0);
+  const active = streaming || shown.length < text.length;
   useEffect(() => {
+    if (!active) return;
     const media = matchMedia("(prefers-reduced-motion: reduce)");
     const change = () => setReduced(media.matches);
     change();
     media.addEventListener("change", change);
     return () => media.removeEventListener("change", change);
-  }, []);
+  }, [active]);
   useEffect(() => {
     if (reduced) {
       cancelAnimationFrame(raf.current);
