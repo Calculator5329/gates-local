@@ -2,7 +2,7 @@
 // Journeys on a phone: 412x915, touch, the mobile viewport. The layout at 640
 // px and below is a top bar (menu, title, new thread), the thread drawer, a
 // full-width composer pinned to the bottom and bottom sheets for menus, the
-// model picker and the GPU panel; Settings is a list screen and a section
+// model picker; Settings is a list screen and a section
 // screen with a back button. None of it may scroll the page sideways.
 import type { Page } from "@playwright/test";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
@@ -58,14 +58,6 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await openDrawer(page);
   await noSideScroll(page, "drawer");
   await page.keyboard.press("Escape");
-  // the thread menu opens the GPU panel as a sheet
-  await page.locator(".hdr-t").tap();
-  await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).tap();
-  await expectSheet(page, "#fitPanel");
-  await expect(page.locator("#fitPanel")).toContainText("Where the memory goes");
-  await noSideScroll(page, "GPU sheet");
-  await page.locator("#fitPanel .fpn-h").getByRole("button", { name: /^Close/ }).tap();
-  await expect(page.locator("#fitPanel")).toBeHidden();
   await page.locator(".hdr").getByRole("button", { name: "New thread" }).tap();
   await expect(page.locator(".hero")).toBeVisible();
   await noSideScroll(page, "new thread");
@@ -108,7 +100,7 @@ test.describe("first run", () => {
 test("the drawer opens and closes, and picking a thread closes it", async ({ page, open, seededThread }) => {
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
-  const title = page.locator(".hdr h2, .hdr .hdr-t").first();
+  const title = page.locator(".hdr h2");
   await expect(title).toContainText("Library: Effect Schema books");
 
   // the scrim closes it, and focus goes back to the menu button

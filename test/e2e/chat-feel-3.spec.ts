@@ -237,7 +237,7 @@ function downloads(page: Page): Download[] {
 
 async function exportRow(page: Page, title: string): Promise<void> {
   await row(page, title).click({ button: "right" });
-  await page.locator("#moreMenu").getByRole("menuitem", { name: "Export as Markdown" }).click();
+  await page.locator("#threadMenu").getByRole("menuitem", { name: "Export as Markdown" }).click();
 }
 
 test.describe("Export as Markdown from the thread menu", () => {
@@ -318,7 +318,7 @@ test.describe("Export as Markdown from the thread menu", () => {
     t.late.set("threads.get", 1500);
     await exportRow(page, OTHER);
     await row(page, OTHER).click({ button: "right" });
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+    await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
     await expect(row(page, OTHER)).toHaveCount(0);
     await expect(page.getByRole("status")).toContainText("it was deleted");
     await page.waitForTimeout(1000);

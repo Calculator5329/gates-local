@@ -88,13 +88,17 @@ for (const delay of [0, 150, 600]) {
     await measure("picker-close", "#picker", () => page.keyboard.press("Escape"));
     await page.locator("#modelBtn").click();
     await page.locator('#picker .pk-r[data-m="qwen3.5:9b"]').click();
-    for (const [name, opener, target] of [["plus", "#plusBtn", "#plusMenu"], ["options", "#optBtn", "#optsMenu"], ["more", "#moreBtn", "#moreMenu"]] as const) {
+    for (const [name, opener, target] of [["plus", "#plusBtn", "#plusMenu"], ["options", "#optBtn", "#optsMenu"]] as const) {
       if (!(await page.locator(opener).isVisible())) continue;
       await measure(`popover-${name}`, target, () => page.locator(opener).click());
       await page.keyboard.press("Escape");
     }
     await measure("sidebar-thread", ".stage", () => page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click());
-    await measure("sidebar-context-menu", "#moreMenu", () => page.locator(".sb-row").filter({ hasText: "Whisper latency check" }).click({ button: "right" }));
+    const row = page.locator(".sb-row").filter({ hasText: "Whisper latency check" });
+    await row.hover();
+    await measure("sidebar-thread-menu", "#threadMenu", () => row.locator(".sb-menu").click());
+    await page.keyboard.press("Escape");
+    await measure("sidebar-context-menu", "#threadMenu", () => row.click({ button: "right" }));
     await page.keyboard.press("Escape");
     await measure("new-thread", ".stage", () => page.keyboard.press("Control+n"));
   });

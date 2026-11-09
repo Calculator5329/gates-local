@@ -107,24 +107,10 @@ const SHOTS: readonly Shot[] = [
   {
     name: "S-136-sidebar-thread-menu",
     act: async (p) => {
-      await p.locator(".sb-row", { hasText: "Fix the backup cron" }).click({ button: "right", position: { x: 60, y: 14 } });
-      await expect(p.locator("#moreMenu")).toBeVisible();
-    },
-  },
-  {
-    name: "S-137-more-menu-gpu",
-    act: async (p) => {
-      await p.locator("#moreBtn").click();
-      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).hover();
-    },
-  },
-  {
-    name: "S-138-gpu-panel",
-    act: async (p) => {
-      await p.locator("#moreBtn").click();
-      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
-      await expect(p.locator("#fitPanel .fp-v")).toContainText("Runs on GPU");
-      await p.mouse.move(700, 720);
+      const row = p.locator(".sb-row", { hasText: "Fix the backup cron" });
+      await row.hover();
+      await row.locator(".sb-menu").click();
+      await expect(p.locator("#threadMenu")).toBeVisible();
     },
   },
 ];
@@ -323,10 +309,13 @@ interface MobileShot extends Omit<Shot, "light" | "seed"> {
 
 const tap = (sel: string) => (p: Page) => p.locator(sel).first().tap();
 const isPhoneWidth = (p: Page) => (p.viewportSize()?.width ?? 0) <= 640;
-const threadMenu = (p: Page) => p.locator(isPhoneWidth(p) ? ".hdr-t" : "#moreBtn").first().tap();
 const drawer = async (p: Page) => {
   await p.getByRole("button", { name: "Open threads" }).tap();
   await expect(p.locator(".sb .sb-row").first()).toBeInViewport({ ratio: 1 });
+};
+const threadMenu = async (p: Page) => {
+  await drawer(p);
+  await p.locator(".sb-row .sb-menu").first().tap();
 };
 const phoneSettings = (section?: string) => async (p: Page) => {
   await drawer(p);
@@ -346,14 +335,6 @@ const MOBILE: readonly MobileShot[] = [
   { name: "M-02-drawer", act: drawer },
   { name: "M-03-new", start: "new" },
   { name: "M-04-picker", start: "new", act: tap("#modelBtn") },
-  {
-    name: "M-05-gpu",
-    act: async (p) => {
-      await threadMenu(p);
-      await p.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).tap();
-      await expect(p.locator("#fitPanel")).toContainText("Context for this chat");
-    },
-  },
   { name: "M-06-settings-list", act: phoneSettings() },
   { name: "M-07-settings-models", act: phoneSettings("Models") },
   { name: "M-08-settings-runtime", act: phoneSettings("Runtime") },

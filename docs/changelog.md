@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-08: Calmer tooltips, thread actions on the row, every running reply marked
+
+Hover tooltips wait a moment before appearing. Thread actions moved to a stable
+button on each sidebar row, and the duplicate header menu is gone. GPU memory
+lives in Settings. The sidebar marks every thread with a reply running, including
+ones you are not looking at, and token updates no longer move row titles or
+buttons. Context choices start at 8k with a 16k default.
+
 ## 2026-11-08: Replay pushes before replies while hydration is held
 
 The ordering harness now follows server broadcast-before-return guarantees for

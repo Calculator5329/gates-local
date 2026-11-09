@@ -345,8 +345,12 @@ for (const width of [1440, 360]) {
         return frames;
       };
       const rename = async () => {
-        if (width <= 640) await page.locator(".hdr-t").click();
-        else await page.locator(".sb-row").filter({ hasText: "Library: Effect Schema books" }).click({ button: "right" });
+        if (width <= 640) {
+          await page.getByRole("button", { name: "Open threads" }).click();
+          const row = page.locator(".sb-row").filter({ hasText: "Library: Effect Schema books" });
+          await row.hover();
+          await row.locator(".sb-menu").click();
+        } else await page.locator(".sb-row").filter({ hasText: "Library: Effect Schema books" }).click({ button: "right" });
         await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
       };
       await rename();

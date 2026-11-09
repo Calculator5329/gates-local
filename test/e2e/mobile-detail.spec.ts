@@ -42,9 +42,9 @@ async function openDrawer(page: Page): Promise<void> {
 /** A thread's menu from its row in the drawer, by the keyboard; a long press opens the same menu. */
 async function drawerRowMenu(page: Page): Promise<void> {
   await openDrawer(page);
-  await page.locator(".sb .sb-row").first().focus();
+  await page.locator(".sb .sb-row .sb-thread").first().focus();
   await page.keyboard.press("Shift+F10");
-  await expect(page.locator("#moreMenu")).toHaveClass(/\bopen\b/);
+  await expect(page.locator("#threadMenu")).toHaveClass(/\bopen\b/);
 }
 
 // ------------------------------------------------------------- sheets (MB-01, ML-11)
@@ -71,11 +71,12 @@ test.describe("sheets on a phone", () => {
     ["the model picker", "#modelBtn", "#picker"],
     ["chat options", "#optBtn", "#optsMenu"],
     ["the add menu", "#plusBtn", "#plusMenu"],
-    ["the thread menu", ".hdr-t", "#moreMenu"],
+    ["the thread menu", ".sb-row .sb-menu", "#threadMenu"],
   ] as const) {
     test(`${label} is modal: focus moves in, stays in, and goes back`, async ({ page, open, seededThread }) => {
       await openThread(page, open, seededThread);
-      await page.locator(opener).tap();
+      if (sheet === "#threadMenu") await openDrawer(page);
+      await page.locator(opener).first().tap();
       await expect(page.locator(`${sheet} .sh-h button`)).toBeFocused();
       await expect(page.locator("#app")).toHaveAttribute("inert", "");
       for (let i = 0; i < 12; i++) {
@@ -85,12 +86,13 @@ test.describe("sheets on a phone", () => {
       await page.keyboard.press("Escape");
       await expect(page.locator(sheet)).toBeHidden();
       await expect(page.locator("#app")).not.toHaveAttribute("inert", "");
-      await expect(page.locator(opener)).toBeFocused();
+      await expect(page.locator(opener).first()).toBeFocused();
     });
 
     test(`${label} has a grab handle, a 44 px close and closes on a swipe down`, async ({ page, open, seededThread }) => {
       await openThread(page, open, seededThread);
-      await page.locator(opener).tap();
+      if (sheet === "#threadMenu") await openDrawer(page);
+      await page.locator(opener).first().tap();
       expect(await css(page, `${sheet} .sh-h`, "width", "::before")).toBe("36px");
       const close = await box(page, `${sheet} .sh-h button`);
       expect(Math.min(close.width, close.height), "close size").toBeGreaterThanOrEqual(44);
@@ -102,40 +104,6 @@ test.describe("sheets on a phone", () => {
       await expect(page.locator(sheet)).toBeHidden();
     });
   }
-
-  test("the GPU sheet is modal without making itself inert", async ({ page, open, seededThread }) => {
-    await openThread(page, open, seededThread);
-    await page.locator(".hdr-t").tap();
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).tap();
-    const panel = page.locator("#fitPanel");
-    await expect(panel).toBeVisible();
-    await expect(panel.locator(".fpn-x")).toBeFocused();
-    expect(await panel.evaluate((el) => el.closest("[inert]") === null), "the panel is not inert").toBe(true);
-    await expect(page.locator(".stage")).toHaveAttribute("inert", "");
-    for (let i = 0; i < 12; i++) {
-      await page.keyboard.press("Tab");
-      expect(await focusInside(page, "#fitPanel"), `Tab ${i + 1} stays in the panel`).toBe(true);
-    }
-    expect(await css(page, "#fitPanel .fpn-h", "width", "::before")).toBe("36px");
-    await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden();
-    await expect(page.locator(".stage")).not.toHaveAttribute("inert", "");
-    await expect(page.locator(".hdr-t")).toBeFocused();
-  });
-
-  test("the GPU sheet leads with the verdict and the context, the rest under Details", async ({ page, open, seededThread }) => {
-    await openThread(page, open, seededThread);
-    await page.locator(".hdr-t").tap();
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).tap();
-    const panel = page.locator("#fitPanel");
-    await expect(panel.locator(".fp-v")).toContainText("Runs on GPU");
-    await expect(panel.locator(".mini-seg")).toBeVisible();
-    await expect(panel.locator(".legend")).toBeHidden();
-    await panel.getByRole("button", { name: "Details" }).tap();
-    await expect(panel.locator(".legend")).toBeVisible();
-    await expect(panel.locator(".lg-r .v.est")).toHaveCount(0);
-    await expect(panel.locator(".legend .ic:visible")).toHaveCount(0);
-  });
 });
 
 // ------------------------------------------------------------- the drawer (ML-08, MB-02, MB-03)
@@ -194,7 +162,7 @@ test.describe("the drawer", () => {
     await openThread(page, open, seededThread);
     await openDrawer(page);
     await page.locator(".sb .sb-row").filter({ hasText: "Fix the backup cron" }).tap();
-    await expect(page.locator(".hdr-t")).toContainText("Fix the backup cron");
+    await expect(page.locator(".hdr h2")).toContainText("Fix the backup cron");
     await expect.poll(() => focusVisible(page), { message: "focus after a thread pick" }).toBe(true);
     await openDrawer(page);
     await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
@@ -445,8 +413,9 @@ test.describe("sheet content on a phone", () => {
 
   test("the thread menu's Delete has a trash icon", async ({ page, open, seededThread }) => {
     await openThread(page, open, seededThread);
-    await page.locator(".hdr-t").tap();
-    await expect(page.locator("#moreMenu .mi.danger use")).toHaveAttribute("href", "#i-trash");
+    await openDrawer(page);
+    await page.locator(".sb-row .sb-menu").first().tap();
+    await expect(page.locator("#threadMenu .mi.danger use")).toHaveAttribute("href", "#i-trash");
   });
 
   test("the picker: full-width search, an estimate in each row, one 16 px inset", async ({ page, open }) => {
@@ -471,6 +440,7 @@ test.describe("sheet content on a phone", () => {
     const blocked = page.locator('#picker .pk-r.dis[data-m="qwen3.8-abliterated:27b"]');
     await expect(blocked.locator(".pk-est")).toHaveText(/^Needs \d+\.\d\sGB more$/);
     await expect(blocked.locator(".pk-v")).toBeHidden();
+    await page.locator("#picker").evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
     const details = await blocked.locator("[data-memdet]").boundingBox();
     const name = await blocked.locator(".pk-nm").boundingBox();
     expect(details?.y ?? 0, "Memory details below the name").toBeGreaterThan((name?.y ?? 0) + (name?.height ?? 0));
@@ -487,6 +457,9 @@ test.describe("sheet content on a phone", () => {
     await smaller.tap();
     await expect(page.locator('#picker [data-ctx="32768"]')).toHaveAttribute("aria-checked", "true");
     await expect(page.locator('#picker .pk-r[data-m="gemma4:12b"]:not(.dis)')).toBeVisible();
+    await blocked.getByRole("button", { name: "Memory details" }).tap();
+    await expect(page.locator(".set-bar").getByRole("heading", { name: "Advanced", exact: true })).toBeVisible();
+    await expect(page.locator("#gpuMemory > .fp-h .fp-t")).toHaveText("qwen3.8-abliterated:27b");
   });
 });
 
@@ -495,19 +468,10 @@ test.describe("sheet content on a phone", () => {
 test.describe("the thread menu from a drawer row", () => {
   test.use(PHONE);
 
-  test("GPU memory closes the drawer, so its sheet can be used", async ({ page, open, seededThread }) => {
-    await openThread(page, open, seededThread);
-    await drawerRowMenu(page);
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
-    await expect(page.locator(".app.drawer")).toHaveCount(0);
-    await expect(page.locator("main.main")).not.toHaveAttribute("inert", /.*/);
-    await expect(page.locator("#fitPanel .fpn-x")).toBeFocused();
-  });
-
   test("Rename closes the drawer, so its title field can be typed in", async ({ page, open, seededThread }) => {
     await openThread(page, open, seededThread);
     await drawerRowMenu(page);
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "Rename" }).click();
+    await page.locator("#threadMenu").getByRole("menuitem", { name: "Rename" }).click();
     await expect(page.locator(".app.drawer")).toHaveCount(0);
     await expect(page.locator("main.main")).not.toHaveAttribute("inert", /.*/);
     await expect(page.getByRole("textbox", { name: "Thread title" })).toBeFocused();

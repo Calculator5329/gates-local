@@ -234,7 +234,6 @@ test("the picker's Context setting changes the context size; the composer has no
 test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await expect(page.locator("#fitPanel")).toHaveCount(0);
   await page.keyboard.press("Control+Comma");
   const nav = page.locator(".snav").getByRole("button");
   await expect(nav.last()).toHaveText("Shortcuts");

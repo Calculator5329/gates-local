@@ -1010,7 +1010,7 @@ async function startTurn(threadId: string, content: string, model: string, opts:
       setState((st) => ({ messages: withMessage(st, threadId, r.userMessage) }));
       const theirs = early.filter((p) => p.turnId === r.turnId);
       early = early.filter((p) => p.turnId !== r.turnId);
-      for (const p of theirs) onChatEvent(p);
+      for (const p of theirs) turnEvent(p);
       return;
     }
     const now = getState().live;
@@ -1022,6 +1022,7 @@ async function startTurn(threadId: string, content: string, model: string, opts:
     }));
     // stopped before its id was known, or replaced by a newer turn: end it on the server too
     if (!mine || now.end !== undefined) {
+      clearRunning(threadId, r.turnId);
       oldTurns.add(r.turnId);
       void call("chat.cancel", { turnId: r.turnId }).catch(() => undefined);
     }
@@ -1080,7 +1081,7 @@ function notSent(e: unknown, gen: number, threadId: string, content: string, mod
 function replayEarly(): void {
   const all = early;
   early = [];
-  for (const p of all) onChatEvent(p);
+  for (const p of all) turnEvent(p);
 }
 
 function elsewhereNotice(s: State, threadId: string): string {
@@ -1109,6 +1110,15 @@ function refusal(code: string, model: string, where: "box" | "queue" | null): st
   }
 }
 
+/** A late terminal must leave a newer turn in the same thread marked. */
+function clearRunning(threadId: string, turnId: string | undefined): void {
+  const active = getState().runningTurns;
+  if (turnId === undefined || active[threadId] !== turnId) return;
+  const runningTurns = { ...active };
+  delete runningTurns[threadId];
+  setState({ runningTurns });
+}
+
 export function stop(): void {
   const live = getState().live;
   if (live === null || live.end !== undefined) return;
@@ -1117,6 +1127,7 @@ export function stop(): void {
   const secs = Math.round((Date.now() - live.startedAt) / 1000);
   setState((s) => (s.live !== null && s.live.gen === live.gen && s.live.end === undefined ? { live: { ...s.live, end: { kind: "stopped", secs }, ending: true } } : {}));
   if (live.turnId !== null) {
+    clearRunning(live.threadId, live.turnId);
     oldTurns.add(live.turnId);
     void call("chat.cancel", { turnId: live.turnId }).catch(() => undefined);
     return;
@@ -1146,6 +1157,7 @@ function lostTurn(): void {
   flushDeltas();
   // the words of a turn behind another chat stop too; the next visit to its thread reloads what was saved
   parked = [];
+  setState({ runningTurns: {} });
   // the old socket's terminal events will not come; a stopped turn stops waiting for them
   setState((s) =>
     s.live === null
@@ -1203,6 +1215,16 @@ function queueDelta(kind: "text" | "thinking", t: string): void {
 }
 
 function onChatEvent(p: Payload<"chat.event">): void {
+  const { turnId, threadId, event } = p;
+  const active = getState().runningTurns;
+  if (event.type === "start" && !oldTurns.has(turnId) && active[threadId] !== turnId) {
+    setState({ runningTurns: { ...active, [threadId]: turnId } });
+  } else if (event.type === "done" || event.type === "error") clearRunning(threadId, turnId);
+  turnEvent(p);
+}
+
+/** Buffered words replay here, without reviving activity that already ended on the wire. */
+function turnEvent(p: Payload<"chat.event">): void {
   const { turnId, threadId, event } = p;
   const live = getState().live;
   // a live turn still waiting for chat.send's answer (pendingUser goes when it comes, or when the send

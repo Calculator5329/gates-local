@@ -118,9 +118,9 @@ test("the Shortcuts page lists the bindings that work, and nothing else", async 
   await page.keyboard.press("Control+n");
   await expect(page.locator(".turn.a")).toHaveCount(0);
   const row = page.locator(".sb-row").first();
-  await row.focus();
+  await row.locator(".sb-thread").focus();
   await page.keyboard.press("Shift+F10");
-  await expect(page.locator("#moreMenu")).toBeVisible();
+  await expect(page.locator("#threadMenu")).toBeVisible();
 });
 
 test("Text size changes messages and the message box at once, and survives a reload", async ({ page, open }) => {

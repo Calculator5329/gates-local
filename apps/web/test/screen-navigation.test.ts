@@ -36,12 +36,11 @@ function holdSettings() {
 
 describe("pending navigation exits", () => {
   for (const section of ["general", "models"] as const) {
-    for (const exit of ["Escape", "current thread", "another thread", "new thread", "Search", "thread drawer", "drawer Back", "GPU memory", "close GPU memory", "another section"] as const) {
+    for (const exit of ["Escape", "current thread", "another thread", "new thread", "Search", "thread drawer", "drawer Back", "Memory details", "another section"] as const) {
       it(`${exit} supersedes a pending ${section} navigation`, async () => {
         const release = holdSettings();
         try {
           if (exit === "drawer Back") store.setState({ drawer: true });
-          if (exit === "close GPU memory") store.setState({ fitPanel: { open: true, model: null } });
           session.openSettings(section);
           if (exit === "Escape") {
             const { onKey } = await import("../src/App.tsx");
@@ -58,20 +57,18 @@ describe("pending navigation exits", () => {
             (await import("../src/Sidebar.tsx")).openDrawer();
           }
           else if (exit === "drawer Back") (await import("../src/Sidebar.tsx")).onDrawerPop();
-          else if (exit === "GPU memory") (await import("../src/fit-actions.ts")).openGpuPanel();
-          else if (exit === "close GPU memory") (await import("../src/fit-actions.ts")).closeGpuPanel(false);
+          else if (exit === "Memory details") (await import("../src/fit-actions.ts")).openFit();
           else session.openSettings("runtime");
           release();
           await tick();
-          if (exit === "another section") expect(store.getState()).toMatchObject({ view: "settings", section: "runtime" });
+          if (exit === "Memory details") expect(store.getState()).toMatchObject({ view: "settings", section: "advanced" });
+          else if (exit === "another section") expect(store.getState()).toMatchObject({ view: "settings", section: "runtime" });
           else if (exit === "new thread") expect(store.getState()).toMatchObject({ view: "new", threadId: null });
           else {
             expect(store.getState()).toMatchObject({ view: "thread", threadId: exit === "another thread" ? "t2" : "t1" });
             if (exit === "Search") expect(store.getState().searchOpen).toBe(true);
             if (exit === "thread drawer") expect(store.getState().drawer).toBe(true);
             if (exit === "drawer Back") expect(store.getState().drawer).toBe(false);
-            if (exit === "GPU memory") expect(store.getState().fitPanel.open).toBe(true);
-            if (exit === "close GPU memory") expect(store.getState().fitPanel.open).toBe(false);
           }
         } finally {
           release();

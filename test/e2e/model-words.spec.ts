@@ -1,6 +1,6 @@
 // Pins for the model-pick lane's words and geometry: picker row tooltips sit
 // beside their own row (F72), the fit panel names its two memory quantities
-// apart (G7-01) and puts its context lines apart (F76), a refused verdict's
+// apart (G7-01) and keeps context fit on hover (S1), a refused verdict's
 // dot is red in the first-run card (item 4), and tok/s counts decode time only.
 import type { Page } from "@playwright/test";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
@@ -46,7 +46,7 @@ for (const width of [1440, 760]) {
   });
 }
 
-test("the fit panel names what this model can use apart from what is free, on separate context lines", async ({ page, open }) => {
+test("GPU memory distinguishes available from free memory and leaves context fit on hover", async ({ page, open }) => {
   await open();
   await waitReady(page);
   const panel = await openGpuMemory(page);
@@ -54,11 +54,11 @@ test("the fit panel names what this model can use apart from what is free, on se
   await expect(panel.locator(".legend")).toContainText("Free after loading");
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 
-  // F76: the definition once; the other size's result is apart from it, in that size's tooltip (S1)
-  const def = panel.locator(".ctx-line .ctx-def");
-  await expect(def).toHaveText("How much conversation the model can keep in view.");
+  // Context sizes explain their fit on hover; the redundant definition leaves no blank line above Details.
+  await expect(panel.getByText("How much conversation the model can keep in view.", { exact: true })).toHaveCount(0);
+  await expect(panel.locator(".ctx-line")).toHaveCount(0);
   await expect(panel.locator('[data-ctx="32768"]')).toHaveAttribute("data-tip", /at 32k/);
-  await expect(panel.getByText("keep in view")).toHaveCount(1);
+  await panel.screenshot({ path: test.info().outputPath("gpu-memory.png") });
   await page.keyboard.press("Escape");
 
   // once a reply has loaded the model, the leftover segment is what is free right now

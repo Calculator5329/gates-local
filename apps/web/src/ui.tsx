@@ -8,10 +8,11 @@ import { Icon } from "./icons.tsx";
 import { type State, getState, setState } from "./store.ts";
 
 type PopId = NonNullable<State["pop"]>["id"];
+type FixedPopId = Exclude<PopId, "thread">;
 /** The control each popover opens from; Escape and outside clicks return focus there. */
-export const POP_ANCHOR: Record<PopId, string> = { picker: "modelBtn", plus: "plusBtn", more: "moreBtn", opts: "optBtn" };
+const POP_ANCHOR: Record<FixedPopId, string> = { picker: "modelBtn", plus: "plusBtn", opts: "optBtn" };
 /** The popover each element is drawn as. */
-export const POP_EL: Record<PopId, string> = { picker: "picker", plus: "plusMenu", more: "moreMenu", opts: "optsMenu" };
+export const POP_EL: Record<PopId, string> = { picker: "picker", plus: "plusMenu", thread: "threadMenu", opts: "optsMenu" };
 
 /** A phone-width window (styles.css: 640 px and below), where popovers are bottom sheets. */
 export const PHONE = "(max-width: 640px)";
@@ -32,16 +33,15 @@ export function useMedia(query: string): boolean {
   return useSyncExternalStore(subscribe, () => matchMedia(query).matches, () => false);
 }
 
-/** The control a popover opened from: its desktop anchor, or another opener (data-anchor) when that one is hidden. */
+/** A popover's control; each thread menu has its own row button. */
 export function anchorOf(id: PopId): HTMLElement | null {
-  const main = document.getElementById(POP_ANCHOR[id]);
-  if (main && main.getClientRects().length > 0) return main;
-  for (const el of document.querySelectorAll<HTMLElement>(`[data-anchor="${id}"]`)) if (el.getClientRects().length > 0) return el;
-  return main;
+  if (id !== "thread") return document.getElementById(POP_ANCHOR[id]);
+  const p = getState().pop;
+  return p?.id === "thread" ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"] .sb-menu`) : null;
 }
 
 /** Open a popover, or close it when it is already open from the same control. */
-export function togglePop(id: PopId, kb = false): void {
+export function togglePop(id: FixedPopId, kb = false): void {
   closeTip();
   setState((s) => ({ pop: s.pop?.id === id ? null : { id, kb } }));
 }
@@ -51,12 +51,13 @@ export function closePop(refocus: boolean | "if-inside" = false): void {
   const p = getState().pop;
   if (p === null) return;
   const el = document.getElementById(POP_EL[p.id]);
+  const anchor = anchorOf(p.id);
   const sheet = isPhone() || (refocus === "if-inside" && el?.contains(document.activeElement) === true) ? el : null;
   setState({ pop: null });
-  // a thread menu from the sidebar gives focus back to its row
+  // A context-menu key returns to the thread control; a button-opened menu returns to that button.
   const target = () =>
-    (p.thread !== undefined ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"]`) : null) ??
-    anchorOf(p.id) ??
+    (p.id === "thread" && p.at !== undefined ? document.querySelector<HTMLElement>(`.sb-row[data-thread="${CSS.escape(p.thread)}"] .sb-thread`) : null) ??
+    (anchor?.isConnected ? anchor : null) ??
     document.querySelector<HTMLElement>(".set-bar .bk") ??
     document.getElementById("menuBtn");
   if (sheet !== null) {
@@ -100,7 +101,7 @@ export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hi
 /** A bottom sheet's title row with its close button. Drawn only on a phone (styles.css .sh-h). */
 export function SheetHead({ title, sub }: { title: string; sub?: string }) {
   return (
-    <div className="fpn-h sh-h">
+    <div className="sh-h">
       <span className="fp-h fp-t">
         {title}
         {sub === undefined ? null : <span className="fp-gpu">{sub}</span>}
@@ -115,6 +116,9 @@ export function SheetHead({ title, sub }: { title: string; sub?: string }) {
 /** What counts as a control for tap-to-explain: its tap is its own action. */
 const CONTROL = "button, a, input, textarea, [role=button], [role=switch], [role=menuitem]";
 
+const TIP_DELAY_MS = 400;
+const TIP_WARM_MS = 300;
+
 let hideTip: () => void = () => undefined;
 /** Hide the open tooltip (after a click that changes what it described). */
 export function closeTip(): void {
@@ -128,7 +132,17 @@ export function Tip() {
     const el = ref.current;
     if (!el) return;
     let tipFor: Element | null = null;
+    let waitingFor: Element | null = null;
+    let timer: number | undefined;
+    let closedAt = -Infinity;
+    const cancelWait = () => {
+      window.clearTimeout(timer);
+      timer = undefined;
+      waitingFor = null;
+    };
     const hide = () => {
+      cancelWait();
+      if (tipFor !== null) closedAt = performance.now();
       el.classList.remove("open");
       tipFor = null;
     };
@@ -139,14 +153,27 @@ export function Tip() {
       const target = e.target instanceof Element ? e.target : null;
       const t = target?.closest("[data-tip],[data-tipt]") ?? null;
       if (!t) {
-        if (tipFor) hide();
+        hide();
         return;
       }
-      if (t === tipFor) return;
-      show(t);
+      if (t === tipFor || t === waitingFor) return;
+      const warm = tipFor !== null || performance.now() - closedAt <= TIP_WARM_MS;
+      hide();
+      if (warm) show(t);
+      else {
+        waitingFor = t;
+        timer = window.setTimeout(() => show(t), TIP_DELAY_MS);
+      }
+    };
+    const out = (e: MouseEvent) => {
+      const next = e.relatedTarget instanceof Element ? e.relatedTarget.closest("[data-tip],[data-tipt]") : null;
+      if (next !== null && (next === tipFor || next === waitingFor)) return;
+      hide();
     };
     const show = (t: Element) => {
-      if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return;
+      cancelWait();
+      if (!t.isConnected || (getState().pop !== null && t.closest(".pop") === null)) return hide();
+      if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
       let html = t.getAttribute("data-tip");
       if (!html) {
         const tt = t.querySelector(".t");
@@ -181,9 +208,9 @@ export function Tip() {
     };
     const focusIn = (e: FocusEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      if (!target || target.matches("input,textarea")) return;
+      if (isTouch() || !target?.matches(":focus-visible") || target.matches("input,textarea")) return;
       const t = target.closest("[data-tip]");
-      if (t) t.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      if (t) show(t);
     };
     // touch: a tap on text that only explains (a legend row, a dotted term, a row that can't be
     // picked) opens its tooltip; a tap on a control does what the control does
@@ -198,13 +225,17 @@ export function Tip() {
       if (isTouch()) hide();
     };
     document.addEventListener("mouseover", over);
+    document.addEventListener("mouseout", out);
     document.addEventListener("focusin", focusIn);
     document.addEventListener("focusout", hide);
     document.addEventListener("mousedown", hide);
     document.addEventListener("click", tap);
     document.addEventListener("scroll", scrolled, true);
     return () => {
+      hide();
+      hideTip = () => undefined;
       document.removeEventListener("mouseover", over);
+      document.removeEventListener("mouseout", out);
       document.removeEventListener("focusin", focusIn);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("mousedown", hide);

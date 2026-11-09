@@ -1,25 +1,24 @@
 // Header layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The app shell (shell.md F05, F22, F51): sidebar, one header, the stage
 // (new-thread draft or the timeline with the composer docked under it) or
-// Settings, the docked GPU panel, first run, popovers and the tooltip layer.
-// Global keys follow the design's Escape order: popover, GPU panel, the
+// Settings, first run, popovers and the tooltip layer.
+// Global keys follow the design's Escape order: popover, drawer, the
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Banner, type Rt, rtOf } from "./Banner.tsx";
 import { Composer, OptsMenu, Picker, PlusMenu } from "./Composer.tsx";
-import { closeGpuPanel, openGpuPanel } from "./fit-actions.ts";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
-import { GpuError, ScreenError, firstRunScreen, gpuScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
+import { ScreenError, firstRunScreen, preloadScreens, settingsScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { Timeline } from "./Thread.tsx";
 import { UpdateNote } from "./Updates.tsx";
 import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, renameThread, threadFromHash, threadMarkdown } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { syncWindowTitle } from "./titlebar.ts";
-import { PHONE, POP_ANCHOR, POP_EL, SheetHead, Tip, closePop, isPhone, isTouch, menuKeys, place, togglePop, useMedia } from "./ui.tsx";
+import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, useMedia } from "./ui.tsx";
 
 interface Card {
   readonly icon: IconId;
@@ -217,12 +216,11 @@ function SettingsList() {
   );
 }
 
-function Header({ isNew, inert }: { isNew: boolean; inert: boolean }) {
+function Header({ isNew }: { isNew: boolean }) {
   const threadId = useStore((s) => s.threadId);
   const emptyDraft = useStore((s) => s.draft === "");
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
-  const moreOpen = useStore((s) => s.pop?.id === "more" && s.pop.thread === undefined);
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
     syncWindowTitle(isNew ? null : title);
@@ -234,7 +232,7 @@ function Header({ isNew, inert }: { isNew: boolean; inert: boolean }) {
     setState({ renaming: false });
   };
   return (
-    <header className="hdr" inert={inert}>
+    <header className="hdr">
       <MenuButton />
       {renaming && !isNew ? (
         <input
@@ -252,25 +250,11 @@ function Header({ isNew, inert }: { isNew: boolean; inert: boolean }) {
           }}
         />
       ) : (
-        <>
-          <h2 className={isNew ? "muted" : "tt"}>{isNew ? "New thread" : title}</h2>
-          {/* a phone has no room for the actions button: the title opens the thread menu */}
-          {isNew ? null : (
-            <button type="button" className="hdr-t" data-anchor="more" aria-label={`Thread actions: ${title}`} aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => togglePop("more")}>
-              <span className="t">{title}</span>
-              <Icon id="down" cls="chev" />
-            </button>
-          )}
-        </>
+        <h2 className={isNew ? "muted" : undefined}>{isNew ? "New thread" : title}</h2>
       )}
       <button type="button" className="ibtn hb nb" aria-label="New thread" disabled={isNew && emptyDraft} onClick={goNew}>
         <Icon id="pen" cls="s18" />
       </button>
-      {isNew ? null : (
-        <button type="button" className="ibtn" id="moreBtn" data-tip="Thread actions" aria-label="Thread actions" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => togglePop("more")}>
-          <Icon id="more" />
-        </button>
-      )}
     </header>
   );
 }
@@ -286,10 +270,10 @@ function exportThread(threadId: string, messages: readonly Message[]): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** A thread-menu item's click: close the menu, then act on its thread (the sidebar row it opened from, or the open thread). */
+/** Close a thread menu, then act on the row it opened from. */
 const act = (fn: (threadId: string) => void) => () => {
   const s = getState();
-  const id = s.pop?.thread ?? s.threadId;
+  const id = s.pop?.id === "thread" ? s.pop.thread : null;
   closePop();
   if (id !== null) fn(id);
 };
@@ -334,22 +318,21 @@ function placeAt(pop: HTMLElement, at: { x: number; y: number }): void {
   pop.style.left = `${Math.max(8, Math.min(at.x, window.innerWidth - pw - 8))}px`;
 }
 
-function MoreMenu() {
-  const pop = useStore((s) => (s.pop?.id === "more" ? s.pop : null));
+function ThreadMenu() {
+  const pop = useStore((s) => (s.pop?.id === "thread" ? s.pop : null));
   const open = pop !== null;
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || pop === null) return;
-    const anchor = document.getElementById("moreBtn");
+    const anchor = anchorOf("thread");
     if (pop.at) placeAt(el, pop.at);
     else if (anchor) place(el, anchor, "end", "below");
     if (pop.kb) el.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [pop]);
   return (
-    <div className={`pop menu${open ? " open" : ""}`} id="moreMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
+    <div className={`pop menu${open ? " open" : ""}`} id="threadMenu" role="menu" aria-label="Thread actions" ref={ref} onKeyDown={menuKeys}>
       <SheetHead title="Thread" />
-      {/* Rename and GPU memory open on the main surface, which the drawer holds inert */}
       <button type="button" className="mi" role="menuitem" onClick={act((id) => closeDrawer(() => renameFromMenu(id)))}>
         <Icon id="pencil" />
         <b>Rename</b>
@@ -357,10 +340,6 @@ function MoreMenu() {
       <button type="button" className="mi" role="menuitem" onClick={act((id) => void exportFromMenu(id))}>
         <Icon id="download" />
         <b>Export as Markdown</b>
-      </button>
-      <button type="button" className="mi" role="menuitem" onClick={act(() => closeDrawer(openGpuPanel))}>
-        <Icon id="cpu" />
-        <b>GPU memory</b>
       </button>
       <div className="msep" />
       <button type="button" className="mi danger" role="menuitem" onClick={act((id) => void deleteThread(id))}>
@@ -371,11 +350,10 @@ function MoreMenu() {
   );
 }
 
-/** What Tab must stay inside right now: a phone's sheet, the drawer, or a phone's GPU sheet. */
+/** What Tab must stay inside right now: a phone's sheet or the drawer. */
 function modalBox(s: State): HTMLElement | null {
   if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
   if (s.drawer) return document.querySelector<HTMLElement>(".sb");
-  if (s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun" && isPhone()) return document.getElementById("fitPanel");
   return null;
 }
 
@@ -400,7 +378,7 @@ let swipeFrom: number | null = null;
 function onTouchStart(e: TouchEvent): void {
   swipeFrom = null;
   const t = e.target instanceof Element ? e.target : null;
-  if (t === null || !isPhone() || t.closest("button") !== null || t.closest(".sh-h, .fpanel .fpn-h") === null) return;
+  if (t === null || !isPhone() || t.closest("button") !== null || t.closest(".sh-h") === null) return;
   swipeFrom = e.touches[0]?.clientY ?? null;
 }
 
@@ -411,7 +389,6 @@ function onTouchEnd(e: TouchEvent): void {
   const to = e.changedTouches[0]?.clientY;
   if (from === null || to === undefined || to - from < 48) return;
   if (getState().pop !== null) closePop(true);
-  else closeGpuPanel(true);
 }
 
 export function onKey(e: KeyboardEvent): void {
@@ -430,10 +407,6 @@ export function onKey(e: KeyboardEvent): void {
     if (s.drawer) {
       e.preventDefault();
       return closeDrawer();
-    }
-    if (s.fitPanel.open && s.view !== "settings") {
-      e.preventDefault();
-      return closeGpuPanel(true);
     }
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
     if (s.view === "settings" && s.addPage) return setState({ addPage: false });
@@ -461,9 +434,8 @@ function onMouseDown(e: MouseEvent): void {
   const p = getState().pop;
   if (p === null || !(e.target instanceof Node)) return;
   const pop = document.getElementById(POP_EL[p.id]);
-  const anchor = document.getElementById(POP_ANCHOR[p.id]);
+  const anchor = anchorOf(p.id);
   if (pop?.contains(e.target) || anchor?.contains(e.target)) return;
-  if (e.target instanceof Element && e.target.closest(`[data-anchor="${p.id}"]`)) return;
   closePop();
 }
 
@@ -490,13 +462,10 @@ export function App() {
   const popOpen = useStore((s) => s.pop !== null);
   const setList = useStore((s) => s.setList);
   const popId = useStore((s) => s.pop?.id ?? null);
-  const gpuOpen = useStore((s) => s.fitPanel.open && s.view !== "settings" && s.view !== "firstrun");
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
-  const gpu = useScreen(gpuScreen, gpuOpen);
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
-  const gpuSheet = gpuOpen && phone && gpu.kind !== "pending";
   // a phone's sheet is modal: focus moves in, except Ctrl+M's search field, which focuses itself
   useEffect(() => {
     if (popId === null || !isPhone()) return;
@@ -536,12 +505,12 @@ export function App() {
     <>
       <Sprite />
       <div className={`app${drawer ? " drawer" : ""}`} id="app" inert={popOpen && phone}>
-        <div style={{ display: "contents" }} inert={covered || gpuSheet}>
+        <div style={{ display: "contents" }} inert={covered}>
           <Sidebar />
         </div>
         {drawer ? <div className="scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer}>
-          {isSet ? <SettingsBar /> : <Header isNew={isNew} inert={gpuSheet} />}
+          {isSet ? <SettingsBar /> : <Header isNew={isNew} />}
           <div className="work">
             {isSet ? (
               <div className={`set${setList ? " listing" : ""}`}>
@@ -551,7 +520,7 @@ export function App() {
                 </div>
               </div>
             ) : (
-              <div className="stage" inert={gpuSheet}>
+              <div className="stage">
                 {isNew || threadId === null ? (
                   <Draft />
                 ) : (
@@ -568,7 +537,6 @@ export function App() {
                 )}
               </div>
             )}
-            {gpu.kind === "ready" ? <gpu.value.GpuPanel /> : gpuOpen && gpu.kind === "error" ? <GpuError /> : null}
           </div>
         </main>
         {covered ? (
@@ -582,7 +550,7 @@ export function App() {
       <Picker />
       <PlusMenu />
       <OptsMenu />
-      <MoreMenu />
+      <ThreadMenu />
       <Tip />
     </>
   );

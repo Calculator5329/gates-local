@@ -7,7 +7,7 @@ import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread } from "./session.ts";
 import { NA, type Section, type State, getState, setState, streaming, useStore } from "./store.ts";
-import { closeTip, esc, isTouch, useMedia } from "./ui.tsx";
+import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "sliders"],
@@ -119,10 +119,10 @@ export function openSearch(): void {
 
 const closeSearch = () => setState({ searchOpen: false, search: "" });
 
-/** The thread menu (the header's ⋯ menu) for a sidebar row, at a point. */
-function openThreadMenu(thread: string, at: { x: number; y: number }, kb: boolean): void {
+/** The row's thread actions, anchored to its button or to a context-menu point. */
+function openThreadMenu(thread: string, at: { x: number; y: number } | undefined, kb: boolean): void {
   closeTip();
-  setState({ pop: { id: "more", kb, thread, at } });
+  setState({ pop: { id: "thread", kb, thread, ...(at === undefined ? {} : { at }) } });
 }
 
 function rowMenuKey(e: KeyboardEvent<HTMLButtonElement>, thread: string): void {
@@ -132,22 +132,24 @@ function rowMenuKey(e: KeyboardEvent<HTMLButtonElement>, thread: string): void {
   openThreadMenu(thread, { x: r.left + 12, y: r.bottom }, true);
 }
 
-function rowMenuClick(e: MouseEvent<HTMLButtonElement>, thread: string): void {
+function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
   e.preventDefault();
   const p = getState().pop;
   // the context-menu key also sends this event after its keydown opened the menu
-  if (p?.thread === thread && p.kb) return;
+  if (p?.id === "thread" && p.thread === thread && p.kb) return;
   openThreadMenu(thread, { x: e.clientX, y: e.clientY }, false);
 }
-const liveThreadOf = (s: State) => (streaming(s) ? (s.live?.threadId ?? null) : null);
+// A pending send is visible before the server reports its start.
+const pendingThreadOf = (s: State) => (streaming(s) && s.live?.turnId === null ? s.live.threadId : null);
 
 function ThreadList() {
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
   const on = useStore((s) => (s.view === "thread" ? s.threadId : null));
-  const live = useStore(liveThreadOf);
+  const pending = useStore(pendingThreadOf);
+  const running = useStore((s) => s.runningTurns);
   // the row whose thread menu is open stays marked while the menu acts on it
-  const menuFor = useStore((s) => (s.pop?.id === "more" ? (s.pop.thread ?? null) : null));
+  const menuFor = useStore((s) => (s.pop?.id === "thread" ? s.pop.thread : null));
   const now = useNow(30_000);
   const drawerWidth = useMedia("(max-width: 1023px)");
   const shown = q === "" ? threads : threads.filter((t) => t.title.toLowerCase().includes(q));
@@ -165,20 +167,31 @@ function ThreadList() {
         return (
           <Fragment key={t.id}>
             {head}
-            <button
-              type="button"
-              className={`sb-row${on === t.id ? " on" : ""}`}
+            <div
+              className={`sb-row${on === t.id ? " on" : ""}${menuFor === t.id ? " menu-open" : ""}`}
               data-thread={t.id}
               data-tipt={t.title}
-              aria-haspopup="menu"
-              aria-expanded={menuFor === t.id}
-              onClick={() => closeDrawer(() => openThread(t.id), true)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
-              onKeyDown={(e) => rowMenuKey(e, t.id)}
             >
-              <span className="t">{t.title}</span>
-              {live === t.id ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
-            </button>
+              <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}>
+                <span className="t">{t.title}</span>
+                <span className="sb-status">
+                  {pending === t.id || Object.hasOwn(running, t.id) ? <span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="ibtn xs sb-menu"
+                aria-label={`Thread actions: ${t.title}`}
+                aria-haspopup="menu"
+                aria-expanded={menuFor === t.id}
+                aria-controls="threadMenu"
+                data-tip="Thread actions"
+                onClick={(e) => menuFor === t.id ? closePop(true) : openThreadMenu(t.id, undefined, e.detail === 0)}
+              >
+                <Icon id="more" cls="s14" />
+              </button>
+            </div>
           </Fragment>
         );
       })}

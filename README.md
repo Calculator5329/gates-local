@@ -12,7 +12,7 @@ Ollama, for people who want local models without guessing whether they fit.
 - Checks memory before a model loads. Each model gets a label for the
   chosen context size: runs on GPU, uses system memory (slower), or not
   enough memory.
-- Uses a 16k context by default, with 8k, 32k and 64k as options, and
+- Context choices start at 8k, with a 16k default and 32k and 64k options. It
   never asks a model for more than it takes. A model with a small window
   (2k, say) runs at its own size.
 - Streams replies, shows the model's thinking, and has Stop and Retry.

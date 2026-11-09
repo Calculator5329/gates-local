@@ -120,32 +120,6 @@ for (const width of [1440, 390]) {
       });
     }
 
-    test("a delayed GPU panel leaves the composer in place until the panel is ready", async ({ page, open, seededThread }) => {
-      const chunks = await holdChunks(page);
-      try {
-        await open(`#thread=${seededThread ?? ""}`);
-        await waitReady(page);
-        await chunks.started;
-        await expect(page.locator(".tl .turn")).toHaveCount(2);
-        const before = await page.locator(".composer").boundingBox();
-        await page.keyboard.press("Control+Comma");
-        await page.locator(width <= 640 ? ".hdr-t" : "#moreBtn").click();
-        await page.getByRole("menuitem", { name: "GPU memory", exact: true }).click();
-        const delayed = await stableChat(page);
-        await capture(page, "held");
-        for (const frame of delayed.frames) expect(frame).toEqual(delayed.first);
-        expect(await page.locator(".composer").boundingBox()).toEqual(before);
-        await expect(page.locator("#fitPanel")).toHaveCount(0);
-        chunks.release();
-        await expect(page.locator("#fitPanel")).toBeVisible();
-        await expect(page.locator("#fitPanel .fpn-x")).toBeFocused();
-        await expect(page.locator(".set")).toHaveCount(0);
-        await capture(page, "ready");
-      } finally {
-        chunks.release();
-      }
-    });
-
     for (const exit of ["Escape", "current thread", "Search", "new thread"] as const) {
       test(`cancel a pending navigation via ${exit} and keep the last destination`, async ({ page, open, seededThread }) => {
         const chunks = await holdChunks(page);
@@ -272,27 +246,4 @@ test.describe("an old tab after an update", () => {
     await capture(page, "recovered");
   });
 
-  test.describe("phone", () => {
-    test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, seed: 2 });
-    test("BG-03: a failed GPU import has a touch exit back to chat", async ({ page, open, seededThread }) => {
-      await page.route(/\/assets\/(?:screens|FitPanel)-[^/]+\.js$/, (route) => route.fulfill({ status: 404, body: "Not found" }));
-      await open(`#thread=${seededThread ?? ""}`);
-      await waitReady(page);
-      await expect(page.locator(".tl .turn")).toHaveCount(2);
-      await page.locator(".hdr-t").tap();
-      await page.getByRole("menuitem", { name: "GPU memory", exact: true }).tap();
-      await expect(page.getByRole("alert")).toContainText("This page couldn't load");
-      await capture(page, "gpu-error");
-      const url = page.url();
-      const boot = await page.evaluate(() => performance.timeOrigin);
-      await page.getByRole("button", { name: "Back to chat", exact: true }).tap();
-      await expect(page.locator("#fitPanel")).toHaveCount(0);
-      await expect(page.locator(".stage")).not.toHaveAttribute("inert", "");
-      await page.locator("#ta").tap();
-      await expect(page.locator("#ta")).toBeFocused();
-      expect(page.url()).toBe(url);
-      expect(await page.evaluate(() => performance.timeOrigin)).toBe(boot);
-      await capture(page, "chat-recovered");
-    });
-  });
 });

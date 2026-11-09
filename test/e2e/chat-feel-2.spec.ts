@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Journeys from Ethan's second pass: a long model name never pushes the
 // composer's controls out, an 8k context, a toolbar that holds still while a
-// model loads, and the thread menu on right-click with GPU memory in it.
+// model loads, and the thread menu on right-click.
 import type { Locator, Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { FAKE_URL } from "./env.ts";
@@ -221,18 +221,12 @@ async function settled(el: Locator): Promise<void> {
 
 test.describe("thread menu", () => {
   test.use({ seed: "design" });
-  const MENU = ["Rename", "Export as Markdown", "GPU memory", "Delete thread"];
+  const MENU = ["Rename", "Export as Markdown", "Delete thread"];
 
-  test("right-click a sidebar thread: the ⋯ menu's items at the pointer; Rename renames that thread", async ({ page, open, seededThread }) => {
+  test("right-click a sidebar thread: its actions at the pointer; Rename renames that thread", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
-    const menu = page.locator("#moreMenu");
-    // the header's ⋯ menu stays, with the same items
-    await page.locator("#moreBtn").click();
-    await expect(menu.getByRole("menuitem")).toHaveText(MENU);
-    await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
-
+    const menu = page.locator("#threadMenu");
     const target = row(page, "Fix the backup cron");
     const box = await target.boundingBox();
     if (!box) throw new Error("no row");
@@ -246,8 +240,7 @@ test.describe("thread menu", () => {
     expect(Math.abs((mb?.y ?? 0) - at.y), "menu at the pointer (y)").toBeLessThan(2);
     // the thread under the pointer is not opened by the right-click, and its row is marked while the menu is open
     await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
-    await expect(target).toHaveAttribute("aria-expanded", "true");
-    await expect(page.locator("#moreBtn")).toHaveAttribute("aria-expanded", "false");
+    await expect(target.locator(".sb-menu")).toHaveAttribute("aria-expanded", "true");
 
     await menu.getByRole("menuitem", { name: "Rename" }).click();
     const input = page.getByRole("textbox", { name: "Thread title" });
@@ -255,7 +248,7 @@ test.describe("thread menu", () => {
     await input.fill("Fix the nightly backup");
     await input.press("Enter");
     await expect(row(page, "Fix the nightly backup")).toBeVisible();
-    await expect(row(page, "Fix the nightly backup")).toHaveAttribute("aria-expanded", "false");
+    await expect(row(page, "Fix the nightly backup").locator(".sb-menu")).toHaveAttribute("aria-expanded", "false");
     await expect(row(page, "Library: Effect Schema books")).toBeVisible();
     // the server has it
     await page.reload();
@@ -268,7 +261,7 @@ test.describe("thread menu", () => {
     await waitReady(page);
     const rows = await page.locator(".sb-row").count();
     await row(page, "Whisper latency check").click({ button: "right" });
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "Delete thread" }).click();
+    await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
     await expect(row(page, "Whisper latency check")).toHaveCount(0);
     await expect(page.locator(".sb-row")).toHaveCount(rows - 1);
     await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
@@ -282,9 +275,9 @@ test.describe("thread menu", () => {
       await open(`#thread=${seededThread ?? ""}`);
       await waitReady(page);
       const target = row(page, "Ollama 0.40 release notes");
-      await target.focus();
+      await target.locator(".sb-thread").focus();
       await page.keyboard.press(key);
-      const menu = page.locator("#moreMenu");
+      const menu = page.locator("#threadMenu");
       await expect(menu).toBeVisible();
       await expect(menu.getByRole("menuitem", { name: "Rename" })).toBeFocused();
       await settled(menu);
@@ -294,33 +287,7 @@ test.describe("thread menu", () => {
       await expect(menu.getByRole("menuitem", { name: "Export as Markdown" })).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(menu).toBeHidden();
-      await expect(target).toBeFocused();
+      await expect(target.locator(".sb-thread")).toBeFocused();
     });
   }
-
-  test("⋯ › GPU memory opens the panel beside the chat; closed by default, Escape closes it", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`);
-    await waitReady(page);
-    const panel = page.getByRole("complementary", { name: "GPU memory" });
-    await expect(panel).toHaveCount(0);
-    await page.locator("#moreBtn").click();
-    await page.locator("#moreMenu").getByRole("menuitem", { name: "GPU memory" }).click();
-    await expect(panel).toBeVisible();
-    await expect(panel.locator(".fp-gpu")).toContainText("RTX 5070 Ti");
-    await expect(panel.locator(".fp-v")).toBeVisible();
-    // beside the chat, not over it
-    const [stage, side] = [await page.locator(".stage").boundingBox(), await panel.boundingBox()];
-    expect((side?.x ?? 0) + 0.5).toBeGreaterThanOrEqual((stage?.x ?? 0) + (stage?.width ?? 0));
-    // the chat still works beside it
-    await expect(page.locator("#ta")).toBeEnabled();
-    await expect(panel.getByRole("button", { name: "Close GPU memory" })).toBeFocused();
-    await page.keyboard.press("Escape");
-    await expect(panel).toHaveCount(0);
-    await expect(page.locator("#moreBtn")).toBeFocused();
-    // Settings › Advanced keeps GPU memory too
-    await expect(page.locator(".set #gpuMemory")).toHaveCount(0);
-    await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
-    await expect(page.locator(".set #gpuMemory")).toBeVisible();
-  });
 });
