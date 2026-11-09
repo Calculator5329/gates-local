@@ -1,4 +1,79 @@
-# Testing client ordering
+# Testing
+
+## Informational browser performance
+
+`test/perf/` is a separate Playwright project, excluded from `pnpm e2e`.
+Timing is informational and never changes the release verdict. On an authorized
+browser machine, one command builds two commits and alternates them in one job:
+
+```sh
+pnpm perf:compare BASE_COMMIT CANDIDATE_COMMIT --rounds 5 --samples 3 --out perf-results
+```
+
+For a runner without Git history, prepare inputs locally without a browser:
+
+```sh
+pnpm perf:compare --prepare BASE_COMMIT CANDIDATE_COMMIT --out perf-inputs
+```
+
+Submit this tree, including `perf-inputs`, with **exclusive** access and a
+900-second timeout. The command inside the browser job is:
+
+```sh
+pnpm perf:compare --prepared perf-inputs --rounds 5 --samples 3 --out perf-results
+```
+
+Fetch `perf-results`. Freeze the tree until the runner captures it, then archive
+`perf-inputs`; never commit them. Always use a fresh output directory: run records
+are never replaced. `--self` compares the prepared base with itself. A shorter
+diagnostic uses `--rounds 4 --samples 2`; its eight-sample p95 is usually the
+maximum, not a precise tail estimate. Keep each job under 15 minutes.
+
+Journeys cover ordinary chat, picker and Settings actions, 200/2,000-message
+threads, a 4,000-line code block and 300-row table, a 400-thread sidebar,
+concurrent streams and reconnect. Image paste is unsupported at this version.
+No production hook is used. Reconnect measures a usable composer after a drop;
+the visible stream is interrupted while the server may finish saving its reply.
+
+Cold means a fresh context with HTTP cache disabled and a warm fixture server.
+Input timestamps through the target DOM state and two animation frames bracket
+a paint opportunity, not physical display latency. Setup and assertion polling
+are excluded. Typing also records dispatch delay. Stream metrics record each
+window's frame-gap p95/maximum and count/total time of tasks over 50 ms. Mixed
+stream completion starts after first visible text; concurrent frames cover the
+confirmed overlap until either running marker clears.
+
+The existing fake waits 40 ms before tokens, then 8 ms per eight-token burst,
+with Thinking off and zero model-load delay. Longer Markdown for typing,
+concurrent streams and reconnect uses 12 ms per four-token burst. Tokens are
+whitespace pieces. Model inference and GPU speed are outside this baseline.
+
+Each `round-N-ARM/run.json` contains commit, action, unit, samples, median, p95,
+browser version, CPU count, memory and load before/after, without names,
+addresses or paths. `comparison.json` and `comparison.md` show AB/BA paired-round
+changes. Noise is the larger of p95 changes between adjacent same-build round
+medians and the sum of both builds' p95 sample deviations from their medians, at least 2 ms or
+one count. A paired-round bootstrap supplies a
+descriptive 95% interval. A signal must exceed that floor and have its interval
+on one side of zero. Noise over 20% of baseline and 10 ms/one count is marked
+too noisy for small changes. This is screening, not a significance test.
+
+To improve a number, keep fixtures and fake speed fixed, commit the change,
+compare it with its parent in one exclusive job, and inspect samples, load,
+noise and other actions for tradeoffs. Repeat noisy findings with more rounds.
+Unit tests are diagnostic probes; also check a real self-comparison and an
+unlanded commit with a real delay before trusting a change in the tool.
+After an analysis correction, `--analyze SAVED_COMPARISON --out FRESH_DIRECTORY`
+recomputes from the original round files without rerunning browsers or
+overwriting either the raw measurements or the earlier analysis.
+
+Later release wiring: after existing correctness checks, prepare the previous
+released commit and candidate, run this comparison as an exclusive browser job,
+and attach its artifacts and exit code to the release report. A slower signal
+is informational; a tool failure means measurements unavailable. Neither changes
+the release verdict. No release script is changed here.
+
+## Client ordering replays
 
 `pnpm test` includes in-memory ordering replays for speech connection choices,
 messages crossing a reconnect, and Stop pressed around a send acknowledgement.

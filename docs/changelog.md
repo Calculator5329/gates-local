@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09: Measure repeated actions before tuning responsiveness
+
+A separate browser performance harness now measures everyday chat actions and
+large-thread, large-reply, concurrent-stream and reconnect cases. It alternates
+two production builds in one job, keeps raw samples and reports each action's
+noise floor. Results are informational and do not change the release verdict.
+
 ## 2026-11-09: Timing records no longer decide releases
 
 - Only unit verification, the build and functional browser checks decide
