@@ -1,14 +1,6 @@
 # Changelog
 
 ## 2026-11-09: Cancel pending speech connections when a foreign save arrives
-## 2026-11-08: Saved-consent test waits for cancellation
-
-- The reload test now waits for the first stopped turn to end on the server
-  before resetting its fake runtime. It checks that the later send really needs
-  to stop the other model, sends that consent and cancels the exact running reply.
-  The stop-note deadline stays unchanged.
-
-## 2026-11-08: Replies across threads
 
 A Disconnect received during reconnect now invalidates older Connect checks
 immediately, while its settings still wait for hydration. Replaying those
