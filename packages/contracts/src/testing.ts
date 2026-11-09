@@ -148,6 +148,7 @@ const imageReady: ImageStatus = { state: "ready", owner: "external", baseUrl: "h
 const runtime: RuntimeStatus = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:11434", version: "0.40.4" };
 
 export const methodSamples: { readonly [M in MethodName]: { readonly params: Params<M>; readonly result: ResultOf<M> } } = {
+  "sync.negotiate": { params: { ordered: [] }, result: { epoch: "sample-process", ordered: [] } },
   "voice.check": { params: { url: "http://127.0.0.1:18078" }, result: { ready: true } },
   "voice.transcribe": { params: { id: "v1", audio: "UklGRg==" }, result: { text: "spoken words" } },
   "voice.cancel": { params: { id: "v1" }, result: {} },

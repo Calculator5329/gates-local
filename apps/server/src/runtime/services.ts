@@ -3,7 +3,8 @@
 // real-machine reads (nvidia-smi, /proc, systemctl --user show, Ollama's
 // HTTP API) are read-only; nothing here stops or signals a process the app
 // did not start.
-import type { Channel, Payload, RuntimeMode } from "@gates-local/contracts";
+import type { RuntimeMode } from "@gates-local/contracts";
+import type { Push } from "../app.ts";
 import { fitEach, planLoad, type FitDeps } from "../fit/fit.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
@@ -32,8 +33,6 @@ export const MODELS_REFRESH_MIN_MS = 2000;
 const WHISPER_PID_TTL_MS = 60_000;
 /** How long a switch waits for the old runtime's turns to end before it fails and keeps that runtime. */
 const TURN_DRAIN_MS = 10_000;
-
-type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
 
 export interface ModelServices {
   readonly settings: SettingsStore;
@@ -193,7 +192,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         // Putting it back schedules no switch.
         puttingBack = true;
         try {
-          options.push("settings.changed", settings.update({ runtimeMode: runtime.mode() }));
+          const restored = settings.update({ runtimeMode: runtime.mode() });
+          options.push("settings.changed", restored, [settings.stamp(restored)]);
         } catch (error) {
           log(`settings not put back to ${runtime.mode()}: ${(error as Error).message}`);
         } finally {

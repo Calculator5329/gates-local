@@ -1,19 +1,44 @@
 // Saved settings, initial choices and speech-save ownership.
-import type { ContextSize, MethodName, Params, Payload, ResultOf, Settings, SettingsPatch, ModelSettingsPatch } from "@gates-local/contracts";
+import type { CallOptions, ClientSync, ContextSize, MethodName, Params, Payload, ResultOf, Settings, SettingsPatch, ModelSettingsPatch, SyncMetadata } from "@gates-local/contracts";
+import type { ServerEvent, SettingsAuthority } from "./server-state.ts";
 import { noGpu } from "../format.ts";
 import { NA, type State, getState, setState } from "../store.ts";
 
-type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
+type Act = <M extends MethodName>(method: M, params: Params<M>, what: string, todo?: string, options?: CallOptions<M>) => Promise<{ readonly ok: true; readonly value: ResultOf<M> } | { readonly ok: false; readonly message: string }>;
 
 interface SettingsEffects {
-  readonly applyServerEvent: typeof setState;
+  readonly applyServerEvent: (event: ServerEvent) => void;
+  readonly authority: SettingsAuthority;
+  readonly sync: () => ClientSync | undefined;
   readonly act: Act;
   readonly applyTheme: (theme: Settings["theme"]) => void;
   readonly applyTextSize: (size: Settings["textSize"]) => void;
   readonly refreshImageStatus: () => void;
 }
 
-export function createSettings({ applyServerEvent, act, applyTheme, applyTextSize, refreshImageStatus }: SettingsEffects) {
+export function createSettings({ applyServerEvent, authority, sync, act, applyTheme, applyTextSize, refreshImageStatus }: SettingsEffects) {
+  let staging = false;
+  // A close may clear transport state while the accepted bootstrap batch is
+  // still finishing. Keep its confirmed mode until this hydration is cleaned up.
+  let negotiated: ClientSync | undefined;
+  const connectionSync = () => negotiated = sync() ?? negotiated;
+  const ordered = () => { const current = connectionSync(); return current?.mode === "ordered" && current.domains.includes("settings"); };
+
+  /** Accept authority now; only initial presentation waits for the coherent ready batch. */
+  function acceptSettings(settings: Settings, metadata: SyncMetadata | undefined, own = false): void {
+    applyServerEvent(() => {
+      if (!ordered() || metadata === undefined) return;
+      authority.begin(connectionSync());
+      const accepted = authority.accept(settings, metadata);
+      if (accepted === undefined) return;
+      const visible = getState().settings;
+      const previous = accepted.previous ?? (visible === NA ? undefined : visible);
+      if (!own && previous?.whisperUrl !== settings.whisperUrl) {
+        applyServerEvent(s => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
+      }
+      if (!staging) applySettings(settings, false, true);
+    });
+  }
   /** Thinking is set from settings and the GPU once per page load; after that a reconnect leaves the person's choice alone. */
   let thinkSeeded = false;
   /** A context choice belongs to this page session, including reconnects. */
@@ -66,6 +91,7 @@ export function createSettings({ applyServerEvent, act, applyTheme, applyTextSiz
   function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
     return {
       settings,
+      ...(ordered() ? { voiceConnectionVersion: _s.voiceConnectionVersion } : {}),
       ...(first && !contextSeeded ? { numCtx: settings.defaultNumCtx } : {}),
       ...(first && !thinkSeeded ? { think: settings.thinking } : {}),
       ...(!settings.imageGen ? { image: false } : {}),
@@ -95,12 +121,21 @@ export function createSettings({ applyServerEvent, act, applyTheme, applyTextSiz
       voiceWrites.add(voiceChange);
     }
     let saved = false;
-    const received = settingsReceipt;
+    const received = ordered() ? undefined : settingsReceipt;
     try {
-      const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what);
+      let orderedResponse = false;
+      const r = await act("settings.update", { ...patch, ...(voiceChange === undefined ? {} : { voiceChange }) }, what, undefined, {
+        onResult(value, metadata) {
+          orderedResponse = ordered();
+          if (orderedResponse) {
+            const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
+            acceptSettings(value, metadata, own);
+          }
+        },
+      });
       if (!r.ok) return r.message;
       saved = true;
-      if (received === settingsReceipt) applySettings(r.value, false, voiceChange !== undefined);
+      if (!orderedResponse && received !== undefined && received === settingsReceipt) applySettings(r.value, false, voiceChange !== undefined);
       // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
       if ("imageGen" in patch || "comfyUrl" in patch) {
         refreshImageStatus();
@@ -111,10 +146,13 @@ export function createSettings({ applyServerEvent, act, applyTheme, applyTextSiz
 
   /** Save or reset one model; apply only the settings the server accepted. */
   async function updateModelSettings(model: string, patch: ModelSettingsPatch | null): Promise<string | null> {
-    const received = settingsReceipt;
-    const r = await act("settings.model.update", { model, patch }, "save model settings");
+    const received = ordered() ? undefined : settingsReceipt;
+    let orderedResponse = false;
+    const r = await act("settings.model.update", { model, patch }, "save model settings", undefined, {
+      onResult(value, metadata) { orderedResponse = ordered(); if (orderedResponse) acceptSettings(value, metadata); },
+    });
     if (!r.ok) return r.message;
-    if (received === settingsReceipt) applySettings(r.value);
+    if (!orderedResponse && received !== undefined && received === settingsReceipt) applySettings(r.value);
     return null;
   }
 
@@ -126,32 +164,47 @@ export function createSettings({ applyServerEvent, act, applyTheme, applyTextSiz
     return null;
   }
 
-  function receiveSettings({ voiceChange, ...settings }: Payload<"settings.changed">, dispatch: (apply: () => void) => void): void {
-    settingsReceipt++;
+  function receiveSettings({ voiceChange, ...settings }: Payload<"settings.changed">, dispatch: (apply: () => void) => void, metadata?: SyncMetadata): void {
     // Apply intent ordering at receipt, before a pending health check can
     // finish. Only the settings themselves wait behind hydration snapshots.
     const own = voiceChange !== undefined && voiceWrites.delete(voiceChange);
+    if (ordered()) { acceptSettings(settings, metadata, own); return; }
+    settingsReceipt++; // Legacy only; revisions replace this on ordered connections.
     const changed = receivedVoiceUrl !== settings.whisperUrl;
     receivedVoiceUrl = settings.whisperUrl;
     if (!own && changed) {
       applyServerEvent((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
     }
     dispatch(() => {
+      if (ordered()) return; // A pre-negotiation legacy frame is covered by ordered reads.
       receivedVoiceUrl = settings.whisperUrl;
       applySettings(settings, false, true);
     });
   }
 
   return {
-    settingsPatch, setContext, updateSettings, updateModelSettings, resetSettings, receiveSettings,
+    settingsPatch, setContext, updateSettings, updateModelSettings, resetSettings, receiveSettings, acceptSettings,
+    ready() { applyServerEvent(() => { authority.begin(connectionSync()); }); },
+    endHydration(fallback: State["settings"]): State["settings"] {
+      staging = false;
+      return ordered() ? authority.current() ?? fallback : fallback;
+    },
+    releasePresentation() {
+      const accepted = authority.current();
+      if (staging && ordered() && accepted !== undefined) applySettings(accepted, false, true);
+      staging = false;
+    },
     beginHydration() {
+      negotiated = undefined;
+      staging = true;
       const current = getState().settings;
       receivedVoiceUrl = current === NA ? undefined : current?.whisperUrl;
     },
     noteVoiceSnapshot(settings: State["settings"]) {
+      if (ordered()) return;
       receivedVoiceUrl = settings === NA ? undefined : settings?.whisperUrl;
     },
-    disconnected() { voiceWrites.clear(); receivedVoiceUrl = undefined; },
+    disconnected() { voiceWrites.clear(); receivedVoiceUrl = undefined; negotiated = undefined; },
     seedContext() { contextSeeded = true; },
     seedThinking() {
       const startsOff = !thinkSeeded && noGpu(getState().gpu);

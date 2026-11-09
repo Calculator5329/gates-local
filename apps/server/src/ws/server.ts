@@ -6,7 +6,7 @@
 // (src/web/socket.ts), serves the web client and the same socket on /ws,
 // admitted by Tailscale Serve's headers instead of the token
 // (src/web/phone.ts); both listeners share handlers and pushes.
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, createServer } from "node:http";
 import { isIP } from "node:net";
 import type { Duplex } from "node:stream";
@@ -17,7 +17,12 @@ import {
   type Params,
   type Payload,
   type ResultOf,
+  type SyncChange,
+  type SyncDomain,
+  type SyncMetadata,
   WireError,
+  ORDERED_DOMAINS,
+  settingsSnapshotMethod,
   decodeRequest,
   encodeErrorResponse,
   encodePush,
@@ -29,17 +34,22 @@ import { SECURITY_HEADERS, phoneGate } from "../web/phone.ts";
 import { listenOwnerSocket } from "../web/socket.ts";
 import { serveClient } from "../web/static.ts";
 
+// One opaque identity for this process, shared by desktop and phone listeners.
+const epoch = randomUUID();
+
 export interface HandlerContext {
   /** Stable per connection, for handlers that track who started what. */
   readonly clientId: number;
   readonly listener?: "desktop" | "phone";
   readonly signal?: AbortSignal;
+  /** Called by the state owner while capturing the result, before any await. */
+  readonly capture?: (changes: readonly SyncChange[]) => void;
 }
 
 export type Handler<M extends MethodName> = (params: Params<M>, ctx: HandlerContext) => ResultOf<M> | Promise<ResultOf<M>>;
 
-/** The full registry, for the composer to `satisfies` once every module is wired. */
-export type Handlers = { readonly [M in MethodName]: Handler<M> };
+/** Application registry; negotiation belongs to the transport, not an app handler. */
+export type Handlers = { readonly [M in Exclude<MethodName, "sync.negotiate">]: Handler<M> };
 
 export interface WsServerOptions {
   /** Loopback only: 127.0.0.0/8 or ::1. Default 127.0.0.1. */
@@ -50,8 +60,10 @@ export interface WsServerOptions {
   readonly token: string;
   /** Exact Origin header values allowed. A request with no Origin (Electron main, node) is allowed. */
   readonly allowedOrigins: readonly string[];
-  /** Methods without a handler answer "not-implemented". */
+  /** Application methods without a handler answer "not-implemented". */
   readonly handlers: Partial<Handlers>;
+  /** Enable only domains whose handlers and every writer capture revisions. */
+  readonly ordered?: readonly SyncDomain[];
   readonly log?: (line: string) => void;
   /** Largest inbound frame. Default 16 MiB. */
   readonly maxPayloadBytes?: number;
@@ -81,7 +93,7 @@ export interface WsServer {
   readonly port: number;
   /** The phone listener's socket path, when it is on. */
   readonly phoneSocket?: string;
-  push<C extends Channel>(channel: C, payload: Payload<C>): void;
+  push<C extends Channel>(channel: C, payload: Payload<C>, changes?: readonly SyncChange[]): void;
   close(): Promise<void>;
 }
 
@@ -156,6 +168,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   // Eight 10 MiB pasted images expand to about 107 MiB in base64. Saved threads carry paths only.
   const wss = new WebSocketServer({ noServer: true, maxPayload: options.maxPayloadBytes ?? 128 * 1024 * 1024 });
   const clients = new Set<WebSocket>();
+  const ordered = new WeakMap<WebSocket, readonly SyncDomain[]>();
   const phoneClients = new WeakSet<WebSocket>();
   // Before the snapshot, active replies are recovered from that snapshot and
   // completed ones from RPC history. Keeping no chat backlog bounds idle clients.
@@ -219,11 +232,19 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       if (req.id === undefined) return log(`dropped frame with no usable id: ${req.error.code}: ${req.error.message}`);
       return send(ws, encodeErrorResponse(req.id, req.error.code, req.error.message));
     }
-    const { id, method } = req.value;
+    const { id, method, params: decodedParams } = req.value;
+    if (method === "sync.negotiate") {
+      const domains = (options.ordered ?? []).filter(domain => ORDERED_DOMAINS.includes(domain) && decodedParams.ordered.includes(domain));
+      const frame = encodeResult(id, method, { epoch, ordered: domains });
+      if (!frame.ok) throw frame.error;
+      send(ws, frame.value);
+      ordered.set(ws, domains); // Success is enqueued before any ordered push.
+      return;
+    }
     if (ctx.listener === "phone" && method.startsWith("update.") && method !== "update.status") {
       return send(ws, encodeErrorResponse(id, "forbidden", "Updates can only be controlled from the computer running Gates Local."));
     }
-    let params: unknown = req.value.params;
+    let params: unknown = decodedParams;
     if (ctx.listener === "phone" && req.value.method === "settings.update") {
       // Reset still succeeds on phones, but desktop update preferences stay put.
       const { updateAutomatic: _automatic, updateEveryChange: _channel, ...phonePatch } = req.value.params;
@@ -232,14 +253,17 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     const handler = handlers[method] as ((p: unknown, c: HandlerContext) => unknown) | undefined;
     if (handler === undefined) return send(ws, encodeErrorResponse(id, "not-implemented", `${method} has no handler`));
     let result: unknown;
+    let captured: SyncMetadata | undefined;
     try {
-      result = await handler(params, ctx);
+      result = await handler(params, { ...ctx, capture: changes => { captured = { epoch, changes }; } });
     } catch (e) {
       const { code, message, blocking } = errorCode(e);
       if (code === "internal") log(`${method} handler threw: ${message}`);
       return send(ws, encodeErrorResponse(id, code, message, blocking));
     }
-    const frame = encodeResult(id, method, result as never);
+    const needsSettings = ordered.get(ws)?.includes("settings") && settingsSnapshotMethod(method);
+    if (needsSettings && captured === undefined) return send(ws, encodeErrorResponse(id, "bad-result", `${method} did not capture settings metadata`));
+    const frame = encodeResult(id, method, result as never, needsSettings ? captured : undefined);
     if (!frame.ok) {
       log(`${method} returned a result that breaks its Schema: ${frame.error.message}`);
       return send(ws, encodeErrorResponse(id, frame.error.code, frame.error.message));
@@ -292,10 +316,22 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
   return {
     port,
     ...(phone === undefined ? {} : { phoneSocket: phone.socketPath }),
-    push(channel, payload) {
+    push(channel, payload, changes) {
       const frame = encodePush(channel, payload);
       if (!frame.ok) throw frame.error;
-      for (const ws of clients) if (channel !== "chat.event" || chatClients.has(ws)) send(ws, frame.value);
+      let versioned: string | undefined;
+      for (const ws of clients) {
+        if (channel === "chat.event" && !chatClients.has(ws)) continue;
+        if (channel === "settings.changed" && ordered.get(ws)?.includes("settings")) {
+          if (changes === undefined) throw new Error("settings.changed did not capture settings metadata");
+          if (versioned === undefined) {
+            const encoded = encodePush(channel, payload, { epoch, changes });
+            if (!encoded.ok) throw encoded.error;
+            versioned = encoded.value;
+          }
+          send(ws, versioned);
+        } else send(ws, frame.value);
+      }
     },
     async close() {
       for (const ws of clients) ws.terminate();

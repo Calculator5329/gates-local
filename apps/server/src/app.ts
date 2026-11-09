@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
-import type { BlockingTurn, Channel, Message, Params, Payload, ToolStep } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, Message, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -93,7 +93,7 @@ const preemptedBy = (model: string, numCtx: number, held: string): AppError =>
 const threadGoing = (threadId: string) => new AppError("thread-not-found", `thread ${threadId} is being deleted`);
 const cancelledBeforeStart = () => new AppError("cancelled", "the turn was cancelled before it started");
 
-export type Push = <C extends Channel>(channel: C, payload: Payload<C>) => void;
+export type Push = <C extends Channel>(channel: C, payload: Payload<C>, changes?: readonly SyncChange[]) => void;
 type WireEvent = Payload<"chat.event">["event"];
 
 export interface AppDeps {
@@ -198,9 +198,9 @@ export function createApp(deps: AppDeps): App {
   const byThread = new Map<string, Turn>();
   let closing = false;
 
-  const push: Push = (channel, payload) => {
+  const push: Push = (channel, payload, changes) => {
     try {
-      deps.push(channel, payload);
+      deps.push(channel, payload, changes);
     } catch (e) {
       log(`push ${channel} failed: ${(e as Error).message}`);
     }

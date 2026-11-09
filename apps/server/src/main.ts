@@ -51,6 +51,7 @@ import { createImportActivity, withImportAdmission } from "./sources/activity.ts
 import { createLibraryImports, type ImportsDeps } from "./sources/imports.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
+import { ORDERED_DOMAINS } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
@@ -167,7 +168,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     services = await createModelServices({
       admit: admission.admit,
       dataDir,
-      push: (channel, payload) => server?.push(channel, payload),
+      push: (channel, payload, changes) => server?.push(channel, payload, changes),
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
         ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),
@@ -187,7 +188,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     admit: admission.admit,
     dataDir, store, lease: gpuLease,
     log: (line) => log(`image ${line}`),
-    push: (channel, payload) => server?.push(channel, payload),
+    push: (channel, payload, changes) => server?.push(channel, payload, changes),
     settings: () => services.settings.get(),
     appLoadedModels: () => services.loader.appLoadedModels(),
     // The loader forgets a model the image module unloaded (keep_alive 0).
@@ -233,7 +234,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       : runtime,
     catalog,
     fit,
-    push: (channel, payload) => server?.push(channel, payload),
+    push: (channel, payload, changes) => server?.push(channel, payload, changes),
     models: services,
     log,
   });
@@ -260,6 +261,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     server = await startWsServer({
       port,
       token,
+      ordered: ORDERED_DOMAINS,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
       handlers: { ...app.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
       onClientCount: (n) => services.gpu.clientsChanged(n),

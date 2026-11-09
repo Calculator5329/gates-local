@@ -23,6 +23,8 @@
   Slower measurements stay informational; tool failures say measurements are
   unavailable and leave the correctness verdict unchanged.
 
+2026-11-09: Settings saves and reconnects keep newer shared theme and speech changes from being replaced by older answers.
+
 ## 2026-11-09: Completed deletes succeed even when image cleanup fails
 
 Thread and message deletion now log an image-cleanup failure after the row

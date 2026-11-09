@@ -14,6 +14,7 @@ import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { createModelServices, type ModelServices } from "./services.ts";
 import { freePort, freePortRun, removeDir, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 import { ownedIdleComfy, type OwnedComfy } from "./test-image.ts";
+import type { SyncChange } from "@gates-local/contracts";
 
 const VERSION = "9.9.9-services";
 const manifest = { version: VERSION, url: "http://127.0.0.1:1/never", sha256: "0".repeat(64), sizeBytes: 1, format: "tar.zst", verified: true, source: "test" } as const;
@@ -42,11 +43,12 @@ async function models(url: string): Promise<string | undefined> {
   return r.kind === "response" ? (JSON.parse(r.body) as { OLLAMA_MODELS: string }).OLLAMA_MODELS : undefined;
 }
 
-async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number, fitDeps: AppDeps["fit"] = fit): Promise<ModelServices> {
+async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number, fitDeps: AppDeps["fit"] = fit) {
   const home = path.join(work, "home");
+  const settingsFrames: Array<{ value: unknown; changes: readonly SyncChange[] | undefined }> = [];
   const s = await createModelServices({
     dataDir,
-    push: () => undefined,
+    push: (channel, value, changes) => { if (channel === "settings.changed") settingsFrames.push({ value, changes }); },
     runtime: { home, env: { PATH: "", HOME: home }, systemModelsDirs: [], allowInstall: false, probeTimeoutMs: 500, manifest, ...runtime },
     fit: fitDeps,
     log: () => undefined,
@@ -55,7 +57,7 @@ async function services(dataDir: string, runtime: Record<string, unknown>, lease
   });
   s.gpu.stop();
   open.push(s);
-  return s;
+  return Object.assign(s, { settingsFrames });
 }
 
 it("S-08: two services with different data dirs run their own Ollama against their own models folder", async () => {
@@ -410,6 +412,10 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     await sleep(20);
     expect(r.s.runtime.mode()).toBe("system");
     expect(r.s.handlers["settings.get"]!({}, { clientId: 1 })).toMatchObject({ runtimeMode: "system" });
+    expect(r.s.settingsFrames).toEqual([
+      { value: expect.objectContaining({ runtimeMode: "app" }), changes: [{ scope: "settings", kind: "snapshot", rev: 1 }] },
+      { value: expect.objectContaining({ runtimeMode: "system" }), changes: [{ scope: "settings", kind: "snapshot", rev: 2 }] },
+    ]);
     // R5-04: putting Settings back schedules no switch.
     expect(switches).toEqual(["app"]);
     stuck.end();

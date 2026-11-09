@@ -5,7 +5,7 @@
 // never lost silently. Other modules read settings through SettingsReader.
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch } from "@gates-local/contracts";
+import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch, type SyncChange } from "@gates-local/contracts";
 import { Result, Schema as S } from "effect";
 import { canonicalTag } from "../runtime/recommended.ts";
 import { boundedModelSettings } from "./turn.ts";
@@ -24,6 +24,8 @@ export interface SettingsReader {
 }
 
 export interface SettingsStore extends SettingsReader {
+  /** The revision captured with this immutable value, never the latest revision at serialization. */
+  stamp(value: Settings): SyncChange;
   /** Apply a patch (`null` clears defaultModel and comfyUrl), persist, notify. */
   update(patch: SettingsPatch): Settings;
   /** Merge fields for one model; null fields inherit again, a null patch resets the model. */
@@ -150,17 +152,25 @@ export async function openSettingsStore(options: SettingsStoreOptions): Promise<
   }
 
   const listeners = new Set<SettingsListener>();
+  let revision = 0;
+  const revisions = new WeakMap<Settings, number>([[current, revision]]);
   const persist = (next: Settings): Settings => {
     if (sameSettings(next, current)) return current;
     writeAtomic(file, next, options.rename);
     const previous = current;
     current = next;
+    revisions.set(next, ++revision);
     for (const l of listeners) l(next, previous);
     return next;
   };
   return {
     loadNote,
     get: () => current,
+    stamp(value) {
+      const rev = revisions.get(value);
+      if (rev === undefined) throw new Error("Settings value was not captured by this store");
+      return { scope: "settings", kind: "snapshot", rev };
+    },
     update(patch) {
       return persist(S.decodeUnknownSync(Settings)(applyPatch(current, S.decodeUnknownSync(SettingsPatch)(patch))));
     },

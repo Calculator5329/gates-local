@@ -3,13 +3,14 @@
 import type { ReactNode } from "react";
 import { isValidElement } from "react";
 import { vi } from "vitest";
-import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch } from "@gates-local/contracts";
+import type { Message, Params, Payload, ResultOf, Settings, SettingsPatch, SyncMetadata } from "@gates-local/contracts";
+import { decodeResult } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { FakeServer, FakeSocket, installBrowser } from "./harness.ts";
 
 export const SPEECH_URL = "http://speech.invalid";
 type Request = Parameters<FakeServer["handle"]>[1];
-interface Delivery { readonly socket: FakeSocket; readonly request: Request; readonly result: unknown }
+interface Delivery { readonly socket: FakeSocket; readonly request: Request; readonly result: unknown; readonly sync?: SyncMetadata }
 
 /** A bounded microtask drain; event preconditions check readiness explicitly. */
 export async function drain(): Promise<void> {
@@ -17,7 +18,18 @@ export async function drain(): Promise<void> {
 }
 
 export class OrderingServer extends FakeServer {
+  orderedSettings = false;
+  private settingsRevision = 0;
+  settingsSync(): SyncMetadata | undefined {
+    // Setup-only external writers assign settings directly. Capture their
+    // commit once, before either window receives its versioned push.
+    if (JSON.stringify(this.settings) !== JSON.stringify(this.stampedSettings)) {
+      this.settingsRevision++; this.stampedSettings = this.settings;
+    }
+    return this.orderedSettings ? { epoch: "replay-process", changes: [{ scope: "settings", kind: "snapshot", rev: this.settingsRevision }] } : undefined;
+  }
   settings: Settings = { ...methodSamples["settings.get"].result, whisperUrl: SPEECH_URL };
+  private stampedSettings = this.settings;
   readonly deliveries = new Map<string, Delivery>();
   readonly writes: Array<{ socket: FakeSocket; patch: SettingsPatch; key: string }> = [];
   connectName = "connect";
@@ -36,12 +48,15 @@ export class OrderingServer extends FakeServer {
 
   override handle(socket: FakeSocket, request: Request): void {
     const label = this.labels.get(socket) ?? "A";
-    const save = (key: string, result: unknown) => this.deliveries.set(key, { socket, request, result });
-    const respond = (result: unknown) => socket.frame({ type: "response", id: request.id, ok: true, result });
+    const save = (key: string, result: unknown, sync?: SyncMetadata) => this.deliveries.set(key, { socket, request, result, sync });
+    const respond = (result: unknown, sync?: SyncMetadata) => socket.frame({ type: "response", id: request.id, ok: true, result, ...(sync ? { sync } : {}) });
+    if (request.method === "sync.negotiate" && this.orderedSettings) {
+      this.log.push(request); respond({ epoch: "replay-process", ordered: ["settings"] }); return;
+    }
     if (request.method === "settings.get") {
       this.log.push(request);
-      if (this.holdHydration && label === "A") save("snapshot", this.settings);
-      else respond(this.settings);
+      if (this.holdHydration && label === "A") save("snapshot", this.settings, this.settingsSync());
+      else respond(this.settings, this.settingsSync());
     } else if (request.method === "models.list" && this.holdHydration && label === "A") {
       this.log.push(request); save("hydration", this.modelsSnapshot);
     } else if (request.method === "voice.check") {
@@ -52,12 +67,29 @@ export class OrderingServer extends FakeServer {
       const patch = request.params as Params<"settings.update">;
       const { voiceChange, whisperUrl, theme, imageGen } = patch;
       if (Object.keys(patch).some((key) => !["voiceChange", "whisperUrl", "theme", "imageGen"].includes(key))) throw new Error("Script a settings result for this patch first");
-      this.settings = { ...this.settings, ...(theme ? { theme } : {}), ...(imageGen === undefined ? {} : { imageGen }), ...("whisperUrl" in patch ? { whisperUrl: whisperUrl ?? undefined } : {}) };
+      const next = { ...this.settings, ...(theme ? { theme } : {}), ...(imageGen === undefined ? {} : { imageGen }), ...("whisperUrl" in patch ? { whisperUrl: whisperUrl ?? undefined } : {}) };
+      if (JSON.stringify(next) !== JSON.stringify(this.settings)) this.settingsRevision++;
+      this.settings = next;
+      this.stampedSettings = next;
       const key = `${label}-${"whisperUrl" in patch ? whisperUrl === null ? "disconnect" : this.connectName : "theme"}`;
       this.writes.push({ socket, patch, key });
-      save(key, this.settings);
+      save(key, this.settings, this.settingsSync());
       // The sender's response and both windows' push deliveries are separate.
-      this.deliveries.set(`${key}-push`, { socket, request, result: { ...this.settings, ...(voiceChange ? { voiceChange } : {}) } });
+      this.deliveries.set(`${key}-push`, { socket, request, result: { ...this.settings, ...(voiceChange ? { voiceChange } : {}) }, sync: this.settingsSync() });
+    } else if (request.method === "settings.model.update" && this.orderedSettings) {
+      this.log.push(request);
+      const { model, patch } = request.params as Params<"settings.model.update">;
+      const overrides = { ...this.settings.modelSettings };
+      if (patch === null) delete overrides[model];
+      else overrides[model] = Object.fromEntries(Object.entries({ ...overrides[model], ...patch }).filter(([, value]) => value !== null));
+      const decoded = decodeResult("settings.model.update", { ...this.settings, modelSettings: overrides });
+      if (!decoded.ok) throw decoded.error;
+      const next = decoded.value;
+      if (JSON.stringify(next) !== JSON.stringify(this.settings)) this.settingsRevision++;
+      this.settings = next; this.stampedSettings = next;
+      const key = `${label}-model`;
+      save(key, next, this.settingsSync());
+      this.deliveries.set(`${key}-push`, { socket, request, result: next, sync: this.settingsSync() });
     } else if (request.method === "threads.get") {
       this.log.push(request);
       respond({ thread: methodSamples["threads.create"].result, messages: this.messages });
@@ -90,7 +122,7 @@ export class OrderingServer extends FakeServer {
     const delivery = this.deliveries.get(key);
     if (!delivery) { if (optional) return; throw new Error(`No pending response: ${key}`); }
     this.deliveries.delete(key);
-    delivery.socket.frame({ type: "response", id: delivery.request.id, ok: true, result: delivery.result });
+    delivery.socket.frame({ type: "response", id: delivery.request.id, ok: true, result: delivery.result, ...(delivery.sync ? { sync: delivery.sync } : {}) });
   }
 
   settingsPush(key: string, target: FakeSocket, tagged = true, optional = false): void {
@@ -98,7 +130,7 @@ export class OrderingServer extends FakeServer {
     if (!delivery) { if (optional) return; throw new Error(`No committed settings push: ${key}`); }
     const payload = delivery.result as Payload<"settings.changed">;
     const { voiceChange: _voiceChange, ...settings } = payload;
-    target.frame({ type: "push", channel: "settings.changed", payload: tagged ? payload : settings });
+    target.frame({ type: "push", channel: "settings.changed", payload: tagged ? payload : settings, ...(delivery.sync ? { sync: delivery.sync } : {}) });
   }
 
   chatPush(turnId: string, target: FakeSocket, done = false): void {
@@ -142,11 +174,12 @@ export class OrderingWorld {
   get a(): WindowSession { const a = this.windows[0]; if (!a) throw new Error("Missing window A"); return a; }
   get b(): WindowSession { const b = this.windows[1]; if (!b) throw new Error("Missing window B"); return b; }
 
-  static async create(twoWindows = true): Promise<OrderingWorld> {
+  static async create(twoWindows = true, orderedSettings = process.env["REPLAY_ORDERED_SETTINGS"] !== "0"): Promise<OrderingWorld> {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     vi.setSystemTime(1_800_000_000_000);
     installBrowser();
     const world = new OrderingWorld();
+    world.server.orderedSettings = orderedSettings;
     vi.stubGlobal("WebSocket", class extends FakeSocket { constructor(url: string) { super(url, world.server); } });
     for (const label of twoWindows ? ["A", "B"] : ["A"]) {
       vi.resetModules();

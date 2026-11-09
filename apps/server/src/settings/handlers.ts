@@ -1,5 +1,5 @@
 // settings.get, settings.update and the settings.changed push.
-import type { Handlers } from "../ws/server.ts";
+import type { HandlerContext, Handlers } from "../ws/server.ts";
 import type { Push } from "../app.ts";
 import type { SettingsStore } from "./store.ts";
 import { fetchShow } from "../fit/ollama.ts";
@@ -12,17 +12,25 @@ export interface SettingsHandlerDeps {
 
 export function createSettingsHandlers(deps: SettingsHandlerDeps) {
   return {
-    "settings.get": () => deps.settings.get(),
-    "settings.update": ({ voiceChange, ...patch }) => {
+    "settings.get": (_params?: object, ctx?: HandlerContext) => {
+      const value = deps.settings.get();
+      ctx?.capture?.([deps.settings.stamp(value)]);
+      return value;
+    },
+    "settings.update": ({ voiceChange, ...patch }, ctx?: HandlerContext) => {
       const before = deps.settings.get();
       const next = deps.settings.update(patch);
-      if (next !== before || voiceChange !== undefined) deps.push("settings.changed", { ...next, ...(voiceChange === undefined ? {} : { voiceChange }) });
+      const changes = [deps.settings.stamp(next)];
+      ctx?.capture?.(changes);
+      if (next !== before || voiceChange !== undefined) deps.push("settings.changed", { ...next, ...(voiceChange === undefined ? {} : { voiceChange }) }, changes);
       return next;
     },
-    "settings.model.update": ({ model, patch }) => {
+    "settings.model.update": ({ model, patch }, ctx?: HandlerContext) => {
       const before = deps.settings.get();
       const next = deps.settings.updateModel(model, patch);
-      if (next !== before) deps.push("settings.changed", next);
+      const changes = [deps.settings.stamp(next)];
+      ctx?.capture?.(changes);
+      if (next !== before) deps.push("settings.changed", next, changes);
       return next;
     },
     "settings.modelDefaults": async ({ model }) => {

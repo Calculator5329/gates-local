@@ -1,5 +1,22 @@
 # Testing
 
+## Ordered settings replays
+
+The production-session replay suites negotiate ordered settings by default.
+Run `pnpm exec vitest run apps/web/test/ordering-replay.test.ts apps/web/test/ordering-state.test.ts apps/web/test/ordering-downloads.test.ts` for the 999 original causal schedules, three additional explicit FIFO RP-01 witnesses and three focused ordered-settings action probes.
+Set `REPLAY_ORDERED_SETTINGS=0` on the same command to compare the original
+legacy guards; the new explicitly ordered probes still exercise the new path.
+No invariant assertion changes between modes. Sampling remains bounded and
+fixed-seed where the scheduler reports it; the three RP-01 witnesses are named
+orders, not exhaustive exploration. The ordered settings fixture captures each
+settings revision with its value before holding response emission.
+
+Real settings-store/transport probes in `apps/server/src/settings/ordered.test.ts`
+check read/save capture, shared/model writes, no-ops, reentrant commits and old
+peers. Runtime-service tests check rollback publication. The browser journey
+`ordered-settings.spec.ts` checks independent windows' theme, Connect/Disconnect
+and reload presentation; transport scheduling invariants stay in the replays.
+
 ## Fast default browser run
 
 `pnpm e2e` builds the client and runs the complete one-worker `e2e` project.

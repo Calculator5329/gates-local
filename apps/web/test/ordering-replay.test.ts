@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { explore, replay, regression, schedules, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "./ordering-replay.ts";
-import { OrderingWorld } from "./ordering-world.ts";
+import { OrderingWorld, SPEECH_URL, drain } from "./ordering-world.ts";
 
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -165,12 +165,12 @@ export function foreignSpeech(theme = false, tagged = true): ReplayScenario<Worl
   });
 }
 
-function batchedSettings(): ReplayScenario<World> {
+function batchedSettings(orderedSettings?: boolean): ReplayScenario<World> {
   const themes: string[] = [];
   return {
     name: "RP-01: two broadcasts before either settings response",
     create: async () => {
-      const w = await OrderingWorld.create();
+      const w = await OrderingWorld.create(true, orderedSettings);
       themes.length = 0;
       vi.spyOn(document.documentElement, "setAttribute").mockImplementation((name, value) => {
         if (name === "data-theme") themes.push(value);
@@ -207,6 +207,66 @@ it("RP-01: a batched older response never overwrites the newer theme push", asyn
     "B.disconnect.response", "B.theme.response",
   ];
   await replay(scenario, { order: JSON.stringify(order) });
+});
+
+it("RP-01 ordered settings preserves the newest theme across three explicit FIFO witnesses", async () => {
+  const orders = [
+    ["B.disconnect.request", "B.theme.request", "B.disconnect.response.ready", "B.theme.response.ready", "B.disconnect.push-to-A", "B.theme.push-to-A", "B.disconnect.push-to-B", "B.theme.push-to-B", "B.disconnect.response", "B.theme.response"],
+    ["B.disconnect.request", "B.disconnect.response.ready", "B.disconnect.push-to-A", "B.disconnect.push-to-B", "B.theme.request", "B.theme.response.ready", "B.theme.push-to-A", "B.disconnect.response", "B.theme.push-to-B", "B.theme.response"],
+    ["B.disconnect.request", "B.theme.request", "B.disconnect.response.ready", "B.theme.response.ready", "B.disconnect.push-to-B", "B.disconnect.push-to-A", "B.theme.push-to-A", "B.theme.push-to-B", "B.disconnect.response", "B.theme.response"],
+  ];
+  for (const order of orders) await replay(batchedSettings(true), { order: JSON.stringify(order) });
+  process.stdout.write("RP-01 ordered settings: 3 orders (explicit FIFO witnesses)\n");
+});
+
+it("ordered shared/model acknowledgements retain both commits and a no-op voice echo preserves intent", async () => {
+  const w = await OrderingWorld.create(true, true);
+  try {
+    const shared = w.a.session.updateSettings({ theme: "light" }); await drain();
+    const model = w.b.session.updateModelSettings("model:latest", { systemPrompt: "Keep this prompt" }); await drain();
+    for (const socket of [w.a.socket, w.b.socket]) {
+      w.server.settingsPush("A-theme", socket);
+      w.server.settingsPush("B-model", socket);
+    }
+    w.server.response("B-model"); await drain();
+    w.server.response("A-theme"); await drain();
+    expect(await shared).toBeNull(); expect(await model).toBeNull();
+    for (const window of w.windows) expect(window.store.getState().settings).toMatchObject({ theme: "light", modelSettings: { "model:latest": { systemPrompt: "Keep this prompt" } } });
+    const version = w.a.store.getState().voiceConnectionVersion;
+    const unchanged = w.a.session.updateSettings({ whisperUrl: SPEECH_URL }, { voiceActionStarted: true }); await drain();
+    w.server.settingsPush("A-connect", w.a.socket); w.server.response("A-connect"); await drain();
+    expect(await unchanged).toBeNull();
+    expect(w.a.store.getState().voiceConnectionVersion).toBe(version);
+  } finally { await w.dispose(); }
+});
+
+it("ordered settings accepted during bootstrap cannot roll back when the last response and socket close share a task", async () => {
+  const w = await OrderingWorld.create(true, true);
+  try {
+    await w.drop(); await w.reconnect();
+    const saved = w.b.session.updateSettings({ theme: "light" }); await drain();
+    w.server.settingsPush("B-theme", w.b.socket); w.server.settingsPush("B-theme", w.a.socket);
+    w.server.response("B-theme"); await drain(); await saved;
+    w.server.response("snapshot"); w.server.response("hydration"); w.a.socket.close();
+    await drain();
+    expect(w.a.store.getState().settings).toMatchObject({ theme: "light" });
+  } finally { await w.dispose(); }
+});
+
+it("ordered bootstrap missing its required settings stamp retains failed-startup backoff", async () => {
+  const w = await OrderingWorld.create(true, true);
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  try {
+    await w.drop(); await w.reconnect();
+    w.server.response("hydration"); await drain();
+    const snapshot = w.server.deliveries.get("snapshot");
+    if (!snapshot) throw new Error("Missing captured settings read");
+    w.server.deliveries.set("snapshot", { ...snapshot, sync: undefined });
+    w.server.response("snapshot"); await drain();
+    expect(w.a.store.getState().conn.kind).toBe("down");
+    const retry = timers.mock.calls.map(([, ms]) => ms).filter(ms => ms !== undefined && [250, 500, 1000, 2000, 4000].includes(ms)).at(-1);
+    expect(retry).toBe(500);
+  } finally { timers.mockRestore(); await w.dispose(); }
 });
 
 // app.ts stores the user row and broadcasts start before chat.send returns.

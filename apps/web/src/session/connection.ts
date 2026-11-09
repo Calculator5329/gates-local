@@ -1,5 +1,5 @@
 // One connection's reconnect loop, RPCs and draft-persistence lifetime.
-import { type Client, type MethodName, type Params, type ResultOf, WireError, createClient } from "@gates-local/contracts";
+import { type CallOptions, type Client, type MethodName, type Params, type ResultOf, WireError, createClient } from "@gates-local/contracts";
 import { NA, setState } from "../store.ts";
 
 interface ConnectionEffects {
@@ -109,9 +109,9 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
       }
       if (opened) {
         client = c;
-        delay = 250;
         applyServerEvent({ conn: { kind: "open" } });
-        await hydrate(c).catch(() => undefined);
+        // An open socket may still fail negotiation or its startup reads.
+        await hydrate(c).then(() => { delay = 250; }, () => undefined);
         await c.closed;
         beforeDisconnect();
         client = null;
@@ -124,24 +124,24 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
   }
 
   /** Call a server method; rejects with WireError("closed") while disconnected. */
-  function call<M extends MethodName>(method: M, params: Params<M>): Promise<ResultOf<M>> {
+  function call<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M>> {
     if (client === null) return Promise.reject(new WireError("closed", `not connected; ${method} not sent`));
-    return client.call(method, params);
+    return client.call(method, params, options);
   }
 
   /** A v2 read: its result, NA when the server lacks it, undefined on any other failure. */
-  async function probe<M extends MethodName>(method: M, params: Params<M>): Promise<ResultOf<M> | typeof NA | undefined> {
+  async function probe<M extends MethodName>(method: M, params: Params<M>, options?: CallOptions<M>): Promise<ResultOf<M> | typeof NA | undefined> {
     try {
-      return await call(method, params);
+      return await call(method, params, options);
     } catch (e) {
       return isNA(e) ? NA : undefined;
     }
   }
 
   /** Run an action method; NA marks it unavailable for the rest of the session. `what` completes "Couldn't …". */
-  async function act<M extends MethodName>(method: M, params: Params<M>, what: string, todo = "try again"): Promise<Acted<M>> {
+  async function act<M extends MethodName>(method: M, params: Params<M>, what: string, todo = "try again", options?: CallOptions<M>): Promise<Acted<M>> {
     try {
-      return { ok: true, value: await call(method, params) };
+      return { ok: true, value: await call(method, params, options) };
     } catch (e) {
       if (isNA(e)) applyServerEvent((s) => ({ unavailable: { ...s.unavailable, [method]: true } }));
       return { ok: false, message: failure(what, e, todo) };
@@ -154,5 +154,5 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
     return client.call(method, params);
   }
 
-  return { connect, call, probe, act, libraryRequest, get stopped() { return stopped; } };
+  return { connect, call, probe, act, libraryRequest, get stopped() { return stopped; }, get sync() { return client?.sync; } };
 }

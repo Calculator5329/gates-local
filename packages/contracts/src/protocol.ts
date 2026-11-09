@@ -2,6 +2,7 @@
 // boundary codecs both ends use. Decode functions never throw; a message
 // that does not decode comes back as a WireError with a named code.
 import { Result, Schema as S } from "effect";
+import { SyncDomain, SyncMetadata, SyncNegotiation } from "./sync.ts";
 import {
   BlockingTurn,
   CatalogEntry,
@@ -87,6 +88,7 @@ const SourceRef = S.Struct({ id: S.String });
 
 /** One definition for both ends: each method's params and result Schema. */
 export const methods = {
+  "sync.negotiate": { params: S.Struct({ ordered: S.Array(SyncDomain) }), result: SyncNegotiation },
   "voice.check": { params: S.Struct({ url: S.String }), result: S.Struct({ ready: S.Boolean }) },
   "voice.transcribe": { params: S.Struct({ id: S.String, audio: S.String }), result: S.Struct({ text: S.String }) },
   "voice.cancel": { params: S.Struct({ id: S.String }), result: NoParams },
@@ -250,17 +252,20 @@ export const ResponseOkEnvelope = S.Struct({
   id: S.String,
   ok: S.Literal(true),
   result: S.Unknown,
+  sync: S.optional(SyncMetadata),
 });
 export const ResponseErrEnvelope = S.Struct({
   type: S.Literal("response"),
   id: S.String,
   ok: S.Literal(false),
   error: ErrorBody,
+  sync: S.optional(SyncMetadata),
 });
 export const PushEnvelope = S.Struct({
   type: S.Literal("push"),
   channel: S.String,
   payload: S.Unknown,
+  sync: S.optional(SyncMetadata),
 });
 export const ServerEnvelope = S.Union([ResponseOkEnvelope, ResponseErrEnvelope, PushEnvelope]);
 
@@ -308,28 +313,29 @@ export function encodeRequest<M extends MethodName>(id: string, method: M, param
   return { ok: true, value: JSON.stringify({ type: "request", id, method, params: p.value }) };
 }
 
-export function encodeResult<M extends MethodName>(id: string, method: M, result: ResultOf<M>): Decoded<string> {
+export function encodeResult<M extends MethodName>(id: string, method: M, result: ResultOf<M>, sync?: SyncMetadata): Decoded<string> {
   if (!isMethod(method)) return { ok: false, error: new WireError("unknown-method", `unknown method "${String(method)}"`) };
   const r = encodeWith(methods[method].result, result, "bad-result", `${method} result`);
   if (!r.ok) return r;
-  return { ok: true, value: JSON.stringify({ type: "response", id, ok: true, result: r.value }) };
+  const metadata = sync === undefined ? { ok: true as const, value: undefined } : encodeWith(SyncMetadata, sync, "bad-result", "response synchronization");
+  if (!metadata.ok) return metadata;
+  return { ok: true, value: JSON.stringify({ type: "response", id, ok: true, result: r.value, ...(sync === undefined ? {} : { sync: metadata.value }) }) };
 }
 
 export function encodeErrorResponse(id: string, code: string, message: string, blocking?: readonly BlockingTurn[]): string {
   return JSON.stringify({ type: "response", id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
 }
 
-export function encodePush<C extends Channel>(channel: C, payload: Payload<C>): Decoded<string> {
+export function encodePush<C extends Channel>(channel: C, payload: Payload<C>, sync?: SyncMetadata): Decoded<string> {
   if (!isChannel(channel)) return { ok: false, error: new WireError("bad-payload", `unknown channel "${String(channel)}"`) };
   const p = encodeWith(pushes[channel].payload, payload, "bad-payload", `${channel} payload`);
   if (!p.ok) return p;
-  return { ok: true, value: JSON.stringify({ type: "push", channel, payload: p.value }) };
+  const metadata = sync === undefined ? { ok: true as const, value: undefined } : encodeWith(SyncMetadata, sync, "bad-payload", "push synchronization");
+  if (!metadata.ok) return metadata;
+  return { ok: true, value: JSON.stringify({ type: "push", channel, payload: p.value, ...(sync === undefined ? {} : { sync: metadata.value }) }) };
 }
 
-export type ServerMessage =
-  | { readonly type: "response"; readonly id: string; readonly ok: true; readonly result: unknown }
-  | { readonly type: "response"; readonly id: string; readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly blocking?: readonly BlockingTurn[] | undefined } }
-  | { readonly type: "push"; readonly channel: string; readonly payload: unknown };
+export type ServerMessage = typeof ServerEnvelope.Type;
 
 /** Client side: decode the envelope of one inbound frame. Results and payloads decode later, by method or channel. */
 export function decodeServerMessage(raw: unknown): Decoded<ServerMessage> {

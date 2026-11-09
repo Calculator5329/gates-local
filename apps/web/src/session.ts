@@ -77,7 +77,7 @@ const modelsSession = createModels({ applyServerEvent,
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
 
-const settingsSession = createSettings({ applyServerEvent, act, applyTheme, applyTextSize, refreshImageStatus: probeImageStatus });
+const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyTextSize, refreshImageStatus: probeImageStatus });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
@@ -105,14 +105,15 @@ async function hydrate(c: Client): Promise<void> {
   };
   const on = <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) =>
     c.subscribe(channel, (p) => applyServerEvent(() => dispatch(channel, () => handler(p))));
-  c.subscribe("settings.changed", (payload) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run))));
+  c.subscribe("settings.changed", (payload, metadata) => applyServerEvent(() => settingsSession.receiveSettings(payload, (run) => dispatch("settings.changed", run), metadata)));
   c.subscribe("image.status", (imageStatus) => applyServerEvent(() => {
     imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
     dispatch("image.status", () => applyServerEvent({ imageStatus }));
   }));
   try {
-    await hydrateWith(on, release);
+    await hydrateWith(on, release, c.negotiate);
   } finally {
+    settingsSession.releasePresentation();
     release("none");
   }
 }
@@ -120,6 +121,7 @@ async function hydrate(c: Client): Promise<void> {
 async function hydrateWith(
   on: <C extends Channel>(channel: C, handler: (p: Payload<C>) => void) => void,
   release: (next: ReadonlySet<Channel> | "none") => void,
+  negotiate: Client["negotiate"],
 ): Promise<void> {
   on("chat.event", onChatEvent);
   on("runtime.changed", modelsSession.runtimeChanged);
@@ -133,6 +135,11 @@ async function hydrateWith(
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
   });
+  // Install every receipt handler first. Ordered domains stay disabled until
+  // their full migration lands; unsupported servers continue in legacy mode.
+  const negotiated = await negotiate();
+  settingsSession.ready();
+  const orderedSettings = negotiated.mode === "ordered" && negotiated.domains.includes("settings");
 
   // settings.get is a local store read and the model choice needs only it and
   // the model list, so the runtime dot and a chosen model land in one render:
@@ -142,17 +149,22 @@ async function hydrateWith(
   const ticket = modelsOrder.next();
   const statusTicket = runtimeOrder.next();
   const listTicket = threadSession.listOrder.next();
-  const [status, listed, threads, settings, active, pendingPulls] = await Promise.all([
+  const [status, listed, threads, snapshot, active, pendingPulls] = await Promise.all([
     call("runtime.status", {}),
     call("models.list", {}).catch(() => undefined),
     call("threads.list", {}),
-    probe("settings.get", {}),
+    // Ordered snapshots are required; protocol rejection must fail bootstrap,
+    // rather than become an optional unavailable read and reset retry backoff.
+    orderedSettings
+      ? call("settings.get", {}, { onResult: settingsSession.acceptSettings })
+      : probe("settings.get", {}, { onResult: settingsSession.acceptSettings }),
     call("turns.active", {}),
     probe("models.pulls", {}),
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
   markFitsStale();
+  const settings = settingsSession.endHydration(snapshot);
   settingsSession.noteVoiceSnapshot(settings);
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);

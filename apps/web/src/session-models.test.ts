@@ -51,6 +51,7 @@ async function boot(answers: Record<string, () => Promise<unknown>> = {}, connec
   const subs = new Map<string, (p: unknown) => void>();
   const calls: string[] = [];
   fake.client = {
+    negotiate: async () => ({ mode: "legacy" }),
     get closed() {
       return connections.shift() ?? new Promise(noop);
     },

@@ -5,6 +5,58 @@ import { createConnection } from "../src/session/connection.ts";
 import { installBrowser, tick, until } from "./harness.ts";
 import { setState } from "../src/store.ts";
 
+type Attempt = "negotiation-error" | "hydration-error" | "ready";
+
+async function retryDelays(attempts: readonly Attempt[]): Promise<number[]> {
+  vi.useFakeTimers();
+  const browser = installBrowser();
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  let attempted = 0;
+  browser.server.answer("sync.negotiate", () => {
+    if (attempts[attempted++] === "negotiation-error") throw { code: "internal", message: "Negotiation refused" };
+    return methodSamples["sync.negotiate"].result;
+  });
+  const connection = createConnection({
+    applyServerEvent: setState,
+    serverUrl: async () => "ws://retry.invalid/ws",
+    webServerUrl: () => "ws://retry.invalid/ws",
+    desktopBridge: () => undefined,
+    hydrate: async client => {
+      await client.negotiate();
+      client.close();
+      if (attempts[attempted - 1] === "hydration-error") throw new Error("Snapshot unavailable");
+    },
+    beforeDisconnect: () => {}, afterDisconnect: () => {},
+  });
+  const stop = connection.connect();
+  const delays: number[] = [];
+  try {
+    for (let i = 0; i < attempts.length; i++) {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempted).toBe(i + 1);
+      const retry = timers.mock.calls.map(([, ms]) => ms).filter(ms => ms !== undefined && [250, 500, 1000, 2000, 4000].includes(ms)).at(-1);
+      if (retry === undefined) throw new Error("No reconnect timer was scheduled");
+      delays.push(retry);
+      if (i + 1 < attempts.length) await vi.advanceTimersByTimeAsync(retry);
+    }
+    return delays;
+  } finally {
+    stop(); browser.server.accepting = false;
+    await vi.advanceTimersByTimeAsync(0);
+    vi.clearAllTimers(); vi.restoreAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals();
+  }
+}
+
+it.each(["negotiation-error", "hydration-error"] as const)("SS6-01: repeated %s increases reconnect backoff to its cap", async failure => {
+  expect(await retryDelays(Array<Attempt>(6).fill(failure))).toEqual([250, 500, 1000, 2000, 4000, 4000]);
+});
+
+it("SS6-01: successful hydration resets backoff after failed negotiations", async () => {
+  expect(await retryDelays(["negotiation-error", "negotiation-error", "ready", "negotiation-error", "negotiation-error"]))
+    .toEqual([250, 500, 250, 500, 1000]);
+});
+
 it("stopping one connection leaves another instance's pending and subsequent RPCs alone", async () => {
   const browser = installBrowser();
   const hydrated: string[] = [];

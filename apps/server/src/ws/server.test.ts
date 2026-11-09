@@ -134,13 +134,26 @@ describe("round trip over a real socket", () => {
     expect(chat).toEqual([payload]);
   });
 
-  it.each(methodNames)("%s", async (method: MethodName) => {
+  it.each(methodNames.filter(method => method !== "sync.negotiate"))("%s", async (method: MethodName) => {
     const seen: Array<[string, unknown]> = [];
     const server = await start(sampleHandlers(seen));
     const { client: c } = await client(server);
     const { params, result } = methodSamples[method];
     await expect(c.call(method, params as never)).resolves.toEqual(result);
     expect(seen).toEqual([[method, params]]);
+  });
+
+  it("owns negotiation without an app handler and offers no incomplete ordered domain", async () => {
+    const server = await start({});
+    const desktop = await client(server);
+    const other = await client(server, APP_ORIGIN);
+    const result = await desktop.client.call("sync.negotiate", { ordered: ["settings", "threads"] });
+    expect(result.ordered).toEqual([]);
+    expect(result.epoch).toMatch(/^[\da-f-]{36}$/);
+    await expect(other.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch });
+    const nextListener = await start({});
+    const next = await client(nextListener);
+    await expect(next.client.negotiate()).resolves.toEqual({ mode: "legacy", epoch: result.epoch });
   });
 
   it.each(channelNames)("push %s reaches every client", async (channel: Channel) => {
