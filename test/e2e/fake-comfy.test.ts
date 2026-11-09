@@ -33,7 +33,9 @@ it.each([false, true])("an upgraded fake peer reset is expected, but unrelated s
     console.log("still answers");
   `;
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"] });
+    // Killed well inside the test timeout, so a stalled child can't outlive the
+    // test and keep its fake server's port; the assertion below then reports it.
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["ignore", "pipe", "pipe"], timeout: 20_000, killSignal: "SIGKILL" });
     let stdout = "", stderr = "";
     child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
     child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
