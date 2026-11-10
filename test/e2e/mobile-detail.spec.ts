@@ -167,7 +167,8 @@ test.describe("the drawer", () => {
     await openThread(page, open, seededThread);
     await openDrawer(page);
     const d = await box(page, ".sb");
-    expect(d.width, "drawer width").toBeLessThanOrEqual(340);
+    // Layout widths are fractional on some hosts (340.0000072 seen); the cap is whole pixels.
+    expect(d.width, "drawer width").toBeLessThanOrEqual(340.5);
     expect(d.width / 412, "drawer share of the screen").toBeGreaterThanOrEqual(0.82);
     expect(await css(page, ".sb", "background-color")).toBe(await css(page, "#plusMenu", "background-color"));
     expect(await css(page, ".scrim", "background-color")).toBe("rgba(0, 0, 0, 0.6)");

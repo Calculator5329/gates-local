@@ -11,7 +11,7 @@ vi.mock("react", () => ({
 afterEach(() => vi.unstubAllGlobals());
 
 /** A DOM contract fake; browser specs separately check the actual OS clipboard. */
-function fallback(mode: "missing" | "rejected", result: boolean | "throw", where: "reply" | "field" = "reply") {
+function fallback(mode: "missing" | "rejected", result: boolean | "throw", where: "reply" | "field" | "page-to-reply" | "across-page" = "reply") {
   class Focusable {
     focus = vi.fn();
   }
@@ -30,11 +30,15 @@ function fallback(mode: "missing" | "rejected", result: boolean | "throw", where
   }
   const active = new Field();
   const ta = new Textarea();
-  // A focused field reports the document selection as a caret in its parent;
-  // a selected reply reports a range in nodes that don't contain the field.
-  const anchor = { contains: (node: unknown) => where === "field" && node === active };
-  const focus = {};
-  const selection = { anchorNode: anchor, anchorOffset: 12, focusNode: focus, focusOffset: 4, removeAllRanges: vi.fn(), setBaseAndExtent: vi.fn() };
+  // A focused field reports the document selection as a caret (one point) in
+  // its parent; a selected reply reports a range. A range dragged from empty
+  // page space starts in an ancestor of the field but still ends in the reply.
+  const anchor = { contains: (node: unknown) => where !== "reply" && node === active };
+  // "across-page" is a range between two children of the page body: one node
+  // at both ends, but two different offsets, so it is not a caret.
+  const focus = where === "field" || where === "across-page" ? anchor : {};
+  const [anchorOffset, focusOffset] = where === "field" ? [3, 3] : [12, 4];
+  const selection = { anchorNode: anchor, anchorOffset, focusNode: focus, focusOffset, removeAllRanges: vi.fn(), setBaseAndExtent: vi.fn() };
   let written: string | null = null;
   const execCommand = vi.fn(() => {
     if (result === "throw") throw new Error("Copy refused");
@@ -61,6 +65,15 @@ describe("copyText", () => {
     expect(await copyText("code")).toBe(true);
     expect(selected.text).toBe("re is the ");
   });
+
+  for (const where of ["page-to-reply", "across-page"] as const) {
+    it(`a page range containing the focused composer is restored as the reader left it (${where})`, async () => {
+      const f = fallback("missing", true, where);
+      expect(await copyText("code")).toBe(true);
+      expect(f.selection.setBaseAndExtent).toHaveBeenCalledWith(f.anchor, 12, f.focus, 4);
+      expect(f.active.setSelectionRange).not.toHaveBeenCalled();
+    });
+  }
 
   it("a focused draft keeps its own backward selection after fallback copying", async () => {
     const f = fallback("missing", true, "field");

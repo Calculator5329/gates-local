@@ -18,9 +18,11 @@ export async function copyText(text: string): Promise<boolean> {
   const anchorOffset = selection?.anchorOffset ?? 0;
   const focus = selection?.focusNode;
   const focusOffset = selection?.focusOffset ?? 0;
-  // With a field focused, the document selection is only a caret beside it;
-  // a range elsewhere (a selected reply) is the selection that matters.
-  const inField = field != null && (!anchor || anchor === field || anchor.contains(field));
+  // With a field focused, the document selection is only a caret (one point)
+  // at or around it; any real range, even one starting in an ancestor such as
+  // the page body, is a reader's selection and is what gets restored.
+  const caret = anchor === focus && anchorOffset === focusOffset;
+  const inField = field != null && (!anchor || (caret && (anchor === field || anchor.contains(field))));
   const ta = document.createElement("textarea");
   try {
     ta.value = text;
