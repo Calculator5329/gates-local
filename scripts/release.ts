@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -50,7 +50,7 @@ export interface CheckOptions { cwd: string; remote?: string; commit?: string; r
 // The first corrected comparison scorer is the stated base before the first release.
 const FIRST_PERFORMANCE_BASE = "a369f0a3b7280f33802d6f816287546814da99eb";
 
-const BLOCKING = ["clone", "checkout", "install", "verify", "build", "e2e"];
+const BLOCKING = ["clone", "checkout", "install", "verify", "build", "desktop-build", "e2e"];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const emptyTotals = (): Totals => ({ passed: 0, failed: 0, skipped: 0 });
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -130,7 +130,7 @@ export function checkBeforePush(cwd: string, version: string, commit: string, re
 }
 
 /** Do not inherit app state, pnpm configuration, tokens, Node hooks, or git configuration from the calling checkout. */
-function cleanEnvironment(home: string, temp: string, checkout: string, browserPath?: string): NodeJS.ProcessEnv {
+export function cleanEnvironment(home: string, temp: string, checkout: string, browserPath?: string): NodeJS.ProcessEnv {
   const checkoutRoot = path.resolve(checkout);
   const cleanPath = process.env["PATH"]?.split(path.delimiter).filter((entry) => {
     const absolute = path.resolve(entry);
@@ -142,8 +142,42 @@ function cleanEnvironment(home: string, temp: string, checkout: string, browserP
     CI: "1", NO_COLOR: "1", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null", GIT_TERMINAL_PROMPT: "0",
   };
   for (const key of ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"]) if (process.env[key]) env[key] = process.env[key];
-  if (browserPath) env["GATES_LOCAL_CHROMIUM"] = browserPath;
+  if (browserPath) {
+    const executable = path.resolve(browserPath);
+    let directory = path.dirname(executable);
+    while (!/^chromium-\d+$/.test(path.basename(directory))) {
+      const parent = path.dirname(directory);
+      if (parent === directory) throw new Error("--browser-path must point inside a Playwright chromium-<revision> directory. Supply Chromium from a complete cache prepared with pnpm exec playwright install chromium.");
+      directory = parent;
+    }
+    env["GATES_LOCAL_CHROMIUM"] = executable;
+    env["PLAYWRIGHT_BROWSERS_PATH"] = path.dirname(directory);
+  }
   return env;
+}
+
+/** Ask the clone's installed registry for its revisions and platform paths, in the isolated environment. */
+export function validateBrowserToolchain(checkout: string, env: NodeJS.ProcessEnv): void {
+  const browser = env["GATES_LOCAL_CHROMIUM"];
+  if (!browser) return;
+  if (!existsSync(browser) || !statSync(browser).isFile()) throw new Error(`Missing supplied Chromium executable: ${browser}. Supply --browser-path from a complete Playwright cache.`);
+  const cli = playwrightCommand(checkout)[1];
+  if (!cli) throw new Error("Installed Playwright has no Node CLI");
+  const playwright = createRequire(cli).resolve("playwright/package.json");
+  const registry = createRequire(playwright).resolve("playwright-core/lib/coreBundle");
+  // The registry reads browsers.json and PLAYWRIGHT_BROWSERS_PATH at module load.
+  // A fresh Node process avoids inheriting a registry cached under the caller's HOME.
+  const pieces: unknown = JSON.parse(execFileSync(process.execPath, ["-e",
+    'const {registry} = require(process.argv[1]).registry; console.log(JSON.stringify(["chromium-headless-shell", "ffmpeg"].map(name => ({name, executable: registry.findExecutable(name).executablePath()}))));',
+    registry,
+  ], { cwd: checkout, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  if (!Array.isArray(pieces) || pieces.length !== 2) throw new Error("Installed Playwright did not report its headless shell and ffmpeg paths");
+  for (const piece of pieces) {
+    if (!record(piece) || typeof piece["name"] !== "string" || typeof piece["executable"] !== "string") throw new Error("Installed Playwright reported an invalid browser toolchain path");
+    if (!existsSync(piece["executable"]) || !statSync(piece["executable"]).isFile()) {
+      throw new Error(`Missing Playwright ${piece["name"]}: ${piece["executable"]}. Supply --browser-path from a complete cache prepared with PLAYWRIGHT_BROWSERS_PATH set to ${env["PLAYWRIGHT_BROWSERS_PATH"]} and pnpm exec playwright install chromium. A supplied browser never triggers a download during release:check.`);
+    }
+  }
 }
 
 /** Spawn the installed Node CLI itself: pnpm exec can turn a child signal into exit 1. */
@@ -281,6 +315,9 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     schemaVersion: 1, commit: options.commit ?? "", remote: options.remote ?? "", startedAt: new Date(began).toISOString(), finishedAt: "", durationMs: 0,
     status: "failed", tools: { node: process.version }, steps: [], tests: { unit: emptyTotals(), e2e: emptyTotals() }, failures: [], limits: [],
   };
+  // Record limits before any fallible setup, so a failed report still carries them.
+  if (options.storeDir) report.limits?.push("A shared pnpm store was selected for installation; a download into an empty store was not proven.");
+  if (options.browserPath) report.limits?.push("A supplied Playwright browser cache was shared with the fresh home; installing browsers into an empty cache was not proven.");
   let scratch: string | undefined;
   let active = "setup";
   let cleanupUnsafeReason: string | undefined;
@@ -312,7 +349,6 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
       if (r.code) throw new Error(`${tool} is unavailable: ${r.output}`);
       report.tools[tool] = r.output.trim();
     }
-    if (options.storeDir) report.limits?.push("A shared pnpm store was selected for installation; a download into an empty store was not proven.");
     const retainResults = (name: string, source: string) => {
       try { if (existsSync(source)) cpSync(source, path.join(artifacts, `${name}-results`), { recursive: true, dereference: true }); }
       catch (error) { report.failures.push({ step: name, test: "retain artifacts", message: errorText(error) }); }
@@ -338,6 +374,11 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     requirePass(installedPnpm); report.tools["pnpm"] = installedPnpm.output.trim();
     const pw = await execute(["pnpm", "exec", "playwright", "--version"], clone, path.join(artifacts, "tools.log"));
     report.tools["playwright"] = pw.code === 0 ? pw.output.trim() : "unavailable";
+    if (options.browserPath) {
+      active = "browser";
+      requirePass(pw);
+      validateBrowserToolchain(clone, env);
+    }
     const verify = await step("verify", ["pnpm", "verify"], clone);
     report.tests.unit = unitTotals(verify.output);
     if (verify.code) {
@@ -347,9 +388,10 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
     requirePass(verify);
     if (report.tests.unit.passed === 0 || report.tests.unit.failed) throw new Error("verify did not report passing unit tests");
     requirePass(await step("build", ["pnpm", "build"], clone));
+    requirePass(await step("desktop-build", ["pnpm", "--filter", "@gates-local/desktop", "build"], clone));
     requirePass(pw);
     const playwright = playwrightCommand(clone);
-    // Browser software is toolchain, not checkout state. A supplied system browser avoids a network download.
+    // A supplied Playwright cache is validated above and never downloaded here.
     if (!options.browserPath) requirePass(await step("browser", ["pnpm", "exec", "playwright", "install", "chromium"], clone));
     const browserReport = path.join(artifacts, "e2e.json");
     env["PLAYWRIGHT_JSON_OUTPUT_FILE"] = browserReport;

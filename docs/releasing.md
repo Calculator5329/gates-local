@@ -402,7 +402,8 @@ The check defaults to this clone's origin and current origin/main tracking
 ref. Refresh that ref first. It clones into a new cache directory with a
 fresh home and configuration, checks out the exact commit, installs with
 `--frozen-lockfile`, runs `pnpm verify`, builds the web client with
-`pnpm build`, then runs Playwright's blocking `e2e` project.
+`pnpm build`, builds Electron with `pnpm --filter @gates-local/desktop build`
+as a blocking `desktop-build` step, then runs Playwright's blocking `e2e` project.
 Every functional test blocks. JS and CSS sizes are reported against soft
 targets and never block; a size that can't be measured still fails.
 A failed blocking command, missing browser report or zero executed
@@ -457,7 +458,14 @@ The JSON includes the exact commit, blocking steps and durations, test
 totals, failures, versions and timestamps. Logs and browser reports sit in
 `<report>.artifacts`; temporary checkout data is otherwise removed on
 success and failure. Existing reports are never overwritten. Chromium is
-installed unless `--browser-path <executable>` supplies one.
+installed unless `--browser-path <executable>` supplies one from a Playwright
+`chromium-<revision>` directory. The check derives `PLAYWRIGHT_BROWSERS_PATH`
+from that executable and shares the cache with its fresh home. Before verify,
+it checks for the headless shell and ffmpeg expected by the clone's installed
+Playwright. A missing piece fails with its path and preparation instructions;
+supplying a browser never downloads browser software during the check. Prepare
+the complete cache beforehand with `pnpm exec playwright install chromium`,
+using `PLAYWRIGHT_BROWSERS_PATH` to select that cache if needed.
 An explicit `--store-dir <path>` selects a seeded pnpm store and records
 that limited evidence. The default uses an empty store.
 

@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -32,7 +33,13 @@ function fixture(unitCommand = "node --test unit.cjs") {
   // through PATH. Every fixture uses this local package-manager protocol.
   const toolchain = path.join(dir, "toolchain");
   mkdirSync(toolchain);
-  writeFileSync(path.join(toolchain, "pnpm"), readFileSync(new URL("./fixtures/release-pnpm.cjs", import.meta.url)), { mode: 0o755 });
+  writeFileSync(path.join(toolchain, "pnpm"), [
+    '#!/usr/bin/env node',
+    'if (process.argv[2] === "--filter") {',
+    '  require("node:assert/strict").deepEqual(process.argv.slice(2), ["--filter", "@gates-local/desktop", "build"]);',
+    '  require(require("node:path").join(process.cwd(), "desktop-build.cjs"));',
+    `} else require(${JSON.stringify(new URL("./fixtures/release-pnpm.cjs", import.meta.url).pathname)});`,
+  ].join("\n"), { mode: 0o755 });
   process.env["PATH"] = toolchain + path.delimiter + (process.env["PATH"] ?? "");
   const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], { stdio: "ignore" });
@@ -41,8 +48,9 @@ function fixture(unitCommand = "node --test unit.cjs") {
   git("config", "user.email", "release@example.com");
   writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "release-fixture", private: true, packageManager: "pnpm@11.10.0", scripts: { verify: unitCommand, build: 'node -e "process.exit(0)"' } }));
   writeFileSync(path.join(cwd, "unit.cjs"), 'require("node:test")("planted unit test", () => require("node:assert/strict").fail("intentional unit failure"));');
+  writeFileSync(path.join(cwd, "desktop-build.cjs"), 'require("node:fs").writeFileSync("desktop-built", "built");');
   execFileSync("pnpm", ["install", "--lockfile-only"], { cwd, stdio: "ignore" });
-  git("add", "package.json", "pnpm-lock.yaml", "unit.cjs");
+  git("add", "package.json", "pnpm-lock.yaml", "unit.cjs", "desktop-build.cjs");
   git("commit", "-m", "fixture");
   git("remote", "add", "origin", remote);
   git("push", "-u", "origin", "main");
@@ -50,7 +58,7 @@ function fixture(unitCommand = "node --test unit.cjs") {
   const report: ReleaseReport = {
     schemaVersion: 1, commit: sha, remote, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), durationMs: 100,
     status: "passed", tools: { node: process.version, git: "test", pnpm: "test", playwright: "test" },
-    steps: ["clone", "checkout", "install", "verify", "build", "e2e"].map((name) => ({ name, blocking: true, status: "passed" as const, exitCode: 0, durationMs: 1 })),
+    steps: ["clone", "checkout", "install", "verify", "build", "desktop-build", "e2e"].map((name) => ({ name, blocking: true, status: "passed" as const, exitCode: 0, durationMs: 1 })),
     tests: { unit: { passed: 1, failed: 0, skipped: 0 }, e2e: { passed: 1, failed: 0, skipped: 0 } },
     failures: [], timing: { completed: false, exitCode: 134, reportPath: "informational.json" }, scratchRemoved: true,
   };
@@ -261,6 +269,73 @@ function protocolFixture(extraCli: readonly string[] = []) {
   const sha = f.git("rev-parse", "HEAD");
   return { ...f, sha };
 }
+
+function suppliedBrowserFixture() {
+  const f = protocolFixture([
+    'fs.writeFileSync(require("node:path").join(require("node:path").dirname(process.env.GATES_LOCAL_CHROMIUM), "environment.json"), JSON.stringify({ root: process.env.PLAYWRIGHT_BROWSERS_PATH, browser: process.env.GATES_LOCAL_CHROMIUM }));',
+  ]);
+  const local = createRequire(import.meta.url);
+  const playwright = createRequire(local.resolve("@playwright/test/package.json"));
+  const core = path.dirname(createRequire(playwright.resolve("playwright/package.json")).resolve("playwright-core/package.json"));
+  // Use the installed toolchain's real registry without installing or launching a browser.
+  const root = path.join(f.dir, "browsers");
+  const pieces: Record<string, string> = JSON.parse(execFileSync(process.execPath, ["-e",
+    'const {registry} = require(process.argv[1]).registry; console.log(JSON.stringify(Object.fromEntries(["chromium", "chromium-headless-shell", "ffmpeg"].map(name => [name, registry.findExecutable(name).executablePath()]))));',
+    path.join(core, "lib/coreBundle.js"),
+  ], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: root }, encoding: "utf8" }));
+  for (const file of Object.values(pieces)) {
+    mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, "toolchain fixture");
+  }
+  const browserPath = pieces["chromium"];
+  if (!browserPath) throw new Error("Installed Playwright has no Chromium executable");
+  mkdirSync(path.join(f.cwd, "tools/node_modules"));
+  symlinkSync(core, path.join(f.cwd, "tools/node_modules/playwright-core"), "dir");
+  f.git("add", "-f", "tools/node_modules/playwright-core");
+  f.git("commit", "-m", "installed browser registry fixture"); f.git("push", "origin", "main");
+  return { ...f, sha: f.git("rev-parse", "HEAD"), root, pieces, browserPath };
+}
+
+test("supplied browser shares its complete Playwright cache with the isolated environment without downloading", async () => {
+  const f = suppliedBrowserFixture();
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, browserPath: f.browserPath, reportPath: path.join(f.dir, "supplied.json") });
+  expect(report.status, JSON.stringify(report.failures)).toBe("passed");
+  expect(JSON.parse(readFileSync(path.join(path.dirname(f.browserPath), "environment.json"), "utf8"))).toEqual({ root: f.root, browser: f.browserPath });
+  expect(report.steps.some(step => step.name === "browser")).toBe(false);
+  expect(report.limits).toContain("A supplied Playwright browser cache was shared with the fresh home; installing browsers into an empty cache was not proven.");
+}, 30_000);
+
+test("a supplied browser outside a Playwright cache fails setup and still reports the shared-cache limit", async () => {
+  const f = suppliedBrowserFixture();
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, browserPath: path.join(f.dir, "chromium"), reportPath: path.join(f.dir, "outside.json") });
+  expect(report.status).toBe("failed");
+  expect(report.failures.map(failure => failure.message).join("\n")).toContain("chromium-<revision>");
+  expect(report.limits).toContain("A supplied Playwright browser cache was shared with the fresh home; installing browsers into an empty cache was not proven.");
+}, 30_000);
+
+test.each(["chromium-headless-shell", "ffmpeg"])("supplied browser refuses missing %s before verify or browser tests", async piece => {
+  const f = suppliedBrowserFixture();
+  const file = f.pieces[piece];
+  if (!file) throw new Error(`Installed Playwright has no ${piece}`);
+  rmSync(file);
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, browserPath: f.browserPath, reportPath: path.join(f.dir, "missing.json") });
+  expect(report.status).toBe("failed");
+  expect(report.failures.map(failure => failure.message).join("\n")).toMatch(new RegExp(`Missing Playwright ${piece}.*playwright install chromium`, "s"));
+  expect(report.steps.some(step => ["verify", "e2e"].includes(step.name))).toBe(false);
+}, 30_000);
+
+test("desktop build is blocking and completes before browser tests", async () => {
+  const f = protocolFixture(['if (name === "e2e" && !fs.existsSync("desktop-built")) throw new Error("Electron app was not built");']);
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "desktop.json") });
+  expect(report.status, JSON.stringify(report.failures)).toBe("passed");
+  expect(report.steps.map(step => step.name)).toEqual(["clone", "checkout", "install", "verify", "build", "desktop-build", "browser", "e2e"]);
+  expect(report.steps.find(step => step.name === "desktop-build")).toMatchObject({ blocking: true, status: "passed" });
+  writeFileSync(path.join(f.cwd, "desktop-build.cjs"), 'throw new Error("desktop build failed");');
+  f.git("add", "desktop-build.cjs"); f.git("commit", "-m", "failing desktop build fixture"); f.git("push", "origin", "main");
+  const failed = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.git("rev-parse", "HEAD"), reportPath: path.join(f.dir, "desktop-failed.json") });
+  expect(failed.steps.find(step => step.name === "desktop-build")).toMatchObject({ blocking: true, status: "failed" });
+  expect(failed.steps.some(step => step.name === "e2e")).toBe(false);
+  await expect(checkTag(f.cwd, "v1.0.0", { ...f.report, commit: f.git("rev-parse", "HEAD"), steps: f.report.steps.filter(step => step.name !== "desktop-build") })).rejects.toThrow(/desktop-build/);
+}, 30_000);
 
 test.each([
   ["crash", 'process.kill(process.pid,"SIGABRT");', {completed:false,exitCode:null,signal:"SIGABRT"}],
