@@ -209,8 +209,8 @@ const installation = (s: State, key: string) => (s.models ?? []).find(m => downl
 export function DownloadTab() {
   const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
   const run = async (name: string, action: Promise<ActionResult>, start = false) => {
-    // A row can change groups while this is pending. Only its newest attempt
-    // may publish an answer, including when Cancel follows an unresolved pull.
+    // Only the newest attempt may publish an answer, including when Cancel
+    // follows an unresolved pull.
     const key = downloadKey(name), snapshot = getState();
     const attempt: (typeof attempts)[string] = { error: undefined, pulls: snapshot.pulls, installed: installation(snapshot, key), start };
     setAttempts(s => ({ ...s, [key]: attempt }));
@@ -245,9 +245,13 @@ export function DownloadTab() {
   const actions: DownloadActions = {
     start: name => {
       const tag = list.find(c => downloadKey(c.name) === downloadKey(name))?.name ?? name.trim();
+      freezeGroups();
       return run(tag, pull(tag), true);
     },
-    cancel: name => void run(name, cancelPull(name)),
+    cancel: name => {
+      freezeGroups();
+      void run(name, cancelPull(name));
+    },
     error: name => {
       const key = downloadKey(name), attempt = attempts[key];
       return attempt && !retired(key, attempt) ? attempt.error ?? null : null;
@@ -261,9 +265,33 @@ export function DownloadTab() {
   useEffect(() => {
     for (const c of list) ensureFit(c.name, numCtx);
   }, [catalog, numCtx, fits]);
-  const rec = list.filter(c => phase(c) === "fresh" && c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
-  const more = list.filter(c => !rec.includes(c));
-  const allSpill = more.length > 0 && more.every(c => phase(c) === "fresh" && report(c)?.verdict === "spills");
+  const group = () => {
+    const rec = list.filter(c => phase(c) === "fresh" && c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
+    const more = list.filter(c => !rec.includes(c));
+    return {
+      context: numCtx,
+      recommended: rec.map(c => c.name),
+      other: more.map(c => c.name),
+      allSpill: more.length > 0 && more.every(c => phase(c) === "fresh" && report(c)?.verdict === "spills"),
+    };
+  };
+  // Initial fit replies may regroup rows until the first Download or Cancel.
+  // Freeze the displayed groups before that action publishes any state change.
+  // A new visit or context resets the hold; row details always stay live.
+  const [savedGroups, setGroups] = useState<ReturnType<typeof group>>();
+  const groups = savedGroups?.context === numCtx ? savedGroups : group();
+  if (savedGroups && savedGroups.context !== numCtx) setGroups(undefined);
+  const freezeGroups = () => setGroups(current => current?.context === numCtx ? current : groups);
+  const entries = new Map(list.map(c => [c.name, c]));
+  const rows = (names: string[]) => names.flatMap(name => {
+    const entry = entries.get(name);
+    return entry ? [entry] : [];
+  });
+  const known = new Set([...groups.recommended, ...groups.other]);
+  const rec = rows(groups.recommended);
+  // A newly discovered model appears at the end without moving existing rows.
+  const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name))];
+  const allSpill = groups.allSpill;
   return (
     <>
       <p className="mp-quiet">

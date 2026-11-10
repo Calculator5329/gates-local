@@ -70,15 +70,27 @@ const groupOf = (page: Page, kind: string) => page.locator(".set .grp").filter({
 const boxFor = (page: Page, control: Locator) => page.locator(".set .grp").filter({ has: control }).locator(":scope > .box");
 const nounOf = (kind: string) => kind === "sqlite" ? "database" : kind;
 
-async function refuseAction(page: Page, method: string) {
+async function refuseAction(page: Page, method: string, holdFitsUntilAction = false) {
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
     const server = ws.connectToServer();
+    const fits = new Set<unknown>();
+    const held: Array<() => void> = [];
+    let holding = holdFitsUntilAction;
     ws.onMessage((message) => {
       const req = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-      if (req.method === method) setTimeout(() => ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: "Fixture action refused." } })), 150);
+      if (req.method === "fit.check" && holding) fits.add(req.id);
+      if (req.method === method) {
+        holding = false;
+        for (const deliver of held.splice(0)) deliver();
+        setTimeout(() => ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: "Fixture action refused." } })), 150);
+      }
       else server.send(message);
     });
-    server.onMessage((message) => ws.send(message));
+    server.onMessage((message) => {
+      const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+      if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
+      else ws.send(message);
+    });
   });
 }
 
@@ -235,22 +247,60 @@ for (const width of [1440, 360]) {
       await expect(verdict).toContainText("Should run slower");
     });
 
+    test("Download groups late fit replies before any download action", async ({ page, open }) => {
+      const held: Array<() => void> = [];
+      let holding = true;
+      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+        const server = ws.connectToServer();
+        const fits = new Set<unknown>();
+        ws.onMessage(message => {
+          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
+          if (request.method === "fit.check") fits.add(request.id);
+          server.send(message);
+        });
+        server.onMessage(message => {
+          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+          if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
+          else ws.send(message);
+        });
+      });
+      await open();
+      await waitReady(page);
+      await section(page, "Models", true);
+      await page.getByRole("tab", { name: /Download/ }).click();
+      const selector = '.dlrow[data-cat="qwen3.5:4b"]';
+      const row = page.locator(selector);
+      await expect(row).toBeVisible();
+      await expect(row.locator(".vl")).toHaveCount(0);
+      await expect.poll(() => held.length).toBeGreaterThan(0);
+      holding = false;
+      for (const deliver of held.splice(0)) deliver();
+      await expect(row.locator(".vl")).toBeVisible();
+      const recommended = page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: /^Recommended$/ }) });
+      await expect(recommended.locator(selector), "late fit replies must update grouping before any download action").toBeVisible();
+    });
+
     test("download progress replaces an equal-sized model row", async ({ page, open }) => {
       // Hold catalog hydration so a probe started before the row exists
       // reliably distinguishes initial loading from a download-state gap.
       const heldCatalog: Array<() => void> = [];
+      const heldFits: Array<() => void> = [];
       let holdingCatalog = true;
+      let holdingFits = true;
       await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
         const server = ws.connectToServer();
         const catalogRequests = new Set<unknown>();
+        const fitRequests = new Set<unknown>();
         ws.onMessage(message => {
           const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
           if (request.method === "models.catalog") catalogRequests.add(request.id);
+          if (request.method === "fit.check") fitRequests.add(request.id);
           server.send(message);
         });
         server.onMessage(message => {
           const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
           if (response.type === "response" && catalogRequests.delete(response.id) && holdingCatalog) heldCatalog.push(() => ws.send(message));
+          else if (response.type === "response" && fitRequests.delete(response.id) && holdingFits) heldFits.push(() => ws.send(message));
           else ws.send(message);
         });
       });
@@ -269,9 +319,29 @@ for (const width of [1440, 360]) {
       }, 500);
       // Establish the old state before sampling; click() alone waits too late.
       await expect(row).toBeVisible();
-      const frames = await burst(page, `r2-${width}/download-start`, '.dlrow[data-cat="qwen3.5:4b"]', () => row.getByRole("button", { name: "Download", exact: true }).click());
+      await expect.poll(() => heldFits.length).toBeGreaterThan(0);
+      await row.scrollIntoViewIfNeeded();
+      const original = await row.elementHandle();
+      if (!original) throw new Error("The download row must exist before starting");
+      const frames = await burst(page, `r2-${width}/download-start`, '.dlrow[data-cat="qwen3.5:4b"]', async () => {
+        await row.getByRole("button", { name: "Download", exact: true }).click();
+        await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
+        holdingFits = false;
+        for (const deliver of heldFits.splice(0)) deliver();
+        await expect(row.locator(".vl")).toBeVisible();
+      });
       stableSize(frames, "surface", `download-start-${width}`);
-      await row.getByRole("button", { name: "Cancel download" }).click();
+      expect.soft(sizeChange(frames, "surface").positionPx, "starting and progressing must keep the clicked row in place").toBeLessThanOrEqual(0.5);
+      expect.soft(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "fit replies must not remount the download row").toBe(true);
+      await page.screenshot({ path: test.info().outputPath("download-progress-in-place.png") });
+      const cancelled = await burst(page, `r2-${width}/download-cancel`, '.dlrow[data-cat="qwen3.5:4b"]', () => row.getByRole("button", { name: "Cancel download" }).click());
+      stableSize(cancelled, "surface", `download-cancel-${width}`);
+      expect(sizeChange(cancelled, "surface").positionPx, "cancelling must keep the row in place").toBeLessThanOrEqual(0.5);
+      expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "cancelling must preserve the row").toBe(true);
+      await page.getByRole("tab", { name: /Installed/ }).click();
+      await page.getByRole("tab", { name: /Download/ }).click();
+      const recommended = page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: /^Recommended$/ }) });
+      await expect(recommended.locator('.dlrow[data-cat="qwen3.5:4b"]'), "a new visit uses the current fit grouping").toBeVisible();
     });
 
     test("an Installed download row keeps its size when it becomes ready", async ({ page, open }) => {
@@ -295,16 +365,24 @@ for (const width of [1440, 360]) {
     });
 
     test("a failed download replaces its detail without growing the row", async ({ page, open }) => {
-      await refuseAction(page, "models.pull");
+      // Keep pre-click regrouping outside the measurement; release real fit
+      // replies only once the pull request proves that the click occurred.
+      await refuseAction(page, "models.pull", true);
       await open();
       await waitReady(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
       const selector = '.dlrow[data-cat="qwen3.5:4b"]';
       const row = page.locator(selector);
+      await expect(row).toBeVisible();
+      await row.scrollIntoViewIfNeeded();
+      const original = await row.elementHandle();
+      if (!original) throw new Error("The download row must exist before failure");
       const frames = await burst(page, `r2-${width}/download-error`, selector, () => row.getByRole("button", { name: "Download", exact: true }).click());
       await expect(row.getByRole("alert")).toBeVisible();
       stableSize(frames, "surface", `download-error-${width}`);
+      expect(sizeChange(frames, "surface").positionPx, "failure must keep the row in place").toBeLessThanOrEqual(0.5);
+      expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "failure must preserve the row").toBe(true);
     });
 
     test("an older pull refusal cannot replace a newer cancellation error", async ({ page, open }) => {
@@ -344,8 +422,13 @@ for (const width of [1440, 360]) {
       const row = page.locator(selector);
       await row.getByRole("button", { name: "Download", exact: true }).click();
       await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
+      await row.scrollIntoViewIfNeeded();
+      const original = await row.elementHandle();
+      if (!original) throw new Error("The download row must exist before completion");
       const frames = await burst(page, `r2-${width}/download-complete`, selector, () => expect(row.locator(".badge")).toHaveText("Installed", { timeout: 15_000 }));
       stableSize(frames, "surface", `download-complete-${width}`);
+      expect(sizeChange(frames, "surface").positionPx, "completion must keep the row in place").toBeLessThanOrEqual(0.5);
+      expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "completion must preserve the row").toBe(true);
       expect(frames.filter((f) => f.elements.includes("BUTTON:Download")), "completion must not return to the idle action while the list catches up").toHaveLength(0);
     });
 

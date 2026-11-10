@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-09: Download rows stay where you clicked them
+
+- Fit replies update the Recommended group as they arrive until you start or
+  cancel a download. That action holds the current row positions for the rest
+  of the visit, including through progress, failure and completion.
+- Returning to Download or changing context lets grouping update again. Fit
+  labels and Installed marks always stay live; once positions are held, newly
+  discovered models appear at the end until the next visit.
+
 ## 2026-11-09: Chat starts ready to type, and model loading keeps its earlier memory advice
 
 - Opening chat with a mouse or keyboard now focuses the message box once
