@@ -1,6 +1,7 @@
 // Opening a 2,000-message thread, counted rather than timed: rows in the first
 // commit, store subscriptions, matchMedia calls and the selectors one
 // keystroke runs. Counts cannot be noisy, so the bounds are exact limits.
+import { readFileSync } from "node:fs";
 import { act, createElement } from "react";
 import type { Root } from "react-dom/client";
 import type { Message } from "@gates-local/contracts";
@@ -70,17 +71,31 @@ beforeAll(async () => {
   vi.stubGlobal("requestAnimationFrame", () => 0);
   vi.stubGlobal("cancelAnimationFrame", () => {});
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal("HTMLElement", FakeElement);
+  Object.defineProperty(FakeElement.prototype, "previousElementSibling", { configurable: true, get(this: FakeElement) {
+    let n = this.previousSibling;
+    while (n !== null && !(n instanceof FakeElement)) n = n.previousSibling;
+    return n;
+  } });
   // react-dom decides at import whether it has a DOM, so it loads after the stubs
   const { createRoot } = await import("react-dom/client");
   store = await import("../src/store.ts");
   const container = doc.body.appendChild(doc.createElement("div"));
   root = createRoot(container as unknown as Element);
 });
-afterAll(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
+afterAll(() => {
+  act(() => root.unmount());
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(FakeElement.prototype, "previousElementSibling");
+});
 
 const turns = () => doc.body.querySelectorAll(".turn");
 const turnLabel = (el: FakeElement | undefined) => el?.textContent.slice(0, 40);
 const sameElements = (now: FakeElement[], was: FakeElement[]) => now.length === was.length && now.every((el, i) => el === was[i]);
+/** A turn marked not to fade in. */
+const still = (el: FakeElement) => el.style.animation === "none";
+/** A selector with a sibling combinator, outside brackets and parentheses. */
+const sibling = (s: string) => /[+~]/.test(s.replace(/\[[^\]]*\]/g, "").replace(/\([^)]*\)/g, ""));
 
 it("opens a 2,000-message thread with a bounded first commit and few subscriptions, then mounts the rest", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
@@ -323,4 +338,34 @@ it("changes nothing mounted when a turn in front of a part-mounted thread, or it
   act(() => store.setState({ messages: { "gone-early": early.filter((_, i) => i !== 1919 && i !== 1920) } }));
   expect(sameElements([...turns()], before.slice(2)), "the first mounted turns deleted: the rest stay, the same elements").toBe(true);
   idle.length = 0;
+});
+
+it("mounts older turns above the view without their entrance fade, and keeps the fade on the first screen and on new turns", async () => {
+  // the fade of turns nobody sees kept frames running through the backfill, each one laying out
+  // and observing every mounted turn; marked before they are first styled, they never start one
+  const { Timeline } = await import("../src/Thread.tsx");
+  const thread = longThread("fade", 120);
+  act(() => store.setState({ messages: { fade: thread }, turns: {} }));
+  idle.length = 0;
+  act(() => root.render(createElement(Timeline, { threadId: "fade", key: "fade" })));
+  const screen = [...turns()];
+  expect(screen).toHaveLength(40);
+  act(() => idle.shift()?.());
+  expect(turns()).toHaveLength(80);
+  expect(turns().slice(0, 40).filter(still), "the slice mounted above the view").toHaveLength(40);
+  expect(screen.filter(still), "the first screen keeps its fade").toEqual([]);
+  act(() => store.setState({ messages: { fade: [...thread, { id: "new", threadId: "fade", role: "user", content: "A new question", createdAt: 5 }] } }));
+  expect(turns()).toHaveLength(81);
+  expect(turns().slice(40).filter(still), "the first screen and a new turn at the end fade in").toEqual([]);
+  idle.length = 0;
+});
+
+it("spaces the turns without a rule that looks at the element before a turn", () => {
+  // `.turn+.turn` made each slice of older turns mounted at the top restyle and re-lay out every
+  // turn below it: in the perf comparison, a 2,000-turn thread's whole-mount style time fell from
+  // about 970 ms to 220 ms without it
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const selectors = [...css.matchAll(/([^{}]+)\{/g)].flatMap((m) => (m[1] ?? "").split(",")).map((s) => s.trim()).filter((s) => !s.startsWith("@"));
+  expect(selectors.filter((s) => sibling(s) && /\.(turn|stop-note|err-line)\b/.test(s)), "sibling combinators on timeline turns").toEqual([]);
+  expect(selectors.filter(sibling).length, "the check still finds sibling rules elsewhere").toBeGreaterThan(0);
 });

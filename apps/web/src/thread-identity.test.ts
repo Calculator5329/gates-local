@@ -45,6 +45,23 @@ it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime 
   expect(html).toContain('aria-label="Interrupted reply"');
 });
 
+const at = (id: string, role: "user" | "assistant", more: object = {}) => ({ id, threadId: "proof", role, content: `Words of ${id}`, createdAt: 1, ...more });
+
+it("marks exactly the turns with a stop note under them, whatever state the turn is in", () => {
+  // the mark is what gives the turn's gap up to its note (styles.css, `.col>.turn.noted`): a note
+  // under an unmarked turn sits a whole gap too low, a marked turn with no note loses its gap
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({
+    turns: {},
+    messages: { proof: [at("u1", "user"), at("a1", "assistant"), at("u2", "user"), at("a2", "assistant"), at("u3", "user"), at("a3", "assistant", { interrupted: true }), at("u4", "user")] },
+    stopNotes: { a2: "The reply didn't finish.", a3: "Stopped after 3 s.", u4: "Stopped so another model could load." },
+  });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  const classes = [...html.matchAll(/<div class="(turn [^"]*|stop-note)"/g)].map((m) => m[1]);
+  expect(classes).toEqual(["turn u", "turn a done", "turn u", "turn a done noted", "stop-note", "turn u", "turn a interrupted noted", "stop-note", "turn u noted", "stop-note"]);
+});
+
 function child(node: unknown, index: number): unknown {
   if (!isValidElement<{ children: unknown }>(node)) throw new Error("Expected an element");
   return Array.isArray(node.props.children) ? node.props.children[index] : node.props.children;

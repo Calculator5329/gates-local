@@ -92,9 +92,9 @@ function ActRow({ text, meta, regen }: { text: string; meta: string; regen: bool
   );
 }
 
-function UserBubble({ text, time, images = [] }: { text: string; time: string; images?: readonly string[] | undefined }) {
+function UserBubble({ text, time, images = [], noted = false }: { text: string; time: string; images?: readonly string[] | undefined; noted?: boolean }) {
   return (
-    <div className="turn u" tabIndex={0} aria-label="Your message">
+    <div className={noted ? "turn u noted" : "turn u"} tabIndex={0} aria-label="Your message">
       <div className="u-row">
         <div className="u-act">
           <span className="tm">{time}</span>
@@ -255,9 +255,9 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
   </div>;
 }
 
-const UserTurn = memo(function UserTurn({ msg }: { msg: Message }) {
+const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: boolean }) {
   countRender(msg.id);
-  return <UserBubble text={msg.content} images={msg.images} time={turnTime(msg.createdAt)} />;
+  return <UserBubble text={msg.content} images={msg.images} time={turnTime(msg.createdAt)} noted={noted} />;
 });
 
 /** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. While the model reasons, its icon is the thinking row's bulb. */
@@ -311,7 +311,7 @@ function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, a
   const pending = paced.length < text.length;
   const shown = reveal(paced, streaming || pending);
   return (
-    <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
+    <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
       {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
       {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
         <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />
@@ -519,6 +519,13 @@ export function Timeline({ threadId }: { threadId: string }) {
     const el = tl.current;
     const a = anchor.current;
     if (el !== null && a !== null && a.el !== col.current?.querySelector(".turn") && col.current?.contains(a.el) === true) {
+      // They are above the view this keeps still, so nobody sees them come in: no fade. Set before
+      // the read below first styles them, a fade never starts; running ones kept frames going
+      // through the backfill, each laying out and observing every mounted turn. React sets no
+      // style on these elements, so the mark stays.
+      for (let up = a.el.previousElementSibling; up !== null; up = up.previousElementSibling) {
+        if (up instanceof HTMLElement) up.style.animation = "none";
+      }
       const moved = a.el.getBoundingClientRect().top - el.getBoundingClientRect().top - a.off;
       if (moved !== 0) el.scrollTop += moved;
     }
@@ -567,7 +574,7 @@ export function Timeline({ threadId }: { threadId: string }) {
           const last = skip + j === messages.length - 1;
           return (
             <Fragment key={key}>
-              {m?.role === "user" ? <UserTurn msg={row(m)} />
+              {m?.role === "user" ? <UserTurn msg={row(m)} noted={stopNotes[m.id] !== undefined} />
                 : m === undefined || wasLive.has(key) ? <LiveReply threadId={threadId} msg={m === undefined ? undefined : row(m)} last={last} origin={origin} token={token} />
                 : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} knownStop={stopNotes[m.id] !== undefined} origin={origin} token={token} />}
               {m !== undefined && stopNotes[m.id] !== undefined ? (

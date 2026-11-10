@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-09: A long thread's older turns mount in a third of the time
+
+- A thread with more than 40 turns opens with its last 40 and mounts the
+  rest above the view while the browser is idle. For a 2,000-turn thread
+  that fill cost about 3 s of work; it now costs about 1 s (perf comparison
+  on the timing host, 4 rounds: 3,061 to 1,075 ms wall, 3,012 to 953 ms of
+  main-thread tasks, 974 to 73 ms of style, 200 to 69 layouts). The first
+  screen is unchanged within noise. No row in the comparison got slower.
+- Spacing: the gap between turns came from a rule that looks at the turn
+  before, so every slice mounted at the top restyled every turn below it.
+  Each turn now carries its own gap below itself. A turn with a stop note
+  under it gives that gap up, and so does the last turn.
+- Fade: turns mounted above the view each started an entrance fade nobody
+  sees, which kept frames running through the fill. They are marked before
+  the fade can start. Older turns therefore no longer fade in; the first
+  screen and new turns at the end still do.
+- One visible spacing change: when a conversation's history fails to load,
+  the line saying so sat flush under the last turn and now sits one turn's
+  gap below it.
+- Two other attempts made the long thread faster and ordinary rows slower,
+  and were reverted.
+
 ## 2026-11-09: New thread cancels a paste that has not arrived yet, again
 
 - In the desktop app a copied file's path is read after Ctrl+V and lands

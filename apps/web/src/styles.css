@@ -216,9 +216,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
    positions to whole pixels, which moves text by a pixel against the design. */
 .col.long .turn{content-visibility:auto;contain-intrinsic-size:auto 120px}
 /* F40: the same gap after every turn. A finished reply's action row is the first 32 px of its gap
-   (8 px under the text, a 24 px row), so the next turn adds only the remaining 12 px */
-.turn+.turn{margin-top:var(--turn-gap)}
-.turn.a.done+.turn{margin-top:calc(var(--turn-gap) - var(--s2) - 24px)}
+   (8 px under the text, a 24 px row), so it adds only the remaining 12 px. Each turn carries its gap
+   below itself, and no rule here looks at the element before a turn: with `.turn+.turn` every
+   slice of older turns the timeline mounted at the top restyled and re-laid out every turn below
+   it (in the perf comparison, a 2,000-turn thread's whole-mount style time fell from about 970 ms
+   to 220 ms without it). A turn with a stop note under it (`noted`) gives its gap up: the note
+   sits 12 px into the turn it explains, and the next turn follows the note directly. */
+.col{--turn-after:var(--turn-gap);--turn-after-done:calc(var(--turn-gap) - var(--s2) - 24px)}
+.col>.turn{margin-bottom:var(--turn-after)}
+.col>.turn.a.done{margin-bottom:var(--turn-after-done)}
+.col>.turn:last-child,.col>.turn.noted{--turn-after:0px;--turn-after-done:0px}
 .u-row{display:flex;justify-content:flex-end;align-items:flex-end;gap:var(--s2)}
 [data-text=small]{--chat-fs:14px}
 [data-text=large]{--chat-fs:17px}
@@ -761,7 +768,7 @@ a.btn{text-decoration:none}
 /* a reply reads in 8/16/24 steps */
 .md p,.md ul,.md ol,.md pre,.md table,.md .cb,.md blockquote{margin:16px 0}
 .md li+li{margin-top:8px}
-.turn+.turn{margin-top:24px}
+.col{--turn-after:24px}
 .md a{text-decoration-color:currentColor}
 .md a.url{overflow-wrap:normal}
 .cb-copy{min-width:44px;width:auto;height:44px;opacity:1;justify-content:center;white-space:nowrap}
@@ -804,7 +811,7 @@ a.btn{text-decoration:none}
 .a-det{display:inline-flex}
 .a-act .meta{display:none}
 .a-act.det .meta{display:block}
-.turn.a.done+.turn{margin-top:24px}
+.col{--turn-after-done:24px}
 .ctl,.pill,.meter,.btn,.think,.wr-line,.qa,.link,.sb-row,.sb-act,.sb-set,.rt,.sb-search{min-height:44px}
 .send{width:44px;height:44px;padding:4px;transform:none!important}
 .cf-r .send{background-clip:content-box}
