@@ -307,7 +307,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const queueIn = threadId ?? (await createThread(content, model));
     if (queueIn === null) return;
     const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }) };
-    if (getDraft(key) === draft) clearDraft(key);
+    // Unchanged since Send, by its words: New thread during the creation gives the same draft a new identity.
+    const now = getDraft(key);
+    if (now.text === draft.text && now.images === draft.images && now.sendId === draft.sendId) clearDraft(key);
     if (key === null) moveDraft(null, queueIn);
     settleEnded();
     setState((st) => ({ notice: null, stopAsk: null, queued: [...st.queued, q] }));

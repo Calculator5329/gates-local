@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-09: New thread cancels a paste that has not arrived yet, again
+
+- In the desktop app a copied file's path is read after Ctrl+V and lands
+  only if the draft it was meant for is still the one in the box. Since
+  each chat got its own draft, pressing New thread while already on the
+  new-chat screen left that draft's identity alone, so a path still being
+  read landed after it. New thread now gives the new-chat draft a new
+  identity and keeps its words; a dictation or image still arriving there
+  is dropped the same way. Switching between two different chats already
+  refused a late paste and still does.
+- A queued first message whose chat is still being created is cleared from
+  the box by its words, so pressing New thread in that moment does not
+  leave a second copy in the created chat.
+- This was a red test on main for one landing: the drafts change ran 14
+  browser specs before landing and the desktop paste spec was not one of
+  them.
+
 ## 2026-11-09: Each chat keeps its own unsent draft
 
 - The message box held one draft for the whole app, so words typed in one

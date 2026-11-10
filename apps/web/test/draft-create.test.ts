@@ -29,3 +29,18 @@ it.each([false, true])("R4: newer words follow the created thread (queued: %s)",
   expect(drafts.getDraft(null).text).toBe("");
   session.newThread(); expect(drafts.getDraft().text).toBe("");
 });
+
+it.each([false, true])("New thread pressed while the first chat is being created leaves no second copy of the words (queued: %s)", async queued => {
+  session.newThread();
+  if (queued) store.setState({ runtime: { state: "installing", owner: "app", baseUrl: "http://runtime.invalid" } });
+  drafts.editDraft("only once");
+  const creating = browser.server.hold("threads.create"), sent = session.send("only once");
+  const request = await creating;
+  session.newThread();
+  request.respond({ id: "N", title: "only once", createdAt: 1, updatedAt: 1 });
+  await sent;
+  expect(store.getState().threadId).toBe("N");
+  if (queued) expect(store.getState().queued.map(q => q.text)).toEqual(["only once"]);
+  expect(drafts.getDraft("N").text).toBe("");
+  expect(drafts.getDraft(null).text).toBe("");
+});

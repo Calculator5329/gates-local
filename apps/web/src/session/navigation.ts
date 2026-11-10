@@ -1,7 +1,7 @@
 // Hash routing, deferred Settings and first-run navigation share one intent generation.
 import { type Section, type State, getState, setState } from "../store.ts";
 import { settingsScreen } from "../screen-loaders.ts";
-import { cancelQueuedDraft } from "../drafts.ts";
+import { cancelQueuedDraft, renewDraft } from "../drafts.ts";
 
 /** The open thread lives in the URL hash: #thread=<id>. */
 export function threadFromHash(): string | null {
@@ -72,6 +72,8 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     wakeAfterEdit();
     // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
     setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...newChatModel(s) }));
+    // Asking for a new chat while already on one changes no slot, so nothing else would tell a late paste it is stale.
+    renewDraft(null);
     setHash(null);
   }
 

@@ -92,6 +92,16 @@ it("a new chat's first send consumes its draft slot", async () => {
   expect(drafts.getDraft().text).toBe("");
 });
 
+it("New thread on the new-chat screen keeps its words and gives the draft a new identity", () => {
+  session.newThread();
+  drafts.editDraft("kept words");
+  const arriving = drafts.getDraft().version; // what a paste or dictation still being read was started against
+  session.newThread();
+  expect(drafts.getDraft()).toMatchObject({ text: "kept words", images: [], sendId: null });
+  expect(drafts.getDraft().version).not.toBe(arriving);
+  expect(drafts.savedDrafts().map(d => d.key)).toEqual([null]);
+});
+
 it("M18: removing a queued editor restores the earlier draft and attachments", () => {
   store.setState({ queued: [{ id: "q", threadId: "A", text: "queued words", at: 1, held: true, waitFor: "reply" }] });
   drafts.replaceDraft("A", { text: "before edit", images: ["before-image"], sendId: "before-id" });

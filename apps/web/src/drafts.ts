@@ -50,6 +50,11 @@ export function clearDraft(key: DraftKey): void {
   changed();
 }
 export function dropDraft(key: DraftKey): void { if (slots.delete(key)) changed(); }
+/** Same words, new identity: a paste or dictation still being read was meant for the draft before this. */
+export function renewDraft(key: DraftKey): void {
+  slots.set(key, { ...getDraft(key), version: ++version });
+  changed();
+}
 /** A first send creates a thread; later typing belongs to that thread too. */
 export function moveDraft(from: DraftKey, to: DraftKey): void {
   const draft = getDraft(from);
