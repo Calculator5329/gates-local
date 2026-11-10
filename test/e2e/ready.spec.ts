@@ -20,6 +20,8 @@ test("the runtime turning ready and a chosen model appear in the same render, an
   await page.addInitScript(watchReady);
   await open();
   await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
+  await expect(page.locator("#ta")).toBeFocused();
+  await page.screenshot({ path: test.info().outputPath("ready-focused.png") });
   await expect(page.locator(".sb-foot .rt")).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { glReadyModel?: string | null }).glReadyModel)).toBe("Qwen 3.5 9B");
   await sendMessage(page, "Right away");

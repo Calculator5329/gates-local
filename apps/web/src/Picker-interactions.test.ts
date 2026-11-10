@@ -56,6 +56,7 @@ function settle() { render(); for (const effect of probe.effects) effect(); }
 const control = (inert: boolean) => ({ tabIndex: 0, getClientRects: () => [{}], closest: () => inert ? {} : null, focus: vi.fn() });
 const tag = "capped-chat:8k", gib = 1024 ** 3;
 const fit = (verdict: "fits" | "refuse", numCtx = 8192) => ({ model: tag, numCtx, verdict, needVramBytes: 20 * gib, freeVramBytes: 12 * gib, spillRamBytes: 0, source: "estimate", measuredAt: 0 });
+const advice = (tree: unknown) => find(find(tree, p => p["data-ctx"] === 8192), p => "v" in p).props["v"];
 
 beforeEach(() => {
   probe.stale.clear();
@@ -64,6 +65,22 @@ beforeEach(() => {
   probe.state = { pop: { id: "picker", kb: true, ready: true }, unavailable: {}, model: "other:1b", numCtx: 16384,
     models: [{ name: tag, maxContext: 8192, sizeBytes: gib, capabilities: ["completion"] }],
     catalog: [], fits: {}, pulls: {}, stopFrees: {}, gpu: { vendor: "nvidia", freeBytes: 12 * gib } };
+});
+
+it("keeps the selected context's fit while its model is loading, then accepts a later refusal", () => {
+  probe.state.model = tag;
+  probe.state.numCtx = 8192;
+  probe.state.loads = {};
+  probe.state.fits = { [`${tag}@8192`]: fit("fits") };
+  expect(advice(render())).toMatchObject({ k: "gpu" });
+  probe.state.loads = { [tag]: { state: "loading", numCtx: 8192 } };
+  render();
+  probe.state.fits = { [`${tag}@8192`]: fit("refuse") };
+  expect(advice(render())).toMatchObject({ k: "gpu" });
+  probe.state.loads = { [tag]: { state: "ready", numCtx: 8192 } };
+  expect(advice(render())).toMatchObject({ k: "gpu" });
+  probe.state.fits = { [`${tag}@8192`]: fit("refuse") };
+  expect(advice(render())).toMatchObject({ k: "no" });
 });
 
 it("PK-01: clicking a refused capped row while its effective-context check is pending cannot choose it", () => {

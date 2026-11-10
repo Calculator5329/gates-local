@@ -5,6 +5,7 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import type { ContextSize, ModelInfo } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, gb, k, noGpu, verdictOf } from "./format.ts";
 import { openFit } from "./fit-actions.ts";
+import { displayFit } from "./fit-display.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { Icon } from "./icons.tsx";
 import { chatModels, pendingDownload } from "./pick.ts";
@@ -52,6 +53,7 @@ export function Picker() {
   const pullNA = useStore(s => s.unavailable["models.pull"] === true);
   const catalogRaw = useStore(s => s.catalog);
   const fits = useStore(s => s.fits);
+  const loads = useStore(s => s.loads);
   const pulls = useStore(s => s.pulls);
   const stopFrees = useStore(s => s.stopFrees);
   const numCtx = useStore(s => s.numCtx);
@@ -79,8 +81,11 @@ export function Picker() {
   const checked = (tag: string, c = numCtx) => checks.current[keyFor(tag, c)] ?? catalog?.find(m => m.name === tag && m.fit?.numCtx === ctxFor(c, models, tag))?.fit;
   const stale = (tag: string, c = numCtx) => !fitIsCurrent(checked(tag, c));
   const report = (tag: string, c = numCtx) => {
-    const r = checked(tag, c);
-    return r && r !== "error" ? verdictOf(r) : undefined;
+    const ctx = ctxFor(c, models, tag);
+    const load = loads?.[tag];
+    const previous = catalog?.find(m => m.name === tag)?.fit;
+    const r = displayFit(keyFor(tag, c), checked(tag, c), load?.state === "loading" && load.numCtx === ctx, previous?.numCtx === ctx ? previous : undefined);
+    return r ? verdictOf(r) : undefined;
   };
   const installed = chatModels(models ?? []);
   const downloading = Object.values(pulls).filter(p => pendingDownload(p, models));

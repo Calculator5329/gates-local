@@ -764,7 +764,7 @@ a.btn{text-decoration:none}
 .turn+.turn{margin-top:24px}
 .md a{text-decoration-color:currentColor}
 .md a.url{overflow-wrap:normal}
-.cb-copy{width:44px;height:44px;opacity:1;justify-content:center}
+.cb-copy{min-width:44px;width:auto;height:44px;opacity:1;justify-content:center;white-space:nowrap}
 .md .cb-h{height:44px;padding:0 0 0 12px}
 .wr-tool{display:none}
 .wr-who{display:block;margin:0 0 8px;font-size:14px;color:var(--muted-foreground)}

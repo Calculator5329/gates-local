@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-09: Chat starts ready to type, and model loading keeps its earlier memory advice
+
+- Opening chat with a mouse or keyboard now focuses the message box once
+  the runtime is ready, without taking focus from another control.
+- The model picker and GPU memory panel retain the earlier fit while a
+  model loads, including when reopened midway through that load. They use
+  the composer's existing presentation rule; a failed check clears the
+  hold and a distinct check after loading can still refuse the model.
+- Code-copy feedback on narrow screens stays on one line while keeping
+  its 44-pixel touch target.
+- Fallback copying restores the composer's cursor before the reader's
+  reply selection, so the focused composer cannot erase selected reply
+  text while clipboard permissions are unavailable.
+- A controlled browser refusal reproduced both advice flashes before the
+  fix. The picker interaction regression and focused fit tests cover the
+  retained reading and a real refusal arriving after loading.
+
 ## 2026-11-09: A running reply is held once, whichever chat is open
 
 - The client kept a reply that was being written in two shapes: one for the

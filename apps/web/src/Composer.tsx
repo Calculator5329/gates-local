@@ -130,6 +130,9 @@ export function Composer() {
   }, [ready, model, numCtx, fit]);
 
   const blocked = !ready;
+  useEffect(() => {
+    if (!blocked && !isTouch() && document.activeElement === document.body) ta.current?.focus({ preventScroll: true });
+  }, [blocked]);
   const queueable = wait !== null;
   const shownTag = first ?? model;
   const info = models?.find((m) => m.name === shownTag);

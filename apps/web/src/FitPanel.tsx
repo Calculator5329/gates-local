@@ -13,6 +13,7 @@ import { Row, useAct } from "./settings-ui.tsx";
 import { closeTip, esc } from "./ui.tsx";
 export { openFit } from "./fit-actions.ts";
 import { FIT_DOT, fitLabel } from "./models-rules.ts";
+import { displayFit } from "./fit-display.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -277,6 +278,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const stale = useStore(s => s.staleFits);
   const fitStatus = useStore(s => s.fitStatus);
   const fitHistory = useStore(s => s.fitHistory);
+  const load = useStore(s => s.loads[model]);
   const catalog = useStore(s => s.catalog);
   const settingsNA = useStore((s) => s.settings === NA);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
@@ -297,12 +299,15 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   };
   const memory = cpu ? "memory" : "GPU memory";
   const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, model, numCtx);
-  const fit = reading.report?.numCtx === ctx ? reading.report : undefined;
+  const previous = catalog === NA ? undefined : catalog?.find(m => m.name === model)?.fit;
+  const shown = displayFit(fitKey(model, numCtx), report === "error" ? "error" : reading.report, load?.state === "loading" && load.numCtx === ctx, previous?.numCtx === ctx ? previous : undefined);
+  const fit = shown?.numCtx === ctx ? shown : report === "error" && reading.report?.numCtx === ctx ? reading.report : undefined;
   // says it is an estimate until this model has really run at this size (fit.ts)
   const phase = reading.phase;
   const defaultSize = saved ?? numCtx;
   const defaultFit = fitReading({ fits, fitStatus, fitHistory, catalog }, model, defaultSize);
-  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultFit.report === undefined ? undefined : defaultFit.phase !== "fresh" ? `${fitPendingWord(defaultFit.phase, true)} at ${k(defaultSize)}` : `${defaultFit.report.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultFit.report, cpu).tip ?? ""}`;
+  const defaultReport = displayFit(fitKey(model, defaultSize), fits[fitKey(model, defaultSize)] === "error" ? "error" : defaultFit.report, load?.state === "loading" && load.numCtx === defaultSize);
+  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultReport === undefined ? undefined : defaultFit.phase !== "fresh" ? `${fitPendingWord(defaultFit.phase, true)} at ${k(defaultSize)}` : `${defaultReport.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultReport, cpu).tip ?? ""}`;
   return (
     <>
       {locked ? null : (
@@ -310,7 +315,9 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
           <div className="ctx-c">
             <span className="mini-seg" role="group" aria-label="Default context">
               {CONTEXT_SIZES.map((c) => {
-                const f = ctxFit(c, max, currentFit({ fits, fitStatus, catalog }, model, c), cpu, stale[fitKey(model, c)] === true);
+                const raw = currentFit({ fits, fitStatus, catalog }, model, c);
+                const advice = displayFit(fitKey(model, c), fits[fitKey(model, c)] === "error" ? "error" : raw, load?.state === "loading" && load.numCtx === c);
+                const f = ctxFit(c, max, advice, cpu, stale[fitKey(model, c)] === true);
                 return (
                   <button
                     key={c}

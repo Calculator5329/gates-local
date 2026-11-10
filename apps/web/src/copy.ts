@@ -18,6 +18,9 @@ export async function copyText(text: string): Promise<boolean> {
   const anchorOffset = selection?.anchorOffset ?? 0;
   const focus = selection?.focusNode;
   const focusOffset = selection?.focusOffset ?? 0;
+  // With a field focused, the document selection is only a caret beside it;
+  // a range elsewhere (a selected reply) is the selection that matters.
+  const inField = field != null && (!anchor || anchor === field || anchor.contains(field));
   const ta = document.createElement("textarea");
   try {
     ta.value = text;
@@ -32,9 +35,12 @@ export async function copyText(text: string): Promise<boolean> {
   } finally {
     ta.remove();
     if (active instanceof HTMLElement) active.focus({ preventScroll: true });
-    selection?.removeAllRanges();
-    if (anchor && focus) selection?.setBaseAndExtent(anchor, anchorOffset, focus, focusOffset);
-    if (start != null && end != null) field?.setSelectionRange(start, end, direction ?? undefined);
+    if (inField) {
+      if (start != null && end != null) field?.setSelectionRange(start, end, direction ?? undefined);
+    } else {
+      selection?.removeAllRanges();
+      if (anchor && focus) selection?.setBaseAndExtent(anchor, anchorOffset, focus, focusOffset);
+    }
   }
 }
 
