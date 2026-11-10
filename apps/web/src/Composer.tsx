@@ -372,6 +372,14 @@ export function Composer() {
   );
 }
 
+/**
+ * A browser that sizes the field to its text (styles.css `.ta`, `field-sizing`)
+ * needs no measuring here. Measuring reads the height back, which lays out the
+ * whole page inside the key's own task: a streaming reply's new text too, and
+ * 40 freshly mounted turns when a long thread opens.
+ */
+const sizesItself = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content");
+
 function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<HTMLTextAreaElement | null>; placeholder: string; submit: () => void }) {
   const draft = useDraft(d => d.text);
   const version = useDraft(d => d.version);
@@ -381,7 +389,7 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
   }, [textarea]);
   useLayoutEffect(() => {
     const el = textarea.current;
-    if (!el) return;
+    if (!el || sizesItself) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft, placeholder, textarea]);

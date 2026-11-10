@@ -21,6 +21,9 @@ describe("prepared performance data", () => {
       expect(a.listThreads()).toHaveLength(400);
       expect(a.getThread(ids.long).messages).toHaveLength(200);
       expect(a.getThread(ids.thousands).messages).toHaveLength(2000);
+      if (!ids.typing) throw new Error("Missing typing fixture");
+      expect(a.getThread(ids.typing).messages).toHaveLength(400);
+      expect(a.getThread(ids.typing).messages.at(-1)?.content).toContain("Perf typing 400");
       const byTitle = (title: string) => a.listThreads().find(thread => thread.title === title)?.id;
       const hover = byTitle("Perf hover 2000");
       expect(hover).toBeDefined();

@@ -16,6 +16,11 @@ describe("nextJourneys", () => {
     expect(nextJourneys(NEXT_DEFAULT)).toEqual(["startup", "send", "threads", "parallel", "clipboard", "voice", "queue", "reconnect"]);
   });
 
+  it("runs the typing group only when named", () => {
+    expect(nextJourneys(NEXT_DEFAULT)).not.toContain("typing");
+    expect(nextJourneys("typing,send")).toEqual(["typing", "send"]);
+  });
+
   it("runs the picker group only when named, because its replies would shift every later group", () => {
     expect(nextJourneys("picker,threads")).toEqual(["picker", "threads"]);
   });

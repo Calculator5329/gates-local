@@ -600,6 +600,15 @@ RS-03 remains dropped.
       *Accept:* an intentionally stalled backfill fails promptly with the missing mount count and action named.
 - [ ] <!-- workspace:id=work:27cc6930-07f6-59f5-a97a-af395e2b8da1 --> Explain the measured typing wall-time rise from 35.15 to 43.22 ms despite lower script time in the long-thread comparison.
       *Accept:* a focused paired run and profile separate frame scheduling from extra app work before attributing the change.
+      *Measured 2026-11-10:* the typing group reads about 42 ms from key to paint in every state, idle or streaming, short thread or 400 messages, with about 1 ms of script for each key. That points at frame timing on the test machine, not app work.
+- [ ] <!-- workspace:id=work:93d20a76-5eac-55f5-961d-eb34a758e017 --> The release check's "typing during a stream" row has a fixed 50 ms limit, and idle typing misses it on the test machine as often as typing during a reply does. The row cannot tell what the reply adds.
+      *Accept:* the row compares typing during a reply with idle typing measured in the same run, and fails on the difference.
+- [ ] <!-- workspace:id=work:e65348a3-9ba1-5d8b-8be4-e35ef9a4768a --> Opening a long chat still forces one layout of the first 40 turns when the message box takes focus (about 35 to 50 ms on the test machine).
+      *Accept:* opening the 400-message test thread on a fresh page shows no task over 50 ms in 5 of 5 runs, by mounting fewer turns on open.
+- [ ] <!-- workspace:id=work:f66c5682-2627-58b7-89e2-9ae45cebd180 --> The typing timing group fits only 2 of 4 rounds in one test-machine job, so its time rows are never scored. With the new self-sizing message box, layout time for each piece of a reply in the 400-message thread read about 2 ms higher in 3 of 4 runs and equal in an earlier job.
+      *Accept:* four rounds fit (two jobs, or one counter repetition after the first round), and the per-piece layout row is scored.
+- [ ] <!-- workspace:id=work:914d2e33-f0ed-53c9-bbc1-0a07a0da8801 --> Firefox, and Safari versions without `field-sizing`, still measure the message box on every key and lay out the page.
+      *Accept:* a measured layouts-per-key count on one of them, and a decision from it.
 - [ ] <!-- workspace:id=work:8db4ff53-ea0c-5a87-b735-afbc5da7fa46 --> Retire the older `compare.ts`/`stats.ts` path after the new method has served a release; first-run and desktop-launch still depend on it.
       *Accept:* those groups have an equivalent supported home and recorded comparisons remain readable.
 

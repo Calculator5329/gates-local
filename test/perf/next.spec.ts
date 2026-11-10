@@ -20,6 +20,7 @@ import { metric, type Run } from "./stats.ts";
 import { fakeVoice } from "./voice-fixture.ts";
 import { threadReply } from "../fake-ollama/fake-ollama.ts";
 import { parallelPrompt } from "./workload.ts";
+import { browserBusyStart, browserBusyStop, browserLongTasks, browserRegionHook, longSince, type RegionCounts } from "./typing.ts";
 
 const only = nextJourneys(process.env["GL_PERF_ONLY"] ?? NEXT_DEFAULT);
 const selected = new Set<Journey>(only);
@@ -177,6 +178,8 @@ test("priority journeys with costs", async ({ browser }) => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark", permissions: ["clipboard-read", "clipboard-write", "microphone"] });
       try {
         if (kind === "counters") await context.addInitScript(browserReactHook);
+        if (kind === "counters" && selected.has("typing")) await context.addInitScript(browserRegionHook);
+        if (selected.has("typing")) await context.addInitScript(browserLongTasks);
         const page = await context.newPage(); await install(page);
         const cdp = await context.newCDPSession(page);
         await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
@@ -362,6 +365,136 @@ test("priority journeys with costs", async ({ browser }) => {
           await expect(page.locator(".turn.a .md")).toBeVisible();
           // The reply can end before this point; an unbounded click would wait out the test.
           await page.getByRole("button", { name: "Stop", exact: true }).click({ timeout: 2_000 }).catch(() => undefined);
+        }
+
+        if (selected.has("typing")) {
+          // Typing the next message while a reply streams, in a new chat and in a
+          // thread of 400 messages. Each key is its own window. The states: idle;
+          // held, a reply running but quiet; stream, chunks arriving about every
+          // 24 ms; busy, the stream plus back-to-back 100 ms tasks.
+          const seeded: unknown = await (await fetch(`${CONTROL_URL}/seed`)).json();
+          const typingId: unknown = typeof seeded === "object" && seeded !== null ? Reflect.get(seeded, "typing") : undefined;
+          if (typeof typingId !== "string" || !typingId) throw new Error("The seed has no typing thread");
+          const ta = page.locator("#ta");
+          // Six keys a state keeps four rounds of both arms inside one runner job.
+          const KEYS = "steady", BUSY_KEYS = "busy", HOLD_TOKENS = 24, CHUNK_WINDOW_MS = 600;
+          const regions = async (): Promise<RegionCounts> => {
+            const counts = await page.evaluate(() => window.perfRegions ? { ...window.perfRegions, where: { ...window.perfRegions.where } } : null);
+            if (!counts) throw new Error("The region hook is missing from the page, so renders cannot be placed");
+            return counts;
+          };
+          // A missing counter must fail the run: read as zero it would look like an exact improvement.
+          const flushes = async () => {
+            const count = await page.evaluate(() => (window as unknown as { glPerf?: { flushes: number } }).glPerf?.flushes);
+            if (count === undefined) throw new Error("The client's flush counter is missing");
+            return count;
+          };
+          const regionRows = (name: string, before: RegionCounts, after: RegionCounts) => {
+            for (const region of ["composer", "live", "elsewhere"] as const) add(counted, { action: `${name}.renders-${region}`, unit: "count", value: after[region] - before[region] });
+            const where = Object.entries(after.where).map(([label, n]) => [label, n - (before.where[label] ?? 0)] as const).filter(([, n]) => n > 0);
+            if (where.some(([label]) => label !== "composer textarea#ta.ta" && !label.startsWith("began textarea#ta.ta "))) console.log(`${name} renders outside the live reply: ${where.map(([label, n]) => `${label} x${n}`).join(", ")}`);
+          };
+          const profiled = async (name: string, act: () => Promise<unknown>) => {
+            await cdp.send("Profiler.start");
+            await act();
+            const { profile } = await cdp.send("Profiler.stop");
+            mkdirSync(path.join(out, "profiles"), { recursive: true });
+            writeFileSync(path.join(out, "profiles", `${name}.cpuprofile`), JSON.stringify(profile));
+            hot[name] = hotSpots(profile);
+          };
+          /** One window per key, each closing when the typed text is in the field and painted; the profile covers the whole burst. */
+          const typeKeys = async (name: string, text: string) => {
+            await ta.fill(""); await ta.focus();
+            if (kind === "profile") await profiled(name, async () => { for (const ch of text) await page.keyboard.press(ch); await expect(ta).toHaveValue(text); });
+            else {
+              let value = "";
+              for (const ch of text) {
+                value += ch;
+                await quiet(page);
+                const before = await begin();
+                const placed = kind === "counters" ? await regions() : undefined;
+                const observation = await measure(page, () => page.keyboard.press(ch), "keydown", "#ta", value, "usable-value");
+                if (placed) regionRows(name, placed, await regions());
+                await finish(name, before, observation.elapsed);
+                if (kind === "timed") add(timed, { action: `${name}.long-tasks`, unit: "count", value: observation.longTasks.length });
+              }
+            }
+            await expect(ta).toHaveValue(text); await ta.fill("");
+          };
+          /** No key in the window: what the streamed chunks alone render. Its time row is the window's fixed length. */
+          const chunkWindow = async (name: string) => {
+            if (kind === "profile") { await profiled(name, () => page.waitForTimeout(CHUNK_WINDOW_MS)); return; }
+            await quiet(page);
+            const before = await begin();
+            const placed = kind === "counters" ? await regions() : undefined;
+            const from = await flushes();
+            await page.waitForTimeout(CHUNK_WINDOW_MS);
+            const flushed = await flushes() - from;
+            if (placed) regionRows(name, placed, await regions());
+            await finish(name, before, CHUNK_WINDOW_MS);
+            add(kind === "timed" ? timed : counted, { action: `${name}.flushes`, unit: "count", value: flushed });
+          };
+          const emitted = async (prompt: string) => { try { return tokensFor(await (await fetch(`${FAKE_URL}/__fake/state`)).json(), prompt); } catch { return 0; } };
+          const typeDuringReply = async (label: string, prompt: string) => {
+            // Earlier repetitions left interrupted replies in the 400-message thread; only the live one counts.
+            await ta.fill(prompt); await ta.press("Enter"); await expect(page.locator(".md.live")).toBeVisible();
+            await expect.poll(() => emitted(prompt)).toBe(HOLD_TOKENS);
+            const shown = (threadReply(prompt).match(/\s*\S+/g) ?? []).slice(0, HOLD_TOKENS).join("").replace(/\s/g, "");
+            await expect.poll(async () => ((await page.locator(".md.live").textContent()) ?? "").replace(/\s/g, "")).toContain(shown);
+            await quiet(page);
+            await typeKeys(`typing-${label}-held`, KEYS);
+            const released = await fetch(`${FAKE_URL}/__fake/release`, { method: "POST" });
+            if (!released.ok) throw new Error("Could not release fake reply");
+            await expect.poll(() => emitted(prompt)).toBeGreaterThan(HOLD_TOKENS + 4);
+            await chunkWindow(`chunks-${label}`);
+            await typeKeys(`typing-${label}-stream`, KEYS);
+            await page.evaluate(browserBusyStart);
+            try { await typeKeys(`typing-${label}-busy`, BUSY_KEYS); } finally { await page.evaluate(browserBusyStop); }
+            // Every state after the hold ran with the reply still streaming.
+            expect(await page.locator(".md.live").count(), "the reply ended before the typing did").toBe(1);
+            await stop(page);
+          };
+
+          await scenario("threads", { tokenDelayMs: 24, burstTokens: 1, holdAfterTokens: HOLD_TOKENS });
+          await newThread(page);
+          await typeKeys("typing-short-idle", KEYS);
+          await typeDuringReply("short", parallelPrompt("typing short"));
+
+          // The 400-message thread opened from a fresh load, as the release check opens it,
+          // then scrolled top, middle and end. Earlier repetitions each added a turn pair.
+          const turns = page.locator(".tl .turn");
+          // A hash-only change would keep the document, its long tasks and its busy spins.
+          await page.goto("about:blank");
+          const openLong = async () => {
+            await page.goto(appUrl(`#thread=${typingId}`));
+            await ready(page);
+            await expect.poll(() => turns.count(), { timeout: 30_000 }).toBeGreaterThanOrEqual(400);
+            let count = -1;
+            await expect.poll(async () => { const previous = count; count = await turns.count(); return count === previous; }, { intervals: [300] }).toBe(true);
+          };
+          const scrollLong = async () => {
+            const tl = page.locator(".tl");
+            await tl.evaluate(el => el.scrollTo({ top: 0 })); await page.waitForTimeout(200);
+            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight / 2 })); await page.waitForTimeout(200);
+            await tl.evaluate(el => el.scrollTo({ top: el.scrollHeight })); await page.waitForTimeout(300);
+          };
+          const longTasks = () => page.evaluate(() => window.perfLong ?? []);
+          if (kind === "profile") { await profiled("open-400", openLong); await profiled("scroll-400", scrollLong); }
+          else {
+            await openLong();
+            const opened = await longTasks(), scrollFrom = await page.evaluate(() => performance.now());
+            await scrollLong();
+            const scrolled = longSince(await longTasks(), scrollFrom), open = longSince(opened, 0);
+            if (kind === "timed") {
+              add(timed, { action: "open-400.long-tasks", unit: "count", value: open.count });
+              add(timed, { action: "open-400.longest-task", unit: "ms", value: open.longest });
+              add(timed, { action: "scroll-400.long-tasks", unit: "count", value: scrolled.count });
+              add(timed, { action: "scroll-400.longest-task", unit: "ms", value: scrolled.longest });
+            }
+            console.log(`open-400 ${kind}: long tasks ${opened.map(task => `${Math.round(task.duration)} ms at ${Math.round(task.start)}`).join(", ") || "none"}; scroll ${scrolled.count}, longest ${Math.round(scrolled.longest)} ms`);
+          }
+          await typeKeys("typing-400-idle", KEYS);
+          await typeDuringReply("400", parallelPrompt("typing 400"));
         }
       } finally { await context.close(); }
       // The fresh picker sessions record no profile; hover-away records only a count.

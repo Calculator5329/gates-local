@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-10: Each key does less work, and a new chat's first key no longer redraws the sidebar
+
+- The message box now sizes itself to its text with CSS. Before, every key
+  made the app measure the box, and that made the browser lay out the whole
+  page: 3 layouts for each key, 6 while a reply was streaming. It is now 1.
+  Browsers without that CSS (Firefox, and Safari before it added it) keep
+  the old measuring.
+- The first key of a new chat used to redraw the whole app, sidebar icons
+  included (448 component renders outside the message box, now 4). The
+  cause was the conversation view's code arriving in the background, which
+  redrew everything although no conversation was on screen.
+- Opening a long chat on a fresh page had one stall of 50 to 96 ms. It is
+  smaller and was absent in half of the timed runs; it is not gone.
+- What did not change: the time from a key to the letter on screen, about
+  42 ms on the test machine in every state, typing idle or during a reply,
+  before and after. Typing during a reply was not slower than typing idle
+  there, so the release check's "typing during a stream" miss is not
+  explained by the reply. That check was not run again.
+- A typing group in the timing tests (`--only typing`) counts, for each key
+  and each piece of a reply, which parts of the page redraw and how many
+  layouts the browser does.
+
 ## 2026-11-10: The steps that replace an installed copy's program file, not yet connected
 
 - The code that will let an installed Linux copy replace its own program

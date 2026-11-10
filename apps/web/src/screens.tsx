@@ -3,8 +3,16 @@ import { afterFirstPaint, type deferred } from "./deferred.ts";
 import { firstRunScreen, settingsScreen } from "./screen-loaders.ts";
 export { firstRunScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
 
+const unwatched = () => () => {};
+
+/**
+ * Only a screen on show listens for its code landing. A preload (the thread
+ * screen once a new chat has text, settings after the first paint) would
+ * otherwise re-render the whole app, sidebar and all, inside someone's key;
+ * the render that shows the screen reads where its load got to.
+ */
 export function useScreen<T>(screen: ReturnType<typeof deferred<T>>, needed: boolean) {
-  const state = useSyncExternalStore(screen.subscribe, screen.get, screen.get);
+  const state = useSyncExternalStore(needed ? screen.subscribe : unwatched, screen.get, screen.get);
   useEffect(() => {
     if (needed) void screen.load();
   }, [screen, needed]);

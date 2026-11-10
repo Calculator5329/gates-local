@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import type { defaultSettings } from "../../apps/server/src/settings/store.ts";
 import type { openThreadStore } from "../../apps/server/src/threads/store.ts";
 
-export interface FixtureIds { short: string; long: string; thousands: string; huge: string; hoverLong: string; hoverThousands: string }
+export interface FixtureIds { short: string; long: string; thousands: string; huge: string; hoverLong: string; hoverThousands: string; typing?: string }
 
 /** Build one closed, pristine database using the subject commit's store and schema. */
 export async function prepareFixture(target: string, cache = path.join(homedir(), ".cache", "gates-local-perf")): Promise<string> {
@@ -30,10 +30,12 @@ export async function prepareFixture(target: string, cache = path.join(homedir()
     const huge = store.createThread({ title: "Perf huge reply" }).id;
     const hugeText = ["Huge reply marker", "", "```ts", ...Array.from({ length: 4000 }, (_, i) => `const item${i} = { value: ${i}, label: 'deterministic code fixture' };`), "```", "", "| Item | Value |", "| --- | --- |", ...Array.from({ length: 300 }, (_, i) => `| Row ${i} | Value ${i} |`), "", "Huge reply end"].join("\n");
     store.appendMessage({ threadId: huge, role: "assistant", content: hugeText, model: "qwen3.5:9b" });
-    for (let i = 0; i < 394; i++) store.createThread({ title: `Perf sidebar ${String(i).padStart(3, "0")}` });
+    // Typing during a reply in a thread of 400 messages, the size the release check opens.
+    const typing = seedLong(400, "Perf typing 400");
+    for (let i = 0; i < 393; i++) store.createThread({ title: `Perf sidebar ${String(i).padStart(3, "0")}` });
     const settings = await import(pathToFileURL(path.join(target, "apps/server/src/settings/store.ts")).href) as { defaultSettings: typeof defaultSettings; SETTINGS_FILE_NAME: string; SETTINGS_FILE_VERSION: number };
     writeFileSync(path.join(data, settings.SETTINGS_FILE_NAME), JSON.stringify({ version: settings.SETTINGS_FILE_VERSION, settings: { ...settings.defaultSettings("system"), thinking: false } }));
-    writeFileSync(path.join(data, "fixture.json"), JSON.stringify({ short, long, thousands, huge, hoverLong, hoverThousands }));
+    writeFileSync(path.join(data, "fixture.json"), JSON.stringify({ short, long, thousands, huge, hoverLong, hoverThousands, typing }));
     return data;
   } finally { store.close(); }
 }
@@ -49,5 +51,7 @@ export function restoreFixture(prepared: string, destination: string): FixtureId
     || !("hoverLong" in ids) || typeof ids.hoverLong !== "string" || !ids.hoverLong
     || !("hoverThousands" in ids) || typeof ids.hoverThousands !== "string" || !ids.hoverThousands) throw new Error("Invalid prepared performance fixture");
   cpSync(prepared, destination, { recursive: true, force: false, errorOnExist: true });
-  return { short: ids.short, long: ids.long, thousands: ids.thousands, huge: ids.huge, hoverLong: ids.hoverLong, hoverThousands: ids.hoverThousands };
+  // Data prepared before the typing thread existed has none; only the typing journey needs it.
+  const typing = "typing" in ids && typeof ids.typing === "string" && ids.typing ? { typing: ids.typing } : {};
+  return { short: ids.short, long: ids.long, thousands: ids.thousands, huge: ids.huge, hoverLong: ids.hoverLong, hoverThousands: ids.hoverThousands, ...typing };
 }
