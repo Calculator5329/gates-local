@@ -149,7 +149,7 @@ describe("one Update and restart per click", () => {
   });
 
   it("refuses in a packaged app or a folder that is not a clone", () => {
-    expect(cannotUpdate({ packaged: true, repoRoot: REPO, exists: () => true })).toMatch(/not run from a git clone/);
+    expect(cannotUpdate({ packaged: true, repoRoot: REPO, exists: () => true })).toBe("This installed copy of Gates Local cannot update itself yet. Download the new version from the release page.");
     expect(cannotUpdate({ packaged: false, repoRoot: REPO, exists: (f) => !f.endsWith(".git") })).toMatch(/not a git clone/);
     expect(cannotUpdate({ packaged: false, repoRoot: REPO, exists: () => true })).toBeNull();
   });

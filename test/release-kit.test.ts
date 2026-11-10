@@ -44,6 +44,16 @@ test.each(["missing", "stale"])("artifact refuses %s installer after a zero-exit
   expect(run(repo, args, env)).toMatchObject({ status: 1, output: expect.stringContaining(scenario === "stale" ? "archive it and its record first" : "did not produce") });
   expect(existsSync(output + ".record.json")).toBe(false);
 });
+test.each(["1", "0", ""])("artifact refuses to package or record a test build (GATES_LOCAL_TEST_BUILD=%j)", (value) => {
+  const dir = scratch(); const repo = path.join(dir, "repo"); checkout(repo);
+  const output = path.join(repo, "dist", "installer", process.platform === "win32" ? windowsFile : linuxFile);
+  expect(run(repo, ["artifact", "--version", "1.2.3"], { npm_execpath: packager(dir), GATES_LOCAL_TEST_BUILD: value })).toMatchObject({
+    status: 1,
+    output: expect.stringContaining("GATES_LOCAL_TEST_BUILD is set. A test build trusts test keys and a loopback feed, so it can never be released. Unset it and run release:artifact again."),
+  });
+  expect(existsSync(output)).toBe(false);
+  expect(existsSync(output + ".record.json")).toBe(false);
+});
 test.skipIf(process.platform === "win32")("artifact starts a native executable directly and a cjs through Node", () => {
   const dir = scratch(); const repo = path.join(dir, "repo"); checkout(repo);
   // A real native Node binary stands in for standalone pnpm. It executes this

@@ -4,7 +4,9 @@
 // when enabled. Browsers only check on request. Update and
 // restart shows only in the desktop app, which quits and lets
 // `pnpm run app-update` do the work. The phone listener exposes status only;
-// a computer browser may check but installs from the desktop app.
+// a computer browser may check but installs from the desktop app. An
+// installed copy (AppImage or installer) only reads the signed release list
+// and points at the release page; it never shows an install control.
 import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, updateAndRestart, updateSettings } from "./session.ts";
@@ -28,7 +30,46 @@ function versionText(v: UpdateVersion): { value: string; desc: string } {
       return { value: "Not a git clone", desc: "This copy was not downloaded with git clone, so it cannot check for updates or update itself." };
     case "unreadable":
       return { value: "Unknown", desc: `Could not read the version: ${v.detail}.` };
+    case "installed":
+      return { value: `Installed copy ${v.version}`, desc: "Updates come from the Gates Local release page." };
   }
+}
+
+const AGAIN = "Gates Local will try again in an hour.";
+
+/** An installed copy only reads the signed release list: the server's own
+ *  words, a release-page link when they send the person there, and never an
+ *  install control. A failed read promises a retry only while automatic
+ *  checks are on now, so the sentence follows the switch, not the check. */
+function InstalledResult({ check, automatic }: { check: UpdateCheck; automatic: boolean }) {
+  if (check.state === "up-to-date") {
+    return (
+      <div className="upd-res" role="status">
+        <b>No newer version was found.</b> Checked at {clock(check.checkedAt)}.
+      </div>
+    );
+  }
+  if (check.state === "available") return null;
+  const retries = automatic && check.state === "cannot-check" && (check.reason === "unreachable" || check.reason === "no-list");
+  const [first, ...rest] = retries ? [...check.lines, AGAIN] : check.lines;
+  return (
+    <div className="upd-res" role={check.state === "newer" ? "status" : "alert"}>
+      {first === undefined ? null : <b>{first}</b>}
+      {rest.length > 0 ? (
+        <div className="upd-lines">
+          {rest.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      ) : null}
+      {check.page === undefined ? null : (
+        <div className="upd-act">
+          <a className="link" href={check.page} target="_blank" rel="noreferrer noopener">Open the release page</a>
+        </div>
+      )}
+      <div className="upd-when">{check.state === "newer" ? "Checked" : "Tried"} at {clock(check.checkedAt)}.</div>
+    </div>
+  );
 }
 
 const channelText = (c: "main" | "release") => (c === "release" ? "Following releases." : "Following every change on the main branch.");
@@ -53,6 +94,9 @@ function CheckResult({ check, canUpdate, onUpdate, updateErr, updating }: { chec
           <div className="upd-when">Tried at {clock(check.checkedAt)}.</div>
         </div>
       );
+    case "newer":
+      // Only an installed copy answers "newer"; UpdatesView renders it there.
+      return <InstalledResult check={check} automatic={false} />;
     case "available": {
       const notes = check.notes?.split("\n").filter((l) => l.trim() !== "");
       const items = notes ?? check.changes;
@@ -129,6 +173,7 @@ export function UpdatesView(p: UpdatesViewProps) {
   }
   const version = p.status === undefined ? { value: "…", desc: "Reading the version." } : versionText(p.status.version);
   const clone = p.status !== undefined && (p.status.version.kind === "release" || p.status.version.kind === "commit");
+  const installed = p.status?.version.kind === "installed";
   const check = p.status?.lastCheck ?? null;
   const settings = p.settings === NA ? undefined : p.settings;
   const every = settings?.updateEveryChange === true;
@@ -138,9 +183,9 @@ export function UpdatesView(p: UpdatesViewProps) {
       <Row label="Version" desc={version.desc}>
         <span className="mono">{version.value}</span>
       </Row>
-      {clone ? (
+      {clone || installed ? (
         <>
-          {canControl ? <Row label="Check for updates" desc="Asks the git remote this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update." err={p.checkErr ?? null}>
+          {canControl ? <Row label="Check for updates" desc={installed ? "Reads the signed list of versions on the Gates Local release page. Nothing is downloaded or installed." : "Asks the git remote this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update."} err={p.checkErr ?? null}>
             <button type="button" className="btn outline" disabled={p.checking || p.updating} onClick={p.onCheck}>
               {p.checking ? (
                 <>
@@ -151,17 +196,19 @@ export function UpdatesView(p: UpdatesViewProps) {
               )}
             </button>
           </Row> : <Row label="Updates" desc="Check and install updates on the computer running Gates Local." />}
-          {check !== null && !p.checking ? (
+          {check === null || p.checking ? null : installed ? (
+            <InstalledResult check={check} automatic={settings !== undefined && settings.updateAutomatic !== false} />
+          ) : (
             <CheckResult check={check} canUpdate={p.canUpdate && canControl} onUpdate={p.onUpdate} updateErr={p.updateErr ?? null} updating={p.updating === true} />
-          ) : null}
+          )}
           {settings === undefined || p.settingsLocked || !canControl ? null : (
             <>
-            <Row label="Check for updates automatically" desc="Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work." err={p.switchErr ?? null}>
+            <Row label="Check for updates automatically" desc={installed ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly. Default on. Off stops automatic requests; a check in progress finishes. Manual checks still work." : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."} err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
             </Row>
-            <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
+            {installed ? null : <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
-            </Row>
+            </Row>}
             </>
           )}
         </>

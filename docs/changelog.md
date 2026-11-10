@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-09: An installed copy checks the release page for a newer version
+
+- A copy installed from the AppImage or the Windows setup program now shows
+  **Installed copy** and its version in Settings, General, Updates, and can
+  check for a newer version. It reads a signed list of versions from the
+  release page, checks the signature against the keys built into the copy,
+  and says whether a newer version exists, with a link to the release page.
+  It downloads nothing and installs nothing yet; Update and restart answers
+  that this copy cannot update itself.
+- An installed copy never starts git for updates. A copy run from a git clone
+  updates the way it did before.
+- The read is bounded: at most 5 redirects, a 64 KiB list and a 1 KiB
+  signature, 30 seconds for an answer and 60 seconds for the list and the
+  signature together. A response the copy will not use is hung up on, not
+  read.
+- When the check cannot be done, Settings says why in one sentence: a
+  development build, a build with no release key, a release page that cannot
+  be reached, no list on the page, or a list that fails its signature check.
+  "Gates Local will try again in an hour." appears only while the automatic
+  switch is on.
+- No release key is built in yet, so a copy built from this commit says it
+  has no release key and makes no request. Test builds (`GATES_LOCAL_TEST_BUILD=1`)
+  can be pointed at a local signed list; `pnpm release:artifact` refuses to
+  build while that variable is set.
+- Known limits: not run on Windows; never read against the real release
+  page, which has no signed list yet.
+
 ## 2026-11-09: A written design for how an installed copy updates itself
 
 - `docs/design/installed-updates.md` describes how a copy installed from the

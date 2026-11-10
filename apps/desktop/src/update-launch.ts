@@ -144,7 +144,7 @@ export async function launchApprovedUpdate(request: UpdateInstallRequest, contro
 
 /** Why "Update and restart" cannot start here, or null when it can. */
 export function cannotUpdate(o: { readonly packaged: boolean; readonly repoRoot: string; readonly exists: (file: string) => boolean }): string | null {
-  if (o.packaged) return "This copy of Gates Local was not run from a git clone, so it cannot update itself.";
+  if (o.packaged) return "This installed copy of Gates Local cannot update itself yet. Download the new version from the release page.";
   if (!o.exists(path.join(o.repoRoot, "scripts", "update.ts")) || !o.exists(path.join(o.repoRoot, ".git"))) {
     return "This folder is not a git clone of Gates Local, so it cannot update itself.";
   }

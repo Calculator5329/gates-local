@@ -168,7 +168,70 @@ describe("the Updates group", () => {
   });
 });
 
-const note = (result: UpdateStatus["result"] & object) => renderToStaticMarkup(createElement(ui.UpdateNoteView, { result, onDismiss: () => undefined }));
+describe("the Updates group of an installed copy", () => {
+  const INSTALLED: UpdateStatus = { version: { kind: "installed", version: "1.2.3" }, result: null, lastCheck: null, activity: [], installing: false };
+  const PAGE = "https://example.invalid/owner/repo/releases/latest";
+  const installedWith = (lastCheck: UpdateCheck) => ({ status: { ...INSTALLED, lastCheck } });
+  const link = `<a class="link" href="${PAGE}" target="_blank" rel="noreferrer noopener">Open the release page</a>`;
+
+  it("names the copy, checks the release page and has no git words or clone switches", () => {
+    const html = view({ status: INSTALLED });
+    const plain = text(html);
+    expect(plain).toContain("Installed copy 1.2.3");
+    expect(plain).toContain("Updates come from the Gates Local release page.");
+    expect(plain).toContain("Check for updates");
+    expect(html).toContain('aria-label="Check for updates automatically"');
+    expect(plain).not.toContain("Get every change");
+    expect(plain).not.toMatch(/git|clone|pnpm/i);
+  });
+
+  it.each([
+    ["development build", { state: "cannot-check", checkedAt: AT, reason: "development", lines: ["This is a development build, so it does not check for updates."] }, false],
+    ["no key", { state: "cannot-check", checkedAt: AT, reason: "no-key", lines: ["This build has no release key, so it cannot check for updates. Download the latest version from the release page."], page: PAGE }, true],
+    ["could not reach", { state: "cannot-check", checkedAt: AT, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] }, false],
+    ["no list", { state: "cannot-check", checkedAt: AT, reason: "no-list", lines: ["No release list was found on the release page."] }, false],
+    ["bad signature", { state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["The release list did not pass its signature check, so Gates Local ignored it. Nothing was downloaded. If this keeps happening, download the latest version from the release page."], page: PAGE }, true],
+    ["available", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available. Download it from the release page."], page: PAGE }, true],
+    ["not for this copy", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: false, lines: ["Version 1.3.0 is available, but this copy cannot install it by itself. Download it from the release page."], page: PAGE }, true],
+  ] satisfies [string, UpdateCheck, boolean][])("%s: says the server's words, links the release page only when they send the person there", (_name, check, linked) => {
+    const html = view({ canUpdate: true, ...installedWith(check) });
+    const plain = text(html);
+    for (const line of check.lines) expect(plain).toContain(line);
+    expect(html.includes(link)).toBe(linked);
+    expect(plain).not.toContain("Could not check for updates.");
+    expect(plain).not.toContain("Update and restart");
+    expect(plain).not.toMatch(/git|pnpm/i);
+  });
+
+  it.each([
+    ["could not reach", "unreachable", "Could not reach the update server. Check your connection."],
+    ["no list", "no-list", "No release list was found on the release page."],
+  ] as const)("%s: says it will try again only while automatic checks are on now", (_name, reason, line) => {
+    const failed = installedWith({ state: "cannot-check", checkedAt: AT, reason, lines: [line] });
+    const again = "Gates Local will try again in an hour.";
+    expect(text(view({ ...failed, settings: SETTINGS }))).toContain(again);
+    expect(text(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: true } }))).toContain(again);
+    const off = text(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: false } }));
+    expect(off).toContain(line);
+    expect(off).not.toContain(again);
+    // Other failures never promise a retry.
+    expect(text(view(installedWith({ state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["x"], page: PAGE })))).not.toContain(again);
+  });
+
+  it("none found", () => {
+    const plain = text(view(installedWith({ state: "up-to-date", checkedAt: AT, channel: "release", current: "1.2.3" })));
+    expect(plain).toContain("No newer version was found.");
+    expect(plain).not.toContain("Up to date");
+    expect(plain).not.toContain("Following releases");
+  });
+
+  it("puts no install button in the sidebar for a newer version", async () => {
+    const { updateButton } = await import("../src/update-state.ts");
+    expect(updateButton({ ...INSTALLED, lastCheck: { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE } }, true)).toBeNull();
+  });
+});
+
+const note = (result: UpdateStatus["result"] & object) =>renderToStaticMarkup(createElement(ui.UpdateNoteView, { result, onDismiss: () => undefined }));
 const hydrated = () => store.getState().imageStatus !== undefined && store.getState().conn.kind === "open";
 
 describe("the note after an update", () => {

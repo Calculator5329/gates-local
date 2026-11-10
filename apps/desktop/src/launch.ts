@@ -51,16 +51,23 @@ export interface ServerEnvInput {
   readonly clientOrigin: string | null;
   /** The built web client the window serves; the phone listener serves the same files. */
   readonly webRoot: string;
+  /** app.getVersion() when the app is packaged, else null. */
+  readonly installedVersion?: string | null;
 }
 
 /**
  * The server child's environment. The phone knobs (GATES_LOCAL_WEB_LISTEN,
  * _ORIGIN, _USER, _PEERS) pass through as set; with LISTEN set, GATES_LOCAL_WEB_ROOT
  * is the dist dir the window serves, so the phone gets the same client.
+ * A packaged app passes its version as GATES_LOCAL_INSTALLED_VERSION, so the
+ * server checks the release list instead of building the clone updater; any
+ * other launch never passes one on, even from its own environment.
  */
-export function serverEnv({ env, clientOrigin, webRoot }: ServerEnvInput): NodeJS.ProcessEnv {
+export function serverEnv({ env, clientOrigin, webRoot, installedVersion = null }: ServerEnvInput): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   out["GATES_LOCAL_DESKTOP"] = "1";
+  if (installedVersion === null) delete out["GATES_LOCAL_INSTALLED_VERSION"];
+  else out["GATES_LOCAL_INSTALLED_VERSION"] = installedVersion;
   if (clientOrigin !== null) {
     const extra = (env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "").split(",").map((o) => o.trim()).filter((o) => o !== "");
     out["GATES_LOCAL_ALLOWED_ORIGINS"] = [...extra, clientOrigin].join(",");

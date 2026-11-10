@@ -32,6 +32,16 @@ const domRequire = createRequire(webRequire.resolve("react-dom/package.json"));
 const notices = [[serverRequire, "effect"], [serverRequire, "ws"], [webRequire, "react"], [webRequire, "react-dom"], [domRequire, "scheduler"]] as const;
 writeFileSync(path.join(appDir, "THIRD-PARTY-NOTICES.txt"), notices.map(([resolveFrom, name]) => `${name}\n${readFileSync(path.join(path.dirname(resolveFrom.resolve(`${name}/package.json`)), "LICENSE"), "utf8")}`).join("\n\n"));
 writeFileSync(path.join(server, "package.json"), '{"type":"module"}\n');
+// GATES_LOCAL_TEST_BUILD=1 marks a test build: only a copy holding
+// resources/test-build.json reads GATES_LOCAL_UPDATE_TEST_KEYS and accepts a
+// loopback update feed (apps/server/src/update/installed/module.ts).
+// release:artifact refuses to run with the variable set.
+const testBuild = process.env["GATES_LOCAL_TEST_BUILD"] === "1";
+const marker = path.join(stage, "test-build.json");
+if (testBuild) {
+  writeFileSync(marker, JSON.stringify({ testBuild: true, note: "Accepts test release keys and a loopback update feed. Never release this build." }, null, 2) + "\n");
+  console.log("Packaging a test build: resources/test-build.json is included.");
+}
 
 // ws has optional native accelerators; its portable JS path needs no native
 // rebuild. createRequire supports bundled CommonJS dependencies in this ESM.
@@ -58,6 +68,7 @@ await packageApp({
       { from: server, to: "server" },
       { from: path.join(repo, "apps/web/dist"), to: "web" },
       { from: path.join(desktop, "assets/icon.png"), to: "icon.png" },
+      ...(testBuild ? [{ from: marker, to: "test-build.json" }] : []),
     ],
     asar: true, npmRebuild: false,
     linux: { category: "Utility", executableName: "gates-local", icon: path.join(desktop, "assets/icon.png"), syncDesktopName: true },

@@ -72,6 +72,12 @@ describe("server child environment", () => {
     expect(env).toEqual({ PATH: "/bin", GATES_LOCAL_ALLOWED_ORIGINS: "gates-local://app", GATES_LOCAL_DESKTOP: "1" });
   });
 
+  it("a packaged app tells the server its version; a development launch never passes one on", () => {
+    expect(serverEnv({ env: { PATH: "/bin" }, clientOrigin: null, webRoot: "/w", installedVersion: "1.2.3" })).toEqual({ PATH: "/bin", GATES_LOCAL_DESKTOP: "1", GATES_LOCAL_INSTALLED_VERSION: "1.2.3" });
+    const dev = serverEnv({ env: { PATH: "/bin", GATES_LOCAL_INSTALLED_VERSION: "9.9.9" }, clientOrigin: null, webRoot: "/w", installedVersion: null });
+    expect(dev).toEqual({ PATH: "/bin", GATES_LOCAL_DESKTOP: "1" });
+  });
+
   it("keeps extra allowed origins and adds the client's", () => {
     const env = serverEnv({ env: { GATES_LOCAL_ALLOWED_ORIGINS: "http://a, ,http://b" }, clientOrigin: "gates-local://app", webRoot: "/w" });
     expect(env["GATES_LOCAL_ALLOWED_ORIGINS"]).toBe("http://a,http://b,gates-local://app");

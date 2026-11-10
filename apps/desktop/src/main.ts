@@ -109,7 +109,7 @@ function run(): void {
   }
   process.on("exit", () => clearRunning(dataDir, process.pid));
   // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
-  const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot() });
+  const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot(), installedVersion: app.isPackaged ? app.getVersion() : null });
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
   const modelFolders = modelFolderActions({ ownership: () => checkOwnership(ownedStateFile(dataDir)), isFolder, openPath: folder => shell.openPath(folder) });
   let win: BrowserWindow | null = null;

@@ -21,6 +21,12 @@
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
+//   GATES_LOCAL_INSTALLED_VERSION the packaged desktop app's version; set, Settings › Updates
+//                                checks the signed release list (src/update/installed/) and the
+//                                clone updater is never built, so updates start no git
+//   GATES_LOCAL_UPDATE_FEED      an https release page base in place of the public one
+//   GATES_LOCAL_UPDATE_TEST_KEYS test builds only (resources/test-build.json): extra release keys,
+//                                and the feed may be loopback http
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
 //   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
@@ -38,7 +44,7 @@
 // always refused. PEERS also covers what that check cannot see, such as a
 // userspace-networking tailscaled where no interface carries the address.
 // With LISTEN set, a missing or malformed other knob stops the start (exit 2).
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +62,7 @@ import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
+import { chooseUpdateModule, createInstalledUpdateModule, installedFeed } from "./update/installed/module.ts";
 import { automaticChecks } from "./update/automatic.ts";
 import { createUpdateAdmission } from "./update/admission.ts";
 import { realRunner } from "./update/run.ts";
@@ -64,6 +71,8 @@ import { createServerShutdown } from "./shutdown.ts";
 
 /** The clone this server runs from (apps/server/src -> the repo root), for Settings › Updates. */
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
+/** The packager's marker of a test build: resources/test-build.json beside resources/server/main.mjs. */
+const TEST_BUILD_MARKER = path.resolve(import.meta.dirname, "..", "test-build.json");
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
@@ -196,22 +205,33 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
   const libraryImports = createLibraryImports({ ...options.imports, sources, activity: imports });
   // One automatic checker for the supervised desktop server; browser-only servers never fetch on a timer.
-  const update = createUpdateModule({
-    admission,
-    root: REPO_ROOT,
-    dataDir,
-    runner: realRunner,
-    everyChange: () => services.settings.get().updateEveryChange === true,
-    changed: (status) => server?.push("update.changed", status),
-    activity: () => [
-      ...imports.activity(),
-      ...libraryImports.activity(),
-      ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
-      ...services.pulls.pending().map((p) => `model download: ${p.name}`),
-      ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
-    ],
-    uninterruptible: () => [...imports.activity(), ...libraryImports.activity()],
-    log: (line) => log(`update ${line}`),
+  // An installed copy (the desktop app says its version) checks the signed release list instead.
+  const update = chooseUpdateModule(process.env, {
+    installed: (version) => createInstalledUpdateModule({
+      version,
+      platform: process.platform,
+      arch: process.arch,
+      feed: installedFeed(process.env, { testBuild: existsSync(TEST_BUILD_MARKER), log: (line) => log(`update ${line}`) }),
+      changed: (status) => server?.push("update.changed", status),
+      log: (line) => log(`update ${line}`),
+    }),
+    clone: () => createUpdateModule({
+      admission,
+      root: REPO_ROOT,
+      dataDir,
+      runner: realRunner,
+      everyChange: () => services.settings.get().updateEveryChange === true,
+      changed: (status) => server?.push("update.changed", status),
+      activity: () => [
+        ...imports.activity(),
+        ...libraryImports.activity(),
+        ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
+        ...services.pulls.pending().map((p) => `model download: ${p.name}`),
+        ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
+      ],
+      uninterruptible: () => [...imports.activity(), ...libraryImports.activity()],
+      log: (line) => log(`update ${line}`),
+    }),
   });
   const app: App = createApp({
     admit: admission.admit,

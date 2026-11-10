@@ -485,6 +485,8 @@ export const UpdateVersion = S.Union([
   S.Struct({ kind: S.Literal("commit"), commit: S.String, date: S.optional(Millis) }),
   S.Struct({ kind: S.Literal("not-a-clone") }),
   S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
+  /** An installed copy (AppImage or installer): the version it was packaged as. Checks read the signed release list. */
+  S.Struct({ kind: S.Literal("installed"), version: S.String }),
 ]);
 export type UpdateVersion = typeof UpdateVersion.Type;
 
@@ -492,8 +494,12 @@ export type UpdateVersion = typeof UpdateVersion.Type;
 export const UpdateChannel = S.Literals(["main", "release"]);
 export type UpdateChannel = typeof UpdateChannel.Type;
 
-/** Why a check could not say whether there is an update. */
-export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "unfinished", "error"]);
+/**
+ * Why a check could not say whether there is an update. The last five are an
+ * installed copy's: a development build, no trusted release key, the release
+ * page unreachable, no list on it, a list that failed its signature check.
+ */
+export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "unfinished", "error", "development", "no-key", "unreachable", "no-list", "bad-signature"]);
 export type UpdateBlocked = typeof UpdateBlocked.Type;
 
 /** One click of "Check for updates": fetches from the clone's remote, changes nothing. */
@@ -514,8 +520,14 @@ export const UpdateCheck = S.Union([
     /** A release's tag message, shown instead of the subjects when there is one. */
     notes: S.optional(S.String),
   }),
-  /** lines: what happened, then what to do, in plain words. */
-  S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String) }),
+  /** lines: what happened, then what to do, in plain words. page: the release page the lines send the person to, when they do. */
+  S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String), page: S.optional(S.String) }),
+  /**
+   * An installed copy found a newer version in a verified release list. It
+   * carries no commit, approval or install control: the person downloads it
+   * from page. forThisCopy: the list holds an installer for this platform.
+   */
+  S.Struct({ state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String }),
 ]);
 export type UpdateCheck = typeof UpdateCheck.Type;
 

@@ -89,13 +89,33 @@ the clone's paths are not migrated automatically either.
 override, keeps server data in its `server-data` subdirectory. These
 overrides intentionally allow the caller to choose a shared path.
 
-Packaged copies show **Standalone copy** in Updates and say they cannot
-check for updates or update themselves. Install a replacement build
-manually when one is available. Packaged updating needs a distribution
-and update-metadata path, an updater integration with the supervised
-server's shutdown, and replacement/rollback tests. It is not implemented.
+Packaged copies show **Installed copy** and their version in Updates. The
+desktop app passes the version to the server, which then checks the
+release page instead of a git remote and never starts git. A check reads
+`<release page>/latest/download/release.json` and its `.sig` over https,
+verifies the signature against the keys built into the copy, and compares
+versions. The reads follow at most 5 redirects, take at most a 64 KiB list
+and a 1 KiB signature, wait 30 seconds for an answer and 60 seconds for
+the list and signature together. The copy adds no query string and sends
+no cookies; a redirect's own query, as GitHub's signed asset links carry,
+is followed as given. A
+newer version is shown with a link to the release page; nothing is
+downloaded or installed, and Update and restart answers that this
+installed copy cannot update itself yet. A copy whose version is not a
+plain release (`0.0.0-dev`) is a development build and does not check; a
+build with no trusted release key makes no request and says so.
+`GATES_LOCAL_UPDATE_FEED` points the check at another https release page.
 The clone path remains: close Gates Local, `git pull`, `pnpm install`,
 `pnpm start`. Its existing in-app updater is unchanged.
+
+Test builds: `GATES_LOCAL_TEST_BUILD=1 pnpm package:linux` adds
+`resources/test-build.json`. Only a copy holding that file reads extra
+public keys from `GATES_LOCAL_UPDATE_TEST_KEYS` (comma-separated base64
+SPKI) and accepts a loopback `http` feed, so a packaged run can serve its
+own signed lists. `pnpm release:artifact` refuses to run while
+`GATES_LOCAL_TEST_BUILD` is set, so a test build never becomes a release
+artifact. `apps/desktop/scripts/packaged-installed-check.ts` drives a test
+build and a plain build through every Updates state.
 
 ### Linux checkpoint, 2026-11-09
 

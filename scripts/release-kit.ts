@@ -70,6 +70,8 @@ function count(positionals: string[], length: number, usage: string) {
 }
 
 async function buildArtifact(args: string[]) {
+  // An artifact record is the only way into a release list, so a test build can never be listed.
+  if (process.env["GATES_LOCAL_TEST_BUILD"] !== undefined) throw new Error("GATES_LOCAL_TEST_BUILD is set. A test build trusts test keys and a loopback feed, so it can never be released. Unset it and run release:artifact again.");
   const { values, positionals } = parseArgs({ args, options: { version: { type: "string" }, commit: { type: "string" } } });
   count(positionals, 0, "release:artifact --version X.Y.Z [--commit COMMIT]");
   const version = validateReleaseVersion(required(values.version, "--version"));
