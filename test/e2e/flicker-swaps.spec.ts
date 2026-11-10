@@ -413,6 +413,26 @@ for (const width of [1440, 360]) {
     });
 
     test("Download finishes in place without briefly offering Download again", async ({ page, open }) => {
+      const heldFits: Array<() => void> = [];
+      let holdingFits = true;
+      const releaseFits = () => {
+        holdingFits = false;
+        for (const deliver of heldFits.splice(0)) deliver();
+      };
+      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+        const server = ws.connectToServer();
+        const fits = new Set<unknown>();
+        ws.onMessage(message => {
+          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
+          if (request.method === "fit.check") fits.add(request.id);
+          server.send(message);
+        });
+        server.onMessage(message => {
+          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+          if (response.type === "response" && fits.delete(response.id) && holdingFits) heldFits.push(() => ws.send(message));
+          else ws.send(message);
+        });
+      });
       await open();
       await waitReady(page);
       await section(page, "Models", true);
@@ -422,11 +442,39 @@ for (const width of [1440, 360]) {
       const row = page.locator(selector);
       await row.getByRole("button", { name: "Download", exact: true }).click();
       await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
+      releaseFits();
+      const count = await page.locator(".dlrow").count();
+      await expect(page.locator(".dlrow .vl")).toHaveCount(count);
       await row.scrollIntoViewIfNeeded();
+      const geometry = () => page.locator(".mp").evaluate(root => {
+        const rows = [...root.querySelectorAll<HTMLElement>(".dlrow")].map(node => {
+          const rect = node.getBoundingClientRect(), verdict = node.querySelector(".dl-v")?.getBoundingClientRect();
+          return { name: node.dataset["cat"], y: rect.y, height: rect.height, verdictY: verdict?.y, verdictHeight: verdict?.height };
+        });
+        const scroll = [];
+        for (let node = root.parentElement; node; node = node.parentElement) {
+          if (node.scrollHeight > node.clientHeight) scroll.push({ className: node.className, top: node.scrollTop });
+        }
+        return { rows, scroll };
+      });
+      const before = await geometry();
+      holdingFits = true;
+      await mark(row.locator(".dl-v"), "download-verdict");
       const original = await row.elementHandle();
       if (!original) throw new Error("The download row must exist before completion");
-      const frames = await burst(page, `r2-${width}/download-complete`, selector, () => expect(row.locator(".badge")).toHaveText("Installed", { timeout: 15_000 }));
+      const frames = await burst(page, `r2-${width}/download-complete`, selector, async () => {
+        await expect(row.locator(".badge")).toHaveText("Installed", { timeout: 15_000 });
+        await expect(page.locator(".dlrow .vl")).toHaveCount(0);
+        await expect.poll(() => heldFits.length).toBeGreaterThan(0);
+        await page.screenshot({ path: test.info().outputPath("download-complete-rechecking.png") });
+        console.log(`RECHECK_GEOMETRY ${width} ${JSON.stringify({ before, rechecking: await geometry() })}`);
+        releaseFits();
+        await expect(page.locator(".dlrow .vl")).toHaveCount(count);
+      });
       stableSize(frames, "surface", `download-complete-${width}`);
+      const heights = frames.map(frame => frame.boxes["download-verdict"]?.[3]).filter((height): height is number => height !== undefined);
+      expect(heights, "every frame must include the verdict block").toHaveLength(frames.length);
+      expect.soft(Math.max(...heights) - Math.min(...heights), "a recheck must preserve the verdict block height").toBeLessThanOrEqual(0.5);
       expect(sizeChange(frames, "surface").positionPx, "completion must keep the row in place").toBeLessThanOrEqual(0.5);
       expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "completion must preserve the row").toBe(true);
       expect(frames.filter((f) => f.elements.includes("BUTTON:Download")), "completion must not return to the idle action while the list catches up").toHaveLength(0);

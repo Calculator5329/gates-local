@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-09: Finishing a model download keeps the list still during its fit recheck
+
+- A fit verdict changing to Rechecking could shrink its block to one line.
+  The browser adjusted the scroll position around it, making the Download
+  list jump briefly on a narrow screen even though the rows kept their size.
+- Verdicts now reserve both lines' space during the recheck. The current
+  Rechecking wording and the existing download controls stay in place.
+
 ## 2026-11-09: A long thread's older turns mount in a third of the time
 
 - A thread with more than 40 turns opens with its last 40 and mounts the
