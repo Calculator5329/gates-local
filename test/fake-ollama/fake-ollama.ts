@@ -277,6 +277,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     installed = new Set(next === "no-models" ? [] : (names?.map((n) => findFakeModel(n)?.name ?? n) ?? installedFor(next)));
     loaded = [];
     filling = [];
+    requests.length = 0;
     turns.length = 0;
     loads.length = 0;
     released.clear();

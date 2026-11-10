@@ -114,6 +114,21 @@ describe("fake ollama", () => {
   const hello = async () =>
     ndjson(await post(fake, "/api/chat", { model: "qwen3.5:9b", messages: [{ role: "user", content: "hello there" }], stream: true }));
 
+  it("starts a fresh request log on every scenario reset", async () => {
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const reset = await post(fake, "/__fake/scenario", { scenario: "models" });
+      expect(reset.status).toBe(200);
+      await reset.json();
+      expect(fake.state().requests).toEqual([]);
+
+      await hello();
+      expect(fake.state().requests).toEqual([{
+        method: "POST", path: "/api/chat",
+        body: { model: "qwen3.5:9b", messages: [{ role: "user", content: "hello there" }], stream: true },
+      }]);
+    }
+  });
+
   it("streams thinking then deterministic content for a thinking model", async () => {
     const lines = await hello();
     const thinking = lines.map((l) => (l["message"] as { thinking?: string } | undefined)?.thinking ?? "").join("");
