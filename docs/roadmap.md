@@ -782,6 +782,16 @@ RS-03 remains dropped.
       *Accept:* `packaged-installed-download.ts` passes against an installed Windows test build.
 - [ ] <!-- workspace:id=work:e9a95a12-2be9-5da1-9625-988aadeb2f12 --> The git-clone updater's tests fail on native Windows: `apps/server/src/update/update.test.ts` fails removing its test repositories (EPERM), with 5-second timeouts and one wrong count. Measured 2026-11-10 on Windows 11 with Node 24. In the code before installed updates.
       *Accept:* the file passes 10 of 10 runs on native Windows, or each test that cannot run there says why and is skipped by name.
+- [ ] <!-- workspace:id=work:7f312117-5179-59b6-8fa7-9e57af5a5a21 --> Installed update on Linux is not connected: `apps/desktop/src/installed-update/` replaces the program file in its own tests, and nothing in the app calls it. The app's start has to route each launch with `decideLaunch` before anything opens the chat store, and Update and restart has to call `beginUpdate` and show its refusals.
+      *Accept:* an installed Linux test build updates itself to a newer signed build; one whose new version does not start goes back to the old version with its chats; one stopped at each step carries on at the next start.
+- [ ] <!-- workspace:id=work:e886e88a-5e60-577a-9089-9855fcb25032 --> Installed update: when the first record of a new update cannot be written and keeps failing (a full disk, a data folder that cannot be changed), every later start meets the same failure. Found in review of the core, 2026-11-10.
+      *Accept:* a start that cannot write that record shows a page that names the folder and still lets the person start the app.
+- [ ] <!-- workspace:id=work:c81a09fe-d24c-579c-b5ea-a49097f6a80b --> Installed update: a folder at a file name the update owns (`.incoming-<id>`, `.previous-<id>`) still stops the watcher with an error when it tries to delete it, and a named pipe in place of the saved copy of the chats blocks the copy back. Nothing but a person by hand makes either.
+      *Accept:* each ends on the paused page that names the path, shown by a test with a time limit.
+- [ ] <!-- workspace:id=work:e537e489-cf78-5f7e-9f15-1e8f6db804ca --> Installed update: the program file is checked and then moved by name, so another program of the same user could swap it between the check and the move.
+      *Accept:* the move acts on the file that was checked, or the design states the limit.
+- [ ] <!-- workspace:id=work:5bd68647-099d-5fd3-8daa-7a2ff0f582aa --> Installed update downloads the whole program file each time (about 90 MB). Downloading only the parts that changed would make updates smaller.
+      *Accept:* a measured size for an update between two real versions, and a decision from it.
 - [ ] <!-- workspace:id=work:dc5b68a0-32a1-577a-a58a-6dcc57461a2e --> No check runs an older released version's data through the current version. Chat store upgrades are tested from fixtures built by the current code.
       *Accept:* a test opens a store, settings file and profile written by each released version and reads the chats back; it runs before a release is tagged.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change

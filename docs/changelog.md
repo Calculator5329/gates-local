@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-11-10: The steps that replace an installed copy's program file, not yet connected
+
+- The code that will let an installed Linux copy replace its own program
+  file is written and tested by itself in `apps/desktop/src/installed-update/`.
+  Nothing in the app calls it yet, so nothing changes when you use the app:
+  Update and restart still answers that this copy cannot update itself.
+  Connecting it to the app's start and to Settings is the next piece of work.
+- It follows `docs/design/installed-updates.md` step by step. Before each
+  step it writes down what it is about to do, so a start after a crash or a
+  power cut carries on from the files that are really there. It waits for
+  the old program to be gone, proves the download against the signed list
+  again, keeps the old program file beside the new one, starts the new
+  version and waits for it to say it is ready.
+- When the new version does not start, it stops it, puts the chats back
+  from the copy made before the update, puts the old program file back and
+  starts that. When going back is not possible it moves and deletes nothing
+  and says where each file is.
+- A new update is refused while an earlier failed one has not been
+  dismissed, and while files from the last update could not be removed. The
+  refusal names the folder to look at. Asking again for the same version
+  keeps its download.
+- A folder, a named pipe or a broken link where a program file should be is
+  never opened, so it cannot hang or crash a start.
+- The sentences a person will see are in the code and are checked word for
+  word against the design's section 8.
+- Known limits: this is Linux only; Windows is separate work. Every test
+  here uses real files and stand-in processes, so no packaged copy has
+  replaced itself yet.
+
 ## 2026-11-10: The model picker opens faster when you reach for it
 
 - When the pointer enters the model button, when it gets keyboard focus, or
