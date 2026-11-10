@@ -734,6 +734,32 @@ RS-03 remains dropped.
       *Accept:* a packaged launch reads the installed GPU rather than silently treating a missing executable as a system-memory plan.
 - [ ] <!-- workspace:id=work:a34578dc-e5a4-5922-a8d4-32be83dfaef3 --> Carry the git-clone update handoff deadline into the packaged-update design; the current five-second disconnected-client reservation belongs to the clone updater.
       *Accept:* abandoned approval releases admission and an accepted packaged update is acknowledged only after server readiness, including rollback.
+- [ ] <!-- workspace:id=work:77bf507b-bee7-57b1-92d2-577b59852e18 --> Release commands: refuse a version number part too large to compare exactly. `update/semver.ts` reads each part with `Number`, so two different parts above 2^53 compare as equal.
+      *Accept:* a version with such a part is refused by `release:assemble`, `release:verify` and the installed check, with a test for each.
+- [ ] <!-- workspace:id=work:c925b608-1a16-5594-9873-8e9726494f29 --> Release commands: `release:sign` and `release:artifact` trust `git status`, which does not report files marked assume-unchanged or skip-worktree.
+      *Accept:* a checkout with a changed file hidden that way is refused, shown by a test that hides one.
+- [ ] <!-- workspace:id=work:d995693f-189f-5982-a1a8-2315101621da --> Release commands: `release:assemble` moves the finished folder into place with one rename, which replaces an empty folder that appeared at the output path after the first check.
+      *Accept:* the move fails when anything exists at the output path, shown by a test that creates the folder between the check and the move.
+- [ ] <!-- workspace:id=work:058f843a-281d-5cc7-b097-8d17a4196332 --> Packaging: a release build may download its build tools (the installer and AppImage tooling) when the cache is empty, so the same commit can be built from different tool files.
+      *Accept:* `release:artifact` fails with a plain message when a build tool is not already in the cache, or checks each one against a recorded hash.
+- [ ] <!-- workspace:id=work:dbb82391-06ba-5282-b260-850193507e58 --> Settings saved by an older version drop the keys a newer version wrote, because the file is decoded to the fields that version knows and written back.
+      Going back one version and forward again loses those settings.
+      *Accept:* a settings file with a key this version does not know keeps that key after a save.
+- [ ] <!-- workspace:id=work:c18a378b-448f-53ec-8cd5-d551385374c8 --> Chat store copies are never removed. Each upgrade of the chat store leaves one full copy in `store-copies`, and failed attempts can leave `.copy-*` files there.
+      *Accept:* a stated rule (which copies stay, and for how long) with a test, and no copy removed while an update is unfinished or a failed go-back has not been dismissed.
+- [x] <!-- workspace:id=work:03cdfc1a-4cb7-5f66-aeb3-e6f8174a1506 --> Chat store copy on Windows: another program holding the new copy open makes the final rename fail and the start is refused. The rename is now tried again for up to two seconds. Measured on native Windows 11: 3 failures in 28 runs before, 0 in 60 after, with 8 refusals that each worked on the first retry.
+- [ ] <!-- workspace:id=work:b8a2e9c7-ef2e-5878-9551-1e6ba27e248f --> Chat store copy on Windows: a rename still refused after the two-second retry says permission was denied, or that the copy could not be put in its final place. It does not say another program is holding the file, and that give-up path has only run in a unit test with the wait mocked.
+      *Accept:* a sentence of its own for a file held by another program, and a native Windows run with a second handle held on the copy for longer than two seconds that shows it.
+- [ ] <!-- workspace:id=work:9e063480-b2a4-5802-908a-992232d2d55f --> Chat store copy on Windows: the copy's final name is not forced to disk before the first upgrade step, because Windows cannot flush a folder. A power cut in the seconds after could leave an upgraded store whose saved copy still has its temporary `.copy-*` name. Not measured.
+      *Accept:* either a flush of the renamed file is shown to make the name durable on NTFS, or the limit is stated in the update design with how to find the file.
+- [ ] <!-- workspace:id=work:49fe0c50-fe54-5ca2-8c0d-1c9b1dd452e7 --> Chat store copy, known limit: the copy is taken before the upgrade starts, so chats written by an older copy of the program that is still running at that moment, after the copy, are in the upgraded store but not in the saved copy. An installed update stops the old program before the new one starts, so this needs two programs sharing one data folder.
+      *Accept:* the upgrade refuses, or copies again, when another program has the store open.
+- [ ] <!-- workspace:id=work:287352dd-93c3-573a-bf76-98e9c9a37d2b --> A person who installs an older version by hand over a newer one is refused at startup because the chat database is at a newer version (`StoreVersionTooNewError`), with no next step, although the older store is saved in `store-copies`. On Windows the first release has no automatic go-back, so this is the only way back there.
+      *Accept:* that page names the saved copy and the steps to put it back, or offers to do it.
+- [ ] <!-- workspace:id=work:23b671db-1e12-583c-8d8b-876067b494db --> The git-clone updater cannot go back across a chat store upgrade: it restores the program files, and the older program then refuses the upgraded store. In the code before installed updates.
+      *Accept:* a clone update whose new version upgraded the store and then failed goes back with the saved copy restored, shown by a test.
+- [ ] <!-- workspace:id=work:dc5b68a0-32a1-577a-a58a-6dcc57461a2e --> No check runs an older released version's data through the current version. Chat store upgrades are tested from fixtures built by the current code.
+      *Accept:* a test opens a store, settings file and profile written by each released version and reads the chats back; it runs before a release is tagged.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
       Prepared on lane/readme: README, `docs/setup/linux.md` and the
