@@ -388,6 +388,132 @@ policy; do not promise a particular dialog or a bypass. See Microsoft's
 [SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 and [download-zone documentation](https://support.microsoft.com/en-us/windows/security/information-about-the-attachment-manager-in-microsoft-windows).
 
+## Prepare a signed release directory
+
+Signing happens on the Linux machine only. The private key never goes to the
+Windows build machine. Both machines need Node 24 and pnpm 11.
+
+### Once: create and back up the signing key
+
+On Linux, create a key outside every git checkout:
+
+```sh
+pnpm release:keygen --out "$HOME/.local/share/gates-release-signing/release.pem"
+```
+
+The command prints only the public key, as a base64 Ed25519 SPKI string.
+Add that string to `TRUSTED_RELEASE_KEYS` in
+`apps/server/src/update/release-manifest.ts`, then land that commit before
+building any release that uses this key. The source list is currently empty;
+those builds have no release key and cannot check updates.
+
+The private key is a PKCS8 PEM file with owner-only permissions. Keep it out
+of repositories, logs, installers and cloud-synced folders. Keep a second
+copy on storage that is not this machine. **If the only key is lost,
+installed copies that trust only that key can never take another update.**
+Key generation refuses to overwrite a file. Signing refuses a key inside a
+checkout, a symlink or a file accessible to its group or others.
+
+To rotate the key, first ship an app containing both public keys, signed by
+the old key. Only then sign later releases with the new key. Copies must get
+that bridging release before they can trust the replacement key.
+
+### Each release: build the same checked commit on both systems
+
+First complete [the clone release checks and tag procedure](#clone-release-checks-and-tags).
+Continue only after `release:check` passes and the release tag exists on the
+commit being built. From the clean Linux checkout at that commit:
+
+```sh
+git rev-parse HEAD
+git rev-parse 'v1.2.3^{commit}'
+pnpm install --frozen-lockfile
+pnpm release:artifact --version 1.2.3
+```
+
+The two Git commands must print the same full commit. Export that commit
+with `git archive`, and transfer the archive to the Windows build machine.
+Extract it into a fresh directory. That copy has no `.git` and needs no Git
+on `PATH`. On native Windows x64, replace `FULL_COMMIT_FROM_LINUX` below
+with the full commit printed above:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm release:artifact --version 1.2.3 --commit FULL_COMMIT_FROM_LINUX
+```
+
+The command chooses the native packaging script, supplies
+`GATES_LOCAL_BUILD_VERSION`, and records an installer only after packaging
+exits zero and the expected new file exists. A stale installer or record
+blocks the build; archive both before retrying. A failed NSIS build can leave
+an intermediate executable, but gets no record.
+
+Each machine produces its own installer and adjacent record:
+
+```text
+dist/installer/Gates-Local-1.2.3-x86_64.AppImage
+dist/installer/Gates-Local-1.2.3-x86_64.AppImage.record.json
+dist/installer/Gates-Local-1.2.3-Setup-x64.exe
+dist/installer/Gates-Local-1.2.3-Setup-x64.exe.record.json
+```
+
+Records hold platform, architecture, kind, filename, byte size, SHA-512,
+version, commit and `commitFrom`: `git` for a checkout, `given` for an export.
+In a checkout, an optional `--commit` must match `HEAD`. Exported builds
+require it, make no Git calls and say the commit was given rather than read.
+The packaging tools may download build dependencies if their caches need them.
+
+### Back on Linux: assemble, sign and verify
+
+Copy the Windows installer and record back to a folder outside the checkout
+on Linux, here `$HOME/.cache/gates-release/incoming/`, using a transfer you
+trust. Signing refuses a checkout with any untracked or changed file, so a
+folder inside it would block the last step. **Records are not
+authenticated.** Assembly checks
+what arrived against those records, so it cannot detect someone replacing
+both a record and its installer during an untrusted transfer.
+
+From the Linux checkout still at the release commit:
+
+```sh
+pnpm release:assemble --out "$HOME/.cache/gates-release/1.2.3" dist/installer/Gates-Local-1.2.3-x86_64.AppImage.record.json "$HOME/.cache/gates-release/incoming/Gates-Local-1.2.3-Setup-x64.exe.record.json"
+pnpm release:sign --key "$HOME/.local/share/gates-release-signing/release.pem" "$HOME/.cache/gates-release/1.2.3"
+pnpm release:verify "$HOME/.cache/gates-release/1.2.3"
+```
+
+Assembly prints each record's commit source, requires matching versions and
+commits, and re-hashes every installer before and after copying it. It builds
+in a sibling temporary directory, renaming that directory to the final path
+only after success. On failure it retains the partial directory and prints
+its location. It refuses an existing output directory.
+
+Signing rechecks all files and requires a clean checkout at the list's commit
+whose trusted list contains the key's public half. Verification uses that
+checkout's built-in keys, without a `--public-key` override. It checks the
+signature before parsing, then every file's size and SHA-512, prints the
+platforms and one plain line per check, and exits zero only if all checks pass.
+
+For a local proof, `assemble` and `sign` both require
+`--allow-single-platform` for one platform. `sign --allow-untrusted-key`
+skips checkout and key trust checks and warns that installed copies will not
+accept the signature unless they already trust that key. `verify --public-key`
+can check that proof key. These flags are for proofs, not the release workflow.
+
+`release.json` has one canonical UTF-8 JSON spelling, with no byte order mark,
+LF line endings, two-space indentation, fixed key order and one trailing LF.
+Artifacts have only the two exact names shown above, using the list's own
+version. `release.json.sig` is one base64 Ed25519 signature line plus LF.
+
+A verified list says the holder of a trusted key published that version with
+those files. It does not prove the version is newer, that the app works or
+that an installer has an operating-system signing certificate. A reader must
+accept only versions greater than its own. No artifact for its platform means
+there is nothing for that copy. A download is used only after its size and
+SHA-512 match the verified list, saved under the rebuilt name in a directory
+for that version and run by absolute path without a shell. Someone controlling
+the download page can keep serving an old, validly signed list, hiding newer
+versions. Nothing here uploads; publishing is a separate step the owner decides.
+
 ## Clone release checks and tags
 
 A release is an annotated `vX.Y.Z` tag on `main`. There is no hosted CI;

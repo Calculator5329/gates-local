@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-09: One set of commands prepares a signed release folder
+
+- `pnpm release:artifact` builds the installer for the machine it runs on
+  (Linux AppImage or Windows setup program) and writes a small record beside
+  it: version, commit, size and SHA-512. On a machine with exported source
+  and no git it takes the commit as `--commit`, and the record says so.
+- `pnpm release:assemble` puts both installers and one version list,
+  `release.json`, into a new folder. `pnpm release:sign` signs the list with
+  an Ed25519 key kept outside any checkout, and `pnpm release:verify` checks
+  the signature, sizes and hashes.
+- An installed copy will believe a version list only when it is signed by a
+  key built into that copy. No key exists yet, so today every check answers
+  "This build has no release key and cannot check updates". Nothing in the
+  app reads the list yet.
+- Signing refuses unless it runs from a clean checkout at the list's commit
+  whose built-in key list holds the signing key, so a release that no copy
+  would accept cannot be signed by accident.
+- Nothing here uploads or publishes anything. The walkthrough is "Prepare a
+  signed release directory" in `docs/releasing.md`.
+
 ## 2026-11-09: Finishing a model download keeps the list still during its fit recheck
 
 - A fit verdict changing to Rechecking could shrink its block to one line.
