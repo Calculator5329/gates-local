@@ -1,5 +1,48 @@
 # Decisions
 
+## 2026-11-09 · Drafts belong to their conversation
+
+Each thread keeps its own text, images and failed-send identity. The new-chat
+screen has one separate slot, consumed when its first message is sent or queued.
+Switching threads restores that thread's words with the caret at the end.
+Sending clears only the source slot; a refused send restores its source thread,
+even while another thread is open. A newer draft there puts the refused words
+on hold in that thread's queue. Deleting a thread discards its draft too.
+
+A queued edit belongs to the queued item's thread. The item keeps its place
+while being edited. Cancel, removing the item, navigating to another chat, or
+updating the item restores the draft that was there before editing; leaving
+does not apply unfinished edits. The queue remains one ordered list.
+If the queued row disappears after its words changed, those edited words remain
+sendable and their pre-edit draft stays beneath them. Sending clears that copy
+by revealing the earlier draft; reloading preserves both until then.
+
+Startup merges saved slots individually in their saved order, followed by
+drafts already edited in this window, including an empty queued editor with
+a pre-edit backup. Memory wins for its own key;
+it does not prevent other chats from recovering. A saved queued-edit marker
+returns only with its restored slot in the open chat, when no different edit
+is active. Otherwise that restored slot returns to its pre-edit draft, leaving
+the queued row untouched. A global marker in another chat would make that
+chat's composer update the wrong queued message.
+
+Persist the 32 most recently edited nonempty draft slots and retain images
+only in the newest two slots with images, including a queued editor's saved
+draft. Older slots retain their text; a saved copy whose images are omitted
+loses its retry identity because its content changed. Older images remain
+in memory until this window closes. This bounds inactive attachment storage
+without discarding the words of ordinary recent conversations. Each slot has
+the existing eight-image limit. Queued attachments retain the existing queue
+lifetime. The reload journey pastes 50,000 characters, types one more
+character, reloads immediately, and requires all of those words to survive.
+Legacy single records
+use their saved thread, retry thread, queued-edit thread or current route,
+in that order, falling back to the new-chat slot.
+
+Typing notifies only draft subscribers. The textarea reads text; its action
+controls and the header read the nonempty boolean. Drafts have no fields or
+projection in the application store.
+
 ## 2026-11-09 · The phone is for chat only
 
 The phone can read threads, send, stop, pick among the installed models,

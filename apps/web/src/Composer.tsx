@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { composerFit } from "./composer-fit.ts";
@@ -31,7 +31,8 @@ import {
   sendQueuedNow,
   stop,
 } from "./session.ts";
-import { NA, type Queued, type State, editDraft, fitKey, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
+import { NA, type Queued, type State, fitKey, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
+import { editDraft, getDraft, useDraft } from "./drafts.ts";
 import { SheetHead, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 import { Voice } from "./Voice.tsx";
 
@@ -80,9 +81,9 @@ export function Composer() {
   const numCtx = useStore((s) => s.numCtx);
   const think = useStore((s) => s.think);
   const image = useStore((s) => s.image);
-  const draft = useStore((s) => s.draft);
-  const draftVersion = useStore((s) => s.draftVersion);
-  const images = useStore((s) => s.draftImages);
+  const hasText = useDraft(d => d.text.trim() !== "");
+  const images = useDraft(d => d.images);
+  const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
   const notice = useStore((s) => s.notice);
   const fit = useStore((s) => (s.model === undefined ? undefined : s.fits[fitKey(s.model, s.numCtx)]));
@@ -112,8 +113,8 @@ export function Composer() {
   // Preparing a reply is user intent, not an idle startup download. The
   // renderer can arrive while the person types, before the first Send.
   useEffect(() => {
-    if (draft.trim() || images.length) void threadScreen.load();
-  }, [draft, images.length]);
+    if (hasText || images.length) void threadScreen.load();
+  }, [hasText, images.length]);
   useLayoutEffect(() => {
     const button = primary.current;
     if (primaryFocus) button?.focus();
@@ -151,7 +152,7 @@ export function Composer() {
   const kept = held.current?.at === fitAt ? held.current.v : undefined;
   const { shown: v, held: next } = composerFit(kept, failed ? "error" : fresh, loading, fit === duringLoad.current);
   held.current = next === undefined ? undefined : { at: fitAt, v: next };
-  const text = draft.trim() || images.length > 0;
+  const text = hasText || images.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
@@ -172,14 +173,6 @@ export function Composer() {
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
   const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
-
-  // the placeholder counts: a long one wraps on a phone, and it changes as the runtime comes up
-  useLayoutEffect(() => {
-    const el = ta.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
-  }, [draft, placeholder]);
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
@@ -205,7 +198,7 @@ export function Composer() {
 
   const submit = () => {
     if (sendDisabled) return;
-    void send(draft);
+    void send(getDraft().text);
   };
   const stopThisReply = () => {
     const s = getState();
@@ -242,26 +235,7 @@ export function Composer() {
         }}
       >
         <div className="att"><AttachmentImages images={images} removable /></div>
-        <textarea
-          ref={ta}
-          id="ta"
-          data-draft-version={draftVersion}
-          className="ta"
-          rows={1}
-          placeholder={placeholder}
-          aria-label="Message"
-          value={draft}
-          onPaste={paste}
-          // the warning is about the words it was raised for
-          onChange={(e) => editDraft(e.target.value)}
-          onKeyDown={(e) => {
-            // a touch keyboard's Enter is a new line; the send button sends
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
+        <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={submit} />
         <div className="cf">
           <div className="cf-l">
             <button
@@ -329,7 +303,7 @@ export function Composer() {
             </button>
           </div>
           <div className="cf-r">
-            <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}`} textarea={ta} /></Suspense>
+            <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} /></Suspense>
             <button
               type="button"
               className="ctl gate"
@@ -374,6 +348,25 @@ export function Composer() {
       ) : null}
     </>
   );
+}
+
+function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<HTMLTextAreaElement | null>; placeholder: string; submit: () => void }) {
+  const draft = useDraft(d => d.text);
+  const version = useDraft(d => d.version);
+  useLayoutEffect(() => {
+    const el = textarea.current;
+    if (el) el.setSelectionRange(el.value.length, el.value.length);
+  }, [textarea]);
+  useLayoutEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [draft, placeholder, textarea]);
+  return <textarea ref={textarea} id="ta" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
+    onChange={e => editDraft(e.target.value)} onKeyDown={e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) { e.preventDefault(); submit(); }
+    }} />;
 }
 
 // ---------------------------------------------------------------- queue and warning
@@ -445,10 +438,11 @@ function stopNames(blocking: NonNullable<State["stopAsk"]>["blocking"], catalog:
 /** Shown once: a send needs a load that stops another chat's reply. */
 function StopWarning() {
   const ask = useStore((s) => s.stopAsk);
+  const matches = useDraft(d => ask === null || ask.keepDraft || d.text.trim() === ask.content && d.images === ask.images);
   const catalog = useStore(catalogOf);
   const [never, setNever] = useState(false);
   useEffect(() => setNever(false), [ask]);
-  if (ask === null) return null;
+  if (ask === null || !matches) return null;
   const names = stopNames(ask.blocking, catalog);
   const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
   return (

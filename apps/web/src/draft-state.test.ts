@@ -1,21 +1,22 @@
 import { expect, it } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 import * as store from "./store.ts";
+import { beginQueuedDraft, cancelQueuedDraft, clearDraft, editDraft, getDraft, replaceDraft } from "./drafts.ts";
 
 it("VC-01: every draft replacement, clear, queued edit and thread switch changes its identity", () => {
-  for (const patch of [{ draft: "replacement" }, { draft: "" }, { editingQueued: "queue-a" }, { editingQueued: "queue-b" }, { editingQueued: null }, { threadId: "another-thread" }]) {
-    const previous = store.getState().draftVersion;
-    store.setState(patch);
-    expect(store.getState().draftVersion).not.toBe(previous);
+  for (const action of [() => replaceDraft(null, { text: "replacement" }), () => clearDraft(null), () => beginQueuedDraft(null, "queue-a", [], null), () => beginQueuedDraft(null, "queue-b", [], null), () => cancelQueuedDraft(null), () => store.setState({ threadId: "another-thread" })]) {
+    const previous = getDraft().version;
+    action();
+    expect(getDraft().version).not.toBe(previous);
   }
 });
 
 it("ordinary typing keeps the draft identity, but deleting the draft ends it", () => {
-  const previous = store.getState().draftVersion;
-  store.editDraft("more typing");
-  expect(store.getState().draftVersion).toBe(previous);
-  store.editDraft("");
-  expect(store.getState().draftVersion).not.toBe(previous);
+  const previous = getDraft().version;
+  editDraft("more typing");
+  expect(getDraft().version).toBe(previous);
+  editDraft("");
+  expect(getDraft().version).not.toBe(previous);
 });
 
 it("VC-03: shared speech settings changes have a version independent of unrelated settings", () => {

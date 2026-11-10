@@ -40,6 +40,10 @@ vi.mock("../src/store.ts", () => ({
   useStore: (select: (state: typeof h.state) => unknown) => select(h.state),
   setState: (patch: Partial<typeof h.state> | ((state: typeof h.state) => Partial<typeof h.state>)) => Object.assign(h.state, typeof patch === "function" ? patch(h.state) : patch),
 }));
+vi.mock("../src/drafts.ts", () => ({
+  getDraft: () => ({ text: h.state.draft, images: [], sendId: null, version: h.state.draftVersion }),
+  useDraft: (select: (draft: { text: string; images: readonly string[]; sendId: string | null; version: number }) => unknown) => select({ text: h.state.draft, images: [], sendId: null, version: h.state.draftVersion }),
+}));
 vi.mock("../src/session.ts", () => ({ call: h.call, updateSettings: h.update, openSettings: vi.fn() }));
 vi.mock("../src/draft-insertion.ts", () => ({ insertAtCursor: h.insert }));
 vi.mock("../src/voice-audio.ts", () => {

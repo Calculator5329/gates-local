@@ -16,7 +16,8 @@ import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachmentImages } from "./attachment-images.tsx";
-import { type LiveTurn, NA, type State, setState, turnOf, useStore } from "./store.ts";
+import { type LiveTurn, NA, type State, turnOf, useStore } from "./store.ts";
+import { currentDraftKey, replaceDraft } from "./drafts.ts";
 import { closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
@@ -104,7 +105,7 @@ function UserBubble({ text, time, images = [] }: { text: string; time: string; i
             data-tip="Edit"
             aria-label="Edit"
             onClick={() => {
-              setState({ draft: text, draftImages: images });
+              replaceDraft(currentDraftKey(), { text, images });
               focusComposer(true);
             }}
           >

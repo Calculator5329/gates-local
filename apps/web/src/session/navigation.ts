@@ -1,6 +1,7 @@
 // Hash routing, deferred Settings and first-run navigation share one intent generation.
 import { type Section, type State, getState, setState } from "../store.ts";
 import { settingsScreen } from "../screen-loaders.ts";
+import { cancelQueuedDraft } from "../drafts.ts";
 
 /** The open thread lives in the URL hash: #thread=<id>. */
 export function threadFromHash(): string | null {
@@ -24,7 +25,8 @@ interface NavigationEffects {
 
 /** What belongs to the chat being left: its notice, its warning, and a queued message open for editing. */
 function leavingChat(s: State): Partial<State> {
-  return { notice: null, stopAsk: null, ...(s.editingQueued === null ? {} : { editingQueued: null, draft: "", draftImages: [] }) };
+  if (s.editingQueued !== null) cancelQueuedDraft(s.threadId);
+  return { notice: null, stopAsk: null, editingQueued: null };
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */

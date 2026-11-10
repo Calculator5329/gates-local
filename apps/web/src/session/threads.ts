@@ -3,6 +3,7 @@ import type { Message, MethodName, Params, ResultOf } from "@gates-local/contrac
 import { describeModel, titleFrom } from "../format.ts";
 import { choosable, newestOnly } from "../pick.ts";
 import { type LiveTurn, NA, type State, getState, setState } from "../store.ts";
+import { getDraft } from "../drafts.ts";
 import { withTurn } from "./turn.ts";
 
 interface ThreadEffects {
@@ -311,7 +312,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
 
   /** A new chat for this message; null, with the text back in the box, when the server does not answer. */
   async function createThread(content: string, model: string | undefined): Promise<string | null> {
-    const version = getState().draftVersion;
+    const version = getDraft().version;
     if (creatingDrafts.has(version)) return null;
     creatingDrafts.add(version);
     try {

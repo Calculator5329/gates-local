@@ -9,6 +9,7 @@ vi.mock("../src/store.ts", async (original) => {
   return { ...actual, useStore: <T>(selector: (s: State) => T) => selector(actual.getState()) };
 });
 import { setState } from "../src/store.ts";
+import { replaceDraft } from "../src/drafts.ts";
 
 const detail = "The message could not be sent. " + "The full explanation remains available. ".repeat(6);
 let Composer: typeof import("../src/Composer.tsx")["Composer"];
@@ -20,7 +21,8 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ notice: detail, draft: "A draft", models: [], model: undefined, pop: null });
+  replaceDraft(null, { text: "A draft" });
+  setState({ notice: detail, models: [], model: undefined, pop: null });
 });
 afterEach(() => vi.unstubAllGlobals());
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-11-09: Each chat keeps its own unsent draft
+
+- The message box held one draft for the whole app, so words typed in one
+  chat followed you into the next. Each chat now has its own text and
+  images, and the new-chat screen has one more. Switching chats shows that
+  chat's draft with the caret at the end. Sending clears only the chat it
+  was sent from. Deleting a chat discards its draft.
+- A send the server refuses goes back to the draft of the chat it came
+  from, even if another chat is open by then. If that chat already has
+  newer words in its box, the refused message is held in that chat's queue
+  and a notice says where it is.
+- Editing a queued message keeps what was in the box underneath it. Cancel,
+  removing the message, updating it or leaving the chat brings those words
+  back. If the message is sent while you are still changing it, your
+  changed words stay in the box, and the earlier draft returns once they
+  are sent.
+- Drafts survive a restart: the 32 most recently edited are saved, with
+  images for the newest two that have any. Older ones keep their text.
+  Words typed while the saved drafts are still being read win for their own
+  chat and do not stop the other chats' drafts from coming back. A draft
+  saved by an earlier version goes to the chat it was saved in, or to the
+  new-chat box when that is not recorded.
+- Drafts are held outside the application store. Typing with no notice on
+  screen publishes nothing to it: one keystroke runs 0 store selectors in
+  the long-thread test, where it ran 10 and the bound is 10. Each save
+  stores the open draft's text once.
+- Left as they were: a second window saving later replaces the first
+  window's saved drafts, and words typed in the instant before the window
+  is closed abruptly can be missed.
+
 ## 2026-11-09: The performance comparison says "not scored", times the whole mount of a long thread, and types inside one
 
 - A row with too few repetitions to be tested printed "within noise". It now

@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { explore, replay, regression, schedules, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "./ordering-replay.ts";
 import { OrderingWorld, SPEECH_URL, drain, runningIds } from "./ordering-world.ts";
+import { draftView } from "./draft-view.ts";
 
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -301,7 +302,9 @@ export function sendReconnect(): ReplayScenario<World> {
     create: async () => { const w = await OrderingWorld.create(); w.server.holdChat = true; w.server.deferAdmission = true; return w; },
     events: [
       event("A.send.request", [], (w) => w.step(() => {
-        w.a.store.setState({ view: "thread", threadId: "t1", draft: "one message", messages: { t1: [] } }); void w.a.session.send("one message");
+        w.a.store.setState({ view: "thread", threadId: "t1", messages: { t1: [] } }); w.a.drafts.replaceDraft("t1", { text: "one message" });
+        expect(draftView(w.a.store, w.a.drafts).draft).toBe("one message");
+        void w.a.session.send("one message");
       })),
       // Chosen input: drop a socket after it has transmitted this send.
       event("socket.drop", ["A.send.request"], (w) => w.drop(), { discard: ["A1"] }),
@@ -313,7 +316,7 @@ export function sendReconnect(): ReplayScenario<World> {
       ...hydrationEvents("socket.reconnect", "A2"),
     ],
     check(w, order) {
-      const state = w.a.store.getState();
+      const state = draftView(w.a.store, w.a.drafts);
       expect(w.server.calls("chat.send"), "one user action must send once").toHaveLength(1);
       const visible = state.draft === "one message" || state.turns["t1"]?.pendingUser === "one message" ||
         state.queued.some((queued) => queued.text === "one message") || (state.messages["t1"] ?? []).some((message) => message.content === "one message");
@@ -329,7 +332,7 @@ export function stopSend(): ReplayScenario<World> {
     create: async () => { const w = await OrderingWorld.create(); w.server.holdChat = true; w.server.deferAdmission = true; return w; },
     events: [
       event("A.first-send.request", [], (w) => w.step(() => {
-        w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first");
+        w.a.store.setState({ view: "thread", threadId: "t1" }); w.a.drafts.replaceDraft("t1", { text: "first" }); void w.a.session.send("first");
       })),
       // Selected input script targets the first admission with Stop, then sends
       // in another chat. Neither press waits for a server acknowledgement.
@@ -339,7 +342,7 @@ export function stopSend(): ReplayScenario<World> {
         w.expectedCancelled.add("turn-1"); w.a.session.stop();
       })),
       event("A.next-send.request", ["A.Stop"], (w) => w.step(() => {
-        w.a.store.setState({ view: "thread", threadId: "t2", draft: "second" }); void w.a.session.send("second");
+        w.a.store.setState({ view: "thread", threadId: "t2" }); w.a.drafts.replaceDraft("t2", { text: "second" }); void w.a.session.send("second");
       })),
       // app.ts reserves turn ids on request, then awaits admission. Two chats'
       // admissions and start broadcasts can finish in either order.
@@ -367,7 +370,7 @@ export function stopSavedPartial(): ReplayScenario<World> {
     name: "Stop with a saved partial, moving on before it arrives", dispose,
     create: async () => {
       const w = await OrderingWorld.create();
-      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1" }); w.a.drafts.replaceDraft("t1", { text: "first" }); void w.a.session.send("first"); });
       await w.step(() => w.server.admittedPush("turn-1", "A"));
       await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
       w.server.holdChat = true; w.server.deferAdmission = true;
@@ -380,7 +383,7 @@ export function stopSavedPartial(): ReplayScenario<World> {
       event("saved.push-to-A", ["server.stop.saved"], (w) => w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far", true)), { delivery: true }),
       event("saved.push-to-B", ["server.stop.saved"], (w) => w.step(() => w.server.chatWords("turn-1", w.b.socket, "so far", true)), { delivery: true }),
       event("A.next-send.request", ["A.Stop"], (w) => w.step(() => {
-        w.a.store.setState({ view: "thread", threadId: "t2", draft: "second" }); void w.a.session.send("second");
+        w.a.store.setState({ view: "thread", threadId: "t2" }); w.a.drafts.replaceDraft("t2", { text: "second" }); void w.a.session.send("second");
       })),
       event("server.next-admission.complete", ["A.next-send.request"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
       ...chatDeliveries("turn-2", "server.next-admission.complete"),
@@ -407,7 +410,7 @@ export function errorSavedPartial(): ReplayScenario<World> {
     name: "A runtime error after some words keeps its reason", dispose,
     create: async () => {
       const w = await OrderingWorld.create();
-      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1" }); w.a.drafts.replaceDraft("t1", { text: "first" }); void w.a.session.send("first"); });
       await w.step(() => w.server.admittedPush("turn-1", "A"));
       await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
       return w;
@@ -434,7 +437,7 @@ export function retryThroughHistory(): ReplayScenario<World> {
     name: "Retry replaces the old rows when history reloads before its answer", dispose,
     create: async () => {
       const w = await OrderingWorld.create(false);
-      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1", draft: "first" }); void w.a.session.send("first"); });
+      await w.step(() => { w.a.store.setState({ view: "thread", threadId: "t1" }); w.a.drafts.replaceDraft("t1", { text: "first" }); void w.a.session.send("first"); });
       await w.step(() => w.server.admittedPush("turn-1", "A"));
       await w.step(() => w.server.chatWords("turn-1", w.a.socket, "so far"));
       await w.step(() => { w.expectedCancelled.add("turn-1"); w.a.session.stop(); });

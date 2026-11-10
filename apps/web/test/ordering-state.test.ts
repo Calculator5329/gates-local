@@ -142,7 +142,7 @@ function offscreenReconnect(): ReplayScenario<World> {
     name: "lostTurn: off-screen completion crosses reconnect hydration", dispose,
     create: async () => {
       const w = await World.create(); w.wire.server.holdChat = true;
-      w.wire.b.store.setState({ view: "thread", threadId: "t1", draft: "background reply", messages: { t1: [] } });
+      w.wire.b.store.setState({ view: "thread", threadId: "t1", messages: { t1: [] } }); w.wire.b.drafts.replaceDraft("t1", { text: "background reply" });
       void w.wire.b.session.send("background reply"); await drain();
       w.wire.server.admittedPush("turn-1", "A"); w.wire.server.admittedPush("turn-1", "B");
       w.wire.server.response("turn-1"); await drain();

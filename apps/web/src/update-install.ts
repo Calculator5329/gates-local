@@ -2,6 +2,7 @@
 import type { UpdateInstallRequest } from "@gates-local/contracts";
 import type { ActionCall, ActionResult } from "./session/connection.ts";
 import { getState, setState } from "./store.ts";
+import { savedDrafts } from "./drafts.ts";
 
 type StartUpdate = (request: UpdateInstallRequest) => Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 
@@ -29,7 +30,7 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, priorCo
         error = check?.state === "cannot-check" ? check.lines.join(" ") : "Check for updates and review the target before installing.";
         return error;
       }
-      const work = [...snapshot.activity ?? [], ...(getState().queued.length ? ["queued messages in this window"] : []), ...(getState().draft.trim() ? ["the unsent draft in this window"] : [])];
+      const work = [...snapshot.activity ?? [], ...(getState().queued.length ? ["queued messages in this window"] : []), ...(savedDrafts().some(({ draft }) => draft.text.trim() || draft.images.length) ? ["unsent drafts in this window"] : [])];
       if ((changed || work.length > 0 || snapshot.activity === undefined) && !window.confirm(`Update to ${check.target} (${check.targetCommit}) and restart Gates Local?\n\n${check.notes ?? check.changes.slice(0, 3).join("\n")}\n\n${work.length ? `This interrupts:\n${work.join("\n")}` : "No running work was found."}\n\nReplies written so far are kept as interrupted. Downloaded model parts are kept; start the download again to resume. Image jobs stop. Save unsent drafts and queued messages before continuing.\n\nThe window closes during install and build, then opens again.`)) return null;
       const prepared = await act("update.prepare", { approval: snapshot.approval }, "reserve the approved update");
       if (!prepared.ok) { error = prepared.message; return error; }

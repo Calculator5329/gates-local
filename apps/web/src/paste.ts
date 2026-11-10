@@ -2,15 +2,16 @@
 // Native file-manager paths are the owner's explicit exception to image-first paste.
 import type { ClipboardEvent } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
-import { getState, setState } from "./store.ts";
+import { setState } from "./store.ts";
 import { insertAtCursor } from "./draft-insertion.ts";
+import { currentDraftKey, getDraft, replaceDraft } from "./drafts.ts";
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") window.addEventListener("gates-local:native-paste", event => {
   const ta = event.target;
   const result: unknown = (event as CustomEvent<unknown>).detail;
   if (!(ta instanceof HTMLTextAreaElement) || ta !== document.activeElement || !ta.isConnected) return;
   if (!result || typeof result !== "object" || !("paths" in result) || !Array.isArray(result.paths) || !result.paths.every((item): item is string => typeof item === "string")) return;
-  if (!("version" in result) || result.version !== getState().draftVersion) return;
+  if (!("version" in result) || result.version !== getDraft().version) return;
   if (!("start" in result) || typeof result.start !== "number" || !("end" in result) || typeof result.end !== "number") return;
   if (result.paths.length) insertAtCursor(ta, result.paths.join("\n"), { start: result.start, end: result.end });
   if ("skipped" in result && result.skipped) setState({ notice: "Some copied file paths contain control characters and were skipped." });
@@ -46,11 +47,13 @@ export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
   // emits thousands of input events for a large paste.
   if (!files.length) return;
   e.preventDefault();
+  const key = currentDraftKey();
+  const version = getDraft(key).version;
   setState(s => ({ pasting: s.pasting + 1 }));
   void (async () => {
     if (pasteKind([], files) === "unavailable") { setState({ notice: "This browser cannot provide file paths. Paste the full path as text." }); return; }
     // Reserve slots before image reads, so overlapping pastes cannot overfill the composer.
-    const room = MAX_IMAGES - getState().draftImages.length - reserved;
+    const room = MAX_IMAGES - getDraft(key).images.length - reserved;
     const candidates = files.filter(f => f.type.startsWith("image/"));
     const accepted = candidates.slice(0, Math.max(0, room));
     if (accepted.length < candidates.length) setState({ notice: `Attach up to ${MAX_IMAGES} images per message.` });
@@ -61,7 +64,7 @@ export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
           if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Attach GIF, JPEG, PNG or WebP images.");
           const prepared = file.size <= MAX_IMAGE_BYTES ? file : await (await import("./image-compression.ts")).compressImage(file);
           const image = await readImage(prepared);
-          setState(s => ({ draftImages: [...s.draftImages, image] }));
+          if (getDraft(key).version === version) replaceDraft(key, { images: [...getDraft(key).images, image] }, true);
         } catch (error) { setState({ notice: error instanceof Error ? error.message : "This image could not be read." }); }
       }
     } finally { reserved -= accepted.length; }

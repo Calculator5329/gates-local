@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
+import { draftView } from "./draft-view.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -541,7 +542,7 @@ describe("events while a send waits for its id (WF-01)", () => {
     const loads = b.server.calls("threads.get").length;
     pending.fail("turn-active", "thread t1 already has turn turn-9 streaming");
     await tick();
-    expect(store.getState()).toMatchObject({ draft: "mine", notice: "A reply is still being written in this thread. Stop it or wait." });
+    expect(draftView(store, await import("../src/drafts.ts"))).toMatchObject({ draft: "mine", notice: "A reply is still being written in this thread. Stop it or wait." });
     expect(store.getState().turns, "no reply is left waiting in any chat").toEqual({});
     expect(b.server.calls("threads.get").length).toBe(loads + 1);
   });

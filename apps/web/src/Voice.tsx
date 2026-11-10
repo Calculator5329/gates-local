@@ -1,6 +1,7 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { call, openSettings } from "./session.ts";
-import { getState, NA, setState, useStore } from "./store.ts";
+import { NA, setState, useStore } from "./store.ts";
+import { getDraft, useDraft } from "./drafts.ts";
 import type { captureAudio } from "./voice-audio.ts";
 import { insertAtCursor } from "./draft-insertion.ts";
 
@@ -9,7 +10,7 @@ type Dictation = { id: string; draftVersion: number };
 export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | null> }) {
   const settings = useStore((s) => s.settings);
   const conn = useStore((s) => s.conn);
-  const draftVersion = useStore((s) => s.draftVersion);
+  const draftVersion = useDraft(d => d.version);
   const enabled = settings !== NA && !!settings?.whisperUrl;
   const [phase, show] = useState<Phase>("idle");
   const [seconds, time] = useState(0);
@@ -17,7 +18,7 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
   const recording = useRef<Awaited<ReturnType<typeof captureAudio>> | null>(null);
   const capture = useRef<AbortController | null>(null);
   const dictation = useRef<Dictation | null>(null);
-  const valid = (current: Dictation) => dictation.current === current && getState().draftVersion === current.draftVersion;
+  const valid = (current: Dictation) => dictation.current === current && getDraft().version === current.draftVersion;
   const unsupported = !window.isSecureContext ? "Microphone needs HTTPS on a phone or the desktop app." : !navigator.mediaDevices?.getUserMedia || !window.AudioContext ? "This browser cannot record microphone audio. Use the desktop app." : null;
   const state = (p: Phase) => { phaseRef.current = p; show(p); };
   const cancel = () => {
@@ -73,7 +74,7 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
       }
       return;
     }
-    const current: Dictation = { id: crypto.randomUUID(), draftVersion: getState().draftVersion };
+    const current: Dictation = { id: crypto.randomUUID(), draftVersion: getDraft().version };
     dictation.current = current;
     const controller = new AbortController(); capture.current = controller;
     state("asking"); setState({ notice: null });

@@ -188,6 +188,7 @@ function button(node: ReactNode, name: string): (() => unknown) | undefined {
 export interface WindowSession {
   readonly session: typeof import("../src/session.ts");
   readonly store: typeof import("../src/store.ts");
+  readonly drafts: typeof import("../src/drafts.ts");
   readonly close: () => void;
   socket: FakeSocket;
   click(name: "Connect" | "Disconnect"): void;
@@ -219,6 +220,7 @@ export class OrderingWorld {
       const historical = process.env["REPLAY_SESSION"];
       const session: typeof import("../src/session.ts") = historical ? await import(/* @vite-ignore */ historical) : await import("../src/session.ts");
       const store = await import("../src/store.ts");
+      const drafts = await import("../src/drafts.ts");
       if (historical) vi.doMock("../src/session.ts", () => session);
       const { VoiceSettings } = await import("../src/VoiceSettings.tsx");
       const close = session.connect();
@@ -227,7 +229,7 @@ export class OrderingWorld {
       world.server.labels.set(socket, label);
       if (store.getState().imageStatus === undefined) throw new Error("Boot did not finish within 64 promise jobs");
       const tree = VoiceSettings();
-      world.windows.push({ session, store, close, socket, click(name) {
+      world.windows.push({ session, store, drafts, close, socket, click(name) {
         const click = button(tree, name);
         if (!click) throw new Error(`Missing ${name} button`);
         click();

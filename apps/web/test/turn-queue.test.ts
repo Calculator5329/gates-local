@@ -8,6 +8,7 @@ import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 import { replay } from "./ordering-replay.ts";
 import { gpuReadFailure } from "../../server/src/fit/gpu.ts";
+import { draftView } from "./draft-view.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -15,9 +16,11 @@ type Store = typeof import("../src/store.ts");
 let b: Browser;
 let session: Session;
 let store: Store;
+let draftSource: typeof import("../src/drafts.ts");
 let disconnect: (() => void) | undefined;
 
-const st = () => store.getState();
+const st = () => draftView(store, draftSource);
+const type = (text: string) => draftSource.replaceDraft(store.getState().threadId, { text });
 /** The open chat's turn (what the old single live slot showed), or null. */
 const live = () => { const s = st(); return s.threadId === null ? null : s.turns[s.threadId] ?? null; };
 const userMsg = (id: string, threadId: string, content = "hello"): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
@@ -33,7 +36,7 @@ it("CO-06 replay: a refused GPU send shows the server explanation and restores i
   await replay({
     name: "GPU read refusal returns the message to the composer",
     create: async () => {
-      store.setState({ draft: "keep these words" });
+      type("keep these words");
       const waiting = b.server.hold("chat.send");
       const sent = session.send(st().draft);
       return { request: await waiting, sent };
@@ -57,7 +60,7 @@ it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its iden
   const { settingsScreen } = await import("../src/screen-loaders.ts");
   const load = vi.spyOn(settingsScreen, "load").mockResolvedValue();
   try {
-    store.setState({ draft: "same recovered words" });
+    type("same recovered words");
     const waiting = b.server.hold("chat.send");
     const sent = session.send(st().draft);
     const request = await waiting;
@@ -79,18 +82,22 @@ it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its iden
 });
 
 it("round 4: sending the recovered words in B never uses A's identity", async () => {
-  store.setState({ draft: "recovered words" });
+  const drafts = await import("../src/drafts.ts");
+  drafts.editDraft("recovered words");
   const waiting = b.server.hold("chat.send");
-  const sent = session.send(st().draft);
+  const sent = session.send(drafts.getDraft().text);
   const original = await waiting;
   original.fail("timeout", "not confirmed");
   await sent;
   session.openThread("B");
+  expect(drafts.getDraft("A").text).toBe("recovered words");
+  expect(drafts.getDraft("B").text).toBe("");
+  drafts.editDraft("recovered words");
   const checking = b.server.hold("turns.blocking");
-  const sendInB = session.send(st().draft);
+  const sendInB = session.send(drafts.getDraft().text);
   const check = await checking;
   chat("late-A", "A", { type: "start", model: MODEL, userMessage: userMsg(original.params.messageId!, "A", "recovered words") });
-  expect(st().draft).toBe("recovered words");
+  expect(drafts.getDraft("B").text).toBe("recovered words");
   check.respond([]);
   await sendInB;
   const retry = b.server.calls("chat.send").at(-1)?.params as { threadId: string; messageId: string };
@@ -99,7 +106,7 @@ it("round 4: sending the recovered words in B never uses A's identity", async ()
 });
 
 it("round 4: a late confirmation retires the unchanged copy after A to B to A", async () => {
-  store.setState({ draft: "recovered words" });
+  type("recovered words");
   const waiting = b.server.hold("chat.send");
   const sent = session.send(st().draft);
   const original = await waiting;
@@ -113,7 +120,7 @@ it("round 4: a late confirmation retires the unchanged copy after A to B to A", 
 });
 
 it("round 4: editing recovered words after navigation creates a new identity", async () => {
-  store.setState({ draft: "recovered words" });
+  type("recovered words");
   const waiting = b.server.hold("chat.send");
   const sent = session.send(st().draft);
   const original = await waiting;
@@ -121,13 +128,13 @@ it("round 4: editing recovered words after navigation creates a new identity", a
   await sent;
   session.openThread("B");
   session.openThread("A");
-  store.editDraft("edited words");
+  draftSource.editDraft("edited words");
   await session.send(st().draft);
   expect(b.server.calls("chat.send").at(-1)?.params).not.toHaveProperty("messageId", original.params.messageId);
 });
 
 it("PC-04: second Enter during thread creation sends the visible draft once", async () => {
-  store.setState({ draft: "one draft" });
+  type("one draft");
   const creating = b.server.hold("threads.create");
   const first = session.send(st().draft);
   const request = await creating;
@@ -139,19 +146,19 @@ it("PC-04: second Enter during thread creation sends the visible draft once", as
 });
 
 it("PC-04: failed thread creation keeps newer draft attachments", async () => {
-  store.setState({ draft: "earlier words", runtime: { ...methodSamples["runtime.status"].result, state: "installing" } });
+  type("earlier words"); store.setState({ runtime: { ...methodSamples["runtime.status"].result, state: "installing" } });
   const creating = b.server.hold("threads.create");
   const sent = session.send(st().draft);
   const request = await creating;
   const images = ["data:image/png;base64,newer"];
-  store.setState({ draft: "newer words", draftImages: images });
+  draftSource.replaceDraft(st().threadId, { text: "newer words", images });
   request.fail("closed", "creation not confirmed");
   await sent;
   expect(st()).toMatchObject({ draft: "newer words", draftImages: images });
 });
 
 it("PC-03: reconnect retry keeps the identity of the unacknowledged send", async () => {
-  store.setState({ draft: "saved before socket loss" });
+  type("saved before socket loss");
   const waiting = b.server.hold("chat.send");
   const sent = session.send(st().draft);
   const request = await waiting;
@@ -169,15 +176,15 @@ it("PC-02: late success cannot erase words being edited from a recovered queue r
   const realTimeout = globalThis.setTimeout;
   const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
   try {
-    store.setState({ draft: "original words" });
+    type("original words");
     const waiting = b.server.hold("chat.send");
     const sent = session.send(st().draft);
     const request = await waiting;
-    store.setState({ draft: "newer draft" });
+    type("newer draft");
     await until(() => st().queued.length === 1, 2000, "recovered queue");
     const q = st().queued[0]!;
     session.editQueued(q.id);
-    store.editDraft("edited recovery words");
+    draftSource.editDraft("edited recovery words");
     const id = (request.params as { messageId?: string }).messageId ?? "u-A-1";
     chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "original words") });
     request.respond({ turnId: "turn-A-1", userMessage: userMsg(id, "A", "original words") });
@@ -198,7 +205,7 @@ it("PC-06: a stalled open-socket admission releases Send for a safe retry", asyn
   const realTimeout = globalThis.setTimeout;
   const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
   try {
-    store.setState({ draft: "stalled send" });
+    type("stalled send");
     const waiting = b.server.hold("chat.send");
     void session.send(st().draft);
     await waiting;
@@ -210,7 +217,7 @@ it("PC-06: a stalled open-socket admission releases Send for a safe retry", asyn
 
 it.each(["timeout", "closed", "image-input"])("returns an unconfirmed %s send to view with its images", async code => {
   const images = ["data:image/png;base64,cGl4ZWw="];
-  store.setState({ draft: "keep my words", draftImages: images });
+  draftSource.replaceDraft(st().threadId, { text: "keep my words", images });
   const waiting = b.server.hold("chat.send");
   const sent = session.send("keep my words");
   (await waiting).fail(code, "Not confirmed");
@@ -220,11 +227,11 @@ it.each(["timeout", "closed", "image-input"])("returns an unconfirmed %s send to
 
 it("keeps newer typing and puts an unconfirmed timeout in a visible held queue", async () => {
   const images = ["data:image/png;base64,cGl4ZWw="];
-  store.setState({ draft: "earlier words", draftImages: images });
+  draftSource.replaceDraft(st().threadId, { text: "earlier words", images });
   const waiting = b.server.hold("chat.send");
   const sent = session.send("earlier words");
   const request = await waiting;
-  store.setState({ draft: "newer words" });
+  type("newer words");
   request.fail("timeout", "Not confirmed");
   await sent;
   expect(st().draft).toBe("newer words");
@@ -236,12 +243,12 @@ it.each([false, true])("late confirmation retires only the matching recovered co
   const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
   try {
     const images = ["data:image/png;base64,cGl4ZWw="];
-    store.setState({ draft: "slow admission", draftImages: images });
+    draftSource.replaceDraft(st().threadId, { text: "slow admission", images });
     const waiting = b.server.hold("chat.send");
     const sent = session.send("slow admission");
     const request = await waiting;
     const id = request.params.messageId!;
-    if (newer) store.setState({ draft: "newer words" });
+    if (newer) type("newer words");
     await sent;
     expect(newer ? st().queued[0]?.text : st().draft).toBe("slow admission");
     chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
@@ -263,6 +270,7 @@ beforeEach(async () => {
   vi.resetModules();
   session = await import("../src/session.ts");
   store = await import("../src/store.ts");
+  draftSource = await import("../src/drafts.ts");
   created = ["A", "B", "C"];
   turnsOf = {};
   b.server.answer("threads.create", ({ title }) => ({ id: created.shift() ?? "Z", title: title ?? "", createdAt: 1, updatedAt: 1 }));
@@ -286,7 +294,7 @@ afterEach(async () => {
 
 it("snapshots attached images into a queued send and restores them for editing", async () => {
   await answering("A");
-  store.setState({ draftImages: ["data:image/png;base64,cGl4ZWw="] });
+  draftSource.replaceDraft(st().threadId, { images: ["data:image/png;base64,cGl4ZWw="] });
   await session.send("queued image");
   const q = st().queued[0]!;
   expect(q).toMatchObject({ images: ["data:image/png;base64,cGl4ZWw="] });
@@ -301,7 +309,7 @@ it("snapshots attached images into a queued send and restores them for editing",
 
 it("sends an image-only first message with a usable thread title", async () => {
   session.newThread();
-  store.setState({ draftImages: ["data:image/png;base64,cGl4ZWw="] });
+  draftSource.replaceDraft(st().threadId, { images: ["data:image/png;base64,cGl4ZWw="] });
   await session.send("");
   expect(b.server.calls("threads.create").at(-1)?.params).toEqual({ title: "Attached images" });
   expect(b.server.calls("chat.send").at(-1)?.params).toMatchObject({ content: "", images: ["data:image/png;base64,cGl4ZWw="] });
@@ -371,7 +379,7 @@ async function warned(text = "for B"): Promise<void> {
   await answering("A");
   b.server.answer("turns.blocking", () => BLOCKING);
   session.newThread();
-  store.setState({ draft: text });
+  type(text);
   await session.send(text);
 }
 
@@ -403,9 +411,11 @@ describe("a send that would stop another chat", () => {
 
   it("confirmed, sends with stopOthers and clears the box", async () => {
     await warned();
+    const source = draftSource.currentDraftKey();
     session.confirmStopAsk(false);
     await until(() => sends().length === 2, 2000, "the second send");
     expect(sends()[1]).toMatchObject({ content: "for B", threadId: "B", stopOthers: true });
+    expect(draftSource.getDraft(source).text).toBe("");
     expect(st().draft).toBe("");
     expect(st().stopAsk).toBeNull();
   });
@@ -449,7 +459,7 @@ describe("a send that would stop another chat", () => {
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => live() === null, 2000, "A done");
     b.server.answer("turns.blocking", () => BLOCKING);
-    store.setState({ draft: "half a thought" });
+    type("half a thought");
     session.retry();
     await until(() => st().stopAsk !== null, 2000, "the warning");
     expect(sends()).toHaveLength(1);
@@ -723,7 +733,7 @@ describe("picking a model while another is answering", () => {
   it("Send now interrupts only its thread and sends without waiting for a parked reply", async () => {
     const a = await answering("A");
     const images = ["data:image/png;base64,cGl4ZWw="];
-    store.setState({ draftImages: images });
+    draftSource.replaceDraft(st().threadId, { images });
     await session.send("send now");
     const id = st().queued[0]?.id;
     const messageId = st().queued[0]?.messageId;
@@ -780,7 +790,7 @@ describe("a model that fits only once the other chat stops", () => {
 describe("messages typed while a reply is being written", () => {
   it("queue instead of stopping it, and send when it finishes", async () => {
     const turn = await answering("A");
-    store.setState({ draft: "next" });
+    type("next");
     await session.send("next");
     expect(st().queued).toMatchObject([{ threadId: "A", text: "next", waitFor: "reply", model: MODEL }]);
     expect(st().draft).toBe("");
@@ -908,7 +918,7 @@ describe("messages typed while a reply is being written", () => {
     b.server.answer("chat.send", () => {
       throw { code: "internal", message: "no" };
     });
-    store.setState({ draft: "still typing" });
+    type("still typing");
     chat(turn, "A", { type: "done", message: asstMsg("a1", "A"), stopReason: "stop" });
     await until(() => st().notice !== null, 2000, "the notice");
     expect(st().queued.map((q) => q.text)).toEqual(["next"]);
@@ -1045,7 +1055,7 @@ describe("a message the person typed is never lost", () => {
   describe("a Send now that fails (CFS-01)", () => {
     it("goes back at its own place, on hold, and the box keeps what is in it", async () => {
       const ids = await onHold("one", "two", "three");
-      store.setState({ draft: "something else" });
+      type("something else");
       const held = b.server.hold("chat.send");
       session.sendQueuedNow(ids[1] ?? "");
       const h = await held;
@@ -1073,7 +1083,7 @@ describe("a message the person typed is never lost", () => {
     const turn = await answering("A");
     chat(turn, "A", done("a1", "A"));
     await until(() => live() === null, 2000, "A done");
-    store.setState({ draft: "half a thought" });
+    type("half a thought");
     const held = b.server.hold("chat.send");
     session.retry();
     (await held).fail("internal", "no");
@@ -1133,18 +1143,24 @@ describe("a message the person typed is never lost", () => {
   });
 
   describe("a typed message whose send is refused after the person moved on", () => {
-    it("behind another chat, it waits in its own chat's queue", async () => {
-      const h = await typed();
+    it("behind another chat, it restores its source draft and leaves the open chat alone", async () => {
+      const drafts = await import("../src/drafts.ts");
+      session.newThread();
+      const held = b.server.hold("chat.send");
+      void session.send("typed");
+      const h = await held;
       await answering("B");
       h.fail("wont-fit", "no");
-      await until(() => st().queued.length === 1, 2000, "the message back");
-      expect(st().queued).toMatchObject([{ threadId: "A", text: "typed", held: true, waitFor: "reply" }]);
-      expect(st().draft).toBe("");
+      await until(() => drafts.getDraft("A").text === "typed", 2000, "A's draft restored");
+      expect(drafts.getDraft("A").text).toBe("typed");
+      expect(st().queued).toEqual([]);
+      expect(drafts.getDraft("B").text).toBe("");
+      expect(st().messages["B"]?.some(m => m.content === "typed")).not.toBe(true);
     });
 
     it("with new words typed in the box, the box keeps them and the message waits in the queue", async () => {
       const h = await typed();
-      store.setState({ draft: "the next thought" });
+      type("the next thought");
       h.fail("wont-fit", "no");
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().draft).toBe("the next thought");
@@ -1306,7 +1322,7 @@ describe("a message the person typed is never lost", () => {
     it("shows the warning with the text still in the box, and confirm retries with stopOthers in the same chat", async () => {
       await answering("A");
       session.newThread();
-      store.setState({ draft: "for B" });
+      type("for B");
       refusedOnce();
       await session.send("for B");
       await until(() => st().stopAsk !== null, 2000, "the warning");
@@ -1326,7 +1342,7 @@ describe("a message the person typed is never lost", () => {
     it("cancelled, sends nothing more and keeps the text", async () => {
       await answering("A");
       session.newThread();
-      store.setState({ draft: "for B" });
+      type("for B");
       refusedOnce();
       await session.send("for B");
       await until(() => st().stopAsk !== null, 2000, "the warning");
@@ -1349,7 +1365,7 @@ describe("a message the person typed is never lost", () => {
 
     it("a Send now goes back at its place, and confirm sends it and takes it out", async () => {
       const ids = await onHold("one", "two");
-      store.setState({ draft: "something else" });
+      type("something else");
       refusedOnce();
       session.sendQueuedNow(ids[0] ?? "");
       await until(() => st().stopAsk !== null, 2000, "the warning");
@@ -1368,7 +1384,7 @@ describe("a message the person typed is never lost", () => {
       const held = b.server.hold("chat.send");
       void session.send("for B");
       const h = await held;
-      store.setState({ draft: "newer words" });
+      type("newer words");
       h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking);
       await until(() => st().queued.length === 1, 2000, "the message back");
       expect(st().stopAsk).toBeNull();
@@ -1376,7 +1392,8 @@ describe("a message the person typed is never lost", () => {
       expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
     });
 
-    it("after the person left the chat, no warning opens on the wrong screen: the message waits in its own queue", async () => {
+    it("after the person left the chat, no warning opens on the wrong screen: the message returns to its source draft", async () => {
+      const drafts = await import("../src/drafts.ts");
       await answering("A");
       session.newThread();
       const held = b.server.hold("chat.send");
@@ -1384,9 +1401,12 @@ describe("a message the person typed is never lost", () => {
       const h = await held;
       session.openThread("A");
       h.fail(WOULD_STOP.code, WOULD_STOP.message, WOULD_STOP.blocking);
-      await until(() => st().queued.length === 1, 2000, "the message back");
+      await until(() => drafts.getDraft("B").text === "for B", 2000, "B's draft restored");
       expect(st().stopAsk).toBeNull();
-      expect(st().queued).toMatchObject([{ threadId: "B", text: "for B", held: true }]);
+      expect(drafts.getDraft("B").text).toBe("for B");
+      expect(st().queued).toEqual([]);
+      expect(drafts.getDraft("A").text).toBe("");
+      expect(st().messages["A"]?.some(m => m.content === "for B")).not.toBe(true);
     });
   });
 
@@ -1421,7 +1441,11 @@ describe("a message the person typed is never lost", () => {
     });
 
     it("what queued behind a stopped send stays on hold once another chat has taken the slot (CFT-01, CFT-02)", async () => {
-      const h = await typed();
+      const drafts = await import("../src/drafts.ts");
+      session.newThread();
+      const held = b.server.hold("chat.send");
+      void session.send("typed");
+      const h = await held;
       await session.send("behind it");
       session.stop();
       const turnB = await answering("B");
@@ -1429,7 +1453,11 @@ describe("a message the person typed is never lost", () => {
       await until(() => live() === null, 2000, "B done");
       expect(texts()).toEqual(["behind it"]);
       h.fail("wont-fit", "no");
-      await until(() => st().queued.length === 2, 2000, "the message back");
+      await until(() => drafts.getDraft("A").text === "typed", 2000, "A's draft restored");
+      expect(drafts.getDraft("A").text).toBe("typed");
+      expect(drafts.getDraft("B").text).toBe("");
+      expect(st().messages["B"]?.some(m => m.content === "typed")).not.toBe(true);
+      expect(st().queued).toMatchObject([{ threadId: "A", text: "behind it", held: true }]);
       await tick();
       expect(sends().map((s) => s.content)).toEqual(["typed", "hello B"]);
       expect(st().queued.every((q) => q.held === true)).toBe(true);

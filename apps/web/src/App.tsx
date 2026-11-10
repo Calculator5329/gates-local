@@ -17,6 +17,7 @@ import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, open
 import { UpdateNote } from "./UpdateNote.tsx";
 import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
+import { replaceDraft, useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
 import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
@@ -60,7 +61,7 @@ function Cards() {
             type="button"
             className="card"
             onClick={() => {
-              setState({ draft: c.q, ...(c.img ? { image: true } : {}) });
+              replaceDraft(null, { text: c.q }); if (c.img) setState({ image: true });
               focusComposer(true);
             }}
           >
@@ -219,7 +220,7 @@ function SettingsList() {
 
 function Header({ isNew }: { isNew: boolean }) {
   const threadId = useStore((s) => s.threadId);
-  const emptyDraft = useStore((s) => s.draft === "");
+  const emptyDraft = useDraft(d => d.text === "");
   const title = useStore((s) => s.threads.find((t) => t.id === s.threadId)?.title ?? "");
   const renaming = useStore((s) => s.renaming);
   const input = useRef<HTMLInputElement>(null);

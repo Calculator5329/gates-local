@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LiveTurn, State } from "./store.ts";
+import { clearDraft, replaceDraft } from "./drafts.ts";
 
 const device = vi.hoisted(() => ({ touch: false }));
 vi.mock("./store.ts", async (original) => {
@@ -22,7 +23,12 @@ vi.mock("./ui.tsx", async (original) => ({ ...await original<typeof import("./ui
 const { Composer } = await import("./Composer.tsx");
 const { getState, setState } = await import("./store.ts");
 const initial = getState();
-afterEach(() => { setState(initial); device.touch = false; });
+afterEach(() => { clearDraft("thread"); clearDraft(null); setState(initial); device.touch = false; });
+function setFixture(patch: Partial<State> & { draft?: string }) {
+  const { draft = "", ...state } = patch;
+  setState(state);
+  replaceDraft(state.threadId ?? null, { text: draft });
+}
 
 const ready: State = {
   ...initial,
@@ -35,7 +41,7 @@ const ready: State = {
 };
 const live: LiveTurn = { gen: 1, threadId: "thread", turnId: "turn", model: "qwen3.5:9b", startedAt: 0, thinking: "", text: "Reply", tools: [], pendingUser: null };
 const turns = { thread: live };
-const states: readonly [string, Partial<State>, string, string?][] = [
+const states: readonly [string, Partial<State> & { draft?: string }, string, string?][] = [
   ["idle", {}, "Send message"],
   ["typing", { draft: "hello" }, "Send message"],
   ["running", { turns }, "Stop"],
@@ -55,7 +61,7 @@ describe("the composer's primary action", () => {
   for (const touch of [false, true]) {
     it(`keeps a separate Stop available without replacing the ${touch ? "touch queue" : "queued edit"} action`, () => {
       device.touch = touch;
-      setState({ ...ready, turns, draft: "Keep this draft", editingQueued: touch ? null : "queued" });
+      setFixture({ ...ready, turns, draft: "Keep this draft", editingQueued: touch ? null : "queued" });
       const html = renderToStaticMarkup(createElement(Composer));
       expect(html.match(/<button\b[^>]*aria-label="Stop reply"[^>]*>/g) ?? []).toHaveLength(1);
     });
@@ -64,7 +70,7 @@ describe("the composer's primary action", () => {
     for (const [name, patch, keyboardLabel, touchLabel = keyboardLabel] of states) {
       it(`has exactly one button.send when ${name}, ${touch ? "touch" : "keyboard"}`, () => {
         device.touch = touch;
-        setState({ ...ready, ...patch });
+        setFixture({ ...ready, ...patch });
         const html = renderToStaticMarkup(createElement(Composer));
         const actions = html.match(/<button\b[^>]*class="send(?: [^"]*)?"[^>]*>/g) ?? [];
         expect(actions, "one primary slot in every state").toHaveLength(1);

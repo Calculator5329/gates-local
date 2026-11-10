@@ -6,6 +6,7 @@ import type { Root } from "react-dom/client";
 import type { Message } from "@gates-local/contracts";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import type { State } from "../src/store.ts";
+import { editDraft } from "../src/drafts.ts";
 import { FakeDocument, FakeElement, FakeIFrame } from "./fake-dom.ts";
 
 const runs = vi.hoisted(() => ({ selectors: 0 }));
@@ -95,7 +96,7 @@ it("opens a 2,000-message thread with a bounded first commit and few subscriptio
   const allMedia = media.length;
 
   runs.selectors = 0;
-  act(() => store.editDraft("x"));
+  act(() => editDraft("x"));
   const selectors = runs.selectors;
 
   console.info(JSON.stringify({ firstCommitTurns: first, subscriptions, matchMedia: allMedia, reducedMotionQueries: reduced, selectorsPerKeystroke: selectors }));

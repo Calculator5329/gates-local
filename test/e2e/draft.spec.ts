@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import type { getState, setState, editDraft } from "../../apps/web/src/store.ts";
+import type { State, getState } from "../../apps/web/src/store.ts";
+import type { editDraft, replaceDraft } from "../../apps/web/src/drafts.ts";
 import type { watchDraft } from "../../apps/web/src/draft-persistence.ts";
 import { install, measure, type Observation } from "../perf/probe.ts";
 import { quantile } from "../perf/stats.ts";
@@ -10,7 +11,9 @@ import { expect, test, waitReady } from "./fixtures.ts";
 
 declare global {
   interface Window {
-    draftHarness: { watchDraft: typeof watchDraft; getState: typeof getState; setState: typeof setState; editDraft: typeof editDraft };
+    // Historical prepared arms expose the old attachment setter. New arms
+    // expose replaceDraft; this diagnostic fixture supports both bundle APIs.
+    draftHarness: { watchDraft: typeof watchDraft; getState: typeof getState; setState: (patch: Partial<State> & { draftImages?: readonly string[] }) => void; editDraft: typeof editDraft; replaceDraft?: typeof replaceDraft };
     draftWrites: { puts: number; stringBytes: number; putMs: number[]; active: number; maximum: number };
   }
 }
@@ -138,12 +141,15 @@ if (inputs) test("attachment-heavy typing uses bounded, small persistence writes
       });
       await page.goto(`${WEB_ORIGIN}/draft-review/harness`);
       await page.waitForFunction(() => window.draftHarness !== undefined);
-      await page.evaluate(async () => {
+      await page.evaluate(async selectedArm => {
+        if (selectedArm === "candidate" && !window.draftHarness.replaceDraft) throw new Error("Rebuild the candidate diagnostic bundle with replaceDraft from drafts.ts.");
         await window.draftHarness.watchDraft("attachment-typing");
         const images = Array.from({ length: 8 }, (_, i) => "data:image/png;base64," + String(i).repeat(10 * 1024 * 1024));
-        window.draftHarness.setState({ draftImages: images, queued: [{ id: "q", threadId: "t", text: "queued", images: ["data:image/png;base64," + "a".repeat(10 * 1024 * 1024)], at: 1, waitFor: "reply" }] });
+        const queued: State["queued"] = [{ id: "q", threadId: "t", text: "queued", images: ["data:image/png;base64," + "a".repeat(10 * 1024 * 1024)], at: 1, waitFor: "reply" }];
+        if (window.draftHarness.replaceDraft) { window.draftHarness.replaceDraft(null, { images }); window.draftHarness.setState({ queued }); }
+        else window.draftHarness.setState({ draftImages: images, queued });
         document.querySelector<HTMLTextAreaElement>("#ta")!.addEventListener("input", event => window.draftHarness.editDraft((event.target as HTMLTextAreaElement).value));
-      });
+      }, arm);
       await expect.poll(() => page.evaluate(() => window.draftWrites.active), { timeout: 30_000 }).toBe(0);
       await page.evaluate(() => Object.assign(window.draftWrites, { puts: 0, stringBytes: 0, putMs: [], maximum: 0 }));
       const observations: Observation[] = [];

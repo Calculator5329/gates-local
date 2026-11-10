@@ -9,10 +9,10 @@ const source = `
 import React, { useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
-import { editDraft, useStore } from './store.ts';
+import { editDraft, useDraft } from './drafts.ts';
 let brokenThread = false, brokenApp = 'none';
 function Timeline({ id }) { if (brokenThread && id === 'bad') throw new Error('Saved message could not render'); return <p>Conversation {id}</p>; }
-function Composer() { const draft = useStore(s => s.draft); return <textarea aria-label="Message" value={draft} onChange={e => editDraft(e.target.value)} />; }
+function Composer() { const draft = useDraft(d => d.text); return <textarea aria-label="Message" value={draft} onChange={e => editDraft(e.target.value)} />; }
 function Shell() {
   const [id, setId] = useState('bad');
   const [, redraw] = useState(0);
