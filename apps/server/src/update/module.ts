@@ -43,6 +43,8 @@ export interface UpdateModule {
   commit(request: UpdateCommitRequest, disconnected?: AbortSignal): UpdateCommitResult;
   cancel(reservation: string): { cancelled: boolean };
   dismissResult(): { dismissed: boolean };
+  /** An installed copy only (installed/module.ts): the Download click. */
+  download?(): Promise<UpdateCheck>;
 }
 
 const changesWord = (n: number) => (n === 1 ? "1 change" : `${n} changes`);
@@ -208,5 +210,6 @@ export function createUpdateHandlers(update: UpdateModule) {
     "update.commit": (request, context) => update.commit(request, context.signal),
     "update.cancel": ({ reservation }) => update.cancel(reservation),
     "update.dismissResult": () => update.dismissResult(),
+    "update.download": () => update.download?.() ?? Promise.resolve<UpdateCheck>({ state: "cannot-check", checkedAt: Date.now(), reason: "error", lines: ["This copy updates from its git clone, so there is nothing to download here."] }),
   } satisfies Partial<Handlers>;
 }

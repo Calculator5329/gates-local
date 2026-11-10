@@ -5,11 +5,12 @@
 // restart shows only in the desktop app, which quits and lets
 // `pnpm run app-update` do the work. The phone listener exposes status only;
 // a computer browser may check but installs from the desktop app. An
-// installed copy (AppImage or installer) only reads the signed release list
-// and points at the release page; it never shows an install control.
+// installed copy (AppImage or installer) reads the signed release list and
+// downloads a newer version for itself (Download while automatic checks are
+// off); it never shows an install control yet.
 import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
-import { canUpdateHere, checkForUpdates, updateAndRestart, updateSettings } from "./session.ts";
+import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updateSettings } from "./session.ts";
 import { Fail, Grp, Na, Row, useAct } from "./settings-ui.tsx";
 import { type Maybe, NA, useStore } from "./store.ts";
 
@@ -36,12 +37,37 @@ function versionText(v: UpdateVersion): { value: string; desc: string } {
 }
 
 const AGAIN = "Gates Local will try again in an hour.";
+// A file that did not match is not fetched again by a background check of the same list.
+const DOWNLOAD_AGAIN = "Use Check for updates to try again.";
 
-/** An installed copy only reads the signed release list: the server's own
- *  words, a release-page link when they send the person there, and never an
- *  install control. A failed read promises a retry only while automatic
- *  checks are on now, so the sentence follows the switch, not the check. */
-function InstalledResult({ check, automatic }: { check: UpdateCheck; automatic: boolean }) {
+/** The sentence Settings adds while automatic checks are on now, so it follows the switch, not the check. */
+function retryLine(check: UpdateCheck): string | undefined {
+  if (check.state === "cannot-check") return check.reason === "unreachable" || check.reason === "no-list" ? AGAIN : undefined;
+  if (check.state !== "newer") return undefined;
+  if (check.download === "bad") return DOWNLOAD_AGAIN;
+  return check.download === "failed" ? AGAIN : undefined;
+}
+
+/** The words send the person to the release page: a version this copy cannot use, or one it downloaded but cannot install yet. */
+function linksPage(check: UpdateCheck): string | undefined {
+  if (check.state === "cannot-check") return check.page;
+  if (check.state !== "newer") return undefined;
+  return !check.forThisCopy || check.download === "ready" ? check.page : undefined;
+}
+
+interface InstalledResultProps {
+  readonly check: UpdateCheck;
+  readonly automatic: boolean;
+  /** The Download control; absent where this window cannot control updates. */
+  readonly onDownload?: () => void;
+  readonly downloadErr?: string | null;
+}
+
+/** An installed copy reads the signed release list and downloads a newer
+ *  version for itself: the server's own words, a release-page link when
+ *  they send the person there, the Download control while automatic checks
+ *  are off, and never an install control. */
+function InstalledResult({ check, automatic, onDownload, downloadErr = null }: InstalledResultProps) {
   if (check.state === "up-to-date") {
     return (
       <div className="upd-res" role="status">
@@ -50,10 +76,13 @@ function InstalledResult({ check, automatic }: { check: UpdateCheck; automatic: 
     );
   }
   if (check.state === "available") return null;
-  const retries = automatic && check.state === "cannot-check" && (check.reason === "unreachable" || check.reason === "no-list");
-  const [first, ...rest] = retries ? [...check.lines, AGAIN] : check.lines;
+  const again = automatic ? retryLine(check) : undefined;
+  const [first, ...rest] = again === undefined ? check.lines : [...check.lines, again];
+  const page = linksPage(check);
+  const offer = check.state === "newer" && check.forThisCopy && check.download === undefined && !automatic && onDownload !== undefined;
+  const calm = check.state === "newer" && check.download !== "bad" && check.download !== "failed" && check.download !== "disk";
   return (
-    <div className="upd-res" role={check.state === "newer" ? "status" : "alert"}>
+    <div className="upd-res" role={calm ? "status" : "alert"}>
       {first === undefined ? null : <b>{first}</b>}
       {rest.length > 0 ? (
         <div className="upd-lines">
@@ -62,9 +91,15 @@ function InstalledResult({ check, automatic }: { check: UpdateCheck; automatic: 
           ))}
         </div>
       ) : null}
-      {check.page === undefined ? null : (
+      {offer ? (
         <div className="upd-act">
-          <a className="link" href={check.page} target="_blank" rel="noreferrer noopener">Open the release page</a>
+          <button type="button" className="btn outline" onClick={onDownload}>Download</button>
+          <Fail err={downloadErr} />
+        </div>
+      ) : null}
+      {page === undefined ? null : (
+        <div className="upd-act">
+          <a className="link" href={page} target="_blank" rel="noreferrer noopener">Open the release page</a>
         </div>
       )}
       <div className="upd-when">{check.state === "newer" ? "Checked" : "Tried"} at {clock(check.checkedAt)}.</div>
@@ -152,7 +187,10 @@ export interface UpdatesViewProps {
   readonly checkErr?: string | null;
   readonly switchErr?: string | null;
   readonly updateErr?: string | null;
+  readonly downloadErr?: string | null;
   readonly onCheck: () => void;
+  /** An installed copy's Download click. */
+  readonly onDownload?: () => void;
   readonly onUpdate: () => void;
   readonly onEveryChange: (on: boolean) => void;
   readonly onAutomatic?: (on: boolean) => void;
@@ -185,7 +223,7 @@ export function UpdatesView(p: UpdatesViewProps) {
       </Row>
       {clone || installed ? (
         <>
-          {canControl ? <Row label="Check for updates" desc={installed ? "Reads the signed list of versions on the Gates Local release page. Nothing is downloaded or installed." : "Asks the git remote this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update."} err={p.checkErr ?? null}>
+          {canControl ? <Row label="Check for updates" desc={installed ? "Reads the signed list of versions on the Gates Local release page. Nothing is installed." : "Asks the git remote this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update."} err={p.checkErr ?? null}>
             <button type="button" className="btn outline" disabled={p.checking || p.updating} onClick={p.onCheck}>
               {p.checking ? (
                 <>
@@ -197,13 +235,18 @@ export function UpdatesView(p: UpdatesViewProps) {
             </button>
           </Row> : <Row label="Updates" desc="Check and install updates on the computer running Gates Local." />}
           {check === null || p.checking ? null : installed ? (
-            <InstalledResult check={check} automatic={settings !== undefined && settings.updateAutomatic !== false} />
+            <InstalledResult
+              check={check}
+              automatic={settings !== undefined && settings.updateAutomatic !== false}
+              {...(canControl && p.onDownload !== undefined ? { onDownload: p.onDownload } : {})}
+              downloadErr={p.downloadErr ?? null}
+            />
           ) : (
             <CheckResult check={check} canUpdate={p.canUpdate && canControl} onUpdate={p.onUpdate} updateErr={p.updateErr ?? null} updating={p.updating === true} />
           )}
           {settings === undefined || p.settingsLocked || !canControl ? null : (
             <>
-            <Row label="Check for updates automatically" desc={installed ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly. Default on. Off stops automatic requests; a check in progress finishes. Manual checks still work." : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."} err={p.switchErr ?? null}>
+            <Row label="Check for updates automatically" desc={installed ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly, and downloads a newer version for this copy. Default on. Off stops automatic requests, stops a download in progress and deletes downloaded versions; a check in progress finishes. Manual checks still work." : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."} err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
             </Row>
             {installed ? null : <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
@@ -224,6 +267,7 @@ export function Updates() {
   const checking = useStore((s) => s.updateChecking);
   const [checkErr, runCheck] = useAct();
   const [switchErr, runSwitch] = useAct();
+  const [downloadErr, runDownload] = useAct();
   const updateErr = useStore((s) => s.updateError);
   const updating = useStore((s) => s.updateInstalling || (s.update !== NA && s.update?.installing === true));
   return (
@@ -237,7 +281,9 @@ export function Updates() {
       checkErr={checkErr}
       switchErr={switchErr}
       updateErr={updateErr}
+      downloadErr={downloadErr}
       onCheck={() => void runCheck(checkForUpdates())}
+      onDownload={() => void runDownload(downloadUpdate())}
       onEveryChange={(on) => void runSwitch(updateSettings({ updateEveryChange: on }))}
       onAutomatic={(on) => void runSwitch(updateSettings({ updateAutomatic: on }))}
       onUpdate={() => void updateAndRestart()}

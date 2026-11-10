@@ -16,7 +16,9 @@ export type InstalledOutcome =
   /** The verified list is this version or older. */
   | { readonly kind: "none-found"; readonly listed: string }
   /** artifact: this platform's installer, when the list holds one. */
-  | { readonly kind: "newer"; readonly target: string; readonly artifact?: ReleaseArtifact };
+  | { readonly kind: "newer"; readonly target: string }
+  /** signed: the exact bytes verified, which the download stores beside the file. */
+  | { readonly kind: "newer"; readonly target: string; readonly artifact: ReleaseArtifact; readonly signed: { readonly list: Buffer; readonly signature: Buffer } };
 
 export interface InstalledCheckOptions {
   /** This copy's own version (app.getVersion()). */
@@ -74,5 +76,5 @@ async function readAndCompare(o: InstalledCheckOptions, own: NonNullable<ReturnT
   // verifyManifest admits only versions parseRelease reads; this is the type's due.
   if (listed === null || compare(listed, own) <= 0) return { kind: "none-found", listed: manifest.version };
   const artifact = manifest.artifacts.find((a) => a.platform === o.platform && a.arch === o.arch);
-  return artifact === undefined ? { kind: "newer", target: manifest.version } : { kind: "newer", target: manifest.version, artifact };
+  return artifact === undefined ? { kind: "newer", target: manifest.version } : { kind: "newer", target: manifest.version, artifact, signed: { list: list.bytes, signature: signature.bytes } };
 }

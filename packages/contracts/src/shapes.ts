@@ -502,6 +502,14 @@ export type UpdateChannel = typeof UpdateChannel.Type;
 export const UpdateBlocked = S.Literals(["no-git", "not-a-clone", "no-upstream", "local-changes", "remote", "local-commits", "no-releases", "diverged", "unfinished", "error", "development", "no-key", "unreachable", "no-list", "bad-signature"]);
 export type UpdateBlocked = typeof UpdateBlocked.Type;
 
+/**
+ * An installed copy's download of a newer version (absent: not started, and
+ * update.download starts it). bad: it did not match the signed list. failed:
+ * the network. disk: too little free space. ready: downloaded and checked.
+ */
+export const UpdateDownload = S.Literals(["downloading", "bad", "failed", "disk", "ready"]);
+export type UpdateDownload = typeof UpdateDownload.Type;
+
 /** One click of "Check for updates": fetches from the clone's remote, changes nothing. */
 export const UpdateCheck = S.Union([
   S.Struct({ state: S.Literal("up-to-date"), checkedAt: Millis, channel: UpdateChannel, current: S.String }),
@@ -524,10 +532,11 @@ export const UpdateCheck = S.Union([
   S.Struct({ state: S.Literal("cannot-check"), checkedAt: Millis, reason: UpdateBlocked, lines: S.Array(S.String), page: S.optional(S.String) }),
   /**
    * An installed copy found a newer version in a verified release list. It
-   * carries no commit, approval or install control: the person downloads it
-   * from page. forThisCopy: the list holds an installer for this platform.
+   * carries no commit, approval or install control. forThisCopy: the list
+   * holds an installer for this platform. download: where fetching that
+   * installer stands; lines already say it in words, progress included.
    */
-  S.Struct({ state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String }),
+  S.Struct({ state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String, download: S.optional(UpdateDownload) }),
 ]);
 export type UpdateCheck = typeof UpdateCheck.Type;
 

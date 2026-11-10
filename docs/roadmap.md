@@ -758,6 +758,12 @@ RS-03 remains dropped.
       *Accept:* that page names the saved copy and the steps to put it back, or offers to do it.
 - [ ] <!-- workspace:id=work:23b671db-1e12-583c-8d8b-876067b494db --> The git-clone updater cannot go back across a chat store upgrade: it restores the program files, and the older program then refuses the upgraded store. In the code before installed updates.
       *Accept:* a clone update whose new version upgraded the store and then failed goes back with the saved copy restored, shown by a test.
+- [ ] <!-- workspace:id=work:13e31a99-8209-562e-9930-81caea21467c --> Installed download: a local write error, or a release file the release page does not have, says "Could not download version <new>. Check your connection." Neither is a connection problem.
+      *Accept:* each has a sentence of its own that names what failed, with a test.
+- [ ] <!-- workspace:id=work:eb6d69b4-2f3e-5a71-9cc4-ff8597b3077d --> Installed download on Windows: the packaged test build has not been driven through the download states there. The folder's unit tests and the final rename were measured on native Windows 11; the packaged script ran on Linux only.
+      *Accept:* `packaged-installed-download.ts` passes against an installed Windows test build.
+- [ ] <!-- workspace:id=work:e9a95a12-2be9-5da1-9625-988aadeb2f12 --> The git-clone updater's tests fail on native Windows: `apps/server/src/update/update.test.ts` fails removing its test repositories (EPERM), with 5-second timeouts and one wrong count. Measured 2026-11-10 on Windows 11 with Node 24. In the code before installed updates.
+      *Accept:* the file passes 10 of 10 runs on native Windows, or each test that cannot run there says why and is skipped by name.
 - [ ] <!-- workspace:id=work:dc5b68a0-32a1-577a-a58a-6dcc57461a2e --> No check runs an older released version's data through the current version. Chat store upgrades are tested from fixtures built by the current code.
       *Accept:* a test opens a store, settings file and profile written by each released version and reads the chats back; it runs before a release is tagged.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change

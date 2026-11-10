@@ -1,21 +1,50 @@
 // The installed module: every sentence of Settings' table from a real signed
 // list, the status and refusals it answers, the test-build gate, and the
 // composition that keeps the clone updater when the desktop says nothing.
+import { randomBytes } from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
-import { decodeResult, type UpdateCheck } from "@gates-local/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { homedir } from "node:os";
+import path from "node:path";
+import { decodeResult, type UpdateCheck, type UpdateStatus } from "@gates-local/contracts";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateModule } from "../module.ts";
-import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, INSTALL_REFUSAL, installedFeed, type InstalledFeed } from "./module.ts";
-import { BASE, LIST_URL, memoryFeed, releaseKey, SIG_URL, signedList } from "./testing.ts";
+import { LIST_FILE, SIGNATURE_FILE } from "./download.ts";
+import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, downloadLines, INSTALL_REFUSAL, type InstalledModuleDeps, installedFeed, type InstalledFeed } from "./module.ts";
+import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "./testing.ts";
+
+/** A data folder under ~/.cache, removed by the test that made it. */
+function tempDataDir(): string {
+  const cache = path.join(homedir(), ".cache");
+  fs.mkdirSync(cache, { recursive: true });
+  return fs.mkdtempSync(path.join(cache, "installed-module-test-"));
+}
 
 const key = releaseKey();
 const PAGE = `${BASE.href}/latest`;
 const feedWith = (keys: readonly string[]): InstalledFeed => ({ base: BASE, page: PAGE, keys, allowLoopbackHttp: false });
 
+/** Settings' automatic switch, flipped by the test. */
+function toggle(on: boolean) {
+  let value = on;
+  const listeners = new Set<() => void>();
+  return {
+    automatic: { enabled: () => value, onChange: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; } },
+    set(next: boolean) { value = next; for (const listener of listeners) listener(); },
+  };
+}
+
+// The words tests below make no download (the switch is off and nothing is clicked).
+let wordsDir: string;
+beforeAll(() => { wordsDir = tempDataDir(); });
+afterAll(() => fs.rmSync(wordsDir, { recursive: true, force: true }));
+const offline = () => ({ dataDir: wordsDir, automatic: toggle(false).automatic, keep: () => [] });
+
 function copy(o: { version?: string; keys?: readonly string[]; feed?: ReturnType<typeof memoryFeed> } = {}) {
   const feed = o.feed ?? memoryFeed();
   const changed = vi.fn();
   const module = createInstalledUpdateModule({
+    ...offline(),
     version: o.version ?? "1.2.3", platform: "linux", arch: "x64",
     feed: feedWith(o.keys ?? [key.publicKey]), get: feed.get,
     now: () => 1_000, changed,
@@ -68,7 +97,7 @@ describe("Settings' words for an installed copy", () => {
   it("available, with no approval or install control", async () => {
     const { module, feed } = copy();
     feed.serve(signedList("1.3.0", ["linux", "win32"], key.privateKey));
-    expect(await words(module)).toEqual({ state: "newer", lines: ["Version 1.3.0 is available. Download it from the release page."], page: PAGE });
+    expect(await words(module)).toEqual({ state: "newer", lines: ["Version 1.3.0 is available."], page: PAGE });
     expect(module.status().lastCheck).toMatchObject({ state: "newer", current: "1.2.3", target: "1.3.0", forThisCopy: true });
     expect(module.status()).not.toHaveProperty("approval");
     expect(await module.prepare("anything")).toEqual({ state: "blocked", message: INSTALL_REFUSAL });
@@ -118,6 +147,7 @@ describe("the installed module's checks", () => {
   it("stops the read on close", async () => {
     let seen: AbortSignal | undefined;
     const module = createInstalledUpdateModule({
+      ...offline(),
       version: "1.2.3", platform: "linux", arch: "x64", feed: feedWith([key.publicKey]),
       get: (_url, _max, signal) => { seen = signal; return new Promise((resolve) => signal.addEventListener("abort", () => resolve({ kind: "failed", detail: "stopped" }))); },
     });
@@ -150,6 +180,7 @@ describe("the installed module's checks", () => {
       if (address === null || typeof address === "string") throw new Error("no port");
       const base = new URL(`http://127.0.0.1:${address.port}/r`);
       const module = createInstalledUpdateModule({
+        ...offline(),
         version: "1.2.3", platform: "linux", arch: "x64",
         feed: { base, page: `${base.href}/latest`, keys: [key.publicKey], allowLoopbackHttp: true },
       });
@@ -199,7 +230,7 @@ describe("the test-build gate", () => {
   });
 });
 
-const stub = (name: string): UpdateModule => createInstalledUpdateModule({ version: name, platform: "linux", arch: "x64", feed: feedWith([]) });
+const stub = (name: string): UpdateModule => createInstalledUpdateModule({ ...offline(), version: name, platform: "linux", arch: "x64", feed: feedWith([]) });
 
 describe("composition", () => {
   it("builds the clone updater, and never the installed module, when the desktop says nothing", () => {
@@ -217,5 +248,415 @@ describe("composition", () => {
     chooseUpdateModule({ GATES_LOCAL_INSTALLED_VERSION: "1.2.3" }, { installed, clone });
     expect(installed).toHaveBeenCalledWith("1.2.3");
     expect(clone).not.toHaveBeenCalled();
+  });
+});
+
+describe("the download's words", () => {
+  it("says each state in Settings' words", () => {
+    expect(downloadLines("1.3.0", { state: "downloading", received: 12_345_678, total: 98_765_432 })).toEqual(["Downloading version 1.3.0 (12 of 99 MB). You can keep chatting."]);
+    expect(downloadLines("1.3.0", { state: "downloading", received: 1_250_000, total: 4_000_000 })).toEqual(["Downloading version 1.3.0 (1.2 of 4.0 MB). You can keep chatting."]);
+    expect(downloadLines("1.3.0", { state: "bad" })).toEqual(["The download of version 1.3.0 did not match the signed release list, so it was deleted."]);
+    expect(downloadLines("1.3.0", { state: "failed" })).toEqual(["Could not download version 1.3.0. Check your connection."]);
+    expect(downloadLines("1.3.0", { state: "disk", volume: "/home", needed: 98_100_000, free: 97_900_000 })).toEqual(["Not enough free space on /home for version 1.3.0 (needs 99 MB, 97 MB free). Free some space, then use Check for updates."]);
+    expect(downloadLines("1.3.0", { state: "ready" })).toEqual(["Version 1.3.0 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."]);
+  });
+});
+
+/** The newer check Settings shows, after it decoded off the wire. */
+function shown(module: UpdateModule) {
+  const decoded = decodeResult("update.status", module.status());
+  if (!decoded.ok) throw new Error("status does not decode");
+  const check = decoded.value.lastCheck;
+  if (check?.state !== "newer") throw new Error(`not newer: ${JSON.stringify(check)}`);
+  return check;
+}
+/** Until the download in flight ends. */
+const settled = (module: UpdateModule) => vi.waitFor(() => {
+  const download = shown(module).download;
+  if (download === undefined || download === "downloading") throw new Error(`still ${String(download)}`);
+}, { timeout: 5_000 });
+/** The progress lines among the pushes Settings received. */
+const downloading = (pushes: readonly UpdateStatus[]) => pushes.flatMap((s) => (s.lastCheck?.state === "newer" && s.lastCheck.download === "downloading" ? s.lastCheck.lines : []));
+
+describe("downloading a newer version", () => {
+  const VERSION = "1.3.0";
+  const FILE = artifactFile(VERSION);
+  const ARTIFACT = `/r/download/v${VERSION}/${FILE}`;
+  const BYTES = randomBytes(300_000);
+  let dataDir: string;
+  let page: ReleasePage;
+  beforeEach(async () => { dataDir = tempDataDir(); page = await releasePage(); });
+  afterEach(async () => { await page.close(); fs.rmSync(dataDir, { recursive: true, force: true }); });
+
+  const folder = (version = VERSION) => path.join(dataDir, "updates", version);
+  const artifactRequests = () => page.requests.filter((p) => p === ARTIFACT).length;
+  const serveGood = () => {
+    const files = listFor(VERSION, BYTES, key.privateKey);
+    page.serve(files, { file: FILE, bytes: BYTES });
+    return files;
+  };
+  function installed(on: boolean, over: Partial<InstalledModuleDeps> = {}) {
+    const sw = toggle(on);
+    const pushes: UpdateStatus[] = [];
+    const module = createInstalledUpdateModule({
+      version: "1.2.3", platform: "linux", arch: "x64",
+      feed: { base: page.base, page: `${page.base.href}/latest`, keys: [key.publicKey], allowLoopbackHttp: true },
+      dataDir, automatic: sw.automatic, keep: () => [],
+      freeSpace: () => Promise.resolve({ volume: "/data", free: 10 ** 12 }),
+      changed: (status) => { pushes.push(status); },
+      ...over,
+    });
+    return { module, sw, pushes };
+  }
+  /** Headers and the first bytes, then silence: a download in flight. */
+  const hold = () => page.route((p, res) => {
+    if (p !== ARTIFACT) return false;
+    res.writeHead(200, { "Content-Length": BYTES.length });
+    res.write(BYTES.subarray(0, 1000));
+    return true;
+  });
+
+  it("with the switch on, a check that finds a newer version downloads it without asking", async () => {
+    serveGood();
+    const { module } = installed(true);
+    expect(await module.check()).toMatchObject({ state: "newer", download: "downloading" });
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "ready", lines: ["Version 1.3.0 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."], page: `${page.base.href}/latest` });
+    expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
+    expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(BYTES));
+    expect(artifactRequests()).toBe(1);
+    await module.close();
+  });
+
+  it("with the switch off, nothing downloads until the Download click", async () => {
+    serveGood();
+    const { module } = installed(false);
+    const check = await module.check();
+    expect(check).toMatchObject({ state: "newer", lines: ["Version 1.3.0 is available."] });
+    expect(check).not.toHaveProperty("download");
+    expect(artifactRequests()).toBe(0);
+    expect(fs.existsSync(folder())).toBe(false);
+    expect(await module.download?.()).toMatchObject({ state: "newer", download: "downloading" });
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(1);
+    await module.close();
+  });
+
+  /** The release's file is wrong for the list served until the test fixes one or the other. */
+  function serveWrongFile() {
+    const files = serveGood();
+    const wrong = Buffer.from(BYTES);
+    wrong[7] = (wrong[7] ?? 0) ^ 1;
+    let broken = true;
+    page.route((p, res) => {
+      if (p !== ARTIFACT || !broken) return false;
+      res.writeHead(200, { "Content-Length": wrong.length }).end(wrong);
+      return true;
+    });
+    return { files, wrong, fixFile: () => { broken = false; } };
+  }
+  /** A bad download from a background check with the switch on. */
+  async function badOnce() {
+    const release = serveWrongFile();
+    const made = installed(true);
+    await made.module.check(true);
+    await settled(made.module);
+    expect(shown(made.module)).toMatchObject({ download: "bad", lines: ["The download of version 1.3.0 did not match the signed release list, so it was deleted."] });
+    expect(fs.existsSync(folder())).toBe(false);
+    expect(artifactRequests()).toBe(1);
+    return { ...release, ...made };
+  }
+
+  it("a bad download is not fetched again by a background check of the same list", async () => {
+    const { module, fixFile } = await badOnce();
+    fixFile();
+    await module.check(true);
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "bad", lines: ["The download of version 1.3.0 did not match the signed release list, so it was deleted."] });
+    expect(artifactRequests()).toBe(1);
+    expect(fs.existsSync(folder())).toBe(false);
+    await module.close();
+  });
+
+  it("after a bad download, Check for updates fetches the same list again", async () => {
+    const { module, fixFile } = await badOnce();
+    fixFile();
+    expect(await module.check()).toMatchObject({ download: "downloading" });
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it("after a bad download, a click that joins a background check in flight still fetches again", async () => {
+    const { module, fixFile } = await badOnce();
+    fixFile();
+    await Promise.all([module.check(true), module.check()]);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it("after a bad download, the Download click fetches the same list again", async () => {
+    const { module, fixFile } = await badOnce();
+    fixFile();
+    expect(await module.download?.()).toMatchObject({ download: "downloading" });
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it("after a bad download, a background check fetches a list whose bytes changed", async () => {
+    const { module, wrong } = await badOnce();
+    // The release is fixed by signing a list for the file it serves.
+    page.serve(listFor(VERSION, wrong, key.privateKey));
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(wrong));
+    await module.close();
+  });
+
+  it("after a bad download, a click whose retry could not finish keeps the hourly retry", async () => {
+    const { module } = await badOnce();
+    let failOnce = true;
+    page.route((p, res) => {
+      if (p !== ARTIFACT || !failOnce) return false;
+      failOnce = false;
+      res.writeHead(500).end();
+      return true;
+    });
+    await module.check();
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "failed", lines: ["Could not download version 1.3.0. Check your connection."] });
+    expect(artifactRequests()).toBe(2);
+    // The next background check (hourly in the app) tries again.
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(3);
+    await module.close();
+  });
+
+  it("after a bad download, a retry the switch ended leaves the list still not fetched by a background check", async () => {
+    const { module, sw, fixFile } = await badOnce();
+    fixFile();
+    hold();
+    await module.check();
+    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    sw.set(false);
+    await page.hangUps[1];
+    await vi.waitFor(() => expect(fs.existsSync(folder())).toBe(false));
+    sw.set(true);
+    await module.check(true);
+    expect(shown(module).download).toBe("bad");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it.each([
+    ["a newer version that downloads", "1.4.0", "ready"],
+    ["a newer version still downloading", "1.4.0", "held"],
+    ["a list with nothing newer", "1.2.0", "none"],
+  ] as const)("a list that did not match is fetched again once %s came between", async (_name, between, how) => {
+    const { module, files, fixFile } = await badOnce();
+    const other = randomBytes(1_000);
+    page.serve(listFor(between, other, key.privateKey), { file: artifactFile(between), bytes: other });
+    const otherPath = `/r/download/v${between}/${artifactFile(between)}`;
+    if (how === "held") {
+      page.route((p, res) => {
+        if (p !== otherPath) return false;
+        res.writeHead(200, { "Content-Length": other.length });
+        res.write(other.subarray(0, 100));
+        return true;
+      });
+    }
+    await module.check(true);
+    if (how === "ready") await vi.waitFor(() => expect(shown(module).download).toBe("ready"));
+    if (how === "held") await vi.waitFor(() => expect(page.requests).toContain(otherPath));
+    // That list is withdrawn and the first one's exact bytes come back.
+    page.serve(files);
+    if (how !== "held") fixFile();
+    else page.route(undefined);
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it("a download in flight is ended when the same version is re-signed, and the new list's file is the one made ready", async () => {
+    serveGood();
+    let held = true;
+    page.route((p, res) => {
+      if (p !== ARTIFACT || !held) return false;
+      held = false;
+      res.writeHead(200, { "Content-Length": BYTES.length });
+      res.write(BYTES.subarray(0, 1000));
+      return true;
+    });
+    const { module } = installed(true);
+    await module.check(true);
+    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    const other = randomBytes(BYTES.length);
+    const resigned = listFor(VERSION, other, key.privateKey);
+    page.serve(resigned, { file: FILE, bytes: other });
+    await module.check(true);
+    await vi.waitFor(() => expect(artifactRequests()).toBe(2));
+    await page.hangUps[0];
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(other));
+    expect(fs.readFileSync(path.join(folder(), LIST_FILE)).equals(resigned.list)).toBe(true);
+    await module.close();
+  });
+
+  it("a ready version re-signed with a different file is downloaded again, not reused", async () => {
+    serveGood();
+    const { module } = installed(true);
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    const other = randomBytes(BYTES.length);
+    const files = listFor(VERSION, other, key.privateKey);
+    page.serve(files, { file: FILE, bytes: other });
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    expect(sha512(fs.readFileSync(path.join(folder(), FILE)))).toBe(sha512(other));
+    expect(fs.readFileSync(path.join(folder(), LIST_FILE)).equals(files.list)).toBe(true);
+    await module.close();
+  });
+
+  it("a download that could not finish is tried again at the next check while the switch is on", async () => {
+    serveGood();
+    let first = true;
+    page.route((p, res) => {
+      if (p !== ARTIFACT || !first) return false;
+      first = false;
+      res.writeHead(500).end();
+      return true;
+    });
+    const { module } = installed(true);
+    await module.check(true);
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "failed", lines: ["Could not download version 1.3.0. Check your connection."] });
+    await module.check(true);
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(artifactRequests()).toBe(2);
+    await module.close();
+  });
+
+  it("with the switch off, a failed download is not retried; Check for updates offers Download again", async () => {
+    serveGood();
+    page.route((p, res) => {
+      if (p !== ARTIFACT) return false;
+      res.writeHead(500).end();
+      return true;
+    });
+    const { module } = installed(false);
+    await module.check();
+    await module.download?.();
+    await settled(module);
+    expect(shown(module).download).toBe("failed");
+    const again = await module.check();
+    expect(again).toMatchObject({ lines: ["Version 1.3.0 is available."] });
+    expect(again).not.toHaveProperty("download");
+    expect(artifactRequests()).toBe(1);
+    await module.close();
+  });
+
+  it("too little free space makes no artifact request and names the volume and sizes", async () => {
+    serveGood();
+    const { module } = installed(true, { freeSpace: () => Promise.resolve({ volume: "/data", free: 100_000 }) });
+    await module.check();
+    await settled(module);
+    expect(shown(module)).toMatchObject({ download: "disk", lines: ["Not enough free space on /data for version 1.3.0 (needs 0.3 MB, 0.1 MB free). Free some space, then use Check for updates."] });
+    expect(artifactRequests()).toBe(0);
+    expect(fs.existsSync(folder())).toBe(false);
+    await module.close();
+  });
+
+  it("turning the switch off ends a download in flight, hangs up, and leaves no folder", async () => {
+    serveGood();
+    hold();
+    const { module, sw } = installed(true);
+    await module.check();
+    await vi.waitFor(() => expect(page.hangUps).toHaveLength(1));
+    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    sw.set(false);
+    await page.hangUps[0];
+    await vi.waitFor(() => expect(fs.existsSync(folder())).toBe(false));
+    await vi.waitFor(() => expect(shown(module)).not.toHaveProperty("download"));
+    expect(shown(module).lines).toEqual(["Version 1.3.0 is available."]);
+    await module.close();
+  });
+
+  it("closing ends a download in flight, hangs up, and leaves nothing a later start would trust", async () => {
+    serveGood();
+    hold();
+    const { module } = installed(true);
+    await module.check();
+    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    const closing = Date.now();
+    await module.close();
+    expect(Date.now() - closing).toBeLessThan(1_000);
+    await page.hangUps[0];
+    expect(fs.existsSync(folder())).toBe(false);
+  });
+
+  it("a kept version survives the cleanup a newer list starts, and the switch turned off", async () => {
+    for (const version of ["1.0.0", "1.1.0"]) {
+      fs.mkdirSync(folder(version), { recursive: true });
+      fs.writeFileSync(path.join(folder(version), "note"), version);
+    }
+    serveGood();
+    const { module, sw } = installed(true, { keep: () => ["1.1.0"] });
+    await module.check();
+    await settled(module);
+    expect(shown(module).download).toBe("ready");
+    expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.1.0", "1.3.0"]);
+    sw.set(false);
+    await vi.waitFor(() => expect(fs.readdirSync(path.join(dataDir, "updates"))).toEqual(["1.1.0"]));
+    expect(fs.readFileSync(path.join(folder("1.1.0"), "note"), "utf8")).toBe("1.1.0");
+    await module.close();
+  });
+
+  it("sends progress at most about once a second", async () => {
+    serveGood();
+    page.route((p, res) => {
+      if (p !== ARTIFACT) return false;
+      res.writeHead(200, { "Content-Length": BYTES.length });
+      let sent = 0;
+      const step = 50_000;
+      const timer = setInterval(() => {
+        res.write(BYTES.subarray(sent, sent + step));
+        sent += step;
+        if (sent >= BYTES.length) { clearInterval(timer); res.end(); }
+      }, 30);
+      res.on("close", () => clearInterval(timer));
+      return true;
+    });
+    // A clock that never moves: only the push that starts the download.
+    const still = installed(true, { now: () => 5_000 });
+    await still.module.check();
+    await settled(still.module);
+    expect(downloading(still.pushes)).toEqual(["Downloading version 1.3.0 (0.0 of 0.3 MB). You can keep chatting."]);
+    await still.module.close();
+    // No wait between pushes: one per chunk, with the bytes so far. The first copy's folder would be reused.
+    fs.rmSync(folder(), { recursive: true });
+    const eager = installed(true, { progressMs: 0 });
+    await eager.module.check();
+    await settled(eager.module);
+    const lines = downloading(eager.pushes);
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect(lines).toContain("Downloading version 1.3.0 (0.1 of 0.3 MB). You can keep chatting.");
+    await eager.module.close();
   });
 });

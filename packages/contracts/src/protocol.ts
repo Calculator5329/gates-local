@@ -217,6 +217,8 @@ export const methods = {
   "update.commit": { params: UpdateCommitRequest, result: UpdateCommitResult, phone: "deny" },
   "update.cancel": { params: S.Struct({ reservation: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
   "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }), phone: "deny" },
+  // An installed copy's Download click (automatic checks off): fetch and check the newer version; never installs.
+  "update.download": { params: NoParams, result: UpdateCheck, phone: "deny" },
 } as const satisfies Record<string, MethodRow>;
 
 /** Server-to-client channels and their payload Schemas. */

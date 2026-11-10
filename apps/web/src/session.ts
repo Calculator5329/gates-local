@@ -41,7 +41,7 @@ const connection = createConnection({ applyServerEvent,
 export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
 const updatesSession = createUpdates({ applyServerEvent, act });
-export const { checkForUpdates, dismissUpdateResult, updateAndRestart } = updatesSession;
+export const { checkForUpdates, downloadUpdate, dismissUpdateResult, updateAndRestart } = updatesSession;
 const { updateOrder } = updatesSession;
 
 const threadSession = createThreads({ applyServerEvent,

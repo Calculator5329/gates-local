@@ -215,6 +215,15 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       platform: process.platform,
       arch: process.arch,
       feed: installedFeed(process.env, { testBuild: existsSync(TEST_BUILD_MARKER), log: (line) => log(`update ${line}`) }),
+      dataDir,
+      automatic: {
+        enabled: () => services.settings.get().updateAutomatic !== false,
+        onChange: (listener) => services.settings.onChange((next, previous) => {
+          if (next.updateAutomatic !== previous.updateAutomatic) listener();
+        }),
+      },
+      // Nothing to keep yet: the install step will name its unfinished update or failure note here.
+      keep: () => [],
       changed: (status) => server?.push("update.changed", status),
       log: (line) => log(`update ${line}`),
     }),

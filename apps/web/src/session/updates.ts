@@ -27,6 +27,18 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     return r.ok ? null : r.message;
   }
 
+  /** An installed copy's Download click: the server answers with the check, now downloading; progress follows as update.changed. */
+  async function downloadUpdate(): Promise<ActionResult> {
+    const r = await act("update.download", {}, "download the update");
+    if (!r.ok) return r.message;
+    applyServerEvent((s) => {
+      if (s.update === undefined || s.update === NA) return {};
+      updateOrder.next();
+      return { update: { ...s.update, lastCheck: r.value } };
+    });
+    return null;
+  }
+
   /** A phone dismisses its own note without writing through the desktop listener. */
   async function dismissUpdateResult(): Promise<void> {
     const current = getState().update;
@@ -58,5 +70,5 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     }
   }
 
-  return { updateOrder, receiveUpdate, checkForUpdates, dismissUpdateResult, updateAndRestart };
+  return { updateOrder, receiveUpdate, checkForUpdates, downloadUpdate, dismissUpdateResult, updateAndRestart };
 }

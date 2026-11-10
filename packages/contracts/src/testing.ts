@@ -254,6 +254,19 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
     },
   },
   "update.dismissResult": { params: {}, result: { dismissed: true } },
+  "update.download": {
+    params: {},
+    result: {
+      state: "newer",
+      checkedAt: 1_762_500_006_000,
+      current: "1.2.3",
+      target: "1.3.0",
+      forThisCopy: true,
+      lines: ["Downloading version 1.3.0 (0 of 98 MB). You can keep chatting."],
+      page: "https://example.invalid/releases/latest",
+      download: "downloading",
+    },
+  },
 };
 
 /** One sample per channel; chat.event gets one per ChatEvent variant. */

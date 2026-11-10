@@ -191,7 +191,12 @@ describe("the Updates group of an installed copy", () => {
     ["could not reach", { state: "cannot-check", checkedAt: AT, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] }, false],
     ["no list", { state: "cannot-check", checkedAt: AT, reason: "no-list", lines: ["No release list was found on the release page."] }, false],
     ["bad signature", { state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["The release list did not pass its signature check, so Gates Local ignored it. Nothing was downloaded. If this keeps happening, download the latest version from the release page."], page: PAGE }, true],
-    ["available", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available. Download it from the release page."], page: PAGE }, true],
+    ["available", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available."], page: PAGE }, false],
+    ["downloading", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Downloading version 1.3.0 (12 of 98 MB). You can keep chatting."], page: PAGE, download: "downloading" }, false],
+    ["bad download", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["The download of version 1.3.0 did not match the signed release list, so it was deleted."], page: PAGE, download: "bad" }, false],
+    ["could not download", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Could not download version 1.3.0. Check your connection."], page: PAGE, download: "failed" }, false],
+    ["disk", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Not enough free space on /home for version 1.3.0 (needs 98 MB, 12 MB free). Free some space, then use Check for updates."], page: PAGE, download: "disk" }, false],
+    ["downloaded", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page."], page: PAGE, download: "ready" }, true],
     ["not for this copy", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: false, lines: ["Version 1.3.0 is available, but this copy cannot install it by itself. Download it from the release page."], page: PAGE }, true],
   ] satisfies [string, UpdateCheck, boolean][])("%s: says the server's words, links the release page only when they send the person there", (_name, check, linked) => {
     const html = view({ canUpdate: true, ...installedWith(check) });
@@ -216,6 +221,40 @@ describe("the Updates group of an installed copy", () => {
     expect(off).not.toContain(again);
     // Other failures never promise a retry.
     expect(text(view(installedWith({ state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["x"], page: PAGE })))).not.toContain(again);
+  });
+
+  const newer = (over: Partial<UpdateCheck & { state: "newer" }> = {}): UpdateCheck => ({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available."], page: PAGE, ...over });
+  const OFF = { ...SETTINGS, updateAutomatic: false };
+  const ON = { ...SETTINGS, updateAutomatic: true };
+
+  it.each([
+    ["bad download", "bad", "Use Check for updates to try again."],
+    ["could not download", "failed", "Gates Local will try again in an hour."],
+  ] as const)("%s: says how it is tried again only while automatic checks are on now", (_name, download, again) => {
+    const failed = installedWith(newer({ download, lines: ["x"] }));
+    expect(text(view({ ...failed, settings: ON }))).toContain(again);
+    expect(text(view({ ...failed, settings: OFF }))).not.toContain(again);
+    // Neither bracket belongs to any other state.
+    for (const other of ["downloading", "disk", "ready"] as const) {
+      const plain = text(view({ ...installedWith(newer({ download: other })), settings: ON }));
+      expect(plain).not.toContain("Use Check for updates to try again");
+      expect(plain).not.toContain("try again in an hour");
+    }
+  });
+
+  it("offers Download for a version this copy can use only while automatic checks are off", () => {
+    const button = '<button type="button" class="btn outline">Download</button>';
+    const onDownload = vi.fn();
+    const off = view({ ...installedWith(newer()), settings: OFF, onDownload });
+    expect(off).toContain(button);
+    expect(text(off)).toContain("Version 1.3.0 is available.");
+    expect(view({ ...installedWith(newer()), settings: ON, onDownload })).not.toContain(button);
+    expect(view({ ...installedWith(newer({ forThisCopy: false })), settings: OFF, onDownload })).not.toContain(button);
+    for (const download of ["downloading", "bad", "failed", "disk", "ready"] as const) {
+      expect(view({ ...installedWith(newer({ download })), settings: OFF, onDownload })).not.toContain(button);
+    }
+    // A phone sees the words and no control.
+    expect(view({ status: { ...INSTALLED, lastCheck: newer(), canControl: false }, settings: OFF, onDownload })).not.toContain(button);
   });
 
   it("none found", () => {
@@ -313,6 +352,17 @@ describe("the check runs only on a click", () => {
     const answer = methodSamples["update.check"].result;
     expect(await session.checkForUpdates()).toBeNull();
     expect(b.server.calls("update.check").length).toBe(1);
+    const update = store.getState().update;
+    expect(update !== undefined && update !== "na" && update.lastCheck).toEqual(answer);
+  });
+
+  it("the Download click sends update.download once and shows the answer", async () => {
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    const answer = methodSamples["update.download"].result;
+    expect(b.server.calls("update.download")).toEqual([]);
+    expect(await session.downloadUpdate()).toBeNull();
+    expect(b.server.calls("update.download").length).toBe(1);
     const update = store.getState().update;
     expect(update !== undefined && update !== "na" && update.lastCheck).toEqual(answer);
   });

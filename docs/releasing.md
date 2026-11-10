@@ -98,10 +98,34 @@ versions. The reads follow at most 5 redirects, take at most a 64 KiB list
 and a 1 KiB signature, wait 30 seconds for an answer and 60 seconds for
 the list and signature together. The copy adds no query string and sends
 no cookies; a redirect's own query, as GitHub's signed asset links carry,
-is followed as given. A
-newer version is shown with a link to the release page; nothing is
-downloaded or installed, and Update and restart answers that this
-installed copy cannot update itself yet. A copy whose version is not a
+is followed as given.
+
+A newer version with a file for this copy is downloaded into
+`<data dir>/updates/<version>/`. The signed list and its signature are
+written first, byte for byte. The artifact then comes from
+`<release page>/download/v<version>/<file>` into a `.part` file that is
+counted and hashed as it arrives. The read stops the moment it passes the
+listed size, and the file is renamed only after its size and SHA-512 match
+the list. The read keeps the check's rules (https, at most 5 redirects, no
+cookies, 30 seconds of silence at most) and also gives up on a server that
+sends less than 256 KiB in each successive five-minute window. Free space
+is checked before the request. A folder holding a `.part` or missing its
+list is deleted, never resumed. A complete folder counts as ready only
+after it checks out again and holds the same signed list the check has just
+verified; a version folder or a file that is a link is never trusted. On
+Windows the final rename is retried for up to 2 seconds while another
+program holds the file. With **Check for updates automatically** on, the
+download starts by itself. One that could not finish is tried again at the
+next hourly check. One that did not match the signed list is not fetched
+again by itself: it is tried again when the signed list changes, when the
+person uses Check for updates, or on Download. With the switch off,
+Settings offers a Download button. Turning the switch off stops a download
+and deletes downloaded versions, and a newer signed list deletes the folders
+of older versions. Nothing installs yet: Settings says the version is
+downloaded and checked and links the release page, and Update and restart
+answers that this installed copy cannot update itself yet.
+
+A copy whose version is not a
 plain release (`0.0.0-dev`) is a development build and does not check; a
 build with no trusted release key makes no request and says so.
 `GATES_LOCAL_UPDATE_FEED` points the check at another https release page.
@@ -116,6 +140,8 @@ own signed lists. `pnpm release:artifact` refuses to run while
 `GATES_LOCAL_TEST_BUILD` is set, so a test build never becomes a release
 artifact. `apps/desktop/scripts/packaged-installed-check.ts` drives a test
 build and a plain build through every Updates state.
+`apps/desktop/scripts/packaged-installed-download.ts` drives a test build
+through each download state and counts the requests its feed answers.
 
 ### Linux checkpoint, 2026-11-09
 

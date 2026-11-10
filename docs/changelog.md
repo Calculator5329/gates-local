@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-10: An installed copy downloads a newer version and checks it
+
+- When an installed copy finds a newer version with a file for it, it now
+  downloads that file into `updates/<version>/` in the data folder and
+  checks it against the signed release list: the size, then the SHA-512.
+  Settings, General, Updates shows the progress ("Downloading version 1.3.0
+  (12 of 92 MB). You can keep chatting.") and then says the version is
+  downloaded and checked. Nothing installs yet; Update and restart still
+  answers that this copy cannot update itself.
+- With **Check for updates automatically** on, the download starts by
+  itself. With it off, Settings offers a **Download** button. Turning the
+  switch off stops a download and deletes downloaded versions. A phone
+  using the app over the network cannot start a download.
+- A download that could not finish is tried again at the next hourly check.
+  One that did not match the signed list is deleted and is not fetched
+  again by itself: Settings says so, and Check for updates, Download, or a
+  changed release list tries again.
+- When there is not enough free space, nothing is requested and Settings
+  names the volume, the space needed and the space free.
+- A downloaded version is trusted only after it checks out again and holds
+  the same signed list the last check verified. A half-written download is
+  deleted, never resumed. A version folder or program file that is a link
+  is never trusted, and deleting one removes the link only.
+- The read is bounded: https only, at most 5 redirects, no cookies, 30
+  seconds of silence at most, a stop the moment the file passes its listed
+  size, and a stop for a server sending less than 256 KiB in each
+  successive five-minute window.
+- Measured on native Windows 11: the folder's unit tests passed in 10 of 10
+  runs, and the final rename of a freshly written 92 MB program file was
+  refused 0 times in 20 (it is retried for up to 2 seconds if another
+  program holds the file).
+- Known limits: the packaged test build was driven through each download
+  state on Linux only, and before the last two small changes to what the
+  app remembers after a bad download; never read against the real release
+  page, which has no signed list yet; a local write error or a missing
+  release file says "Check your connection."; downloaded versions are not
+  installed by anything yet.
+
 ## 2026-11-09: Your chats are copied before a new version upgrades them
 
 - When a newer Gates Local opens a chat database made by an older version,

@@ -266,7 +266,7 @@ L1 names the copy **"Installed copy"**. It replaces "Not a git clone" (SettingsU
 | 404 | "No release list was found on the release page. *[Gates Local will try again in an hour.]*" |
 | bad signature | "The release list did not pass its signature check, so Gates Local ignored it. Nothing was downloaded. If this keeps happening, download the latest version from the release page." + link |
 | downloading | "Downloading version <new> (<a> of <b> MB). You can keep chatting." |
-| bad download | "The download of version <new> did not match the signed release list, so it was deleted. *[It will be downloaded again at the next check.]*" |
+| bad download | "The download of version <new> did not match the signed release list, so it was deleted. *[Use Check for updates to try again.]*" |
 | disk | "Not enough free space on <volume> for version <new> (needs <n> MB, <m> MB free). Free some space, then use Check for updates." |
 | ready, Linux | "Restart to update" — "Gates Local will close, update and reopen." |
 | ready, Windows | "Restart to update" — "If version <new> does not start, Gates Local will not go back by itself. To go back, run <path>." (or "…download version <current> from <release page link>.") |

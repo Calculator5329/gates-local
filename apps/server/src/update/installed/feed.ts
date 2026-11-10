@@ -1,12 +1,17 @@
 // The one network read an installed copy makes for updates: a bounded GET
-// of the release list or its signature (contract: the signed version list
-// of a release, docs/releasing.md).
+// of the release list, its signature (contract: the signed version list of a
+// release, docs/releasing.md) or the artifact the list names.
 //
 // https only, every redirect too, at most FEED_LIMITS.redirects of them. The
 // copy adds no query string (a redirect's own query is followed as given:
 // GitHub's asset links are signed that way), sends no cookie and keeps none,
 // and names itself "Gates-Local" without a version. A body over its limit is dropped
 // as soon as it is seen. A test build alone may read a loopback http feed.
+//
+// streamGet is the read; what happens to a 200 body is the caller's Body.
+// boundedGet keeps a small body in memory (the list and its signature);
+// download.ts streams the artifact to disk through the same redirects,
+// refusals and timeouts.
 import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 
@@ -31,6 +36,24 @@ export type Fetched =
 /** One bounded read of url, never more than maxBytes of body. */
 export type Get = (url: URL, maxBytes: number, signal: AbortSignal) => Promise<Fetched>;
 
+/**
+ * What a read does with a 200 body. Any result one of these returns ends the
+ * read there and hangs up, so the rest of the body is never received.
+ */
+export interface Body<T> {
+  /** The declared Content-Length, before a byte is read. */
+  readonly declared?: (length: number) => T | undefined;
+  /** Each chunk in order. While a returned promise is pending the response is paused. */
+  readonly chunk: (bytes: Buffer) => T | undefined | Promise<T | undefined>;
+  /** The whole body arrived. */
+  readonly end: () => T;
+}
+
+export type Streamed<T> = T | { readonly kind: "missing" } | { readonly kind: "failed"; readonly detail: string };
+
+/** One read of url whose 200 body goes to body. */
+export type Stream = <T>(url: URL, body: Body<T>, signal: AbortSignal) => Promise<Streamed<T>>;
+
 export interface GetOptions {
   /** Test builds only: also read http from 127.0.0.1, localhost or [::1]. */
   readonly allowLoopbackHttp?: boolean;
@@ -48,36 +71,58 @@ export function refusedAddress(url: URL, allowLoopbackHttp: boolean): string | n
   return `a ${url.protocol} address (only https is read)`;
 }
 
-type Answer = Fetched | { readonly kind: "redirect"; readonly location: string };
+type Answer<T> = Streamed<T> | { readonly kind: "redirect"; readonly location: string };
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-function once(url: URL, maxBytes: number, idleMs: number, signal: AbortSignal): Promise<Answer> {
-  return new Promise<Answer>((resolve) => {
-    const failed = (detail: string) => { clearTimeout(headers); resolve({ kind: "failed", detail }); };
+function once<T>(url: URL, body: Body<T>, idleMs: number, signal: AbortSignal): Promise<Answer<T>> {
+  return new Promise<Answer<T>>((resolve) => {
+    let settled = false;
+    const settle = (answer: Answer<T>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(headers);
+      resolve(answer);
+    };
+    const failed = (detail: string) => settle({ kind: "failed", detail });
+    // A body this read will not use is never read: hang up, so a server
+    // that keeps streaming it cannot hold the connection open.
+    const hangUp = (answer: Answer<T>) => { request.destroy(); settle(answer); };
     const silent = () => new Error(`no answer for ${Math.round(idleMs / 1000)} seconds`);
     const read = (res: IncomingMessage) => {
       clearTimeout(headers);
       const status = res.statusCode ?? 0;
-      // A body this read will not use is never read: hang up, so a server
-      // that keeps streaming it cannot hold the connection open.
       if (REDIRECTS.has(status)) {
         const location = res.headers.location;
-        request.destroy();
-        resolve(location === undefined ? { kind: "failed", detail: `HTTP ${status} without a location` } : { kind: "redirect", location });
+        hangUp(location === undefined ? { kind: "failed", detail: `HTTP ${status} without a location` } : { kind: "redirect", location });
         return;
       }
-      if (status === 404) { request.destroy(); resolve({ kind: "missing" }); return; }
-      if (status !== 200) { request.destroy(); failed(`HTTP ${status}`); return; }
+      if (status === 404) { hangUp({ kind: "missing" }); return; }
+      if (status !== 200) { hangUp({ kind: "failed", detail: `HTTP ${status}` }); return; }
       const declared = Number(res.headers["content-length"]);
-      if (Number.isFinite(declared) && declared > maxBytes) { request.destroy(); resolve({ kind: "too-large" }); return; }
-      const chunks: Buffer[] = [];
-      let size = 0;
+      const early = Number.isFinite(declared) ? body.declared?.(declared) : undefined;
+      if (early !== undefined) { hangUp(early); return; }
+      // The chunk after a pending write waits for it; end waits for the last one.
+      let pending: Promise<void> = Promise.resolve();
       res.on("data", (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > maxBytes) { request.destroy(); resolve({ kind: "too-large" }); return; }
-        chunks.push(chunk);
+        if (settled) return;
+        let taken: T | undefined | Promise<T | undefined>;
+        try { taken = body.chunk(chunk); }
+        catch (error) { hangUp({ kind: "failed", detail: message(error) }); return; }
+        if (!(taken instanceof Promise)) { if (taken !== undefined) hangUp(taken); return; }
+        res.pause();
+        pending = taken.then(
+          (result) => { if (result !== undefined) hangUp(result); else if (!settled) res.resume(); },
+          (error: unknown) => hangUp({ kind: "failed", detail: message(error) }),
+        );
       });
-      res.on("end", () => resolve({ kind: "ok", bytes: Buffer.concat(chunks) }));
+      res.on("end", () => {
+        void pending.then(() => {
+          if (settled) return;
+          try { settle(body.end()); }
+          catch (error) { failed(message(error)); }
+        });
+      });
       res.on("error", (error) => failed(error.message));
       res.on("close", () => { if (!res.complete) failed("the connection closed before the whole file arrived"); });
     };
@@ -89,8 +134,8 @@ function once(url: URL, maxBytes: number, idleMs: number, signal: AbortSignal): 
     const headers = setTimeout(() => request.destroy(silent()), idleMs);
     request.on("timeout", () => request.destroy(silent()));
     request.on("error", (error) => {
-      const reason: unknown = signal.reason;
-      failed(signal.aborted && reason instanceof Error ? reason.message : error.message);
+      const reason: unknown = signal.aborted ? signal.reason : undefined;
+      failed(reason instanceof Error ? reason.message : error.message);
     });
     request.end();
   });
@@ -98,20 +143,47 @@ function once(url: URL, maxBytes: number, idleMs: number, signal: AbortSignal): 
 
 /** The real reader: node's http(s), no proxy, no cookie jar, no decompression.
  *  The total time is the caller's signal: checkInstalled gives the list and
- *  its signature one FEED_LIMITS.totalMs deadline between them. */
-export function boundedGet(options: GetOptions = {}): Get {
+ *  its signature one FEED_LIMITS.totalMs deadline between them; an artifact
+ *  has none (download.ts bounds its rate instead). */
+export function streamGet(options: GetOptions = {}): Stream {
   const idleMs = options.idleMs ?? FEED_LIMITS.idleMs;
   const allowLoopbackHttp = options.allowLoopbackHttp === true;
-  return async (start, maxBytes, signal) => {
+  return async <T>(start: URL, body: Body<T>, signal: AbortSignal): Promise<Streamed<T>> => {
     let url = start;
     for (let hop = 0; ; hop++) {
       const refused = refusedAddress(url, allowLoopbackHttp);
       if (refused !== null) return { kind: "failed", detail: `refused ${refused}` };
-      const answer = await once(url, maxBytes, idleMs, signal);
-      if (answer.kind !== "redirect") return answer;
+      const answer: Answer<T> = await once(url, body, idleMs, signal);
+      if (!isRedirect(answer)) return answer;
       if (hop >= FEED_LIMITS.redirects) return { kind: "failed", detail: `more than ${FEED_LIMITS.redirects} redirects` };
       try { url = new URL(answer.location, url); }
       catch { return { kind: "failed", detail: "a redirect to something that is not an address" }; }
     }
   };
+}
+
+function isRedirect<T>(answer: Answer<T>): answer is { readonly kind: "redirect"; readonly location: string } {
+  return typeof answer === "object" && answer !== null && "kind" in answer && answer.kind === "redirect" && "location" in answer;
+}
+
+/** A body kept in memory, dropped the moment it passes maxBytes. */
+function inMemory(maxBytes: number): Body<Fetched> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  return {
+    declared: (length) => (length > maxBytes ? { kind: "too-large" } : undefined),
+    chunk: (bytes) => {
+      size += bytes.length;
+      if (size > maxBytes) return { kind: "too-large" };
+      chunks.push(bytes);
+      return undefined;
+    },
+    end: () => ({ kind: "ok", bytes: Buffer.concat(chunks) }),
+  };
+}
+
+/** The list and signature reader: streamGet into memory. */
+export function boundedGet(options: GetOptions = {}): Get {
+  const stream = streamGet(options);
+  return (url, maxBytes, signal) => stream(url, inMemory(maxBytes), signal);
 }
