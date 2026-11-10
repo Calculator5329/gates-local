@@ -248,6 +248,12 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* measure abrupt-close recovery; evaluate a synchronous text mirror without copying large attachments into it.
 - [ ] <!-- workspace:id=work:91fb9dbf-7ca0-5d18-be0b-47ef2b68f1a3 --> Repeat the prepared-bundle attachment benchmark after the per-chat draft change; the earlier 90 MiB result predates its slot layout.
       *Accept:* retain submitted bytes and recovered text/images for text edits and chat switches using the current bundle.
+- [ ] <!-- workspace:id=work:118b8438-49e8-5f79-b8fb-848f9ac88ef7 --> A late confirmation of a queued message being edited ends the edit without giving the draft a new identity (`confirmCopy` in `session/chat.ts`), so a dictation or paste still arriving lands in the now-standalone draft.
+      *Accept:* late-confirm an edited queued row while a dictation or paste is held, and the late words are dropped or kept by a recorded rule, with a test.
+- [ ] <!-- workspace:id=work:a4f6ff07-e57c-5c71-9c16-1063e2008ae7 --> Erasing the box and retyping identical words while a first send's chat is being created clears the retyped copy when the send settles (`send` in `session/chat.ts`, queued and ready paths).
+      *Accept:* hold the create, retype the same words, settle it, and keep the retyped draft.
+- [ ] <!-- workspace:id=work:f30c4c8a-8cad-5d2f-ad96-d65c7fa0cda5 --> New thread pressed on the new-chat screen drops an image paste still being read; before per-chat drafts an image read had no such guard.
+      *Accept:* decide whether a pending image survives New thread on the same screen; `paste-desktop.spec.ts` fixes only the file-path case.
 
 *Replies, rendering and shutdown, review follow-ups:*
 
@@ -282,8 +288,16 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Done 2026-11-09:* “Open long threads at their last turns and keep saved replies out of the store”; typing now runs zero store selectors after the per-chat draft change.
 - [x] <!-- workspace:id=work:42f3dee9-3ced-515a-8271-14de5ffc56c6 --> Send retains its pre-load fit verdict until a fresh post-load report arrives.
       *Done 2026-11-09:* “Keep Send steady when a picked model finishes loading”; the formerly intermittent toolbar journey passed 60 repetitions with fakes.
-- [ ] <!-- workspace:id=work:f58122ba-b60b-50cf-93a6-a8654450b80f --> Whole-thread backfill does more work despite the faster first screen: the recorded 2,000-message comparison rose from 643 to 2,989 ms CPU task time.
-      *Accept:* profile `Timeline` backfill and compare both first-screen and `-mounted` rows in one job before claiming a total-work improvement.
+- [x] <!-- workspace:id=work:f58122ba-b60b-50cf-93a6-a8654450b80f --> Whole-thread backfill does more work despite the faster first screen: the recorded 2,000-message comparison rose from 643 to 2,989 ms CPU task time.
+      *Done 2026-11-09:* “Mount a long thread's older turns in a third of the time”; one job compared first-screen and `-mounted` rows: whole mount 3,012 to 953 ms CPU task time, first screen unchanged within noise, no row slower.
+- [ ] <!-- workspace:id=work:e10ac9e4-a55f-592f-aa2b-39d37d3e76e2 --> Whole-thread mount of a 2,000-turn thread still costs about 950 ms of tasks, above the 643 ms recorded before long threads opened at their last turns; one trace reading puts most of the rest in React rendering turns above the view.
+      *Accept:* attribute the remainder in the perf comparison, then compare mounting on demand (scroll, Find) against always mounting before choosing.
+- [ ] <!-- workspace:id=work:d2b26db4-2611-5eba-bf16-66baa081190e --> The history-load error line sits one turn's gap below the last turn since turns carry their own gap (it was flush); derived from the rules in `styles.css`, not looked at in a browser.
+      *Accept:* view it on wide, narrow and touch screens and either keep the gap or restore the flush position without a rule that reads the previous turn.
+- [ ] <!-- workspace:id=work:e5acc555-615d-5f42-8267-a8d279b29ad3 --> Older turns mounted above the view no longer fade in; a turn mounted just above the top edge can be partly visible when it appears.
+      *Accept:* scroll up fast into the backfill in a browser and decide whether the missing fade is noticeable.
+- [ ] <!-- workspace:id=work:f4058164-fc2d-505b-aeba-850140f41156 --> Startup CSS is 13.022 KiB gzip against its 13 KiB soft target after the per-turn gap rules (12.979 before).
+      *Accept:* the build prints no startup CSS warning, by trimming rules or by a recorded decision to move the target.
 - [ ] <!-- workspace:id=work:2c2cf019-23eb-5b40-ad63-bc82721ccf01 --> Saved replies that streamed during this visit keep six `useStore` subscriptions for the timeline's lifetime in `LiveReply`.
       *Accept:* finish many replies in one open chat and show that retained subscriptions do not grow per saved reply.
 - [ ] <!-- workspace:id=work:a2661a16-a279-5107-88aa-7ec500defce8 --> `markdown.tsx` runs `matchMedia` for every code block/table through `useEdges`.
@@ -601,8 +615,14 @@ RS-03 remains dropped.
       *Accept:* representative reconnect/queue tests include server-listed work so active-turn regressions cannot pass through an empty fixture.
 - [ ] <!-- workspace:id=work:f3885671-23fc-5569-82cf-ec66b22e2ee6 --> The long-thread unit scroll model does not model browser anchoring independently; it cannot distinguish a content offset from a view offset.
       *Accept:* either offset bug fails the model, with the real browser drift journey retained as the position proof.
-- [ ] <!-- workspace:id=work:1fb09f37-2be1-5c5d-bf0a-260f2031b1b1 --> The one unexplained immediate-reload paste loss was not reproduced by later 20-repeat runs; IndexedDB unload remains best effort.
+- [ ] <!-- workspace:id=work:1fb09f37-2be1-5c5d-bf0a-260f2031b1b1 --> The unexplained immediate-reload paste loss (`paste.spec.ts:67`, last typed character missing) was seen a second time on 2026-11-09 and not reproduced in 50 further runs across two hosts; IndexedDB unload remains best effort.
       *Accept:* retain a reproducible lifecycle trace if it recurs and distinguish an aborted pending write from a lost committed write.
+- [ ] <!-- workspace:id=work:20af668e-d8f2-5996-9db1-8be1360d9370 --> The desktop paste journey (`test/e2e/paste-desktop.spec.ts`) needs a display and was outside the 14 browser specs run for the per-chat drafts change, which changed the paste guard; it went red on main for one landing.
+      *Accept:* a change to `paste.ts`, `drafts.ts`, `Composer.tsx` or `apps/desktop/src/native-paste.ts` cannot land without that spec having run.
+- [ ] <!-- workspace:id=work:f8500bc0-43c3-57ae-9bcd-c6807bc8a779 --> The stop-note mark test renders saved and user turns only (`thread-identity.test.ts`); a live reply's `noted` class and the `styles.css` rule that reads it are untested.
+      *Accept:* read the gap under a stop note in a browser for a reply kept while its last words are still appearing.
+- [ ] <!-- workspace:id=work:78a260ae-f934-5e92-8357-0f4dcc13926a --> The gap between timeline neighbours was measured for the per-turn gap change by a staging-only spec (four screen profiles, 12 and 2,000 turns, four stop-note states); nothing in the suite fails when a spacing rule changes a gap.
+      *Accept:* keep one fast gap journey, or record that spacing changes are measured by hand before landing.
 - [ ] <!-- workspace:id=work:3d565764-5f08-5010-9dd5-4ff0df759b71 --> Replace routine five-second journey warnings with the whole-suite budget; `budget-reporter.ts` still prints both after the suite trim.
       *Accept:* one complete-run report identifies budget overruns and expensive setup without per-journey warning noise.
 
