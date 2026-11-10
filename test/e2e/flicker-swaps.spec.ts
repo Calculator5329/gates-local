@@ -414,7 +414,7 @@ for (const width of [1440, 360]) {
 
     test("Download finishes in place without briefly offering Download again", async ({ page, open }) => {
       const heldFits: Array<() => void> = [];
-      let holdingFits = true;
+      let holdingFits = false;
       const releaseFits = () => {
         holdingFits = false;
         for (const deliver of heldFits.splice(0)) deliver();
@@ -440,11 +440,13 @@ for (const width of [1440, 360]) {
       await stack.scenario("models", { pullTickMs: 250, pullChunkBytes: 256 * 1024 * 1024 });
       const selector = '.dlrow[data-cat="qwen3.5:4b"]';
       const row = page.locator(selector);
-      await row.getByRole("button", { name: "Download", exact: true }).click();
-      await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
-      releaseFits();
+      await expect(row).toBeVisible();
       const count = await page.locator(".dlrow").count();
       await expect(page.locator(".dlrow .vl")).toHaveCount(count);
+      // Arm before starting: completion can outrun any awaited setup afterward.
+      holdingFits = true;
+      await row.getByRole("button", { name: "Download", exact: true }).click();
+      await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
       await row.scrollIntoViewIfNeeded();
       const geometry = () => page.locator(".mp").evaluate(root => {
         const rows = [...root.querySelectorAll<HTMLElement>(".dlrow")].map(node => {
@@ -458,7 +460,6 @@ for (const width of [1440, 360]) {
         return { rows, scroll };
       });
       const before = await geometry();
-      holdingFits = true;
       await mark(row.locator(".dl-v"), "download-verdict");
       const original = await row.elementHandle();
       if (!original) throw new Error("The download row must exist before completion");
