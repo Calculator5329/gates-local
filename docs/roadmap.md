@@ -35,15 +35,17 @@ Another tab's replacement or clear cannot mix its images with the last writer's
 words. Recovery probes use fresh module/store state, including the held-write
 probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
-- [ ] Download rows: say Ollama is stopped instead of Rechecking when the runtime is down.
+- [ ] <!-- workspace:id=work:4a67ae55-fe9f-548f-8749-1318755bce48 --> Download rows: say Ollama is stopped instead of Rechecking when the runtime is down.
 
 - [ ] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes
 
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
 
-Follow-up: Ignore pasted images that finish loading after the draft is replaced.
-Follow-up: Remove a confirmed retry from background replies so it no longer looks active.
+- [x] <!-- workspace:id=work:ba9367e2-4e63-5198-81ec-5dbc61eff392 --> Ignore pasted images that finish loading after the draft is replaced.
+      *Done 2026-11-09:* “Give each chat its own unsent draft, held outside the application store” checks the source slot's replacement identity.
+- [x] <!-- workspace:id=work:6d2c35d9-1890-5227-9084-041c804362af --> Remove a confirmed retry from background replies so it no longer looks active.
+      *Done 2026-11-09:* “Hold every running reply in one turn map with one reducer” replaces the source chat's turn in the map.
 Follow-up (TC-02): Add a server-side size limit or eligibility check before hover-preloading very large thread histories.
 
 *In progress 2026-11-08:* Clipboard buttons share a fallback, truthful feedback
@@ -67,11 +69,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* a malformed message is refused at the boundary with a named
       error; round-trip tests cover every channel.
       *Done 2026-11-07:* 7fddd5d and 8741597; named decode errors and the wire-mirrors test.
-- [x] <!-- workspace:id=work:92903769-ac74-5c41-8bf8-51fcebae0efb --> Thread store: SQLite WAL, completed messages persisted, token deltas in
-      memory only.
-      *Accept:* kill the server mid-stream; after restart the thread has every
-      completed message and no partial one.
-      *Done 2026-11-07:* 5b475b9; the SIGKILL accept test is in the store suite.
+- [x] <!-- workspace:id=work:92903769-ac74-5c41-8bf8-51fcebae0efb --> Thread store: SQLite WAL, completed messages and interrupted replies persisted.
+      *Accept:* killing the server mid-stream keeps completed messages and the last saved partial, marked interrupted.
+      *Updated 2026-11-09:* “Keep the words of a reply that is stopped, fails or is cut off” writes the first words, then at most once a second.
 - [ ] <!-- workspace:id=work:d33c371c-75b7-5e3a-b211-091795aba823 --> Runtime discovery: reuse a healthy Ollama; start an app-owned one when
       none answers; never adopt or stop a service the app did not start.
       *Accept:* `pnpm verify:chat` covers existing, stopped, missing and
@@ -111,7 +111,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       scale are provisional defaults while icon/bar treatments are chosen.
       The broader visual-direction item stays open.
 
-- [ ] Picker: cancel a pending row or size pick when the open thread changes,
+- [ ] <!-- workspace:id=work:4b3b6776-404e-5fdf-b306-f0908c5e2f23 --> Picker: cancel a pending row or size pick when the open thread changes,
       so Ctrl+N during a memory check does not apply it to the new chat.
 
 - [x] <!-- workspace:id=work:47a64e0b-8d3e-5763-8022-def80b846256 --> Packaged renderer Origin: measure what Origin the `file://` renderer's
@@ -135,7 +135,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       `gates-local://app` with 101 and refused all four foreign origins with
       403. This was a non-interactive SSH run; desktop launch and SmartScreen
       remain unobserved.
-- [ ] First-run model pick on real models: `chooseModel()` takes the smallest
+- [ ] <!-- workspace:id=work:2150ced9-ffda-51fd-837d-af03704fad1b --> First-run model pick on real models: `chooseModel()` takes the smallest
       installed model, so on this machine the first run recommends
       `nomic-embed-text` (an embedding model, `/api/show` capabilities
       `["embedding"]`) as "the best model for your GPU", and `verdictOf`
@@ -143,55 +143,43 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* an embedding-only model is never picked or offered for chat;
       the pick is the best installed chat model that fits; a context-limit
       refusal names the limit; an E2E with an embedding model installed.
-- [ ] App-owned models store: `/var/lib/ollama` is read-only to this user,
+- [ ] <!-- workspace:id=work:9de15378-a1cb-5428-99e8-2debc34026ec --> App-owned models store: `/var/lib/ollama` is read-only to this user,
       so an app-owned Ollama cannot see or pull into the system models.
       Pick `OLLAMA_MODELS` for the owned server and show it in settings.
       *Accept:* with the system Ollama stopped, the owned server pulls a
       model into the app folder and the picker lists it.
-- [ ] `AppErrorCode` (turn-active, runtime-not-ready, wont-fit, cancelled,
+- [ ] <!-- workspace:id=work:3eab9e6e-bae9-57c3-bd28-a5a5b278448d --> `AppErrorCode` (turn-active, runtime-not-ready, wont-fit, cancelled,
       shutting-down) moves from `apps/server/src/app.ts` into
       `packages/contracts` so the client switches on a typed code.
-- [ ] Fit with two loaded models: `/api/ps` reported 5.92 GB where the
+- [ ] <!-- workspace:id=work:e5f54fe9-4806-5e9f-b84f-c11253a2ddb3 --> Fit with two loaded models: `/api/ps` reported 5.92 GB where the
       runner held 6926 MiB (e54cafc). Measure the two-model case before the
       fit check trusts `/api/ps` for more than one runner.
-- [ ] Fit gate when the GPU is unreadable: today a `gpu-unreadable` report
-      blocks the send. Decide block or warn from a measured failure mode,
-      and put the reason in the refusal text.
-- [ ] Owned Ollama port: 11435 is fixed; take it from an environment knob
+- [x] <!-- workspace:id=work:e0b86596-5c8e-5d82-909d-68f5160dd088 --> Fit gate when the GPU is unreadable: refuse a load with the shared reading's reason, also shown on a refused send.
+      *Done 2026-11-09:* “One truth about the GPU: a failed reading is not "no GPU"” distinguishes confirmed absence from an unreadable device.
+- [ ] <!-- workspace:id=work:8d55a4c7-87fa-5e11-8871-8e74319b3a25 --> Owned Ollama port: 11435 is fixed; take it from an environment knob
       when 11435 is busy with another service.
-- [ ] Stopped replies (turns/queue lane, from the runtime-fix04 review,
-      R3-02 and R4-06): a reply cut by a runtime switch or a preemption is
-      saved with its text and thinking, but nothing stored marks it stopped
-      (the stopped code is only on the chat event), and its tool steps are
-      not saved. `endHalted` in `apps/server/src/app.ts`.
-      *Accept:* a reloaded thread shows the cut reply as stopped, with the
-      tool steps it had sent.
-- [ ] Shutdown order (turns/queue lane, runtime-fix04 review R2-03):
-      `apps/server/src/main.ts` exits by force after 2.5 s, but
-      `image.close()` can wait up to 15 s for a ComfyUI stop already under
-      way, and the app-owned Ollama is stopped only after it, so a slow
-      ComfyUI stop skips the Ollama cleanup. Run that cleanup first or
-      alongside, behind a shutdown sequence a test can drive.
-      *Accept:* with a ComfyUI stop held, the owned Ollama is still
-      stopped before the forced exit.
-- [ ] Cancel a turn that waits for the GPU: a turn queued behind an image
+- [x] <!-- workspace:id=work:6038c5bb-f547-54c0-8048-5106e6b2d528 --> Stopped replies retain text, thinking, tool steps and an interrupted marker after reload.
+      *Done 2026-11-09:* “Keep the words of a reply that is stopped, fails or is cut off” routes endings through `runTurn`'s final save in `apps/server/src/app.ts`.
+- [x] <!-- workspace:id=work:74ac98c1-70c4-54a8-b7f8-efe9a7fa546e --> Shutdown stops the owned Ollama even when ComfyUI's close stalls past the hard deadline.
+      *Done 2026-11-09:* “Recover from a render crash, and quit without leaving anything running” adds the deadline stop in `apps/server/src/shutdown.ts`.
+- [ ] <!-- workspace:id=work:cf0d95d4-92c3-5e83-9cb9-e618033d1682 --> Cancel a turn that waits for the GPU: a turn queued behind an image
       job holds no claim yet, and Stop only aborts once the claim lands.
       *Accept:* a test queues a turn behind a held image claim, presses
       Stop, and the turn ends cancelled with the image job untouched.
-- [ ] Windows process trees: `child.kill()` leaves Ollama's runner
+- [ ] <!-- workspace:id=work:8775fff1-7abd-5633-b650-d73e80993fc9 --> Windows process trees: `child.kill()` leaves Ollama's runner
       children alive on Windows. Kill the tree (`taskkill /T`) through the
       runtime's spawn seam. *Accept:* on the Windows test machine, stopping the app-owned
       Ollama leaves no `ollama*.exe` process.
-- [ ] Thinking pill follows the model: add `ModelInfo.capabilities` from
+- [ ] <!-- workspace:id=work:559de703-5cf5-5bec-948c-b3ebdfb333ba --> Thinking pill follows the model: add `ModelInfo.capabilities` from
       `/api/show` and grey the pill out for a model without "thinking"
       (the server already drops `think` for those, 24877a4).
       *Accept:* picking gemma3 greys the pill; picking qwen3.5 lights it.
-- [ ] Tools default reaches the turn (439a230): an E2E that sets Tools off
+- [ ] <!-- workspace:id=work:c958fcf0-2eab-5488-8b83-32a071fe311e --> Tools default reaches the turn (439a230): an E2E that sets Tools off
       in Settings and sees a turn with no tool definitions in the request.
-- [x] `think` on a model without thinking: run 2026-11-07 on the real
+- [x] <!-- workspace:id=work:920bf6fb-58cb-5846-9c98-f204d89a3fef --> `think` on a model without thinking: run 2026-11-07 on the real
       runtime, HTTP 400 `"gemma3-abliterated:12b-q4" does not support
       thinking` in 18 ms, nothing loaded (evidence log).
-- [ ] A shell over its cap must not look like a low-memory desktop: every
+- [ ] <!-- workspace:id=work:9b302caf-d3f3-5f92-96d4-e6f6cef20f87 --> A shell over its cap must not look like a low-memory desktop: every
       `gates-shell-*` scope that hits `MemoryMax=512M` ends with result
       oom-kill. Plasma's kded `oom_notifier` then tells the user "the system
       is low on memory" and names the scope. On 2026-11-07, `sandbox.test.ts`
@@ -204,7 +192,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* the cap test passes, the scope's unit result is not oom-kill,
       and a shell `python3 …; echo ok` that goes over the cap still reports the
       cap to the model.
-- [x] Source updates for a git clone: `pnpm run app-update` (`--check`,
+- [x] <!-- workspace:id=work:69296d23-d669-50f8-9b37-432855294a8a --> Source updates for a git clone: `pnpm run app-update` (`--check`,
       `--channel main|release`) and Settings › General › Updates (version,
       manual checks plus desktop automatic checks, "Update and restart" in the
       desktop app, the result on the next start).
@@ -233,6 +221,124 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       rollback, interrupted text after reopening and manual start were
       exercised. Closed-window gaps: 4.293 s success, 5.782 s rollback with
       cached offline dependencies and fake services. Windows remains unproven.
+
+*Drafts and queue, review follow-ups:*
+
+- [x] <!-- workspace:id=work:2f0d4982-c718-5fe4-bcfa-9631a94a4d7d --> Each chat has an independent draft outside the application store; queued edits keep a backup.
+      *Done 2026-11-09:* “Give each chat its own unsent draft, held outside the application store”; `drafts.ts`, `draft-persistence.ts` and `session/chat.ts` implement the rules in `docs/decisions.md`.
+- [ ] <!-- workspace:id=work:a1677d16-f15f-5a35-9874-003d0b744e7a --> Draft persistence: a later save in another window replaces the whole saved record in `draft-persistence.ts`.
+      *Accept:* edits in two windows recover both chats' latest words after reload, including attachments.
+- [ ] <!-- workspace:id=work:619330ac-ce2b-58ea-82fe-aaef1f191d9f --> Draft startup: words typed during the IndexedDB read are not saved until another change, because `watchDraft` subscribes after restoration.
+      *Accept:* hold the read, type, release it, then reload without another edit and recover the words.
+- [ ] <!-- workspace:id=work:9910392e-7d4f-5cba-8d20-4cc4ca593217 --> Draft recovery: one malformed queued row makes `recoverDraft` reject the record, including its saved chat drafts.
+      *Accept:* a bad queue row leaves valid queued rows and draft slots recoverable.
+- [ ] <!-- workspace:id=work:6a743bca-bfda-5ee9-97cd-6649910d248c --> Retrying `watchDraft` can replace an unchanged in-memory queue with the saved queue in `draft-persistence.ts`.
+      *Accept:* retry persistence with an existing queue and retain its current rows, order and held state.
+- [ ] <!-- workspace:id=work:65a5597f-86b6-5c56-9b4e-f676b095e755 --> Edit on a sent message replaces the current draft without a backup in `Thread.tsx`'s `UserBubble`.
+      *Accept:* editing and then cancelling or sending preserves the earlier unsent draft.
+- [ ] <!-- workspace:id=work:35f11948-721a-5afd-8730-2671bebfd1a9 --> Two overlapping first sends can leave a stray draft in the first created chat (`session/threads.ts`, `session/chat.ts`).
+      *Accept:* hold both creates, change the draft between sends, then settle them in either order without a duplicate unsent copy.
+- [ ] <!-- workspace:id=work:de7b1aba-7295-5561-807d-d618b11f8554 --> Editing another queued row can overwrite changed words left by a confirmed queued edit; `beginQueuedDraft` retains only the older backup.
+      *Accept:* late-confirm an edited row, change its words, then edit a second row and recover both unsent copies.
+- [ ] <!-- workspace:id=work:11662a8b-85ac-5fcb-9c6a-80c177a213f1 --> A refused send after its chat is deleted can recreate an orphan draft and a notice pointing to that deleted chat in `session/chat.ts`.
+      *Accept:* delete during a held send, refuse it, and offer a reachable recovery location without an orphan slot.
+- [ ] <!-- workspace:id=work:555f410f-d8e8-5be6-ad19-9ccc07f5d8d1 --> Changing chats makes `sameAttachments` rewrite the entire attachment payload even when image strings are unchanged.
+      *Accept:* repeat chat switches with large image drafts and measure bounded metadata writes without rewriting unchanged images.
+- [ ] <!-- workspace:id=work:71dfdff3-43f0-54d6-9e19-9253d76a3663 --> Draft close/reload durability remains best effort: pagehide only requests the active IndexedDB commit and cannot save a pending snapshot synchronously.
+      *Accept:* measure abrupt-close recovery; evaluate a synchronous text mirror without copying large attachments into it.
+- [ ] <!-- workspace:id=work:91fb9dbf-7ca0-5d18-be0b-47ef2b68f1a3 --> Repeat the prepared-bundle attachment benchmark after the per-chat draft change; the earlier 90 MiB result predates its slot layout.
+      *Accept:* retain submitted bytes and recovered text/images for text edits and chat switches using the current bundle.
+
+*Replies, rendering and shutdown, review follow-ups:*
+
+- [x] <!-- workspace:id=work:e3945bec-492b-5b34-baea-50a612c2fed7 --> A render crash offers retry and, after an app retry, window reload while drafts remain outside React.
+      *Done 2026-11-09:* “Recover from a render crash, and quit without leaving anything running”; `ErrorBoundary.tsx` and its recovery journey.
+- [ ] <!-- workspace:id=work:1124fbb6-fa9b-5562-8779-f5ee5f3623c9 --> Show the first error line in the render-failure notice in `ErrorBoundary.tsx`; currently the detail is available only through Copy error.
+      *Accept:* a thrown error's useful first line is visible and the full error still copies.
+- [ ] <!-- workspace:id=work:a2ea4a34-6420-5718-a0d3-d4a08b1f8416 --> Reload window in `ErrorBoundary.tsx` calls reload without requesting draft persistence first.
+      *Accept:* an app failure after an edit requests the pending save before reload and reports the same durability limits as ordinary reload.
+- [ ] <!-- workspace:id=work:885ecfb9-1cdd-508b-a9ba-ecb6606b94bc --> A shutdown deadline between `service.start()` and recording `owned` in `image/module.ts` can leave the app-started ComfyUI running.
+      *Accept:* hold post-start inspection, trigger the deadline, and stop only the unit started by this run.
+- [ ] <!-- workspace:id=work:6ef1ece0-46a2-5bf1-adee-9cb8e76aec0e --> Measure server stderr behavior when the desktop dies: `main.ts` writes to the parent's pipe without an error listener.
+      *Accept:* close that pipe during logging and confirm an EPIPE cannot interrupt owned-runtime cleanup.
+- [ ] <!-- workspace:id=work:7c28a0dd-6431-5775-971c-26536cc31d5c --> Prove shutdown with real Ollama runner descendants and real systemctl, plus native Windows process handling; current shutdown tests use throwaway children and service fakes.
+      *Accept:* success and deadline paths leave no owned runtime, and external services remain running.
+- [ ] <!-- workspace:id=work:edbcd7e6-9a5a-5027-909a-117b503a0db1 --> Other windows retain deleted or retry-replaced messages until history reload; `threadsChanged` refreshes the index and invalidates previews only.
+      *Accept:* delete or retry in one window and observe exact current history in another without reconnecting.
+- [ ] <!-- workspace:id=work:4df8720c-58e9-55c3-b9e4-2aa9ac841c98 --> Retry removes the earlier partial when the new question is admitted, even if the new reply fails before its first word (`app.ts`, `session/chat.ts`).
+      *Accept:* a pre-word retry failure leaves the earlier partial recoverable without duplicating the question.
+- [ ] <!-- workspace:id=work:27b69c41-ef51-5019-96ec-c65adf933f1a --> Retry after an image card asks again instead of replacing the unfinished turn because `retriedRows` requires every following row to be interrupted.
+      *Accept:* retry with an intervening image card preserves the image and produces the intended single question/reply pair.
+- [ ] <!-- workspace:id=work:02577bfa-238b-583c-94bd-82567ef200ff --> A tool reply stopped on its last token is saved interrupted, while a plain reply's completion wins the same race in `app.ts`.
+      *Accept:* exercise both endings through the real harness and confirm the chosen completion rule with every word and tool step retained.
+- [ ] <!-- workspace:id=work:16f8dbbf-4410-5e33-b411-0670ca2afc72 --> Overlapping thread/message deletes share a set marker; the first owning operation can clear it while another delete is pending in `app.ts`.
+      *Accept:* overlap two held deletes and keep new admission refused until both finish.
+- [ ] <!-- workspace:id=work:321b3581-f2ce-546d-bf51-ac5d435b3628 --> Rerun `test/e2e/real-smoke.spec.ts` after the interrupted-reply change; its real-model journey was updated but not exercised by that landing.
+      *Accept:* a real streamed reply, Stop and server restart retain the completed and interrupted messages as specified.
+
+*Long threads and model fit, review follow-ups:*
+
+- [x] <!-- workspace:id=work:ab0f2f0a-f777-5cd5-b288-87ca6dc420cb --> Open a long thread with its last 40 turns, then mount older turns in idle slices while holding the reader's place.
+      *Done 2026-11-09:* “Open long threads at their last turns and keep saved replies out of the store”; typing now runs zero store selectors after the per-chat draft change.
+- [x] <!-- workspace:id=work:42f3dee9-3ced-515a-8271-14de5ffc56c6 --> Send retains its pre-load fit verdict until a fresh post-load report arrives.
+      *Done 2026-11-09:* “Keep Send steady when a picked model finishes loading”; the formerly intermittent toolbar journey passed 60 repetitions with fakes.
+- [ ] <!-- workspace:id=work:f58122ba-b60b-50cf-93a6-a8654450b80f --> Whole-thread backfill does more work despite the faster first screen: the recorded 2,000-message comparison rose from 643 to 2,989 ms CPU task time.
+      *Accept:* profile `Timeline` backfill and compare both first-screen and `-mounted` rows in one job before claiming a total-work improvement.
+- [ ] <!-- workspace:id=work:2c2cf019-23eb-5b40-ad63-bc82721ccf01 --> Saved replies that streamed during this visit keep six `useStore` subscriptions for the timeline's lifetime in `LiveReply`.
+      *Accept:* finish many replies in one open chat and show that retained subscriptions do not grow per saved reply.
+- [ ] <!-- workspace:id=work:a2661a16-a279-5107-88aa-7ec500defce8 --> `markdown.tsx` runs `matchMedia` for every code block/table through `useEdges`.
+      *Accept:* a fully mounted long thread shares the viewport check while keeping overflow fades correct on narrow screens.
+- [ ] <!-- workspace:id=work:b896849a-9d90-5ca4-ac8a-5374c92450ae --> `AttachmentImages` subscribes separately to origin and token for every user turn with images.
+      *Accept:* mounting many image turns does not add two global-store subscriptions per turn, and authenticated images still load.
+- [ ] <!-- workspace:id=work:0048d992-d4e2-59fc-9601-419892c6d803 --> Browser Find during idle backfill cannot search turns not yet mounted by `Timeline`.
+      *Accept:* finding text in an older held-back turn reveals that turn before reporting no match.
+- [ ] <!-- workspace:id=work:13596ca1-006d-51df-8d92-4dcf423973ea --> Verify scroll position when top turns are deleted; current `long-thread.test.ts` checks surviving mounted rows, not the browser's view.
+      *Accept:* delete above a scrolled reader and keep the visible turn in place in the browser journey.
+- [ ] <!-- workspace:id=work:df5bb3b7-c7f9-5847-83f6-6ad00ec56329 --> Verify `Timeline` anchoring in Firefox/Safari, including its timer fallback when requestIdleCallback is absent.
+      *Accept:* bounded first mount, complete backfill and stable scroll position in each supported engine.
+- [ ] <!-- workspace:id=work:a912dd15-2545-5781-b854-126e49381517 --> Verify streaming while older turns backfill in the long-thread browser journey; current coverage separates those actions.
+      *Accept:* stream during backfill with no lost words, detached reader or broken follow-to-end behavior.
+- [ ] <!-- workspace:id=work:7b28fd7b-6671-5fa9-b038-5b9c3ddcc12b --> History can change a live reply's owner from a pending/answer key to its user-message key, remounting it in `Timeline`.
+      *Accept:* delay history across a live reply and retain the reply's DOM and disclosure state when history arrives.
+- [ ] <!-- workspace:id=work:f7b624dc-e9f9-5c72-a060-a135832be07d --> The stick-to-end ResizeObserver can undo a scroll assigned in an animation-frame callback before the scroll listener clears `stick`.
+      *Accept:* scroll from that callback during backfill and keep the requested reader position.
+- [ ] <!-- workspace:id=work:c4d16987-5cb6-53ea-8d23-e21803f52bab --> Deleting the user message between two replies can give both the same `reply:` owner key in `Timeline`.
+      *Accept:* remove that message and retain both replies with distinct keys and stable content.
+- [ ] <!-- workspace:id=work:6327fe6f-c001-5916-aa4c-7e9fdd2bad6c --> Image fit rereads free VRAM immediately after unload in `image/module.ts`; delayed reclamation can produce a false refusal.
+      *Accept:* hold VRAM reclamation after a successful unload and wait within a bounded read loop before refusing.
+- [ ] <!-- workspace:id=work:25435160-b10d-5f49-9f80-058db4ba46d0 --> `planLoad` has no explicit-versus-default context provenance, so it cannot safely offer a smaller default while respecting a deliberate context pick.
+      *Accept:* a default may step down to a fitting context while an explicit size retains its choice and truthful refusal.
+- [ ] <!-- workspace:id=work:df33005b-e223-558e-a587-00377eb43b07 --> Missing model context metadata is published as a 4k maximum by `runtime/models.ts`, so the picker/fit panel calls it the model's actual limit.
+      *Accept:* absent metadata is labelled unknown or conservative, and a reported maximum remains authoritative.
+- [ ] <!-- workspace:id=work:e942de90-b6a2-5aa3-94b1-266259c70f5e --> `parseGpuTotals` and GPU status use only the first NVIDIA card; a multi-card machine can receive advice for the wrong memory pool.
+      *Accept:* two-card fixtures and a real check agree on which card Ollama uses and whose occupants are counted.
+- [ ] <!-- workspace:id=work:7560b1d6-d0aa-572f-a938-b25ca0e59a8c --> CPU-only fit does not credit RAM another loaded model would release (`fitWithReadings`, `planLoad`).
+      *Accept:* measure available memory with a resident CPU model before adding reclaim credit, avoiding mmap double counting.
+- [ ] <!-- workspace:id=work:bc118a3f-f036-50f1-8bf1-91308c6d543b --> Confirmed NVIDIA absence is reread on every check in `readNvidiaSmi`; a broken-driver absence costs two reads and a pause each time.
+      *Accept:* a bounded cache avoids repeated confirmation while a recovered device becomes visible promptly.
+- [ ] <!-- workspace:id=work:599adb1b-c8e5-5162-9459-0826989fe3c6 --> Verify GPU failure wording and admission on real Windows, AMD and Intel hardware; `gpu-failures.md` describes behavior currently checked with fakes.
+      *Accept:* missing executable, unavailable driver and unreadable readings produce the documented status and load decisions.
+- [ ] <!-- workspace:id=work:9fce0f69-41da-58d7-b87e-c1e9304beb9c --> Verify the held Send verdict through a real GPU/Ollama model load; `composerFit`'s browser evidence uses the fake runtime.
+      *Accept:* no load-time refusal flash, and a genuine refusal after loading still appears.
+- [ ] <!-- workspace:id=work:c51519fb-c9cb-5fa5-80e9-5b7d091f2285 --> Model-list refresh silently swallows RPC errors in `session/models.ts`, leaving an old list without an explanation.
+      *Accept:* a failed refresh keeps usable cached rows and offers a visible, truthful retry state.
+
+*Phone and Library, review follow-ups:*
+
+- [x] <!-- workspace:id=work:99f6c9b4-78cf-500c-943a-c3cd53362fcd --> Phone permissions come from a required contract row; read-tool path escapes are refused before disk access.
+      *Done 2026-11-09:* “Make the phone chat-only, and check a read path before touching the disk”; phone Retry is read-only discovery.
+- [ ] <!-- workspace:id=work:95f303cf-ff2b-5754-be60-04c154a75494 --> Reduce phone read responses: `settings.get`, `sources.list` and `gpu.status` still expose full settings, source paths and process details.
+      *Accept:* phone-specific projections carry only chat/status fields and desktop reads retain their full shape.
+- [ ] <!-- workspace:id=work:66ca88c4-2098-56d3-8b49-1ab815157cdf --> The read tool distinguishes an escaping symlink from a missing path in `packages/harness/src/tools.ts`.
+      *Accept:* both refusals reveal no facts about the target outside the Library source.
+- [ ] <!-- workspace:id=work:3d81b8a1-79c5-531c-9cce-88fda08d1e69 --> Verify read-tool containment on native Windows, including NUL and alternate-data-stream names; injected platform tests do not exercise the Windows filesystem.
+      *Accept:* valid source reads work and hostile names cannot read or contact anything outside the source.
+- [ ] <!-- workspace:id=work:61736857-2858-563a-99eb-c4ecf1758782 --> Verify Retry from a real phone against real Ollama; fake and unit checks cannot prove recovery on that connection.
+      *Accept:* rediscover a stopped-then-restarted runtime without starting or installing one from the phone.
+- [ ] <!-- workspace:id=work:7184b430-e6cf-5c69-9efc-326b33ae6b2f --> Drive the phone's runtime-error sentence in a browser (`FirstRun.tsx`); the instruction to retry on the computer has unit coverage only.
+      *Accept:* a refused/error runtime shows the useful computer action and the phone cannot perform a privileged retry.
+- [ ] <!-- workspace:id=work:09c3acc4-ad82-5517-beb5-32d601ec0f3a --> Extend the phone tap-through journey to confirmation and menu actions; `phone.spec.ts`'s broad sweep reaches only first-tap writers.
+      *Accept:* those paths offer no forbidden mutation, with the exhaustive server method-table test retained.
 
 ## Next: slices 2 to 4
 
@@ -294,31 +400,31 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 ## Next: setup with an AI assistant (decision 2026-11-07)
 
-- [ ] Tier table (`setup/tiers.json`): the best text and image model per
+- [ ] <!-- workspace:id=work:c21fe091-b851-5db9-89f8-9c3f58a6f715 --> Tier table (`setup/tiers.json`): the best text and image model per
       hardware tier (NVIDIA by VRAM, no GPU by system memory), dated.
       *Accept:* every entry names its source, download size, memory at 16k
       and license; the research behind it is in `docs/research/`.
-- [ ] `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
+- [ ] <!-- workspace:id=work:7cb6f429-529c-5443-b3cd-91999212715b --> `pnpm setup:probe`: device facts as JSON (OS, GPU vendor and memory,
       system memory, disk free, CPU, Ollama and ComfyUI found, models
       installed).
       *Accept:* fixtures for NVIDIA 16 GB with whisper, NVIDIA 8 GB, no GPU
       with 16 GB and no GPU with 8 GB; real runs on the maintainer's Linux machine and the Windows test machine.
-- [ ] `pnpm setup:plan`: the text model and context, the image model or
+- [ ] <!-- workspace:id=work:3069bb9d-1618-5be6-91db-7491fe69d987 --> `pnpm setup:plan`: the text model and context, the image model or
       none, the downloads and their sizes, each with a plain reason.
       *Accept:* each fixture gets its tier's picks; a plan never exceeds the
       measured free memory.
-- [ ] `pnpm setup:apply --yes`: Ollama, models and (when chosen) ComfyUI
+- [ ] <!-- workspace:id=work:376e3b6d-6b5a-563b-a40b-8263f3312e9d --> `pnpm setup:apply --yes`: Ollama, models and (when chosen) ComfyUI
       and image weights through the app's own install paths, resumable,
       with progress; refuses without `--yes`.
       *Accept:* with fakes, every step in order; a killed run resumes.
-- [ ] `setup/` folder: `AGENTS.md` (run, show, ask, apply, check, report),
+- [ ] <!-- workspace:id=work:e548375f-e4bd-5cb4-8f2c-f162fa1eebbf --> `setup/` folder: `AGENTS.md` (run, show, ask, apply, check, report),
       `CLAUDE.md` pointing to it, `README.md` for the manual path.
       *Accept:* a fresh agent on the Windows test machine told "look at this folder and set me
       up" gets a working app with only the user's yes; transcript in
       `docs/evidence/`.
-- [ ] Settings shows the same plan with no agent, and a "Set up with an AI
+- [ ] <!-- workspace:id=work:0343e439-dfb2-5169-a7ea-aa60c66bb273 --> Settings shows the same plan with no agent, and a "Set up with an AI
       assistant" line with the folder path and the sentence to say.
-- [ ] Every model name the app offers for download is a real, pullable
+- [ ] <!-- workspace:id=work:274c94c9-caf5-5c57-ad1d-65eecc604e1b --> Every model name the app offers for download is a real, pullable
       name. The research (`docs/research/setup-tiers-2026-11.md` §1.1)
       found `qwen3.5:14b` does not exist (in `docs/design/shell.html`,
       `packages/contracts/src/testing.ts` and lane/build-runtime's
@@ -328,7 +434,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       fails on a catalog name that is not in it; tier entries store the
       pullable name (`hf.co/...:QUANT` or `namespace/name:tag`), never an
       alias.
-- [ ] Fit estimator counts implicit sliding-window layers. `/api/show` for
+- [ ] <!-- workspace:id=work:0fefb2a7-4da4-5dfe-9ec0-b6dbe74e5d5c --> Fit estimator counts implicit sliding-window layers. `/api/show` for
       gpt-oss and Gemma 3 names a window but no pattern, so `fit/estimate.ts`
       counts every layer as full: gpt-oss:20b computes 15.67 GB at 16k
       against 13.0 GB measured at 32K on a T4 (research §0.6), which wrongly
@@ -336,7 +442,7 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* per-architecture default patterns (gptoss 1:1, gemma3 5:1)
       with fixture tests; one real load of `gemma3-abliterated:12b-q4` at
       16k on this machine within 10% of the estimate.
-- [ ] No-GPU plans turn thinking off by default (qwen3.5:2b took 4 min 37 s
+- [ ] <!-- workspace:id=work:e8ac931c-b912-5f7f-b657-a6476541dfb1 --> No-GPU plans turn thinking off by default (qwen3.5:2b took 4 min 37 s
       with thinking on, 4 s off, research §0.9); gpt-oss on CPU runs at
       "low". Image licences: Qwen-Image-2.1 (Qwen Research License) and
       SD-Turbo (Stability Community License) are never a default pick; a
@@ -366,6 +472,9 @@ person talks over it. `docs/design/voice.md` compares CPU and GPU options,
 documents Milo's measured 404/850 ms first-audio references and the latency
 targets to validate here, and explains the request identities and PCM capture
 that stage 1 leaves reusable. Manual Dictate stays available separately.
+
+- [ ] <!-- workspace:id=work:467cf6a2-d944-5751-89dd-5115d78c96a6 --> Dictation cancellation is keyed twice: Composer remounts `Voice` by draft identity, while `Voice` also tears capture down on identity changes.
+      *Accept:* consolidate the lifecycle in `Composer.tsx`/`Voice.tsx` while replacement, navigation and disconnect still release the microphone and reject late transcripts.
 
 ## Client ordering replay
 
@@ -414,9 +523,88 @@ cover connected failure, Cancel, editing, removal, retry and a live download
 during a disconnect. All four stopped-download wording checks were watched red.
 RS-03 remains dropped.
 
-Stop during a replayed-send acknowledgment is ignored once, a reply that a second
-Stop does cancel: return the real active turn id on replay and cancel it when the
-send was stopped at admission.
+- [x] <!-- workspace:id=work:6f64f21a-3033-507f-aafe-f17f3bd1970b --> Keep running replies in one turn map and one reducer, including off-screen first-word time and reconnect snapshots.
+      *Done 2026-11-09:* “Hold every running reply in one turn map with one reducer”; listed-only turns mark the sidebar without holding the queue.
+- [ ] <!-- workspace:id=work:fbae140a-52c0-55b0-a978-0dd9a2362dc0 --> Stop during a replayed-send acknowledgment can miss the real running turn: `app.ts` returns a synthetic saved id and the client's replay branch clears its pending turn.
+      *Accept:* replay returns the active id when present and a Stop at admission cancels it on the server.
+- [ ] <!-- workspace:id=work:a99c6e69-d3f5-5b10-ba25-9e4303fbb829 --> A failure after fit passes but before the user row is saved emits no terminal event in `apps/server/src/app.ts`.
+      *Accept:* another window clears the listed running marker without waiting for reconnect when admission fails there.
+- [ ] <!-- workspace:id=work:c587a493-aab1-56bb-9bf4-37a11af524c5 --> Sending into a chat with a listed-only turn replaces its marker; a turn-active refusal drops it until the other client's start arrives (`session/chat.ts`).
+      *Accept:* a held other-client start and refused local send retain the sidebar's truthful running state.
+- [ ] <!-- workspace:id=work:0d656ff2-effc-5c4c-9ffb-9e3d65679a19 --> `oldTurns` in `session/chat.ts` only retires ids on terminal events, so missed terminals can grow the set for the session's lifetime.
+      *Accept:* repeated missed endings stay bounded without allowing late events into a replacement turn.
+- [ ] <!-- workspace:id=work:3226a596-aaa1-5051-914e-fe2f6a70a940 --> Exercise listed-turn send refusal and a listed turn's later start in the browser; `listed-turn.test.ts` currently proves those ordering paths in memory.
+      *Accept:* the visible marker, controls and thinking clock follow the same rules under delayed delivery.
+- [ ] <!-- workspace:id=work:41ca497f-e406-5a64-854b-f935d39c1f8a --> Add browser proof for the queued-edit late-confirmation race; session/persistence fixtures cover it, but `thread-drafts.spec.ts` does not drive it.
+      *Accept:* hold confirmation, change the queued edit, then confirm, send and reload without losing either draft.
+- [ ] <!-- workspace:id=work:552df8d8-5654-5441-a6d8-8870b694f013 --> Run the complete browser suite on the per-chat-draft head; its landing ran 14 specs, while the earlier full-suite pass predates it.
+      *Accept:* a retained full-project result covers the current draft and turn-map integration.
+
+## Next: measurement tooling
+
+- [x] <!-- workspace:id=work:84ab98b2-f3ee-5357-b1a1-53e0880f6770 --> Record per-action CPU cost and work counts with a shuffle comparison and release history.
+      *Done 2026-11-09:* “Add a performance comparison that counts work, and say what one job can see”; method and limits are in `docs/perf-method.md`.
+- [x] <!-- workspace:id=work:096ae7c9-d7dd-5ac4-a3b1-c6c4dc616106 --> Separate unscoreable rows from noise, measure whole-thread mounts and type inside a fully mounted long thread.
+      *Done 2026-11-09:* “Make the perf comparison say "not scored" and time a long thread's whole mount”; the same-run comparison exposed the backfill cost above.
+- [ ] <!-- workspace:id=work:77855959-5fc4-5577-a95c-73680a4a0ee8 --> `score-next.ts`'s arrangement guard assumes only two extreme shuffles, which is false for tied lower quartiles at four rounds of two timed samples.
+      *Accept:* tied data that cannot establish a reliable difference says not scored rather than within noise.
+- [ ] <!-- workspace:id=work:8aa6f4f6-e027-55af-be64-777e0930ea38 --> Calibrate the new `-mounted` and `type-in-thread-2000` rows on a same-build job; their detectable sizes remain unknown in `docs/perf-method.md`.
+      *Accept:* retain raw rows and simulated detectable sizes for both windows without treating the comparison limit as machine noise.
+- [ ] <!-- workspace:id=work:d800b42c-fec8-5a5b-b8ae-ba7b8e2e1ed5 --> Run `perf:next` with its default group selection on the test runner; earlier jobs selected groups explicitly.
+      *Accept:* an unfiltered job records every supported default group and its sampling plan inside the stated job budget.
+- [ ] <!-- workspace:id=work:17af7eb8-33ef-5574-8f07-f76ad912c521 --> Prove missing-hook and late-hook refusals on a real page in `next.spec.ts`, not only through unit tests and the passing hook path.
+      *Accept:* deliberately absent/late React counters fail with the named measurement error instead of zero work.
+- [ ] <!-- workspace:id=work:ccb1cd26-49da-5eef-a0e3-d37495a865be --> Measure CPU throttling before using `next-compare.ts --throttle` to interpret changes; the option is implemented but uncalibrated.
+      *Accept:* a same-build run states its noise and detectable sizes under the selected throttle.
+- [ ] <!-- workspace:id=work:60e41e9c-a63e-5c28-bc6c-439f8bae8274 --> The detectable-size simulation uses 400 shuffles while real scoring uses 4,000; `docs/perf-method.md` records nine cells moving one step on a full replay.
+      *Accept:* quantify or remove that approximation without presenting simulated cells as equally precise measurements.
+- [ ] <!-- workspace:id=work:9496c561-7ebe-58f5-93e2-cf24392f9613 --> Cold-composer's first recording once ended before the sidebar loaded, counting 536 renders rather than 1,458; its probe still ends at the usable composer.
+      *Accept:* distinguish composer readiness from complete initial sidebar work and retain comparable counters for each claimed window.
+- [ ] <!-- workspace:id=work:857ee6b0-847e-570a-b8ef-b4b61020a923 --> The queue handoff's CPU/count window includes the previous reply finishing, while its wall window starts at the done marker (`next.spec.ts`, `perf-method.md`).
+      *Accept:* isolate handoff work or label each reported window so the wider CPU change is never called handoff latency.
+- [ ] <!-- workspace:id=work:cce39778-08c1-5077-842d-003f72074a63 --> Add a focused diagnostic test for `next.spec.ts`'s typing action; only recorded comparison rows currently prove that journey runs.
+      *Accept:* wrong character, focus or end-state wiring fails the diagnostic without needing a full paired job.
+- [ ] <!-- workspace:id=work:602e2a33-bd58-5e7d-bcce-b0ced6d2d02f --> A long thread that never fully mounts leaves the new later-end probe waiting until the general test timeout.
+      *Accept:* an intentionally stalled backfill fails promptly with the missing mount count and action named.
+- [ ] <!-- workspace:id=work:27cc6930-07f6-59f5-a97a-af395e2b8da1 --> Explain the measured typing wall-time rise from 35.15 to 43.22 ms despite lower script time in the long-thread comparison.
+      *Accept:* a focused paired run and profile separate frame scheduling from extra app work before attributing the change.
+- [ ] <!-- workspace:id=work:8db4ff53-ea0c-5a87-b735-afbc5da7fa46 --> Retire the older `compare.ts`/`stats.ts` path after the new method has served a release; first-run and desktop-launch still depend on it.
+      *Accept:* those groups have an equivalent supported home and recorded comparisons remain readable.
+
+## Next: test suite health
+
+- [x] <!-- workspace:id=work:c5f7828f-71d6-577c-8b62-253b42121818 --> Give each unit run one scratch root, wait on state and keep SQL children from outliving their server.
+      *Done 2026-11-09:* “Make the unit tests wait for state, clean up after themselves, and stop a query whose server died”; permission/link cleanup and cancellation have failing-first probes.
+- [ ] <!-- workspace:id=work:66f9deb7-c573-5270-85f3-ef538418a946 --> Confirm repeated paste scenarios are isolated: `paste.spec.ts` counts matching prompts globally, and the fake kept its request log across resets until “Clear the fake Ollama's request log on every scenario reset”.
+      *Accept:* the two image-send/edit paste cases pass repeated in one process without weakening request-count assertions.
+- [ ] <!-- workspace:id=work:82586f85-d8af-5135-a722-a71f7a459366 --> Diagnose the intermittent release-cancellation report failure in `test/release.test.ts`'s “interrupting a running check” case.
+      *Accept:* repeat under load with retained failure evidence and require the report plus confirmed child shutdown on every run.
+- [ ] <!-- workspace:id=work:5743ffbb-2350-5ab5-a971-a72e96d87b8b --> Diagnose the intermittent project-list check in `test/release-projects.test.ts`; the blocking/timing companion assertion failed once and then passed.
+      *Accept:* repeated project listings under load keep the functional companions in the blocking project with no timeout flake.
+- [ ] <!-- workspace:id=work:854ba173-6dcb-55b2-b926-e25cad7cae67 --> Profile performance-fixture seeding: `test/perf/fixture.test.ts` now uses the run root and a 180-second setup bound, but the expensive real-store seed is unprofiled.
+      *Accept:* attribute seed time and reduce unnecessary work while preserving the complete isolated 400-thread fixture.
+- [ ] <!-- workspace:id=work:afaa4cbe-6194-5ecd-94c1-2556e1c8c3d8 --> State-wait helpers still give generic “condition not reached” messages, including `runtime/load.test.ts`'s `until`.
+      *Accept:* forced readiness/shutdown failures name the missing state and keep their existing deadlines.
+- [ ] <!-- workspace:id=work:2cbbff58-6e22-5bd9-b802-385daaf751fc --> The scratch sweep trusts directory mtime and wall time, so a forward clock jump over a day can remove a live run (`test/global-setup.ts`).
+      *Accept:* simulate the jump with a live run and preserve its root while still collecting abandoned runs.
+- [ ] <!-- workspace:id=work:29716ee3-290a-504c-a5db-ae99746955c6 --> A watch session idle over a day can be swept by another test invocation because the scratch root has no live-owner check.
+      *Accept:* overlap an aged watch session and a fresh setup without losing the active session's files.
+- [ ] <!-- workspace:id=work:1509e5e6-9819-51dd-9a5f-ba5765e45cd1 --> Scratch permission repair has a window between lstat and chmod where a directory could be replaced by a symlink in `test/global-setup.ts`.
+      *Accept:* race that replacement and leave the outside target's permissions unchanged.
+- [ ] <!-- workspace:id=work:39bfa3f4-a81e-58b7-aaf1-125e4b14571a --> Older scratch folders with the former names are not collected by the new run-prefix sweep.
+      *Accept:* inventory and archive authorized old test/performance/GPU fixtures without touching unrelated files or live runs.
+- [ ] <!-- workspace:id=work:579a8c2c-0d90-5b3b-b5c2-888063c2586e --> Verify stale-run cleanup against a genuinely day-old abandoned run; current cleanup evidence uses artificially aged fixtures.
+      *Accept:* the next setup collects that run and preserves recent and linked paths.
+- [ ] <!-- workspace:id=work:b1729469-e4fb-5dcf-99b0-6f04fc1d60e1 --> Verify the scratch-root, SQL-parent and cancelled-release changes on native Windows; the unit-hygiene landing used Linux checks.
+      *Accept:* Windows keeps its temp-path rules, bounds cancellation and leaves no owned query child.
+- [ ] <!-- workspace:id=work:005b7a72-a2c3-510c-96b1-3d21782b91a8 --> The default session harness answers `turns.active` with the empty contract sample unless a test overrides it.
+      *Accept:* representative reconnect/queue tests include server-listed work so active-turn regressions cannot pass through an empty fixture.
+- [ ] <!-- workspace:id=work:f3885671-23fc-5569-82cf-ec66b22e2ee6 --> The long-thread unit scroll model does not model browser anchoring independently; it cannot distinguish a content offset from a view offset.
+      *Accept:* either offset bug fails the model, with the real browser drift journey retained as the position proof.
+- [ ] <!-- workspace:id=work:1fb09f37-2be1-5c5d-bf0a-260f2031b1b1 --> The one unexplained immediate-reload paste loss was not reproduced by later 20-repeat runs; IndexedDB unload remains best effort.
+      *Accept:* retain a reproducible lifecycle trace if it recurs and distinguish an aborted pending write from a lost committed write.
+- [ ] <!-- workspace:id=work:3d565764-5f08-5010-9dd5-4ff0df759b71 --> Replace routine five-second journey warnings with the whole-suite budget; `budget-reporter.ts` still prints both after the suite trim.
+      *Accept:* one complete-run report identifies budget overruns and expensive setup without per-journey warning noise.
 
 ## Later: slices 5 to 7
 
@@ -445,7 +633,7 @@ send was stopped at admission.
       per-user XDG storage. Ordinary execution in the test environment fails
       before Electron because `libfuse.so.2` is missing; tested workaround
       still needs extraction mode and `--no-sandbox`.
-- [ ] Release gate: after a step exits normally, stop its owned process group
+- [ ] <!-- workspace:id=work:958fd54b-6524-5aa6-a943-fcffaf4153bb --> Release gate: after a step exits normally, stop its owned process group
       and keep the scratch directory if shutdown stays unconfirmed.
       *Accept:* a step that leaves a same-group process behind gets it stopped.
 - [ ] <!-- workspace:id=work:83589d17-fd67-55b2-b660-ed14c924768c --> Packaged releases (AppImage, Windows installer, auto-update) once
@@ -522,12 +710,16 @@ send was stopped at admission.
       server with no line ending is buffered without a limit until a newline
       arrives, and a server that fails during an intentional shutdown leaves
       no report.
+- [ ] <!-- workspace:id=work:6dcaca3e-31c9-50f9-aef3-2ad7dd7e9af0 --> Prove that nvidia-smi resolves from the packaged app's PATH on an NVIDIA machine (`fit/gpu.ts`, desktop server environment).
+      *Accept:* a packaged launch reads the installed GPU rather than silently treating a missing executable as a system-memory plan.
+- [ ] <!-- workspace:id=work:a34578dc-e5a4-5922-a8d4-32be83dfaef3 --> Carry the git-clone update handoff deadline into the packaged-update design; the current five-second disconnected-client reservation belongs to the clone updater.
+      *Accept:* abandoned approval releases admission and an accepted packaged update is acknowledged only after server readiness, including rollback.
 - [ ] <!-- workspace:id=work:4bf733c7-09c2-59b9-82e7-2a1d4ab6e964 --> Public repository: needs Ethan's explicit go for the visibility change
       ("public from the start" is the intent, not the go).
       Prepared on lane/readme: README, `docs/setup/linux.md` and the
       `pnpm shots:readme` images; the license is still open.
 - [ ] <!-- workspace:id=work:fbd76a2b-2cb1-5aeb-8864-bfc67cb7bf45 --> Finetuning: scoped once benchmarks show a gap a finetune can close.
-- [ ] Settings left for later (Settings council S1), each added only when
+- [ ] <!-- workspace:id=work:6e7a46b5-a357-572b-b51a-e027f7b01438 --> Settings left for later (Settings council S1), each added only when
       the feature behind it exists:
       - Instructions: one home for what the model is told in every chat.
         2026-11-08: server/schema foundation implemented:
