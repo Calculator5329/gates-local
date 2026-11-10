@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-09: A written design for how an installed copy updates itself
+
+- `docs/design/installed-updates.md` describes how a copy installed from the
+  AppImage or the Windows setup program will check for, download and apply a
+  newer version, and how it goes back when the new version does not start.
+  Nothing in the app changes with this entry; the design is what the next
+  lanes build from.
+- It names each step, what is written to disk before the step, and what a
+  later start does when the program stopped in the middle. The chats are
+  copied before a newer version upgrades them, and going back restores that
+  copy.
+- Known limits it states: on Windows the first release has no automatic
+  go-back; a failed go-back keeps every file and shows where they are; the
+  git-clone updater still cannot go back across a chat store upgrade.
+- Reviewed four times by a second model. The last round closed every earlier
+  finding and raised one more, which is fixed in the text and was not
+  reviewed again.
+
 ## 2026-11-09: One set of commands prepares a signed release folder
 
 - `pnpm release:artifact` builds the installer for the machine it runs on
