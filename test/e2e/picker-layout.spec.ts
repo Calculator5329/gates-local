@@ -1,6 +1,91 @@
 import { expect, test, waitReady } from "./fixtures.ts";
+import { decodeRequest, decodeServerMessage } from "@gates-local/contracts";
 
 test.use({ viewport: { width: 1137, height: 749 }, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
+
+test("idle warms nothing; hover prepares the first picker view and focus and opening reuse its checks", async ({ page, open }) => {
+  const requests = new Map<string, string>(), answered = new Set<string>();
+  page.on("websocket", ws => {
+    ws.on("framesent", frame => {
+      const request = decodeRequest(frame.payload);
+      if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
+    });
+    ws.on("framereceived", frame => {
+      const response = decodeServerMessage(frame.payload);
+      if (response.ok && response.value.type === "response" && requests.has(response.value.id)) answered.add(response.value.id);
+    });
+  });
+  const settled = async () => {
+    await expect.poll(() => answered.size === requests.size).toBe(true);
+    // Two frames, an idle callback and a pause: every chance a background warm-up would take.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestIdleCallback(() => resolve())))));
+    await page.waitForTimeout(500);
+  };
+  await open(); await waitReady(page); await settled();
+  const idle = requests.size;
+  expect(new Set(requests.values()).size, "idle checks only the selected pair").toBeLessThanOrEqual(1);
+  const button = page.locator("#modelBtn");
+  await button.hover();
+  await expect.poll(() => requests.size, "hover warms the first view's checks").toBeGreaterThan(idle);
+  await settled();
+  expect(await page.locator("#picker").count(), "warming must not mount the picker").toBe(0);
+  const warmed = requests.size;
+  await button.focus(); await button.click();
+  await expect(page.locator("#picker")).toBeVisible();
+  await expect(page.locator("#picker")).not.toContainText("Checking…");
+  await page.screenshot({ path: test.info().outputPath("picker-hover-complete.png") });
+  await page.keyboard.press("Escape");
+  await page.locator("#ta").focus(); await button.hover(); await button.focus(); await button.click();
+  await expect(page.locator("#picker")).toBeVisible();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(requests.size, "an opening after a warm, and repeated hover or focus, make no further check").toBe(warmed);
+  await test.info().attach("session-fit-checks", { body: JSON.stringify({ idle, warmed, after: requests.size, pairs: [...requests.values()] }), contentType: "application/json" });
+});
+
+test("the picker waits for missing fit replies and opens with a complete context column", async ({ page, open }) => {
+  let holding = false;
+  const held: (() => void)[] = [];
+  await page.routeWebSocket(/.*/, ws => {
+    const server = ws.connectToServer(), requests = new Set<unknown>();
+    ws.onMessage(message => {
+      const frame = JSON.parse(String(message)) as { id?: unknown; method?: string };
+      if (holding && frame.method === "fit.check") requests.add(frame.id);
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const frame = JSON.parse(String(message)) as { id?: unknown; type?: string };
+      if (frame.type === "response" && requests.delete(frame.id) && holding) held.push(() => ws.send(message));
+      else ws.send(message);
+    });
+  });
+  await open(); await waitReady(page);
+  holding = true;
+  try {
+    await page.locator("#modelBtn").click();
+    const picker = page.locator("#picker"), search = page.locator("#pkSearch");
+    await expect.poll(() => held.length).toBeGreaterThan(0);
+    await expect(picker).toBeHidden();
+    holding = false;
+    for (const release of held.splice(0)) release();
+    await expect(picker).toBeVisible();
+    await expect(search).toBeFocused();
+    await expect(picker).not.toContainText("Checking…");
+    const bounds = await picker.boundingBox();
+    await page.screenshot({ path: test.info().outputPath("picker-complete-first-view.png") });
+    await search.fill("qwen");
+    await search.press("ArrowRight");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Enter");
+    await expect(picker).toBeHidden();
+    await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("8k");
+    await page.locator("#modelBtn").click();
+    expect(await picker.boundingBox()).toEqual(bounds);
+    await page.screenshot({ path: test.info().outputPath("picker-after-context-choice.png") });
+  } finally {
+    holding = false;
+    for (const release of held.splice(0)) release();
+  }
+});
 
 test("approved picker closes when the composer is clicked and lets that click focus it", async ({ page, open }) => {
   await open(); await waitReady(page);
@@ -157,6 +242,46 @@ test.describe("phone", () => {
     await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
     await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("8k");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+  // The closing sheet hands focus back to the model button by script. That is
+  // not someone reaching for the picker, so it must not warm every installed
+  // model at the new size. The pick itself preloads the model, and each fit
+  // invalidation on the way rechecks the picked pair, as it did before warming.
+  test("a pick at a new context size checks only the picked model after the sheet closes", async ({ page, open }) => {
+    // `readyAt` is how many checks had been sent when the preload reported ready.
+    const requests = new Map<string, string>(), answered = new Set<string>();
+    let readyAt: number | undefined;
+    page.on("websocket", ws => {
+      ws.on("framesent", frame => {
+        const request = decodeRequest(frame.payload);
+        if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
+      });
+      ws.on("framereceived", frame => {
+        const response = decodeServerMessage(frame.payload);
+        if (!response.ok) return;
+        if (response.value.type === "response" && requests.has(response.value.id)) answered.add(response.value.id);
+        const payload: unknown = response.value.type === "push" && response.value.channel === "models.load" ? response.value.payload : undefined;
+        if (readyAt === undefined && typeof payload === "object" && payload !== null && "state" in payload && payload.state === "ready") readyAt = requests.size;
+      });
+    });
+    await open(); await waitReady(page);
+    await page.locator("#modelBtn").tap();
+    const picker = page.locator("#picker");
+    await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
+    await picker.locator('[data-m="gemma4:12b"]').tap();
+    await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
+    const before = new Set(requests.keys());
+    readyAt = undefined;
+    await picker.getByRole("radio", { name: /^8k/ }).tap();
+    await expect(picker).toBeHidden();
+    await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("8k");
+    // The refocus comes a frame after the close; the preload's ready push and the
+    // recheck it causes come later, so by then any warm has been sent.
+    await expect.poll(() => readyAt !== undefined, "the preload reports ready").toBe(true);
+    await expect.poll(() => [...requests.values()].slice(readyAt).includes("gemma4:12b@8192"), "the recheck after the load").toBe(true);
+    await expect.poll(() => answered.size === requests.size).toBe(true);
+    const after = [...requests].filter(([id]) => !before.has(id)).map(([, pair]) => pair);
+    expect(after.filter(pair => pair !== "gemma4:12b@8192"), `checks after the pick: ${after.join(", ")}`).toEqual([]);
   });
 });
 

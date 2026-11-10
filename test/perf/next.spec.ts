@@ -8,12 +8,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import path from "node:path";
-import { test, expect, type CDPSession, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Browser, type CDPSession, type Locator, type Page } from "@playwright/test";
+import { decodeRequest } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
 import { install, measure, type LaterEnd, type Observation } from "./probe.ts";
-import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan } from "./next-journeys.ts";
+import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan, type RepetitionKind } from "./next-journeys.ts";
 import type { Journey } from "./selection.ts";
 import { metric, type Run } from "./stats.ts";
 import { fakeVoice } from "./voice-fixture.ts";
@@ -74,6 +75,96 @@ async function stop(page: Page) { await page.getByRole("button", { name: "Stop",
 function threadId(page: Page) { const id = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread"); if (!id) throw new Error("Missing selected thread"); return id; }
 async function point(locator: Locator) { const box = await locator.boundingBox(); if (!box) throw new Error("Target has no box"); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; }
 
+/** How long a hand rests on the model button between arriving and clicking, or a keyboard user between focus and Enter. */
+const handDwellMs = 150;
+
+/**
+ * After a completed reply every fit report is stale, so these sessions open
+ * the picker the way people do: a hand that arrives and clicks about 150 ms
+ * later, or keyboard focus and then Enter. `hover-away` hovers and leaves
+ * without opening: the one warm-up whose checks no opening uses.
+ */
+async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "hand" | "keyboard" | "hover-away") {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
+  try {
+    const page = await context.newPage(); await install(page);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+    let checks = 0;
+    cdp.on("Network.webSocketFrameSent", event => {
+      const request = decodeRequest(event.response.payloadData);
+      if (request.ok && request.value.method === "fit.check") checks++;
+    });
+    await page.goto(appUrl()); await page.evaluate(() => window.perfJourney.result); await ready(page);
+    await page.locator("#ta").fill("Measure first picker opening");
+    await page.locator("#ta").press("Enter");
+    await expect(page.locator(".turn.a.done")).toHaveCount(1);
+    await quiet(page);
+    const button = page.locator("#modelBtn"), name = `picker-open-${mode}`;
+    if (mode === "hover-away") {
+      await button.hover(); await page.waitForTimeout(hoverDwellMs);
+      const away = await point(page.locator("#ta")); await page.mouse.move(away.x, away.y);
+      // Let every warm-up answer arrive before counting.
+      await page.waitForTimeout(hoverDwellMs); await quiet(page);
+      expect(await page.locator("#picker").count(), "hovering must not mount the picker").toBe(0);
+      if (kind === "counters") add(counted, { action: `${name}.session-fit-checks`, unit: "count", value: checks });
+      return;
+    }
+    let observation: Observation;
+    if (mode === "hand") {
+      const { x, y } = await point(button);
+      await page.mouse.move(x, y); await page.waitForTimeout(handDwellMs);
+      observation = await measure(page, () => page.mouse.click(x, y), "click", "#picker.open");
+    } else {
+      await button.focus();
+      // Only focus with a focus ring warms; without one this row would be a cold open.
+      expect(await button.evaluate(b => b.matches(":focus-visible")), "script focus after typing counts as keyboard focus").toBe(true);
+      await page.waitForTimeout(handDwellMs);
+      observation = await measure(page, () => page.keyboard.press("Enter"), "keydown", "#picker.open");
+    }
+    if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
+    await expect(page.locator("#pkSearch")).toBeFocused();
+    await expect(page.locator("#picker")).not.toContainText("Checking…");
+    await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+    await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+    await quiet(page);
+    if (kind === "counters") add(counted, { action: `${name}.session-fit-checks`, unit: "count", value: checks });
+  } finally { await context.close(); }
+}
+
+/** Each case owns a fresh client session; none warms the next case's fit cache. */
+async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mode: "hover" | "cold-ready") {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
+  try {
+    const page = await context.newPage(); await install(page);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+    let checks = 0;
+    cdp.on("Network.webSocketFrameSent", event => {
+      const request = decodeRequest(event.response.payloadData);
+      if (request.ok && request.value.method === "fit.check") checks++;
+    });
+    await page.goto(appUrl()); await page.evaluate(() => window.perfJourney.result); await ready(page);
+    const button = page.locator("#modelBtn");
+    if (mode === "hover") { await button.hover(); await page.waitForTimeout(350); }
+    const location = await point(button);
+    const name = `picker-open-${mode}`;
+    const observation = await measure(page, () => page.mouse.click(location.x, location.y), "click", "#picker.open");
+    if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
+    await expect(page.locator("#picker")).not.toContainText("Checking…");
+    await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+    await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+    const first = checks;
+    // A session includes repeated pointer/focus intent and a second opening.
+    // This must not multiply answers which are current or already in flight.
+    await page.keyboard.press("Escape"); await page.locator("#ta").focus();
+    await button.hover(); await button.focus(); await button.click();
+    await expect(page.locator("#pkSearch")).toBeFocused(); await quiet(page);
+    expect(checks, "repeated intent must reuse the same session's checks").toBe(first);
+    if (kind === "counters") add(counted, { action: `${name}.session-fit-checks`, unit: "count", value: checks });
+  } finally { await context.close(); }
+}
+
 test("priority journeys with costs", async ({ browser }) => {
   const loadBefore = loadavg();
   const seed = fixtureIds(await (await fetch(`${CONTROL_URL}/seed`)).json());
@@ -92,9 +183,14 @@ test("priority journeys with costs", async ({ browser }) => {
         await cdp.send("Performance.enable", { timeDomain: "threadTicks" });
         if (throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
         let network: NetworkCounts = emptyNetwork();
+        let sessionFitChecks = 0;
         cdp.on("Network.requestWillBeSent", () => { network.requests++; });
         cdp.on("Network.loadingFinished", event => { network.bytes += event.encodedDataLength; });
-        cdp.on("Network.webSocketFrameSent", event => { network.wsOut++; network.wsBytes += frameBytes(event.response.opcode, event.response.payloadData); });
+        cdp.on("Network.webSocketFrameSent", event => {
+          network.wsOut++; network.wsBytes += frameBytes(event.response.opcode, event.response.payloadData);
+          const request = decodeRequest(event.response.payloadData);
+          if (request.ok && request.value.method === "fit.check") sessionFitChecks++;
+        });
         cdp.on("Network.webSocketFrameReceived", event => { network.wsIn++; network.wsBytes += frameBytes(event.response.opcode, event.response.payloadData); });
         if (kind === "profile") { await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 500 }); }
         // A missing hook must fail the run: read as zero, it would look like an exact improvement.
@@ -152,6 +248,23 @@ test("priority journeys with costs", async ({ browser }) => {
         if (kind === "counters" && (await reactCounts()).commits < 1) throw new Error("React committed nothing during the first load, so the counting hook was installed too late");
         if (selected.has("startup")) await finish("cold-composer", beforeLoad, cold.elapsed);
         else if (kind === "profile") await cdp.send("Profiler.stop");
+
+        if (selected.has("picker")) {
+          // Match the broad journey: open after a completed reply, without
+          // visiting the picker or settings first to warm their fit checks.
+          await newThread(page);
+          await page.locator("#ta").fill("Measure first picker opening");
+          await page.locator("#ta").press("Enter");
+          await expect(page.locator(".turn.a.done")).toHaveCount(1);
+          await timing("picker-open", await clicking(page.locator("#modelBtn")), "click", "#picker.open");
+          await expect(page.locator("#pkSearch")).toBeFocused();
+          // Finish deferred checks outside the opening window, so they cannot
+          // spill into the next group's thread measurements.
+          await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+          await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+          if (kind === "counters") add(counted, { action: "picker-open.session-fit-checks", unit: "count", value: sessionFitChecks });
+          await page.keyboard.press("Escape");
+        }
 
         if (selected.has("threads")) {
           for (const [count, clickId, hoverId, clickTitle, hoverTitle] of [
@@ -251,6 +364,13 @@ test("priority journeys with costs", async ({ browser }) => {
           await page.getByRole("button", { name: "Stop", exact: true }).click({ timeout: 2_000 }).catch(() => undefined);
         }
       } finally { await context.close(); }
+      // The fresh picker sessions record no profile; hover-away records only a count.
+      if (selected.has("picker") && kind !== "profile") {
+        for (const mode of ["hover", "cold-ready"] as const) await pickerReadyCase(browser, kind, mode);
+        for (const mode of ["hand", "keyboard", "hover-away"] as const) {
+          if (mode !== "hover-away" || kind === "counters") await pickerReplyCase(browser, kind, mode);
+        }
+      }
     }
   } finally { await voice?.close(); }
   const record = (rows: Rows, repetitions: number): Run & { repetitions: number; throttle: number } => ({

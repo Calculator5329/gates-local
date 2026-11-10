@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-11-10: The model picker opens faster when you reach for it
+
+- When the pointer enters the model button, when it gets keyboard focus, or
+  on press (touch has no hover), the app asks ahead of time whether each
+  installed model fits. By the time the picker opens it already has its
+  answers. After a reply, a hand that rests on the button for about 150 ms
+  before clicking opens the picker in 120.63 ms instead of 287.20, and
+  focus then Enter in 40.45 ms instead of 292.73. A 350 ms hover in a fresh
+  session opens in 32.30 ms instead of 290.90.
+- Nothing is asked ahead of time at idle, after a reply, while a reply
+  runs or while a model loads; the last two end by making every answer
+  stale. Focus counts only when it came from the keyboard: on a phone a
+  closing sheet hands focus back to the button by itself, and picking a
+  model at a new context size no longer checks every other model.
+- The picker still waits for every answer before it appears, so rows never
+  swap from "Checking…" to bars, and every choice still needs a current
+  answer. The picker and its warm-up now read one row order, so the row
+  warmed is the row shown.
+- A scripted click with no hover first still waits for its checks: 293.38
+  ms against 309.65, and 301.48 against 318.53 for a click as soon as the
+  composer is ready. Script time inside that click rose from 29.02 to 32.50
+  ms, because the warm-up now runs inside it.
+- Measured against v0.1.0 on the test machine, picker group only, 4 of 4
+  rounds, 8 timed repetitions per arm. The build measured differs from the
+  one shipped only by a renamed check and a comment. Each warmed open sent
+  its 5 checks before the opening input, where the old build sent none.
+  Every measured session makes the same number of fit checks as before (11
+  after a reply in the long journey, 7 in a fresh after-reply session, 6 in
+  fresh hover and cold-ready sessions). A hover that leaves without opening
+  costs one warm: 7 checks where it made 2.
+- Known limits: a keyboard pick in the phone layout still warms once when
+  the sheet gives focus back; phone Safari's keyboard-focus rule was read
+  from version tables, not tested on a device.
+- Thread performance rows now distinguish the first screen from the complete
+  background mount. `open-thread-200` and `open-thread-2000` changed meaning
+  since v0.1.0; their `-mounted` twins keep the old whole-fill window. The
+  `perf:compare` report explains this, and no scorer or threshold changed.
+
 ## 2026-11-10: An installed copy downloads a newer version and checks it
 
 - When an installed copy finds a newer version with a file for it, it now

@@ -7,6 +7,24 @@ never shows a whisper stop, start or restart.
 
 ## Now: slice 1, desktop chat and models
 
+*2026-11-10, picker warms on intent and thread measurements:* The picker
+keeps its complete-first-view barrier and warms its fit cache only on hover,
+keyboard focus or pointer-down, never at idle, while a reply runs or while a
+model loads. After a reply, focus-then-Enter opens in 40.45 ms instead of
+292.73 and a hand click in 120.63 instead of 287.20, both faster over 4 rounds,
+with the same fit-check count as before in every measured session. A scripted
+click with no hover first still waits about 293.38 ms for its checks; making that
+case fast needs a product decision (faster checks, or opening on the previous
+reading). A hover that leaves without opening costs one warm (5 checks).
+Broad thread-open rows end at the first screen and retain full-fill `-mounted`
+twins; old release reports used the full fill for the plain rows and are labeled
+accordingly.
+
+- [ ] <!-- workspace:id=work:bd43faf2-3ad7-5ce0-a367-796c4579aea1 --> A click on the model button with no hover first still waits about 293 ms for its fit checks. Each check reads the GPU again on the server.
+      *Accept:* the checks for one opening share one GPU reading, or the picker opens on the previous reading and corrects itself without rows swapping, with the scripted-click row measured faster.
+- [ ] <!-- workspace:id=work:a685bc32-2449-5e0b-8625-2a38dfb08221 --> The page's record of which models are loading is never reset on reconnect. A "ready" message lost across a reconnect leaves a model shown as loading, and the picker then never warms for the rest of the session (it still opens, as slowly as before). In the code before the picker warm-up.
+      *Accept:* a reconnect reads the load states again, shown by a test that drops the ready message.
+
 *Measured 2026-11-09:* Native launch now includes Electron and the supervised
 server, with separate phase markers and import counters. Startup imports fell
 from 396 to 291; main initialization and same-thread reconnect have qualified

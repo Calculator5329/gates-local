@@ -2,7 +2,7 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type FocusEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { composerFit } from "./composer-fit.ts";
@@ -11,6 +11,7 @@ import { openFit } from "./fit-actions.ts";
 import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
+import { warmPickerFits } from "./picker-fit.ts";
 import { pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
@@ -73,6 +74,24 @@ function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
   // a tag the catalog does not know is its own name: say it once, and its quant only when the tag does not
   const head = name === tag ? `<b class="mono">${esc(tag)}</b>` : `<b>${esc(name)}</b> · <span class="mono">${esc(tag)}</span>`;
   return `${head}${q && !tag.toLowerCase().includes(q.toLowerCase()) ? ` · ${esc(q)}` : ""}`;
+}
+
+/** Someone is about to open the picker: load its code and the fit reports its first view needs. */
+function pickerIntent(): void {
+  void pickerScreen.load();
+  warmPickerFits();
+}
+
+/**
+ * Focus is intent only with a focus ring, that is from the keyboard. A sheet
+ * closing on phone hands focus back to this button by script, and after a pick
+ * at a new size a warm there would check every installed model at that size.
+ * Known limit: a keyboard pick in the sheet layout (narrow window, or a phone
+ * with a keyboard) still warms when the sheet gives focus back, because the
+ * last input was a key.
+ */
+function pickerFocus(e: FocusEvent<HTMLElement>): void {
+  if (e.currentTarget.matches(":focus-visible")) pickerIntent();
 }
 
 export function Composer() {
@@ -312,8 +331,11 @@ export function Composer() {
               aria-expanded={pop === "picker" && !pickerPending}
               aria-busy={loading || pickerPending || undefined}
               data-tip={modelTip}
-              onPointerEnter={() => void pickerScreen.load()}
-              onFocus={() => void pickerScreen.load()}
+              // Warm only on intent: hover, keyboard focus, or the press before a
+              // click (touch has no hover). Never at idle; see picker-fit.ts.
+              onPointerEnter={pickerIntent}
+              onFocus={pickerFocus}
+              onPointerDown={pickerIntent}
               onClick={() => togglePop("picker")}
             >
               {/* loading shows in the tile, never in the label: the trigger keeps its width */}

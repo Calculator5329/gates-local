@@ -78,10 +78,12 @@ test("production browser journeys", async ({ browser }) => {
 
     const row = await select(page, "Perf short");
     latency("switch-thread", await measure(page, () => row.click(), "click", ".bubble", "Short marker"));
-    const longRow = await select(page, "Perf long 200");
-    latency("open-thread-200", await measure(page, () => longRow.click(), "click", ".tl .turn", "200", "count"));
-    const thousands = await select(page, "Perf thousands 2000");
-    latency("open-thread-2000", await measure(page, () => thousands.click(), "click", ".tl .turn", "2000", "count"));
+    for (const [count, title] of [[200, "Perf long 200"], [2000, "Perf thousands 2000"]] as const) {
+      const target = await select(page, title);
+      latency(`open-thread-${count}`, await measure(page, () => target.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "class-count" }));
+      latency(`open-thread-${count}-mounted`, await page.evaluate(() => window.perfJourney.later));
+      await expect(page.locator(".tl .turn")).toHaveCount(count);
+    }
     const huge = await select(page, "Perf huge reply");
     latency("open-huge-reply", await measure(page, () => huge.click(), "click", ".turn.a.done .md", "Huge reply end"));
     await expect(page.locator(".md pre")).toHaveCount(1);

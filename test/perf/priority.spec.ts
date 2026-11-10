@@ -5,7 +5,7 @@ import path from "node:path";
 import { test, expect, type Page, type CDPSession } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
-import { install, measure, type Observation } from "./probe.ts";
+import { install, measure, type LaterEnd, type Observation } from "./probe.ts";
 import { metric, quantile, type Run } from "./stats.ts";
 import { selectJourneys, type Journey } from "./selection.ts";
 import type { FixtureIds } from "./fixture.ts";
@@ -36,11 +36,11 @@ function smooth(name: string, o: Observation) {
   }
 }
 async function quiet(page: Page) { await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))); }
-async function timing(page: Page, name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text") {
+async function timing(page: Page, name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text", later?: LaterEnd) {
   await quiet(page);
   const profiler = profilers.get(page);
   await profiler?.send("Profiler.start");
-  const o = await measure(page, trigger, event, selector, text, mode); add(name, o.elapsed);
+  const o = await measure(page, trigger, event, selector, text, mode, later); add(name, o.elapsed);
   if (profiler) {
     const profile = await profiler.send("Profiler.stop");
     const out = process.env["GL_PERF_OUT"] ?? "perf-results";
@@ -112,6 +112,18 @@ test("focused priority production journeys", async ({ browser }) => {
         const cold = await page.evaluate(() => window.perfJourney.result); if (selected.has("startup")) add("cold-composer", cold.elapsed);
         await ready(page);
 
+        if (selected.has("picker")) {
+          await newThread(page);
+          await page.locator("#ta").fill("Measure first picker opening");
+          await page.locator("#ta").press("Enter");
+          await expect(page.locator(".turn.a.done")).toHaveCount(1);
+          await timing(page, "picker-open", () => page.locator("#modelBtn").click(), "click", "#picker.open");
+          await expect(page.locator("#pkSearch")).toBeFocused();
+          await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+          await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+          await page.keyboard.press("Escape");
+        }
+
         if (selected.has("threads")) {
           for (const [count, clickId, hoverId, clickTitle, hoverTitle] of [
             [200, seed.long, seed.hoverLong, "Perf long 200", "Perf hover 200"],
@@ -125,12 +137,13 @@ test("focused priority production journeys", async ({ browser }) => {
                 const action = `thread-${count}-${warmth}-${pathName}`;
                 const requestsBeforeClick = historyRequests;
                 const beforeClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
-                const observation = await timing(page, action, () => button.click(), "click", ".tl .turn:last-child .md", title);
+                const observation = await timing(page, action, () => button.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "class-count" });
                 add(`${action}.history-requests`, historyRequests - requestsBeforeClick, "count");
                 const afterClick = await page.evaluate(() => ({ motion: window.threadMotionQueries, height: window.threadHeightReads }));
                 add(`${action}.motion-queries`, afterClick.motion - beforeClick.motion, "count");
                 add(`${action}.height-reads`, afterClick.height - beforeClick.height, "count");
                 smooth(action, observation);
+                add(`${action}-mounted`, (await page.evaluate(() => window.perfJourney.later)).elapsed);
                 await expect(page.locator(".tl .turn")).toHaveCount(count);
                 await expect(page.locator(`.sb-row.on[data-thread="${id}"]`)).toBeVisible();
                 await expect(page.locator(".tl .turn:last-child .md")).toContainText(title);

@@ -12,8 +12,12 @@ describe("repetitionPlan", () => {
 });
 
 describe("nextJourneys", () => {
-  it("runs every group the spec implements by default", () => {
+  it("runs the priority groups by default, unchanged by the picker group", () => {
     expect(nextJourneys(NEXT_DEFAULT)).toEqual(["startup", "send", "threads", "parallel", "clipboard", "voice", "queue", "reconnect"]);
+  });
+
+  it("runs the picker group only when named, because its replies would shift every later group", () => {
+    expect(nextJourneys("picker,threads")).toEqual(["picker", "threads"]);
   });
 
   it("refuses first-run by name instead of skipping it", () => {

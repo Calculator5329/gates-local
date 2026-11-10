@@ -10,7 +10,7 @@ import { bundleSizeWarnings, bundleSize } from "../bundle-size.ts";
 import { prepareFixture } from "./fixture.ts";
 import { firstRunTimes } from "./first-run.ts";
 import { ownProcesses } from "./processes.ts";
-import { selectJourneys } from "./selection.ts";
+import { selectJourneys, THREAD_WINDOW_NOTE } from "./selection.ts";
 import { desktopLaunchTimes } from "./desktop-launch.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -35,9 +35,9 @@ type Bundles = { base: ReturnType<typeof bundleSize>; candidate: ReturnType<type
 function report(runs: Runs, commits: Inputs, count: number, repetitions: number, bundles: Bundles) {
   const changes = compare(runs.base, runs.candidate);
   const bundleWarnings = { base: bundleSizeWarnings(bundles.base), candidate: bundleSizeWarnings(bundles.candidate) };
-  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, only: runs.base[0]?.only, bundles, bundleWarnings, changes }, null, 2) + "\n", { flag: "wx" });
+  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, only: runs.base[0]?.only, bundles, bundleWarnings, threadWindowNote: THREAD_WINDOW_NOTE, changes }, null, 2) + "\n", { flag: "wx" });
   const lines = ["Timing is informational. Slower means a measured signal, never a release failure.", "", "| Action | Unit | Base median | Base p95 | Candidate median | Delta | Noise floor | Signal |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", ...changes.map(c => `| ${c.action} | ${c.unit} | ${c.base.median.toFixed(2)} | ${c.base.p95.toFixed(2)} | ${c.candidate.median.toFixed(2)} | ${c.delta.toFixed(2)} | ${c.noiseFloor.toFixed(2)} | ${c.signal}${c.tooNoisy ? "; too noisy for small changes" : ""} |`)];
-  lines.push("", "Bundle sizes are informational soft targets (KiB gzip).");
+  lines.push("", THREAD_WINDOW_NOTE, "", "Bundle sizes are informational soft targets (KiB gzip).");
   for (const arm of ["base", "candidate"] as const) {
     lines.push(`${arm}: ${JSON.stringify(bundles[arm])}`, ...bundleWarnings[arm].map(warning => `${arm} warning: ${warning}`));
   }

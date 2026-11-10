@@ -10,9 +10,11 @@ can be trusted on its own: any difference in it is a real difference.
 `node test/perf/next-compare.ts --prepared INPUTS --out RESULTS --only GROUPS --rounds 4 --samples 2`
 (`pnpm perf:next` is the same command)
 runs the priority journeys (`test/perf/next.spec.ts`) for a base and a candidate
-build, alternating which goes first in each round. `--only` defaults to the eight
-groups the spec implements: startup, send, threads, parallel, clipboard, voice,
-queue and reconnect. **First-run is not covered by this path yet.** The spec and
+build, alternating which goes first in each round. `--only` defaults to eight
+groups: startup, send, threads, parallel, clipboard, voice, queue and reconnect.
+The spec also implements `picker`, which runs only when named with `--only`: its
+reply and extra sessions would shift every later group in a default run and
+spend the job's budget. **First-run is not covered by this path yet.** The spec and
 `next-compare.ts` refuse a selection that names it, or desktop-launch, and the
 first-run row in the table below comes from older data scored offline. Each run
 is:
@@ -57,6 +59,55 @@ measures first-run. It goes away once the climbs have used this one for a
 release.
 
 ### What window each row covers
+
+The broad `perf:compare` rows `open-thread-200` and `open-thread-2000`
+changed meaning after v0.1.0: they now close at the last turn's text in view,
+matching `perf:next`'s cold-click first-screen window. Previously they waited
+for every turn in the DOM, including the idle background fill introduced in
+07b935a. Their new `-mounted` twins retain that whole-fill window from the
+same click. Focused `perf:compare` thread rows also produce `-mounted` twins.
+Both arms of a new comparison use the new windows, even against v0.1.0;
+do not compare its plain-row timings directly with an older release report.
+The `perf:compare` output (`comparison.md` and `comparison.json`) repeats this
+change of meaning; `perf:next`, which has no `open-thread-*` rows, does not.
+No thresholds changed.
+
+The `picker` group measures a first picker opening after a completed reply,
+without visiting the picker or settings first. Every row ends two frames after
+`#picker.open` appears, with the complete-view barrier intact. The picker warms
+its fit reports only on intent (pointer entering the model button, keyboard
+focus, pointer-down), never at idle and never while a reply runs or a model
+loads, so how the opening arrives decides how much of the wait is hidden.
+Keyboard focus means focus with a focus ring: `picker-open-keyboard` focuses
+the button by script straight after typing in the composer, which Chromium
+treats as keyboard focus. The row asserts the focus ring; without it the row
+would measure a cold open.
+
+`picker-open` is a scripted click with no hover before it: the pointer moves
+onto the button and presses in the same instant, so the warm-up starts with the
+click. Its `session-fit-checks` counter includes every `fit.check` sent since
+navigation, including setup and the completed reply.
+
+Three more after-reply rows each use a fresh client session with one completed
+reply. `picker-open-hand` moves the pointer onto the button and clicks 150 ms
+later, the way a hand does. `picker-open-keyboard` focuses the button and
+presses Enter 150 ms later; its window starts at the keydown. Both record wall
+time and exact session `fit.check` counts. `picker-open-hover-away` hovers for
+350 ms, leaves and never opens; it records only the session's `fit.check`
+count, the one warm-up whose checks no opening uses.
+
+Two rows each use a fresh client session with no reply or earlier picker
+visit, and leave the app's own idle work alone. `picker-open-hover` hovers the
+model button for 350 ms before clicking. `picker-open-cold-ready` clicks as
+soon as automation observes the enabled composer. These rows record wall time
+and exact session `fit.check` counts, including repeated hover/focus and a
+second opening; repeated intent must not add requests. (Earlier lane jobs also
+had `picker-open-idle` and held idle callbacks to separate an idle warm-up
+that no longer exists; both are gone.)
+
+Every dwell is setup, excluded from elapsed time, and applies equally to both
+arms. None of the fresh-session rows adds CPU or React count windows, and none
+runs in the profile repetition.
 
 - **Wall time** starts at the input that triggers the action, using the event's
   own timestamp (click, keydown, paste). Three rows start differently.

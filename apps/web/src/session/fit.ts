@@ -15,13 +15,16 @@ const ownedChatModel = (o: GpuStatus["occupants"][number]) => o.kind === "chat-m
 const gpuOccupantKey = (g: GpuStatus, owned: boolean) => g.occupants.filter(o => ownedChatModel(o) === owned)
   .map(o => JSON.stringify([o.kind, o.label, Math.round(o.bytes / 1024 ** 2), o.protected])).toSorted().join("|");
 
+/** A reply is running or a model is loading: either one ends by changing GPU memory and every fit report with it. */
+export const fitsAboutToChange = (s: State): boolean =>
+  runningThreads(s).size > 0 || Object.values(s.loads).some(load => load.state === "loading");
+
 /** Only decides whether old words stay on screen; every pick still needs a current fit.check answer. */
 function onlyIdleOwnedModelsChanged(s: State, next: GpuStatus): boolean {
   const before = s.gpu;
   if (!before || before === NA || before.vendor !== "nvidia" || next.vendor !== "nvidia" ||
     before.name !== next.name || before.totalBytes !== next.totalBytes || before.detail !== next.detail ||
-    before.freeBytes === undefined || next.freeBytes === undefined || runningThreads(s).size > 0 ||
-    Object.values(s.loads).some(load => load.state === "loading")) return false;
+    before.freeBytes === undefined || next.freeBytes === undefined || fitsAboutToChange(s)) return false;
   if (gpuOccupantKey(before, true) === gpuOccupantKey(next, true) || gpuOccupantKey(before, false) !== gpuOccupantKey(next, false)) return false;
   const beforeOwned = before.occupants.filter(ownedChatModel).reduce((sum, o) => sum + o.bytes, 0);
   const nextOwned = next.occupants.filter(ownedChatModel).reduce((sum, o) => sum + o.bytes, 0);

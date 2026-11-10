@@ -8,8 +8,8 @@ import { openFit } from "./fit-actions.ts";
 import { displayFit } from "./fit-display.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { Icon } from "./icons.tsx";
-import { chatModels, pendingDownload } from "./pick.ts";
-import { contextRuler, makerOf, pickerLabel, pickerLabels, type Maker } from "./picker-models.ts";
+import { chatModels } from "./pick.ts";
+import { activeEntry, contextRuler, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
 import { NA, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
@@ -88,26 +88,18 @@ export function Picker() {
     return r ? verdictOf(r) : undefined;
   };
   const installed = chatModels(models ?? []);
-  const downloading = Object.values(pulls).filter(p => pendingDownload(p, models));
-  const labels = pickerLabels([...installed.map(m => m.name), ...downloading.map(p => p.name)], catalog);
-  const presentation = (tag: string) => {
-    const name = pickerLabel(tag, catalog?.find(c => c.name === tag)?.label), label = labels.get(tag) ?? name;
-    return { name, label, variant: label === name ? "" : label.slice(name.length + 3) };
-  };
-  const rows: Row[] = installed.map(info => ({ tag: info.name, ...presentation(info.name), info, v: report(info.name), frees: stopFrees[keyFor(info.name)] === true }));
-  for (const p of downloading) {
-    rows.push({ tag: p.name, ...presentation(p.name), v: report(p.name), downloading: p.totalBytes ? Math.round(p.completedBytes / p.totalBytes * 100) : 0, frees: false });
-  }
+  // In list order already: filtering keeps it, and intent warming reads the same entries.
+  const rows: Row[] = pickerEntries(models, pulls, catalog, selected).map(({ pull, ...entry }) => ({ ...entry, v: report(entry.tag),
+    ...pull ? { downloading: pull.totalBytes ? Math.round(pull.completedBytes / pull.totalBytes * 100) : 0, frees: false } : { frees: stopFrees[keyFor(entry.tag)] === true } }));
   const q = query.toLowerCase().trim();
   const filtered = rows.filter(r => q ? `${r.label} ${r.tag}`.toLowerCase().includes(q) : group === "all" || (group === "favorites" ? favorites.includes(r.tag) : makerOf(r.tag) === group));
-  filtered.sort((a, b) => Number(b.tag === selected) - Number(a.tag === selected) || a.label.localeCompare(b.label, undefined, { numeric: true }));
   const limit = phone ? 5 : 6; // Leave room for Show more alongside the phone's 44 px rows.
   const visible = q || expanded ? filtered : filtered.slice(0, limit);
-  const active = (choice ? rows.find(r => r.tag === choice.tag) : undefined) ?? visible.find(r => r.tag === highlight) ?? visible.find(r => r.tag === selected) ?? visible[0];
+  const active = activeEntry(visible, selected, highlight, choice ? rows.find(r => r.tag === choice.tag) : undefined);
   const activeMax = active?.info?.maxContext;
   const actual = active ? ctxFor(numCtx, models, active.tag) : numCtx;
   const present = new Set([...rows.map(r => makerOf(r.tag)), ...(catalog ?? []).map(c => makerOf(c.name))]);
-  const rowKey = rows.map(r => r.tag).join("\n");
+  const rowKey = rows.map(r => r.tag).toSorted().join("\n");
   // Prepare the first view with the existing checks. Later refreshes keep
   // readable history on screen; neither history nor opening authorizes a pick.
   const prepared = !readyForFits || (models !== undefined || settled) && (gpu !== undefined || settled) &&

@@ -1,4 +1,6 @@
+import type { CatalogEntry, ModelInfo, PullProgress } from "@gates-local/contracts";
 import { friendlyName, type Verdict } from "./format.ts";
+import { chatModels, pendingDownload } from "./pick.ts";
 
 export type Maker = "Gemma" | "Qwen" | "Milo" | "gpt-oss" | "Phi" | "Mistral" | "Other";
 
@@ -41,6 +43,31 @@ export function pickerLabels(tags: readonly string[], catalog: readonly { name: 
     }
   }
   return labels;
+}
+
+/** One picker row before its fit report: an installed chat model (`info`) or a pending download (`pull`). */
+export interface PickerEntry { readonly tag: string; readonly label: string; readonly name: string; readonly variant: string; readonly info?: ModelInfo; readonly pull?: PullProgress }
+
+/**
+ * Every row the picker lists, in its order: the selected model first, then by
+ * visible label. The picker and its intent warm-up both read this, so the row
+ * one prepares is the row the other shows.
+ */
+export function pickerEntries(models: readonly ModelInfo[] | undefined, pulls: Readonly<Record<string, PullProgress>>, catalog: readonly CatalogEntry[] | undefined, selected: string | undefined): PickerEntry[] {
+  const installed = chatModels(models ?? []);
+  const downloading = Object.values(pulls).filter(p => pendingDownload(p, models));
+  const labels = pickerLabels([...installed.map(m => m.name), ...downloading.map(p => p.name)], catalog);
+  const entry = (tag: string) => {
+    const name = pickerLabel(tag, catalog?.find(c => c.name === tag)?.label), label = labels.get(tag) ?? name;
+    return { tag, name, label, variant: label === name ? "" : label.slice(name.length + 3) };
+  };
+  return [...installed.map(info => ({ ...entry(info.name), info })), ...downloading.map(pull => ({ ...entry(pull.name), pull }))]
+    .toSorted((a, b) => Number(b.tag === selected) - Number(a.tag === selected) || a.label.localeCompare(b.label, undefined, { numeric: true }));
+}
+
+/** The row the context column describes: a pending choice, else the highlighted row, else the selected one, else the first listed. */
+export function activeEntry<R extends { readonly tag: string }>(visible: readonly R[], selected: string | undefined, highlight: string | null = null, choice?: R): R | undefined {
+  return choice ?? visible.find(r => r.tag === highlight) ?? visible.find(r => r.tag === selected) ?? visible[0];
 }
 
 /** Presentation only: the track ends at usable memory; a dashed extension shows overflow. */

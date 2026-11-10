@@ -1,8 +1,14 @@
 import { selectJourneys, type Journey } from "./selection.ts";
 
-/** The journey groups next.spec.ts implements. */
-const IMPLEMENTED = new Set<Journey>(["startup", "send", "threads", "parallel", "clipboard", "voice", "queue", "reconnect"]);
-export const NEXT_DEFAULT = [...IMPLEMENTED].join(",");
+/** The groups a default run measures. */
+const DEFAULT = ["startup", "send", "threads", "parallel", "clipboard", "voice", "queue", "reconnect"] as const satisfies readonly Journey[];
+/**
+ * The journey groups next.spec.ts implements. `picker` runs only when named:
+ * its reply and extra sessions would shift every later group in a default run
+ * and spend the job's budget.
+ */
+const IMPLEMENTED = new Set<Journey>([...DEFAULT, "picker"]);
+export const NEXT_DEFAULT = DEFAULT.join(",");
 
 export type RepetitionKind = "timed" | "counters" | "profile";
 /**
