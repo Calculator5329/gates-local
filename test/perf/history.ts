@@ -2,8 +2,10 @@
 // store: each run adds a column to what is already committed.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { isChange, type Signal } from "./score-next.ts";
 
-export interface HistoryRow { action: string; unit: "ms" | "count"; kind: "exact" | "sampled"; candidateValue: number; signal: "slower" | "faster" | "within noise" }
+export interface HistoryRow { action: string; unit: "ms" | "count"; kind: "exact" | "sampled"; candidateValue: number; signal: Signal }
+const SIGNALS: readonly unknown[] = ["slower", "faster", "within noise", "not scored"] satisfies Signal[];
 interface Table { labels: string[]; rows: Map<string, string[]> }
 
 const PREAMBLE = `# Performance history
@@ -12,8 +14,9 @@ One column per release, measured on the test machine with the priority journeys.
 Times show the lower quartile of the repetitions. A count that was the same in
 every run is exact and prints whole; ~ marks a count that varied between runs,
 and shows its lower quartile to one decimal. A word beside a number means the
-release measured differently from the build it was compared with. These numbers
-are information, not a gate.
+release measured differently from the build it was compared with; "not scored"
+means it had too few repetitions to be tested at all. These numbers are
+information, not a gate.
 
 Refresh with \`node test/perf/history.ts --label RELEASE --scored RESULTS/scored.json\`.
 `;
@@ -89,7 +92,7 @@ function isHistoryRow(value: unknown): value is HistoryRow {
     && "unit" in value && (value.unit === "ms" || value.unit === "count")
     && "kind" in value && (value.kind === "exact" || value.kind === "sampled")
     && "candidateValue" in value && typeof value.candidateValue === "number"
-    && "signal" in value && (value.signal === "slower" || value.signal === "faster" || value.signal === "within noise");
+    && "signal" in value && SIGNALS.includes(value.signal);
 }
 
 /** The verdicts, without words when the job compared a build with itself, since any signal there is false. */
@@ -98,7 +101,7 @@ export function parseScored(text: string): HistoryRow[] {
   if (typeof value !== "object" || value === null || !("verdicts" in value) || !Array.isArray(value.verdicts) || !value.verdicts.every(isHistoryRow)) throw new Error("Not a scored result");
   const commits: unknown = "commits" in value ? value.commits : undefined;
   const self = typeof commits === "object" && commits !== null && "base" in commits && "candidate" in commits && commits.base === commits.candidate;
-  return self ? value.verdicts.map(row => ({ ...row, signal: "within noise" as const })) : value.verdicts;
+  return self ? value.verdicts.map(row => isChange(row.signal) ? { ...row, signal: "within noise" as const } : row) : value.verdicts;
 }
 
 if (import.meta.main) {

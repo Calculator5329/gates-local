@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { DEFAULT_ALPHA, detectableChange, parseMetric, parseRun, scoreNext } from "./score-next.ts";
+import { DEFAULT_ALPHA, detectableChange, isChange, parseMetric, parseRun, scoreNext } from "./score-next.ts";
 import { compare, type Run } from "./stats.ts";
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -29,8 +29,9 @@ for (const folder of positionals) {
   if (!runs) { console.log(`Skipped, incomplete: ${folder}`); continue; }
   const self = runs.base[0]!.commit === runs.candidate[0]!.commit;
   const verdicts = scoreNext(runs.base, runs.candidate, { alpha });
-  const signals = verdicts.filter(v => v.signal !== "within noise");
-  console.log(`\n# ${path.basename(path.dirname(folder))}/${path.basename(folder)} ${self ? "same build" : "different builds"}: ${verdicts.length} rows, ${signals.length} signals at alpha ${alpha}`);
+  const signals = verdicts.filter(v => isChange(v.signal));
+  const unscored = verdicts.filter(v => v.signal === "not scored").length;
+  console.log(`\n# ${path.basename(path.dirname(folder))}/${path.basename(folder)} ${self ? "same build" : "different builds"}: ${verdicts.length} rows, ${signals.length} signals at alpha ${alpha}${unscored ? `, ${unscored} not scored` : ""}`);
   for (const v of signals) console.log(`  SIGNAL ${v.action} ${v.signal} delta ${v.delta.toFixed(2)} ${v.unit} (${v.percent?.toFixed(1) ?? "n/a"}%) p ${v.p.toFixed(4)} repetitions ${v.repetitions}`);
   if (!self) {
     const old = compare(runs.base, runs.candidate).filter(c => c.signal !== "within noise");

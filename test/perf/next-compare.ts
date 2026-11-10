@@ -9,7 +9,7 @@ import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
 import { prepareFixture } from "./fixture.ts";
 import { ownProcesses } from "./processes.ts";
-import { parseRun, scoreNext, type Verdict } from "./score-next.ts";
+import { parseRun, scoreNext, scoredMarkdown, type Verdict } from "./score-next.ts";
 import { NEXT_DEFAULT, nextJourneys } from "./next-journeys.ts";
 import type { Run } from "./stats.ts";
 
@@ -82,8 +82,7 @@ await processes.close();
 
 const verdicts: Verdict[] = [...scoreNext(runs.base, runs.candidate), ...scoreNext(counters.base, counters.candidate)];
 writeFileSync(path.join(out, "scored.json"), JSON.stringify({ schema: 1, informational: true, commits, rounds: runs.base.length, samples, throttle: Number(values.throttle), seconds: elapsed(), verdicts }, null, 2) + "\n", { flag: "wx" });
-const lines = ["Timing is informational. A signal is a measured change, never a release failure.", "", "| Action | Kind | Unit | Base | Candidate | Delta | % | p | Noise limit | Repetitions | Signal |", "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
-  ...verdicts.map(v => `| ${v.action} | ${v.kind} | ${v.unit} | ${v.baseValue.toFixed(2)} | ${v.candidateValue.toFixed(2)} | ${v.delta.toFixed(2)} | ${v.percent?.toFixed(1) ?? "n/a"} | ${v.p.toFixed(4)} | ${v.limit.toFixed(2)} | ${v.repetitions} | ${v.signal}${v.note ? `; ${v.note}` : ""} |`)];
-writeFileSync(path.join(out, "scored.md"), lines.join("\n") + "\n", { flag: "wx" });
-console.log(lines.join("\n"));
+const markdown = scoredMarkdown(verdicts);
+writeFileSync(path.join(out, "scored.md"), markdown, { flag: "wx" });
+console.log(markdown);
 console.log(`NEXT finished in ${elapsed().toFixed(0)}s with ${runs.base.length} rounds`);

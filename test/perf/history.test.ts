@@ -47,6 +47,12 @@ describe("addRelease", () => {
     expect(next).toContain("| cold-composer (ms) | 287 | 330 (slower) |");
   });
 
+  it("marks a row that could not be tested apart from one that showed no change", () => {
+    const next = addRelease(first, "v2", [row("cold-composer", "ms", 260.2, "not scored"), row("cold-composer.react-renders", "count", 190)]);
+    expect(next).toContain("| cold-composer (ms) | 287 | 260 (not scored) |");
+    expect(next).toContain("| cold-composer.react-renders (count) | 214 | 190 |");
+  });
+
   it("refuses a release it already has", () => {
     expect(() => addRelease(first, "v1", [])).toThrow("already has v1");
   });
@@ -61,6 +67,11 @@ describe("parseScored", () => {
     const scored = { commits: { base: "abc", candidate: "abc" }, verdicts: [row("a", "ms", 1, "slower")] };
     expect(parseScored(JSON.stringify(scored))[0]).toMatchObject({ signal: "within noise" });
     expect(parseScored(JSON.stringify({ ...scored, commits: { base: "abc", candidate: "def" } }))[0]).toMatchObject({ signal: "slower" });
+  });
+
+  it("keeps a row that was not tested as not scored, even for a build compared with itself", () => {
+    const scored = { commits: { base: "abc", candidate: "abc" }, verdicts: [row("a", "ms", 1, "not scored"), row("b", "ms", 1, "faster")] };
+    expect(parseScored(JSON.stringify(scored)).map(r => r.signal)).toEqual(["not scored", "within noise"]);
   });
 
   it("refuses something else", () => {

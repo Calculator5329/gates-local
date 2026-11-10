@@ -8,11 +8,13 @@ function fixture() {
   const frames: FrameRequestCallback[] = [];
   let mutation = noop;
   let done = false;
-  const element = { value: "", textContent: "", disabled: false, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 10, bottom: 100 }) };
+  const turns = { length: 0 };
+  const element ={ value: "", textContent: "", disabled: false, getClientRects: () => [{}], getBoundingClientRect: () => ({ top: 10, bottom: 100 }) };
   const document = Object.assign(new EventTarget(), {
     activeElement: element,
     querySelector: (selector: string) => selector === "#done" ? (done ? element : null) : selector === ".composer.blocked" ? null : element,
     querySelectorAll: () => [element],
+    getElementsByClassName: (name: string) => name === "turn" ? turns : { length: 0 },
   });
   class Socket { static OPEN = 1; readyState = 1; close() { this.readyState = 3; } }
   class Observer { observe() {} disconnect() {} takeRecords() { return []; } }
@@ -26,7 +28,7 @@ function fixture() {
   const tick = (count = 3) => { for (let i = 0; i < count; i++) { const callback = frames.shift(); if (!callback) throw new Error("No pending paint"); clock += 16; callback(clock); } };
   const input = (type: string, delay: number) => { const event = new Event(type); Object.defineProperty(event, "timeStamp", { value: clock - delay }); document.dispatchEvent(event); };
   browserProbe(false); tick();
-  return { element, document, frames, tick, input, complete: () => { done = true; mutation(); } };
+  return { element, document, frames, turns, tick, input, complete: () => { done = true; mutation(); } };
 }
 
 test("completion-to-next timing waits for the begin marker and usable rendered value", async () => {
@@ -56,6 +58,27 @@ test("a cached reply from another thread cannot finish the current-text marker",
   await Promise.resolve(); expect(finished).toBe(false);
   f.element.textContent = "Reply 1\nfresh"; f.tick(); await window.perfJourney.result;
   expect(finished).toBe(true);
+});
+
+test("a second window from the same input closes when every turn is mounted, after the first has closed", async () => {
+  const f = fixture(); f.element.textContent = "Last turn";
+  window.perfJourney.arm("click", ".md", "Last turn", "text", { selector: "turn", text: "2000", mode: "class-count" });
+  f.turns.length = 40; f.input("click", 0); f.tick(4);
+  const first = await window.perfJourney.result;
+  let mounted = false; void window.perfJourney.later.then(() => { mounted = true; });
+  f.tick(1); await Promise.resolve(); expect(mounted).toBe(false);
+  f.turns.length = 2000; f.tick(3);
+  const later = await window.perfJourney.later;
+  expect(first.elapsed).toBe(64);
+  expect(later.elapsed).toBe(128);
+  expect(later.frames.length).toBeGreaterThan(first.frames.length);
+});
+
+test("a window with no second end gives the first result as the later one", async () => {
+  const f = fixture(); f.element.textContent = "ready";
+  window.perfJourney.arm("click", "#ta", "ready", "text");
+  f.input("click", 0); f.tick();
+  expect(await window.perfJourney.later).toBe(await window.perfJourney.result);
 });
 
 test("reconnect observes a replaced socket even when loss and recovery happen between frames", async () => {

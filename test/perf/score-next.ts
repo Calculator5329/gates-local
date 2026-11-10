@@ -11,7 +11,13 @@
 // bottom alone, so the lower quartile is the steadier place to look.
 import type { Metric, Run } from "./stats.ts";
 
-export type Signal = "slower" | "faster" | "within noise";
+/** "Within noise" means the row was tested and no change was seen; "not scored" means it could not be tested. */
+export type Signal = "slower" | "faster" | "within noise" | "not scored";
+
+/** Whether a verdict names a measured change. */
+export function isChange(signal: Signal): boolean {
+  return signal === "slower" || signal === "faster";
+}
 export type RowKind = "exact" | "sampled";
 
 export interface Verdict {
@@ -218,7 +224,7 @@ function sampledVerdict(row: Pick<PairedRow, "action" | "unit">, base: Strata, c
     baseValue, candidateValue, delta, percent: baseValue === 0 ? null : delta / baseValue * 100,
   };
   if (2 / arrangements(base, candidate) >= alpha) {
-    return { ...verdict, p: 1, limit: Number.POSITIVE_INFINITY, signal: "within noise", note: `Only ${verdict.repetitions} repetitions per arm. More are needed before a change can be reported.` };
+    return { ...verdict, p: 1, limit: Number.POSITIVE_INFINITY, signal: "not scored", note: `Only ${verdict.repetitions} repetitions per arm. More are needed before a change can be reported.` };
   }
   const nulls = shuffledDifferences(base, candidate, shuffles, random);
   const extreme = nulls.filter(value => value >= Math.abs(delta) - 1e-9).length;
@@ -248,6 +254,18 @@ function scoreRow(row: PairedRow, alpha: number): Verdict {
 export function scoreNext(base: readonly Run[], candidate: readonly Run[], options: ScoreOptions = {}): Verdict[] {
   const alpha = options.alpha ?? DEFAULT_ALPHA;
   return pairedRows(base, candidate).map(row => scoreRow(row, alpha));
+}
+
+/** The verdicts as the table a person reads, ending with how many rows were not scored. */
+export function scoredMarkdown(verdicts: readonly Verdict[]): string {
+  const unscored = verdicts.filter(v => v.signal === "not scored").length;
+  return [
+    "Timing is informational. A signal is a measured change, never a release failure.", "",
+    "| Action | Kind | Unit | Base | Candidate | Delta | % | p | Noise limit | Repetitions | Signal |",
+    "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ...verdicts.map(v => `| ${v.action} | ${v.kind} | ${v.unit} | ${v.baseValue.toFixed(2)} | ${v.candidateValue.toFixed(2)} | ${v.delta.toFixed(2)} | ${v.percent?.toFixed(1) ?? "n/a"} | ${v.signal === "not scored" ? "n/a" : v.p.toFixed(4)} | ${Number.isFinite(v.limit) ? v.limit.toFixed(2) : "n/a"} | ${v.repetitions} | ${v.signal}${v.note ? `; ${v.note}` : ""} |`),
+    ...unscored ? ["", `${unscored} of ${verdicts.length} rows were not scored: too few repetitions to test them.`] : [],
+  ].join("\n") + "\n";
 }
 
 export interface Detectable {
@@ -306,7 +324,7 @@ export function detectableChange(base: readonly Run[], candidate: readonly Run[]
         a.push(dealt.slice(0, options.rounds));
         b.push(dealt.slice(options.rounds, 2 * options.rounds).map(value => shifted(value, shift, frames, random)));
       }
-      return sampledVerdict(row, a, b, alpha, SIMULATION_SHUFFLES, random).signal !== "within noise";
+      return isChange(sampledVerdict(row, a, b, alpha, SIMULATION_SHUFFLES, random).signal);
     };
     const rate = (shift: number) => {
       let hits = 0;

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { NEXT_DEFAULT, nextJourneys } from "./next-journeys.ts";
+import { NEXT_DEFAULT, nextJourneys, repetitionPlan } from "./next-journeys.ts";
+
+describe("repetitionPlan", () => {
+  it("counts three times per run, so a varying counter has three strata of four against four over four rounds", () => {
+    expect(repetitionPlan(2, 2)).toEqual(["timed", "timed", "counters", "counters", "counters"]);
+  });
+
+  it("profiles once, in the first round", () => {
+    expect(repetitionPlan(1, 1)).toEqual(["timed", "counters", "counters", "counters", "profile"]);
+  });
+});
 
 describe("nextJourneys", () => {
   it("runs every group the spec implements by default", () => {

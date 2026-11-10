@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-09: The performance comparison says "not scored", times the whole mount of a long thread, and types inside one
+
+- A row with too few repetitions to be tested printed "within noise". It now
+  prints "not scored", its p and limit print as n/a, and the table ends
+  with a count of such rows. "Within noise" is left meaning what it says:
+  tested, no change seen.
+- Each run counts three times, not once, so a counter that varies between
+  runs can be scored in the default four-round job. In the first job run
+  this way, 123 count rows were exact, 57 were scored and none was left
+  unscored. It adds 51 to 54 s to a round.
+- Each long-thread visit has a second row, `-mounted`, from the same click,
+  that closes when every turn is in the page. The plain row closes at the
+  first screen.
+- `type-in-thread-2000` types one character with the 2,000-turn thread open
+  and fully mounted.
+- First reading with the new rows, the long-threads change against the
+  commit before it, same job: the first screen of the 2,000-turn thread
+  comes sooner as reported, and the whole thread takes longer to finish
+  mounting, 565 ms to 3,029 ms on a cold click, with about 4.5 times the
+  CPU time and layouts going from 11 to 198. The page holds
+  the same 36,474 elements either way. One keystroke in that thread spends
+  2.75 ms in script where it spent 4.58 ms; its wall time read 43 ms
+  against 35 ms, which is not explained.
+- The doc says what the printed limit is: the size a difference had to
+  exceed in the shuffled arrangements, which is large when the real change
+  is large. It is not a reading of the machine's noise.
+
 ## 2026-11-09: Download rows stay where you clicked them
 
 - Fit replies update the Recommended group as they arrive until you start or

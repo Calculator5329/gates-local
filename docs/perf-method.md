@@ -22,7 +22,7 @@ is:
    the DevTools protocol: `.cpu-task`, `.cpu-script`, `.cpu-layout`, `.cpu-style`,
    `.cpu-thread` in ms, and `.layouts` and `.style-recalcs` as counts. These
    cover a wider window than the wall time; see below.
-2. One counter repetition, never timed: React commits and rendered components
+2. Three counter repetitions, never timed: React commits and rendered components
    (through a stand-in DevTools hook), requests, bytes, WebSocket frames in and
    out with their bytes, and DOM elements at the end of the action. A rendered
    component is a fiber in a committed tree flagged as having done work, so
@@ -32,7 +32,13 @@ is:
    installed cannot read as zero work. WebSocket bytes count text frames in
    UTF-8 and binary frames decoded. Job 2 was recorded before that, when they
    counted string code units, so its `.ws-bytes` rows used the old count; no
-   number in this document or the history cites them.
+   number in this document or the history cites them. There are three so that
+   a counter that varies between runs can be scored in a 4-round job: one per
+   run gives one stratum of 4 against 4, which can never reach 1 in 100. With
+   two, the lower quartile ties across so many arrangements that arms which do
+   not overlap at all land near p = 0.009 and miss about one time in nine.
+   With three they land near 0.002. A count stays exact only when it never
+   varied, at any position, in at least two runs of each arm.
 3. In round 1 only, one profile repetition, never timed: a sampled CPU profile per
    action in `profiles/<action>.cpuprofile` (open it in the browser DevTools
    Performance panel) and the top self-time functions in `profiles/hot-spots.json`.
@@ -70,6 +76,33 @@ release.
   streaming its last tokens and finishing. Its wall row does not.
 - cold-composer's CPU counters restart with the new document, so its CPU rows
   cover the new page from its start, the same span as its wall time.
+- **`thread-<n>-<warmth>-<path>` closes at the first screen; its
+  `-mounted` twin closes at the whole thread.** The plain row ends when the
+  last turn's text is on screen. A timeline that mounts the newest turns
+  first and fills in the rest later reaches that point with most of the
+  thread still to mount, so the plain row times and counts the first screen
+  only. `thread-<n>-<warmth>-<path>-mounted` comes from the same click and
+  the same opening reading, and closes two frames after all `<n>` turns are
+  in the DOM: its wall time, CPU and count rows (rendered components,
+  commits, layouts, DOM elements at the end) cover the whole mount. Where
+  everything mounts at once the two rows end in the same frame. The probe
+  checks the turn count each frame from a live collection by class name,
+  which is cheap on a long thread. Those per-frame checks continue after the
+  plain row's end, so the plain row's CPU window, which runs on through its
+  protocol reads, can hold a few of them; its wall window and end state are
+  unchanged.
+- **`type-in-thread-2000`** types one character into the focused composer
+  while the last 2000-turn visit is open and every turn is mounted. It runs
+  from the keydown to two frames after the character is in the box, with the
+  box enabled and focused, and has the same CPU and count rows as the others.
+  A render counter cannot see everything a keystroke costs. It counts
+  components React rendered and committed. A store selector that runs on
+  every change, finds its value unchanged and so renders nothing is invisible
+  to it: two thousand saved replies can each run their selectors on every
+  keystroke and add nothing to `react-renders`. The cheapest honest reading
+  of that work the page already offers is
+  `type-in-thread-2000.cpu-script`, the main thread's scripting time over the
+  keystroke's window.
 
 ## How a change is scored
 
@@ -90,11 +123,23 @@ release.
   repetition position and asks how often a gap this large appears by chance. A
   change is reported when that is under 1 in 100 and the change is at least the
   smallest worth naming: 1 % and 1 ms for wall time, 1 % and 0.05 ms for CPU time.
-- Fewer than 8 repetitions per arm cannot reach 1 in 100, and the scorer says so
-  instead of giving a verdict.
+- Each row ends in one of four signals. **slower** and **faster** are measured
+  changes. **within noise** means the row was tested and no change was seen at
+  its limit. **not scored** means the row could not be tested at all: its
+  shuffles have too few distinct arrangements to reach 1 in 100, whatever the
+  values. Four strata of one run against one give 2⁴ = 16 arrangements, so
+  fewer than 8 repetitions per arm usually land here. Its p and limit print as
+  n/a, and `scored.md` ends with a line counting the rows not scored.
 - The **noise limit** column is the gap that 99 shuffles in 100 stay under. A
   row "within noise" with a limit of 30 % was not seen; it was not shown to be
   unchanged.
+- The limit is the size a difference had to exceed among the shuffled
+  arrangements of this job's own values, not a reading of the machine's noise.
+  The shuffle deals both arms' values together, so when the real change is
+  large the shuffled gaps are large too, and so is the limit. In the
+  long-threads comparison, thread-2000-cold-click moved from 553 ms to 96 ms
+  and printed a limit of 317 ms: that is the change showing up in the
+  shuffle, not 317 ms of noise.
 
 ## What one job can see
 
@@ -144,6 +189,10 @@ send, parallel, queue and reconnect, 4 rounds of 2 timed repetitions, 655 s.
 | type-after-paste | 36 | 92 | 80 | not recorded | 0.0 %, none | replay of older data |
 | first-run-ready | 365 | 26 | 25 | not recorded | 0.0 %, none | replay of older data |
 | Exact counters (166 rows) | | none | 1 count | | 0, none | job 2 |
+
+Rows added since job 2, with no same-build job behind them yet, so their
+detectable sizes are unknown: the eight `thread-<n>-<warmth>-<path>-mounted`
+rows and `type-in-thread-2000`, each with its CPU and count rows.
 
 **Why 400 shuffles.** At 4,000 shuffles in the simulation, one full replay of
 job 2 took 2,504 s on a desktop, too slow to rerun after each scorer change.
@@ -273,17 +322,23 @@ This section is written to replace "How to climb" in the climb lanes' brief.
 4. **One exclusive job, narrow group:**
    `node test/perf/next-compare.ts --prepared perf-inputs --out <fresh> --only <your group> --rounds 4 --samples <as many as fit>`.
    Setup takes about 80 s. A repetition of the whole priority set takes about
-   20 s, and each run adds one counter repetition (plus one profile repetition
-   in round 1) and a few seconds of start-up. The job stops before its budget on
+   20 s, and each run adds three counter repetitions (plus one profile
+   repetition in round 1) and a few seconds of start-up. The job stops before its budget on
    its own.
 5. **Read counters first.** A change in an exact counter (renders, commits,
    layouts, requests, bytes, DOM elements) is real at any size. Opening the
    2000-turn thread commits 16,460 rendered components in every run today. A change that
    cuts that number is a measured win, even if the time row says "within noise".
+   If the change defers work rather than removing it, the plain thread rows
+   will show the cut and the `-mounted` rows will show whether the total
+   fell, stayed or grew; report both. On typing, a selector that renders
+   nothing does not show in the counters; read `.cpu-script`.
 6. **Then read time, with its limit.** A signal means p < 0.01 and at least 1 %.
    "Within noise" means nothing was seen at that job's noise limit, not that
-   nothing changed. Expect the sizes in the table above. Report the delta and
-   the limit together.
+   nothing changed. "Not scored" means the row was not tested: add rounds or
+   repetitions before saying anything about it. Expect the sizes in the table
+   above. Report the delta and the limit together, and remember a large change
+   brings a large limit with it.
 7. **A lone signal under 3 % near p = 0.01 is weak.** One appears by chance in
    about every job. Believe it when a counter or the profile agrees, or when it
    repeats in the next round's job.
@@ -297,8 +352,10 @@ This section is written to replace "How to climb" in the climb lanes' brief.
 
 `docs/perf-history.md` holds one column per release: wall time and CPU task
 time, using the lower quartile, then work counts. A word beside a number means
-that release measured differently from what it was compared with. A job that
-compared a build with itself adds no words. Add a release with:
+that release measured differently from what it was compared with, or, for
+"(not scored)", that the row had too few repetitions to be tested. A job that
+compared a build with itself adds no change words; it keeps "(not scored)".
+Add a release with:
 
 `node test/perf/history.ts --label RELEASE --scored RESULTS/scored.json`
 

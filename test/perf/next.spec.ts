@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // The priority journeys, also recording what each action cost the browser.
 //
-// A run is timed repetitions, then one counter repetition, then in the first
+// A run is timed repetitions, then three counter repetitions, then in the first
 // round one profile repetition. Counting and profiling never share a
 // repetition with timing. Input goes straight to the browser, because a
 // locator click runs Playwright's own script in the page during the window.
@@ -12,8 +12,8 @@ import { test, expect, type CDPSession, type Locator, type Page } from "@playwri
 import { CONTROL_URL, FAKE_URL, appUrl } from "../e2e/env.ts";
 import { browserReactHook, costRows, counterRows, emptyNetwork, frameBytes, hotSpots, snapshot, type HotSpot, type MetricSnapshot, type NetworkCounts, type ReactCounts, type Row } from "./counters.ts";
 import type { FixtureIds } from "./fixture.ts";
-import { install, measure, type Observation } from "./probe.ts";
-import { NEXT_DEFAULT, nextJourneys } from "./next-journeys.ts";
+import { install, measure, type LaterEnd, type Observation } from "./probe.ts";
+import { COUNTER_REPETITIONS, NEXT_DEFAULT, nextJourneys, repetitionPlan } from "./next-journeys.ts";
 import type { Journey } from "./selection.ts";
 import { metric, type Run } from "./stats.ts";
 import { fakeVoice } from "./voice-fixture.ts";
@@ -28,7 +28,6 @@ const throttle = Number(process.env["GL_PERF_THROTTLE"] ?? 1);
 const paste = process.env["GL_PERF_PASTE"] === "1";
 const out = process.env["GL_PERF_OUT"] ?? "perf-results";
 const hoverDwellMs = 350;
-type Kind = "timed" | "counters" | "profile";
 type Rows = Map<string, { unit: Row["unit"]; samples: number[] }>;
 const timed: Rows = new Map(), counted: Rows = new Map();
 const hot: Record<string, HotSpot[]> = {};
@@ -79,7 +78,7 @@ test("priority journeys with costs", async ({ browser }) => {
   const loadBefore = loadavg();
   const seed = fixtureIds(await (await fetch(`${CONTROL_URL}/seed`)).json());
   const voice = selected.has("voice") ? await fakeVoice() : undefined;
-  const plan: Kind[] = [...Array.from({ length: timedRepetitions }, (): Kind => "timed"), "counters", ...(round === 1 ? ["profile" as const] : [])];
+  const plan = repetitionPlan(timedRepetitions, round);
   try {
     for (const [repeat, kind] of plan.entries()) {
       console.log(`Repetition ${repeat + 1}/${plan.length} ${kind} ${new Date().toISOString()}`);
@@ -129,11 +128,18 @@ test("priority journeys with costs", async ({ browser }) => {
           const elements = await page.evaluate(() => document.getElementsByTagName("*").length);
           for (const count of counterRows(name, { before: before.react, after: await reactCounts() }, network, elements)) add(counted, count);
         };
-        const timing = async (name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text"): Promise<Observation> => {
+        // A later end gives a second row from the same input and the same opening reading.
+        // The profile covers the first window only, but its later window must still close
+        // before the next action arms the probe.
+        const timing = async (name: string, trigger: () => Promise<unknown>, event: string, selector: string, text = "", mode = "text", later?: { name: string } & LaterEnd): Promise<Observation> => {
           await quiet(page);
           const before = await begin();
-          const observation = await measure(page, trigger, event, selector, text, mode);
+          const observation = await measure(page, trigger, event, selector, text, mode, later);
           await finish(name, before, observation.elapsed);
+          if (later) {
+            const closed = await page.evaluate(() => window.perfJourney.later);
+            if (kind !== "profile") await finish(later.name, before, closed.elapsed);
+          }
           return observation;
         };
         const clicking = async (locator: Locator) => { const { x, y } = await point(locator); return () => page.mouse.click(x, y); };
@@ -157,12 +163,18 @@ test("priority journeys with costs", async ({ browser }) => {
                 await openShort(page, seed.short);
                 const button = await row(page, id);
                 if (pathName === "hover") { await button.hover(); await page.waitForTimeout(hoverDwellMs); }
-                await timing(`thread-${count}-${warmth}-${pathName}`, await clicking(button), "click", ".tl .turn:last-child .md", title);
+                const name = `thread-${count}-${warmth}-${pathName}`;
+                await timing(name, await clicking(button), "click", ".tl .turn:last-child .md", title, "text", { name: `${name}-mounted`, selector: "turn", text: String(count), mode: "class-count" });
                 await expect(page.locator(".tl .turn")).toHaveCount(count);
                 await expect(page.locator(`.sb-row.on[data-thread="${id}"]`)).toBeVisible();
               }
             }
           }
+          // One keystroke with the last 2000-turn visit open and every turn mounted.
+          await expect(page.locator(".tl .turn")).toHaveCount(2000); await ready(page);
+          const composer = page.locator("#ta"); await composer.focus();
+          await timing("type-in-thread-2000", () => page.keyboard.press("x"), "keydown", "#ta", "x", "usable-value");
+          await expect(composer).toHaveValue("x"); await composer.fill("");
           await openShort(page, seed.short);
           await timing("open-huge-reply", await clicking(await row(page, seed.huge)), "click", ".turn.a.done .md", "Huge reply end");
           await expect(page.locator(".md tbody tr")).toHaveCount(300);
@@ -249,6 +261,6 @@ test("priority journeys with costs", async ({ browser }) => {
   });
   mkdirSync(out, { recursive: true });
   writeFileSync(path.join(out, "run.json"), JSON.stringify(record(timed, timedRepetitions), null, 2) + "\n", { flag: "wx" });
-  writeFileSync(path.join(out, "counters.json"), JSON.stringify(record(counted, 1), null, 2) + "\n", { flag: "wx" });
+  writeFileSync(path.join(out, "counters.json"), JSON.stringify(record(counted, COUNTER_REPETITIONS), null, 2) + "\n", { flag: "wx" });
   if (Object.keys(hot).length) writeFileSync(path.join(out, "profiles", "hot-spots.json"), JSON.stringify(hot, null, 2) + "\n", { flag: "wx" });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectableChange, parseMetric, parseRun, scoreNext } from "./score-next.ts";
+import { detectableChange, parseMetric, parseRun, scoreNext, scoredMarkdown } from "./score-next.ts";
 import { metric, type Metric, type Run } from "./stats.ts";
 
 function noise(seed: number): () => number {
@@ -55,6 +55,14 @@ function counters(arm: "base" | "candidate", rounds: number, value: number): Run
   return Array.from({ length: rounds }, (_, round) => run(arm, round + 1, [metric("commits", "count", [value, value])]));
 }
 
+/** Four runs of a counter that varies, counted `perRun` times in each. */
+function varying(arm: "base" | "candidate", perRun: number, value: (round: number, position: number) => number): Run[] {
+  return Array.from({ length: 4 }, (_, round) => run(arm, round + 1, [metric("thread-2000.react-renders", "count", Array.from({ length: perRun }, (_item, position) => value(round, position)))]));
+}
+/** Shaped like the long-thread open: the base renders the whole thread, the candidate a first screen plus however many backfill slices fit. */
+const baseRenders = (round: number, position: number) => 16454 + (round + position) % 2;
+const candidateRenders = (round: number, position: number) => 1135 + 97 * (3 * round + position);
+
 describe("scoreNext", () => {
   it("reports no change between two draws from the same build", () => {
     const random = noise(11);
@@ -92,8 +100,18 @@ describe("scoreNext", () => {
 
   it("refuses a verdict when the repetitions cannot reach the threshold, however large the change", () => {
     const verdicts = scoreNext(runs("base", 4, 1, () => 200), runs("candidate", 4, 1, round => 900 + round));
-    expect(verdicts[0]).toMatchObject({ repetitions: 4, signal: "within noise" });
+    expect(verdicts[0]).toMatchObject({ repetitions: 4, signal: "not scored" });
     expect(verdicts[0]!.note).toContain("4 repetitions");
+  });
+
+  it("tells a row that was not tested from one that showed no change, in the table and its last line", () => {
+    const tested = scoreNext(counters("base", 4, 12), counters("candidate", 4, 12));
+    const untested = scoreNext(runs("base", 4, 1, () => 200, "open"), runs("candidate", 4, 1, () => 900, "open"));
+    const text = scoredMarkdown([...tested, ...untested]);
+    expect(text).toContain("| commits | exact | count | 12.00 | 12.00 | 0.00 | 0.0 | 1.0000 | 0.00 | 8 | within noise |");
+    expect(text).toMatch(/\| open \| sampled \| ms \| 200\.00 \| 900\.00 \| 700\.00 \| 350\.0 \| n\/a \| n\/a \| 4 \| not scored;/);
+    expect(text.trimEnd().split("\n").at(-1)).toBe("1 of 2 rows were not scored: too few repetitions to test them.");
+    expect(scoredMarkdown(tested)).not.toContain("not scored");
   });
 
   it("ignores a consistent change too small to matter", () => {
@@ -148,8 +166,19 @@ describe("scoreNext", () => {
     expect(scoreNext(base, base)[0]).toMatchObject({ kind: "sampled", signal: "within noise" });
   });
 
+  it("scores a counter that varies when each of four runs counts three times, and cannot when each counts once", () => {
+    expect(scoreNext(varying("base", 1, baseRenders), varying("candidate", 1, candidateRenders))[0]).toMatchObject({ kind: "sampled", signal: "not scored" });
+    const [three] = scoreNext(varying("base", 3, baseRenders), varying("candidate", 3, candidateRenders));
+    expect(three).toMatchObject({ kind: "sampled", signal: "faster" });
+    expect(three!.p).toBeLessThan(0.005);
+  });
+
+  it("leaves two counts per run at the edge of the threshold, even when the arms do not overlap", () => {
+    expect(scoreNext(varying("base", 2, baseRenders), varying("candidate", 2, candidateRenders))[0]!.p).toBeGreaterThan(0.005);
+  });
+
   it("does not call a counter exact from one run per arm, which cannot show it is steady", () => {
-    expect(scoreNext(counters("base", 1, 66), counters("candidate", 1, 182))[0]).toMatchObject({ kind: "sampled", signal: "within noise" });
+    expect(scoreNext(counters("base", 1, 66), counters("candidate", 1, 182))[0]).toMatchObject({ kind: "sampled", signal: "not scored" });
   });
 
   it("gives no direction to an exact counter whose moves cancel, and names them", () => {
