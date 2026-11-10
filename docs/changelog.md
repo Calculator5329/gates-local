@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-09: Your chats are copied before a new version upgrades them
+
+- When a newer Gates Local opens a chat database made by an older version,
+  it first saves a complete copy beside it, in `store-copies/` in the data
+  folder, named for the version it was at (`threads.v4.sqlite`). The copy
+  includes rows not yet written into the main database file, is checked by
+  opening it, and is flushed to disk before any upgrade step runs.
+- If the copy cannot be made, Gates Local does not upgrade and does not
+  start. It says why in one sentence (the disk is full, permission was
+  denied, another program is using the chats, the disk is read-only) and
+  that nothing was changed. The server's log names the call and file that
+  failed.
+- A new or already current database gets no copy and no folder.
+- On Windows, another program can hold a file for a moment and make the
+  final rename fail. That rename is now tried again for up to two seconds.
+- Copies are never deleted or pruned yet. Nothing restores a copy by itself
+  yet; that comes with the installed-copy update work.
+
 ## 2026-11-09: An installed copy checks the release page for a newer version
 
 - A copy installed from the AppImage or the Windows setup program now shows

@@ -147,6 +147,9 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     mkdirSync(dataDir, { recursive: true });
     store = openThreadStore(path.join(dataDir, "threads.sqlite"));
   } catch (e) {
+    // The message is the sentence for the person. A raw cause (the call and
+    // file that failed) goes to the log line above it.
+    if (e instanceof Error && e.cause instanceof Error) log(`thread store: ${e.cause.message}`);
     die(`cannot open the thread store in ${dataDir}: ${(e as Error).message}`, 1);
   }
 

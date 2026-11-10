@@ -3,6 +3,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
+import { copyBeforeMigration } from "./copies.ts";
 import { StoreVersionTooNewError } from "./errors.ts";
 
 export interface Migration {
@@ -122,6 +123,10 @@ export function migrate(db: DatabaseSync, dbPath: string, migrations: readonly M
 
   const initial = readUserVersion(db);
   if (initial > latest) throw new StoreVersionTooNewError(dbPath, initial, latest);
+  // A pre-versioning store can have tables while still reporting version 0.
+  if (initial < latest && (initial > 0 || db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get() !== undefined)) {
+    copyBeforeMigration(db, dbPath, latest);
+  }
 
   for (;;) {
     db.exec("BEGIN IMMEDIATE");
