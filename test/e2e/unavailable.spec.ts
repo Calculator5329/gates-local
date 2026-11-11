@@ -117,7 +117,8 @@ test("a live tool step that cannot run says why while the reply streams, and the
   await release();
   await expect.poll(async () => (await state()).turns[1]?.tokens).toBe(1);
 
-  // live: the failed step shows in the turn that is still streaming (a finished turn is .done)
+  // live: the failed step shows in the turn that is still streaming (a finished turn is .done), once its chip is opened
+  await page.locator(".turn.a:not(.done):not(.interrupted) button.think.fold").click();
   const step = page.locator(".turn.a:not(.done):not(.interrupted) .wr").first();
   await expect(step.locator(".wr-m")).toContainText("failed");
   await expect(step.locator(".wr-h")).toHaveText("Tool could not finish");

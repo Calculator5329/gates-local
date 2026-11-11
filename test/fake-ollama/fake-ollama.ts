@@ -19,6 +19,9 @@
 //   long-name         the three models plus a long Hugging Face GGUF tag
 //   threads           prompt-labelled paragraphs with independent request timing
 //   image-text-call   streams IMAGE_TEXT_CALL, an image call written as reply text, with no tool_calls
+// A prompt with the word "tool" makes any scenario call the first offered tool
+// once (repeatToolCalls: every round; toolCalls: N, the first N rounds);
+// quietToolRounds ends such a round at the call, with no reply text.
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
@@ -63,6 +66,10 @@ export interface FakeOptions {
   thinkingRepeat: number;
   /** Keep asking for a native tool after receiving its result, to exercise the tool-turn limit. */
   repeatToolCalls: number;
+  /** When nonzero: call a tool in each of the first this-many rounds of a reply, then answer. */
+  toolCalls: number;
+  /** A round that calls a tool ends at the call, with no reply text, as a real model's tool round usually does. */
+  quietToolRounds: number;
   /** slow-drip: use the long mixed-Markdown measurement fixture when nonzero. */
   longDrip: number;
   /** Number of reply tokens delivered together; tokenDelayMs is then the gap between bursts. */
@@ -101,6 +108,8 @@ const DEFAULTS: FakeOptions = {
   holdThinkingAfterTokens: 0,
   thinkingRepeat: 1,
   repeatToolCalls: 0,
+  toolCalls: 0,
+  quietToolRounds: 0,
   longDrip: 0,
   burstTokens: 0,
   loadDelayMs: 0,
@@ -436,7 +445,10 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           await sleep(timing.tokenDelayMs, abort.signal);
         }
       }
-      if (Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt) && (timing.repeatToolCalls > 0 || !Array.isArray(messages) || !messages.some((msg) => field(msg, "role") === "tool"))) {
+      const observed = Array.isArray(messages) ? messages.filter((msg) => field(msg, "role") === "tool").length : 0;
+      const calls = Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt)
+        && (timing.toolCalls > 0 ? observed < timing.toolCalls : timing.repeatToolCalls > 0 || observed === 0);
+      if (calls) {
         const image = /\b(draw|image|ship)\b/i.test(prompt) ? tools.find((tool) => field(field(tool, "function"), "name") === "image") : undefined;
         const fn = field(field(image ?? tools[0], "function"), "name");
         line({
@@ -445,7 +457,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           done: false,
         });
       }
-      for (const t of mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords))) {
+      for (const t of calls && timing.quietToolRounds > 0 ? [] : mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords))) {
         if (abort.signal.aborted) return;
         if ((mode === "slow-drip" || mode === "threads") && timing.holdAfterTokens > 0 && sent === timing.holdAfterTokens && !released.has(turn.id)) {
           await new Promise<void>((resolve) => {

@@ -39,8 +39,8 @@ accordingly.
       *Accept:* the turn joins the running preload, shown by one residency read and one generate for the pair.
 - [ ] <!-- workspace:id=work:44254433-4354-58d3-ba51-04fdcd40fd17 --> The Default card in Settings shows the app's pick before anyone picks, while New thread starts on the model used last; the two can name different models with no saved default.
       *Accept:* decide which one the card means and say it once on the card.
-- [ ] <!-- workspace:id=work:eee4b8c7-1d1d-5fa8-af4d-274277beda34 --> Thinking and tool calls in a reply are one control. Today each tool call is its own row, a second round of thinking grows inside the first thought above those rows and pushes them down, its label says "Thought for" while the model thinks again, and the bottom row says "Writing" during it.
-      *Accept:* one chip per reply (thinking seconds and the number of tool calls), closed by default and the same height however many calls the turn makes; opened, one list in the order things happened; an opened call shows its whole command and its output in a box that scrolls past 360 px.
+- [x] <!-- workspace:id=work:eee4b8c7-1d1d-5fa8-af4d-274277beda34 --> Thinking and tool calls in a reply are one control. Today each tool call is its own row, a second round of thinking grows inside the first thought above those rows and pushes them down, its label says "Thought for" while the model thinks again, and the bottom row says "Writing" during it.
+      *Done 2026-11-11:* "A reply's thinking and tool calls fold into one chip"; follow-ups under "Work chip, review follow-ups".
 - [ ] <!-- workspace:id=work:7d4370b7-afe9-5e0f-b438-8ea1d02fca00 --> A reply stopped while the model was thinking reads "Show thinking" and its pill can change width at Stop.
       *Accept:* the stopped thought keeps its seconds and its box.
 - [ ] <!-- workspace:id=work:6a3a902b-86b2-59ec-b753-dda94ddcd3a8 --> Live thoughts are checked with the test model only. Try a real thinking model, the desktop window and the phone width.
@@ -511,6 +511,31 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* each is seen red against a named mutant, and a journey measures the row before and after the Image press.
 - [ ] <!-- workspace:id=work:ce0b5803-6fba-50f4-a550-050af132a579 --> The composer's model button, the owner's call: with the name whole, the mic moves about 17 px when Image is turned on or off (built). The other options are a pinned width that cuts the name, or the short name alone on the button with the size left to the picker. Also his: the phone's Make images row says "On" with a grey dot when images are not offered, with the reason beside it.
       *Accept:* the owner picks; nothing under the pointer moves on the press.
+
+*Work chip, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:d686ec35-610b-5fa8-b37a-de1789e93542 --> A tool call cut short by Stop shows "stopped" while the reply is live and is saved as failed, so after a reload its chip is red.
+      *Accept:* a call the person stopped is saved and shown as stopped, live and after a reload.
+- [ ] <!-- workspace:id=work:cc76f951-d121-550c-9cfe-2adc58fabbcd --> A reload loses the order of thinking and calls inside the chip and the thinking seconds, because neither is saved with the message.
+      *Accept:* the saved message carries the times; a reloaded reply opens to the same list and the same number.
+- [ ] <!-- workspace:id=work:5e30a5dc-d7fb-53f6-a7b2-1372ab0384d2 --> A finished image step counts as a call in the chip; before the chip it was hidden once the image card showed.
+      *Accept:* decide whether an image is a call in the count, and say it once.
+- [ ] <!-- workspace:id=work:a3401491-dd13-54bc-b25e-fefa10f035b1 --> A reply this window joined part-way shows no thinking time at all, although the server knows when the turn began.
+      *Accept:* the replayed start carries the thinking time so far, or the chip says the time is unknown in its tip.
+- [ ] <!-- workspace:id=work:948a47ed-3fce-57f8-ae44-185d5dfa0ab4 --> The line beside an opened call's `$` hides `source`, `limit`, `offset` and `timeoutMs`.
+      *Accept:* the opened call shows every argument the model sent.
+- [ ] <!-- workspace:id=work:8c16196b-90a8-5d77-b7ca-bff62c209798 --> A round of thinking that finishes while it is being read closes under the reader.
+      *Accept:* something the reader opened stays open until they close it.
+- [ ] <!-- workspace:id=work:004760a1-fe17-569b-9fc9-d6300d45fe6c --> The chip and the thought line are under 44 px tall on touch, and a call's scrolling box is a focusable element inside a button role.
+      *Accept:* 44 px touch targets, and the box is reachable by keyboard without a control nested in a control.
+- [ ] <!-- workspace:id=work:0dc7d255-833e-5ccb-86cd-a6c69e342385 --> The chip's count, its closed default and the 360 px rule are held by browser journeys only, and the stopped case with different numbers on the bulb and the square (2 and 18) is held by a unit test only, never seen in a browser.
+      *Accept:* a unit test for the count and default, and one journey with a long call before Stop.
+- [ ] <!-- workspace:id=work:7d7a0fb4-8099-51bd-a145-a2b931b6130c --> After a toggle the page follows the end only from within 2 px in a finished reply but from 120 px in a reply still being written. The second rule is reasoned, not measured.
+      *Accept:* a journey opens a chip in a live reply 100 px from the end and shows what the reader sees.
+- [ ] <!-- workspace:id=work:efbf4018-f971-5e1a-b85a-11f500f40dda --> `waitReady` in the browser fixtures returns while the app is still booting, since the composer is no longer blocked then. Specs that read state once right after it race under load; two were patched one line at a time.
+      *Accept:* it waits for a signal that means the app has its data, with one full suite before and after.
+- [ ] <!-- workspace:id=work:d12d9455-b436-59b5-9ad5-d86cc83ba737 --> The owner's calls on the chip: the stop square keeps its seconds whenever the reply has calls (built); a reply that thinks and calls nothing keeps the old thought line, not a bulb-only chip (built).
+      *Accept:* the owner picks, or leaves both as built.
 
 ## Next: slices 2 to 4
 

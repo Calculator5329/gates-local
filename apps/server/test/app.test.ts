@@ -1262,6 +1262,17 @@ describe("chat.cancel and threads.delete during a turn", () => {
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
   });
 
+  it("a start sent again to a client that joins mid-reply says it is a replay; the first one does not", async () => {
+    const r = await rig();
+    const { sent } = await startReply(r);
+    await untilWords(r, sent.turnId);
+    const replayed: Payload<"chat.event">[] = [];
+    r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
+    expect(replayed.find((p) => p.turnId === sent.turnId)?.event).toMatchObject({ type: "start", replayed: true });
+    expect(events(r, sent.turnId).find((e) => e.type === "start")).not.toHaveProperty("replayed");
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+  });
+
   describe("a reply on its way to disk", () => {
     it("is written marked interrupted from its first words, and threads.get does not show it while it runs", async () => {
       const r = await rig();

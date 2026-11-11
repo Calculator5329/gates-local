@@ -486,9 +486,19 @@ describe("saved reply and observations", () => {
     expect(observation.content.endsWith("</tool_result>")).toBe(true);
     expect(observation.content.match(/<\/tool_result>/g)).toHaveLength(1);
   });
-  it("trims a step's detail to 2,000 characters", async () => {
-    const { complete } = await collect({ execute: async () => ({ output: "y".repeat(50000), summary: "Read" }), replies: [{ calls: reads(1) }] });
-    expect(DETAIL_LIMIT).toBe(2000);
-    expect(complete.tools[0]!.detail!.length).toBeLessThanOrEqual(2000);
+  it("keeps a step's output as the model got it, middle elided and its last line included", async () => {
+    const output = Array.from({ length: 300 }, (_, i) => `line ${i + 1} ${"x".repeat(30)}`).join("\n");
+    const { requests, complete } = await collect({ numCtx: 65536, execute: async () => ({ output, summary: "Read" }), replies: [{ calls: reads(1) }] });
+    const got = requests[1]!.messages.find(m => m.role === "tool")!.content;
+    expect(got).toContain("characters elided");
+    const detail = complete.tools[0]!.detail!;
+    expect(detail.slice(detail.indexOf("\n") + 1)).toBe(got);
+    expect(detail.endsWith(`line 300 ${"x".repeat(30)}`)).toBe(true);
+  });
+  it("still caps a step's detail", async () => {
+    const { complete } = await collect({ execute: async () => ({ output: "y".repeat(50000), summary: "Read" }), replies: [{ calls: [{ name: "read", arguments: { path: `/library/docs/${"z".repeat(20000)}` } }] }] });
+    expect(complete.tools[0]!.detail!.length).toBeLessThanOrEqual(DETAIL_LIMIT);
+    // the cap itself: 16,000 characters, the last one the ellipsis
+    expect(complete.tools[0]!.detail!.length).toBe(16000);
   });
 });

@@ -7,7 +7,7 @@ import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
-import { type ChatEvent, type TurnEvent, reduceTurn, unfinished, withTurn } from "./turn.ts";
+import { type ChatEvent, type TurnEvent, type WorkClock, leaveThinking, reduceTurn, startClock, stopThinking, unfinished, withTurn } from "./turn.ts";
 
 declare global {
   interface Window {
@@ -204,7 +204,27 @@ interface Waiting {
   thinking: string;
   /** When the first of these words arrived: a first word's time is when it came, not when it reached the screen. */
   textAt?: number;
+  /** When the first of the thinking words arrived: a thought starts when it came, also in a chat not on screen. */
+  thinkingAt?: number;
 }
+
+/**
+ * The turn with the words that waited for a frame applied at the times they came:
+ * the thinking runs from its first waiting word and stops at `answerAt` when answer words waited too.
+ */
+function withWaiting(turn: LiveTurn, w: Waiting, now: number, answerAt: number): LiveTurn {
+  const thought = reduceTurn(turn, { type: "thinking", text: w.thinking }, w.thinkingAt ?? now) ?? turn;
+  const answering = w.text === "" ? thought : leaveThinking(thought, answerAt);
+  return reduceTurn(answering, { type: "delta", text: w.text }, w.textAt ?? now) ?? answering;
+}
+
+/** A turn's clock as it ends, with thinking still waiting for a frame counted: a chat not on screen has none. */
+const endClock = (turn: LiveTurn, w: Waiting | undefined, now: number): WorkClock | undefined =>
+  w === undefined || w.gen !== turn.gen ? turn.clock : withWaiting(turn, w, now, w.textAt ?? now).clock;
+
+/** A finished reply's clock, its thinking stopped at the end: kept by message id when the turn watched it. */
+const keptClock = (clocks: State["clocks"], id: string, clock: WorkClock | undefined, now: number): State["clocks"] =>
+  clock === undefined ? clocks : { ...clocks, [id]: stopThinking(clock, now) };
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
 export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects) {
@@ -398,6 +418,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       messages: withMessage(s, threadId, msg),
       stopNotes: { ...s.stopNotes, [msg.id]: note },
       ...(first === undefined ? {} : { firstToken: { ...s.firstToken, [msg.id]: first - l.startedAt } }),
+      clocks: keptClock(s.clocks, msg.id, l.clock, Date.now()),
     }));
   }
 
@@ -414,7 +435,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
     opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
     const draw = opts.out?.draw ?? opts.from?.q.draw;
-    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(draw === undefined ? {} : { image: true as const }) };
+    const startedAt = Date.now();
+    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, clock: startClock(startedAt), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
     // The next new chat starts on this model (navigation.ts newThread). An Image send uses no chat model.
     setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
@@ -597,8 +619,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       const turn = s.turns[threadId];
       if (turn === undefined || turn.gen !== w.gen) return;
       const now = Date.now();
-      const thought = reduceTurn(turn, { type: "thinking", text: w.thinking }, now) ?? turn;
-      return { turns: withTurn(s.turns, threadId, reduceTurn(thought, { type: "delta", text: w.text }, w.textAt ?? now)) };
+      // the thinking stops when the answer's words reach the store, never before a time the chip already showed
+      return { turns: withTurn(s.turns, threadId, withWaiting(turn, w, now, now)) };
     });
   }
 
@@ -613,6 +635,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     let w = waiting.get(turn.threadId);
     if (w === undefined || w.gen !== turn.gen) waiting.set(turn.threadId, (w = { gen: turn.gen, text: "", thinking: "" }));
     if (kind === "text" && w.textAt === undefined) w.textAt = Date.now();
+    if (kind === "thinking" && w.thinkingAt === undefined) w.thinkingAt = Date.now();
     w[kind] += t;
     if (getState().threadId === turn.threadId) {
       if (raf === 0) raf = requestAnimationFrame(frame);
@@ -675,10 +698,13 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         waiting.delete(threadId);
         const msg = event.message;
         const firstAt = turn.firstTokenAt ?? firstWordsAt;
+        const now = Date.now();
+        const clock = endClock(turn, w, now);
         if (open) noteMessage(threadId, msg);
         applyServerEvent((s) => ({
           ...(open ? { messages: withMessage(s, threadId, msg) } : {}),
           ...(firstAt === undefined ? {} : { firstToken: { ...s.firstToken, [msg.id]: firstAt - turn.startedAt } }),
+          clocks: keptClock(s.clocks, msg.id, clock, now),
           turns: withTurn(s.turns, threadId, null),
         }));
         // a chat not on screen reloads: its cached history may be behind
@@ -696,12 +722,15 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           const w = waiting.get(threadId);
           const firstAt = turn.firstTokenAt ?? (w !== undefined && w.gen === turn.gen ? w.textAt : undefined);
           waiting.delete(threadId);
+          const now = Date.now();
+          const clock = endClock(turn, w, now);
           const { partial } = said;
           noteMessage(threadId, partial);
           // a reply stopped while not on screen says so; who stopped it is not known here
           const note = savedNote(said, turn.end ?? (!open && said.code === "cancelled" ? { kind: "stopped", secs: Math.round((Date.now() - turn.startedAt) / 1000) } : undefined));
           applyServerEvent((s) => ({
             turns: withTurn(s.turns, threadId, null),
+            clocks: keptClock(s.clocks, partial.id, clock, now),
             ...(open || s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),
             ...(note === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: note } }),
             // the thought's length stays on the pill once the saved row takes over, as it does for a finished reply
@@ -752,7 +781,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (event.type !== "start" || oldTurns.has(turnId)) return;
     noteMessage(threadId, event.userMessage);
     retire(getState().turns[threadId]);
-    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
+    const startedAt = Date.now();
+    // a start sent again to this client as it connected: the turn began before it was here
+    const clock = event.replayed === true ? {} : { clock: startClock(startedAt) };
+    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt, ...clock, thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
     applyServerEvent((st) => ({
       ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
       turns: withTurn(st.turns, threadId, turn),

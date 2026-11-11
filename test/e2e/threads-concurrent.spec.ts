@@ -205,7 +205,11 @@ test("thinking and a tool row survive leaving mid-reply and returning during the
   await expect(page.locator("[data-tool-row]")).toHaveCount(1);
   await expect(page.locator(".think")).toHaveCount(1);
   await page.locator(".think").click();
-  await expect(page.locator(".think-body")).toContainText("The question is short");
+  // the thought kept through leaving and returning: its first round, closed once the call followed it, opens to show it
+  const round = page.locator(".fold-th").first();
+  await round.locator(".th-line").click();
+  await expect(round.locator(".think-body")).toBeVisible();
+  await expect(round.locator(".think-body")).toContainText("The question is short");
 });
 
 test.describe("another client stops an off-screen reply", () => {

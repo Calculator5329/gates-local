@@ -347,6 +347,7 @@ test.describe("a finished thread on touch", () => {
 
   test("a tool row's collapsed line drops the tool's name; its details keep it", async ({ page, open, seededThread }) => {
     await openThread(page, open, seededThread);
+    await page.locator("button.think.fold").first().tap();
     const row = page.locator(".wr").first();
     await expect(row.locator(".wr-m")).toBeVisible();
     const visible = await row.locator(".wr-m").evaluate((el) => (el as HTMLElement).innerText);

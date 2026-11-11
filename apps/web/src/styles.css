@@ -274,7 +274,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think:hover{color:var(--foreground);background:var(--hover)}
 .think .th-i{width:20px;display:flex;justify-content:center;flex:none}
 /* one disclosure convention for thought and tool rows: leading icon says what, trailing chevron opens (F24) */
-.think .th-i .ic,.wr-st .ic,.working .ic,.pill .ic{width:15px;height:15px}
+.wr-st .ic,.working .ic,.pill .ic{width:15px;height:15px}
+/* the bulb is 14 px and 5 px in, on the thought line and on the chip it becomes */
+.think .th-i .ic{width:14px;height:14px}
 .think .th-x{display:flex;align-items:center}
 .think .th-x .ic,.wr-x .ic{width:14px;height:14px;transition:transform .2s}
 .think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
@@ -288,9 +290,34 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think.live .th-l [aria-hidden]{color:var(--muted-foreground)}
 @media (prefers-reduced-motion:reduce){.think.live .th-i .ic{animation:none}}
 /* one short ease on height and opacity, so the reply under it slides instead of jumping; hidden only after it has closed */
-.think-body{interpolate-size:allow-keywords;height:0;opacity:0;visibility:hidden;overflow:hidden;overflow-wrap:anywhere;margin:0 0 0 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground);transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s linear .18s}
-.think[aria-expanded="true"]+.think-body{height:auto;opacity:1;visibility:visible;margin-bottom:4px;transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s}
-@media (prefers-reduced-motion:reduce){.think-body,.think[aria-expanded="true"]+.think-body{transition:none}}
+.think-body{interpolate-size:allow-keywords;height:0;min-height:0;opacity:0;visibility:hidden;overflow:clip;overflow-wrap:anywhere;margin:0 0 0 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground);transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s linear .18s}
+.think[aria-expanded="true"]+.think-body,.fold-line.open+.think-body,.th-line[aria-expanded="true"]+.think-body{height:auto;opacity:1;visibility:visible;margin-bottom:4px;transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s}
+@media (prefers-reduced-motion:reduce){.think-body,.think[aria-expanded="true"]+.think-body,.fold-line.open+.think-body,.th-line[aria-expanded="true"]+.think-body{transition:none}}
+/* a reply's fold: the thought line, or the chip with the current step in quiet words beside it, on one line whose height never changes */
+.fold-line{display:flex;align-items:center;gap:10px;min-width:0;align-self:stretch}
+.fold-line .think{flex:none}
+.fold-now{min-width:0;font-size:13px;line-height:24px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the chip: the box changes only by digits, each number keeping room for two */
+.think.fold{gap:7px;height:24px;line-height:22px;margin-left:-4px;padding:0 6px 0 8px;border:1px solid var(--border);font-variant-numeric:tabular-nums}
+.ch-p{display:inline-flex;align-items:center;gap:5px}
+.ch-p .ic{width:14px;height:14px}
+.ch-n{min-width:2ch;text-align:right}
+.ch-u{margin-left:-2px}
+.ch-sep{width:1px;height:12px;background:var(--border)}
+.ch-p.on{color:var(--foreground)}
+.ch-p.on .ic{animation:pulse 2s ease-in-out infinite}
+.ch-p.bad .ic{color:var(--red)}
+@media (prefers-reduced-motion:reduce){.ch-p.on .ic{animation:none}}
+/* open: one list in the order things happened, a thinking round's line beside each call's */
+.fold-body{interpolate-size:allow-keywords;height:0;min-height:0;opacity:0;visibility:hidden;overflow:clip;transition:height .18s ease,opacity .18s ease,visibility 0s linear .18s}
+.fold-line.open+.fold-body{height:auto;opacity:1;visibility:visible;margin-top:2px;transition:height .18s ease,opacity .18s ease,visibility 0s}
+@media (prefers-reduced-motion:reduce){.fold-body,.fold-line.open+.fold-body{transition:none}}
+.fold-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.th-line{display:flex;align-items:center;gap:8px;width:100%;padding:2px 8px 2px 2px;border-radius:var(--r-md);font-size:14px;line-height:24px;color:var(--muted-foreground);text-align:left;transition:background-color .12s}
+.th-line:hover{background:var(--hover)}
+.th-line .wr-h{color:var(--muted-foreground);font-weight:400}
+.th-line[aria-expanded="true"] .wr-x .ic{transform:rotate(180deg)}
+.fold-th .think-body{margin-left:13px}
 /* after a tool step, while the model reasons again, the status row carries the same bulb with "Thinking · 3 s" */
 .working.thinking>.ic{width:15px;height:15px;margin:0 2px 0 4px;animation:pulse 2s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.working.thinking>.ic{animation:none}}
@@ -305,11 +332,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .wr-m{color:var(--muted-foreground);font-size:13px}
 .wr-x{display:flex;align-items:center;color:var(--muted-foreground)}
 .wr[aria-expanded="true"] .wr-x .ic{transform:rotate(180deg)}
-.wr-body{display:none;margin:6px 0 6px 11px;border-left:1px solid var(--border);padding:2px 0 2px 18px;cursor:default}
+/* an opened call is one box up to 360 px: shorter text has no scrollbar and no empty space, longer scrolls with the app's scrollbar */
+.wr-body{display:none;margin:6px 0 6px 11px;border-left:1px solid var(--border);padding:2px 0 2px 18px;cursor:default;max-height:360px;overflow-y:auto;overflow-x:hidden}
+.wr-body:focus-visible{outline:2px solid var(--border-strong);outline-offset:2px}
 .wr[aria-expanded="true"] .wr-body{display:block}
 .cmd{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--foreground);white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 10px}
 .cmd span{color:var(--muted-foreground)}
-.out{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--muted-foreground);white-space:pre-wrap;margin:0}
+.out{font-family:var(--font-mono);font-size:12.5px;line-height:1.6;color:var(--muted-foreground);white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 
 /* the one live status row at the end of a streaming turn (F11) */
 .working{display:flex;align-items:center;gap:8px;font-size:14px;line-height:24px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}

@@ -34,7 +34,9 @@ describe("fabricated mixed-image follow-ups", () => {
       expect(html).toContain('data-image-job="queued"');
       expect(html).toContain("The report total is 42.");
       expect(html).not.toContain('href="https://invented.example/ship.png"');
-      expect(html).not.toContain("data-tool-row");
+      // the image call is one line in the reply's closed fold, never a row of its own beside the card
+      expect(html).toContain('class="fold-body"');
+      expect(html.replace(/<div class="fold-body".*?<\/ol><\/div>/s, "")).not.toContain("data-tool-row");
     };
     setState({ threadId, messages: { [threadId]: [image] }, turns: { [threadId]: live } });
     if (stage !== "streaming") setState({ turns: {}, messages: { [threadId]: [image, saved] } });

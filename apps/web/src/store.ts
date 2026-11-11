@@ -3,6 +3,7 @@
 // identity, so a token arriving re-renders the live turn and nothing else.
 import { useSyncExternalStore } from "react";
 import { dropDraft } from "./drafts.ts";
+import type { WorkClock } from "./session/turn.ts";
 import type {
   BlockingTurn,
   CatalogEntry,
@@ -52,6 +53,8 @@ export interface LiveTurn {
   readonly firstTokenAt?: number;
   readonly thinking: string;
   readonly thinkingSecs?: number;
+  /** How long it thought, kept as its events arrive; absent when this client did not see it start. */
+  readonly clock?: WorkClock;
   readonly text: string;
   readonly tools: readonly ToolStep[];
   /** The user's text, shown until chat.send returns the saved message. */
@@ -128,6 +131,8 @@ export interface State {
   readonly messages: Readonly<Record<string, readonly Message[]>>;
   /** First-token times measured this session, by message id, for the meta line. */
   readonly firstToken: Readonly<Record<string, number>>;
+  /** A finished reply's thinking clock, kept this session the way `firstToken` is, by message id. */
+  readonly clocks: Readonly<Record<string, WorkClock>>;
   /** Each chat's reply, by thread id: being written, or ended here and still shown. The open chat shows `turns[threadId]`. */
   readonly turns: Readonly<Record<string, LiveTurn>>;
   readonly queued: readonly Queued[];
@@ -215,6 +220,7 @@ const initial: State = {
   threads: [],
   messages: {},
   firstToken: {},
+  clocks: {},
   turns: {},
   queued: [],
   editingQueued: null,

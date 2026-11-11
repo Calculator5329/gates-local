@@ -22,8 +22,8 @@ export const STREAM_STALL_MS = 120 * 1000;
 export const FINAL_ANSWER_MS = 10 * 60 * 1000;
 /** Half the context at the 3 characters/token estimate the tool block uses. */
 export const toolOutputBudget = (numCtx: number): number => Math.floor(numCtx * 3 / 2);
-/** A step's detail is for the UI; the model gets the full (trimmed) output. */
-export const DETAIL_LIMIT = 2000;
+/** A step's detail is for the UI: the call and the output the model got (trimOutput's 10,000 characters and its elision line), with room for a long call. */
+export const DETAIL_LIMIT = 16000;
 const clipDetail = (detail: string) => detail.length <= DETAIL_LIMIT ? detail : `${detail.slice(0, DETAIL_LIMIT - 1)}…`;
 
 const notRun = (item: { name: string }, summary: string, detail: string): ToolStep => ({ callId: randomUUID(), name: item.name, state: "error", summary, detail });

@@ -225,7 +225,8 @@ export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it
   // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
   // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
-  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)) }),
+  // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
+  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
   // An empty delta can carry context metadata without becoming reply text.
   S.Struct({ type: S.Literal("delta"), text: S.String, contextNotice: S.optional(S.String) }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),

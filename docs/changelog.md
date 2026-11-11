@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-11: A reply's thinking and tool calls fold into one chip
+
+- A reply that calls tools shows one chip: a bulb with the seconds it
+  thought and the number of calls. It is closed by default and one line
+  high however many calls the reply makes. Before, every call was its
+  own row and a second round of thinking pushed those rows down.
+- Opened, the chip is one list in the order things happened. An opened
+  call shows its whole command and its output, in a box that scrolls
+  past 360 px. A reply that thinks and calls nothing keeps the thought
+  line it had.
+- The seconds are thinking time only, counted from this window's own
+  clock, and they never go down. A reply this window did not see begin
+  (a reload, or a second device joining part-way) shows no number
+  rather than a low one. Thinking that arrived while the chat was off
+  screen is counted.
+- A stopped reply with calls keeps the bulb's thinking time, and the
+  stop square keeps the seconds to Stop.
+- Opening or closing something in a finished reply no longer moves the
+  page: the opened row stays where it was while the composer grows or
+  another device's reply arrives. The page follows the end again only
+  from the very end, until you scroll.
+- The line the server adds when it answered without tools is not a
+  call: it stays a plain line and the Working row stays up beside it.
+- For other clients: the start event has one new optional field,
+  `replayed`, set when the server sends a running reply's start again
+  to a client that just connected.
+- Two tests that failed now and then were wrong, not the app: one read
+  the update negotiation once before it had answered, one took "20 ms"
+  for "0 ms". A stale voice measurement waits for what the control
+  shows now.
+
 ## 2026-11-11: Installed copies trust a release key
 
 - An installed copy built from this commit on checks the release page for a

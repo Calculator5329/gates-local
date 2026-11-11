@@ -11,7 +11,8 @@
 //                           writes one thread of N messages, seed: "design" the
 //                           design's sidebar, seed: "readme" the README's demo
 //                           threads, seed: "usage" the design's sidebar and a
-//                           week of usage (test/e2e/seed.ts), all pinned to
+//                           week of usage, seed: "work-fold" saved tool turns
+//                           (test/e2e/seed.ts), all pinned to
 //                           seedAt; installed: [names] sets the fake's installed
 //                           models; runtimeMode ("system" | "app") writes saved
 //                           settings in that mode, else first run picks it; the
@@ -45,7 +46,7 @@ import { createServer as createNetServer, type Server } from "node:net";
 import { CONTROL_PORT, DATA_ROOT, FAKE_PORT, FAKE_URL, PHONE_ADDR, PHONE_USER, ROOT, SERVER_PORT, TOKEN, WEB_ORIGIN } from "./env.ts";
 import type { Settings } from "@gates-local/contracts";
 import { SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION, defaultSettings } from "../../apps/server/src/settings/store.ts";
-import { seedDesign, seedLong, seedReadme, seedUsage } from "./seed.ts";
+import { seedDesign, seedLong, seedReadme, seedUsage, seedWorkFold } from "./seed.ts";
 import { type ServeStandIn, startServeStandIn } from "./serve-standin.ts";
 import { e2eServerEntry } from "./server-entry.ts";
 import { prepareLibraryFixture } from "./library-fixture.ts";
@@ -211,7 +212,8 @@ type Seed =
   | { readonly kind: "long"; readonly messages: number; readonly at: number }
   | { readonly kind: "design"; readonly at: number; readonly code?: boolean }
   | { readonly kind: "readme"; readonly at: number }
-  | { readonly kind: "usage"; readonly at: number };
+  | { readonly kind: "usage"; readonly at: number }
+  | { readonly kind: "work-fold"; readonly at: number };
 
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
 async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string, imageTool = false): Promise<string | null> {
@@ -229,6 +231,7 @@ async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings
     : seed.kind === "design" ? seedDesign(db, seed.at, seed.code)
     : seed.kind === "readme" ? seedReadme(db, seed.at)
     : seed.kind === "usage" ? seedUsage(db, path.join(dataDir, "usage.sqlite"), seed.at)
+    : seed.kind === "work-fold" ? seedWorkFold(db, seed.at)
     : null;
   await startServer();
   return threadId;
@@ -236,7 +239,7 @@ async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings
 
 function seedOf(body: Record<string, unknown>): Seed {
   const at = typeof body["seedAt"] === "number" ? body["seedAt"] : Date.now();
-  if (body["seed"] === "design" || body["seed"] === "readme" || body["seed"] === "usage") return { kind: body["seed"], at };
+  if (body["seed"] === "design" || body["seed"] === "readme" || body["seed"] === "usage" || body["seed"] === "work-fold") return { kind: body["seed"], at };
   if (body["seed"] === "design-code") return { kind: "design", at, code: true };
   if (typeof body["seed"] === "number" && body["seed"] > 0) return { kind: "long", messages: body["seed"], at };
   return { kind: "none" };

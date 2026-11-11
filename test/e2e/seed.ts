@@ -226,6 +226,66 @@ export function seedReadme(dbPath: string, now: number): string {
   return writeThreads(dbPath, now, older, "Debounce a search box", turns);
 }
 
+/** A step's saved detail as the harness writes it: the call as JSON, then the output the model got. */
+const stepDetail = (name: string, input: Record<string, unknown>, output: string) => `${JSON.stringify({ name, input })}\n${output}`;
+
+/** A command long enough to wrap in the opened call (work-fold.spec.ts). */
+export const LONG_COMMAND = "sqlite3 -readonly -header -column /data/music.db \"select t.Name as track, al.Title as album, ar.Name as artist, g.Name as genre, t.Milliseconds / 1000 as seconds from tracks t join albums al on al.AlbumId = t.AlbumId join artists ar on ar.ArtistId = al.ArtistId join genres g on g.GenreId = t.GenreId order by ar.Name, al.Title, t.TrackId\"";
+/** 300 lines of output, short enough that the harness kept every one. */
+export const LONG_OUTPUT = Array.from({ length: 300 }, (_, i) => `${String(i + 1).padStart(3, "0")} Track ${i + 1}`).join("\n");
+
+/**
+ * Saved replies whose work folds into one chip (work-fold.spec.ts): the
+ * owner's three-call turn with a recovered failure, a call with 300 lines
+ * of output and a long command beside one with three lines, a reply with
+ * no thinking whose only call failed, and a reply that only thought.
+ */
+export function seedWorkFold(dbPath: string, now: number): string {
+  const model = "qwen3.5:9b";
+  const music = "sqlite3 -readonly /data/music.db";
+  const turns: Turn[] = [
+    { role: "user", content: "Who is the top musician in the database?", at: now - 8 * MIN },
+    {
+      role: "assistant",
+      content: "The top musician according to the database (based on the highest number of tracks) is **Iron Maiden**, with a total of 213 tracks.",
+      thinking: "The library has a music database. Count the tracks per artist, read-only, and name the one with the most.",
+      model,
+      stats: { promptTokens: 2400, completionTokens: 34, durationMs: 2100 },
+      tools: [
+        { callId: "w1", name: "shell", state: "done", summary: "Searched your library", detail: stepDetail("shell", { command: `${music} ".tables"` }, "albums  artists  genres  tracks"), durationMs: 56 },
+        { callId: "w2", name: "shell", state: "error", summary: "Tool could not finish", detail: stepDetail("shell", { command: `${music} "select artist, count(*) from tracks group by artist"` }, "Error: in prepare, no such column: artist"), durationMs: 12 },
+        { callId: "w3", name: "shell", state: "done", summary: "Searched your library", detail: stepDetail("shell", { command: `${music} "select ar.Name, count(*) n from tracks t join albums al using (AlbumId) join artists ar using (ArtistId) group by ar.Name order by n desc limit 1"` }, "Iron Maiden|213"), durationMs: 21 },
+      ],
+      at: now - 8 * MIN + 18_000,
+    },
+    { role: "user", content: "List every track with its album and artist.", at: now - 6 * MIN },
+    {
+      role: "assistant",
+      content: "There are 300 tracks; the list is in the first step above.",
+      thinking: "One query joins the four tables; then count the lines.",
+      model,
+      stats: { promptTokens: 9800, completionTokens: 14, durationMs: 1400 },
+      tools: [
+        { callId: "w4", name: "shell", state: "done", summary: "Searched your library", detail: stepDetail("shell", { command: LONG_COMMAND }, LONG_OUTPUT), durationMs: 88 },
+        { callId: "w5", name: "shell", state: "done", summary: "Searched your library", detail: stepDetail("shell", { command: `${music} "select count(*) from tracks"` }, "count(*)\n--------\n300"), durationMs: 9 },
+      ],
+      at: now - 6 * MIN + 9000,
+    },
+    { role: "user", content: "Open my notes file.", at: now - 4 * MIN },
+    {
+      role: "assistant",
+      content: "I could not open your notes file: it is not in your Library.",
+      model,
+      stats: { promptTokens: 1200, completionTokens: 14, durationMs: 700 },
+      tools: [{ callId: "w6", name: "read", state: "error", summary: "Tool could not finish", detail: stepDetail("read", { path: "~/notes.md" }, "Path is outside your Library; use /library/<source id>"), durationMs: 4 }],
+      at: now - 4 * MIN + 3000,
+    },
+    { role: "user", content: "Which album should I start with?", at: now - 2 * MIN },
+    { role: "assistant", content: "Start with **The Number of the Beast**.", thinking: "Pick the best-known album.", model, stats: { promptTokens: 1300, completionTokens: 9, durationMs: 500 }, at: now - 2 * MIN + 2000 },
+  ];
+  return writeThreads(dbPath, now, [], "Top musician in the music database", turns);
+}
+
 const DAY = 24 * HOUR;
 
 /** Three models over the last seven days, as the usage store records them: [model, days ago used, decode tok/s, prompt size]. */

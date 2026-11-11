@@ -16,6 +16,8 @@ async function ndjson(res: Response): Promise<Record<string, unknown>[]> {
     .map((l) => JSON.parse(l) as Record<string, unknown>);
 }
 
+/** The reply text a chat stream wrote. */
+const replyText = (lines: Record<string, unknown>[]) => lines.map(l => (l["message"] as { content?: string } | undefined)?.content ?? "").join("");
 const post = (fake: FakeOllama, p: string, body: unknown, method = "POST") =>
   fetch(`${fake.url}${p}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -239,6 +241,26 @@ describe("fake ollama", () => {
     expect(repeated.some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(true);
     const plain = await ndjson(await post(fake, "/api/chat", body));
     expect(plain.some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(false);
+  });
+
+  it("quietToolRounds: a round that calls a tool writes no reply text; one that does not still answers", async () => {
+    await post(fake, "/__fake/scenario", { scenario: "models", quietToolRounds: 1, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    const called = await ndjson(await post(fake, "/api/chat", { model: "gemma4:12b", tools: [{ type: "function", function: { name: "read" } }], messages: [{ role: "user", content: "use a tool please" }] }));
+    expect(called.some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls)).toBe(true);
+    expect(replyText(called)).toBe("");
+    expect(called.at(-1)?.["done"]).toBe(true);
+    const answered = await ndjson(await post(fake, "/api/chat", { model: "gemma4:12b", messages: [{ role: "user", content: "use a tool please" }] }));
+    expect(replyText(answered)).not.toBe("");
+  });
+
+  it("toolCalls: calls a tool in the first N rounds, then answers", async () => {
+    await post(fake, "/__fake/scenario", { scenario: "models", toolCalls: 2, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    const round = async (observed: number) => ndjson(await post(fake, "/api/chat", {
+      model: "gemma4:12b", tools: [{ type: "function", function: { name: "read" } }],
+      messages: [{ role: "user", content: "use a tool please" }, ...Array.from({ length: observed }, () => ({ role: "tool", content: "Path is outside your Library" }))],
+    }));
+    const calls = async (observed: number) => (await round(observed)).some(l => (l["message"] as { tool_calls?: unknown } | undefined)?.tool_calls);
+    expect([await calls(0), await calls(1), await calls(2)]).toEqual([true, true, false]);
   });
 
   it("breaks the stream with an error in the mid-stream-error scenario", async () => {

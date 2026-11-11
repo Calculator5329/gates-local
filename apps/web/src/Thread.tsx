@@ -3,7 +3,7 @@
 // props only and memoised by message, so a streaming token or a keystroke runs
 // nothing in it; only the live reply reads the store and paces its text. A
 // thread opens with its last turns mounted and adds the older ones when idle.
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { CatalogEntry, ImageEvent, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
@@ -17,12 +17,17 @@ import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachmentImages } from "./attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, turnOf, useStore } from "./store.ts";
+import { thoughtSecs, type WorkClock } from "./session/turn.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
 import { TurnSkel, closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
 const NO_TOOLS: readonly ToolStep[] = [];
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
+
+/** The times this session kept for finished replies, as one subscription: the same object until either map changes. */
+let times: Pick<State, "firstToken" | "clocks"> = { firstToken: {}, clocks: {} };
+const replyTimes = (s: State) => (s.firstToken === times.firstToken && s.clocks === times.clocks ? times : (times = { firstToken: s.firstToken, clocks: s.clocks }));
 
 declare global {
   interface Window {
@@ -126,28 +131,203 @@ function UserBubble({ text, time, images = [], noted = false }: { text: string; 
   );
 }
 
+/** What a reply's chip shows at this moment; the face draws it and knows nothing else. */
+interface ChipStep {
+  /** Seconds of thinking so far; null when the reply has no thinking part, undefined when the time is not known (an older thread). */
+  readonly think: number | null | undefined;
+  /** Tool calls so far; null when the reply has none. */
+  readonly calls: number | null;
+  /** The part at work while the reply runs. */
+  readonly lit: "think" | "calls" | null;
+  /** The last call failed. */
+  readonly failed: boolean;
+  /** The current step in words, said beside the chip until the answer starts. */
+  readonly words: string;
+}
+
 /**
- * A reply's thought: one control from the first piece of thinking to the saved
- * reply. While the model thinks (`since`, when its turn started) it reads
- * "Thinking" and its text grows in place. It opens only when asked and stays as
- * the person left it when the reply starts and ends. Its seconds are hidden from
- * a screen reader, which hears one stable name.
+ * The chip's face (owner's option 3 of four, 2026-11-11): the finished shape
+ * from the first moment, bulb and seconds, a divider, wrench and calls, a
+ * chevron; the part at work is lit and its number climbs. The box changes only
+ * by digits. Another option is a change to this part and ChipWords.
  */
-function ThinkLine({ secs, text, since }: { secs: number | undefined; text: string; since: number | undefined }) {
-  const [open, setOpen] = useState(false);
-  const body = useId();
+function ChipFace({ step }: { step: ChipStep }) {
   return (
     <>
-      <button type="button" className={since === undefined ? "think" : "think live"} aria-expanded={open} aria-controls={body} onClick={() => setOpen(!open)}>
-        <span className="th-i">
+      {step.think !== null ? (
+        <span className={step.lit === "think" ? "ch-p on" : "ch-p"}>
+          <Icon id="bulb" />
+          {step.think === undefined ? null : <span className="ch-n">{step.think}</span>}
+          {step.think === undefined ? null : <span className="ch-u">s</span>}
+        </span>
+      ) : null}
+      {step.think !== null && step.calls !== null ? <span className="ch-sep" /> : null}
+      {step.calls !== null ? (
+        <span className={step.lit === "calls" ? "ch-p on" : step.failed ? "ch-p bad" : "ch-p"}>
+          <Icon id={step.failed ? "xc" : "wrench"} />
+          <span className="ch-n">{step.calls}</span>
+        </span>
+      ) : null}
+      <span className="th-x">
+        <Icon id="down" />
+      </span>
+    </>
+  );
+}
+
+function ChipWords({ step }: { step: ChipStep }) {
+  return <span className="fold-now">{step.words}</span>;
+}
+
+/** The screen reader's one name for the chip: what is inside, never a count that ticks. */
+function chipName(step: ChipStep, busy: boolean): string {
+  const calls = step.calls === null ? "" : `${step.calls} tool ${step.calls === 1 ? "call" : "calls"}`;
+  if (busy) return `Working, ${calls}`;
+  const think = step.think === null ? "" : step.think === undefined ? "Thinking" : `Thinking ${step.think} ${step.think === 1 ? "second" : "seconds"}`;
+  return [think, calls].filter(Boolean).join(", ") + (step.failed ? ", last call failed" : "");
+}
+
+interface FoldProps {
+  readonly thinking: string;
+  /** The reply's calls; the server's notes are not calls and are not here. */
+  readonly tools: readonly ToolStep[];
+  /** Seconds before the answer, for the thought line of a reply with no calls; undefined when not known. */
+  readonly secs: number | undefined;
+  /** When the turn started, while a reply with no calls is still thinking. */
+  readonly since: number | undefined;
+  /** A thinking-only reply still thinking: the thought line reads "Thinking". */
+  readonly thinkingNow: boolean;
+  /** The turn has not ended. */
+  readonly busy: boolean;
+  /** The answer's words have started (they may still lead to a call). */
+  readonly answering: boolean;
+  /** Steps still running are stopped: Stop, an error or an interrupted save. */
+  readonly stopped: boolean;
+  /** How long it thought, kept as the turn's events arrived; undefined when this session did not watch it from its start. */
+  readonly clock: WorkClock | undefined;
+}
+
+/**
+ * Everything a reply did before its answer, as one control from its first
+ * piece of thinking to the saved reply. A reply with no tool call is the thought
+ * line as it was; with calls it is the chip. Closed, nothing is added under it;
+ * open (only when asked, and it stays as left), it is one list in the order
+ * things happened: thinking rounds and one line per call. Where each call came
+ * in the thinking is the turn's clock's; a reply it did not watch (a reload)
+ * lists its thought first, then its calls.
+ */
+function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stopped, clock }: FoldProps) {
+  const [open, setOpen] = useState(false);
+  const [rounds, setRounds] = useState<Readonly<Record<number, boolean>>>({});
+  const body = useId();
+  const running = busy ? tools.find((t) => t.state === "running") : undefined;
+  const now = useTicker(250, busy && tools.length > 0);
+  const t = busy ? Math.max(now, Date.now()) : Date.now();
+  // the list in the order things happened: a thinking round before each call it led to
+  const items: ({ kind: "think"; from: number; to: number } | { kind: "call"; step: ToolStep })[] = [];
+  let from = 0;
+  for (const s of tools) {
+    const at = Math.min(clock?.at[s.callId] ?? thinking.length, thinking.length);
+    if (at > from) items.push({ kind: "think", from, to: at });
+    from = Math.max(from, at);
+    items.push({ kind: "call", step: s });
+  }
+  if (thinking.length > from) items.push({ kind: "think", from, to: thinking.length });
+  /** A round's seconds: its closed spans on the clock; none when the clock did not watch it. */
+  const roundSecs = (a: number, b: number) => {
+    const spans = clock?.spans.filter((s) => s.from >= a && s.from < b) ?? [];
+    return spans.length === 0 ? undefined : Math.max(1, Math.round(spans.reduce((n, s) => n + s.ms, 0) / 1000));
+  };
+  const line = (
+    <ToggleLine open={open} onToggle={() => setOpen(!open)} body={body} chip={tools.length > 0} live={thinkingNow}
+      step={tools.length === 0 ? null : chipStep(thinking, tools, clock, t, running, answering, busy)} busy={busy}>
+      {thinkingNow && since !== undefined ? <ThinkingLabel since={since} /> : <ThoughtLabel secs={secs} />}
+    </ToggleLine>
+  );
+  if (tools.length === 0) {
+    return (
+      <>
+        {line}
+        <div className="think-body" id={body}>{thinking}</div>
+      </>
+    );
+  }
+  return (
+    <>
+      {line}
+      <div className="fold-body" id={body}>
+        <ol className="fold-list" aria-label="Steps">
+          {items.map((it, i) => it.kind === "call" ? (
+            <li key={it.step.callId}><ToolRow step={it.step} stopped={stopped} /></li>
+          ) : (
+            <li key={`th-${it.from}`} className="fold-th">
+              <ThoughtRound text={thinking.slice(it.from, it.to)}
+                live={busy && i === items.length - 1 && (clock === undefined ? running === undefined && !answering : clock.thinking)}
+                secs={roundSecs(it.from, it.to)}
+                open={rounds[it.from] ?? i === items.length - 1} onToggle={(o) => setRounds({ ...rounds, [it.from]: o })} />
+            </li>
+          ))}
+        </ol>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The chip's state. Thinking seconds are the turn's clock, never rebuilt here:
+ * a reply the clock did not watch shows the bulb with no number. The red mark
+ * means one thing, the last call failed, and only once the turn has ended.
+ */
+export function chipStep(thinking: string, tools: readonly ToolStep[], clock: WorkClock | undefined, now: number,
+  running: ToolStep | undefined, answering: boolean, busy: boolean): ChipStep {
+  const thinkingNow = clock === undefined ? thinking !== "" && !answering : clock.thinking;
+  return {
+    think: thinking === "" ? null : clock === undefined ? undefined : thoughtSecs(clock, now),
+    calls: tools.length,
+    lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : null,
+    failed: !busy && tools[tools.length - 1]?.state === "error",
+    words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : answering ? "" : "Working",
+  };
+}
+
+/** The control that opens a reply's fold: the thought line as it was, or the chip with the current step beside it. */
+function ToggleLine({ open, onToggle, body, chip, live, step, busy, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; children: ReactNode }) {
+  return (
+    <div className={open ? "fold-line open" : "fold-line"}>
+      <button type="button" className={chip ? "think fold" : live ? "think live" : "think"} aria-expanded={open} aria-controls={body}
+        aria-label={step === null ? undefined : chipName(step, busy)} onClick={onToggle}>
+        {step === null ? (
+          <>
+            <span className="th-i">
+              <Icon id="bulb" />
+            </span>
+            {children}
+            <span className="th-x">
+              <Icon id="down" />
+            </span>
+          </>
+        ) : <ChipFace step={step} />}
+      </button>
+      {step !== null && step.words !== "" ? <ChipWords step={step} /> : null}
+    </div>
+  );
+}
+
+/** One thinking round in the open fold: its text, growing live; once the next step starts it closes to "Thought · 6 s" and reopens on a click. */
+function ThoughtRound({ text, live, secs, open, onToggle }: { text: string; live: boolean; secs: number | undefined; open: boolean; onToggle: (open: boolean) => void }) {
+  const id = useId();
+  return (
+    <>
+      <button type="button" className="th-line" aria-expanded={open} aria-controls={id} onClick={() => onToggle(!open)}>
+        <span className="wr-st">
           <Icon id="bulb" />
         </span>
-        {since === undefined ? <ThoughtLabel secs={secs} /> : <ThinkingLabel since={since} />}
-        <span className="th-x">
+        <span className="wr-h">{live ? "Thinking" : secs === undefined ? "Thought" : `Thought · ${secs} s`}</span>
+        <span className="wr-x">
           <Icon id="down" />
         </span>
       </button>
-      <div className="think-body" id={body}>{text}</div>
+      <div className="think-body" id={id}>{text}</div>
     </>
   );
 }
@@ -178,6 +358,28 @@ const TOOL_LABEL: Record<string, string> = { read: "Read", sql: "SQL", shell: "S
 const toolLabel = (name: string) => TOOL_LABEL[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
 const duration = (ms: number | undefined) => (ms === undefined ? "" : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
 
+/**
+ * A step's call as a person reads it. The saved detail's first line is the call
+ * as JSON ({"name":"shell","input":{"command":…}}): a shell call shows its
+ * command after "$", another call its query, path or prompt. A line that is not
+ * such JSON (an older step cut at 2,000 characters) is shown as saved.
+ */
+function callLine(line: string): { cmd: string; shell: boolean } {
+  try {
+    const call: unknown = JSON.parse(line);
+    const input = typeof call === "object" && call !== null ? (call as { input?: unknown }).input : undefined;
+    if (typeof input === "object" && input !== null) {
+      const i = input as Record<string, unknown>;
+      if (typeof i["command"] === "string") return { cmd: i["command"], shell: true };
+      const arg = [i["query"], i["path"], i["prompt"]].find((v) => typeof v === "string");
+      if (typeof arg === "string") return { cmd: arg, shell: false };
+    }
+  } catch {
+    // not JSON: shown as it is
+  }
+  return { cmd: line, shell: true };
+}
+
 /** A tool step row; `stopped` marks a step that was running when the user pressed Stop. */
 function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -187,8 +389,11 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const ro = /(^|\s)-readonly(\s|$)/.test(step.detail ?? "") ? "read-only" : "";
   const lead = ro === "" ? label : `${label} · ${ro}`;
   const dur = duration(step.durationMs);
-  const meta = st === "run" ? `${label} · running` : stopped && step.state === "running" ? "stopped" : step.state === "error" ? `${label} · failed` : dur === "" ? lead : null;
-  const [cmd = "", ...rest] = (step.detail ?? "").split("\n");
+  // the summary is said once: "Read notes.md" needs no "Read ·" after it
+  const named = step.summary.toLowerCase().startsWith(label.toLowerCase());
+  const meta = st === "run" ? (named ? "running" : `${label} · running`) : stopped && step.state === "running" ? "stopped" : step.state === "error" ? (named ? "failed" : `${label} · failed`) : dur === "" ? lead : null;
+  const [line = "", ...rest] = (step.detail ?? "").split("\n");
+  const { cmd, shell } = callLine(line);
   const out = rest.join("\n").trim();
   const toggle = () => setOpen(!open);
   return (
@@ -217,7 +422,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
         <span className="wr-m">
           {meta ?? (
             <>
-              <span className="wr-tool">{lead} · </span>
+              {named ? null : <span className="wr-tool">{lead} · </span>}
               {dur}
             </>
           )}
@@ -226,11 +431,12 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
           <Icon id="down" />
         </span>
       </div>
-      <div className="wr-body">
+      {/* one box up to 360 px: longer output scrolls inside it, by wheel or keys; the wheel goes on to the page at its ends */}
+      <div className="wr-body" tabIndex={open ? 0 : -1} aria-label={`${step.summary}: details`}>
         {meta === null ? <p className="wr-who">{lead}</p> : null}
         {cmd !== "" ? (
           <p className="cmd">
-            <span>$ </span>
+            {shell ? <span>$ </span> : null}
             {cmd}
           </p>
         ) : null}
@@ -374,6 +580,8 @@ interface ReplyView extends Files {
   readonly paced: string;
   readonly thinking: string;
   readonly tools: readonly ToolStep[];
+  /** How long it thought, from the turn's events; undefined when this session did not watch it. */
+  readonly clock: WorkClock | undefined;
   readonly secs: number | undefined;
   readonly contextNotice: string | undefined;
   readonly allowedLinks: ReadonlySet<string> | undefined;
@@ -386,26 +594,32 @@ interface ReplyView extends Files {
   readonly loading: boolean;
 }
 
-function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, allowedLinks, note, meta, regen, thread, loading, origin, token }: ReplyView) {
+function Reply({ msg, live, text, paced, thinking, tools, clock, secs, contextNotice, allowedLinks, note, meta, regen, thread, loading, origin, token }: ReplyView) {
   const end = live?.end;
-  const running = tools.some((t) => t.state === "running");
   const interrupted = msg?.interrupted === true;
   // a reason in words has its own note under the turn; otherwise a saved stopped reply carries the square, with Stop's seconds when this session saw them
   const knownStop = note?.kind === "said";
-  // the same mark while the stopped turn is live and once its saved row takes over; stopped while thinking, the pill holds the seconds
+  // the server's note (answered without tools) is not a call: it stays the plain line it was, outside the fold
+  const notes = useMemo(() => tools.filter((t) => t.name === "note"), [tools]);
+  const calls = useMemo(() => (notes.length === 0 ? tools : tools.filter((t) => t.name !== "note")), [tools, notes]);
+  // stopped while thinking, with no calls and no words, the pill holds the time and the square has no second copy;
+  // with calls the bulb keeps the thinking and the square keeps Stop's seconds
+  const foldTimed = calls.length === 0 && text === "" && thinking !== "";
+  // the same mark while the stopped turn is live and once its saved row takes over
   const stopSecs = end?.kind === "stopped" ? end.secs : note?.kind === "stopped" ? note.secs : undefined;
-  const stop = stopSecs !== undefined ? (text === "" && thinking !== "" ? null : stopSecs) : interrupted && note === undefined ? null : undefined;
+  const stop = stopSecs !== undefined ? (foldTimed ? null : stopSecs) : interrupted && note === undefined ? null : undefined;
   const streaming = live !== null && end === undefined;
   // the model is thinking: the thought is the pill, and no status row says so again
-  const thinkingNow = streaming && text === "" && tools.length === 0 && thinking !== "";
+  const thinkingNow = streaming && text === "" && calls.length === 0 && thinking !== "";
   const pending = paced.length < text.length;
   const shown = reveal(paced, streaming || pending);
   return (
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
-      {thinking !== "" ? <ThinkLine secs={secs} text={thinking} since={thinkingNow ? live.startedAt : undefined} /> : null}
-      {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
-        <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />
-      ))}
+      {thinking !== "" || calls.length > 0 ? (
+        <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? live.startedAt : undefined} thinkingNow={thinkingNow}
+          busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} />
+      ) : null}
+      {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
       {msg?.imageJob ? <ImageJob msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {contextNotice ? <p className="na" role="status">{contextNotice}</p> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
@@ -414,7 +628,7 @@ function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, a
           <span className="ph">Writing</span>
         </div>
       ) : null}
-      {streaming && text === "" && !running && !thinkingNow ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
+      {streaming && text === "" && calls.length === 0 && !thinkingNow ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
       {end?.kind === "error" ? (
         <div className="err-line" data-tip={esc(end.message)}>
           <Icon id="alert" cls="s14" />
@@ -447,6 +661,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const live = useStore((s) => (msg === undefined ? turnOf(s, threadId) ?? null : null));
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
+  const clock = useStore((s) => (msg === undefined ? live?.clock : s.clocks[msg.id]));
   const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
   const name = describeModel(msg?.model ?? live?.model ?? "", catalog).name;
   const text = msg?.content ?? live?.text ?? "";
@@ -469,7 +684,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   return (
     <>
       {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null}
-      <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} secs={secs}
+      <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} clock={clock} secs={secs}
         contextNotice={msg?.contextNotice ?? live?.contextNotice} allowedLinks={allowedLinks} note={note}
         meta={msg === undefined ? replyMeta(name, {}, live?.end?.kind === "stopped" && live.firstTokenAt !== undefined ? live.firstTokenAt - live.startedAt : undefined) : replyMeta(name, msg, ft)}
         regen={msg === undefined ? live?.end?.kind === "stopped" : last} thread={messages} loading={loading} origin={origin} token={token} />
@@ -484,12 +699,12 @@ function savedThoughtSecs(ft: number | undefined, note: StopNote | undefined, te
 }
 
 /** A saved reply: props only, so a keystroke or a token elsewhere runs nothing here. */
-const SavedReply = memo(function SavedReply({ msg, last, thread, catalog, ft, note, origin, token }: RowProps & { catalog: readonly CatalogEntry[] | undefined; ft: number | undefined; note: StopNote | undefined }) {
+const SavedReply = memo(function SavedReply({ msg, last, thread, catalog, ft, clock, note, origin, token }: RowProps & { catalog: readonly CatalogEntry[] | undefined; ft: number | undefined; clock: WorkClock | undefined; note: StopNote | undefined }) {
   countRender(msg.id);
   const tools = msg.tools ?? NO_TOOLS;
   const allowedLinks = useMemo(() => imageTurnLinks(thread, tools), [thread, tools]);
   return (
-    <Reply msg={msg} live={null} text={msg.content} paced={msg.content} thinking={msg.thinking ?? ""} tools={tools}
+    <Reply msg={msg} live={null} text={msg.content} paced={msg.content} thinking={msg.thinking ?? ""} tools={tools} clock={clock}
       secs={savedThoughtSecs(ft, note, msg.content, msg.thinking ?? "")} contextNotice={msg.contextNotice} allowedLinks={allowedLinks}
       note={note} meta={replyMeta(describeModel(msg.model ?? "", catalog).name, msg, ft)} regen={last} thread={thread} loading={false} origin={origin} token={token} />
   );
@@ -552,12 +767,16 @@ export function Timeline({ threadId }: { threadId: string }) {
   const row = (m: Message) => (bust === 0 ? m : { ...m });
   // what saved rows need from the store, read once here and passed down as props
   const catalog = useStore(catalogOf);
-  const firstToken = useStore((s) => s.firstToken);
+  const { firstToken, clocks } = useStore(replyTimes);
   const origin = useStore((s) => s.serverOrigin);
   const token = useStore((s) => s.fileToken);
   const tl = useRef<HTMLDivElement>(null);
   const col = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  // Where the timeline last scrolled itself: a scroll event that lands there is its own, any other is the reader's.
+  const own = useRef(-1);
+  // The reader opened or closed something in a finished reply and has not scrolled since: the page follows the end only from exactly there.
+  const toggled = useRef(false);
   // Image jobs have their own identity. The text reply belongs to its user
   // turn, even when a job is inserted between that user and the live reply.
   let owner: string | undefined;
@@ -624,7 +843,10 @@ export function Timeline({ threadId }: { threadId: string }) {
         if (up instanceof HTMLElement) up.style.animation = "none";
       }
       const moved = a.el.getBoundingClientRect().top - el.getBoundingClientRect().top - a.off;
-      if (moved !== 0) el.scrollTop += moved;
+      if (moved !== 0) {
+        el.scrollTop += moved;
+        own.current = el.scrollTop;
+      }
     }
     note();
   });
@@ -637,29 +859,68 @@ export function Timeline({ threadId }: { threadId: string }) {
   // a newly opened thread starts at its end
   useLayoutEffect(() => {
     const el = tl.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      own.current = el.scrollTop;
+    }
     stick.current = true;
+    toggled.current = false;
   }, [threadId]);
 
   useEffect(() => {
     const el = tl.current;
     const c = col.current;
     if (!el || !c) return;
+    // near the end follows it as the reader scrolls; after the reader opens or closes something finished, only the end itself does
+    const atEnd = () => el.scrollHeight - el.scrollTop - el.clientHeight < (toggled.current ? 2 : 120);
     const onScroll = () => {
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      // a scroll the timeline did not make, the hold's last one included, is the reader's: the hold lets go
+      if (Math.abs(el.scrollTop - own.current) > 1) {
+        held = null;
+        toggled.current = false;
+      }
+      stick.current = atEnd();
       note();
       // within a screen of the turns not mounted yet: mount them now, not when idle
       if (el.scrollTop < el.clientHeight) grow();
     };
+    // a disclosure the reader opens or closes stays where it was through its ease: no following, no anchoring shift
+    let held: { at: Element; top: number; until: number } | null = null;
+    const keep = () => {
+      if (held === null) return;
+      // the hold ends where the disclosure left the page: following only if that is still the end
+      if (performance.now() > held.until || !held.at.isConnected) { held = null; stick.current = atEnd(); return; }
+      el.scrollTop += held.at.getBoundingClientRect().top - held.top;
+      own.current = el.scrollTop;
+      requestAnimationFrame(keep);
+    };
+    const onToggle = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== "Enter" && e.key !== " ") return;
+      const disclosure = e.target instanceof Element ? e.target.closest("[aria-expanded]") : null;
+      if (disclosure === null || !c.contains(disclosure)) return;
+      const start = held === null;
+      // what opens in a reply still being written is read as it grows, so the page keeps following near the end
+      toggled.current = disclosure.closest(".turn.a:not(.done):not(.interrupted)") === null;
+      stick.current = atEnd();
+      own.current = el.scrollTop;
+      held = { at: disclosure, top: disclosure.getBoundingClientRect().top, until: performance.now() + 400 };
+      if (start) requestAnimationFrame(keep);
+    };
     const ro = new ResizeObserver(() => {
-      if (stick.current) el.scrollTop = el.scrollHeight;
+      if (!stick.current || held !== null) return;
+      el.scrollTop = el.scrollHeight;
+      own.current = el.scrollTop;
     });
     ro.observe(c);
     ro.observe(el);
     el.addEventListener("scroll", onScroll, { passive: true });
+    c.addEventListener("click", onToggle, true);
+    c.addEventListener("keydown", onToggle, true);
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
+      c.removeEventListener("click", onToggle, true);
+      c.removeEventListener("keydown", onToggle, true);
     };
   }, [grow, note]);
 
@@ -675,7 +936,7 @@ export function Timeline({ threadId }: { threadId: string }) {
             <Fragment key={key}>
               {m?.role === "user" ? <UserTurn msg={row(m)} noted={why?.kind === "said"} />
                 : m === undefined || wasLive.has(key) ? <LiveReply threadId={threadId} msg={m === undefined ? undefined : row(m)} last={last} origin={origin} token={token} />
-                : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} note={why} origin={origin} token={token} />}
+                : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} clock={clocks[m.id]} note={why} origin={origin} token={token} />}
               {/* a reason the person did not cause, in its own words; under a reply, the stop square says the model won't see it */}
               {m !== undefined && why?.kind === "said" ? (
                 <div className={m.role === "user" ? "stop-note under-u" : "stop-note"} role="status">

@@ -39,7 +39,8 @@ test("the chat model's image tool answers with a durable job card, never the inv
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText("Making image");
   await expect(page.locator(".tl")).not.toContainText("Here's an image");
-  await expect(page.locator(".tl")).not.toContainText("0 ms");
+  // no zero-length step; a real one may last 20 ms
+  await expect(page.locator(".tl")).not.toContainText(/\b0 ms/);
   const before = await card.boundingBox();
   await page.reload(); await waitReady(page);
   await expect(card).toContainText("Making image");

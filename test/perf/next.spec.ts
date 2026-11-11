@@ -317,7 +317,8 @@ test("priority journeys with costs", async ({ browser }) => {
           await page.getByRole("button", { name: "Connect", exact: true }).click();
           await expect(page.getByText("Connected for dictation.", { exact: false })).toBeVisible(); await page.keyboard.press("Escape");
           await timing("voice-start-recording", await clicking(page.getByRole("button", { name: "Dictate", exact: true })), "click", ".voice.listening", "Listening");
-          await expect(page.locator(".voice")).toContainText("1s");
+          // Dictate is one icon: its seconds are on the control, not in its text
+          await expect(page.locator(".voice.listening")).toHaveAttribute("data-elapsed", "1");
           await timing("voice-stop-to-transcript", await clicking(page.getByRole("button", { name: "Stop dictation" })), "click", "#ta", "spoken words", "value");
           await expect(page.locator("#ta")).toHaveValue("spoken words"); await page.locator("#ta").fill("");
         }

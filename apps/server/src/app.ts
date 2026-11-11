@@ -928,7 +928,7 @@ export function createApp(deps: AppDeps): App {
       for (const turn of turns.values()) {
         if (turn.start === undefined || turn.terminal) continue;
         const send = (event: WireEvent) => target("chat.event", { turnId: turn.turnId, threadId: turn.threadId, event });
-        send(turn.start);
+        send({ ...turn.start, replayed: true });
         if (turn.thinking !== "") send({ type: "thinking", text: turn.thinking });
         for (const step of turn.steps.values()) send({ type: "tool", step });
         if (turn.text !== "" || turn.contextNotice) send({ type: "delta", text: turn.text, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });

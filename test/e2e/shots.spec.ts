@@ -80,7 +80,7 @@ const SHOTS: readonly Shot[] = [
   { name: "S-21-settings-images", act: settings("Image generation") },
   { name: "S-109-settings-library", light: "S-110-light-settings-library", act: settings("Library") },
   { name: "S-23-thread-hover-actions", act: (p) => p.locator(".turn.a").last().locator(".md").hover() },
-  { name: "S-24-tool-expanded", act: (p) => p.locator(".wr").first().click() },
+  { name: "S-24-tool-expanded", act: async (p) => { await p.locator("button.think.fold").first().click(); await p.locator(".wr").first().click(); } },
   { name: "S-25-plus-menu", act: (p) => p.locator("#plusBtn").click() },
   // chat-feel: a reply held mid code block, a code block hovered, the composer Thinking pill hovered
   {

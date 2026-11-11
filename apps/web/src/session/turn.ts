@@ -31,6 +31,64 @@ const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code =
 
 const secsSince =(turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
 
+/**
+ * How long a reply thought, kept as its events arrive, so every screen that
+ * shows it reads the same number and a remount rebuilds nothing. A span of
+ * thinking opens with its first words and closes when a call, the answer or
+ * the end arrives; it never closes before a time already shown, so the total
+ * never goes down. A turn this client did not watch from its start has none.
+ */
+export interface WorkClock {
+  /** Thinking since `since`; otherwise a call, the answer, or waiting. */
+  readonly thinking: boolean;
+  readonly since: number;
+  /** Where the open span's words start in the thinking. */
+  readonly from: number;
+  /** Milliseconds in closed spans. */
+  readonly total: number;
+  /** Each closed span: where its words start in the thinking, and how long it ran. */
+  readonly spans: readonly { readonly from: number; readonly ms: number }[];
+  /** The thinking's length when each call first arrived: where it came in the thinking. */
+  readonly at: Readonly<Record<string, number>>;
+}
+
+export const startClock = (now: number): WorkClock => ({ thinking: false, since: now, from: 0, total: 0, spans: [], at: {} });
+
+/** The clock once the thinking stops at `now`. */
+export function stopThinking(clock: WorkClock, now: number): WorkClock {
+  if (!clock.thinking) return clock;
+  const ms = Math.max(0, now - clock.since);
+  return { ...clock, thinking: false, since: now, total: clock.total + ms, spans: [...clock.spans, { from: clock.from, ms }] };
+}
+
+/** Whole seconds of thinking at `now`, at least one. */
+export const thoughtSecs = (clock: WorkClock, now: number): number =>
+  Math.max(1, Math.round((clock.total + (clock.thinking ? Math.max(0, now - clock.since) : 0)) / 1000));
+
+/** The turn with its thinking stopped at `now`: a call, the answer or the end came. */
+export function leaveThinking(turn: LiveTurn, now: number): LiveTurn {
+  return turn.clock?.thinking === true ? { ...turn, clock: stopThinking(turn.clock, now) } : turn;
+}
+
+function clockOn(turn: LiveTurn, event: TurnEvent, now: number): WorkClock | undefined {
+  const c = turn.clock;
+  if (c === undefined) return undefined;
+  switch (event.type) {
+    case "thinking":
+      return c.thinking || event.text === "" ? c : { ...c, thinking: true, since: now, from: turn.thinking.length };
+    case "tool":
+      return { ...stopThinking(c, now), at: c.at[event.step.callId] === undefined ? { ...c.at, [event.step.callId]: turn.thinking.length } : c.at };
+    case "delta":
+      return event.text === "" ? c : stopThinking(c, now);
+    case "stop":
+    case "error":
+    case "lost":
+      return stopThinking(c, now);
+    default:
+      return c;
+  }
+}
+
 function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
   const i = steps.findIndex((x) => x.callId === step.callId);
   return i < 0 ? [...steps, step] : steps.map((x, j) => (j === i ? step : x));
@@ -42,8 +100,16 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
  * dropped (W-05); a tool step still lands.
  */
 export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
-  const next = advance(turn, event, now);
-  if (next?.listed !== true || event.type === "running") return next;
+  const advanced = advance(turn, event, now);
+  if (advanced === null) return null;
+  const clock = event.type === "start"
+    // heard of at its start: watched from there; a start sent again to a client that connected
+    // mid-reply, and words the start replaces, were not watched
+    ? event.replayed === true ? undefined : turn.listed === true ? startClock(now) : turn.thinking !== "" || turn.text !== "" || turn.tools.length > 0 ? undefined : turn.clock
+    // words after the end are dropped, and so is their time
+    : turn.end !== undefined && (event.type === "thinking" || event.type === "delta") ? turn.clock : clockOn(turn, event, now);
+  const next = clock === advanced.clock ? advanced : { ...advanced, clock };
+  if (next.listed !== true || event.type === "running") return next;
   // its own first event makes a turn known only from turns.active a turn like any
   // other; its start also starts its clock, as for a turn first heard of at its start
   return { ...next, listed: undefined, ...(event.type === "start" ? { startedAt: now } : {}) };
