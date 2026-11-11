@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-11: Installed copies trust a release key
+
+- An installed copy built from this commit on checks the release page for a
+  newer version and accepts a version list only when it is signed by the
+  project's release key. Until now the list of trusted keys was empty, so
+  every installed copy said it had no release key and made no request.
+- No release has been published yet. Until one is, the release page has no
+  version list for the check to find, and the copy should say "No release
+  list was found on the release page." That has not been seen against the
+  real page.
+- A copy that has downloaded a newer version still sends the person to the
+  release page to install it; restarting into the new version is not
+  connected yet.
+
 ## 2026-11-11: An image takes the memory a loaded chat model holds, and the picker says so first
 
 - An image is no longer refused because a chat model is still loaded from

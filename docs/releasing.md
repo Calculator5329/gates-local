@@ -450,8 +450,9 @@ pnpm release:keygen --out "$HOME/.local/share/gates-release-signing/release.pem"
 The command prints only the public key, as a base64 Ed25519 SPKI string.
 Add that string to `TRUSTED_RELEASE_KEYS` in
 `apps/server/src/update/release-manifest.ts`, then land that commit before
-building any release that uses this key. The source list is currently empty;
-those builds have no release key and cannot check updates.
+building any release that uses this key. The source list has held one key
+since 2026-11-11. A build from before that commit has no release key and
+cannot check updates.
 
 The private key is a PKCS8 PEM file with owner-only permissions. Keep it out
 of repositories, logs, installers and cloud-synced folders. Keep a second

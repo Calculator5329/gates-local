@@ -15,7 +15,12 @@ export interface ReleaseManifest {
   commit: string;
   artifacts: ReleaseArtifact[];
 }
-export const TRUSTED_RELEASE_KEYS: readonly string[] = [];
+/**
+ * The public halves of the keys that may sign a version list, as base64
+ * Ed25519 SPKI. An installed copy accepts a list only when one of these
+ * verifies it. docs/releasing.md says how a key is made and replaced.
+ */
+export const TRUSTED_RELEASE_KEYS: readonly string[] = ["MCowBQYDK2VwAyEAmkifrULbJLUgNyNjPq/gN0LS/MWyENTsD536HKcSu4I="];
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${field} must be an object`);

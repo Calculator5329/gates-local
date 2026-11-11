@@ -9,6 +9,7 @@ import path from "node:path";
 import { decodeResult, type UpdateCheck, type UpdateStatus } from "@gates-local/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateModule } from "../module.ts";
+import { TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
 import { LIST_FILE, SIGNATURE_FILE } from "./download.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, downloadLines, INSTALL_REFUSAL, type InstalledModuleDeps, installedFeed, type InstalledFeed } from "./module.ts";
 import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "./testing.ts";
@@ -226,7 +227,12 @@ describe("the test-build gate", () => {
 
   it("the default feed is the public repository's release pages", () => {
     expect(DEFAULT_FEED.href).toMatch(/^https:\/\/github\.com\/[^/]+\/gates-local\/releases$/);
-    expect(installedFeed({}, { testBuild: false }).keys).toEqual([]);
+  });
+
+  it("a plain build trusts the source list's keys and nothing from its environment", () => {
+    expect(TRUSTED_RELEASE_KEYS.length).toBeGreaterThan(0);
+    expect(installedFeed({}, { testBuild: false }).keys).toEqual([...TRUSTED_RELEASE_KEYS]);
+    expect(installedFeed({ GATES_LOCAL_UPDATE_TEST_KEYS: testKey }, { testBuild: false }).keys).toEqual([...TRUSTED_RELEASE_KEYS]);
   });
 });
 
