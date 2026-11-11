@@ -622,6 +622,8 @@ RS-03 remains dropped.
       *Accept:* the two image-send/edit paste cases pass repeated in one process without weakening request-count assertions.
 - [ ] <!-- workspace:id=work:82586f85-d8af-5135-a722-a71f7a459366 --> Diagnose the intermittent release-cancellation report failure in `test/release.test.ts`'s “interrupting a running check” case.
       *Accept:* repeat under load with retained failure evidence and require the report plus confirmed child shutdown on every run.
+- [ ] <!-- workspace:id=work:41c4ee7c-0188-5e88-aa9d-2796b112e730 --> Diagnose the intermittent process-group timing failure in `apps/server/src/update/run.test.ts`: it failed once inside a full `pnpm verify` on a busy machine and passed 3 of 3 alone.
+      *Accept:* repeat the file under full load, name the case and the missed deadline, and make it wait on state so it passes every run.
 - [x] <!-- workspace:id=work:5743ffbb-2350-5ab5-a971-a72e96d87b8b --> Diagnose the intermittent project-list check in `test/release-projects.test.ts`; the blocking/timing companion assertion failed once and then passed. Cause: Playwright exits right after printing the list, and a pipe's reader on a busy machine had not taken it all, so the list arrived cut short with exit status 0. The list now goes to a file and must end with its total line. Under full load: 5 failures in 12 runs before, 0 in 12 after.
       *Accept:* repeated project listings under load keep the functional companions in the blocking project with no timeout flake.
 - [ ] <!-- workspace:id=work:854ba173-6dcb-55b2-b926-e25cad7cae67 --> Profile performance-fixture seeding: `test/perf/fixture.test.ts` now uses the run root and a 180-second setup bound, but the expensive real-store seed is unprofiled.

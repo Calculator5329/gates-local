@@ -136,13 +136,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         listeningPids: procListeningPids,
         modelLabel,
         appLoaded: () => loader?.appLoadedModels() ?? [],
-        residentModels: async () => {
-          const baseUrl = runtime.baseUrl();
-          if (baseUrl === undefined) return [];
-          const ps = await listLoaded(baseUrl);
-          loader?.prune(ps.map((m) => m.name));
-          return ps.map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes }));
-        },
+        // The loader reads /api/ps for the runtime it owns now and prunes against it.
+        residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
       }),
     push: (status) => options.push("gpu.changed", status),
     log,

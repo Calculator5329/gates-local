@@ -11,9 +11,11 @@
 // turn is a cold load: "loading" is pushed then and "ready" at the first
 // content or thinking token. Either way the model joins appLoadedModels(),
 // the one list the image lane may unload from. The list is pruned against
-// /api/ps whenever this module or the GPU poll reads it, so a model Ollama
-// let go of leaves it ("unloaded" push). A preload takes the same per-model
-// reservation as a turn, so models.remove refuses while either runs.
+// /api/ps whenever this module reads it (the GPU poll reads it here too, via
+// residentModels()), so a model Ollama let go of leaves it ("unloaded" push).
+// A reading of a runtime switched away from prunes nothing. A preload takes
+// the same per-model reservation as a turn, so models.remove refuses while
+// either runs.
 //
 // One load gate per loader: the residency read, the fit and the load run
 // inside it, so a second load measures the memory the first one took. A
@@ -155,7 +157,13 @@ export interface ModelLoader {
   close(): Promise<void>;
   /** Models this app loaded that are still resident, by tag. */
   appLoadedModels(): readonly string[];
-  /** Drops models no longer in /api/ps; the GPU poll feeds its own reading here. */
+  /**
+   * The GPU poll's /api/ps of the current runtime, pruning the owned list on the way. Empty
+   * when no runtime is ready, the read fails, or the runtime changed while it was in flight:
+   * a reading of the old runtime says nothing about the GPU or what the app owns now.
+   */
+  residentModels(): Promise<readonly LoadedModel[]>;
+  /** Drops models not in `resident`; the image module's unloads land here (not /api/ps readings). */
   prune(resident: readonly string[]): void;
 }
 
@@ -270,15 +278,25 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     }
   };
 
-  /** /api/ps by tag, pruning the owned list on the way when `gen` is still current. */
-  const residency = async (baseUrl: string, gen: number, signal: AbortSignal): Promise<Residency> => {
+  /** The GPU poll's last logged /api/ps failure; cleared when a read succeeds. */
+  let pollFailure: string | undefined;
+
+  /**
+   * /api/ps by tag, pruning the owned list on the way when `gen` is still current. A `poll` read
+   * (every 3 s) logs nothing when cancelled and a failure only when it is not the one last logged.
+   */
+  const residency = async (baseUrl: string, gen: number, signal: AbortSignal, poll = false): Promise<Residency> => {
     try {
       const loaded = await deps.listLoaded(baseUrl, signal);
+      pollFailure = undefined;
       // A reading of the old runtime says nothing about what the app owns now.
       if (gen === generation) prune(loaded.map((m) => m.name));
       return { ok: true, models: new Map(loaded.map((m) => [canonicalTag(m.name), m])) };
     } catch (e) {
-      log(`reading /api/ps failed: ${(e as Error).message}`);
+      const message = (e as Error).message;
+      if (poll && (signal.aborted || message === pollFailure)) return { ok: false };
+      if (poll) pollFailure = message;
+      log(`reading /api/ps failed: ${message}`);
       return { ok: false };
     }
   };
@@ -539,6 +557,14 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     },
 
     appLoadedModels: () => [...owned.keys()],
+    async residentModels() {
+      const baseUrl = deps.baseUrl();
+      if (baseUrl === undefined) return [];
+      const gen = generation;
+      // A switch aborts `current`, so a read of the old runtime ends then rather than late.
+      const here = await residency(baseUrl, gen, current.signal, true);
+      return here.ok && gen === generation ? [...here.models.values()] : [];
+    },
     prune,
   };
 }

@@ -14,7 +14,7 @@ import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { createModelServices, type ModelServices } from "./services.ts";
 import { freePort, freePortRun, removeDir, tmpDir, writeFakeBinary } from "./test-fakes.ts";
 import { ownedIdleComfy, type OwnedComfy } from "./test-image.ts";
-import type { SyncChange } from "@gates-local/contracts";
+import type { ModelLoad, SyncChange } from "@gates-local/contracts";
 
 const VERSION = "9.9.9-services";
 const manifest = { version: VERSION, url: "http://127.0.0.1:1/never", sha256: "0".repeat(64), sizeBytes: 1, format: "tar.zst", verified: true, source: "test" } as const;
@@ -46,9 +46,13 @@ async function models(url: string): Promise<string | undefined> {
 async function services(dataDir: string, runtime: Record<string, unknown>, lease?: GpuLease, turnDrainMs?: number, fitDeps: AppDeps["fit"] = fit) {
   const home = path.join(work, "home");
   const settingsFrames: Array<{ value: unknown; changes: readonly SyncChange[] | undefined }> = [];
+  const modelLoads: ModelLoad[] = [];
   const s = await createModelServices({
     dataDir,
-    push: (channel, value, changes) => { if (channel === "settings.changed") settingsFrames.push({ value, changes }); },
+    push: (channel, value, changes) => {
+      if (channel === "settings.changed") settingsFrames.push({ value, changes });
+      if (channel === "models.load") modelLoads.push(value as ModelLoad);
+    },
     runtime: { home, env: { PATH: "", HOME: home }, systemModelsDirs: [], allowInstall: false, probeTimeoutMs: 500, manifest, ...runtime },
     fit: fitDeps,
     log: () => undefined,
@@ -57,7 +61,7 @@ async function services(dataDir: string, runtime: Record<string, unknown>, lease
   });
   s.gpu.stop();
   open.push(s);
-  return Object.assign(s, { settingsFrames });
+  return Object.assign(s, { settingsFrames, modelLoads });
 }
 
 it("S-08: two services with different data dirs run their own Ollama against their own models folder", async () => {
@@ -134,6 +138,89 @@ async function settled<T>(p: Promise<T>, what: string, ms = 20_000): Promise<unk
     ]);
   } finally { clearTimeout(deadline); }
 }
+
+/**
+ * The app runtime's fake `ollama` for a load: one model installed, /api/show answers, a
+ * preload makes it resident and keep_alive 0 lets it go.
+ */
+function loadableOllamaScript(model: string): string {
+  return `#!${process.execPath}
+const http = require("node:http");
+const [cmd] = process.argv.slice(2);
+if (cmd === "--version" || cmd === "-v") { console.log("ollama version is 0.0.3-fake-app"); process.exit(0); }
+if (cmd !== "serve") process.exit(2);
+const [host, port] = (process.env.OLLAMA_HOST || "").split(":");
+const show = ${JSON.stringify(SHOW)};
+const loaded = [];
+const server = http.createServer((req, res) => {
+  const json = (b) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const b = JSON.parse(body || "{}");
+    if (req.url === "/") { res.writeHead(200); res.end("Ollama is running"); }
+    else if (req.url === "/api/version") json({ version: "0.0.3-fake-app" });
+    else if (req.url === "/api/tags") json({ models: [{ name: ${JSON.stringify(model)}, size: 6600000000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] });
+    else if (req.url === "/api/ps") json({ models: loaded.map((name) => ({ name, size: 1, size_vram: 1, context_length: 16384 })) });
+    else if (req.url === "/api/show") json(show);
+    else if (req.url === "/api/generate") {
+      if (b.keep_alive === 0) loaded.splice(0, loaded.length, ...loaded.filter((m) => m !== b.model));
+      else if (!loaded.includes(b.model)) loaded.push(b.model);
+      json({ model: b.model, response: "", done: true });
+    } else { res.writeHead(404); res.end(); }
+  });
+});
+server.listen(Number(port), host);
+process.on("SIGTERM", () => { server.close(); process.exit(0); });
+`;
+}
+
+it("a GPU reading of the old runtime that answers after a switch leaves the new runtime's loaded models alone", async () => {
+  // The old runtime: a system Ollama whose /api/ps the GPU watcher's read waits on.
+  let holdPs = false;
+  const psAsked = signalled();
+  const psAnswer = signalled();
+  const old = await startFakeServer({
+    "GET /": (_b, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("Ollama is running");
+    },
+    "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [] }),
+    "GET /api/ps": async (_b, res) => {
+      if (holdPs) {
+        holdPs = false;
+        psAsked.resolve();
+        await psAnswer.promise;
+      }
+      json(res, 200, { models: [] });
+    },
+  });
+  servers.push(old);
+  const dataDir = path.join(work, "data");
+  writeFakeBinary(installedBinary(dataDir, VERSION), loadableOllamaScript(MODEL));
+  // The status query gets no answer it can read (so the reading never asks systemd about
+  // whisper); the fit's own query sees 15 GB free.
+  const fitDeps = { ...fit, runNvidiaSmi: async (args: readonly string[]) => (args[0]?.startsWith("--query-gpu=memory") ? "16303, 1303, 15000\n" : "") };
+  const s = await services(dataDir, { appPort: await freePort(), externalBaseUrl: old.baseUrl }, undefined, undefined, fitDeps);
+  expect(s.runtime.mode()).toBe("system");
+  expect((await s.runtime.ensure()).state).toBe("ready");
+
+  holdPs = true;
+  const reading = s.gpu.read();
+  try {
+    expect(await settled(psAsked.promise, "the watcher's /api/ps to the old runtime")).toEqual({ resolved: undefined });
+    expect(await s.runtime.setMode("app")).toMatchObject({ state: "ready" });
+    expect(await s.loader.load(MODEL, 16384)).toMatchObject({ state: "ready" });
+    expect(s.loader.appLoadedModels()).toEqual([MODEL]);
+  } finally {
+    // The old runtime's answer (nothing loaded there) arrives now, after the switch and the load.
+    psAnswer.resolve();
+  }
+  await settled(reading, "the GPU reading");
+  const unloaded = s.modelLoads.filter((l) => l.state === "unloaded");
+  expect({ owned: s.loader.appLoadedModels(), unloaded }).toEqual({ owned: [MODEL], unloaded: [] });
+});
 
 describe("R2-02: shutdown aborts a preload in its residency read or its fit", () => {
   for (const where of ["/api/ps", "/api/show"] as const) {

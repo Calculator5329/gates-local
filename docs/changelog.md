@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-11: Switching runtimes no longer forgets which models are loaded
+
+- The app checks every few seconds which models the runtime has in memory.
+  If you switched runtimes while one of those checks was still on its way
+  back from the old runtime, its late answer could make the app forget the
+  models it had just loaded on the new one and report them as unloaded.
+  The check now belongs to the part that owns the loaded list, which
+  ignores an answer about a runtime it has since left.
+- While a runtime is unreachable, the log gets one line about the failed
+  check, not one every three seconds. A check cancelled by a switch or by
+  quitting logs nothing. A failed check during a model load still logs
+  every time.
+- Found by reading the code, then reproduced in a test before the fix. It
+  was not seen happening in the app.
+
 ## 2026-11-10: One row at the top of the sidebar
 
 - The top of the sidebar is one row now: Search on the left and a New

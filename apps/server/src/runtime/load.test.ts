@@ -194,6 +194,62 @@ describe("models.load", () => {
   });
 });
 
+/** A loader whose /api/ps fails with `failure()` (or answers empty when it gives undefined); its log lines about /api/ps. */
+function quiet(failure: () => string | undefined) {
+  const lines: string[] = [];
+  const loader = createModelLoader({
+    baseUrl: () => "http://127.0.0.1:1",
+    push: () => undefined,
+    listLoaded: async () => {
+      const message = failure();
+      if (message !== undefined) throw new Error(message);
+      return [];
+    },
+    fit: async (_model, numCtx) => ({ ...report("fits"), numCtx }),
+    log: (line) => lines.push(line),
+  });
+  return { loader, logged: () => lines.filter((l) => l.includes("/api/ps")) };
+}
+
+describe("the GPU poll's /api/ps failures are logged quietly", () => {
+  it("ten failing polls in a row log one line", async () => {
+    const { loader, logged } = quiet(() => "connection refused");
+    for (let i = 0; i < 10; i++) expect(await loader.residentModels()).toEqual([]);
+    expect(logged()).toEqual(["reading /api/ps failed: connection refused"]);
+  });
+
+  it("a success, or a different message, logs the next failure again", async () => {
+    const answers: (string | undefined)[] = ["connection refused", "connection refused", undefined, "connection refused", "timed out", "timed out"];
+    const { loader, logged } = quiet(() => answers.shift());
+    for (let i = 0; i < 6; i++) await loader.residentModels();
+    expect(logged()).toEqual(["reading /api/ps failed: connection refused", "reading /api/ps failed: connection refused", "reading /api/ps failed: timed out"]);
+  });
+
+  it("a poll read cancelled by a switch logs nothing", async () => {
+    const lines: string[] = [];
+    const loader = createModelLoader({
+      baseUrl: () => "http://127.0.0.1:1",
+      push: () => undefined,
+      listLoaded: (_url, signal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("This operation was aborted")), { once: true })),
+      fit: async (_model, numCtx) => ({ ...report("fits"), numCtx }),
+      log: (line) => lines.push(line),
+    });
+    const reading = loader.residentModels();
+    await tick();
+    loader.runtimeChanged();
+    expect(await reading).toEqual([]);
+    expect(lines).toEqual([]);
+  });
+
+  it("a load's failed read still logs every time, beside a quiet poll", async () => {
+    const { loader, logged } = quiet(() => "connection refused");
+    await loader.residentModels();
+    await loader.residentModels();
+    for (let i = 0; i < 3; i++) expect(await loader.load("m", 16384)).toMatchObject({ state: "error" });
+    expect(logged()).toHaveLength(4);
+  });
+});
+
 describe("runtime generation", () => {
   it("R-02: after a switch to B where m is external, B's m is never app-owned", async () => {
     const a = await fakeOllama([]);
@@ -219,6 +275,36 @@ describe("runtime generation", () => {
     expect(loader.appLoadedModels()).toEqual([]);
     // The switch itself pushes no "unloaded" for a model that stays resident elsewhere.
     expect(pushes.slice(before).filter((p) => p.state === "unloaded")).toEqual([]);
+  });
+
+  it("a GPU-poll reading of A that answers after the switch prunes nothing and reads as empty", async () => {
+    const a = await fakeOllama(["old:7b"]);
+    const b = await fakeOllama([]);
+    let url = a.baseUrl;
+    const held = deferred();
+    const pushes: ModelLoad[] = [];
+    // A read that ignores its abort, so only the generation decides.
+    const loader = loaderFor(b, pushes, "fits", {
+      baseUrl: () => url,
+      listLoaded: async (u) => {
+        const ps = await listLoaded(u);
+        if (u === a.baseUrl) await held.promise;
+        return ps;
+      },
+    });
+    const reading = loader.residentModels();
+    await tick();
+    loader.runtimeChanged();
+    url = b.baseUrl;
+    loader.runtimeSettled();
+    await loader.load("m", 16384);
+    held.release();
+    expect(await reading).toEqual([]);
+    expect(loader.appLoadedModels()).toEqual(["m:latest"]);
+    expect(pushes.filter((p) => p.state === "unloaded")).toEqual([]);
+    // B's own reading prunes as before.
+    expect((await loader.residentModels()).map((m) => m.name)).toEqual(["m"]);
+    expect(loader.appLoadedModels()).toEqual(["m:latest"]);
   });
 
   it("R-02: an A preload that resolves after the switch adds nothing", async () => {
