@@ -27,20 +27,40 @@ export interface Sources {
 
 const decodeRegistry = S.decodeUnknownSync(S.Array(Source));
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "latin1");
+/** A database row lists at most this many tables. */
+const MAX_TABLES = 500;
 export const SQLITE_FILE_REFUSED = "This is a SQLite database; add it as a database source so the model reads a snapshot, never the live file.";
 
 // VACUUM INTO runs on a worker thread so a large database never stalls the server.
 // It reads a transactionally consistent view, including committed WAL frames; the
 // read-only connection cannot change the live database or take its writer lock.
+// It then reads the copy's tables and row counts once, so a list never opens a
+// database; a copy it cannot count is still a good snapshot, without counts.
+// table_list names each table's kind: a virtual table (full-text, R-tree) is
+// listed by name, uncounted, since counting one can mean reading all of it;
+// the shadow tables that hold its rows and SQLite's own sqlite_ tables are not
+// the person's. Views are not tables.
 const VACUUM_WORKER = `
-const { workerData } = require("node:worker_threads");
+const { workerData, parentPort } = require("node:worker_threads");
 const { DatabaseSync } = require("node:sqlite");
 const live = new DatabaseSync(workerData.live, { readOnly: true, timeout: 5000, allowExtension: false });
 try { live.prepare("VACUUM INTO ?").run(workerData.pending); } finally { live.close(); }
+try {
+  const copy = new DatabaseSync(workerData.pending, { readOnly: true, allowExtension: false });
+  try {
+    const all = copy.prepare("SELECT name, type FROM pragma_table_list WHERE schema = 'main' AND type IN ('table', 'virtual') AND substr(name, 1, 7) <> 'sqlite_' ORDER BY name").all();
+    const tables = all.slice(0, ${MAX_TABLES}).map(({ name, type }) => type === "virtual" ? { name } : { name, rows: Number(copy.prepare('SELECT count(*) AS n FROM "' + name.replaceAll('"', '""') + '"').get().n) });
+    parentPort.postMessage({ tables, count: all.length });
+  } finally { copy.close(); }
+} catch {}
 `;
-function vacuumInto(live: string, pending: string, signal?: AbortSignal): Promise<void> {
+/** A snapshot's tables as the worker read them: at most MAX_TABLES, and how many there are. */
+type Listed = { tables: NonNullable<Source["tables"]>; count: number };
+function vacuumInto(live: string, pending: string, signal?: AbortSignal): Promise<Listed | undefined> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(VACUUM_WORKER, { eval: true, workerData: { live, pending } });
+    let tables: Listed | undefined;
+    worker.once("message", (m: Listed) => { tables = m; });
     let failure: Error | undefined;
     const abort = () => { void worker.terminate().catch((error: unknown) => { failure = error instanceof Error ? error : new Error(String(error)); }); };
     if (signal?.aborted) abort();
@@ -50,7 +70,7 @@ function vacuumInto(live: string, pending: string, signal?: AbortSignal): Promis
       signal?.removeEventListener("abort", abort);
       if (signal?.aborted) reject(new Error("Import interrupted while Gates Local is closing."));
       else if (failure) reject(failure);
-      else if (code === 0) resolve();
+      else if (code === 0) resolve(tables);
       else reject(new Error(`Snapshot worker exited ${code}`));
     });
   });
@@ -264,8 +284,9 @@ export function createSources(deps: SourcesDeps): Sources {
     if (source.kind !== "sqlite") return { ...source, path: canonical, state: "ready", sizeBytes: statSync(canonical).size, detail: undefined };
     if (!snapshots.placed()) throw moved();
     const pending = `${source.id}.${randomUUID()}.pending.db`;
+    let listed: Listed | undefined;
     try {
-      await vacuumInto(canonical, snapshots.at(pending), signal);
+      listed = await vacuumInto(canonical, snapshots.at(pending), signal);
       signal?.throwIfAborted();
       if (!snapshots.placed()) throw moved();
       const copy = openEntry(snapshots, pending, platform);
@@ -276,7 +297,10 @@ export function createSources(deps: SourcesDeps): Sources {
         renameSync(snapshots.at(pending), snapshots.at(snapshotName(source.id)));
       } finally { copy?.close(); }
     } finally { if (snapshots.placed()) unlinkIfAny(snapshots, pending); }
-    return { ...source, path: canonical, state: "ready", snapshotAt: now(), sizeBytes: snapshots.lstat(snapshotName(source.id))?.size ?? 0, detail: undefined };
+    // The counts are this snapshot's: an older copy's never outlive it.
+    const { tables: _older, tableCount: _olderCount, ...rest } = source;
+    const tables = listed === undefined ? {} : { tables: listed.tables, ...(listed.count > listed.tables.length ? { tableCount: listed.count } : {}) };
+    return { ...rest, path: canonical, state: "ready", snapshotAt: now(), sizeBytes: snapshots.lstat(snapshotName(source.id))?.size ?? 0, detail: undefined, ...tables };
   };
   const find = (id: string) => {
     const source = sources.find(s => s.id === id);

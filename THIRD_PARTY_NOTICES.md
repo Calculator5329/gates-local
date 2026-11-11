@@ -13,9 +13,17 @@ and SHA-256 digests live in `apps/server/src/sources/samples.ts`.
   [upstream commit 7f677725](https://github.com/lerocha/chinook-database/blob/7f67772503d71ba90f19283c38e93923addb43fa/LICENSE.md).
 - **Northwind SQLite:** MIT, Copyright (c) 2016 JP White. Reviewed at
   [upstream commit 4f56e7f5](https://github.com/jpwhite3/northwind-SQLite3/blob/4f56e7f5906dfd23b25244c5bfe8fb5da6402efd/LICENSE).
+- **World Cup:** [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/),
+  © 2023 Joshua C. Fjelstul, Ph.D. Reviewed at
+  [upstream commit 35a8667f](https://github.com/jfjelstul/worldcup/blob/35a8667f518b07469182ae16d35574dd0e7a00fb/README.md#the-license).
+  The file is downloaded unchanged.
+- **Periodic table (mendeleev):** MIT, Copyright (c) 2015 Lukasz Mentel. Reviewed at
+  [upstream commit bd4716bf](https://github.com/lmmentel/mendeleev/blob/bd4716bff94c7acf22210d6ffb75dbd1fcc4f9bc/LICENSE).
 
-Their notices and full MIT permission text are in `SAMPLE_LICENSE` in that
-module, and saved beside each downloaded database as `LICENSE.txt`.
+Each sample's notice (its source, copyright and licence: the MIT text in
+full, or the CC BY-SA 4.0 link) is built in `samples.ts` as its `notice` and
+saved beside that sample's downloaded database as
+`LICENSE.txt`; a copy never carries another sample's notice.
 
 ## T3 Code
 

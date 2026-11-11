@@ -377,7 +377,8 @@ test("a Library folder shows its path on one line, with nothing that looks like 
   const [box, style] = await line.evaluate((el) => [el.getBoundingClientRect().height, parseFloat(getComputedStyle(el).lineHeight)] as const);
   expect(box).toBeLessThan(style * 1.5);
   await expect(page.locator(".grp", { hasText: "Files and folders" })).toContainText("The model always sees the latest version.");
-  await expect(page.locator(".grp", { hasText: "SQLite databases" })).toContainText("The model reads a snapshot; refresh it to see later changes.");
+  // The snapshot note lives on an own database's Refresh tooltip now (apps/web/test/library-imports.test.ts).
+  await expect(page.locator(".grp", { hasText: "Databases" })).toContainText("A SQLite file of your own.");
 });
 
 test.describe("copying from Runtime", () => {

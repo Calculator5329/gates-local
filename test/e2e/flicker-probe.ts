@@ -189,7 +189,7 @@ function wholeSampler(o: WholeOptions & { track: string }): void {
   const short = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, o.track.length > 0 ? 48 : 0);
   const words = (el: Element) => short(el.querySelector(".grp-t, h1, h2, .mp-nmn, b, .sb-t, .nm")?.textContent);
   const labelOf = (el: HTMLElement) => {
-    for (const a of ["data-watch", "data-m", "data-dm", "data-em", "data-cat", "data-import", "data-pull", "data-ctx", "id"]) {
+    for (const a of ["data-watch", "data-m", "data-dm", "data-em", "data-cat", "data-import", "data-db", "data-pull", "data-ctx", "id"]) {
       const v = el.getAttribute(a);
       if (v) return v;
     }

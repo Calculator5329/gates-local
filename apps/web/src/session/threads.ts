@@ -311,7 +311,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
   }
 
   /** A new chat for this message; null, with the text back in the box, when the server does not answer. */
-  async function createThread(content: string, model: string | undefined): Promise<string | null> {
+  async function createThread(content: string, model: string | undefined, fromDraft = true): Promise<string | null> {
     const version = getDraft().version;
     if (creatingDrafts.has(version)) return null;
     creatingDrafts.add(version);
@@ -324,7 +324,7 @@ export function createThreads({ applyServerEvent, call, codeOf, failure, openThr
       openThread(t.id);
       return t.id;
     } catch {
-      applyServerEvent({ notice: "The message didn't send. Gates Local isn't answering; your words are still in the composer." });
+      applyServerEvent({ notice: fromDraft ? "The message didn't send. Gates Local isn't answering; your words are still in the composer." : "The message didn't send. Gates Local isn't answering." });
       return null;
     } finally { creatingDrafts.delete(version); }
   }

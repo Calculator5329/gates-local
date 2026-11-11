@@ -11,7 +11,7 @@ async function library(page: Page) {
     await page.getByRole("button", { name: "Back to Settings" }).click();
     await page.locator(".set-list").getByRole("button", { name: "Library" }).click();
   } else await page.locator(".snav").getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.locator('[data-import="chinook"]')).toBeVisible();
+  await expect(page.locator('[data-db="sample:chinook"]')).toBeVisible();
 }
 async function shot(page: Page, info: TestInfo, name: string) { await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true }); }
 async function size(button: Locator) { const box = await button.boundingBox(); expect(box).not.toBeNull(); return box; }
@@ -19,22 +19,68 @@ const remove = async (page: Page, label: string) => {
   await page.getByRole("button", { name: `More for ${label}` }).click();
   await page.getByRole("menuitem", { name: "Remove", exact: true }).click();
 };
+/** A sample's slot: at rest, while its button fills, and once it is the database (the fixture file has one table). */
+const slot = (page: Page, id: string) => page.locator(`[data-db="sample:${id}"]`);
+const fill = (row: Locator) => row.locator(".fill-btn");
+const isDatabase = (row: Locator, label: string) => expect(row.getByRole("button", { name: `Remove ${label}` })).toBeVisible({ timeout: 15_000 });
 
-test("Library samples keep their control size through download, cancel, retry and added", async ({ page, open }, info) => {
+test("a sample downloads in its own row: same place and height throughout, one row at the end", async ({ page, open }, info) => {
   await open(); await library(page);
-  const row = page.locator('[data-import="chinook"]'); const button = row.getByRole("button");
-  await expect(button).toHaveText("Download"); await expect(row).toContainText("8 KiB");
-  const before = await size(button); await shot(page, info, "01-before");
-  await button.click(); await expect(button).toHaveText("Cancel");
-  for (let n = 0; n < 4; n++) { expect(await size(button)).toEqual(before); await shot(page, info, `02-progress-${n}`); }
-  await button.click(); await expect(button).toHaveText("Retry"); expect(await size(button)).toEqual(before); await shot(page, info, "03-cancelled");
-  await button.click(); await expect(button).toHaveText("Added"); expect(await size(button)).toEqual(before); await expect(button).toBeDisabled();
-  await shot(page, info, "04-added");
-  await expect(page.locator(".srow.src .sl b", { hasText: "Chinook" })).toHaveCount(1);
-  await remove(page, "Chinook"); await expect(button).toHaveText("Download");
-  const northwind = page.locator('[data-import="northwind"]'); await northwind.getByRole("button").click();
-  await expect(northwind.getByRole("alert")).toContainText("Check your connection and retry"); await expect(northwind.getByRole("button")).toHaveText("Retry");
-  await shot(page, info, "05-offline"); await northwind.getByRole("button").click(); await expect(northwind.getByRole("button")).toHaveText("Added");
+  const row = slot(page, "chinook"); const button = fill(row);
+  const add = page.getByRole("button", { name: "Add database…" });
+  await expect(button).toHaveText("Download"); await expect(row).toContainText("Sample ·"); await expect(row.locator(".import-rest")).toContainText("8 KB");
+  const before = await size(row); const addBefore = await size(add); const buttonBefore = await size(button);
+  await shot(page, info, "library-at-rest");
+  await button.click(); await expect(button).toHaveText(/^\d+%$/);
+  await expect(button).toHaveAttribute("data-tip", "Cancel download");
+  for (let n = 0; n < 4; n++) { expect(await size(row)).toEqual(before); expect(await size(button)).toEqual(buttonBefore); await shot(page, info, `progress-${n}`); }
+  // Part filled: the fake sends 512 bytes every 200 ms and the list polls every 500 ms.
+  await expect(button).toHaveText(/^[3-7]\d%$/); expect(await size(button)).toEqual(buttonBefore); await shot(page, info, "library-mid");
+  // Pressing the filling button cancels; the grey line says so and the button offers Retry.
+  await button.click(); await expect(button).toHaveText("Retry"); await expect(row.locator(".import-status")).toContainText("Cancelled.");
+  expect(await size(row)).toEqual(before); await shot(page, info, "cancelled");
+  await button.click(); await expect(button).toHaveText(/^\d+%$/);
+  await isDatabase(row, "Chinook");
+  expect(await size(row)).toEqual(before);
+  await expect(row).toContainText("1 table");
+  // One row for the database: no second row, no "Ready in Library", no "Added"; the Add row has not moved.
+  await expect(page.locator(".db-row", { hasText: "Chinook" })).toHaveCount(1);
+  await expect(page.getByText("Ready in Library")).toHaveCount(0); await expect(page.getByText("Added", { exact: true })).toHaveCount(0);
+  expect(await size(add)).toEqual(addBefore);
+  await shot(page, info, "library-after");
+  // Removing it turns the slot back into the sample, in place.
+  await row.getByRole("button", { name: "Remove Chinook" }).click(); await expect(button).toHaveText("Download");
+  expect(await size(row)).toEqual(before);
+  const northwind = slot(page, "northwind"); await fill(northwind).click();
+  await expect(northwind.getByRole("alert")).toContainText("Check your connection and retry"); await expect(fill(northwind)).toHaveText("Retry");
+  await shot(page, info, "offline"); await fill(northwind).click(); await isDatabase(northwind, "Northwind");
+});
+
+test("an opened sample lists its tables and asks its questions in a new chat", async ({ page, open }, info) => {
+  await open(); await library(page);
+  const row = slot(page, "chinook");
+  await row.locator(".db-open").click();
+  await expect(row.locator(".db-open")).toHaveAttribute("aria-expanded", "true");
+  // Not downloaded: the catalog's tables, and questions that say why they wait.
+  await expect(row.locator(".db-t")).toHaveCount(11);
+  await expect(row.locator(".db-why")).toHaveText("Download it to ask these.");
+  await expect(row.locator(".db-q")).toHaveCount(4);
+  for (const q of await row.locator(".db-q").all()) await expect(q).toBeDisabled();
+  await expect(row.getByRole("link", { name: "Source" })).toHaveAttribute("href", /^https:\/\/github\.com\/[^/]+\/[^/]+\/tree\/[0-9a-f]{40}$/);
+  const before = await size(row.locator(".db-open"));
+  await fill(row).click(); await isDatabase(row, "Chinook");
+  expect(await size(row.locator(".db-open"))).toEqual(before);
+  await expect(row.locator(".db-why")).toHaveCount(0);
+  await shot(page, info, "library-open");
+  const question = row.locator(".db-q").first(); const words = (await question.innerText()).trim();
+  await question.click();
+  // Settings is gone, the new chat is on screen with the question sent and its reply under way, and the caret is in its message box.
+  await expect(page.locator(".set")).toHaveCount(0);
+  await expect(page.locator(".turn.u").last()).toContainText(words);
+  await expect(page.locator(".turn.a").last()).toBeVisible();
+  await expect(page.locator("#ta")).toHaveValue("");
+  await expect(page.locator("#ta")).toBeFocused();
+  await shot(page, info, "library-asked");
 });
 
 test("Library clones a GitHub URL with fixed controls and removing it leaves a hand-added folder", async ({ page, open }, info) => {
@@ -51,13 +97,18 @@ test("Library clones a GitHub URL with fixed controls and removing it leaves a h
   const { readFileSync } = await import("node:fs"); expect(readFileSync(path.join(manual, "keep.txt"), "utf8")).toBe("keep");
 });
 
-test("Library import controls keep their dimensions on a phone", async ({ page, open }, info) => {
-  await page.setViewportSize({ width: 390, height: 844 }); await open(); await library(page);
-  const button = page.locator('[data-import="chinook"]').getByRole("button"); const before = await size(button);
-  await shot(page, info, "phone-before"); await button.click(); await expect(button).toHaveText("Cancel");
-  for (let n = 0; n < 4; n++) { expect(await size(button)).toEqual(before); await shot(page, info, `phone-progress-${n}`); }
-  await expect(button).toHaveText("Added"); expect(await size(button)).toEqual(before); await shot(page, info, "phone-added");
+test("Library import controls keep their dimensions on a narrow screen", async ({ page, open }, info) => {
+  await page.setViewportSize({ width: 360, height: 844 }); await open(); await library(page);
+  const row = slot(page, "chinook"); const button = fill(row); const before = await size(row);
+  await shot(page, info, "phone-before"); await button.click(); await expect(button).toHaveText(/^\d+%$/);
+  for (let n = 0; n < 4; n++) { expect(await size(row)).toEqual(before); await shot(page, info, `phone-progress-${n}`); }
+  await isDatabase(row, "Chinook"); expect(await size(row)).toEqual(before);
+  await row.locator(".db-open").click(); await expect(row.locator(".db-q")).toHaveCount(4);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "nothing runs off a 360 px screen").toBe(true);
+  await shot(page, info, "library-open-360");
   const input = page.getByRole("textbox", { name: "Public GitHub repository URL" });
+  // The opened row above pushes the field below the fold; measure it where typing will scroll it to.
+  await input.scrollIntoViewIfNeeded();
   const clone = page.locator(".srow", { has: input }).getByRole("button"); const cloneSize = await size(clone);
   await input.fill("https://github.com/example/docs"); await clone.click(); await expect(clone).toHaveText("Cancel");
   for (let n = 0; n < 4; n++) { expect(await size(clone)).toEqual(cloneSize); await shot(page, info, `phone-clone-progress-${n}`); }

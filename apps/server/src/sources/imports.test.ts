@@ -16,7 +16,7 @@ import { createUpdateAdmission } from "../update/admission.ts";
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function setup() {
+function setup(id = "chinook") {
   const root = mkdtempSync(path.join(tmpdir(), "library-import-"));
   roots.push(root);
   const dataDir = path.join(root, "app");
@@ -26,7 +26,7 @@ function setup() {
   db.exec("CREATE TABLE albums (title TEXT); INSERT INTO albums VALUES ('First');");
   db.close();
   const bytes = readFileSync(fixture);
-  const sample: PinnedSample = { ...SAMPLES[0]!, sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  const sample: PinnedSample = { ...SAMPLES.find(x => x.id === id)!, sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
   return { root, dataDir, sources, bytes, sample };
 }
 const fake = (bytes: Uint8Array): typeof fetch => vi.fn(async () => new Response(bytes));
@@ -266,6 +266,48 @@ describe("review round 2 durable lifecycle", () => {
   }, 16_000);
 });
 
+// AUTOINCREMENT makes sqlite_sequence; FTS5 and R-tree each keep their rows in shadow tables beside their virtual table.
+function shop(root: string) {
+  const file = path.join(root, "shop.db");
+  const db = new DatabaseSync(file);
+  db.exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT); INSERT INTO notes (body) VALUES ('a'), ('b');
+    CREATE TABLE tags (name TEXT); INSERT INTO tags VALUES ('x');
+    CREATE VIRTUAL TABLE docs USING fts5(body); INSERT INTO docs VALUES ('hello');
+    CREATE VIRTUAL TABLE box USING rtree(id, x0, x1); INSERT INTO box VALUES (1, 0, 1);
+    CREATE VIEW recent AS SELECT * FROM notes;`);
+  db.close();
+  return file;
+}
+describe("a database's tables", () => {
+  it("lists the plain tables with their rows and the virtual ones by name, never shadow or sqlite_ tables; a refresh replaces the list", async () => {
+    const s = setup();
+    const file = shop(s.root);
+    const source = await s.sources.add({ kind: "sqlite", path: file });
+    expect(source.tables).toEqual([{ name: "box" }, { name: "docs" }, { name: "notes", rows: 2 }, { name: "tags", rows: 1 }]);
+    expect(source.tableCount).toBeUndefined();
+    const live = new DatabaseSync(file);
+    live.exec("DROP TABLE tags; INSERT INTO notes (body) VALUES ('c'); DROP TABLE box;"); live.close();
+    await s.sources.refresh(source.id);
+    expect(s.sources.list()[0]?.tables).toEqual([{ name: "docs" }, { name: "notes", rows: 3 }]);
+  });
+  it("past 500 tables lists the first 500 and carries how many there are", async () => {
+    const s = setup();
+    const file = path.join(s.root, "wide.db");
+    const db = new DatabaseSync(file);
+    db.exec(Array.from({ length: 501 }, (_, i) => `CREATE TABLE t${String(i).padStart(3, "0")} (a);`).join(""));
+    db.close();
+    const source = await s.sources.add({ kind: "sqlite", path: file });
+    expect(source.tables).toHaveLength(500);
+    expect(source.tables?.at(-1)).toEqual({ name: "t499", rows: 0 });
+    expect(source.tableCount).toBe(501);
+    const live = new DatabaseSync(file);
+    live.exec("DROP TABLE t000; DROP TABLE t001;"); live.close();
+    await s.sources.refresh(source.id);
+    expect(s.sources.list()[0]?.tables).toHaveLength(499);
+    expect(s.sources.list()[0]?.tableCount).toBeUndefined();
+  }, 16_000);
+});
+
 describe("sample downloads", () => {
   it("does nothing until clicked, checks bytes, uses the ordinary read-only snapshot, deduplicates and removes only its own copy", async () => {
     const s = setup();
@@ -277,7 +319,7 @@ describe("sample downloads", () => {
     expect(imports.handlers["sources.downloadSample"]({ id: s.sample.id }).id).toBe(job.id);
     expect(await finished(imports, job.id)).toMatchObject({ state: "ready" });
     const source = s.sources.list()[0]!;
-    expect(source).toMatchObject({ kind: "sqlite", managed: { kind: "sample", key: "chinook" } });
+    expect(source).toMatchObject({ kind: "sqlite", managed: { kind: "sample", key: "chinook" }, tables: [{ name: "albums", rows: 1 }] });
     const snapshot = s.sources.entries()[0]!.snapshotPath!;
     const db = new DatabaseSync(snapshot, { readOnly: true });
     expect(db.prepare("SELECT title FROM albums").get()).toEqual({ title: "First" });
@@ -286,16 +328,31 @@ describe("sample downloads", () => {
     const live = new DatabaseSync(source.path);
     live.exec("INSERT INTO albums VALUES ('Second')"); live.close();
     await s.sources.refresh(source.id);
-    expect(s.sources.list()[0]?.state).toBe("ready");
+    expect(s.sources.list()[0]).toMatchObject({ state: "ready", tables: [{ name: "albums", rows: 2 }] });
     expect(imports.handlers["sources.downloadSample"]({ id: s.sample.id }).sourceId).toBe(source.id);
     expect(get).toHaveBeenCalledTimes(1);
     expect(createSources({ dataDir: s.dataDir }).entries()).toHaveLength(1);
+    // The counts are kept with the source, so a later list reads no database.
+    expect(createSources({ dataDir: s.dataDir }).list()[0]?.tables).toEqual([{ name: "albums", rows: 2 }]);
     const manual = await s.sources.add({ kind: "sqlite", path: path.join(s.root, "fixture.db") });
+    expect(manual.tables).toEqual([{ name: "albums", rows: 1 }]);
     s.sources.remove(manual.id);
     expect(existsSync(path.join(s.root, "fixture.db"))).toBe(true);
     s.sources.remove(source.id);
     expect(existsSync(source.path)).toBe(false);
     expect(existsSync(snapshot)).toBe(false);
+  });
+  // Not the first sample, and not MIT: a copy that got the first sample's notice, or one text for all, reads wrong here.
+  it("writes the downloaded sample's own licence beside its copy", async () => {
+    const s = setup("worldcup");
+    const imports = createLibraryImports({ sources: s.sources, samples: [SAMPLES[0]!, s.sample], fetch: fake(s.bytes) });
+    const job = imports.handlers["sources.downloadSample"]({ id: "worldcup" });
+    expect(await finished(imports, job.id)).toMatchObject({ state: "ready" });
+    const notice = readFileSync(path.join(path.dirname(s.sources.list()[0]!.path), "LICENSE.txt"), "utf8");
+    expect(notice).toBe(s.sample.notice);
+    expect(notice).toContain("CC BY-SA 4.0");
+    expect(notice).toContain("Joshua C. Fjelstul");
+    expect(notice).not.toContain("MIT");
   });
   it.each(["hash", "type", "short", "long", "length", "invalid-sqlite"])("rejects %s and leaves no source, snapshot or partial download", async fault => {
     const s = setup();

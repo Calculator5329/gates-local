@@ -56,7 +56,7 @@ test("a Library with no sources says nothing is connected, and a chat that asks 
   await expect(page.locator(".snav").getByRole("button", { name: "Library", exact: true })).toHaveClass(/on/);
   await expect(page.getByText("Gates Local never changes them.")).toBeVisible();
   await expect(page.getByText("No folders or files yet.")).toBeVisible();
-  await expect(page.getByText("No databases yet.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add database…" })).toBeVisible();
   await expect(page.locator(".srow.src")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add folder…" })).toBeVisible();
 

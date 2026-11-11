@@ -5,7 +5,7 @@ import { firstChatPull, sendableModel } from "../pick.ts";
 import { type LiveTurn, NA, type Queued, type State, type StopAsk, type StopNote, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
 import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
-import { beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
+import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
 import { type ChatEvent, type TurnEvent, reduceTurn, unfinished, withTurn } from "./turn.ts";
 
@@ -25,7 +25,8 @@ interface ChatEffects {
   readonly applyServerEvent: (event: ServerEvent) => void;
   readonly call: <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
   readonly codeOf: (error: unknown) => string;
-  readonly createThread: (content: string, model: string | undefined) => Promise<string | null>;
+  /** `fromDraft` false: the words are not in the composer, so a refusal does not say they are. */
+  readonly createThread: (content: string, model: string | undefined, fromDraft?: boolean) => Promise<string | null>;
   readonly creatingDraft: (version: number) => boolean;
   readonly loadThread: (threadId: string, force?: boolean) => Promise<void>;
   readonly loading: (threadId: string) => boolean;
@@ -66,6 +67,9 @@ function stopOthersOk(): boolean {
     return false;
   }
 }
+
+/** What a `keepDraft` send reads in place of the composer's draft: no pictures, no copy identity, no create in flight. */
+const APART: Draft = { text: "", images: [], sendId: null, version: -1 };
 
 /** A Send now waits on the server and on the warning: meanwhile the person may have removed its message or opened it for editing. */
 function gone(out: Outgoing): boolean {
@@ -280,11 +284,13 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    */
   let early: Array<Payload<"chat.event">> = [];
 
-  async function send(text: string, opts: { reuseThread?: boolean } = {}): Promise<void> {
+  /** `keepDraft`: words from elsewhere (a Library question). The composer's draft is not this message: none of its pictures go, and it is left as it is, here and after the new chat exists. */
+  async function send(text: string, opts: { reuseThread?: boolean; keepDraft?: true } = {}): Promise<void> {
     const content = text.trim();
     const s = getState();
     const key = currentDraftKey();
-    const draft = getDraft(key);
+    const apart = opts.keepDraft === true;
+    const draft = apart ? APART : getDraft(key);
     const images = draft.images;
     if (creatingDraft(draft.version)) return;
     if ((content === "" && images.length === 0) || asking) return;
@@ -296,7 +302,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (cannotSee) return setState({ notice: cannotSee });
     const threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
     const messageId = draft.sendId ?? queueId();
-    if (s.editingQueued !== null) {
+    if (s.editingQueued !== null && !apart) {
       const id = s.editingQueued;
       if (!s.queued.some(q => q.id === id)) { setState({ editingQueued: null, notice: "Your edited words are still in the composer. Send them as a new message." }); return; }
       cancelQueuedDraft(key);
@@ -310,15 +316,15 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (model === undefined && draw === undefined && wait === null) return;
     const drawing = draw === undefined ? {} : { draw };
 
-    if (wait === null) return admit({ content, images, messageId, model: model ?? "", threadId, keepDraft: false, ...drawing });
+    if (wait === null) return admit({ content, images, messageId, model: model ?? "", threadId, keepDraft: apart, ...drawing });
     // Keep the draft visible while a first thread is being created.
-    const queueIn = threadId ?? (await createThread(content, model));
+    const queueIn = threadId ?? (await createThread(content, model, !apart));
     if (queueIn === null) return;
     const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }), ...drawing };
     // Unchanged since Send, by its words: New thread during the creation gives the same draft a new identity.
     const now = getDraft(key);
-    if (now.text === draft.text && now.images === draft.images && now.sendId === draft.sendId) clearDraft(key);
-    if (key === null) moveDraft(null, queueIn);
+    if (!apart && now.text === draft.text && now.images === draft.images && now.sendId === draft.sendId) clearDraft(key);
+    if (key === null && !apart) moveDraft(null, queueIn);
     settleEnded();
     setState((st) => ({ notice: null, stopAsk: null, queued: [...st.queued, q] }));
   }
@@ -350,12 +356,13 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const from = q === undefined ? undefined : leaving(queued, q);
     settleEnded(undefined, out.regenerate === true ? out.threadId ?? undefined : undefined);
     // Keep the words in view until a new chat exists. A failed create leaves the draft alone.
-    const threadId = out.threadId ?? (await createThread(out.content, out.model === "" ? undefined : out.model));
+    const threadId = out.threadId ?? (await createThread(out.content, out.model === "" ? undefined : out.model, !out.keepDraft));
     if (threadId === null) return;
     const draftKey = out.threadId;
     const draft = getDraft(draftKey);
     if (!out.keepDraft && draft.text.trim() === out.content && draft.images === out.images) clearDraft(draftKey);
-    if (out.threadId === null) moveDraft(null, threadId);
+    // A new chat for words from elsewhere leaves the new-chat draft where it was.
+    if (out.threadId === null && !out.keepDraft) moveDraft(null, threadId);
     setState((s) => ({
       notice: null, stopAsk: null,
       ...(out.queuedId === undefined ? {} : { queued: s.queued.filter((x) => x.id !== out.queuedId) }),

@@ -1,14 +1,29 @@
-import { useEffect, useRef, useState } from "react";
-import type { SourceImport, SourceImports } from "@gates-local/contracts";
-import { applyServerEvent, libraryRequest, settingsReads } from "./session.ts";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { SampleDatabase, Source, SourceImport, SourceImports } from "@gates-local/contracts";
+import { rtOf } from "./Banner.tsx";
+import { count, fileSize } from "./format.ts";
+import { Icon } from "./icons.tsx";
+import { askWhy, databaseRows, type DbRow } from "./library-rows.ts";
+import { chatModels } from "./pick.ts";
+import { applyServerEvent, libraryRequest, refreshSource, removeSource, settingsReads } from "./session.ts";
+import { libraryToolCanUse } from "./settings-rules.ts";
+import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Skel } from "./settings-ui.tsx";
+import { askWith } from "./starter.ts";
 import { NA, useStore } from "./store.ts";
 import { esc } from "./ui.tsx";
 
 const bytes = (n: number) => n < 1_048_576 ? `${Math.ceil(n / 1024)} KiB` : `${(n / 1_048_576).toFixed(1)} MiB`;
 const busy = (j?: SourceImport) => j !== undefined && ["downloading", "cloning", "adding"].includes(j.state);
-/** The server's sample list today; the rows a placeholder draws when Settings opens before the list is read. */
-const USUAL_SAMPLES = 2;
+/** The server's sample list today; the slots a placeholder draws when Settings opens before the list is read. */
+const USUAL_SAMPLES = 4;
+/** How long a finished download shows its check before the row shows the database. */
+const FINISH_MS = 900;
+const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The pinned file's repository at its commit: raw.githubusercontent.com/o/r/<sha>/… → github.com/o/r/tree/<sha>. */
+const repoOf = (url: string) => url.replace(/^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([0-9a-f]{40})\/.*$/, "https://github.com/$1/$2/tree/$3");
+/** On Windows the database tool is Query databases; elsewhere Run commands reads them in its sandbox (Settings › Tools). */
+const DB_TOOL = typeof navigator !== "undefined" && /\bWindows\b/.test(navigator.userAgent) ? "query" : "run";
 
 /**
  * A row's description line: its description at rest, the job's progress or
@@ -28,16 +43,58 @@ const line = (rest: string, job?: SourceImport, added = false, prefix = "") => {
   );
 };
 
-/** Polls only while this Settings section is open; remount and restart read the server's state. */
-export default function LibraryImports() {
+/** A database's words: its tables and size, or what its last refresh is doing or hit. */
+const dbWords = (src: Source) =>
+  src.state === "refreshing" ? "Refreshing…"
+    : src.state === "error" ? src.detail ?? "Couldn't read it."
+      : [...(src.tables ? [count(src.tableCount ?? src.tables.length, "table")] : []), ...(src.sizeBytes === undefined ? [] : [fileSize(src.sizeBytes)])].join(" · ");
+
+/** An own database's line. */
+const dbLine = (src: Source) => src.state === "error"
+  ? <span className="d act-err" role="alert" data-tip={esc(dbWords(src))}>{dbWords(src)}</span>
+  : <span className="d">{dbWords(src)}</span>;
+
+/**
+ * A sample slot's line, in all three of its faces at once, one cell deep:
+ * what it holds; how the last try ended; the database it became. Only one is
+ * visible, and the row is the height of the tallest from the first frame, so
+ * a download that ends, fails or is removed never moves the rows below.
+ */
+const sampleLine = (sample: SampleDatabase, job: SourceImport | undefined, source: Source | undefined) => {
+  const ended = !source && (job?.state === "error" || job?.state === "cancelled");
+  const words = job?.detail ?? (job?.state === "cancelled" ? "Download cancelled." : "Couldn't download it.");
+  // The database face before it exists: its size and tables as the catalog has them.
+  const as = source ?? { state: "ready", tables: sample.tables, sizeBytes: sample.sizeBytes } as Source;
+  return (
+    <span className="d import-line">
+      <span className={source || ended ? "import-rest gone" : "import-rest"}>{`Sample · ${sample.description} · ${fileSize(sample.sizeBytes)}`}</span>
+      <span className={ended ? "import-status" : "import-status gone"} role={job?.state === "error" && ended ? "alert" : "status"} data-tip={ended ? esc(words) : undefined}>{ended ? words : ""}</span>
+      <span className={source ? `import-db${as.state === "error" ? " act-err" : ""}` : "import-db gone"} aria-hidden={source ? undefined : true}>{dbWords(as)}</span>
+    </span>
+  );
+};
+
+/** Settings › Library: one list of databases with the samples in it, then Clone a repository. Polls only while open; remount and restart read the server's state. */
+export default function LibraryImports({ add, clone }: { add: ReactNode; clone: boolean }) {
   // Read before Settings opened (session/settings-reads.ts), so the rows are there on the first frame.
   const [value, setValue] = useState<SourceImports | undefined>(settingsReads.imports());
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState<string>();
+  const [opened, setOpened] = useState<readonly string[]>([]);
+  const [finishing, setFinishing] = useState<readonly string[]>([]);
+  const [rowErr, setRowErr] = useState<Readonly<Record<string, string>>>({});
   const sources = useStore(s => s.sources);
+  // As Settings › Tools reads it: a client that cannot read settings (the phone) leaves the switch to the computer.
+  const tools = useStore(s => s.settings === NA || s.settings?.tools === true);
+  const chat = useStore(s => rtOf(s) === "ready" && chatModels(s.models ?? []).length > 0);
+  const download = useStore(s => s.unavailable["sources.downloadSample"] !== true);
+  const edit = useStore(s => s.unavailable["sources.remove"] !== true);
   const live = useRef(true);
   const request = useRef(false);
+  // Samples whose download this visit saw running: when one lands, its row shows the finish once.
+  const ran = useRef(new Set<string>());
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
     live.current = true;
     const read = async () => {
@@ -49,7 +106,8 @@ export default function LibraryImports() {
     };
     void read();
     const timer = setInterval(() => void read(), 500);
-    return () => { live.current = false; clearInterval(timer); };
+    const held = timers.current;
+    return () => { live.current = false; clearInterval(timer); for (const t of held) clearTimeout(t); held.clear(); };
   }, []);
   const start = async (key: string, action: () => Promise<SourceImport>) => {
     if (pending !== undefined) return;
@@ -65,46 +123,164 @@ export default function LibraryImports() {
     try { await libraryRequest("sources.cancelImport", { id: job.id }); }
     catch { applyServerEvent(() => { if (live.current) setError("Couldn't cancel while disconnected. Retry once Gates Local reconnects."); }); }
   };
-  const ready = (kind: "sample" | "repository", key: string) => {
-    const shownKey = kind === "repository" ? key.replace(/\.git\/?$|\/$/g, "") : key;
-    return sources !== NA && sources?.some(s => s.managed?.kind === kind && s.managed.key.toLowerCase() === shownKey.toLowerCase());
+  const act = async (key: string, action: Promise<string | null>) => {
+    setRowErr(e => { const { [key]: _gone, ...rest } = e; return rest; });
+    const failed = await action;
+    if (failed !== null && live.current) setRowErr(e => ({ ...e, [key]: failed }));
   };
-  const action = (key: string, job: SourceImport | undefined, added: boolean | undefined, begin: () => void, word: string) => (
-    <button type="button" className="btn outline import-action" disabled={added || pending !== undefined} onClick={() => job && busy(job) ? void cancel(job) : begin()}>
-      {added ? "Added" : busy(job) ? "Cancel" : pending === key ? "Starting…" : job?.state === "error" || job?.state === "cancelled" ? "Retry" : word}
-    </button>
-  );
+  const list = sources === NA || sources === undefined ? [] : sources;
+  const rows = value ? databaseRows(value.samples, list, value.jobs) : databaseRows([], list.filter(s => s.managed?.kind !== "sample"), []);
+  for (const r of rows) if (r.sample && !r.source && (busy(r.job) || pending === r.sample.id)) ran.current.add(r.sample.id);
+  const landed = rows.flatMap(r => r.sample && r.source && ran.current.has(r.sample.id) ? [r.sample.id] : []).join(" ");
+  useEffect(() => {
+    if (landed === "") return;
+    const ids = landed.split(" ");
+    for (const id of ids) ran.current.delete(id);
+    if (still()) return;
+    setFinishing(f => [...f, ...ids]);
+    const t = setTimeout(() => { timers.current.delete(t); if (live.current) setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS);
+    timers.current.add(t);
+  }, [landed]);
+  const toggle = (key: string) => setOpened(o => o.includes(key) ? o.filter(k => k !== key) : [...o, key]);
+  const usable = libraryToolCanUse(DB_TOOL, list);
+
+  /** Option A: the button is the progress. It fills with the fraction done and counts; pressing it while it fills cancels. */
+  const fillButton = (row: DbRow, sample: SampleDatabase, done: boolean) => {
+    const job = row.job;
+    // A finished job is landing only for a download this visit saw run; the server keeps it after its database is removed.
+    const landing = job?.state === "ready" && ran.current.has(sample.id);
+    const running = busy(job) || landing || pending === sample.id;
+    const frac = done || job?.state === "adding" || landing ? 1 : busy(job) ? Math.min(1, job!.bytes / (job!.total ?? sample.sizeBytes)) : 0;
+    const pct = Math.floor(frac * 100);
+    const label = done ? "" : running ? `${pct}%` : job?.state === "error" || job?.state === "cancelled" ? "Retry" : "Download";
+    return (
+      <button
+        type="button"
+        className={`btn outline import-action fill-btn${running ? " running" : ""}${done ? " done" : ""}`}
+        style={{ "--f": frac } as React.CSSProperties}
+        aria-label={done ? `${sample.label} downloaded` : running ? `Cancel download, ${pct}% done` : `${label} ${sample.label}`}
+        data-tip={running && !done ? "Cancel download" : undefined}
+        disabled={done || (pending !== undefined && pending !== sample.id)}
+        // A double click's second press (detail 2) lands on the running button; only a single press cancels. Enter and Space have detail 0.
+        onClick={e => { if (job && busy(job)) { if (e.detail <= 1) void cancel(job); } else if (!running) void start(sample.id, () => libraryRequest("sources.downloadSample", { id: sample.id })); }}
+      >
+        <i className="fill" aria-hidden="true" />
+        <span className="lab">{label}</span>
+        <Icon id="check" cls="chk" />
+      </button>
+    );
+  };
+
+  /** What an opened row shows: an own database's path, its tables, and for a sample its questions and licence. */
+  const more = (row: DbRow) => {
+    const tables = row.source?.tables ?? row.sample?.tables;
+    const why = row.sample ? askWhy({ downloaded: row.source?.state === "ready", chat, tools, tool: usable }) : null;
+    return (
+      <div className="db-more">
+        {row.source && !row.sample ? <span className="d db-path"><PathText path={row.source.path} /></span> : null}
+        {tables ? (
+          <div className="db-tables" aria-label="Tables and their rows">
+            {tables.map(t => <span key={t.name} className="db-t">{t.rows === undefined ? t.name : <>{t.name} <span className="n">{t.rows.toLocaleString()}</span></>}</span>)}
+          </div>
+        ) : <span className="d">Refresh it to list its tables.</span>}
+        {row.sample ? (
+          <>
+            <div className="db-qs">
+              {why === null ? null : <span className="d db-why">{why}</span>}
+              {row.sample.questions.map(q => (
+                <button key={q} type="button" className="db-q" disabled={why !== null} onClick={() => { if (why === null) askWith(`In ${row.sample!.label}: ${q}`); }}>
+                  <span>{q}</span>
+                  <Icon id="arrow" cls="s14" />
+                </button>
+              ))}
+            </div>
+            <span className="d db-lic">
+              <a className="link" href={row.sample.licenseUrl} target="_blank" rel="noreferrer noopener">{row.sample.license}</a>
+              {" · "}
+              <a className="link" href={repoOf(row.sample.url)} target="_blank" rel="noreferrer noopener">Source</a>
+            </span>
+          </>
+        ) : null}
+      </div>
+    );
+  };
+
+  const dbRow = (row: DbRow) => {
+    const { sample, source } = row;
+    const name = sample?.label ?? source?.label ?? "";
+    const open = opened.includes(row.key);
+    const done = sample !== undefined && source !== undefined && (finishing.includes(sample.id) || (ran.current.has(sample.id) && !still()));
+    const own = source !== undefined && sample === undefined;
+    const copied = source?.snapshotAt === undefined ? "" : ` from ${new Date(source.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    return (
+      <div className={`srow db-row${open ? " open" : ""}`} key={row.key} data-db={row.key}>
+        <button type="button" className="db-open" aria-expanded={open} onClick={() => toggle(row.key)}>
+          <Icon id="right" cls="db-caret s14" />
+          <Icon id="db" cls="src-ic" />
+          <span className="sl">
+            <b>{name}</b>
+            {sample ? sampleLine(sample, row.job, done ? undefined : source) : source ? dbLine(source) : null}
+          </span>
+        </button>
+        <div className="sv">
+          {sample && (!source || done) ? (download ? fillButton(row, sample, done) : null) : source && edit ? (
+            <>
+              {own || source.state === "error" ? (
+                <button type="button" className="ibtn" aria-label={`Refresh ${name}`} data-tip={own ? esc(`Refresh. The model reads a copy${copied}; refresh it to see later changes.`) : "Refresh"} onClick={() => void act(row.key, refreshSource(source.id))}>
+                  <Icon id="refresh" />
+                </button>
+              ) : null}
+              <button type="button" className="ibtn" aria-label={`Remove ${name}`} data-tip={own ? "Remove from Library. The file stays where it is." : "Remove from Library"} onClick={() => void act(row.key, removeSource(source.id))}>
+                <Icon id="trash" />
+              </button>
+            </>
+          ) : null}
+        </div>
+        <Fail err={rowErr[row.key] ?? null} />
+        {open ? more(row) : null}
+      </div>
+    );
+  };
+
   const lastRepoJob = value?.jobs.findLast(j => j.kind === "repository");
   const entered = url.trim().replace(/\.git\/?$|\/$/g, "").toLowerCase();
   const repoJob = busy(lastRepoJob) || entered === "" || entered === lastRepoJob?.key.toLowerCase() ? lastRepoJob : undefined;
   const repoUrl = repoJob && ["error", "cancelled"].includes(repoJob.state) ? repoJob.key : url;
-  const repoAdded = repoJob !== undefined && ready("repository", repoJob.key);
+  const repoReady = (key: string) => {
+    const shownKey = key.replace(/\.git\/?$|\/$/g, "");
+    return list.some(s => s.managed?.kind === "repository" && s.managed.key.toLowerCase() === shownKey.toLowerCase());
+  };
+  const repoAdded = repoJob !== undefined && repoReady(repoJob.key);
+  const cloneAdded = repoReady(url);
   return (
     <>
-      <Grp title="Sample databases" tip="Download a small database to try a Library query." busy={!value}>
-        {value ? value.samples.map(sample => {
-          const job = value.jobs.findLast(j => j.kind === "sample" && j.key === sample.id);
-          const added = ready("sample", sample.id);
-          return <div className="srow import-row" key={sample.id} data-import={sample.id}>
-            <div className="sl"><b tabIndex={0} data-tip={`${esc(sample.license)}<br>Source: ${esc(sample.url)}`} >{sample.label}</b>{line(`${sample.description} · ${bytes(sample.sizeBytes)}`, job?.state === "ready" && !added ? undefined : job, added)}</div>
-            <div className="sv">{action(sample.id, job, added, () => void start(sample.id, () => libraryRequest("sources.downloadSample", { id: sample.id })), "Download")}</div>
-          </div>;
-        }) : Array.from({ length: USUAL_SAMPLES }, (_, i) => (
-          <div className="srow import-row" key={i} data-skel="" aria-hidden="true">
-            <div className="sl"><b><Skel w="6em" /></b><span className="d"><Skel w="20em" /></span></div>
+      <Grp title="Databases" busy={!value}>
+        {value ? null : Array.from({ length: USUAL_SAMPLES }, (_, i) => (
+          <div className="srow db-row" key={`skel-${i}`} data-skel="" aria-hidden="true">
+            <span className="db-open">
+              <Icon id="right" cls="db-caret s14" />
+              <Icon id="db" cls="src-ic" />
+              <span className="sl"><b><Skel w="6em" /></b><span className="d"><Skel w="20em" /></span></span>
+            </span>
             <div className="sv"><Skel w="104px" /></div>
           </div>
         ))}
+        {rows.map(dbRow)}
+        {add}
       </Grp>
-      <Grp title="Clone a repository" tip="A public GitHub repository, read as a Library folder.">
-        <div className="srow">
-          <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", repoJob, repoAdded, repoJob ? `${repoJob.label} · ` : "")}</div>
-          <div className="sv">
-            <input className="inp import-url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
-            {action("repository", repoJob, ready("repository", url), () => { setUrl(repoUrl); void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })); }, "Clone")}
+      {clone ? (
+        <Grp title="Clone a repository" tip="A public GitHub repository, read as a Library folder.">
+          <div className="srow">
+            <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", repoJob, repoAdded, repoJob ? `${repoJob.label} · ` : "")}</div>
+            <div className="sv">
+              <input className="inp import-url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
+              <button type="button" className="btn outline import-action" disabled={cloneAdded || pending !== undefined} onClick={() => repoJob && busy(repoJob) ? void cancel(repoJob) : (setUrl(repoUrl), void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })))}>
+                {cloneAdded ? "Added" : busy(repoJob) ? "Cancel" : pending === "repository" ? "Starting…" : repoJob?.state === "error" || repoJob?.state === "cancelled" ? "Retry" : "Clone"}
+              </button>
+            </div>
           </div>
-        </div>
-      </Grp>
+        </Grp>
+      ) : null}
       <Fail err={error} line />
     </>
   );

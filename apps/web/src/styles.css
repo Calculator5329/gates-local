@@ -617,6 +617,36 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .import-rest.gone{visibility:hidden}
 .import-status{overflow:hidden;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .sl .import-status{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.import-line>.gone{visibility:hidden}
+/* Library › Databases: a row opens in place; its actions column keeps one width, so the line beside it wraps the same at rest, mid-download and after. */
+.db-row{flex-wrap:wrap;row-gap:0}
+.db-open{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:12px;text-align:left;margin:-14px 0 -14px -16px;padding:14px 0 14px 16px;min-height:60px;border-radius:var(--r-xl) 0 0 var(--r-xl)}
+.db-open .sl{flex:1}
+.db-caret{flex:none;color:var(--faint);transition:transform .12s}
+.db-row.open .db-caret{transform:rotate(90deg)}
+.db-row>.sv{min-width:104px;justify-content:flex-end}
+.db-row>.act-err{flex-basis:100%;margin:4px 0 0 58px}
+.fill-btn{position:relative;overflow:hidden;isolation:isolate;font-variant-numeric:tabular-nums}
+.fill-btn .fill{position:absolute;inset:0;z-index:-1;background:var(--track);transform-origin:left;transform:scaleX(var(--f,0));transition:transform .2s linear}
+/* Each face of a sample's line is at most two lines, so a narrow screen's row is two lines tall at rest, mid-download and after. */
+.db-row .import-line>*{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fill-btn .chk{position:absolute;left:50%;top:50%;margin:-8px 0 0 -8px;opacity:0;color:var(--green)}
+.fill-btn.done{opacity:1}
+.fill-btn.done .chk{opacity:1}
+.fill-btn.done .fill{background:none}
+.db-more{flex-basis:100%;display:flex;flex-direction:column;gap:12px;padding:12px 0 2px 58px}
+.db-tables{display:flex;flex-wrap:wrap;gap:6px;max-height:116px;overflow:auto}
+.db-t{font-size:12px;line-height:20px;padding:2px 8px;border-radius:var(--r-sm);background:var(--track);white-space:nowrap}
+.db-t .n{color:var(--muted-foreground);font-variant-numeric:tabular-nums;margin-left:2px}
+.db-qs{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.db-why{margin-bottom:2px}
+.db-q{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:6px 10px;margin-left:-10px;border-radius:var(--r-ctl);font-size:13px;text-align:left}
+.db-q:not(:disabled):hover{background:var(--hover)}
+.db-q .ic{flex:none;color:var(--muted-foreground)}
+.db-q:disabled{color:var(--muted-foreground);cursor:default}
+.db-q:disabled .ic{visibility:hidden}
+.db-lic{font-size:12px}
+@media (prefers-reduced-motion:reduce){.db-caret,.fill-btn .fill{transition:none}}
 .import-url{width:280px;max-width:100%}
 .import-row .sl{min-width:0;overflow-wrap:anywhere}
 .mp-menu.src-menu{width:140px}
@@ -1048,6 +1078,11 @@ a.btn{text-decoration:none}
   .mp-head h1{display:none}
   .mp-mi,.mp-opt{min-height:44px}
   .mp-p,.mp-n,.mp-foot,.mp-quiet,.mp-k,.mp-osz,.mp-cap,.mp-dl-l>span,.mp-opt .mp-fit,.src-none{font-size:14px}
+  .db-open{gap:8px}
+  .db-open .src-ic{display:none}
+  .db-more{padding-left:0}
+  .db-row>.act-err{margin-left:0}
+  .db-q{min-height:44px}
   .src-entry .srow{flex-wrap:wrap}
   .src-entry .sl{flex:1 1 100%}
   .src-entry .sv{flex:1 1 100%;min-width:0;justify-content:flex-start}

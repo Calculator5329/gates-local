@@ -9,7 +9,7 @@ import { IMPORT_MS, cloneRepository, githubRepo, importSize, runGit, type GitTra
 import { readWindowsProc } from "../runtime/ownership.ts";
 import { isAlive } from "../update/wait.ts";
 import { UNCONFIRMED_WORKER, type WorkerIdentity } from "./owned.ts";
-import { SAMPLES, SAMPLE_LICENSE, type PinnedSample } from "./samples.ts";
+import { SAMPLES, type PinnedSample } from "./samples.ts";
 import { openDir, openChild, unlinkIfAny, type Dir } from "./anchored.ts";
 import { rmdirSync } from "node:fs";
 
@@ -92,7 +92,7 @@ export function createLibraryImports(deps: ImportsDeps) {
   const finishedAt = new Map<string, number>();
   const now = deps.now ?? Date.now;
   const listeners = new Set<(value: SourceImports) => void>();
-  const snapshot = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl })), jobs: [...jobs.values()].map(j => ({ ...j })) });
+  const snapshot = (): SourceImports => ({ samples: samples.map(s => ({ id: s.id, label: s.label, description: s.description, sizeBytes: s.sizeBytes, url: s.url, license: s.license, licenseUrl: s.licenseUrl, tables: s.tables, questions: s.questions })), jobs: [...jobs.values()].map(j => ({ ...j })) });
   const emit = () => { const value = snapshot(); for (const listener of listeners) listener(value); };
   const update = (id: string, patch: Partial<SourceImport>) => { const old = jobs.get(id); if (old) { jobs.set(id, { ...old, ...patch }); emit(); } };
   const checkRecovered = () => {
@@ -147,7 +147,7 @@ export function createLibraryImports(deps: ImportsDeps) {
         const progress = (bytes: number) => update(slot.id, { bytes });
         if (sample) {
           await download(sample, slot.path, signal, progress, deps.fetch ?? fetch);
-          await writeFile(path.join(slot.work, "LICENSE.txt"), SAMPLE_LICENSE, { mode: 0o600, flag: "wx" });
+          await writeFile(path.join(slot.work, "LICENSE.txt"), sample.notice, { mode: 0o600, flag: "wx" });
         }
         else {
           const git: GitTransport = async call => {

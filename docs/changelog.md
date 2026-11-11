@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-11: Library databases: one list, a download that stays in its row, and questions to start with
+
+- Settings, Library shows one list of databases. A sample you download
+  becomes that database's row in the same place; nothing is added below and
+  nothing jumps. Your own databases follow, then Add.
+- The Download button is the progress: it fills as the file arrives, and a
+  press on it cancels. A double click starts a download and does not cancel
+  it.
+- A row opens to its tables with row counts, its licence and source, and
+  four questions to start with. A question opens a new chat and sends it,
+  named for its database ("In Chinook: …"). What you had typed in the new
+  chat box, pictures included, is left as it was.
+- Two more samples: World Cup (every FIFA World Cup: matches, goals and
+  players) and Periodic table (118 elements with isotopes and properties),
+  beside Chinook and Northwind. Each is pinned to one commit of its source
+  and checked by size and hash; licences are in `THIRD_PARTY_NOTICES.md`.
+- Tables are listed as SQLite reports them: search and R-tree tables by
+  name with no count, their internal tables left out. A database with more
+  than 500 tables says how many it has.
+
 ## 2026-11-11: A quieter chat window: fewer words, and nothing moves while you type
 
 - The "Reply running" line above the composer is gone. While a reply runs,

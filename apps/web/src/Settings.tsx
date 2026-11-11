@@ -549,12 +549,37 @@ function SourceGroup({ title, note, kinds, items }: { title: string; note: strin
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">{note}</span>}>
+          <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."} desc={<span className="src-help">{note}</span>}>
             {locked ? <Na>{COMPUTER_ONLY}</Na> : action}
           </Row>
         ) : <AddRow key={adding} kind={adding} close={close} />}
       </div>
     </Grp>
+  );
+}
+
+/** The last row of Databases: a SQLite file of the person's own. */
+function AddDatabase() {
+  const locked = useStore((s) => s.unavailable["sources.add"] === true);
+  const [adding, setAdding] = useState(false);
+  const entry = useRef<HTMLDivElement>(null);
+  const close = () => {
+    closeTip();
+    setAdding(false);
+    requestAnimationFrame(() => entry.current?.querySelector<HTMLButtonElement>('[data-add="sqlite"]')?.focus({ preventScroll: true }));
+  };
+  return (
+    <div className="src-entry" ref={entry}>
+      {adding ? <AddRow kind="sqlite" close={close} /> : (
+        <Row label="Add a database" desc={<span className="src-help">A SQLite file of your own.</span>}>
+          {locked ? <Na>{COMPUTER_ONLY}</Na> : (
+            <button type="button" className="btn outline" data-add="sqlite" onClick={() => setAdding(true)}>
+              Add database…
+            </button>
+          )}
+        </Row>
+      )}
+    </div>
   );
 }
 
@@ -567,9 +592,8 @@ function Library() {
       <Head title="Library">Folders, files and databases the model can read in every chat. Gates Local never changes them.</Head>
       {sources === NA ? null : (
         <>
-          {locked ? null : <LibraryImports />}
+          <LibraryImports add={<AddDatabase />} clone={!locked} />
           <SourceGroup title="Files and folders" note="The model always sees the latest version." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
-          <SourceGroup title="SQLite databases" note="The model reads a snapshot; refresh it to see later changes." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
         </>
       )}
     </>

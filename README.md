@@ -141,16 +141,22 @@ measured speeds, updating and uninstalling, is
 
 ## Try the Library
 
-In Settings → Library, **Sample databases** offers Chinook (music store,
-1,007,616 bytes) from [lerocha/chinook-database](https://github.com/lerocha/chinook-database)
-and Northwind (orders, 24,702,976 bytes) from
-[jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3).
-Both are MIT licensed; [third-party notices](THIRD_PARTY_NOTICES.md) record
-the licences and pinned commits. Nothing downloads until you click Download.
-Each HTTPS download must match its pinned SHA-256 and exact size and open as
-SQLite before it enters the same read-only snapshot path as your own database.
-Download progress, Cancel and Retry stay in the row. Adding a sample again
-keeps one Library entry.
+In Settings → Library, **Databases** lists four samples beside your own
+databases: Chinook (music store, 1,007,616 bytes) from
+[lerocha/chinook-database](https://github.com/lerocha/chinook-database),
+Northwind (orders, 24,702,976 bytes) from
+[jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3),
+World Cup (7,917,568 bytes) from [jfjelstul/worldcup](https://github.com/jfjelstul/worldcup)
+and Periodic table (3,149,824 bytes) from [lmmentel/mendeleev](https://github.com/lmmentel/mendeleev).
+World Cup is CC BY-SA 4.0 and the other three are MIT;
+[third-party notices](THIRD_PARTY_NOTICES.md) record the licences and pinned
+commits. Nothing downloads until you click Download. Each HTTPS download must
+match its pinned SHA-256 and exact size and open as SQLite before it enters
+the same read-only snapshot path as your own database. The Download button
+fills as it goes and cancels when pressed; Retry and the reason stay in the
+row. Opening a row lists its tables and, for a downloaded sample, four
+questions that start a new chat. Adding a sample again keeps one Library
+entry.
 
 **Clone a repository** accepts a public `https://github.com/owner/repo` URL
 when you click Clone. It makes a shallow copy inside app data, with no

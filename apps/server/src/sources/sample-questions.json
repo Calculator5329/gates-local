@@ -1,0 +1,135 @@
+{
+  "chinook": [
+    {
+      "kind": "lookup",
+      "text": "What is the longest track in the store?",
+      "sql": "SELECT t.Name AS track, ar.Name AS artist, ROUND(t.Milliseconds / 60000.0, 1) AS minutes FROM Track t JOIN Album al ON al.AlbumId = t.AlbumId JOIN Artist ar ON ar.ArtistId = al.ArtistId ORDER BY t.Milliseconds DESC LIMIT 3",
+      "answer": "track | artist | minutes\nOccupation / Precipice | Battlestar Galactica | 88.1\nThrough a Looking Glass | Lost | 84.8\nGreetings from Earth, Pt. 1 | Battlestar Galactica (Classic) | 49.3"
+    },
+    {
+      "kind": "ranking",
+      "text": "Which countries spend the most money with us?",
+      "sql": "SELECT BillingCountry AS country, ROUND(SUM(Total), 2) AS spent, COUNT(*) AS invoices FROM Invoice GROUP BY BillingCountry ORDER BY spent DESC LIMIT 5",
+      "answer": "country | spent | invoices\nUSA | 523.06 | 91\nCanada | 303.96 | 56\nFrance | 195.1 | 35\nBrazil | 190.1 | 35\nGermany | 156.48 | 28"
+    },
+    {
+      "kind": "over-time",
+      "text": "How did sales change from year to year?",
+      "sql": "SELECT strftime('%Y', InvoiceDate) AS year, ROUND(SUM(Total), 2) AS sales, COUNT(*) AS invoices FROM Invoice GROUP BY year ORDER BY year",
+      "answer": "year | sales | invoices\n2021 | 449.46 | 83\n2022 | 481.45 | 83\n2023 | 469.58 | 83\n2024 | 477.53 | 83\n2025 | 450.58 | 80"
+    },
+    {
+      "kind": "join-3",
+      "text": "Which five artists have earned the most from sales?",
+      "sql": "SELECT ar.Name AS artist, ROUND(SUM(il.UnitPrice * il.Quantity), 2) AS revenue FROM InvoiceLine il JOIN Track t ON t.TrackId = il.TrackId JOIN Album al ON al.AlbumId = t.AlbumId JOIN Artist ar ON ar.ArtistId = al.ArtistId GROUP BY ar.ArtistId ORDER BY revenue DESC LIMIT 5",
+      "answer": "artist | revenue\nIron Maiden | 138.6\nU2 | 105.93\nMetallica | 90.09\nLed Zeppelin | 86.13\nLost | 81.59"
+    },
+    {
+      "kind": "trap",
+      "text": "Which sales rep brought in the most money?",
+      "sql": "SELECT e.FirstName || ' ' || e.LastName AS rep, ROUND(SUM(i.Total), 2) AS sales, COUNT(DISTINCT c.CustomerId) AS customers FROM Invoice i JOIN Customer c ON c.CustomerId = i.CustomerId JOIN Employee e ON e.EmployeeId = c.SupportRepId GROUP BY e.EmployeeId ORDER BY sales DESC",
+      "answer": "rep | sales | customers\nJane Peacock | 833.04 | 21\nMargaret Park | 775.4 | 20\nSteve Johnson | 720.16 | 18",
+      "note": "Invoices have no employee column. The only link is Customer.SupportRepId, and only three of eight employees are sales support agents. Weak models join Invoice.CustomerId to Employee.EmployeeId, or rank all employees including managers with no sales."
+    }
+  ],
+  "northwind": [
+    {
+      "kind": "lookup",
+      "text": "What is our most expensive product?",
+      "sql": "SELECT ProductName, UnitPrice FROM Products ORDER BY UnitPrice DESC LIMIT 3",
+      "answer": "ProductName | UnitPrice\nCôte de Blaye | 263.5\nThüringer Rostbratwurst | 123.79\nMishi Kobe Niku | 97"
+    },
+    {
+      "kind": "ranking",
+      "text": "Who are our five biggest customers by spending?",
+      "sql": "SELECT c.CompanyName, c.Country, ROUND(SUM(od.UnitPrice * od.Quantity * (1 - od.Discount))) AS revenue FROM \"Order Details\" od JOIN Orders o ON o.OrderID = od.OrderID JOIN Customers c ON c.CustomerID = o.CustomerID GROUP BY c.CustomerID ORDER BY revenue DESC LIMIT 5",
+      "answer": "CompanyName | Country | revenue\nB's Beverages | UK | 6154115.0\nHungry Coyote Import Store | USA | 5698024.0\nRancho grande | Argentina | 5559110.0\nGourmet Lanchonetes | Brazil | 5552310.0\nAna Trujillo Emparedados y helados | Mexico | 5534357.0"
+    },
+    {
+      "kind": "over-time",
+      "text": "How has revenue changed from year to year?",
+      "sql": "SELECT strftime('%Y', o.OrderDate) AS year, ROUND(SUM(od.UnitPrice * od.Quantity * (1 - od.Discount))) AS revenue, COUNT(DISTINCT o.OrderID) AS orders FROM Orders o JOIN \"Order Details\" od ON od.OrderID = o.OrderID GROUP BY year ORDER BY year",
+      "answer": "year | revenue | orders\n2012 | 18823202.0 | 654\n2013 | 38633120.0 | 1351\n2014 | 38870148.0 | 1351\n2015 | 41423457.0 | 1449\n2016 | 40568672.0 | 1506\n2017 | 40209904.0 | 1780\n... (12 rows)"
+    },
+    {
+      "kind": "join-3",
+      "text": "Which product category brings in the most revenue?",
+      "sql": "SELECT cat.CategoryName, ROUND(SUM(od.UnitPrice * od.Quantity * (1 - od.Discount))) AS revenue FROM \"Order Details\" od JOIN Products p ON p.ProductID = od.ProductID JOIN Categories cat ON cat.CategoryID = p.CategoryID GROUP BY cat.CategoryID ORDER BY revenue DESC LIMIT 5",
+      "answer": "CategoryName | revenue\nBeverages | 92163184.0\nConfections | 66337803.0\nMeat/Poultry | 64881148.0\nDairy Products | 58018117.0\nCondiments | 55795127.0"
+    },
+    {
+      "kind": "trap",
+      "text": "Which shipper is late most often?",
+      "sql": "SELECT s.CompanyName, SUM(date(o.ShippedDate) > date(o.RequiredDate)) AS late, COUNT(*) AS shipped, ROUND(100.0 * SUM(date(o.ShippedDate) > date(o.RequiredDate)) / COUNT(*), 1) AS late_pct FROM Orders o JOIN Shippers s ON s.ShipperID = o.ShipVia WHERE o.ShippedDate IS NOT NULL GROUP BY s.ShipperID ORDER BY late_pct DESC",
+      "answer": "CompanyName | late | shipped | late_pct\nSpeedy Express | 1173 | 5331 | 22.0\nFederal Shipping | 1182 | 5455 | 21.7\nUnited Package | 1187 | 5475 | 21.7",
+      "note": "Answer worth reading: by rate Speedy Express is worst (22.0%), by count United Package is (1,187), and all three sit near 22%. 'Late' is not a column: it is ShippedDate after RequiredDate. Dates mix 'YYYY-MM-DD' and 'YYYY-MM-DD HH:MM:SS' text; a plain string comparison counts same-day shipments as late (1,244 instead of 1,173 for Speedy Express), so compare with date(). Unshipped orders (ShippedDate NULL) must be left out, not counted as late. 'Most often' can mean the count or the rate; the shippers carry different volumes, so say which. The shipper link is Orders.ShipVia, not a ShipperID column."
+    }
+  ],
+  "worldcup": [
+    {
+      "kind": "lookup",
+      "text": "What was the score in the 2014 men's World Cup final?",
+      "sql": "SELECT match_name, date(CAST(match_date AS REAL) * 86400, 'unixepoch') AS played_on, score, extra_time, penalty_shootout FROM matches WHERE tournament_id = 'WC-2014' AND stage_name = 'final'",
+      "answer": "match_name | played_on | score | extra_time | penalty_shootout\nGermany vs Argentina | 2014-07-13 | 1–0 | 1 | 0"
+    },
+    {
+      "kind": "ranking",
+      "text": "Which countries have won the men's World Cup most often?",
+      "sql": "SELECT winner, COUNT(*) AS titles FROM tournaments WHERE tournament_name NOT LIKE '%Women%' GROUP BY winner ORDER BY titles DESC, winner LIMIT 5",
+      "answer": "winner | titles\nBrazil | 5\nItaly | 4\nArgentina | 3\nWest Germany | 3\nFrance | 2",
+      "note": "Secondary trap: 'West Germany' (3) and 'Germany' (1) are separate winners, so Germany's 4 titles split; a good answer mentions it. LIKE '%Men''s%' also matches \"Women's\"."
+    },
+    {
+      "kind": "over-time",
+      "text": "Have men's World Cups got lower scoring over the years?",
+      "sql": "SELECT t.year, ROUND(1.0 * SUM(m.home_team_score + m.away_team_score) / COUNT(*), 2) AS goals_per_match, COUNT(*) AS matches FROM matches m JOIN tournaments t USING (tournament_id) WHERE t.tournament_name NOT LIKE '%Women%' GROUP BY t.year ORDER BY t.year",
+      "answer": "year | goals_per_match | matches\n1930 | 3.89 | 18\n1934 | 4.12 | 17\n1938 | 4.67 | 18\n1950 | 4.0 | 22\n1954 | 5.38 | 26\n1958 | 3.6 | 35\n... (22 rows)"
+    },
+    {
+      "kind": "join-3",
+      "text": "Which managers have won the most World Cup matches?",
+      "sql": "SELECT mg.given_name || ' ' || mg.family_name AS manager, mg.country_name, COUNT(*) AS wins FROM manager_appearances ma JOIN team_appearances ta ON ta.match_id = ma.match_id AND ta.team_id = ma.team_id JOIN managers mg ON mg.manager_id = ma.manager_id WHERE ta.win = 1 GROUP BY mg.manager_id ORDER BY wins DESC LIMIT 5",
+      "answer": "manager | country_name | wins\nEven Pellerud | Norway | 16\nHelmut Schön | Germany | 16\nLuiz Felipe Scolari | Brazil | 16\nDidier Deschamps | France | 14\nMário Zagallo | Brazil | 14"
+    },
+    {
+      "kind": "trap",
+      "text": "Who has scored the most World Cup goals?",
+      "sql": "SELECT CASE p.given_name WHEN 'not applicable' THEN p.family_name ELSE p.given_name || ' ' || p.family_name END AS player, CASE p.female WHEN 1 THEN 'women' ELSE 'men' END AS tournaments, COUNT(*) AS goals FROM goals g JOIN players p USING (player_id) WHERE g.own_goal = 0 GROUP BY p.player_id ORDER BY goals DESC LIMIT 5",
+      "answer": "player | tournaments | goals\nMarta | women | 17\nMiroslav Klose | men | 16\nRonaldo | men | 15\nAbby Wambach | women | 14\nGerd Müller | men | 14",
+      "note": "Two traps. (1) Own goals are rows in goals credited to the player who put the ball in his own net; counting them without own_goal = 0 inflates some players. (2) 'World Cup' covers the women's tournaments too: Marta (women's) leads Klose (men's), so a model that silently filters to men or ignores the female column gives a different, unexplained answer. A good answer names both."
+    }
+  ],
+  "elements": [
+    {
+      "kind": "lookup",
+      "text": "What is the melting point of tungsten?",
+      "sql": "SELECT e.name, p.melting_point AS kelvin, ROUND(p.melting_point - 273.15, 1) AS celsius FROM phasetransitions p JOIN elements e USING (atomic_number) WHERE e.symbol = 'W'",
+      "answer": "name | kelvin | celsius\nTungsten | 3687.15 | 3414.0"
+    },
+    {
+      "kind": "ranking",
+      "text": "Which elements cost the most per kilogram?",
+      "sql": "SELECT name, symbol, price_per_kg FROM elements WHERE price_per_kg IS NOT NULL ORDER BY price_per_kg DESC LIMIT 5",
+      "answer": "name | symbol | price_per_kg\nPolonium | Po | 49200000000000.0\nActinium | Ac | 29000000000000.0\nBerkelium | Bk | 185000000000.0\nCalifornium | Cf | 60000000000.0\nCurium | Cm | 185000000.0"
+    },
+    {
+      "kind": "over-time",
+      "text": "How many elements were discovered in each century?",
+      "sql": "SELECT CASE WHEN discovery_year IS NULL THEN 'antiquity' ELSE CAST((discovery_year / 100) * 100 AS TEXT) || 's' END AS century, COUNT(*) AS elements FROM elements GROUP BY century ORDER BY MIN(COALESCE(discovery_year, 0))",
+      "answer": "century | elements\nantiquity | 13\n1600s | 1\n1700s | 18\n1800s | 50\n1900s | 31\n2000s | 5"
+    },
+    {
+      "kind": "join-3",
+      "text": "Which family of elements has the most known isotopes?",
+      "sql": "SELECT s.name AS family, COUNT(i.id) AS isotopes, COUNT(DISTINCT e.atomic_number) AS elements, ROUND(1.0 * COUNT(i.id) / COUNT(DISTINCT e.atomic_number), 1) AS per_element FROM isotopes i JOIN elements e USING (atomic_number) JOIN series s ON s.id = e.series_id GROUP BY s.id ORDER BY isotopes DESC LIMIT 5",
+      "answer": "family | isotopes | elements | per_element\nTransition metals | 1294 | 40 | 32.4\nLanthanides | 560 | 14 | 40.0\nActinides | 346 | 14 | 24.7\nPoor metals | 299 | 11 | 27.2\nMetalloids | 231 | 7 | 33.0"
+    },
+    {
+      "kind": "trap",
+      "text": "What is the heaviest element?",
+      "sql": "SELECT name, symbol, atomic_weight, density FROM elements ORDER BY atomic_weight DESC LIMIT 3",
+      "answer": "name | symbol | atomic_weight | density\nTennessine | Ts | 294.0 | 7.2\nOganesson | Og | 294.0 | 7.0\nLivermorium | Lv | 293.0 | 12.9",
+      "note": "'Heaviest' means the largest atomic mass to a chemist (oganesson and tennessine tie at 294, which is the mass number of the most stable isotope, not a measured weight) but 'densest' to most people. ORDER BY density DESC returns hassium (40.7) and meitnerium (37.4), which are predicted values for superheavy elements nobody has weighed; osmium (22.59) is the densest measured element. A good answer says which sense it used and flags predicted values. Melting points are kelvin with no unit in the column name."
+    }
+  ]
+}

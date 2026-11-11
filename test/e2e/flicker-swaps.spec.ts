@@ -52,14 +52,15 @@ const dlGroup = (page: Page, title: string) => page.locator(".mp .grp").filter({
 async function libraryBoxes(page: Page) {
   // Samples and repository imports have their own groups above these lists.
   // Keep box identities attached to manual-source controls after navigation.
-  const groups = page.locator(".set .grp").filter({ has: page.locator(".src-entry") });
-  if (await groups.count() === 0) return;
-  await expect(page.locator('[data-import="chinook"]')).toBeVisible();
-  for (let i = 0; i < await groups.count(); i++) {
-    await mark(groups.nth(i), `group-${i}`);
-    const head = groups.nth(i).locator(".grp-h");
+  // Index 0 is Files and folders, 1 the databases, whatever order they show in.
+  if (await page.locator(".set .grp .src-entry").count() === 0) return;
+  await expect(page.locator('[data-db="sample:chinook"]')).toBeVisible();
+  const groups = [groupOf(page, "folder"), groupOf(page, "sqlite")];
+  for (const [i, group] of groups.entries()) {
+    await mark(group, `group-${i}`);
+    const head = group.locator(".grp-h");
     if (await head.count()) await mark(head, `head-${i}`);
-    await mark(groups.nth(i).locator(".box"), `body-${i}`);
+    await mark(group.locator(":scope > .box"), `body-${i}`);
   }
 }
 
@@ -92,7 +93,9 @@ function sources() {
   return { folder, file, sqlite };
 }
 
-const groupOf = (page: Page, kind: string) => page.locator(".set .grp").filter({ has: page.locator(".grp-t", { hasText: kind === "sqlite" ? "SQLite databases" : "Files and folders" }) });
+const groupOf = (page: Page, kind: string) => page.locator(".set .grp").filter({ has: page.locator(".grp-t", { hasText: kind === "sqlite" ? "Databases" : "Files and folders" }) });
+/** An own database's row has Refresh and Remove by icon; a folder or file's are in its More menu. */
+const ownRow = (group: Locator, kind: string, label: string) => group.locator(kind === "sqlite" ? ".db-row" : ".src").filter({ hasText: label });
 const boxFor = (page: Page, control: Locator) => page.locator(".set .grp").filter({ has: control }).locator(":scope > .box");
 const nounOf = (kind: string) => kind === "sqlite" ? "database" : kind;
 
@@ -706,14 +709,15 @@ for (const width of [1440, 360]) {
         await page.getByRole("textbox", { name: `Add a ${noun} path` }).fill(files[kind]);
         await measure(`library-${kind}-submit`, ".set", () => group.getByRole("button", { name: "Add", exact: true }).click());
         const label = path.basename(files[kind]);
-        const row = group.locator(".src").filter({ hasText: label });
+        const row = ownRow(group, kind, label);
         await expect(row).toBeVisible();
-        await measure(`library-${kind}-menu`, ".set", () => row.getByRole("button", { name: `More for ${label}` }).click());
         if (kind === "sqlite") {
-          const refreshed = await measure("library-refresh", ".set", () => page.getByRole("menuitem", { name: "Refresh", exact: true }).click());
+          const refreshed = await measure("library-refresh", ".set", () => row.getByRole("button", { name: `Refresh ${label}` }).click());
           stableSize(refreshed, "body-1", `library-refresh-${width}`);
-          await row.getByRole("button", { name: `More for ${label}` }).click();
+          await measure(`library-${kind}-remove`, ".set", () => row.getByRole("button", { name: `Remove ${label}` }).click());
+          continue;
         }
+        await measure(`library-${kind}-menu`, ".set", () => row.getByRole("button", { name: `More for ${label}` }).click());
         await measure(`library-${kind}-remove`, ".set", () => page.getByRole("menuitem", { name: "Remove", exact: true }).click());
       }
       const group = groupOf(page, "folder");
@@ -795,14 +799,15 @@ for (const width of [1440, 360]) {
         await page.getByRole("textbox", { name: `Add a ${noun} path` }).fill(files[kind]);
         await measure(`library-${kind}-submit`, ".set", () => group.getByRole("button", { name: "Add", exact: true }).click());
         const label = path.basename(files[kind]);
-        const row = group.locator(".src").filter({ hasText: label });
+        const row = ownRow(group, kind, label);
         await expect(row).toBeVisible();
-        await measure(`library-${kind}-menu`, ".set", () => row.getByRole("button", { name: `More for ${label}` }).click());
         if (kind === "sqlite") {
-          const refreshed = await measure("library-refresh", ".set", () => page.getByRole("menuitem", { name: "Refresh", exact: true }).click());
+          const refreshed = await measure("library-refresh", ".set", () => row.getByRole("button", { name: `Refresh ${label}` }).click());
           stableSize(refreshed, "body-1", `library-refresh-${width}`);
-          await row.getByRole("button", { name: `More for ${label}` }).click();
+          await measure(`library-${kind}-remove`, ".set", () => row.getByRole("button", { name: `Remove ${label}` }).click());
+          continue;
         }
+        await measure(`library-${kind}-menu`, ".set", () => row.getByRole("button", { name: `More for ${label}` }).click());
         await measure(`library-${kind}-remove`, ".set", () => page.getByRole("menuitem", { name: "Remove", exact: true }).click());
       }
       const group = groupOf(page, "folder");

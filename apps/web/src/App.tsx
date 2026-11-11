@@ -14,13 +14,14 @@ import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { imageMode } from "./image-choice.ts";
 import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
-import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
+import { SECTIONS, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
+import { startWith } from "./starter.ts";
 import { UpdateNote } from "./UpdateNote.tsx";
 import { PopPanel } from "./Panel.tsx";
 import { usageScreen } from "./screen-loaders.ts";
 import { call, cancelPendingSettings, closeUsage, deleteThread, leaveSettings, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
-import { replaceDraft, useDraft } from "./drafts.ts";
+import { useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
@@ -94,10 +95,7 @@ function Cards() {
             key={c.t}
             type="button"
             className="card"
-            onClick={() => {
-              replaceDraft(null, { text: c.q }); if (c.img) setState({ image: true });
-              focusComposer(true);
-            }}
+            onClick={() => startWith(c.q, c.img === true)}
           >
             <Icon id={c.icon} />
             <span>

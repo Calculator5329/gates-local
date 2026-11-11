@@ -452,6 +452,21 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:328ba710-331e-5b4d-8477-7312d1035483 --> Tests held too thinly: the cut-name tip by one browser journey only; `screen-overlay.test.ts` no longer states that Search opened, and Usage at a narrow width is uncovered; `Usage.tsx` puts `data-tipt` on cells with no `.t` inside, so those tips never open.
       *Accept:* a unit test per rule that fails when the rule is removed, and the Usage cells either open their tip or drop the attribute.
 
+*Library databases list, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:76e38a5f-5619-58c1-853a-9dba7ed24e02 --> A starter question can be dropped with nothing said: the chosen model's abilities are still unknown, another question is being asked, or a paste is in flight; `send` returns and the new chat shows only the person's own draft (`session/chat.ts`, `starter.ts`). A question the server refuses leaves its text only on the Settings button.
+      *Accept:* every path that does not send a question says why in the new chat, and a unit test per path fails when the notice is removed.
+- [ ] <!-- workspace:id=work:39839908-2e57-5e02-8137-baab8bee0690 --> A double click meant to cancel a download can cancel and then start it again when the poll answers between the two presses (`LibraryImports.tsx`).
+      *Accept:* the second press of a double click does nothing on either branch; a unit test holds it.
+- [ ] <!-- workspace:id=work:d032552b-f3cb-5bdb-a9e0-53ebacc81c00 --> A question asked while a reply runs: the stop warning sits over the person's own draft, "Stop and send" sends the question, and typing drops it silently. While a question's chat is being created, the person's own Send does nothing (`Composer.tsx`, `session/threads.ts`).
+      *Accept:* the warning names the question it will send, and a Send pressed during the create goes out or says why not.
+- [ ] <!-- workspace:id=work:627ef5a9-fee3-5006-977b-3458de0e296e --> Library rows, states that read wrong: a downloaded sample in `error` says "Download it to ask these."; the phone offers questions when the computer has tools off; a table count that throws loses the whole list and Refresh does not bring it back; old counts stay beside a failed refresh; KB and MiB on one page; Remove is one click.
+      *Accept:* each state says one true thing, and Remove asks once.
+- [ ] <!-- workspace:id=work:b1566abd-edda-5cd3-b114-2117e13808f9 --> Library tests held too thinly: a failed create on the queued question path; the licence test passes with one sample's licence changed (any "MIT" in the file matches); the over-100 % clamp and the chat-model check survive mutation; the browser journey's wait for a part-filled button has about 1.6 s to land on a slow machine and never measures the row during the check.
+      *Accept:* each named mutant fails a test, and the journey's wait states a condition that does not depend on the machine's speed.
+- [ ] <!-- workspace:id=work:86a8c045-ad11-5aa2-b0d4-e781d58f1f52 --> Library words and samples, the owner's call: "Sample ·" starts four rows; "Add a database" sits beside "Add database…"; a question sends at once (the other option fills the message box); tell the model each sample's quirks (World Cup dates are days since 1970; Northwind's 1997 views have no 1997 orders); two larger samples.
+      *Accept:* the owner picks, and the row says each thing once.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and
@@ -766,7 +781,7 @@ RS-03 remains dropped.
       *Accept:* nothing on the pop-up appears or moves after it opens, measured in a browser with a slowed read.
 - [ ] <!-- workspace:id=work:f87db37c-b144-5abe-8e74-52c8bddfc640 --> Usage and Back: after a reload on the pop-up the first Back does nothing, and a close followed by a fast reopen can race `history.back()`. Usage returns focus to its icon, not the message box.
 - [ ] <!-- workspace:id=work:09277be1-5e0b-5350-9310-f9b44ebc1389 --> Opening Usage or Settings while a dictation is being transcribed throws away the words already heard.
-- [ ] <!-- workspace:id=work:d21037c3-719b-54b6-838d-a22f2d39e131 --> Sample databases that are more useful: starter questions that open a chat on the database (first), then real public data, the person's own chat history as a database, and a sample used as a model test.
+- [ ] <!-- workspace:id=work:d21037c3-719b-54b6-838d-a22f2d39e131 --> Sample databases that are more useful: starter questions that open a chat on the database and real public data are in (2026-11-11, "Library databases: one list…"); still open: the person's own chat history as a database, and a sample used as a model test.
 - [ ] <!-- workspace:id=work:f68ef1fa-e2f8-5aa4-867e-a1c199c7fa0c --> Screens the owner has named for later: custom image generation workflows, custom benchmarks, fine tuning, a memory viewer, a gallery viewer.
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,
       recording model digest, runtime version, profile and harness revision.

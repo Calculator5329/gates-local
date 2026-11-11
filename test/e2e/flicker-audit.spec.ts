@@ -62,6 +62,25 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
 });
 
+test("Library after a download is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(90_000);
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await ready(page, delay);
+  await page.keyboard.press("Control+Comma");
+  const library = page.locator(".snav").getByRole("button", { name: "Library", exact: true });
+  await library.click();
+  const row = page.locator('[data-db="sample:chinook"]');
+  await row.getByRole("button", { name: "Download Chinook" }).click();
+  await expect(row.getByRole("button", { name: "Remove Chinook" })).toBeVisible({ timeout: 30_000 });
+  await settled(delay, 3000);
+  await page.locator(".snav").getByRole("button", { name: "General", exact: true }).click();
+  await settled(delay, 3000);
+  const r = recorder();
+  r.check("Library after a download", await watchWhole(page, section("Library"), () => library.click(), delay));
+  expect(r.all, "Library after a download: what arrived late, moved or changed its words").toEqual([]);
+});
+
 test("app start is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
   await watchFromLoad(page, { root: "#app" });

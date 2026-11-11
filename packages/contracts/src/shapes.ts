@@ -428,10 +428,19 @@ export const Source = S.Struct({
   state: S.Literals(["ready", "refreshing", "error"]),
   detail: S.optional(S.String),
   managed: S.optional(S.Struct({ kind: S.Literals(["sample", "repository"]), key: S.String })),
+  /**
+   * A database's tables and row counts, read from its snapshot when it is made:
+   * its own tables, a virtual one (full-text, R-tree) by name with no count, never
+   * the tables SQLite keeps for itself or behind a virtual table. At most 500.
+   */
+  tables: S.optional(S.Array(S.Struct({ name: S.String, rows: S.optional(Count) }))),
+  /** How many tables it has, only when that is more than `tables` lists. */
+  tableCount: S.optional(Count),
 });
 export type Source = typeof Source.Type;
 
-export const SampleDatabase = S.Struct({ id: S.String, label: S.String, description: S.String, sizeBytes: Count, url: S.String, license: S.String, licenseUrl: S.String });
+/** `questions`: the four a person can start a chat with, text only. */
+export const SampleDatabase = S.Struct({ id: S.String, label: S.String, description: S.String, sizeBytes: Count, url: S.String, license: S.String, licenseUrl: S.String, tables: S.Array(S.Struct({ name: S.String, rows: Count })), questions: S.Array(S.String) });
 export type SampleDatabase = typeof SampleDatabase.Type;
 export const SourceImport = S.Struct({
   id: S.String, key: S.String, label: S.String, kind: S.Literals(["sample", "repository"]),
