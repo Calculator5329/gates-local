@@ -11,7 +11,7 @@ import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHi
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
 import type { BlockingTurn, Channel, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
-import { streamTurn } from "./chat/stream.ts";
+import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
 import { createSourcesHandlers } from "./sources/handlers.ts";
@@ -32,6 +32,7 @@ import { createImageHandlers } from "./image/handlers.ts";
 import type { ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
+import type { Usage } from "./usage/index.ts";
 import type { SettingsReader } from "./settings/store.ts";
 import { turnSettings, type TurnSettings } from "./settings/turn.ts";
 
@@ -145,6 +146,8 @@ export interface AppDeps {
   readonly lease?: Pick<GpuLease, "acquire">;
   /** Settings › Updates: the version, the one-click check and the last update's result (update/module.ts). */
   readonly update?: UpdateModule;
+  /** Token counts per hour and model (usage/); each model request's done line records here. */
+  readonly usage?: Pick<Usage, "record">;
 }
 
 export interface App {
@@ -332,6 +335,7 @@ export function createApp(deps: AppDeps): App {
     // Exactly the text that reached the client: the reply a halted turn saves.
     turn.contextNotice = options.contextNotice;
     let noticeSent = false;
+    let counted = false;
     const imageOmitted = () => {
       turn.contextNotice = IMAGE_CONTEXT_NOTICE;
       if (noticeSent || turn.terminal || controller.signal.aborted) return;
@@ -447,6 +451,12 @@ export function createApp(deps: AppDeps): App {
         threadId,
         onImageOmitted: imageOmitted,
         ...(think === undefined ? {} : { think }),
+        // Each request once; the reply counts on its first reported request.
+        ...(deps.usage ? { onUsage: (figures: UsageFigures) => {
+          if (figures.promptTokens === undefined && figures.completionTokens === undefined) return;
+          deps.usage!.record(model, figures, !counted);
+          counted = true;
+        } } : {}),
       };
       if (turn.contextNotice) imageOmitted();
       const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);

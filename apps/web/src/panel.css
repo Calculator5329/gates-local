@@ -1,0 +1,14 @@
+/* The footer's pop-up over the chat area (Panel.tsx). Flat: no shadow, no
+   gradient, no motion. */
+.panel-dim{position:absolute;inset:0;z-index:20;background:var(--scrim)}
+.panel{position:absolute;z-index:21;top:24px;bottom:24px;left:50%;transform:translateX(-50%);width:min(960px,calc(100% - 48px));overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-lg);padding:20px 24px;outline:none}
+/* .panel raises these over .ibtn's own size and display in styles.css */
+.panel .panel-x{display:none}
+/* Settings over the chat (App.tsx): the chat keeps its box, so its scroll position and a
+   reply that follows the bottom carry on unseen; hidden keeps layout where display:none would not. */
+.work{position:relative}
+.stage.under{position:absolute;inset:0;visibility:hidden}
+@media (max-width:640px){
+  .panel{top:12px;bottom:12px;width:calc(100% - 24px);padding:14px 12px}
+  .panel .panel-x{display:inline-flex;width:44px;height:44px;margin:-8px -6px -8px 0}
+}

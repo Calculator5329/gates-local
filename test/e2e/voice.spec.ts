@@ -179,6 +179,31 @@ test("voice: a late permission grant, navigation and the clip limit all release 
   expect(whisper.requests).toBe(0);
 });
 
+test("voice: Settings or Usage opened while dictating ends the dictation, and one Esc closes it", async ({ page, open }) => {
+  await open(); await waitReady(page); await connect(page);
+  const ta = page.locator("#ta");
+  await ta.fill("draft");
+  const dictate = page.getByRole("button", { name: "Dictate", exact: true });
+  await dictate.click();
+  await expect(page.locator(".voice")).toHaveClass(/\blistening\b/);
+  await page.keyboard.press("Control+Comma");
+  await expect(page.locator(".set")).toBeVisible();
+  await expect(page.locator(".voice")).toHaveClass(/\bidle\b/);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".set")).toHaveCount(0);
+
+  await dictate.click();
+  await expect(page.locator(".voice")).toHaveClass(/\blistening\b/);
+  await page.locator(".sb-foot .usage").click();
+  const usage = page.getByRole("dialog", { name: "Usage" });
+  await expect(usage).toBeVisible();
+  await expect(page.locator(".voice")).toHaveClass(/\bidle\b/);
+  await page.keyboard.press("Escape");
+  await expect(usage).toHaveCount(0);
+  await expect(ta).toHaveValue("draft");
+  expect(whisper.requests).toBe(0);
+});
+
 test("voice: a transcription timeout recovers without changing the draft", async ({ page, open }) => {
   // The real backend deadline is covered by module.test.ts. Deliver that error
   // at the RPC boundary here so draft recovery does not spend twenty seconds.

@@ -66,6 +66,7 @@ import { chooseUpdateModule, createInstalledUpdateModule, installedFeed } from "
 import { automaticChecks } from "./update/automatic.ts";
 import { createUpdateAdmission } from "./update/admission.ts";
 import { realRunner } from "./update/run.ts";
+import { createUsage } from "./usage/index.ts";
 import { createVoiceModule } from "./voice/module.ts";
 import { createServerShutdown } from "./shutdown.ts";
 
@@ -245,7 +246,14 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       log: (line) => log(`update ${line}`),
     }),
   });
+  const usage = createUsage({
+    file: path.join(dataDir, "usage.sqlite"),
+    push: (channel, payload) => server?.push(channel, payload),
+    replies: () => store.replyUsage(),
+    log,
+  });
   const app: App = createApp({
+    usage,
     admit: admission.admit,
     dataDir,
     libraryImports,
@@ -293,7 +301,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       token,
       ordered: ORDERED_DOMAINS,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
-      handlers: { ...app.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
+      handlers: { ...app.handlers, ...usage.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
       onClientCount: (n) => services.gpu.clientsChanged(n),
       onClientReady: (push) => app.replayTurns(push),
       dataDir,

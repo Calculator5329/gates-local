@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { call, openSettings } from "./session.ts";
-import { NA, setState, useStore } from "./store.ts";
+import { NA, getState, setState, useStore } from "./store.ts";
 import { getDraft, useDraft } from "./drafts.ts";
 import type { captureAudio } from "./voice-audio.ts";
 import { insertAtCursor } from "./draft-insertion.ts";
@@ -12,6 +12,7 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
   const settings = useStore((s) => s.settings);
   const conn = useStore((s) => s.conn);
   const draftVersion = useDraft(d => d.version);
+  const covered = useStore((s) => s.view === "settings" || s.panel !== null);
   const enabled = settings !== NA && !!settings?.whisperUrl;
   const [phase, show] = useState<Phase>("idle");
   const [seconds, time] = useState(0);
@@ -35,6 +36,9 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
     window.addEventListener("pagehide", leave);
     return () => { window.removeEventListener("pagehide", leave); cancel(); };
   }, [enabled, conn, draftVersion]);
+  // Settings or a pop-up over the chat keeps the composer mounted but hidden: a dictation
+  // running into it would type where nobody sees and take Esc from the screen on top.
+  useEffect(() => { if (covered) cancel(); }, [covered]);
   useEffect(() => {
     if (phase !== "listening") return;
     const started = performance.now();
@@ -112,7 +116,8 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape" && phaseRef.current !== "idle") { e.preventDefault(); e.stopImmediatePropagation(); cancel(); }
-      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat) { e.preventDefault(); void toggle(); }
+      // under Settings or a pop-up the chat is kept but hidden: dictation would type into a draft nobody sees
+      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat && getState().view !== "settings" && getState().panel === null) { e.preventDefault(); void toggle(); }
     };
     window.addEventListener("keydown", key, true);
     return () => window.removeEventListener("keydown", key, true);

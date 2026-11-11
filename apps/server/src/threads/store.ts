@@ -29,6 +29,11 @@ export interface ThreadStore {
   getMessage(messageId: string): Message | undefined;
   deleteMessage(threadId: string, messageId: string): void;
   imageReferences(): Map<string, number>;
+  /** Every stored reply's model, time and reported tokens, for usage's one-time fill; `lacking` counts replies with no figures. */
+  replyUsage(): {
+    replies: Array<{ model: string; at: number; promptTokens: number | undefined; completionTokens: number | undefined; evalDurationMs: number | undefined; promptEvalDurationMs: number | undefined; durationMs: number | undefined }>;
+    lacking: number;
+  };
   readonly dbPath: string;
   listThreads(): Thread[];
   createThread(input?: { title?: string }): Thread;
@@ -67,6 +72,7 @@ export const DEFAULT_THREAD_TITLE = "New thread";
 const MAX_TITLE = 500;
 const MAX_ID = 200;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+const opt = (v: SQLOutputValue | undefined) => (typeof v === "number" ? v : undefined);
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -176,6 +182,21 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         for (const image of value) add(image);
       }
       return refs;
+    },
+
+    replyUsage() {
+      guard();
+      const replies: ReturnType<ThreadStore["replyUsage"]>["replies"] = [];
+      let lacking = 0;
+      const rows = db.prepare("SELECT model, created_at, prompt_tokens, completion_tokens, eval_duration_ms, prompt_eval_duration_ms, duration_ms FROM messages WHERE role = 'assistant' AND image_job_json IS NULL").all();
+      for (const row of rows) {
+        const prompt = opt(row["prompt_tokens"]);
+        const completion = opt(row["completion_tokens"]);
+        const model = row["model"];
+        if ((prompt === undefined && completion === undefined) || typeof model !== "string") lacking++;
+        else replies.push({ model, at: Number(row["created_at"]), promptTokens: prompt, completionTokens: completion, evalDurationMs: opt(row["eval_duration_ms"]), promptEvalDurationMs: opt(row["prompt_eval_duration_ms"]), durationMs: opt(row["duration_ms"]) });
+      }
+      return { replies, lacking };
     },
 
     listThreads() {

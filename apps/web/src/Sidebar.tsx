@@ -1,20 +1,20 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
-// the Settings section nav, and the footer's row of icons (Settings, Models, the update icon).
+// the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { rtInfo, rtOf } from "./Banner.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
-import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread, preloadThread } from "./session.ts";
+import { cancelPendingSettings, closeSettings, closeUsage, leaveSettings, newThread, openSettings, openThread, preloadThread, spareScreenEntry, toggleModels, toggleUsage } from "./session.ts";
 import { NA, type Section, getState, runningThreads, setState, useStore } from "./store.ts";
 import { closePop, closeTip, isTouch, useMedia } from "./ui.tsx";
 import { FootButton, SidebarUpdate } from "./Updates.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "gear"],
-  ["models", "Models", "cpu"],
+  ["models", "Models", "bot"],
   ["instructions", "Instructions", "pencil"],
   ["library", "Library", "folder"],
   ["tools", "Tools", "wrench"],
@@ -62,7 +62,9 @@ export function openDrawer(): void {
   cancelPendingSettings();
   if (getState().drawer) return;
   setState({ drawer: true, pop: null, searchOpen: false, search: "" });
-  if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
+  // a screen just closed for this (search) leaves its entry: the drawer takes it over rather than stacking on it
+  if (spareScreenEntry()) history.replaceState({ [DRAWER_ENTRY]: true }, "");
+  else if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
   requestAnimationFrame(() => document.querySelector<HTMLElement>(".sb .sb-act, .sb button")?.focus());
 }
 
@@ -113,9 +115,12 @@ export function openSearch(): void {
   const s = getState();
   if (s.view === "firstrun") return;
   cancelPendingSettings();
-  if (s.view === "settings") leaveSettings();
-  // below 1024 px the search field lives in the drawer
-  if (window.innerWidth < 1024) openDrawer();
+  // below 1024 px the search field lives in the drawer, which takes over the screen's history entry
+  const narrow = window.innerWidth < 1024;
+  if (s.panel !== null) closeUsage(false, narrow);
+  else if (s.view === "settings" && narrow) closeSettings();
+  else if (s.view === "settings") leaveSettings();
+  if (narrow) openDrawer();
   setState({ searchOpen: true });
   requestAnimationFrame(() => document.querySelector<HTMLInputElement>("#searchIn")?.focus());
 }
@@ -292,14 +297,16 @@ function SettingsButton() {
   const info = rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
   const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
+    <Pressed on={inSettings}>
     <FootButton
       icon="gear"
       label={g.label}
       tip={g.tip}
-      {...(inSettings ? { tone: "on" as const, current: true } : {})}
+      {...(inSettings ? { tone: "on" as const } : {})}
       dot={g.dot}
       onClick={() =>
         closeDrawer(() => {
+          if (getState().view === "settings") return leaveSettings();
           if (g.runtime) return openSettings("runtime");
           // a phone opens Settings on its section list
           setState({ setList: true });
@@ -307,6 +314,7 @@ function SettingsButton() {
         }, true)
       }
     />
+    </Pressed>
   );
 }
 
@@ -314,7 +322,7 @@ function SettingsButton() {
 const seenFailures = new WeakSet<PullProgress>();
 const running = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
 
-/** The chip: a ring while models download, red with a dot after a failure until Settings › Models is opened. */
+/** The bot: a ring while models download, red with a dot after a failure until Settings › Models is opened. */
 function ModelsButton() {
   const pulls = useStore((s) => s.pulls);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
@@ -332,15 +340,43 @@ function ModelsButton() {
   burst.current = finishedInBurst(burst.current, all);
   const m = modelsIcon(all.filter((p) => p.state !== "error" || !seenFailures.has(p)), (tag) => describeModel(tag, catalog).name, burst.current);
   return (
+    <Pressed on={inModels}>
     <FootButton
-      icon="cpu"
+      icon="bot"
       label={m.label}
       tip={m.tip}
       {...(m.state === "failed" ? { tone: "red" as const } : m.state === "downloading" ? { tone: "fg" as const, ring: m.progress } : {})}
       dot={m.failed ? "red" : null}
-      onClick={() => closeDrawer(() => openSettings("models", all.some(running)), true)}
+      onClick={() => closeDrawer(() => toggleModels(all.some(running)), true)}
     />
+    </Pressed>
   );
+}
+
+/** Usage: a pop-up over the chat, lit while it is open. No badge: nothing about it needs attention. */
+function UsageButton() {
+  const open = useStore((s) => s.panel === "usage");
+  return (
+    <Pressed on={open}>
+    <FootButton
+      icon="bars"
+      label="Usage"
+      tip="Usage"
+      cls="usage"
+      {...(open ? { tone: "on" as const } : {})}
+      onClick={() => closeDrawer(toggleUsage, true)}
+    />
+    </Pressed>
+  );
+}
+
+/** The footer icons open and close what they name, so assistive tech hears each as a toggle: aria-pressed on the button inside (FootButton takes no such prop yet). */
+function Pressed({ on, children }: { on: boolean; children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    box.current?.firstElementChild?.setAttribute("aria-pressed", String(on));
+  });
+  return <span ref={box} style={{ display: "contents" }}>{children}</span>;
 }
 
 export function Sidebar() {
@@ -361,6 +397,7 @@ export function Sidebar() {
       <div className="sb-foot">
         <SettingsButton />
         <ModelsButton />
+        <UsageButton />
         <SidebarUpdate via={(then) => closeDrawer(then, true)} />
       </div>
     </aside>

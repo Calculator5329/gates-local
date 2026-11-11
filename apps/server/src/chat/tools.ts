@@ -1,6 +1,6 @@
 import * as S from "effect/Schema";
 import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, type ModelMessage, type ToolCall, type ToolResult } from "../../../../packages/harness/src/index.ts";
-import { streamTurn, type StreamTurnInput } from "./stream.ts";
+import { streamTurn, usageFigures, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 import { contextWords, estimateTokens, fitRound, fitToWindow, IMAGE_CONTEXT_NOTICE } from "./window.ts";
 import { ollamaSettings } from "../settings/turn.ts";
@@ -121,6 +121,7 @@ async function* ollamaStep(deps: { input: ToolTurnInput; fetcher: typeof fetch; 
         if (value.message?.thinking) { thinking += value.message.thinking; yield { type: "thinking", text: value.message.thinking }; }
         if (value.message?.tool_calls) calls.push(...value.message.tool_calls);
         if (value.done) {
+          input.onUsage?.(usageFigures(value));
           yield { type: "complete", content, thinking, calls, stopReason: value.done_reason ?? "stop", stats: {
             ...(value.prompt_eval_count === undefined ? {} : { promptTokens: value.prompt_eval_count }),
             ...(value.eval_count === undefined ? {} : { completionTokens: value.eval_count }),

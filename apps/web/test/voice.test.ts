@@ -9,7 +9,7 @@ const h = vi.hoisted(() => {
     cursor: 0, slots: [] as unknown[], refs: new Map<number, { current: unknown }>(),
     effects: new Map<number, { deps?: readonly unknown[]; cleanup?: () => void }>(),
     pending: [] as (() => void)[],
-    state: { settings, unavailable: {}, conn: { kind: "open" }, editingQueued: null as string | null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null as string | null },
+    state: { settings, unavailable: {}, conn: { kind: "open" }, editingQueued: null as string | null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null as string | null, view: "thread", panel: null as string | null },
     call: vi.fn(), update: vi.fn(), capture: vi.fn(), discard: vi.fn(), insert: vi.fn(), audioLoaded: false,
   };
 });
@@ -76,10 +76,12 @@ function held<T>() {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 }
+/** The microphone with no composer behind it. */
+const bare = () => render(() => Voice({ textarea: { current: null } }));
 async function settle() { for (let i = 0; i < 2; i++) await new Promise<void>((resolve) => setTimeout(resolve, 0)); }
 beforeEach(() => {
   h.cursor = 0; h.slots.length = 0; h.refs.clear(); h.effects.clear(); h.pending.length = 0;
-  Object.assign(h.state, { settings: { whisperUrl: "http://127.0.0.1:18078" }, conn: { kind: "open" }, editingQueued: null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null });
+  Object.assign(h.state, { settings: { whisperUrl: "http://127.0.0.1:18078" }, conn: { kind: "open" }, editingQueued: null, draft: "original draft", draftVersion: 0, voiceConnectionVersion: 0, notice: null, view: "thread", panel: null });
   h.insert.mockReset().mockImplementation((_textarea: unknown, text: string) => { h.state.draft = text + h.state.draft; return true; });
   h.call.mockReset().mockResolvedValue({}); h.update.mockReset(); h.discard.mockReset();
   h.update.mockImplementation(async (patch: { whisperUrl: string | null }) => {
@@ -195,4 +197,36 @@ it("VO-03: Disconnect wins over a pending successful Connect", async () => {
   expect(h.state.settings.whisperUrl).toBeUndefined();
   expect(h.update).toHaveBeenCalledTimes(1);
   expect(h.update).toHaveBeenCalledWith({ whisperUrl: null }, { voiceActionStarted: true });
+});
+
+it.each([["Settings", { view: "settings" }], ["Usage", { panel: "usage" }]])("dictating, then %s opens over the chat: the dictation ends and the next Esc is not Voice's", async (_name, cover) => {
+  let key: ((e: Partial<KeyboardEvent>) => void) | undefined;
+  vi.stubGlobal("window", { isSecureContext: true, AudioContext: function () {}, addEventListener(type: string, fn: typeof key) { if (type === "keydown") key = fn; }, removeEventListener() {} });
+  await props(bare(), "Dictate").onClick(); await settle();
+  props(bare(), "Stop dictation");
+  Object.assign(h.state, cover);
+  bare();
+  expect(h.discard).toHaveBeenCalledTimes(1);
+  props(bare(), "Dictate");
+  const esc = { key: "Escape", preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() };
+  key?.(esc);
+  expect(esc.stopImmediatePropagation).not.toHaveBeenCalled();
+  expect(esc.preventDefault).not.toHaveBeenCalled();
+});
+
+it("the dictation shortcut leaves a chat hidden under Settings or the Usage pop-up alone", async () => {
+  h.capture.mockClear();
+  let key: ((e: Partial<KeyboardEvent>) => void) | undefined;
+  vi.stubGlobal("window", { isSecureContext: true, AudioContext: function () {}, addEventListener(type: string, fn: typeof key) { if (type === "keydown") key = fn; }, removeEventListener() {} });
+  render(() => Voice({ textarea: { current: null } }));
+  const press = () => key?.({ code: "Space", ctrlKey: true, shiftKey: true, repeat: false, preventDefault() {}, stopImmediatePropagation() {} });
+  h.state.view = "settings";
+  press();
+  h.state.view = "thread"; h.state.panel = "usage";
+  press();
+  await settle();
+  expect(h.capture).not.toHaveBeenCalled();
+  h.state.panel = null;
+  press();
+  await vi.waitFor(() => expect(h.capture).toHaveBeenCalledTimes(1));
 });

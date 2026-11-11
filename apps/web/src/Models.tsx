@@ -575,7 +575,7 @@ function NoModels() {
   const pick = catalog?.find((c) => c.recommended && currentFit({ fits, fitStatus, fitHistory, catalog }, c.name, numCtx)?.verdict === (cpu ? "spills" : "fits"));
   return (
     <div className="mp-empty">
-      <Icon id="box" cls="mp-big" />
+      <Icon id="bot" cls="mp-big" />
       <h2>No models yet</h2>
       <p>
         {pullNA ? `Downloading: ${COMPUTER_ONLY.toLowerCase()}` : "Download one to start chatting."}

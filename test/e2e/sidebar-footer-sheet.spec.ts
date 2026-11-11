@@ -22,7 +22,7 @@ async function dark(page: Page): Promise<void> {
 
 /** Each button's look in one string: its name, classes, dots and ring. */
 const looks = (page: Page) =>
-  page.locator(".sb-foot button.ibtn").evaluateAll((bs) => bs.map((b) => `${b.getAttribute("aria-label")}|${b.className}|${b.querySelectorAll(".fdot").length}|${b.querySelectorAll(".ring").length}`));
+  page.locator(".sb-foot button.ibtn:not(.usage)").evaluateAll((bs) => bs.map((b) => `${b.getAttribute("aria-label")}|${b.className}|${b.querySelectorAll(".fdot").length}|${b.querySelectorAll(".ring").length}`));
 
 /** The footer as it is now, without pointer or focus on it and without an open confirm. Every row shows one button's state; the other two must be at rest. */
 async function grab(page: Page, shots: Shot[], group: string, name: string, index: number): Promise<void> {
@@ -40,7 +40,8 @@ async function grab(page: Page, shots: Shot[], group: string, name: string, inde
 }
 let rest: string[] | undefined;
 
-const label = (page: Page, i: number) => page.locator(".sb-foot button.ibtn").nth(i);
+// Usage has one look and is left out: the indices stay Settings, Models, update
+const label = (page: Page, i: number) => page.locator(".sb-foot button.ibtn:not(.usage)").nth(i);
 
 test("state sheet: every footer state at real size and 4x, dark", async ({ page, open }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -127,7 +128,7 @@ test("state sheet: every footer state at real size and 4x, dark", async ({ page,
   shots.push({ group: "Update", name: "ready (look only, unreachable)", index: 2, html: idle.html.replace('class="ibtn upd"', 'class="ibtn green upd"').replace(/(<\/svg>)(<\/button><\/span>)/, '$1<span class="fdot green"></span>$2') });
 
   await page.keyboard.press("Control+Comma");
-  await expect(label(page, 0)).toHaveAttribute("aria-current", "page");
+  await expect(label(page, 0)).toHaveAttribute("aria-pressed", "true");
   await grab(page, shots, "Settings", "in Settings (selected)", 0);
 
   const bg = await page.locator(".sb").evaluate((e) => getComputedStyle(e).backgroundColor);
@@ -148,7 +149,7 @@ test("state sheet: every footer state at real size and 4x, dark", async ({ page,
         const big = document.createElement("div");
         big.className = "sb-foot";
         big.style.cssText = `zoom:4;padding:0;border:0;width:max-content;background:${back}`;
-        const b = one.querySelectorAll("button.ibtn")[x.index];
+        const b = one.querySelectorAll("button.ibtn:not(.usage)")[x.index];
         if (b) big.append(b.cloneNode(true));
         row.append(name, one, big);
         sheet.append(row);

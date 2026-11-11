@@ -1,0 +1,60 @@
+/* The Usage panel. Line colours are flat, one per drawn model, kept by first
+   use; each passes 3:1 on its theme's chat and sidebar background
+   (test/usage-data.test.ts reads the two blocks marked light and dark). */
+:root{
+  /* light */
+  --u0:#2f5fd0; --u1:#3f7d20; --u2:#a76100; --u3:#c8334d; --u4:#7c4dcc; --u5:#0f7fa8; --u6:#c4561b; --u7:#565f89;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    /* dark */
+    --u0:#7aa2f7; --u1:#9ece6a; --u2:#e0af68; --u3:#f7768e; --u4:#bb9af7; --u5:#7dcfff; --u6:#ff9e64; --u7:#c0caf5;
+  }
+}
+:root[data-theme="dark"]{
+  --u0:#7aa2f7; --u1:#9ece6a; --u2:#e0af68; --u3:#f7768e; --u4:#bb9af7; --u5:#7dcfff; --u6:#ff9e64; --u7:#c0caf5;
+}
+
+/* Every box has a fixed height, so a read landing or a turn ending changes figures, never the layout. */
+.us{display:flex;flex-direction:column;gap:16px;min-width:0}
+.us .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.us-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.us-bar h2{margin:0;font-size:16px;font-weight:600;line-height:30px}
+.us-ctl{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px}
+.us-nums{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.us-num{min-width:0}
+.us-num b{display:block;font-size:20px;line-height:26px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.us-num span{display:block;font-size:12px;line-height:16px;color:var(--muted-foreground)}
+.us-ph{display:inline-block;width:3.2em;height:.8em;border-radius:3px;background:var(--hover);vertical-align:middle}
+.us-chart{position:relative;border-radius:var(--r-sm);outline:none}
+.us-chart:focus-visible{box-shadow:0 0 0 2px var(--border-strong)}
+.us-top{display:block;font-size:11px;line-height:16px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.us-chart svg{display:block;width:100%;height:160px;overflow:visible}
+.us-chart path{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.us-chart .us-dot{stroke-width:5}
+.us-chart .us-base,.us-chart .us-mark{stroke:var(--border-strong);stroke-width:1}
+.us-chart .us-grid{stroke:var(--border);stroke-width:1}
+.us-at{margin:0 0 -8px;font-size:13px;font-weight:600;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.us-rows{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;font-variant-numeric:tabular-nums}
+.us-rows th,.us-rows td{padding:7px 0 7px 8px;text-align:right;font-weight:400;white-space:nowrap}
+.us-rows thead th{width:72px;font-size:12px;font-weight:500;color:var(--muted-foreground);padding-top:0}
+.us-rows thead th:first-child{width:auto}
+.us-rows th[scope="row"],.us-rows thead th:first-child{text-align:left;padding-left:0}
+.us-rows tbody tr{border-top:1px solid var(--border)}
+.us-name{display:flex;align-items:center;gap:8px;min-width:0}
+.us-key{flex:none;width:12px;height:3px;border-radius:1px}
+.us-label{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.us-share{display:block;height:2px;margin-top:6px;background:var(--track)}
+.us-share i{display:block;height:100%;background:var(--muted-foreground)}
+
+/* 320 px: the controls take a second line under the title and its close button,
+   the numbers go three and two, and the model column gives way to the figures. */
+@media (max-width:640px){
+  .us-bar .panel-x{order:1;margin-left:auto}
+  .us-ctl{order:2;flex-basis:100%;margin-left:0}
+  .us-nums{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 8px}
+  .us-num:last-child{grid-column:span 2}
+  .us-num b{font-size:18px}
+  .us-rows th,.us-rows td{padding-left:6px}
+  .us-rows thead th{width:48px}
+}

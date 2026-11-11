@@ -9,7 +9,7 @@ export type IconId =
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
   | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right" | "speed"
-  | "refresh" | "fetch" | "external";
+  | "refresh" | "fetch" | "external" | "bot" | "bars";
 
 export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   return (
@@ -79,6 +79,9 @@ export function Sprite() {
         <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" /></symbol>
         {/* client addition: measured speed (Lucide circle-gauge), apart from the context gauge above */}
         <symbol id="i-speed" viewBox="0 0 24 24"><path d="M15.6 2.7a10 10 0 1 0 5.7 5.7" /><circle cx="12" cy="12" r="2" /><path d="M13.4 10.6 19 5" /></symbol>
+        {/* client addition: Models everywhere (Lucide bot) and the footer's Usage (Lucide chart-no-axes-column) */}
+        <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></symbol>
+        <symbol id="i-bars" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6" /></symbol>
         {/* client addition: the sidebar footer's update icon (idle and ready, available, cannot update itself) */}
         <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></symbol>
         <symbol id="i-fetch" viewBox="0 0 24 24"><path d="M12 4v11" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" /></symbol>

@@ -269,6 +269,10 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       download: "downloading",
     },
   },
+  "usage.read": {
+    params: { since: 0 },
+    result: { rows: [{ hour: 1_762_506_000_000, model: "qwen3:14b", promptTokens: 1200, completionTokens: 340, replies: 2, decodeMs: 6800, decodeTokens: 340, readMs: 410, readTokens: 1200, wallMs: 7600 }], models: ["qwen3:14b"] },
+  },
 };
 
 /** One sample per channel; chat.event gets one per ChatEvent variant. */
@@ -310,4 +314,5 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { jobId: "j1", threadId: "t1", state: "running", progress: 0.4 },
     { jobId: "j1", state: "done", imagePath: "images/j1.png" },
   ],
+  "usage.changed": [{}],
 };

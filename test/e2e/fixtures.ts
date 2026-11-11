@@ -8,8 +8,8 @@ import { CONTROL_URL, SERVER_PORT, TOKEN, appUrl } from "./env.ts";
 export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream-error" | "wrong-service" | "embed-smallest" | "embed-only" | "slow-drip" | "long-name" | "threads" | "image-turn" | "image-claims" | "image-text-call";
 /** Settings' runtimeMode: "system" uses the Ollama on its port, "app" the app's own copy. */
 export type RuntimeMode = "system" | "app";
-/** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL), the README's demo threads, or 0 for none. */
-export type Seed = number | "design" | "design-code" | "readme";
+/** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL; "usage" adds a week of three models' usage), the README's demo threads, or 0 for none. */
+export type Seed = number | "design" | "design-code" | "readme" | "usage";
 
 async function control(route: string, body: unknown = {}): Promise<unknown> {
   const r = await fetch(`${CONTROL_URL}${route}`, { method: "POST", body: JSON.stringify(body) });

@@ -711,6 +711,13 @@ RS-03 remains dropped.
 ## Later: slices 5 to 7
 
 - [ ] <!-- workspace:id=work:c0cb50be-fb59-52f0-b9e6-bb7c914b700e --> Models and Usage open as pop-up panels over the chat; Settings stays its own screen (owner, 2026-11-11). Usage is built that way first; Models moves out of Settings into the same panel after.
+- [ ] <!-- workspace:id=work:d17c769b-d526-568a-ba63-91a8c1b35a6b --> Usage file: any open error moves the file aside and starts empty. Only a corrupt file should move; a read-only file or a newer schema should run in memory and leave the file alone. The one-time fill compares raw clock times, so a clock moved back after a failed fill can count a reply twice and a reply stamped after the first open is never filled.
+      *Accept:* a test per case (read-only, newer schema, clock moved back) with the file left as it was.
+- [ ] <!-- workspace:id=work:16277434-f91e-59c9-b8a4-b894c9c36559 --> Usage counts nothing for a stopped reply or a benchmark, and the screen does not say so (owner decides whether a stopped reply's tokens count).
+- [ ] <!-- workspace:id=work:f1f4dd1d-01c6-50fb-8a6d-ca3d0753d53e --> Usage screen: a read slower than 250 ms lets the chart and rows appear late (placeholders cover only the five numbers); rows reorder under the pointer when a reply finishes; the chart has no day labels; half-hour time zones put the hour that straddles local midnight wholly in one day; a ninth model shares a colour with the first; the whole file is read every time.
+      *Accept:* nothing on the pop-up appears or moves after it opens, measured in a browser with a slowed read.
+- [ ] <!-- workspace:id=work:f87db37c-b144-5abe-8e74-52c8bddfc640 --> Usage and Back: after a reload on the pop-up the first Back does nothing, and a close followed by a fast reopen can race `history.back()`. Usage returns focus to its icon, not the message box.
+- [ ] <!-- workspace:id=work:09277be1-5e0b-5350-9310-f9b44ebc1389 --> Opening Usage or Settings while a dictation is being transcribed throws away the words already heard.
 - [ ] <!-- workspace:id=work:d21037c3-719b-54b6-838d-a22f2d39e131 --> Sample databases that are more useful: starter questions that open a chat on the database (first), then real public data, the person's own chat history as a database, and a sample used as a model test.
 - [ ] <!-- workspace:id=work:f68ef1fa-e2f8-5aa4-867e-a1c199c7fa0c --> Screens the owner has named for later: custom image generation workflows, custom benchmarks, fine tuning, a memory viewer, a gallery viewer.
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,

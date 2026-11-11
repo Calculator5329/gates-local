@@ -15,7 +15,9 @@ import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
-import { call, cancelPendingSettings, deleteThread, leaveSettings, newThread, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
+import { PopPanel } from "./Panel.tsx";
+import { usageScreen } from "./screen-loaders.ts";
+import { call, cancelPendingSettings, closeUsage, deleteThread, leaveSettings, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
 import { replaceDraft, useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
@@ -97,14 +99,15 @@ function Cards() {
   );
 }
 
-function Draft() {
+function Draft({ under }: { under: boolean }) {
   return (
     <div className="draft">
       <div className="draft-in">
         <h1 className="hero">What would you like help with?</h1>
         <p className="hero-sub">Runs on your computer. Nothing leaves your own network.</p>
         <div className="banner-slot">
-          <UpdateNote />
+          {/* under Settings the note shows on Settings' own surface, once */}
+          {under ? null : <UpdateNote />}
           <Banner />
         </div>
         <div id="draftComposerSlot">
@@ -362,6 +365,7 @@ function ThreadMenu() {
 /** What Tab must stay inside right now: a phone's sheet or the drawer. */
 function modalBox(s: State): HTMLElement | null {
   if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
+  if (s.panel !== null) return document.querySelector<HTMLElement>(".panel");
   if (s.drawer) return document.querySelector<HTMLElement>(".sb");
   return null;
 }
@@ -417,6 +421,10 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
       e.preventDefault();
       return closeDrawer();
     }
+    if (s.panel !== null) {
+      e.preventDefault();
+      return closeUsage();
+    }
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
     if (s.view === "settings" && s.addPage) return setState({ addPage: false });
     if (s.view === "settings") return leaveSettings();
@@ -432,7 +440,7 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
     openSearch();
   } else if (key === "m") {
     e.preventDefault();
-    if (s.view !== "settings") setState({ pop: { id: "picker", kb: true } });
+    if (s.view !== "settings" && s.panel === null) setState({ pop: { id: "picker", kb: true } });
   } else if (key === ",") {
     e.preventDefault();
     openSettings();
@@ -475,7 +483,9 @@ export function App() {
   const picker = useScreen(pickerScreen, popId === "picker");
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
   const popOpen = popId !== null && (popId !== "picker" || picker.kind === "error" || !pickerPending);
-  const thread = useScreen(threadScreen, view === "thread");
+  const thread = useScreen(threadScreen, view === "thread" || (view === "settings" && threadId !== null));
+  const panel = useStore((s) => s.panel);
+  const usage = useScreen(usageScreen, panel === "usage");
   useEffect(preloadScreens, []);
   const phone = useMedia(PHONE);
   // A phone's sheet stays modal through live updates; Ctrl+M's search focuses itself after opening.
@@ -492,6 +502,7 @@ export function App() {
     window.addEventListener("resize", onResize);
     window.addEventListener("hashchange", onHash);
     window.addEventListener("popstate", onDrawerPop);
+    window.addEventListener("popstate", onScreenPop);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("touchstart", onTouchStart);
@@ -500,6 +511,7 @@ export function App() {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("hashchange", onHash);
       window.removeEventListener("popstate", onDrawerPop);
+      window.removeEventListener("popstate", onScreenPop);
     };
   }, []);
   // A cold click keeps the existing chat layout until the whole screen is ready.
@@ -520,20 +532,14 @@ export function App() {
         </div>
         {drawer ? <div className="scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer}>
+          {/* under the pop-up the chat stays mounted and takes no focus, keys or clicks */}
+          <div style={{ display: "contents" }} inert={panel !== null}>
           {isSet ? <SettingsBar /> : <Header isNew={isNew} />}
           <div className="work">
-            {isSet ? (
-              <div className={`set${setList ? " listing" : ""}`}>
-                <UpdateNote />
-                <div className="set-in">
-                  <SettingsList />
-                  {settings.kind === "ready" ? <settings.value.SettingsView /> : <ScreenError />}
-                </div>
-              </div>
-            ) : (
-              <div className="stage">
+            {/* Settings lies over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
+            <div className={`stage${isSet ? " under" : ""}`} inert={isSet}>
                 {isNew || threadId === null ? (
-                  <Draft />
+                  <Draft under={isSet} />
                 ) : (
                   <>
                     <ErrorBoundary key={threadId} scope="thread">
@@ -545,16 +551,30 @@ export function App() {
                     </ErrorBoundary>
                     <div className="cw">
                       <div className="banner-slot">
-                        <UpdateNote />
+                        {isSet ? null : <UpdateNote />}
                         <Banner />
                       </div>
                       <Composer />
                     </div>
                   </>
                 )}
+            </div>
+            {isSet ? (
+              <div className={`set${setList ? " listing" : ""}`}>
+                <UpdateNote />
+                <div className="set-in">
+                  <SettingsList />
+                  {settings.kind === "ready" ? <settings.value.SettingsView /> : <ScreenError />}
+                </div>
               </div>
-            )}
+            ) : null}
           </div>
+          </div>
+          {panel === "usage" && usage.kind !== "pending" ? (
+            <PopPanel label="Usage" onClose={() => closeUsage()}>
+              {usage.kind === "ready" ? <usage.value.Usage /> : <ScreenError />}
+            </PopPanel>
+          ) : null}
         </main>
         {covered ? (
           <div className="first">

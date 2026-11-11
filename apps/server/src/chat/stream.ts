@@ -26,7 +26,27 @@ export interface StreamTurnInput {
   fetch?: typeof fetch;
   /** The caller retains this notice even when the stream stops without a completed message. */
   onImageOmitted?: () => void;
+  /** Each model request's reported figures, once, as its done line arrives (usage). */
+  onUsage?: (figures: UsageFigures) => void;
 }
+
+/** A request's end-of-request figures for usage, the times in ms like MessageStats. */
+export interface UsageFigures {
+  readonly promptTokens: number | undefined;
+  readonly completionTokens: number | undefined;
+  readonly evalDurationMs: number | undefined;
+  readonly promptEvalDurationMs: number | undefined;
+  readonly durationMs: number | undefined;
+}
+
+/** From a done line's counts and nanosecond durations. */
+export const usageFigures = (done: { prompt_eval_count?: number | undefined; eval_count?: number | undefined; eval_duration?: number | undefined; prompt_eval_duration?: number | undefined; total_duration?: number | undefined }): UsageFigures => ({
+  promptTokens: done.prompt_eval_count,
+  completionTokens: done.eval_count,
+  evalDurationMs: done.eval_duration === undefined ? undefined : done.eval_duration / 1e6,
+  promptEvalDurationMs: done.prompt_eval_duration === undefined ? undefined : done.prompt_eval_duration / 1e6,
+  durationMs: done.total_duration === undefined ? undefined : done.total_duration / 1e6,
+});
 
 const ChatChunk = S.Struct({
   model: S.optional(S.String),
@@ -177,6 +197,7 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
           yield { type: "delta", text };
         }
         if (parsed.done === true) {
+          input.onUsage?.(usageFigures(parsed));
           const message: Message = {
             id: (input.newId ?? (() => crypto.randomUUID()))(),
             threadId: input.threadId ?? "",

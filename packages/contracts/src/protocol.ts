@@ -87,6 +87,15 @@ const NoParams = S.Struct({});
 const ThreadRef = S.Struct({ threadId: S.String });
 const ModelRef = S.Struct({ name: S.String });
 const SourceRef = S.Struct({ id: S.String });
+/**
+ * One UTC hour of one model: tokens in and out, replies begun, and summed times (ms) with the
+ * tokens of the requests that reported them, so a speed is a ratio of sums. No text, thread or title.
+ */
+const UsageRow = S.Struct({
+  hour: S.Finite, model: S.String, promptTokens: S.Finite, completionTokens: S.Finite, replies: S.Finite,
+  decodeMs: S.Finite, decodeTokens: S.Finite, readMs: S.Finite, readTokens: S.Finite, wallMs: S.Finite,
+});
+const UsageRead = S.Struct({ rows: S.Array(UsageRow), models: S.Array(S.String) });
 
 /**
  * "allow": the phone listener may call this method. "deny": only the computer may.
@@ -222,6 +231,8 @@ export const methods = {
   "update.dismissResult": { params: NoParams, result: S.Struct({ dismissed: S.Boolean }), phone: "deny" },
   // An installed copy's Download click (automatic checks off): fetch and check the newer version; never installs.
   "update.download": { params: NoParams, result: UpdateCheck, phone: "deny" },
+  // ---- usage (2026-11-11): token counts per UTC hour and model from `since` (ms) on; models in first-use order
+  "usage.read": { params: S.Struct({ since: S.Finite }), result: UsageRead, phone: "allow" },
 } as const satisfies Record<string, MethodRow>;
 
 /** Server-to-client channels and their payload Schemas. */
@@ -245,6 +256,8 @@ export const pushes = {
   "sources.imports": { payload: SourceImports },
   "image.status": { payload: ImageStatus },
   "image.event": { payload: ImageEvent },
+  /** A model request finished and was counted; usage.read has the new numbers. */
+  "usage.changed": { payload: S.Struct({}) },
 } as const;
 
 export type Methods = typeof methods;

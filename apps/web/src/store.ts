@@ -138,6 +138,8 @@ export interface State {
     | { readonly id: "plus" | "opts"; readonly kb: boolean }
     | { readonly id: "thread"; readonly kb: boolean; readonly thread: string; readonly at?: { readonly x: number; readonly y: number } }
     | null;
+  /** The pop-up over the chat area (the footer's Usage); the chat stays mounted under it. */
+  readonly panel: "usage" | null;
   /** Below 1024 px the sidebar is a drawer over the page; this is whether it is open. */
   readonly drawer: boolean;
   /** On a phone, Settings shows its section list as its own screen instead of a section. */
@@ -218,6 +220,7 @@ const initial: State = {
   ownerConfirm: false,
   fitPanel: { model: null },
   pop: null,
+  panel: null,
   drawer: false,
   setList: false,
   pasting: 0,

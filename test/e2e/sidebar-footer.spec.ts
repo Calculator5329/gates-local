@@ -1,4 +1,4 @@
-// The sidebar footer is one row of three icon buttons: Settings, Models and,
+// The sidebar footer is one row of four icon buttons: Settings, Models, Usage and,
 // in the desktop app, the update icon at the far right. Its boxes never move
 // between states or between chat and Settings, it holds no words, and every
 // word it has to say is in a tooltip (data-tip) and the accessible name.
@@ -9,19 +9,19 @@ import { QWEN14, QWEN4, UPDATE, desktopBridge, footerBoxes, footerSocket, footer
 const settings = (page: import("@playwright/test").Page) => page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
 const models = (page: import("@playwright/test").Page) => page.locator(".sb-foot").getByRole("button", { name: /^Models/ });
 
-test("one row of three icon buttons whose boxes never move, in any state or in Settings", async ({ page, open }) => {
+test("one row of four icon buttons whose boxes never move, in any state or in Settings", async ({ page, open }) => {
   await desktopBridge(page);
   const s = await footerSocket(page);
   await open();
   await waitReady(page);
   const buttons = page.locator(".sb-foot button.ibtn");
-  await expect(buttons).toHaveCount(3);
+  await expect(buttons).toHaveCount(4);
   const first = await footerBoxes(page);
   // one row: every button on the same line, 32 px square, the update icon at the far right
   expect(new Set(first.buttons.map((b) => b[1])).size).toBe(1);
   for (const b of first.buttons) expect(b.slice(2)).toEqual([32, 32]);
   const [fx, , fw] = first.foot as [number, number, number, number];
-  const last = first.buttons[2] as [number, number, number, number];
+  const last = first.buttons[3] as [number, number, number, number];
   expect(fx + fw - (last[0] + last[2])).toBeLessThanOrEqual(9);
   expect(await footerWords(page)).toEqual([]);
 
@@ -55,7 +55,7 @@ test("one row of three icon buttons whose boxes never move, in any state or in S
 
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set")).toBeVisible();
-  await expect(settings(page)).toHaveAttribute("aria-current", "page");
+  await expect(settings(page)).toHaveAttribute("aria-pressed", "true");
   await same("Settings");
 });
 
@@ -96,19 +96,19 @@ test("the tooltips carry the words, and the Models tooltip names the model", asy
   await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
 });
 
-test("the keyboard reaches all three buttons in order, and a busy one keeps its focus and tooltip", async ({ page, open }) => {
+test("the keyboard reaches all four buttons in order, and a busy one keeps its focus and tooltip", async ({ page, open }) => {
   await desktopBridge(page);
   const s = await footerSocket(page);
   await open();
   await waitReady(page);
   const reached: string[] = [];
   await page.locator("body").focus();
-  for (let i = 0; i < 80 && reached.length < 3; i++) {
+  for (let i = 0; i < 80 && reached.length < 4; i++) {
     await page.keyboard.press("Tab");
     const name = await page.evaluate(() => (document.activeElement?.closest(".sb-foot") ? document.activeElement.getAttribute("aria-label") : null));
     if (name !== null && !reached.includes(name)) reached.push(name);
   }
-  expect(reached).toEqual(["Settings", "Models", "Check for updates"]);
+  expect(reached).toEqual(["Settings", "Models", "Usage", "Check for updates"]);
   await expect(page.locator("#tip.open")).toContainText("Check for updates");
 
   // a check in flight: the button stays focused, says so, and a second press does nothing; reduced motion stops the turning arrows
@@ -405,10 +405,10 @@ test("Escape closes what is on top first: a picker, then a tooltip, then the ask
   await expect(ask).toHaveCount(0);
 });
 
-test("in a browser tab the footer is Settings and Models only", async ({ page, open }) => {
+test("in a browser tab the footer is Settings, Models and Usage, no update", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await expect(page.locator(".sb-foot button.ibtn")).toHaveCount(2);
+  await expect(page.locator(".sb-foot button.ibtn")).toHaveCount(3);
   await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
 });
 
@@ -419,14 +419,14 @@ for (const width of [390, 320]) test(`in the phone drawer at ${width}px the butt
   await page.getByRole("button", { name: "Open threads" }).click();
   await expect(page.locator(".sb-foot")).toBeInViewport({ ratio: 1 });
   const boxes = await footerBoxes(page);
-  expect(boxes.buttons).toHaveLength(2);
+  expect(boxes.buttons).toHaveLength(3);
   for (const b of boxes.buttons) expect(b.slice(2)).toEqual([44, 44]);
   expect(new Set(boxes.buttons.map((b) => b[1])).size).toBe(1);
   expect(await page.locator(".sb-foot").evaluate((f) => f.scrollWidth <= f.clientWidth)).toBe(true);
   expect(await footerWords(page)).toEqual([]);
 });
 
-test("a narrow desktop window at 320px: three 44 px buttons in the drawer, the update icon at the right edge, nothing clipped; closing the drawer closes the confirm", async ({ page, open }) => {
+test("a narrow desktop window at 320px: four 44 px buttons in the drawer, the update icon at the right edge, nothing clipped; closing the drawer closes the confirm", async ({ page, open }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await desktopBridge(page);
   const s = await footerSocket(page);
@@ -435,11 +435,11 @@ test("a narrow desktop window at 320px: three 44 px buttons in the drawer, the u
   await page.getByRole("button", { name: "Open threads" }).click();
   await expect(page.locator(".sb-foot")).toBeInViewport({ ratio: 1 });
   const boxes = await footerBoxes(page);
-  expect(boxes.buttons).toHaveLength(3);
+  expect(boxes.buttons).toHaveLength(4);
   for (const b of boxes.buttons) expect(b.slice(2)).toEqual([44, 44]);
   expect(new Set(boxes.buttons.map((b) => b[1])).size).toBe(1);
   const [fx, , fw] = boxes.foot as [number, number, number, number];
-  const last = boxes.buttons[2] as [number, number, number, number];
+  const last = boxes.buttons[3] as [number, number, number, number];
   expect(fx + fw - (last[0] + last[2])).toBeLessThanOrEqual(9);
   expect(last[0] + last[2]).toBeLessThanOrEqual(320);
   expect(await page.locator(".sb-foot").evaluate((f) => f.scrollWidth <= f.clientWidth)).toBe(true);

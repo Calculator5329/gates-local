@@ -17,9 +17,10 @@ import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settle
 import { createFit, staleFitReports, staleFitStatus } from "./session/fit.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyTextSize, applyTheme, serverUrl, webServerUrl } from "./session/platform.ts";
-import { createNavigation } from "./session/navigation.ts";
+import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./session/navigation.ts";
 import { createUpdates } from "./session/updates.ts";
 import { speedsChanged, speedsRead } from "./session/speed.ts";
+import { createUsage } from "./session/usage.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
 
 // Preserve the UI's action imports while implementation moves into session modules.
@@ -134,6 +135,7 @@ async function hydrateWith(
   on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
+  on("usage.changed", () => usageSession.usageChanged());
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
   });
@@ -207,16 +209,38 @@ async function hydrateWith(
   threadSession.markOtherThreadsStale(s);
   if (s.threadId !== null) await loadThread(s.threadId, true);
   flushQueued();
+  // turns may have ended while the connection was down
+  usageSession.usageChanged();
 }
 
 const imageOrder = newestOnly();
 
 const navigation = createNavigation({
   flushQueued, catchUp, chooseModel, loadThread, loading,
+  // usageSession is made below; this runs only on a navigation, long after
+  dropPendingPanel: () => usageSession.dropPendingOpen(),
   newChatModel: (s) => decided(pickChoice(s.models, s.model, s.chosen)),
 });
-export const { openThread, newThread, openSettings, leaveSettings, cancelPendingSettings, initialView, finishFirstRun } = navigation;
+export const { openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun } = navigation;
+export { spareScreenEntry } from "./session/navigation.ts";
 const { firstRunDone } = navigation;
+
+const usageSession = createUsage({
+  read: () => call("usage.read", { since: 0 }),
+  beforeOpen: () => { if (getState().view === "settings") closeSettings(); },
+  asked: () => void cancelPendingSettings(),
+  enter: enterScreen,
+  exit: exitScreen,
+});
+export const { openUsage, closeUsage, toggleUsage, usageData } = usageSession;
+
+/** Back left a screen's history entry: close the screen it was made for. */
+export function onScreenPop(): void {
+  if (onScreenEntry()) return;
+  const s = getState();
+  if (s.panel !== null) usageSession.closeUsage(true, true);
+  if (s.view === "settings") closeSettings();
+}
 
 /** The running turns this load would have to stop; none when the server cannot say, and the send goes as it always did. */
 async function blockingFor(model: string, numCtx: number): Promise<readonly BlockingTurn[]> {

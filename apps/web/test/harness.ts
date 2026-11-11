@@ -140,6 +140,8 @@ export interface Browser {
   /** Run the animation frame callbacks queued now. */
   frame(): void;
   readonly location: { search: string; hash: string; pathname: string };
+  /** Where the fake history stands, and a popstate listener for Back. */
+  readonly history: { index(): number; onPop(listener: () => void): void };
 }
 
 /** Install the fake browser globals; call before importing session.ts. */
@@ -151,9 +153,29 @@ export function installBrowser(): Browser {
   const storage = new Map<string, string>();
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("location", location);
+  // a stack of entries: Back is async, like a browser's, and runs the popstate listeners
+  const entries: { state: unknown; hash: string }[] = [{ state: null, hash: "" }];
+  let at = 0;
+  const popListeners: Array<() => void> = [];
   vi.stubGlobal("history", {
-    replaceState: (_s: unknown, _t: string, url: string) => {
-      location.hash = url.startsWith("#") ? url : "";
+    get state() { return entries[at]!.state; },
+    get length() { return entries.length; },
+    pushState: (state: unknown) => {
+      entries.splice(at + 1);
+      entries.push({ state, hash: location.hash });
+      at++;
+    },
+    replaceState: (state: unknown, _t: string, url?: string) => {
+      if (url !== undefined) location.hash = url.startsWith("#") ? url : "";
+      entries[at] = { state, hash: location.hash };
+    },
+    back: () => {
+      setTimeout(() => {
+        if (at === 0) return;
+        at--;
+        location.hash = entries[at]!.hash;
+        for (const listener of popListeners) listener();
+      }, 0);
     },
   });
   vi.stubGlobal("document", { documentElement: { setAttribute: () => undefined, removeAttribute: () => undefined } });
@@ -178,6 +200,10 @@ export function installBrowser(): Browser {
   return {
     server,
     location,
+    history: {
+      index: () => at,
+      onPop: (listener) => void popListeners.push(listener),
+    },
     frame() {
       const now = rafs;
       rafs = new Map();

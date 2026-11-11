@@ -6,8 +6,10 @@
 //              thread (the screenshot rig)
 //   seedReadme neutral demo threads for the README screenshots
 //              (test/e2e/readme-shots.spec.ts)
+//   seedUsage  seven days of three models' usage (test/e2e/usage.spec.ts)
 import { openThreadStore } from "../../apps/server/src/threads/store.ts";
 import type { NewMessage } from "../../apps/server/src/threads/types.ts";
+import { openUsageStore } from "../../apps/server/src/usage/store.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -222,4 +224,48 @@ export function seedReadme(dbPath: string, now: number): string {
     { role: "assistant", content: CLEAR_REPLY, model, stats: { promptTokens: 790, completionTokens: 18, durationMs: 600 }, at: now - 2 * MIN },
   ];
   return writeThreads(dbPath, now, older, "Debounce a search box", turns);
+}
+
+const DAY = 24 * HOUR;
+
+/** Three models over the last seven days, as the usage store records them: [model, days ago used, decode tok/s, prompt size]. */
+const USAGE_MODELS: readonly (readonly [string, readonly number[], number, number])[] = [
+  ["qwen3.5:9b", [0, 1, 2, 3, 4, 5, 6], 52, 1800],
+  ["gemma4:12b", [1, 2, 4, 5], 34, 1200],
+  ["qwen3-vl:8b", [0, 2, 3], 41, 900],
+];
+
+/**
+ * The design's sidebar and, for the Usage pop-up (test/e2e/usage.spec.ts),
+ * three models across seven days, three replies a day each, with decode and
+ * prompt-reading times, through the server's own usage store with its clock
+ * pinned. A model's missing days are gaps in its speed line. Days are UTC
+ * calendar days, so a spec reading them sets timezoneId "UTC"; today's
+ * replies fall in the part of today already gone. The server's one-time fill
+ * from stored replies adds the threads' own replies on start.
+ * Returns the open thread's id.
+ */
+export function seedUsage(dbPath: string, file: string, now: number): string {
+  const id = seedDesign(dbPath, now);
+  const clock = { now: 0 };
+  const store = openUsageStore(file, { now: () => clock.now });
+  const today = now - (now % DAY);
+  try {
+    for (const [model, days, rate, size] of USAGE_MODELS) {
+      for (const d of days) {
+        const span = d === 0 ? now - today : DAY;
+        for (const i of [0, 1, 2]) {
+          clock.now = today - d * DAY + Math.floor((span * (i + 1)) / 4);
+          const promptTokens = size * (1 + ((d * 7 + i * 3) % 5));
+          const completionTokens = Math.round(promptTokens * (0.25 + (d % 3) * 0.1));
+          const evalDurationMs = Math.round((completionTokens / (rate * (1 - (d % 4) * 0.06))) * 1000);
+          const promptEvalDurationMs = Math.round((promptTokens / (rate * 18)) * 1000);
+          store.record(model, { promptTokens, completionTokens, evalDurationMs, promptEvalDurationMs, durationMs: evalDurationMs + promptEvalDurationMs + 300 }, true);
+        }
+      }
+    }
+  } finally {
+    store.close();
+  }
+  return id;
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: Usage, tokens and speed by model over time
+
+- A Usage icon in the sidebar footer opens a pop-up over the chat: tokens,
+  tokens in, tokens out, replies and time spent generating, a line per model,
+  and one row per model that follows the point in focus. Two switches pick
+  Tokens or Speed and the last 24 hours, 7 days, 30 days or everything.
+- The server counts each request's tokens and timings per hour and model in
+  its own file beside the threads. It holds counts and times only: no text,
+  thread or title. The first start fills it once from the replies already
+  stored; a fill that fails runs again on the next start with the same cutoff,
+  so replies counted live in between are not counted again.
+- The footer icons are toggles: Settings, Models and Usage each open on a
+  click and close on a second one, and switch straight to each other. Models
+  has its own icon. A destination picked while a pop-up is still loading wins.
+- Closing Settings puts the caret back in the draft where it was.
+- Dictation stops when Settings or Usage opens.
+
 ## 2026-11-11: The picker waits for a new reading after memory changes
 
 - Warming the model picker and then changing GPU memory or finishing a model
