@@ -52,13 +52,6 @@ it("reports a real emitted JS total over target while its entry still fits", () 
   expect(bundleSizeWarnings(size)).toEqual([expect.stringMatching(/^Total JS: .* KiB over\.$/)]);
 });
 
-it.runIf(process.env["GATES_LOCAL_BUNDLE_DIST"] !== undefined)("reports built bundle overages when explicitly requested", () => {
-  const dist = process.env["GATES_LOCAL_BUNDLE_DIST"];
-  if (dist === undefined) throw new Error("GATES_LOCAL_BUNDLE_DIST must name the production build");
-  const size = bundleSize(dist);
-  for (const warning of bundleSizeWarnings(size)) console.warn(`[bundle] warning: ${warning}`);
-});
-
 it("reports every over-target size without failing", () => {
   const size = { entryJs: 134.5, totalJs: 172.65, startupCss: 14, totalCss: 16 };
   const targets = { entryJsGzipKb: 133.5, totalJsGzipKb: 171.65, startupCssGzipKb: 13, totalCssGzipKb: 15 };

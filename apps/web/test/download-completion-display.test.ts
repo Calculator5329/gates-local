@@ -1,15 +1,31 @@
 // A finished transfer is still pending installation until the model list arrives.
-import { createElement } from "react";
+import { createElement, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 import type { State } from "../src/store.ts";
 import { firstChatPull } from "../src/pick.ts";
 
+const sent = vi.hoisted(() => ({ cancelPull: vi.fn(async (_name: string) => null) }));
 vi.mock("../src/store.ts", async (original) => {
   const actual = await original<typeof import("../src/store.ts")>();
   return { ...actual, useStore: <T>(selector: (s: State) => T) => selector(actual.getState()) };
 });
+vi.mock("../src/session.ts", async (original) => ({ ...await original<typeof import("../src/session.ts")>(), cancelPull: sent.cancelPull }));
+// useAct's state starts empty either way; without its hook a row can be expanded outside a render.
+vi.mock("../src/settings-ui.tsx", async (original) => ({
+  ...await original<typeof import("../src/settings-ui.tsx")>(),
+  useAct: () => [null, async (action: Promise<unknown>) => (await action) === null],
+}));
+
+type Node = ReactElement<Record<string, unknown>>;
+/** Expands function components (here only hook-free ones) and lists every element. */
+function nodes(node: unknown): Node[] {
+  if (Array.isArray(node)) return node.flatMap(nodes);
+  if (!isValidElement<Record<string, unknown>>(node)) return [];
+  if (typeof node.type === "function") return nodes((node.type as (p: unknown) => unknown)(node.props));
+  return [node, ...nodes(node.props["children"])];
+}
 import { setState } from "../src/store.ts";
 
 const fit = methodSamples["fit.check"].result;
@@ -86,6 +102,9 @@ it("an active untagged pull stays visible and cancellable beside its installed l
   expect.soft(rows).toContain('data-pull="llama3"');
   expect.soft(rows).toContain('aria-label="Cancel download"');
   expect.soft(rows).not.toContain('disabled=""');
+  const cancel = nodes(createElement(DownloadingRows)).find(n => n.props["aria-label"] === "Cancel download");
+  (cancel?.props["onClick"] as (() => void) | undefined)?.();
+  expect.soft(sent.cancelPull.mock.calls).toEqual([["llama3"]]);
   const picker = renderToStaticMarkup(createElement(Picker));
   expect.soft(picker).toContain('data-m="llama3"');
   const pendingRow = picker.slice(picker.indexOf('data-m="llama3"')).split("</button>")[0];

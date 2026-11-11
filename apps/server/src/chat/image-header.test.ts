@@ -1,6 +1,16 @@
 import { expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { imageDimensions, visionTokens } from "./image-header.ts";
+
+// A real encoder's output, so the scan has stuffed FF00 bytes and restart markers like a camera JPEG.
+// Made with: magick -seed 7 -size 61x45 xc:gray +noise Random noise.ppm && cjpeg -quality 95 -restart 1 -outfile noise-61x45-restart.jpg noise.ppm
+it("reads a real encoder's JPEG whose scan holds stuffed bytes and restart markers", () => {
+  const real = readFileSync(new URL("./fixtures/noise-61x45-restart.jpg", import.meta.url));
+  expect(real.includes(Buffer.from([255, 0]))).toBe(true);
+  expect(real.includes(Buffer.from([255, 208]))).toBe(true);
+  expect(imageDimensions(real, "jpeg")).toEqual({ width: 61, height: 45, frames: 1 });
+});
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==", "base64");
 const pngChunk = (kind: string, data: Buffer) => {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: Tests that press the buttons
+
+- A test audit broke 50 lines of the app and ran the gates: typecheck, lint
+  and the unit tests caught 26 of the 47 that change behaviour, and eight
+  buttons broken at once left every unit test green. Sixteen of those breaks
+  now fail a test. No app code changed.
+- Restart, Open data folder, Dismiss, Cancel download, Try again, Reload
+  window, the compact Stop and first run's Retry are tested by pressing them,
+  and every method of the desktop bridge by calling it.
+- New checks: a JPEG from a real encoder with stuffed bytes and restart
+  markers is read; a link in the desktop app goes to the system browser; the
+  File/Edit/View menu is removed at start-up; a failed update start shows its
+  error; an update stopped by a crash is cleaned up; every maker in the
+  catalog has its own mark; no Settings section or first-run screen shows the
+  Ollama version.
+- Removed one test that never ran and asserted nothing (the bundle report).
+
 ## 2026-11-11: Image mode sends your words straight to an image model you pick
 
 - With Image on in the composer, the message is the prompt and no chat model

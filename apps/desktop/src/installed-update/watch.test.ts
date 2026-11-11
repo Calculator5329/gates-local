@@ -596,6 +596,38 @@ describe("endings outside the matrix", () => {
     expect(w.transaction()).toMatchObject({ intent: "cleanup", ending: "updated" });
   });
 
+  it("a stopped result saved before a crash, with the transaction not yet moved on: the resume cleans up and ends stopped", async () => {
+    const w = new World();
+    const log = newLog();
+    const fx = w.effects(log, "W2.before");
+    beginUpdate(w.approval, { spawnWatcher: () => undefined, stopAt: fx.stopAt, fs: fx.fs, earlierFailure: false });
+    expect(await attempt(() => runWatcher(w.file, fx))).toMatchObject({ outcome: "crashed", point: "W2.before" });
+    // stop() wrote the result, then the watcher died before writing the cleanup intent.
+    const sentence = disk(w.dataDir);
+    w.results.set("tx1", { id: "tx1", from: FROM, to: TO, words: sentence, outcome: "stopped" });
+    w.watcherDied();
+    const { end } = await resume(w);
+    expect(end).toEqual({ outcome: "stopped", words: sentence, cleaned: true, startApp: true });
+    expect(w.transaction()).toBeNull();
+    expect(holds(w.program, w.old, w.new)).toBe("old");
+    expect(contents(w.live)).toEqual({ version: STORE_BEFORE, ids: BEFORE });
+  });
+
+  it("a stop before the old version was identified, killed at C: the resume reads the cleanup and finishes it", async () => {
+    const w = new World();
+    w.hangOldApp();
+    const log = newLog();
+    const fx = w.effects(log, "C.before");
+    beginUpdate(w.approval, { spawnWatcher: () => undefined, stopAt: fx.stopAt, fs: fx.fs, earlierFailure: false });
+    expect(await attempt(() => runWatcher(w.file, fx))).toMatchObject({ outcome: "crashed", point: "C.before" });
+    w.watcherDied();
+    // The cleanup intent on disk has no identities: the old app was never identified.
+    const { end } = await resume(w);
+    expect(end).toMatchObject({ outcome: "stopped", words: words.didNotClose(), cleaned: true });
+    expect(w.transaction()).toBeNull();
+    expect(holds(w.program, w.old, w.new)).toBe("old");
+  });
+
   it("C: a stop before the replace whose cleanup fails still starts the app", async () => {
     const w = new World(); w.free = 10;
     const { end, log } = await update(w, [{ op: "removeTree", match: is(w.download), code: "EACCES" }]);
