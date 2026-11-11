@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: The app measures each model's speed on this computer (nothing shows yet)
+
+- For each model the app now works out a measured speed in tokens per
+  second: the tokens it wrote divided by the time it spent writing them,
+  over the finished replies of the last 14 days. A model with fewer than
+  50 tokens in that time has no number. Nothing is estimated.
+- The number updates when a reply finishes and when a thread or message
+  is deleted. A second window and the phone get the same numbers.
+- Nothing on screen shows it yet. The rows in Settings › Models and the
+  model picker get it in a later change.
+- The first launch after this change adds an index to the chat history
+  once. On a test history of 50,000 replies that took 0.4 seconds, and
+  0.2 milliseconds on every launch after. The speed read itself took
+  about 11 milliseconds on that history.
+- Known limit: a page left open for more than 14 days with no chat can
+  keep showing an old number until the next reply or a reload.
+
 ## 2026-11-11: Switching runtimes no longer forgets which models are loaded
 
 - The app checks every few seconds which models the runtime has in memory.

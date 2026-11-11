@@ -234,6 +234,14 @@ export function createApp(deps: AppDeps): App {
     refreshModels();
   });
   const offCatalog = catalog.onChange((models) => push("models.changed", models));
+  /** Measured speeds change only when a finished reply is saved or replies are deleted; one read then, never per word. */
+  const pushSpeeds = () => {
+    try {
+      push("models.speed", store.modelSpeeds());
+    } catch (e) {
+      log(`model speeds not read: ${(e as Error).message}`);
+    }
+  };
   const offSources = deps.sources?.onChange(sources => push("sources.changed", sources));
   const offImports = deps.libraryImports?.onChange(value => push("sources.imports", value));
 
@@ -402,6 +410,7 @@ export function createApp(deps: AppDeps): App {
       const event = dropped.type === "done" ? saveFinished(dropped) : saveUnfinished(dropped);
       push("chat.event", { turnId, threadId, event: event.type === "error" && turn.contextNotice ? { ...event, contextNotice: turn.contextNotice } : event });
       if (event.type === "done" || event.partial !== undefined) push("threads.changed", { threadId });
+      if (event.type === "done") pushSpeeds();
     };
     /** `work`, or HALTED as soon as halt() runs; the dropped work finishes in the background. */
     const untilHalted = <T>(work: Promise<T>): Promise<T | typeof HALTED> => {
@@ -573,6 +582,7 @@ export function createApp(deps: AppDeps): App {
         if (marked) deleting.delete(threadId);
       }
       push("threads.changed", { threadId });
+      pushSpeeds();
       return { threadId };
     },
     "messages.delete": async ({ threadId, messageId }) => {
@@ -587,10 +597,12 @@ export function createApp(deps: AppDeps): App {
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after message deletion failed: ${String(error)}`));
       } finally { if (marked) deleting.delete(threadId); }
       push("threads.changed", { threadId });
+      pushSpeeds();
       return { messageId };
     },
 
     "models.list": async () => catalog.current() ?? (await catalog.refresh()).models,
+    "models.speed": () => store.modelSpeeds(),
     "models.refresh": async () => (await catalog.refresh()).models,
 
     "runtime.status": () => runtime.status(),

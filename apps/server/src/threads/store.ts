@@ -42,7 +42,25 @@ export interface ThreadStore {
   claimImageRetry(threadId: string, previousJobId: string, jobId: string): { jobId: string; prompt: string; created: boolean };
   /** Called once by the image module at startup; an old process cannot finish these jobs. */
   interruptImageJobs(): ImageEvent[];
+  /** Each model's measured decode speed over the last SPEED_WINDOW_MS, by model name without ":latest"; models under the floor are left out. */
+  modelSpeeds(): ModelSpeed[];
   close(): void;
+}
+
+/** Measured speeds cover the last 14 days of replies; older ones say nothing about this computer now. */
+export const SPEED_WINDOW_MS = 14 * 86_400_000;
+/** Fewer completion tokens than this in the window shows no number: a reply or two of a few words is noise. */
+export const SPEED_MIN_TOKENS = 50;
+/** Finished replies with a decode time, grouped by model; the partial index messages_speed covers it. */
+export const SPEED_SQL = `SELECT model, SUM(completion_tokens) AS tokens, SUM(eval_duration_ms) AS ms, COUNT(*) AS replies
+  FROM messages INDEXED BY messages_speed
+  WHERE role = 'assistant' AND eval_duration_ms > 0 AND completion_tokens IS NOT NULL AND created_at >= ? AND model IS NOT NULL
+  GROUP BY model`;
+
+export interface ModelSpeed {
+  model: string;
+  tokensPerSecond: number;
+  replies: number;
 }
 
 export const DEFAULT_THREAD_TITLE = "New thread";
@@ -109,6 +127,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     updateImageCard: db.prepare("UPDATE messages SET image_job_json = ?, images_json = ? WHERE id = ? AND thread_id = ?"),
     unfinishedImages: db.prepare("SELECT image_job_json FROM messages WHERE json_extract(image_job_json, '$.state') IN ('queued', 'running')"),
     getImageCard: db.prepare("SELECT content, image_job_json FROM messages WHERE id = ? AND thread_id = ? AND image_job_json IS NOT NULL"),
+    speeds: db.prepare(SPEED_SQL),
   } satisfies Record<string, StatementSync>;
 
   let open = true;
@@ -283,6 +302,21 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         stmt.updateImageCard.run(JSON.stringify(event), null, old.jobId, old.threadId);
         return event;
       }));
+    },
+
+    modelSpeeds() {
+      guard();
+      // "llama3" and "llama3:latest" are one model; the sums merge before the floor.
+      const sums = new Map<string, { tokens: number; ms: number; replies: number }>();
+      for (const row of stmt.speeds.all(now() - SPEED_WINDOW_MS)) {
+        const model = str(row, "model").replace(/:latest$/, "");
+        const sum = sums.get(model) ?? { tokens: 0, ms: 0, replies: 0 };
+        sum.tokens += Number(row["tokens"]); sum.ms += Number(row["ms"]); sum.replies += Number(row["replies"]);
+        sums.set(model, sum);
+      }
+      return [...sums].filter(([, s]) => s.tokens >= SPEED_MIN_TOKENS && s.ms > 0)
+        .map(([model, s]) => ({ model, tokensPerSecond: s.tokens / (s.ms / 1000), replies: s.replies }))
+        .toSorted((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
     },
 
     close() {

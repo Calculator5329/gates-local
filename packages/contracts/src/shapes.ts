@@ -117,6 +117,20 @@ export const ModelInfo = S.Struct({
 });
 export type ModelInfo = typeof ModelInfo.Type;
 
+/**
+ * A model's measured speed on this computer: completion tokens over decode time,
+ * summed over its finished replies of the last 14 days. Never an estimate; a model
+ * without enough measured replies has no entry.
+ */
+export const ModelSpeed = S.Struct({
+  /** The model name without ":latest", so either spelling matches. */
+  model: S.String,
+  tokensPerSecond: S.Finite.check(S.isGreaterThan(0)),
+  /** How many replies the number covers. */
+  replies: PositiveInt,
+});
+export type ModelSpeed = typeof ModelSpeed.Type;
+
 export const RuntimeState = S.Literals([
   "ready",
   "starting",

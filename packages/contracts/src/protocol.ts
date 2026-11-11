@@ -14,6 +14,7 @@ import {
   ImageStatus,
   Message,
   ModelInfo,
+  ModelSpeed,
   NumCtx,
   ModelLoad,
   PullProgress,
@@ -192,6 +193,8 @@ export const methods = {
   "models.remove": { params: ModelRef, result: ModelRef, phone: "deny" },
   /** Preload a model at a window after a fit check (the picker calls it on selection). */
   "models.load": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: ModelLoad, phone: "allow" },
+  /** Each model's measured speed from saved replies (ModelSpeed); later changes come on the models.speed push. */
+  "models.speed": { params: NoParams, result: S.Array(ModelSpeed), phone: "allow" },
   "sources.list": { params: NoParams, result: S.Array(Source), phone: "allow" },
   "sources.add": { params: S.Struct({ kind: SourceKind, path: S.String, label: S.optional(S.String) }), result: Source, phone: "deny" },
   "sources.remove": { params: SourceRef, result: SourceRef, phone: "deny" },
@@ -236,6 +239,8 @@ export const pushes = {
   /** One per progress step of every download, until done, error or cancelled. */
   "models.pull": { payload: PullProgress },
   "models.load": { payload: ModelLoad },
+  /** The whole list again, after a finished reply or a deletion changed what it counts. */
+  "models.speed": { payload: S.Array(ModelSpeed) },
   "sources.changed": { payload: S.Array(Source) },
   "sources.imports": { payload: SourceImports },
   "image.status": { payload: ImageStatus },

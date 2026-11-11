@@ -8,7 +8,7 @@ export type IconId =
   | "star" | "mark" | "pen" | "search" | "gear" | "down" | "left" | "arrow" | "check" | "checkc"
   | "x" | "xc" | "clock" | "plus" | "clip" | "alert" | "lock" | "file" | "image" | "bulb" | "copy" | "redo"
   | "spin" | "download" | "more" | "chat" | "book" | "cpu" | "server" | "db" | "folder" | "sliders"
-  | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right";
+  | "pencil" | "trash" | "box" | "wrench" | "keyboard" | "menu" | "gauge" | "right" | "speed";
 
 export function Icon({ id, cls }: { id: IconId; cls?: string }) {
   return (
@@ -76,6 +76,8 @@ export function Sprite() {
         <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4" /><path d="M3.3 19a10 10 0 1 1 17.4 0" /></symbol>
         <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15" /></symbol>
         <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8" /></symbol>
+        {/* client addition: measured speed (Lucide circle-gauge), apart from the context gauge above */}
+        <symbol id="i-speed" viewBox="0 0 24 24"><path d="M15.6 2.7a10 10 0 1 0 5.7 5.7" /><circle cx="12" cy="12" r="2" /><path d="M13.4 10.6 19 5" /></symbol>
       </defs>
     </svg>
   );

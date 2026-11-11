@@ -687,6 +687,8 @@ a.btn{text-decoration:none}
 .c-note.no{color:var(--red-fg)}
 .hdr .hdr-in{flex:1;min-width:0;width:auto;font-family:var(--font-sans);font-size:14px;font-weight:500}
 .err-line{display:flex;align-items:center;gap:8px;font-size:13px;line-height:24px;color:var(--red-fg)}
+/* a model's measured speed: inline, no width when absent, never taller than the text beside it */
+.tps{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:inherit;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* ---------- small screens (client addition) ----------
    1024 px and up is the desktop above, untouched. Below 1024 the sidebar is a drawer over a scrim;

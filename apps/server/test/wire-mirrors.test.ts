@@ -7,6 +7,7 @@ import {
   type FitReport as WireFitReport,
   type Message as WireMessage,
   type ModelInfo as WireModelInfo,
+  type ModelSpeed as WireModelSpeed,
   type RuntimeStatus as WireRuntimeStatus,
   type Thread as WireThread,
   decodePayload,
@@ -21,6 +22,7 @@ import { decideFit } from "../src/fit/fit.ts";
 import type { FitReport as FitFitReport } from "../src/fit/types.ts";
 import type { ModelInfo as RuntimeModelInfo, RuntimeStatus as RuntimeRuntimeStatus } from "../src/runtime/types.ts";
 import type { Message as StoreMessage, Thread as StoreThread } from "../src/threads/types.ts";
+import type { ModelSpeed as StoreModelSpeed } from "../src/threads/store.ts";
 
 type Assignable<From, To> = [From] extends [To] ? true : false;
 
@@ -33,7 +35,8 @@ export const mirrorsFit: [
   Assignable<FitFitReport, WireFitReport>,
   Assignable<RuntimeRuntimeStatus, WireRuntimeStatus>,
   Assignable<RuntimeModelInfo, WireModelInfo>,
-] = [true, true, true, true, true, true, true];
+  Assignable<StoreModelSpeed, WireModelSpeed>,
+] = [true, true, true, true, true, true, true, true];
 
 const MIB = 1024 * 1024;
 

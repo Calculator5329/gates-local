@@ -209,6 +209,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "models.pulls": { params: {}, result: [] },
   "models.remove": { params: { name: "gemma3:4b" }, result: { name: "gemma3:4b" } },
   "models.load": { params: { model: "qwen3.5:9b", numCtx: 16384 }, result: { model: "qwen3.5:9b", numCtx: 16384, state: "ready" } },
+  // None measured by default, so a client test that does not ask about speed sees none.
+  "models.speed": { params: {}, result: [] },
   "sources.list": { params: {}, result: [source] },
   "sources.add": { params: { kind: "sqlite", path: "/home/me/library.db" }, result: source },
   "sources.remove": { params: { id: "s1" }, result: { id: "s1" } },
@@ -300,6 +302,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
     { model: "qwen3.5:9b", numCtx: 16384, state: "loading" },
     { model: "qwen3.5:9b", numCtx: 32768, state: "error", message: "Not enough memory at 32k" },
   ],
+  "models.speed": [[{ model: "qwen3.5:9b", tokensPerSecond: 101.6, replies: 8 }, { model: "gemma3:4b", tokensPerSecond: 8.4, replies: 1 }], []],
   "sources.changed": [[source], []],
   "sources.imports": [{ samples: [], jobs: [] }],
   "image.status": [imageReady, { state: "off", owner: "none" }],

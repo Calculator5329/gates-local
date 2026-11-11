@@ -98,6 +98,10 @@ export function ensureMessageColumns(db: DatabaseSync): void {
     addMessageColumns(db);
     const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
     if (!columns.has("interrupted")) db.exec("ALTER TABLE messages ADD COLUMN interrupted INTEGER CHECK (interrupted IS NULL OR interrupted = 1)");
+    // Each model's measured speed (store.ts SPEED_SQL) reads only this: finished replies with a decode time.
+    // An index is not a schema version; a previous build opens the file and ignores it.
+    db.exec(`CREATE INDEX IF NOT EXISTS messages_speed ON messages (created_at, model, completion_tokens, eval_duration_ms, role)
+             WHERE role = 'assistant' AND eval_duration_ms > 0 AND completion_tokens IS NOT NULL`);
     db.exec("COMMIT");
   } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
 }

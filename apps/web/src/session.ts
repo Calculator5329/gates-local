@@ -19,6 +19,7 @@ import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyTextSize, applyTheme, serverUrl, webServerUrl } from "./session/platform.ts";
 import { createNavigation } from "./session/navigation.ts";
 import { createUpdates } from "./session/updates.ts";
+import { speedsChanged, speedsRead } from "./session/speed.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
 
 // Preserve the UI's action imports while implementation moves into session modules.
@@ -83,8 +84,8 @@ const { settingsPatch } = settingsSession;
 
 // ---------------------------------------------------------------- hydrate and pushes
 
-/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status", "update.changed"]);
+/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status, models.speed). */
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status", "update.changed", "models.speed"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -130,6 +131,7 @@ async function hydrateWith(
   on("gpu.changed", fitSession.gpuChanged);
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
+  on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
   on("sources.changed", (sources) => applyServerEvent({ sources }));
   on("update.changed", updatesSession.receiveUpdate);
   on("image.event", (e) => {
@@ -183,14 +185,16 @@ async function hydrateWith(
   const catalogTicket = catalogOrder.next();
   const updateTicket = updateOrder.next();
   // update.status reads local files; the desktop server owns automatic checks.
-  const [gpu, catalog, sources, imageStatus, update] = await Promise.all([
+  // Measured speeds are a saved-reply read the model list's first frame never waits on.
+  const [gpu, catalog, sources, imageStatus, update, speeds] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("image.status", {}),
     probe("update.status", {}),
+    probe("models.speed", {}),
   ]);
-  applyServerEvent({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}) });
+  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
   release("none");
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
   // Read after the release: a GPU push held behind gpu.status is the newer answer.

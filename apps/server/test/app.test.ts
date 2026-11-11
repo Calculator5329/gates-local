@@ -192,7 +192,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
 
   const pushes: Rig["pushes"] = [];
   const waiters = new Set<() => void>();
-  for (const channel of ["chat.event", "runtime.changed", "models.changed", "threads.changed"] as const) {
+  for (const channel of ["chat.event", "runtime.changed", "models.changed", "threads.changed", "models.speed"] as const) {
     client.subscribe(channel, (payload) => {
       pushes.push({ channel, payload });
       for (const w of waiters) w(); // a waiter deleting itself mid-iteration is safe on a Set
@@ -1620,5 +1620,47 @@ describe("turn failures", () => {
     const err = await rejection(r.client.call("chat.send", { threadId: "nope", content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("thread-not-found");
     expect(r.app.activeTurns()).toBe(0);
+  });
+});
+
+describe("models.speed", () => {
+  // 60 tokens decoded in 0.5 s of a 4 s call: 120 tokens per second, never 15.
+  const measured = line({ model: MODEL, message: { role: "assistant", content: "" }, done: true, done_reason: "stop", total_duration: 4e9, eval_duration: 5e8, eval_count: 60, prompt_eval_count: 11 });
+
+  it("reads once per finished reply, pushes the new list to every client, and never reads on a word", async () => {
+    const r = await rig();
+    expect(await r.client.call("models.speed", {})).toEqual([]);
+    const reads = vi.spyOn(r.store, "modelSpeeds");
+    r.setChat((res) => stream(res, [piece("one "), piece("two "), piece("three "), measured], 20));
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const pushed = await r.waitFor("models.speed", (p) => p.length > 0);
+    expect(pushed).toEqual([{ model: MODEL, tokensPerSecond: 120, replies: 1 }]);
+    expect(events(r, sent.turnId).filter((e) => e.type === "delta")).toHaveLength(3);
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(await r.client.call("models.speed", {})).toEqual(pushed);
+  });
+
+  it("a reply that stops before its decode time pushes no new list", async () => {
+    const r = await rig();
+    r.setChat((res) => stream(res, [piece("half "), line({ error: "model runner crashed" })]));
+    const reads = vi.spyOn(r.store, "modelSpeeds");
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+    expect(reads).not.toHaveBeenCalled();
+    expect(r.pushes.filter((p) => p.channel === "models.speed")).toEqual([]);
+  });
+
+  it("deleting the thread takes its replies out of the number", async () => {
+    const r = await rig();
+    r.setChat((res) => stream(res, [piece("hi"), measured]));
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    await r.waitFor("models.speed", (p) => p.length === 1);
+    await r.client.call("threads.delete", { threadId: t.id });
+    await r.waitFor("models.speed", (p) => p.length === 0);
+    expect(await r.client.call("models.speed", {})).toEqual([]);
   });
 });

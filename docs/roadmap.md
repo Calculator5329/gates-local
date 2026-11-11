@@ -59,6 +59,9 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
 - [ ] <!-- workspace:id=work:835820d7-09e1-5ef8-ae5d-e027a7d3613e --> Phone drawer: the New thread button's centre sits about 8 px left of the close button above it and about 4 px left of the thread rows' menu buttons. Line the three up.
 
+- [ ] <!-- workspace:id=work:d6f9ccae-85c3-5fbb-8144-9701313e3fcf --> Show each model's measured speed on the installed-model rows in Settings › Models and on the model picker's rows (the data and the small component landed 2026-11-11; nothing renders it yet). The browser spec should then read the number from the row, with a fixture that sets its own token count.
+- [ ] <!-- workspace:id=work:b7c16486-811b-5ff4-b102-bbbcae47de41 --> A model's measured speed can stay on a page left open past the 14-day window with no chat in between; it corrects on the next finished reply or reload. Drop it on time without a polling timer (for example when the window is shown again).
+
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
 

@@ -13,6 +13,7 @@ import type {
   Message,
   ModelInfo,
   ModelLoad,
+  ModelSpeed,
   PullProgress,
   RuntimeStatus,
   Settings,
@@ -170,6 +171,8 @@ export interface State {
   readonly settings: Maybe<Settings>;
   readonly gpu: Maybe<GpuStatus>;
   readonly catalog: Maybe<readonly CatalogEntry[]>;
+  /** Measured decode speed by model name without ":latest"; a model with no entry shows no number (model-speed.tsx). */
+  readonly speeds: Maybe<Readonly<Record<string, ModelSpeed>>>;
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
@@ -233,6 +236,7 @@ const initial: State = {
   settings: undefined,
   gpu: undefined,
   catalog: undefined,
+  speeds: undefined,
   pulls: {},
   sources: undefined,
   imageStatus: undefined,
