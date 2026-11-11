@@ -264,11 +264,20 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .think .th-x{display:flex;align-items:center}
 .think .th-x .ic,.wr-x .ic{width:14px;height:14px;transition:transform .2s}
 .think[aria-expanded="true"] .th-x .ic{transform:rotate(180deg)}
+/* "Thinking · 3 s" and "Thought for 3 s" share one cell, the other hidden: the pill keeps its box when one becomes the other */
+.think .th-l{display:grid;text-align:left;white-space:nowrap;font-variant-numeric:tabular-nums}
+.think .th-l>span{grid-area:1/1}
+.think .th-w{visibility:hidden}
+/* while the model thinks, the pill reads as the status row did: a pulsing bulb, "Thinking" in full colour, its seconds muted */
+.think.live .th-i .ic{animation:pulse 2s ease-in-out infinite}
+.think.live .th-l>span:first-child{color:var(--foreground)}
+.think.live .th-l [aria-hidden]{color:var(--muted-foreground)}
+@media (prefers-reduced-motion:reduce){.think.live .th-i .ic{animation:none}}
 /* one short ease on height and opacity, so the reply under it slides instead of jumping; hidden only after it has closed */
 .think-body{interpolate-size:allow-keywords;height:0;opacity:0;visibility:hidden;overflow:hidden;overflow-wrap:anywhere;margin:0 0 0 11px;padding-left:18px;border-left:1px solid var(--border);font-size:14px;line-height:1.6;color:var(--muted-foreground);transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s linear .18s}
 .think[aria-expanded="true"]+.think-body{height:auto;opacity:1;visibility:visible;margin-bottom:4px;transition:height .18s ease,opacity .18s ease,margin .18s ease,visibility 0s}
 @media (prefers-reduced-motion:reduce){.think-body,.think[aria-expanded="true"]+.think-body{transition:none}}
-/* while the model reasons, the status row carries the same bulb with "Thinking · 3 s" */
+/* after a tool step, while the model reasons again, the status row carries the same bulb with "Thinking · 3 s" */
 .working.thinking>.ic{width:15px;height:15px;margin:0 2px 0 4px;animation:pulse 2s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.working.thinking>.ic{animation:none}}
 

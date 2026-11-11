@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: Read a thought while the model is still thinking
+
+- The "Thinking" line on a reply is now the thought itself: click it (or
+  Enter, or Space) while the model thinks and its text grows as it arrives.
+  Before, it could only be opened after the first reply word or a tool step.
+- It is the same control before and after: "Thinking · 3 s" becomes
+  "Thought for 3 s" in the same box, so nothing shifts. It never opens by
+  itself, and open or shut holds when the reply starts and when it ends.
+- An open thought follows its last line; a reader who scrolled up is left
+  where they are.
+- A reply stopped while thinking keeps the thought, and its seconds run to
+  the moment of Stop.
+- Known limits: after a tool step a second round of thinking still grows
+  inside the first thought, above the tool rows, and the row at the bottom
+  says "Writing" (on the roadmap as one control for thinking and tool
+  calls). Checked with the test model only, not a real model's thinking.
+
 ## 2026-11-11: A model that is loading looks the same from every chat
 
 - Picking a model in one chat and opening a new chat while it was still

@@ -32,6 +32,11 @@ accordingly.
       *Accept:* the turn joins the running preload, shown by one residency read and one generate for the pair.
 - [ ] <!-- workspace:id=work:44254433-4354-58d3-ba51-04fdcd40fd17 --> The Default card in Settings shows the app's pick before anyone picks, while New thread starts on the model used last; the two can name different models with no saved default.
       *Accept:* decide which one the card means and say it once on the card.
+- [ ] <!-- workspace:id=work:eee4b8c7-1d1d-5fa8-af4d-274277beda34 --> Thinking and tool calls in a reply are one control. Today each tool call is its own row, a second round of thinking grows inside the first thought above those rows and pushes them down, its label says "Thought for" while the model thinks again, and the bottom row says "Writing" during it.
+      *Accept:* one chip per reply (thinking seconds and the number of tool calls), closed by default and the same height however many calls the turn makes; opened, one list in the order things happened; an opened call shows its whole command and its output in a box that scrolls past 360 px.
+- [ ] <!-- workspace:id=work:7d4370b7-afe9-5e0f-b438-8ea1d02fca00 --> A reply stopped while the model was thinking reads "Show thinking" and its pill can change width at Stop.
+      *Accept:* the stopped thought keeps its seconds and its box.
+- [ ] <!-- workspace:id=work:6a3a902b-86b2-59ec-b753-dda94ddcd3a8 --> Live thoughts are checked with the test model only. Try a real thinking model, the desktop window and the phone width.
 
 *Measured 2026-11-09:* Native launch now includes Electron and the supervised
 server, with separate phase markers and import counters. Startup imports fell

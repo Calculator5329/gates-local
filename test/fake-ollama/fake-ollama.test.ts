@@ -140,6 +140,19 @@ describe("fake ollama", () => {
     expect(again).toBe(content);
   });
 
+  it("holds inside the thinking until released, then thinks on and answers", async () => {
+    fake.setScenario("models", { holdThinkingAfterTokens: 3, thinkingRepeat: 2, tokenDelayMs: 0, firstTokenDelayMs: 0 });
+    const reply = hello();
+    await vi.waitFor(() => expect(fake.state().turns[0]?.firstTokenAt).toBeDefined());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fake.state().turns[0]?.outcome).toBeUndefined();
+    await post(fake, "/__fake/release", {});
+    const lines = await reply;
+    const thinking = lines.map((l) => (l["message"] as { thinking?: string } | undefined)?.thinking ?? "").join("");
+    expect(thinking.match(/The question is short/g)).toHaveLength(2);
+    expect(contentOf(lines)).toMatch(/^You asked: hello there\./);
+  });
+
   it("skips thinking when think is false, and loads the model at the asked context", async () => {
     const lines = await ndjson(
       await post(fake, "/api/chat", { model: "qwen3.5:9b", think: false, options: { num_ctx: 32768 }, messages: [{ role: "user", content: "x" }] }),

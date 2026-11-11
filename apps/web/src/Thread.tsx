@@ -3,7 +3,7 @@
 // props only and memoised by message, so a streaming token or a keystroke runs
 // nothing in it; only the live reply reads the store and paces its text. A
 // thread opens with its last turns mounted and adds the older ones when idle.
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { CatalogEntry, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
@@ -119,21 +119,51 @@ function UserBubble({ text, time, images = [], noted = false }: { text: string; 
   );
 }
 
-function ThinkLine({ secs, text }: { secs: number | undefined; text: string }) {
+/**
+ * A reply's thought: one control from the first piece of thinking to the saved
+ * reply. While the model thinks (`since`, when its turn started) it reads
+ * "Thinking" and its text grows in place. It opens only when asked and stays as
+ * the person left it when the reply starts and ends. Its seconds are hidden from
+ * a screen reader, which hears one stable name.
+ */
+function ThinkLine({ secs, text, since }: { secs: number | undefined; text: string; since: number | undefined }) {
   const [open, setOpen] = useState(false);
+  const body = useId();
   return (
     <>
-      <button type="button" className="think" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className={since === undefined ? "think" : "think live"} aria-expanded={open} aria-controls={body} onClick={() => setOpen(!open)}>
         <span className="th-i">
           <Icon id="bulb" />
         </span>
-        <span className="th-l">{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
+        {since === undefined ? <ThoughtLabel secs={secs} /> : <ThinkingLabel since={since} />}
         <span className="th-x">
           <Icon id="down" />
         </span>
       </button>
-      <div className="think-body">{text}</div>
+      <div className="think-body" id={body}>{text}</div>
     </>
+  );
+}
+
+// Both labels share one grid cell, the other one hidden, so the pill is as wide
+// as the wider of them before and after "Thinking" becomes "Thought for N s".
+function ThinkingLabel({ since }: { since: number }) {
+  const now = useTicker(250, true);
+  const secs = Math.floor((now - since) / 1000);
+  return (
+    <span className="th-l">
+      <span>Thinking{secs >= 1 ? <span aria-hidden="true">{` · ${secs} s`}</span> : null}</span>
+      <span className="th-w" aria-hidden="true">{`Thought for ${Math.max(1, Math.round((now - since) / 1000))} s`}</span>
+    </span>
+  );
+}
+
+function ThoughtLabel({ secs }: { secs: number | undefined }) {
+  return (
+    <span className="th-l">
+      <span>{secs === undefined ? "Show thinking" : `Thought for ${secs} s`}</span>
+      <span className="th-w" aria-hidden="true">{`Thinking · ${secs ?? 1} s`}</span>
+    </span>
   );
 }
 
@@ -307,12 +337,13 @@ function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, a
   const running = tools.some((t) => t.state === "running");
   const interrupted = msg?.interrupted === true;
   const streaming = live !== null && end === undefined;
-  const showThink = thinking !== "" && (!streaming || text !== "" || tools.length > 0);
+  // the model is thinking: the thought is the pill, and no status row says so again
+  const thinkingNow = streaming && text === "" && tools.length === 0 && thinking !== "";
   const pending = paced.length < text.length;
   const shown = reveal(paced, streaming || pending);
   return (
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
-      {showThink ? <ThinkLine secs={secs} text={thinking} /> : null}
+      {thinking !== "" ? <ThinkLine secs={secs} text={thinking} since={thinkingNow ? live.startedAt : undefined} /> : null}
       {tools.filter(t => t.name !== "image" || t.state !== "done").map((t) => (
         <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />
       ))}
@@ -324,7 +355,7 @@ function Reply({ msg, live, text, paced, thinking, tools, secs, contextNotice, a
           <span className="ph">Writing</span>
         </div>
       ) : null}
-      {streaming && text === "" && !running ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
+      {streaming && text === "" && !running && !thinkingNow ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
       {end?.kind === "stopped" ? (
         <div className="stopped">
           <span>Stopped after {end.secs} s</span>
@@ -374,7 +405,9 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const knownStop = useStore(s => msg !== undefined && s.stopNotes[msg.id] !== undefined);
   const secs = live === null
     ? ft === undefined ? undefined : Math.max(1, Math.round(ft / 1000))
-    : live.thinkingSecs ?? Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000));
+    // stopped while thinking: the thought lasted until Stop, not until this render
+    : live.thinkingSecs ?? (live.firstTokenAt === undefined && live.end?.kind === "stopped" ? Math.max(1, live.end.secs)
+      : Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000)));
   const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
   if (msg !== undefined) countRender(msg.id);

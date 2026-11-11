@@ -14,6 +14,8 @@
 //   slow-drip         every reply is DRIP_REPLY (paragraphs, a heading, a list,
 //                     a code block, a table) over about 2 s; holdAfterTokens > 0
 //                     pauses until /__fake/release or cancellation
+//                     (holdThinkingAfterTokens pauses any thinking model the
+//                     same way, inside its thinking)
 //   long-name         the three models plus a long Hugging Face GGUF tag
 //   threads           prompt-labelled paragraphs with independent request timing
 // An "installed": [names] option replaces the scenario's installed set (names
@@ -50,6 +52,10 @@ export interface FakeOptions {
   errorAfterTokens: number;
   /** slow-drip/threads: pause after this many tokens until released or cancelled; 0 never pauses. */
   holdAfterTokens: number;
+  /** Any scenario that thinks: pause after this many thinking tokens until released or cancelled; 0 never pauses. */
+  holdThinkingAfterTokens: number;
+  /** The thinking text this many times over, for a thought taller than the view. */
+  thinkingRepeat: number;
   /** Keep asking for a native tool after receiving its result, to exercise the tool-turn limit. */
   repeatToolCalls: number;
   /** slow-drip: use the long mixed-Markdown measurement fixture when nonzero. */
@@ -80,6 +86,8 @@ const DEFAULTS: FakeOptions = {
   replyWords: 60,
   errorAfterTokens: 8,
   holdAfterTokens: 0,
+  holdThinkingAfterTokens: 0,
+  thinkingRepeat: 1,
   repeatToolCalls: 0,
   longDrip: 0,
   burstTokens: 0,
@@ -257,6 +265,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
   let promptOptions: Record<string, Partial<FakeOptions>> = {};
   const releases = new Map<number, () => void>();
   const released = new Set<number>();
+  const thinkHolds = new Map<number, () => void>();
   const scheduler = createScheduler(() => [...loaded, ...filling], (names) => {
     loaded = loaded.filter((l) => !names.includes(l.name));
     writeGpu();
@@ -383,9 +392,19 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       }
       let sent = 0;
       if (thinks) {
-        for (const t of tokens(THINKING)) {
+        let thought = 0;
+        for (const t of tokens(Array.from({ length: Math.max(1, timing.thinkingRepeat) }, () => THINKING).flat())) {
           if (abort.signal.aborted) return;
+          if (timing.holdThinkingAfterTokens > 0 && thought === timing.holdThinkingAfterTokens) {
+            await new Promise<void>((resolve) => {
+              const done = () => { thinkHolds.delete(turn.id); abort.signal.removeEventListener("abort", done); resolve(); };
+              thinkHolds.set(turn.id, done);
+              abort.signal.addEventListener("abort", done, { once: true });
+            });
+            if (abort.signal.aborted) return;
+          }
           line({ ...base(), message: { role: "assistant", content: "", thinking: t }, done: false });
+          thought++;
           await sleep(timing.tokenDelayMs, abort.signal);
         }
       }
@@ -492,6 +511,9 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       if (route === "POST /__fake/release") {
         const id = field(body, "id");
         for (const turn of turns) if (id === undefined || id === turn.id) {
+          // a turn held inside its thinking goes on thinking; its reply hold, if any, still waits
+          const thinking = thinkHolds.get(turn.id);
+          if (thinking !== undefined) { thinking(); continue; }
           released.add(turn.id);
           releases.get(turn.id)?.();
         }
