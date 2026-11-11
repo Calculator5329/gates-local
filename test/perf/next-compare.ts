@@ -65,7 +65,7 @@ const fixtures = { base: await prepareFixture(subjects.base), candidate: await p
 console.log(`NEXT setup finished at ${elapsed().toFixed(0)}s`);
 
 const runs: Record<Arm, Run[]> = { base: [], candidate: [] }, counters: Record<Arm, Run[]> = { base: [], candidate: [] };
-const memory: Record<Arm, LimitReading[]> = { base: [], candidate: [] };
+const boxes: Record<Arm, LimitReading[]> = { base: [], candidate: [] };
 const journeys = ["pnpm", "exec", "playwright", "test", "-c", "test/perf/next.config.ts"];
 let longestRound = 0;
 for (let round = 0; round < rounds; round++) {
@@ -84,10 +84,12 @@ for (let round = 0; round < rounds; round++) {
       // Read even when the run failed: a run killed for memory says so here.
       if (limit && existsSync(report)) {
         const reading = readLimit(report);
-        memory[arm].push(reading);
-        console.log(`NEXT round ${round + 1} ${arm} in ${limit.spec}: peak memory ${reading.peakMb} MB, ${reading.oomKills} killed for memory`);
+        boxes[arm].push(reading);
+        console.log(`NEXT round ${round + 1} ${arm} in ${limit.spec}: peak memory ${reading.peakMb} MB, ${reading.oomKills} killed for memory, ${reading.cpuSeconds} s of processor time, held back ${reading.heldBackSeconds} s`);
       }
     }
+    // A slowed run that was never held back was not slowed, so it is not recorded as one.
+    if (limit?.speed && boxes[arm].at(-1)?.heldBackSeconds === 0) throw new Error(`${limit.spec} never held this run back; this machine's scheduler may not enforce a speed limit`);
     runs[arm].push(parseRun(readFileSync(path.join(runOut, "run.json"), "utf8")));
     counters[arm].push(parseRun(readFileSync(path.join(runOut, "counters.json"), "utf8")));
   }
@@ -97,7 +99,7 @@ shutdown.signal.throwIfAborted();
 await processes.close();
 
 const verdicts: Verdict[] = [...scoreNext(runs.base, runs.candidate), ...scoreNext(counters.base, counters.candidate)];
-writeFileSync(path.join(out, "scored.json"), JSON.stringify({ schema: 1, informational: true, commits, limits: { base: limits.base?.spec ?? null, candidate: limits.candidate?.spec ?? null }, memory, rounds: runs.base.length, samples, throttle: Number(values.throttle), seconds: elapsed(), verdicts }, null, 2) + "\n", { flag: "wx" });
+writeFileSync(path.join(out, "scored.json"), JSON.stringify({ schema: 1, informational: true, commits, limits: { base: limits.base?.spec ?? null, candidate: limits.candidate?.spec ?? null }, boxes, rounds: runs.base.length, samples, throttle: Number(values.throttle), seconds: elapsed(), verdicts }, null, 2) + "\n", { flag: "wx" });
 const markdown = scoredMarkdown(verdicts);
 writeFileSync(path.join(out, "scored.md"), markdown, { flag: "wx" });
 console.log(markdown);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: A smaller machine can also be slower
+
+- The smaller machine for speed comparisons could take cores and memory
+  away but not make the cores slower. A percent after the `c` now does:
+  `--limit 1c50-2g` is one core at half speed. On the test machine a fixed
+  loop that took 1.39 s on a free core took 2.83 s at 50 and 5.65 s at 25,
+  and 10 ms bursts of work took 23.8 ms at 50. On two cores the share is of
+  both together, so `2c50` slowed two busy threads from 1.43 s each to 2.66
+  and 2.84 s and left one thread alone at 1.40 s (`docs/perf-method.md`).
+- A run in one core with 1 GB had a process killed for memory in its first
+  round, then sat idle for 15 minutes until the test's time limit. A kill
+  for memory now ends the run and fails the job.
+- Each limited run also records the processor time everything in the box
+  used and how long a speed limit held it back. A slowed run that was never
+  held back fails, so a machine whose scheduler ignores the limit cannot
+  record a slowed run.
+
 ## 2026-11-11: Speed comparisons inside a smaller machine
 
 - The speed comparison only measured the app with the whole test machine

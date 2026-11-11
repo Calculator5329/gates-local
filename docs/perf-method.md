@@ -56,12 +56,23 @@ cores and share 2 GB with no swap (`test/perf/limits.ts`; Linux with a user
 systemd). `1c-512m` and the like work the same way, and `2c` pins cores and
 only measures memory. `--limit-base` and `--limit-candidate` set one arm, so
 `--self --limit-candidate 2c-2g` shows what the limit alone costs one build.
-Each run prints its peak memory and how many processes were killed for
-memory, and `scored.json` keeps both. Setup (install, build, fixtures) stays
-outside the limit. Fewer cores are still this machine's cores, so the numbers
-compare with other limited runs here, not with a real two-core laptop. Give a
-limited job a larger `--budget-seconds` and runner timeout; it stops early
-otherwise.
+A number after the `c` slows the cores: `1c50-2g` gives the box half of one
+core's time, handed out every 5 ms, so everything in it runs at about half
+speed. On more than one core that share is of all the cores together: `2c50`
+is two cores with one core's worth of time, and one busy thread alone in it
+is not slowed.
+
+Each run prints its peak memory, how many processes were killed for memory,
+the processor time everything in the box used and how long a speed limit
+held the box back; `scored.json` keeps them under `boxes`. A kill for memory
+ends that run at once and fails the job, since what survives the kill is no
+longer a measurement. A slowed run that was never held back fails too: a
+scheduler loaded through sched_ext may not enforce the limit, and such a run
+must not be recorded as slowed. Setup (install, build, fixtures) stays
+outside the limit. Fewer or slower cores are still this machine's cores, so
+the numbers compare with other limited runs here, not with a real two-core
+laptop. Give a limited job a larger `--budget-seconds` and runner timeout; it
+stops early otherwise.
 
 It writes `scored.json` and `scored.md`. `node test/perf/replay-next.ts RESULTS`
 rescores recorded results without a browser and, for a same-build job, prints
