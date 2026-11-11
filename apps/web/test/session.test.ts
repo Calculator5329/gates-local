@@ -991,6 +991,9 @@ describe("action failures come back to the caller (W-07)", () => {
   it("turning image generation on reads ComfyUI's status again, so Settings shows what it found (W-12)", async () => {
     await boot();
     b.server.answer("image.status", () => ({ state: "missing", owner: "none", baseUrl: "http://127.0.0.1:9", detail: "ComfyUI did not answer." }));
+    // the server keeps what it is sent, as the real one does
+    let saved = methodSamples["settings.get"].result;
+    b.server.answer("settings.update", ({ imageGen, theme }) => (saved = { ...saved, ...(imageGen === undefined ? {} : { imageGen }), ...(theme === undefined ? {} : { theme }) }));
     const before = b.server.calls("image.status").length;
     expect(await session.updateSettings({ imageGen: true })).toBeNull();
     await until(() => {
@@ -1000,6 +1003,28 @@ describe("action failures come back to the caller (W-07)", () => {
     expect(b.server.calls("image.status").length).toBe(before + 1);
     // a save that touches neither imageGen nor comfyUrl does not ask again
     expect(await session.updateSettings({ theme: "light" })).toBeNull();
+    await tick();
+    expect(b.server.calls("image.status").length).toBe(before + 1);
+  });
+
+  it("another window turning image generation on: this window reads ComfyUI's status again and shows it (T05)", async () => {
+    await boot();
+    const off = { state: "off", owner: "none" } as const;
+    b.server.answer("image.status", () => off);
+    await session.checkImageStatus();
+    expect(store.getState().imageStatus).toEqual(off);
+    const before = b.server.calls("image.status").length;
+    const ready = { state: "ready", owner: "external", baseUrl: "http://127.0.0.1:9" } as const;
+    b.server.answer("image.status", () => ready);
+    b.server.push("settings.changed", { ...methodSamples["settings.get"].result, imageGen: true });
+    await until(() => {
+      const s = store.getState().imageStatus;
+      return s !== undefined && s !== store.NA && s.state === "ready";
+    }, 1000, "the status after another window's save");
+    expect(b.server.calls("image.status").length).toBe(before + 1);
+    // a push that leaves image generation and the address as they were does not ask again
+    b.server.push("settings.changed", { ...methodSamples["settings.get"].result, imageGen: true, theme: "light" });
+    await until(() => { const s = store.getState().settings; return s !== undefined && s !== store.NA && s.theme === "light"; }, 1000, "the theme push");
     await tick();
     expect(b.server.calls("image.status").length).toBe(before + 1);
   });

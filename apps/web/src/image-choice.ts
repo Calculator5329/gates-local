@@ -1,7 +1,7 @@
 // The app's one image choice (Settings.imageChoice) as the composer shows and sends it. The
 // server's image.presets lists the presets ComfyUI has every file for and names what a send
 // runs now; a choice saved since that read wins, so the button follows a pick at once.
-import type { GpuStatus, ImageChoice, ImagePreset, ImagePresets } from "@gates-local/contracts";
+import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImagePreset, type ImagePresets } from "@gates-local/contracts";
 import type { Verdict } from "./format.ts";
 import { type Maybe, NA, type State } from "./store.ts";
 
@@ -43,22 +43,20 @@ export function drawChoice(s: State): ImageChoice | undefined {
 
 export const sizeLabel = (width: number, height: number): string => `${width}×${height}`;
 
-/** The server's VRAM safety margin, as the chat picker shows it. */
-const MARGIN = 512 * 1024 ** 2;
 const held = (gpu: GpuStatus, keep: (o: GpuStatus["occupants"][number]) => boolean) => gpu.occupants.filter(keep).reduce((n, o) => n + o.bytes, 0);
 
 /**
- * How a job at `bytes` sits in GPU memory now, the way the server's image fit counts it:
+ * How a job at `bytes` sits in GPU memory now, by the server's own fit (contracts/image-fit.ts):
  * ComfyUI's own resident memory is credited, and an idle chat model the app loaded is stopped
  * when that makes room (`frees`). Every byte count is the preset's estimate. Undefined
  * without a GPU reading.
  */
 export function imageFit(bytes: number, gpu: Maybe<GpuStatus>): { readonly v: Verdict; readonly frees: boolean } | undefined {
   if (gpu === undefined || gpu === NA || gpu.freeBytes === undefined) return undefined;
-  const avail = gpu.freeBytes + held(gpu, (o) => o.kind === "image");
-  const base = { need: bytes, avail, measured: false, chip: "", word: "", detail: "" };
-  if (bytes <= avail - MARGIN) return { v: { ...base, k: "gpu", amt: 0 }, frees: false };
-  const chats = held(gpu, (o) => o.kind === "chat-model" && !o.protected);
-  if (bytes <= avail + chats - MARGIN) return { v: { ...base, k: "gpu", amt: 0 }, frees: true };
-  return { v: { ...base, k: "no", amt: bytes - Math.max(0, avail - MARGIN) }, frees: false };
+  const credited = held(gpu, (o) => o.kind === "image");
+  const freeable = held(gpu, (o) => o.kind === "chat-model" && !o.protected);
+  const fit = imageFitVerdict({ estimateBytes: bytes, freeBytes: gpu.freeBytes, creditedBytes: credited, freeableBytes: freeable });
+  const base = { need: bytes, avail: gpu.freeBytes + credited, measured: false, chip: "", word: "", detail: "" };
+  if (fit.verdict === "refuse") return { v: { ...base, k: "no", amt: fit.shortBytes }, frees: false };
+  return { v: { ...base, k: "gpu", amt: 0 }, frees: fit.verdict === "frees" };
 }

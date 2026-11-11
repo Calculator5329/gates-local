@@ -33,7 +33,7 @@ export async function ownedIdleComfy(lease: GpuLease, dir: string): Promise<Owne
     store,
     push: () => undefined,
     settings: () => ({ imageGen: true }),
-    appLoadedModels: () => [],
+    imageMayUnload: () => [],
     ollamaUrl: () => undefined,
     readGpu: async () => ({ freeBytes: 1e12, holders: "nothing else" }),
     requiredBytes: 1,

@@ -21,8 +21,8 @@ const deps: GpuStatusDeps = {
   whisperPid: () => systemdMainPid("whisper-server.service"),
   listeningPids: procListeningPids,
   modelLabel,
-  // This script loaded nothing, so every chat model shows as protected.
-  appLoaded: () => [],
+  // This script loaded nothing and started no Ollama, so every chat model shows as protected.
+  mayUnload: () => [],
   residentModels: async () => (baseUrl ? (await listLoaded(baseUrl)).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })) : []),
 };
 

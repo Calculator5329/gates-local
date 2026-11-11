@@ -80,6 +80,30 @@ it("S-08: two services with different data dirs run their own Ollama against the
   expect(await models(rb.baseUrl)).toBe(appModelsDir(b));
 });
 
+it("an image may unload a model the app never loaded only from an Ollama the app started", async () => {
+  const MODEL = "qwen3.5:9b";
+  const external = await startFakeServer({
+    "GET /": (_b, res) => { res.writeHead(200, { "content-type": "text/plain" }); res.end("Ollama is running"); },
+    "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
+  });
+  servers.push(external);
+  const system = await services(path.join(work, "data-system"), { appPort: await freePort(), externalBaseUrl: external.baseUrl });
+  expect((await system.runtime.ensure()).owner).toBe("external");
+  expect(await system.loader.imageMayUnload()).toEqual([]);
+
+  const dataDir = path.join(work, "data-app");
+  writeFakeBinary(installedBinary(dataDir, VERSION), loadableOllamaScript(MODEL));
+  const app = await services(dataDir, { appPort: await freePort(), externalBaseUrl: await nothingAt() });
+  const status = await app.runtime.ensure();
+  expect(status.owner).toBe("app");
+  // Resident, but not through the app's loader (a load from an earlier run of the app).
+  await (await fetch(new URL("/api/generate", status.baseUrl), { method: "POST", body: JSON.stringify({ model: MODEL, prompt: "" }) })).text();
+  expect(app.loader.appLoadedModels()).toEqual([]);
+  expect(await app.loader.imageMayUnload()).toEqual([MODEL]);
+});
+
 it("S-02: a preload's fit reads the URL the load captured, not whatever the runtime says later", async () => {
   // A system Ollama whose root stops answering like Ollama mid-load: the
   // runtime's next discover drops its base URL, but the load already chose it.

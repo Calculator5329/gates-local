@@ -27,7 +27,7 @@ describe("gpu.status occupants", () => {
         residentModels: async () => [{ name: "qwen3.5:9b", sizeVramBytes: 5_920_000_000 }],
         listeningPids: async (port, pids) => new Set(port === 8188 ? pids.filter((p) => p === 5700) : []),
         modelLabel: (tag) => (tag === "qwen3.5:9b" ? "Qwen 3.5 9B" : tag),
-        appLoaded: () => ["qwen3.5:9b"],
+        mayUnload: () => ["qwen3.5:9b"],
       }),
     );
     expect(s).toMatchObject({ vendor: "nvidia", name: "RTX 5070 Ti", totalBytes: 16303 * MIB, freeBytes: 703 * MIB, measuredAt: 1000 });
@@ -70,6 +70,17 @@ describe("gpu.status occupants", () => {
       { label: "a:1b", bytes: 3000 * MIB, kind: "chat-model", protected: true },
       { label: "b:1b", bytes: 1000 * MIB, kind: "chat-model", protected: true },
     ]);
+  });
+
+  it("a chat model is unprotected exactly when an image job may unload it: in the fed list, or every one in an Ollama the app started", async () => {
+    const apps = "1, /usr/bin/ollama, 3000\n2, /usr/bin/ollama, 1000\n";
+    const read = (over: Partial<GpuStatusDeps>) => readGpuStatus(
+      linux({ runNvidiaSmi: smi(apps, "RTX, 16303, 4000, 12000"), residentModels: async () => [{ name: "warm:9b", sizeVramBytes: 3 }, { name: "other:4b", sizeVramBytes: 1 }], ...over }),
+    );
+    const guarded = async (over: Partial<GpuStatusDeps>) => Object.fromEntries((await read(over)).occupants.map((o) => [o.label, o.protected]));
+    expect(await guarded({ mayUnload: () => ["warm:9b"] }), "the fed list: a warm model a turn answered on").toEqual({ "warm:9b": false, "other:4b": true });
+    expect(await guarded({ mayUnload: () => [], ownsRuntime: () => true }), "the app's own Ollama: every resident model").toEqual({ "warm:9b": false, "other:4b": false });
+    expect(await guarded({ mayUnload: () => [], ownsRuntime: () => false }), "an Ollama the app did not start: only the list").toEqual({ "warm:9b": true, "other:4b": true });
   });
 
   it("the machine fixture: whisper and Media Vault are protected, the desktop is named", async () => {

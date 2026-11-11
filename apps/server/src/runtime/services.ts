@@ -135,7 +135,9 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         whisperPid,
         listeningPids: procListeningPids,
         modelLabel,
-        appLoaded: () => loader?.appLoadedModels() ?? [],
+        // Unprotected is what an image job may unload (the loader's imageMayUnload), without a second /api/ps.
+        mayUnload: () => loader?.loadedOrAnswered() ?? [],
+        ownsRuntime: () => runtime.status().owner === "app",
         // The loader reads /api/ps for the runtime it owns now and prunes against it.
         residentModels: async () => ((await loader?.residentModels()) ?? []).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
       }),
@@ -154,6 +156,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     fit: async (model, numCtx, baseUrl, signal) =>
       (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
     onLoaded: () => gpu.poke(),
+    // An Ollama this app started (now or on an earlier run, per the ownership record) holds only the app's models.
+    ownsRuntime: () => runtime.status().owner === "app",
     ...(options.lease ? { lease: options.lease } : {}),
     log,
   });

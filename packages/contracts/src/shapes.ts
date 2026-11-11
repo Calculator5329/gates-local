@@ -498,6 +498,8 @@ export type ImageSize = typeof ImageSize.Type;
 export const ImagePreset = S.Struct({
   id: S.String,
   name: S.String,
+  /** The composer button's name beside the family mark; no two presets share its first letter. Absent: `name`. */
+  short: S.optional(S.String),
   /** The model family the graph is built for (one rail icon per family). */
   family: S.String,
   sizes: S.Array(ImageSize),

@@ -262,7 +262,14 @@ function Tools() {
   const imageTool = settings !== NA && settings?.imageTool === true;
   // Why it cannot be turned on with the master switch on; both sentences hold one cell, so the
   // row keeps its height when the switch above flips.
-  const onWhy = settings === NA || settings?.imageGen !== true ? "Needs Generate images, in Image generation." : status === NA ? "Not available in this build." : !image.usable ? `ComfyUI: ${image.word}.` : null;
+  // Both fixes are in Image generation: the reason goes there, as every Tools row goes where it is fixed.
+  // The same button in both sentences, so the cell keeps one height on touch (a link is 44 px there);
+  // while its sentence is the hidden one it is invisible and out of the tab order.
+  const fixIt = <button type="button" className="link" data-go="images" tabIndex={on ? undefined : -1} onClick={() => openSettings("images")}>Image generation</button>;
+  const onWhy = settings === NA || settings?.imageGen !== true ? <>Needs Generate images, in {fixIt}.</>
+    : status === NA ? "Not available in this build."
+    : !image.usable ? <>ComfyUI: {image.word}. Set it up in {fixIt}.</>
+    : null;
   const imageWhy = on ? onWhy : "Needs the switch above.";
   return (
     <>
@@ -294,7 +301,11 @@ function Tools() {
             <Fail err={imageErr} />
           </span>
           <span className="sv">
-            {locked || settings === NA ? null : <button type="button" className="switch" role="switch" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
+            {settings === NA ? null
+              // a phone cannot change settings: the row says what the computer set, and its dot whether
+              // the tool is offered now (the reason why not is the line beside it)
+              : locked ? <Status dot={imageTool && imageWhy === null ? "ok" : "off"}>{imageTool ? "On" : "Off"}</Status>
+              : <button type="button" className="switch" role="switch" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
           </span>
         </div>
       </Grp>

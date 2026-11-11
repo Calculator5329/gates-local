@@ -3,6 +3,8 @@
 // The swap: node apps/server/src/image/real-check.ts --execute --swap-model <installed chat model tag> [--num-ctx 16384] [--ollama-url URL]
 //   first loads that chat model through the app's own loader and fit planner, so the image job
 //   has to unload it, wait for the memory and then render, as a chat's image does in the app.
+// The warm swap: add --warm with a --swap-model that is already in memory (as after an app restart):
+//   one chat turn runs on it, then the image has to unload it although this check never loaded it.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -25,10 +27,15 @@ import { createImageModule } from "./module.ts";
 import { IMAGE_ESTIMATED_BYTES } from "./workflow.ts";
 
 export interface SwapOptions {
-  /** An installed chat model that is not resident yet: this check must be the one that loads it. */
+  /**
+   * An installed chat model that is not resident yet: this check must be the one that loads it.
+   * With `warm`, one that is already resident (loaded before this check, as after an app restart).
+   */
   model: string;
   numCtx: number;
   ollamaUrl: string;
+  /** The warm swap: the model is already resident, one chat turn runs on it, then the image. */
+  warm?: boolean;
 }
 
 /** Loads the chat model the way the app's models.load does (services.ts): its loader, its fit planner. */
@@ -39,11 +46,39 @@ async function loadChatModel(swap: SwapOptions): Promise<ModelLoader> {
     listLoaded: (url, signal) => listLoaded(url, undefined, signal),
     fit: async (model, numCtx, baseUrl, signal) => (await planLoad({ baseUrl, model, numCtx, signal, busy: [] })).report,
   });
+  if (swap.warm) return warmTurn(swap, loader);
   const result = await loader.load(swap.model, swap.numCtx);
   assert.equal(result.state, "ready", result.message ?? `${swap.model} did not load`);
   assert.deepEqual(loader.appLoadedModels(), [canonicalTag(swap.model)], `${swap.model} was already in memory; unload it first so this check is the one that loads it`);
   const gpu = await readGpu();
   console.log(JSON.stringify({ chatModelLoaded: swap.model, numCtx: result.numCtx, freeBytes: gpu.freeBytes }));
+  return loader;
+}
+
+/**
+ * The owner's restart: the chat model is resident and the loader did not load it. One chat turn
+ * runs on it through the loader's reservation, as chat.send does, so the image may unload it.
+ */
+async function warmTurn(swap: SwapOptions, loader: ModelLoader): Promise<ModelLoader> {
+  const resident = (await listLoaded(swap.ollamaUrl)).map((m) => canonicalTag(m.name));
+  assert(resident.includes(canonicalTag(swap.model)), `${swap.model} is not in memory; load it first (one message in any chat) so this check finds it warm`);
+  const turn = loader.reserve(swap.model);
+  try {
+    const report = await turn.admit(swap.numCtx);
+    assert.notEqual(report.verdict, "refuse", report.message ?? `${swap.model} does not fit`);
+    const response = await fetch(new URL("/api/chat", swap.ollamaUrl), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: swap.model, stream: false, options: { num_ctx: report.numCtx }, messages: [{ role: "user", content: "Say ok." }] }),
+    });
+    assert.equal(response.status, 200, `the chat turn on ${swap.model} failed: HTTP ${response.status}`);
+    await response.arrayBuffer();
+    turn.firstToken();
+  } finally {
+    turn.end();
+  }
+  assert.deepEqual(loader.appLoadedModels(), [], `${swap.model} was loaded by this check, so it was not warm`);
+  assert.deepEqual(await loader.imageMayUnload(), [canonicalTag(swap.model)], "the turn did not make the warm model the app's to unload");
+  console.log(JSON.stringify({ warmChatTurn: swap.model, numCtx: swap.numCtx }));
   return loader;
 }
 
@@ -73,8 +108,8 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
   const image = createImageModule({ dataDir, store, lease: createGpuLease(),
     settings: () => ({ imageGen: true, ...(comfyUrl ? { comfyUrl } : {}) }),
     // Wired as main.ts wires the app's loader.
-    appLoadedModels: () => loader?.appLoadedModels() ?? [], ollamaUrl: () => swap?.ollamaUrl,
-    onModelUnloaded: (model) => loader?.prune(loader.appLoadedModels().filter((m) => m !== model)),
+    imageMayUnload: () => loader?.imageMayUnload() ?? [], ollamaUrl: () => swap?.ollamaUrl,
+    onModelUnloaded: (model) => loader?.unloaded(model),
     push: (channel, payload) => {
       server?.push(channel, payload);
       if (channel === "image.event") {
@@ -105,6 +140,7 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
       assert(freeingAt !== undefined, `the image fit beside ${swap.model}, so no swap ran; pick a larger --swap-model or --num-ctx`);
       assert(freedAt !== undefined, "the job never left its freeing step");
       assert.deepEqual(loader.appLoadedModels(), [], "the chat model is still counted as loaded");
+      assert.deepEqual(await loader.imageMayUnload(), [], "the chat model is still counted as the app's to unload");
       const resident = (await listLoaded(swap.ollamaUrl)).map((m) => canonicalTag(m.name));
       assert(!resident.includes(canonicalTag(swap.model)), `${swap.model} is still resident in Ollama`);
       console.log(JSON.stringify({ swap: { model: swap.model, unloadAndWaitMs: freedAt - freeingAt } }));
@@ -122,10 +158,11 @@ export async function realCheck(dataDir: string, comfyUrl?: string, swap?: SwapO
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { values } = parseArgs({ options: { execute: { type: "boolean" }, "data-dir": { type: "string" }, "comfy-url": { type: "string" },
-    "swap-model": { type: "string" }, "num-ctx": { type: "string" }, "ollama-url": { type: "string" } } });
+    "swap-model": { type: "string" }, "num-ctx": { type: "string" }, "ollama-url": { type: "string" }, warm: { type: "boolean" } } });
   if (!values.execute) throw new Error("Real GPU work requires --execute. The fake suites use pnpm verify:image instead.");
   const swapModel = values["swap-model"];
-  const swap = swapModel === undefined ? undefined : { model: swapModel, numCtx: Number(values["num-ctx"] ?? 16384), ollamaUrl: values["ollama-url"] ?? DEFAULT_EXTERNAL_BASE_URL };
+  if (values.warm && swapModel === undefined) throw new Error("--warm needs --swap-model: the chat model that is already in memory.");
+  const swap = swapModel === undefined ? undefined : { model: swapModel, numCtx: Number(values["num-ctx"] ?? 16384), ollamaUrl: values["ollama-url"] ?? DEFAULT_EXTERNAL_BASE_URL, ...(values.warm ? { warm: true } : {}) };
   if (swap && !(Number.isInteger(swap.numCtx) && swap.numCtx > 0)) throw new Error("--num-ctx must be a positive whole number.");
   await realCheck(values["data-dir"] ?? path.join(os.tmpdir(), "gates-local-real-check"), values["comfy-url"], swap);
 }

@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-11: An image takes the memory a loaded chat model holds, and the picker says so first
+
+- An image is no longer refused because a chat model is still loaded from
+  before the app restarted. Once a reply has run on that model it counts as
+  the app's own: the image unloads it, and only when it will not fit
+  otherwise. In an Ollama the app started, every loaded model counts. A
+  model another program loaded, in an Ollama the app did not start, is
+  still left alone and the refusal names it. A reply that is still coming
+  is never cut off: the image waits for it.
+- The image picker and the app now decide "does it fit" with one rule, so
+  a size the picker marks as fitting is one that runs. The picker's extra
+  512 MB margin is gone. A size that needs the chat model's memory says
+  "Stops the chat model first" and no longer "Too big".
+- Image picker: the button shows a short name beside the family mark
+  ("Klein 4B"), with the full name on hover, where it used to cut the name.
+  Each size row shows its GB once with a bar as the mark; the word "Fits"
+  and the repeated number on every model row are gone. The button keeps its
+  width when you switch threads with Image on.
+- Settings, Tools: when Make images cannot be turned on, its reason links
+  to Image generation, where the fix is. The row keeps its height on a
+  touch screen when "Let the model use tools" flips. On a phone the row
+  says On or Off, with a grey dot when images are not offered right now.
+- Turning image generation on, or changing ComfyUI's address, in one
+  window now updates the image status in every open window.
+
 ## 2026-11-11: Escape closes the drawer in one press, and Settings opens without the picker's files
 
 - With the thread drawer open and its search box empty, one Escape closes

@@ -207,9 +207,9 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     log: (line) => log(`image ${line}`),
     push: (channel, payload, changes) => server?.push(channel, payload, changes),
     settings: () => services.settings.get(),
-    appLoadedModels: () => services.loader.appLoadedModels(),
+    imageMayUnload: () => services.loader.imageMayUnload(),
     // The loader forgets a model the image module unloaded (keep_alive 0).
-    onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
+    onModelUnloaded: (model) => services.loader.unloaded(model),
     ollamaUrl: () => runtime.baseUrl(),
     // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
     ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),

@@ -5,4 +5,5 @@ export * from "./protocol.ts";
 export * from "./client.ts";
 export * from "./links.ts";
 export * from "./sync.ts";
+export * from "./image-fit.ts";
 export const CONTRACTS_VERSION = 1;

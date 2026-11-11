@@ -1,5 +1,5 @@
-// Image on in the composer: the model button names the image model and size in the box the
-// chat model had, its picker lists only what ComfyUI has every file for, Send goes straight
+// Image on in the composer: the model button names the image model and size where the chat
+// model was (the same right edge, the width its name needs), its picker lists only what ComfyUI has every file for, Send goes straight
 // to the image model (no chat request), and the choice is the app's: the same in a new thread
 // and after a reload. Settings › Tools › Make images starts off.
 import type { Page } from "@playwright/test";
@@ -33,9 +33,13 @@ async function imageGenOn(page: Page) {
   await waitReady(page);
 }
 
-const boxes = async (page: Page) => Promise.all(["#modelBtn", '.cf-l button[aria-label="Image"]', ".composer button.send"].map((s) => page.locator(s).first().boundingBox()));
+/** The Image pill and Send keep their boxes; the model button keeps its right edge and height and takes the width its name needs. */
+const boxes = async (page: Page) => {
+  const [button, ...rest] = await Promise.all(["#modelBtn", '.cf-l button[aria-label="Image"]', ".composer button.send"].map((s) => page.locator(s).first().boundingBox()));
+  return [button && { right: button.x + button.width, y: button.y, height: button.height }, ...rest];
+};
 
-test("Image on: the button names the image model and size in the same box, and its picker lists what ComfyUI has", async ({ page, open }, info) => {
+test("Image on: the button names the image model and size where the chat model was, and its picker lists what ComfyUI has", async ({ page, open }, info) => {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
@@ -43,9 +47,9 @@ test("Image on: the button names the image model and size in the same box, and i
   const before = await boxes(page);
   await page.getByRole("button", { name: "Image", exact: true }).click();
   // unset: the first default ComfyUI has every file for, FLUX.2 Klein 4B at 1024x1024
-  await expect(button).toContainText("FLUX.2 Klein 4B");
+  await expect(button).toContainText("Klein 4B");
   await expect(button).toContainText("1024×1024");
-  expect(await boxes(page), "the button, the Image pill and Send keep their boxes").toEqual(before);
+  expect(await boxes(page), "the Image pill and Send keep their boxes, the button its right edge").toEqual(before);
   await page.mouse.move(5, 5);
   await shot(page, "image-after-button.png", info, await composerClip(page));
 
@@ -63,18 +67,18 @@ test("Image on: the button names the image model and size in the same box, and i
   // a row picks that model at the size nearest the current one, as the chat picker picks a model
   await picker.locator('.pk-r[data-preset="sdxl-lightning-pixel"] .pk-select').click();
   await expect(picker).toBeHidden();
-  await expect(button).toContainText("SDXL Lightning pixel art");
+  await expect(button).toContainText("Pixel art");
   await expect(button).toContainText("1024×1024");
   // a size row picks that size
   await button.click();
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
   await picker.locator('.pk-ctx-row[data-size="512x768"]').click();
   await expect(picker).toBeHidden();
-  await expect(button).toContainText("SDXL Lightning pixel art");
+  await expect(button).toContainText("Pixel art");
   await expect(button).toContainText("512×768");
   expect(await boxes(page)).toEqual(before);
 
-  // Image off: the chat model again, in the same box
+  // Image off: the chat model again, at the same right edge
   await page.getByRole("button", { name: "Image", exact: true }).click();
   await expect(button).not.toContainText("SDXL Lightning");
   expect(await boxes(page)).toEqual(before);
@@ -88,7 +92,7 @@ test("the picker lists only presets whose files ComfyUI reports", async ({ page,
   await imageGenOn(page);
   await page.getByRole("button", { name: "Image", exact: true }).click();
   // the default falls to plain SDXL without naming Klein; pixel art stays a pick, never the default
-  await expect(page.locator("#modelBtn")).toContainText("SDXL Lightning768×512");
+  await expect(page.locator("#modelBtn")).toContainText("Lightning768×512");
   await expect(page.locator("#modelBtn")).not.toContainText("pixel art");
   await expect(page.locator("#modelBtn")).not.toContainText("Klein");
   await page.locator("#modelBtn").click();
@@ -126,7 +130,7 @@ test("a first send whose default settles to other files: the card keeps the box 
   // the job settled to SDXL 768×512 and runs it
   await expect.poll(() => comfy.prompts().length).toBe(1);
   expect(Object.values(comfy.prompts()[0]!).map((n) => n.class_type)).toContain("CheckpointLoaderSimple");
-  await expect(page.locator("#modelBtn"), "the button names what ran, without opening the picker").toContainText("SDXL Lightning768×512");
+  await expect(page.locator("#modelBtn"), "the button names what ran, without opening the picker").toContainText("Lightning768×512");
   const size = async () => { const b = await card.boundingBox(); return b && { width: Math.round(b.width), height: Math.round(b.height) }; };
   const before = await size();
   expect(before && Math.abs(before.width / before.height - 1), "drawn square, the sent default's shape").toBeLessThan(0.02);
@@ -149,7 +153,7 @@ test("Send with Image on: no chat request, one job with the words, preset and si
   await page.reload(); await waitReady(page);
   const chats = (await state()).turns.length;
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(page.locator("#modelBtn")).toContainText("FLUX.2 Klein 4B");
+  await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
   await sendMessage(page, "a lighthouse at dusk");
 
   const card = page.locator("[data-image-job]");
@@ -176,12 +180,12 @@ test("Send with Image on: no chat request, one job with the words, preset and si
   expect((await state()).turns.length, "still no chat request").toBe(chats);
 
   await page.getByRole("button", { name: "New thread" }).click();
-  await expect(page.locator("#modelBtn")).toContainText("FLUX.2 Klein 4B");
+  await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
   await expect(page.locator("#modelBtn")).toContainText("1024×768");
   await page.reload(); await waitReady(page);
   // Image itself is per session; the choice is the app's
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(page.locator("#modelBtn")).toContainText("FLUX.2 Klein 4B");
+  await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
   await expect(page.locator("#modelBtn")).toContainText("1024×768");
 });
 

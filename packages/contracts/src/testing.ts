@@ -1,6 +1,7 @@
 // Sample values for every method and push channel. The mapped types make
 // a new method or channel without a sample a type error, so round-trip
 // tests that walk these tables cover every channel by construction.
+import type { ImageFitAnswer, ImageFitInput } from "./image-fit.ts";
 import type { Channel, MethodName, Params, Payload, ResultOf } from "./protocol.ts";
 import type {
   FitTable,
@@ -322,3 +323,20 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   ],
   "usage.changed": [{}],
 };
+
+const GIB = 1024 ** 3, MIB = 1024 ** 2;
+/**
+ * The image fit's edges (image-fit.ts), one table for the server's job fit and the picker's mark:
+ * both are tested on every row, so they cannot give different answers. The old picker kept a
+ * 512 MiB margin the server never had; the rows inside it fit on both now.
+ */
+export const imageFitEdges: readonly (ImageFitInput & { name: string; verdict: ImageFitAnswer["verdict"] })[] = [
+  { name: "free exactly the estimate", estimateBytes: 9 * GIB, freeBytes: 9 * GIB, creditedBytes: 0, freeableBytes: 0, verdict: "fits" },
+  { name: "inside the old 512 MiB margin", estimateBytes: 9 * GIB, freeBytes: 9 * GIB + 256 * MIB, creditedBytes: 0, freeableBytes: 0, verdict: "fits" },
+  { name: "the old margin's own edge", estimateBytes: 9 * GIB, freeBytes: 9 * GIB + 512 * MIB, creditedBytes: 0, freeableBytes: 0, verdict: "fits" },
+  { name: "a byte short with an app chat model as big as the gap", estimateBytes: 9 * GIB, freeBytes: 9 * GIB - 1, creditedBytes: 0, freeableBytes: 1, verdict: "frees" },
+  { name: "the old margin short with an app chat model that holds just that", estimateBytes: 9 * GIB, freeBytes: 9 * GIB - 512 * MIB, creditedBytes: 0, freeableBytes: 512 * MIB, verdict: "frees" },
+  { name: "a byte short with an app chat model a byte too small", estimateBytes: 9 * GIB, freeBytes: 9 * GIB - 2, creditedBytes: 0, freeableBytes: 1, verdict: "refuse" },
+  { name: "a byte short and nothing the image may unload", estimateBytes: 9 * GIB, freeBytes: 9 * GIB - 1, creditedBytes: 0, freeableBytes: 0, verdict: "refuse" },
+  { name: "ComfyUI's own memory makes up the rest exactly", estimateBytes: 9 * GIB, freeBytes: 5 * GIB, creditedBytes: 4 * GIB, freeableBytes: 0, verdict: "fits" },
+];

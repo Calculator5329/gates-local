@@ -14,12 +14,17 @@ import { request } from "node:http";
 import { networkInterfaces } from "node:os";
 import type { Page } from "@playwright/test";
 import { CONTROL_URL } from "./env.ts";
+import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ viewport: { width: 412, height: 915 } });
 
-async function phoneReset(seed?: "design"): Promise<{ port: number; socket: string }> {
-  const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true, seed }) });
+let comfy: Awaited<ReturnType<typeof fakeComfy>> | undefined;
+test.afterEach(async () => { await comfy?.close(); comfy = undefined; });
+
+async function phoneReset(seed?: "design", image?: { comfyUrl: string }): Promise<{ port: number; socket: string }> {
+  const body = { scenario: "models", phone: true, seed, ...(image === undefined ? {} : { comfyUrl: image.comfyUrl, imageTool: true }) };
+  const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`/reset: ${r.status} ${await r.text()}`);
   const { phonePort, phoneSocket } = (await r.json()) as { phonePort?: unknown; phoneSocket?: unknown };
   if (typeof phonePort !== "number" || typeof phoneSocket !== "string") throw new Error("the stack gave no phone port or socket");
@@ -81,8 +86,11 @@ test("a phone loads the client through Serve's stand-in, sends a message and see
   expect(errors, "console errors").toEqual([]);
 });
 
-/** The controls each section must at least offer on a phone; a section at 0 shows only read-only rows there. */
-const SETTINGS_SECTIONS = [["General", 0], ["Models", 4], ["Instructions", 2], ["Library", 0], ["Tools", 3], ["Image generation", 0], ["Runtime", 1], ["Advanced", 0], ["Shortcuts", 0]] as const;
+/**
+ * The controls each section must at least offer on a phone; a section at 0 shows only read-only rows there.
+ * Tools has the two Library rows' links: its switches change settings, which a phone cannot, so they are words there.
+ */
+const SETTINGS_SECTIONS = [["General", 0], ["Models", 4], ["Instructions", 2], ["Library", 0], ["Tools", 2], ["Image generation", 0], ["Runtime", 1], ["Advanced", 0], ["Shortcuts", 0]] as const;
 
 /** Which requests are still unanswered, and which the server refused as computer-only. */
 function watchRequests(page: Page): { open: Map<string, string>; refused: string[] } {
@@ -136,7 +144,10 @@ async function tapEverything(page: Page, section: string, atLeast: number): Prom
 
 test("the phone reads, sends, stops and switches models, and nothing it offers is refused", async ({ page }) => {
   test.setTimeout(120_000);
-  const { port } = await phoneReset("design");
+  // image generation set up on the computer, with Tools › Make images on
+  comfy = await fakeComfy();
+  comfy.withFlux();
+  const { port } = await phoneReset("design", { comfyUrl: comfy.url });
   const { open, refused } = watchRequests(page);
   await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
   await page.goto(`http://127.0.0.1:${port}/`);
@@ -186,6 +197,13 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
   const tapped: Record<string, number> = {};
   for (const [section, atLeast] of SETTINGS_SECTIONS) tapped[section] = await tapEverything(page, section, atLeast);
   console.log(`TAPPED ${JSON.stringify(tapped)}`);
+
+  // Make images, turned on at the computer: the phone shows it on, with no switch to tap.
+  await showSection(page, "Tools");
+  const makeImages = page.locator('.set-in [data-tool="images"]');
+  await expect(makeImages).toContainText("Make images");
+  await expect(makeImages.locator(".sv")).toHaveText("On");
+  await expect(makeImages.getByRole("switch")).toHaveCount(0);
 
   await expect.poll(() => [...open.values()], { message: "every request was answered" }).toEqual([]);
   expect(refused, "no control that writes on the first tap was refused (confirmations and menu items are not tapped)").toEqual([]);

@@ -4,8 +4,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import type { ImagePreset, ImagePresets, ModelInfo, Settings } from "@gates-local/contracts";
-import { methodSamples } from "@gates-local/contracts/testing";
+import type { GpuStatus, ImagePreset, ImagePresets, ModelInfo, Settings } from "@gates-local/contracts";
+import { imageFitEdges, methodSamples } from "@gates-local/contracts/testing";
+import { imageFit } from "../src/image-choice.ts";
 import type { State } from "../src/store.ts";
 
 vi.mock("../src/store.ts", async (original) => {
@@ -102,6 +103,54 @@ it.each([
   expect(html).toContain('<span class="t">Image model</span>');
   expect(html).not.toContain(FLUX.name);
   expect(html).not.toContain("1024×1024");
+});
+
+it.each(imageFitEdges)("the picker's answer at the fit's edge, $name: $verdict, the server's answer (module.test.ts reads the same table)", ({ estimateBytes, freeBytes, creditedBytes, freeableBytes = 0, verdict }) => {
+  const gpu: GpuStatus = { ...methodSamples["gpu.status"].result, freeBytes, occupants: [
+    { label: "ComfyUI", bytes: creditedBytes, kind: "image", protected: false },
+    { label: "Qwen 3.5 9B", bytes: freeableBytes, kind: "chat-model", protected: false },
+    { label: "Whisper", bytes: 2 * GIB, kind: "whisper", protected: true },
+  ] };
+  const fit = imageFit(estimateBytes, gpu);
+  expect(fit?.v.k === "no" ? "refuse" : fit?.frees ? "frees" : "fits").toBe(verdict);
+});
+
+it("Image on: the button says the short name beside the family mark, its tip the full name", () => {
+  setState({ image: true, imagePresets: presetsOf({ ...PIXEL, short: "Pixel art" }, { ...PLAIN, short: "Lightning" }) });
+  const html = button();
+  expect(html).toContain('<span class="t">Pixel art</span>');
+  expect(html).toContain(`data-tip="${PIXEL.name}"`);
+  expect(html).not.toContain("style=");
+});
+
+it("the picker says each size's GB once, on its size row, with a mark and no word", () => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, PLAIN, FLUX), gpu: methodSamples["gpu.status"].result });
+  const html = picker();
+  const models = html.slice(html.indexOf('role="listbox"'), html.indexOf('class="pk-context"'));
+  expect(models).not.toContain("GB");
+  const sizes = html.slice(html.indexOf('class="pk-context"'));
+  expect(sizes.match(/>\d+\.\d GB</g)).toHaveLength(PIXEL.sizes.length);
+  expect(html.replace(/<[^>]*>/g, " "), "no word on screen; the tip and the label say it").not.toMatch(/Fits|Too big|Stops chat/);
+  expect(sizes).toContain('data-tip="Fits on the GPU"');
+  expect(html).not.toContain("usable");
+});
+
+// the status the server pushes once a turn of this app answered on a model that was warm before it started
+const warm = (guarded: boolean): GpuStatus => ({ ...methodSamples["gpu.status"].result, freeBytes: 3 * GIB, occupants: [
+  { label: "Qwen 3.5 9B", bytes: 7 * GIB, kind: "chat-model", protected: guarded },
+  { label: "Whisper", bytes: 2 * GIB, kind: "whisper", protected: true },
+] });
+/** The first size row's cost mark, with the warm model's occupant guarded or not. */
+const warmRow = (guarded: boolean) => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL), gpu: warm(guarded) });
+  const html = picker();
+  return html.slice(html.indexOf('class="pk-context"')).match(/<span class="pk-cost [^"]*"[^>]*>/)?.[0] ?? "";
+};
+
+it("a warm chat model a turn answered on: the status calls it unprotected, so the size row says it stops the chat model, not Too big", () => {
+  expect(warmRow(false)).toContain('class="pk-cost spill"');
+  expect(warmRow(false)).toContain("Stops the chat model first");
+  expect(warmRow(true),"another program's model: the server will not free it either").toContain('class="pk-cost no"');
 });
 
 it("the default ComfyUI lists is named, as the first row", () => {

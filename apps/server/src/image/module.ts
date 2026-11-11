@@ -6,7 +6,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { ImageChoice, ImageEvent, ImagePresets, ImageStatus, Params } from "@gates-local/contracts";
+import { imageFitVerdict, type ImageChoice, type ImageEvent, type ImagePresets, type ImageStatus, type Params } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 import type { Push } from "../app.ts";
 import { readGpu, untilAborted } from "../fit/gpu.ts";
@@ -30,8 +30,11 @@ export interface ImageDeps extends ComfyClientDeps {
   store: ThreadStore;
   push: Push;
   settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice };
-  /** Only models the app loaded, never the complete /api/ps list. */
-  appLoadedModels(): readonly string[];
+  /**
+   * The chat models this app may unload for an image (the loader's imageMayUnload()): ones it
+   * loaded or ran a turn on, or any in an Ollama it started. Never another program's.
+   */
+  imageMayUnload(): readonly string[] | Promise<readonly string[]>;
   ollamaUrl(): string | undefined;
   onModelUnloaded?(model: string): void;
   readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly GpuHolder[] }>;
@@ -304,9 +307,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       credited = resident(gpu);
       need = Math.max(0, estimate - credited);
     };
+    // The picker's mark comes from the same function (contracts/image-fit.ts).
+    const fits = () => imageFitVerdict({ estimateBytes: estimate, freeBytes: gpu.freeBytes, creditedBytes: credited }).verdict === "fits";
     let models: string[] = [];
-    if (gpu.freeBytes < need) {
-      models = [...new Set(deps.appLoadedModels())];
+    if (!fits()) {
+      models = [...new Set(await deps.imageMayUnload())];
+      signal.throwIfAborted();
       const ollama = deps.ollamaUrl();
       if (ollama && models.length > 0) {
         freeing(true);
@@ -324,18 +330,19 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         const deadline = Date.now() + (deps.swapWaitMs ?? SWAP_WAIT_MS);
         for (;;) {
           await remeasure();
-          if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0 || gpu.freeBytes >= need || Date.now() >= deadline) break;
+          if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0 || fits() || Date.now() >= deadline) break;
           await delay(deps.swapPollMs ?? SWAP_POLL_MS, undefined, { signal });
         }
-        if (gpu.freeBytes >= need) freeing(false); // a refusal's own event ends the step otherwise
+        // a refusal's or a bad reading's own event ends the step otherwise
+        if (Number.isFinite(gpu.freeBytes) && gpu.freeBytes >= 0 && fits()) freeing(false);
       } else await remeasure();
     }
     signal.throwIfAborted();
     if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error("GPU free memory could not be measured after unloading app chat.");
-    if (gpu.freeBytes < need) {
+    if (!fits()) {
       const others = (gpu.tenants ?? []).filter((tenant) => !(unit && unit.pid > 0 && tenant.pid === unit.pid)); // ComfyUI's own memory is credited
       // this app's only while Ollama still lists it: an unloaded model that is gone holds nothing
-      const ours = await stillListed([...new Set([...models, ...deps.appLoadedModels()])], signal);
+      const ours = await stillListed([...new Set([...models, ...await deps.imageMayUnload()])], signal);
       const smaller = smallerFit(knownFiles()?.files, estimate, gpu.freeBytes + credited);
       throw imageFitError(estimate, credited, gpu.freeBytes, gpu.holders, fitSentence(need, gpu.freeBytes, others, ours, smaller));
     }

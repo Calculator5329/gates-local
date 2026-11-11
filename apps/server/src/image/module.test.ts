@@ -5,10 +5,11 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FitReport, ImageChoice, ImageEvent, ModelLoad } from "@gates-local/contracts";
+import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
 import { createModelLoader } from "../runtime/load.ts";
 import { listLoaded } from "../runtime/models.ts";
-import { DEFAULT_CHOICE, resolveChoice } from "./presets.ts";
+import { DEFAULT_CHOICE, PRESETS, resolveChoice } from "./presets.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
@@ -82,7 +83,7 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
     // No test reaches real DNS or this machine's real interfaces.
     localAddresses: () => ["192.168.1.20"], lookupHost: fakeLookup,
     settings: () => ({ imageGen: enabled, ...(comfyUrl ? { comfyUrl } : {}), ...(choice ? { imageChoice: choice } : {}) }),
-    appLoadedModels: () => appLoaded, ollamaUrl: () => "http://fake-ollama",
+    imageMayUnload: () => appLoaded, ollamaUrl: () => "http://fake-ollama",
     readGpu: async () => {
       measurements++;
       if (gpuError) throw Object.assign(new Error("nvidia-smi failed"), { code: "gpu-unreadable" });
@@ -267,7 +268,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     instances.push({ close: async () => store.close() });
     const fetcher = vi.fn(); const log = vi.fn();
     const recovered = createImageModule({ dataDir: f.dataDir, store, lease: f.lease, fetch: fetcher, log,
-      settings: () => ({ imageGen: false }), appLoadedModels: () => [], ollamaUrl: () => undefined, push: () => {},
+      settings: () => ({ imageGen: false }), imageMayUnload: () => [], ollamaUrl: () => undefined, push: () => {},
     });
     instances.push(recovered);
     expect(store.getThread(thread.id).messages.map(m => m.imageJob)).toEqual(["queued", "running"].map(jobId => ({
@@ -384,6 +385,17 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(running.slice(freeing + 1).map((e) => e.phase)).not.toContain("freeing");
     expect(f.events.at(-1)).not.toHaveProperty("phase");
   });
+  it("a reading after the unload that cannot be right (negative free) ends in the error alone, with no freeing-ended event before it", async () => {
+    // ComfyUI's credit covers the need on that reading, so the fit alone would say it fits
+    const f: Awaited<ReturnType<typeof fixture>> = await fixture({ swapWaitMs: 50, swapPollMs: 1, onModelUnloaded: () => f.configure({ freeBytes: -1, resident: 20_000 }) });
+    f.configure({ freeBytes: 5000 });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.ollamaPosts).toEqual([{ model: "app-chat", keep_alive: 0 }]);
+    expect(f.events.at(-1)).toMatchObject({ state: "error" });
+    expect(f.module.current().detail).toContain("could not be measured after unloading");
+    const running = f.events.filter((e) => e.state === "running");
+    expect(running.at(-1), "the last running event is the freeing step; the error ends it").toMatchObject({ phase: "freeing" });
+  });
   it("memory back at exactly the need after the unload: made at once, no wait for the bound", async () => {
     let unloaded = false, after = 0;
     const f = await fixture({ swapWaitMs: 5000, swapPollMs: 1, onModelUnloaded: () => { unloaded = true; }, readGpu: async () => {
@@ -426,17 +438,17 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(f.module.current().detail, "the long form stays in the status").toContain("Memory holders: ollama; whisper");
     });
     it("another app holding the most: names it and says to close it", async () => {
-      const { said } = await refuse({ appLoadedModels: () => [], readGpu: async () => ({ freeBytes: 4 * gib, holders: "media-vault", tenants: [
+      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 4 * gib, holders: "media-vault", tenants: [
         { pid: 8, label: "ollama", role: "ollama", usedBytes: 1 * gib }, { pid: 9, label: "media-vault vision runtime", role: "occupant", usedBytes: 6 * gib }] }) });
       expect(said).toBe("The image needs 9.0 GiB and 4.0 GiB is free; media-vault vision runtime holds 6.0 GiB, close it.");
     });
     it("a chat model this app never used holding the most: says so, not that it is this app's", async () => {
-      const { said } = await refuse({ appLoadedModels: () => [], readGpu: async () => ({ freeBytes: 4 * gib, holders: "ollama", tenants: [
+      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 4 * gib, holders: "ollama", tenants: [
         { pid: 8, label: "ollama", role: "ollama", usedBytes: 7 * gib }] }) });
       expect(said).toBe("The image needs 9.0 GiB and 4.0 GiB is free; a chat model this app did not load holds 7.0 GiB, stop it.");
     });
     it("ComfyUI's own memory is credited, never named as the holder", async () => {
-      const { said } = await refuse({ appLoadedModels: () => [], readGpu: async () => ({ freeBytes: 1 * gib, holders: "ComfyUI", tenants: [
+      const { said } = await refuse({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 1 * gib, holders: "ComfyUI", tenants: [
         { pid: 42, label: "python3", role: "occupant", usedBytes: 2 * gib }, { pid: 9, label: "steam", role: "occupant", usedBytes: 3 * gib }] }) });
       expect(said).toBe("The image needs 7.0 GiB and 1.0 GiB is free; steam holds 3.0 GiB, close it.");
     });
@@ -464,7 +476,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   describe("a refusal offers a way out only when one exists, from the picker's own list", () => {
     const gib = 1024 ** 3;
     const refused = async (choice: ImageChoice, freeBytes: number) => {
-      const f = await fixture({ requiredBytes: undefined, appLoadedModels: () => [],
+      const f = await fixture({ requiredBytes: undefined, imageMayUnload: () => [],
         readGpu: async () => ({ freeBytes, holders: "steam", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 5 * gib }] }) });
       f.files({ flux: true }); f.choose(choice);
       expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual(["flux2-klein-4b", "sdxl-lightning", "sdxl-lightning-pixel"]);
@@ -506,6 +518,19 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(f.events[0]).not.toHaveProperty("sent");
     });
   });
+  describe("the fit's edges, the same table the picker's mark is tested on (contracts imageFitEdges)", () => {
+    it.each(imageFitEdges)("$name: $verdict", async ({ estimateBytes, freeBytes, creditedBytes, freeableBytes = 0, verdict }) => {
+      let unloaded = false;
+      const f = await fixture({ requiredBytes: estimateBytes, swapWaitMs: 30, swapPollMs: 1,
+        imageMayUnload: () => freeableBytes > 0 ? ["app-chat"] : [], onModelUnloaded: () => { unloaded = true; },
+        readGpu: async () => ({ freeBytes: freeBytes + (unloaded ? freeableBytes : 0), holders: "ollama", tenants: [] }) });
+      f.configure({ resident: creditedBytes }); // ComfyUI's own memory, read from its stats
+      const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+      const answer = f.events.at(-1)?.errorKind === "wont-fit" ? "refuse" : f.ollamaPosts.length > 0 ? "frees" : "fits";
+      expect(answer).toBe(verdict);
+      if (verdict !== "refuse") expect(f.events.at(-1)?.state).toBe("done");
+    });
+  });
   describe("side by side when both fit, against the preset's own need (size.bytes)", () => {
     const gib = 1024 ** 3;
     const { size } = resolveChoice(DEFAULT_CHOICE);
@@ -545,8 +570,8 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(loader.appLoadedModels()).toEqual([MODEL]);
       // The GPU as the fake Ollama holds it: with the chat model resident the image does not fit
       const resident = () => fake.state().loaded.length > 0;
-      const f = await fixture({ requiredBytes: undefined, ollamaUrl: () => fake.url, appLoadedModels: () => loader.appLoadedModels(),
-        onModelUnloaded: (model) => loader.prune(loader.appLoadedModels().filter((m) => m !== model)),
+      const f = await fixture({ requiredBytes: undefined, ollamaUrl: () => fake.url, imageMayUnload: () => loader.imageMayUnload(),
+        onModelUnloaded: (model) => loader.unloaded(model),
         readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
       f.files({ flux: true });
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
@@ -560,6 +585,49 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       expect(fake.state().loads.length, "the second send loads the model again").toBe(loadsBefore + 1);
       expect(pushes.slice(pushed).map((p) => p.state)).toEqual(["loading", "ready"]);
       expect(loader.appLoadedModels()).toEqual([MODEL]);
+    });
+    /**
+     * The owner's restart: the chat model stayed in Ollama, so the app's loader never loaded it.
+     * `turns` chat turns of this app run on it, then an image needs its memory.
+     */
+    async function warmModel(turns: number) {
+      const fake = await startFakeOllama({ scenario: "threads", options: { firstTokenDelayMs: 0, tokenDelayMs: 0 } });
+      instances.push({ close: () => fake.close() });
+      const MODEL = "qwen3.5:9b";
+      // Resident before the app's first read: another load put it there.
+      await (await fetch(`${fake.url}/api/generate`, { method: "POST", body: JSON.stringify({ model: MODEL, prompt: "", stream: false, options: { num_ctx: 16384 } }) })).text();
+      expect(fake.state().loaded.map((l) => l.name)).toEqual([MODEL]);
+      const loader = createModelLoader({ baseUrl: () => fake.url, push: () => {}, listLoaded: (url) => listLoaded(url),
+        fit: async (_model, numCtx) => ({ verdict: "fits", numCtx }) as FitReport });
+      for (let i = 0; i < turns; i++) {
+        const turn = loader.reserve(MODEL);
+        await turn.admit(16384);
+        const response = await fetch(`${fake.url}/api/chat`, { method: "POST", body: JSON.stringify({ model: MODEL, options: { num_ctx: 16384 }, messages: [{ role: "user", content: "hi" }], stream: true }) });
+        await response.text();
+        turn.firstToken(); turn.end();
+      }
+      expect(loader.appLoadedModels(), "warm: the loader never loaded it").toEqual([]);
+      const resident = () => fake.state().loaded.length > 0;
+      const f = await fixture({ requiredBytes: undefined, ollamaUrl: () => fake.url, imageMayUnload: () => loader.imageMayUnload(),
+        onModelUnloaded: (model) => loader.unloaded(model),
+        readGpu: async () => ({ freeBytes: resident() ? size.bytes - gib : size.bytes + 6 * gib, holders: "ollama", tenants: resident() ? [chat(7 * gib)] : [] }) }, fake.url);
+      f.files({ flux: true });
+      const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+      return { f, fake, loader, MODEL };
+    }
+    it("a model warm before the app started, one chat turn on it, then an image: the image unloads it and is made", async () => {
+      const { f, fake, loader, MODEL } = await warmModel(1);
+      expect(f.events.at(-1)?.state).toBe("done");
+      expect(f.ollamaPosts).toEqual([{ model: MODEL, keep_alive: 0 }]);
+      expect(fake.state().loaded).toEqual([]);
+      expect(await loader.imageMayUnload(), "unloaded: no longer the app's to unload").toEqual([]);
+    });
+    it("the same warm model with no turn of this app is another program's: left loaded, and the refusal says so", async () => {
+      const { f, fake, MODEL } = await warmModel(0);
+      expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
+      expect(f.events.at(-1)?.message).toContain("a chat model this app did not load holds 7.0 GiB, stop it");
+      expect(f.ollamaPosts, "nothing unloaded").toEqual([]);
+      expect(fake.state().loaded.map((l) => l.name)).toEqual([MODEL]);
     });
   });
   it("with no reader injected, the fit runs the nvidia-smi it is given (the e2e stack's fake), not the real one", async () => {
@@ -660,14 +728,14 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
 
   it("never credits another GPU holder to Comfy's MainPID", async () => {
-    const f = await fixture({ appLoadedModels: () => [], readGpu: async () => ({ freeBytes: 1000, holders: "ComfyUI; whisper", tenants: [{ pid: 42, usedBytes: 1000 }, { pid: 99, usedBytes: 100_000 }] }) });
+    const f = await fixture({ imageMayUnload: () => [], readGpu: async () => ({ freeBytes: 1000, holders: "ComfyUI; whisper", tenants: [{ pid: 42, usedBytes: 1000 }, { pid: 99, usedBytes: 100_000 }] }) });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)?.state).toBe("error"); expect(f.calls).not.toContain("/prompt");
   });
 
   it("a cold healthy Comfy needs the full estimate and reports GiB with raw fit fields", async () => {
     const gib = 1024 ** 3;
-    const f = await fixture({ requiredBytes: 9 * gib, appLoadedModels: () => [] });
+    const f = await fixture({ requiredBytes: 9 * gib, imageMayUnload: () => [] });
     f.configure({ freeBytes: 2.4 * gib, resident: 0 });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
     expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
@@ -920,6 +988,14 @@ async function run(f: Awaited<ReturnType<typeof fixture>>) {
 
 describe("image presets (fake ComfyUI file lists)", () => {
   const ids = presetIds;
+
+  it("each preset's button name starts with a letter no other preset's does, so no cut makes two alike", async () => {
+    const f = await fixture();
+    f.files({ flux: true });
+    const shorts = (await f.module.presets()).presets.map((p) => p.short ?? "");
+    expect(shorts).toEqual(["Klein 4B", "Lightning", "Pixel art"]);
+    expect(new Set(shorts.map((s) => s.slice(0, 1).toLowerCase())).size).toBe(PRESETS.length);
+  });
 
   it("lists only the presets whose every file ComfyUI reports, with estimated memory per size", async () => {
     const f = await fixture();

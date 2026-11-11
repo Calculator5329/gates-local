@@ -493,6 +493,25 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:2642d7c2-779f-5e7a-ba98-f487cee0c551 --> One chunk rule decides which screens preload the picker's files, held by `chunks.spec.ts` in a browser only; a new import from `Picker.tsx` in a Settings file puts the picker back into Settings' preload with no unit check.
       *Accept:* a build check fails when the Settings chunk's preload list names the picker chunk or its CSS.
 
+*Image batch 2, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:d745eb0d-63dd-564b-bb41-1cdeb24b3e6e --> The image picker and the server still differ in four cases, none new: ComfyUI on a port other than 8188 (the picker credits only a python process on 8188, the server credits ComfyUI's own memory at any address); a remote ComfyUI (the server skips the fit, the picker marks against the local GPU); how much an unload frees (the picker estimates from a `size_vram` split, the server measures after); and Ollama not ready (the picker can say it stops the chat model while the server can unload nothing).
+      *Accept:* the picker's mark comes from a verdict the server computed, or each case has a test that gets the same answer from both.
+- [ ] <!-- workspace:id=work:a009aa60-86fd-545f-8942-54d94a11c16b --> A reply whose first output is a tool call counts its model as used only at the first text or thinking token (`app.ts`, the loader's first-token call). The one-line change is wrong: the tool turn sends a "note" step before the model answers when the context is too small for tools.
+      *Accept:* a model's first real tool call marks it used, the note step does not, and a loader test holds both.
+- [ ] <!-- workspace:id=work:02e96676-2709-5b18-bad5-ea96e8f86425 --> Image model rows no longer say when a model is too big at every size; only the size column does, after a hover or a pick. A pick of a too-big size is allowed and Send gets the refusal.
+      *Accept:* a model with no size that fits is marked on its own row, once.
+- [ ] <!-- workspace:id=work:7cdee6d2-8b2a-5639-86e9-0566078371ba --> Amber means "stops the chat model first" in the image picker and "spills into system memory" in the chat picker.
+      *Accept:* one colour means one thing across both pickers, or the owner rules that the tooltip is enough.
+- [ ] <!-- workspace:id=work:515f46cf-b615-5f70-aff3-a6c8eb568c87 --> The image fit has no safety margin on either side now, and the setups' needs are padded guesses, not measurements (the real-GPU runs are a roadmap item above).
+      *Accept:* each setup's need is measured, and the fit carries a margin only if a measured run shows one is needed.
+- [ ] <!-- workspace:id=work:493df8d6-4717-5e53-bba8-5373cd2a6563 --> `real-check.ts --warm` (a warm model, one turn, then the image) was written and has never been run; it needs the owner's go for a run on a real GPU.
+      *Accept:* one run on a 16 GB card, its output kept with the swap run's.
+- [ ] <!-- workspace:id=work:dc7886d1-0005-55f7-82f4-258e268217d3 --> Two image-look journeys were never seen failing for their own reason: the thread-switch width test failed in setup on the old main, and the Image-on composer row test is a guard. Neither sees what moves when Image itself is pressed.
+      *Accept:* each is seen red against a named mutant, and a journey measures the row before and after the Image press.
+- [ ] <!-- workspace:id=work:ce0b5803-6fba-50f4-a550-050af132a579 --> The composer's model button, the owner's call: with the name whole, the mic moves about 17 px when Image is turned on or off (built). The other options are a pinned width that cuts the name, or the short name alone on the button with the size left to the picker. Also his: the phone's Make images row says "On" with a grey dot when images are not offered, with the reason beside it.
+      *Accept:* the owner picks; nothing under the pointer moves on the press.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and
@@ -526,15 +545,16 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       Real-runtime acceptance remains open.
 - [ ] <!-- workspace:id=work:efd92470-9e03-54a8-97a0-00dd3401270c --> Image presets measured in the room left beside whisper; a smaller
       preset or a refusal when the room is short.
-- [ ] <!-- workspace:id=work:6cb56f29-0648-5699-ac90-926de5dd53a7 --> A chat model that was already loaded when this app first used it is not counted as the app's own (`runtime/load.ts`), so an image never unloads it and is refused while that model holds the memory. Reported by the owner after a restart with a warm model.
-      *Accept:* a model a chat turn of this app used is unloaded for an image that needs its memory, a model no turn of this app touched is left alone, and the refusal names which case it is.
+- [x] <!-- workspace:id=work:6cb56f29-0648-5699-ac90-926de5dd53a7 --> A chat model that was already loaded when this app first used it is not counted as the app's own (`runtime/load.ts`), so an image never unloads it and is refused while that model holds the memory. Reported by the owner after a restart with a warm model.
+      *Done 2026-11-11:* "An image takes the memory a loaded chat model holds, and the picker says so first"; a model a reply ran on, or any model in an Ollama the app started, is unloaded for an image; a model no reply touched is left alone and named.
 - [ ] <!-- workspace:id=work:f982f32c-1dd3-55d6-8128-c60cd4c5f4a8 --> The image swap and the three setups on a real GPU: `real-check.ts --execute --swap-model` has never been run, and every setup's memory need is an estimate. Needs the owner's go.
       *Accept:* one run per setup on a 16 GB card with the measured need written into the setup, and one swap run that prints how long the unload and the wait took.
-- [ ] <!-- workspace:id=work:4442601c-3c32-51b4-8106-1c517b857cba --> The image picker and the server judge fit differently: the picker subtracts a 512 MiB margin and the server none, so inside that band the picker says "Stops chat" or "Too big" where the server does otherwise, and a refusal can name a setup the picker marks "Too big".
-      *Accept:* one function decides for both, and a test at the edge of the margin gets the same answer from each.
+- [x] <!-- workspace:id=work:4442601c-3c32-51b4-8106-1c517b857cba --> The image picker and the server judge fit differently: the picker subtracts a 512 MiB margin and the server none, so inside that band the picker says "Stops chat" or "Too big" where the server does otherwise, and a refusal can name a setup the picker marks "Too big".
+      *Done 2026-11-11:* "An image takes the memory a loaded chat model holds, and the picker says so first"; one function in contracts decides for the picker and the server, with no margin on either side.
 - [ ] <!-- workspace:id=work:b1d89071-72da-568f-a5ea-766bb4e700e8 --> Image refusals, small holes: with several Ollama runners the byte count in the sentence can be another runner's (take this app's bytes from `/api/ps`); a file list that gains FLUX.2 Klein after ComfyUI starts stops the chat model and then refuses what was sent while offering that same setup; a refused pixel art offers plain SDXL, another look; a refusal on a file list that was never read starts ComfyUI first; the credit in `smallerFit` has no test.
 - [ ] <!-- workspace:id=work:bbb27b74-f736-50f7-9038-ef22971aedcd --> After an image wait that times out or is cancelled the chat model stays unloaded and nothing says the next reply loads it again. With no setup listed Send is still allowed. A saved setup id that no longer exists throws on the tool path. Hidden retry rows still reach the chat model's context as "Image job" rows.
-- [ ] <!-- workspace:id=work:3bb9e774-1ee2-5909-94f1-1248928a4a8b --> Image picker look: the button cuts the setup name ("FLU… 1024×1024") with room to spare and two SDXL rows can cut to the same text; the same GB number is on every model row and again on every size row, and "Fits" shows three times; the composer button changes width on a thread switch with Image on.
+- [x] <!-- workspace:id=work:3bb9e774-1ee2-5909-94f1-1248928a4a8b --> Image picker look: the button cuts the setup name ("FLU… 1024×1024") with room to spare and two SDXL rows can cut to the same text; the same GB number is on every model row and again on every size row, and "Fits" shows three times; the composer button changes width on a thread switch with Image on.
+      *Done 2026-11-11:* "An image takes the memory a loaded chat model holds, and the picker says so first"; short names on the button, the GB once per size row with a bar as the mark, a steady width on a thread switch.
 - [ ] <!-- workspace:id=work:6d0fa9f5-cc7e-5965-b5cf-36e40cb9ed16 --> Image setups as data files, one or two per hardware level, and the app fetches the missing model files into a known folder with progress and resume (today nothing is downloaded and the three setups are constants in `image/presets.ts`).
 - [ ] <!-- workspace:id=work:34d1f23b-6d57-5ca2-ace4-e54040c89f17 --> `real-check.ts` keeps its database and image under a fixed folder name in the shared temp folder; give each run its own folder.
 - [ ] <!-- workspace:id=work:d69f75c9-1b4a-5781-a36c-dd4bb9a21052 --> Turn loop in `packages/harness` (D3): pi's loop shape, a length stop

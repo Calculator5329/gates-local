@@ -875,7 +875,7 @@ function fakeComfyImage() {
       dataDir, lease, store,
       settings: () => ({ imageGen: true, comfyUrl: "http://remote-comfy:8188" }),
       lookupHost: async () => ["10.0.0.5"], localAddresses: () => [],
-      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      imageMayUnload: () => [], ollamaUrl: () => undefined,
       service: { inspect: refuseUnit, start: refuseUnit, stop: refuseUnit },
       socket: () => {
         socket = Object.assign(new EventTarget(), { close() {} });
@@ -935,7 +935,7 @@ function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {})
       dataDir, lease, store, requiredBytes: 1, idleMs: 60_000,
       settings: () => ({ imageGen: true }),
       localAddresses: () => [], lookupHost: async () => { throw new Error("no DNS in tests"); },
-      appLoadedModels: () => [], ollamaUrl: () => undefined,
+      imageMayUnload: () => [], ollamaUrl: () => undefined,
       readGpu: async () => ({ freeBytes: 2 ** 40, holders: "none", tenants: [] }),
       service: {
         inspect: async () => ({ present: true, active: up, activeState: up ? "active" : "inactive", pid: up ? 4242 : 0 }),

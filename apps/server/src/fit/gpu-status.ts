@@ -43,8 +43,13 @@ export interface GpuStatusDeps {
   listeningPids?: (port: number, pids: readonly number[]) => Promise<ReadonlySet<number>>;
   /** Friendly model name for a tag ("Qwen 3.5 9B"). */
   modelLabel?: (tag: string) => string;
-  /** Models this app loaded; only those are unprotected chat-model occupants. */
-  appLoaded?: () => readonly string[];
+  /**
+   * Models this app loaded or a turn of it answered on: what an image job may unload, so those
+   * (and, in an Ollama the app started, every resident model) are the unprotected chat models.
+   */
+  mayUnload?: () => readonly string[];
+  /** The app started this Ollama: every model in it is the app's to unload. Read with the same /api/ps, no second read. */
+  ownsRuntime?: () => boolean;
   now?: () => number;
 }
 
@@ -92,7 +97,7 @@ async function systemMemoryAvailable(deps: GpuStatusDeps, platform: NodeJS.Platf
 }
 
 /** Splits the runners' measured bytes across the resident models in proportion to their size_vram. */
-function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], label: (tag: string) => string, appLoaded: ReadonlySet<string>): GpuOccupant[] {
+function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], label: (tag: string) => string, mine: (tag: string) => boolean): GpuOccupant[] {
   if (models.length === 0) return runnerBytes > 0 ? [{ label: "Ollama", bytes: runnerBytes, kind: "chat-model", protected: true }] : [];
   const vramSum = models.reduce((s, m) => s + m.sizeVramBytes, 0);
   const total = Math.max(runnerBytes, vramSum);
@@ -100,7 +105,7 @@ function chatOccupants(runnerBytes: number, models: readonly ResidentModel[], la
     label: label(m.name),
     bytes: Math.round(vramSum > 0 ? (total * m.sizeVramBytes) / vramSum : total / models.length),
     kind: "chat-model" as const,
-    protected: !appLoaded.has(m.name),
+    protected: !mine(m.name),
   }));
 }
 
@@ -124,7 +129,10 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const pythons = tenants.filter((t) => isPython(t.processName)).map((t) => t.pid);
   const comfy = pythons.length > 0 && deps.listeningPids ? await deps.listeningPids(COMFYUI_PORT, pythons).catch(() => new Set<number>()) : new Set<number>();
   const label = deps.modelLabel ?? ((tag: string) => tag);
-  const appLoaded = new Set(deps.appLoaded?.() ?? []);
+  // Unprotected is what an image job may unload (the loader's imageMayUnload), read here without a second /api/ps.
+  const owns = deps.ownsRuntime?.() === true;
+  const listed = new Set(deps.mayUnload?.() ?? []);
+  const mine = (tag: string) => owns || listed.has(tag);
 
   let runnerBytes = 0;
   let accounted = 0;
@@ -142,7 +150,7 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
     else if (comfy.has(t.pid)) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
     else add({ label: otherAppLabel(t.processName), bytes, kind: "other-app", protected: true });
   }
-  const occupants = [...chatOccupants(runnerBytes, models, label, appLoaded), ...grouped.values()];
+  const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...grouped.values()];
   const unknown = totals.usedBytes - accounted;
   if (unknown >= UNKNOWN_MIN_BYTES) occupants.push({ label: "Not attributed to a process", bytes: unknown, kind: "unknown", protected: true });
   occupants.sort((a, b) => b.bytes - a.bytes);

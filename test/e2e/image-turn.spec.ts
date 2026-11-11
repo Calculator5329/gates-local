@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { fakeComfy } from "./fake-comfy.ts";
+import { FAKE_URL } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", allowedErrors: [/WebSocket connection to .* failed/] });
@@ -140,6 +141,55 @@ test("a restart cannot strand an unfinished image", async ({ page, open }) => {
   await stack.restart();
   await expect(card).toContainText(/cancelled|restarted/);
   await expect(card.getByRole("button", { name: "Try again" })).toBeVisible();
+});
+
+/** The models the fake Ollama holds in memory now. */
+const loaded = async () => ((await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loaded: { name: string }[] }).loaded.map((l) => l.name);
+const replies = async (client: ReturnType<typeof createClient>, threadId: string, count: number) =>
+  expect.poll(async () => (await client.call("threads.get", { threadId })).messages.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(count);
+
+test("after a restart, one chat turn on the model that stayed loaded lets the next image unload it", async ({ page, open }, info) => {
+  const connect = () => {
+    const server = new URL(page.url()).searchParams.get("server");
+    if (!server) throw new Error("No test server URL");
+    return createClient(new WebSocket(server));
+  };
+  await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
+  await open(); await waitReady(page);
+  const first = connect();
+  let threadId: string;
+  try {
+    await first.call("settings.update", { imageGen: true });
+    threadId = (await first.call("threads.create", {})).id;
+    await first.call("chat.send", { threadId, content: "hello", model: "qwen3.5:9b", numCtx: 16384 });
+    await replies(first, threadId, 2);
+  } finally { first.close(); }
+  // The app restarts; the chat model stays in Ollama, which the new process never loaded.
+  await stack.restart();
+  await open(`#thread=${threadId}`); await waitReady(page);
+  expect(await loaded()).toContain("qwen3.5:9b");
+  const again = connect();
+  try {
+    await again.call("chat.send", { threadId, content: "and again", model: "qwen3.5:9b", numCtx: 16384 });
+    await replies(again, threadId, 4);
+    // Before Send the picker says what the server will do: the model the turn ran on is freed, not Too big.
+    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.locator("#modelBtn").click();
+    const sizes = page.locator("#imagePicker .pk-context");
+    await expect(sizes.locator(".pk-cost.spill").first(), "the size row marks that it stops the chat model").toBeVisible();
+    await expect(sizes.locator(".pk-cost.no"), "no size row says Too big for an image the server will make").toHaveCount(0);
+    await page.keyboard.press("Escape");
+    comfy.gpu();
+    await again.call("image.generate", { threadId, prompt: "a sci fi background" });
+    const card = page.locator("[data-image-job]");
+    await expect(card).toContainText("Making image");
+    await expect(card).not.toHaveAttribute("data-fit", "refuse");
+    // the card says Making image as the job starts, before its fit frees memory: wait for the unload
+    await expect.poll(loaded, { message: "the image unloaded the model the turn ran on", timeout: 15_000 }).not.toContain("qwen3.5:9b");
+    comfy.finish();
+    await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("warm-swap-done.png"), animations: "disabled" });
+  } finally { again.close(); }
 });
 
 test("a waiting card survives a reload and cancellation leaves a reason", async ({ page, open }, info) => {

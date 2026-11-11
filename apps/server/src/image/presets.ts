@@ -19,6 +19,11 @@ export interface PresetFile {
 export interface Preset {
   readonly id: string;
   readonly name: string;
+  /**
+   * The composer button's name, beside the family's mark (which says FX or XL already): its first
+   * letter is no other preset's, so however narrow the button, two presets never cut to the same text.
+   */
+  readonly short: string;
   readonly family: string;
   readonly files: readonly PresetFile[];
   /** Every size the graph runs at, first is the default, and the memory a job at it needs. */
@@ -51,6 +56,7 @@ export const PRESETS: readonly Preset[] = [
   {
     id: "flux2-klein-4b",
     name: "FLUX.2 Klein 4B",
+    short: "Klein 4B",
     family: "flux",
     files: [
       { node: "UNETLoader", field: "unet_name", name: FLUX_UNET },
@@ -70,6 +76,7 @@ export const PRESETS: readonly Preset[] = [
   {
     id: "sdxl-lightning",
     name: "SDXL Lightning",
+    short: "Lightning",
     family: "sdxl",
     files: [checkpoint],
     sizes: sdxlSizes,
@@ -79,6 +86,7 @@ export const PRESETS: readonly Preset[] = [
   {
     id: "sdxl-lightning-pixel",
     name: "SDXL Lightning pixel art",
+    short: "Pixel art",
     family: "sdxl",
     files: [checkpoint, { node: "LoraLoader", field: "lora_name", name: LORA }],
     sizes: sdxlSizes,
@@ -135,7 +143,7 @@ export function findFile(files: LoaderFiles, file: PresetFile): string | undefin
   return files[key(file)]?.find((v) => v === file.name || v.replaceAll("\\", "/").endsWith(`/${file.name}`));
 }
 
-const row = (p: Preset): ImagePreset => ({ id: p.id, name: p.name, family: p.family, measured: p.measured, sizes: p.sizes.map((s) => ({ ...s })) });
+const row = (p: Preset): ImagePreset => ({ id: p.id, name: p.name, short: p.short, family: p.family, measured: p.measured, sizes: p.sizes.map((s) => ({ ...s })) });
 
 /** The presets whose every file ComfyUI lists, as the picker shows them. */
 export function availablePresets(files: LoaderFiles): ImagePreset[] {

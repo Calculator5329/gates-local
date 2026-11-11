@@ -106,11 +106,15 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
   }
 
   function applySettings(settings: Settings, first = false, preserveVoiceIntent = false): void {
+    const shown = getState().settings;
     applyServerEvent((s) => ({ ...settingsPatch(s, settings, first),
       ...(preserveVoiceIntent ? { voiceConnectionVersion: s.voiceConnectionVersion } : {}),
     }));
     applyTheme(settings.theme);
     applyTextSize(settings.textSize);
+    // The server reads ComfyUI only when asked: image generation or its address changing, from this
+    // window or any other, asks, so Settings says what it finds now and not what it had before.
+    if (shown !== NA && shown !== undefined && (shown.imageGen !== settings.imageGen || shown.comfyUrl !== settings.comfyUrl)) refreshImageStatus();
   }
 
   function setContext(numCtx: ContextSize): void {
@@ -142,11 +146,8 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
       });
       if (!r.ok) return r.message;
       saved = true;
+      // applying the saved settings asks ComfyUI again when imageGen or comfyUrl changed (applySettings)
       if (!orderedResponse && received !== undefined && received === settingsReceipt) applySettings(r.value, false, voiceChange !== undefined);
-      // the server reads ComfyUI only when asked: after these two, ask, so Settings says what it found
-      if ("imageGen" in patch || "comfyUrl" in patch) {
-        refreshImageStatus();
-      }
       return null;
     } finally { if (!saved && voiceChange !== undefined) voiceWrites.delete(voiceChange); }
   }

@@ -9,13 +9,12 @@ import { gb, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { chosenImage, imageFit, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
-import { ContextMemory } from "./Picker.tsx";
+import { memoryRuler } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { loadImagePresets, updateSettings } from "./session.ts";
 import { NA, useStore } from "./store.ts";
 import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "./ui.tsx";
 
-const MARGIN = 512 * 1024 ** 2;
 /** Below this height the list and the sizes stop being usable. */
 const CRAMPED = 280;
 const FAMILY: Readonly<Record<string, string>> = { sdxl: "SDXL", flux: "FLUX" };
@@ -24,6 +23,29 @@ const familyName = (family: string) => FAMILY[family] ?? family;
 /** The size a preset runs at when its row is picked: the chosen size when it has it, else its first. */
 function sizeFor(preset: ImagePreset, width: number, height: number) {
   return preset.sizes.find((z) => z.width === width && z.height === height) ?? preset.sizes[0]!;
+}
+
+type Fit = ReturnType<typeof imageFit>;
+
+/** What the size row's mark means, for its tooltip and its label. */
+function fitWord(fit: Fit, cpu: boolean): string {
+  if (fit === undefined) return "No GPU reading";
+  if (cpu) return "Runs in system memory";
+  if (fit.v.k === "no") return `Too big: ${gb(fit.v.amt)} short`;
+  return fit.frees ? "Stops the chat model first" : "Fits on the GPU";
+}
+
+/**
+ * A size row's memory: the number once, and the chat picker's ruler as the mark instead of a
+ * word: green fits, amber past the edge stops the chat model first, red is too big.
+ */
+function SizeMemory({ bytes, fit, cpu }: { bytes: number; fit: Fit; cpu: boolean }) {
+  const k = fit === undefined ? "pending" : fit.v.k === "no" ? "no" : fit.frees ? "spill" : "gpu";
+  const ruler = fit === undefined || cpu ? undefined : memoryRuler(bytes, fit.v.avail);
+  return <span className={`pk-cost ${k}`} role="img" aria-label={`${gb(bytes)} estimated; ${fitWord(fit, cpu)}`}>
+    <span className="pk-cost-caption"><span>{gb(bytes)}</span></span>
+    {ruler === undefined ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
+  </span>;
 }
 
 export function ImagePicker() {
@@ -133,12 +155,10 @@ export function ImagePicker() {
         <div className="pk-list-scroll">
           <div role="listbox" aria-label="Image models" onKeyDown={listKeys}>
             {rows.map((p) => {
-              const size = sizeFor(p, width, height), fit = imageFit(size.bytes, gpu);
               return <div key={p.id} className={`pk-r${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
                 <button type="button" className="pk-select" tabIndex={p.id === (chosen?.preset.id ?? rows[0]?.id) ? 0 : -1} aria-label={p.name} onClick={() => choose(p)}>
                   <ImageMark family={p.family} />
                   <span className="pk-name"><span className="pk-nm">{p.name}</span>{p.id === chosen?.preset.id ? <Icon id="check" cls="s12" /> : null}</span>
-                  <span className={`pk-v ${fit?.v.k === "no" ? "no" : ""}`}>{gb(size.bytes)}</span>
                 </button>
               </div>;
             })}
@@ -158,9 +178,9 @@ export function ImagePicker() {
           {active?.sizes.map((z) => {
             const on = active.id === chosen?.preset.id && z.width === width && z.height === height;
             const fit = imageFit(z.bytes, gpu);
-            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} data-size={`${z.width}x${z.height}`} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
+            return <button key={`${z.width}x${z.height}`} className="pk-ctx-row" role="radio" aria-checked={on} tabIndex={on ? 0 : -1} data-size={`${z.width}x${z.height}`} data-tip={fitWord(fit, cpu)} onClick={() => void pick({ preset: active.id, width: z.width, height: z.height })}>
               <span>{sizeLabel(z.width, z.height)}</span>
-              {fit === undefined ? <span className="pk-cost pending">{gb(z.bytes)}</span> : <ContextMemory v={fit.v} cpu={cpu} frees={fit.frees} />}
+              <SizeMemory bytes={z.bytes} fit={fit} cpu={cpu} />
               <span className="pk-context-check">{on ? <Icon id="check" cls="s12" /> : null}</span>
             </button>;
           })}
@@ -168,6 +188,6 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    <footer className="pk-bottom"><span /><span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free · ${gb(Math.max(0, free - MARGIN))} usable`}</span></footer>
+    <footer className="pk-bottom"><span /><span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
   </div>;
 }

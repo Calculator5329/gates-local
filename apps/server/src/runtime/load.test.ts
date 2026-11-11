@@ -5,12 +5,14 @@ import type { FitReport, ModelLoad } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import { checkFit } from "../fit/fit.ts";
+import { readGpuStatus } from "../fit/gpu-status.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { defaultSettings } from "../settings/store.ts";
 import { createRuntimeHandlers } from "./handlers.ts";
 import { ModelActionError, createModelLoader, type ModelLoader, type ModelLoaderDeps } from "./load.ts";
 import { createModelCatalog, listLoaded } from "./models.ts";
 import { createPullManager } from "./pull.ts";
+import { canonicalTag } from "./recommended.ts";
 import { ownedIdleComfy } from "./test-image.ts";
 
 const servers: FakeServer[] = [];
@@ -328,6 +330,86 @@ function quiet(failure: () => string | undefined) {
   });
   return { loader, logged: () => lines.filter((l) => l.includes("/api/ps")) };
 }
+
+/** A turn of this app that answered on `model`. */
+async function turnOn(loader: ModelLoader, model: string) {
+  const turn = loader.reserve(model);
+  await turn.admit(16384);
+  turn.firstToken();
+  turn.end();
+}
+
+describe("what an image may unload: the app's loads, the models its turns ran on, an app-started Ollama's all", () => {
+  it("a model warm before the app started joins once a chat turn of this app answers on it; appLoadedModels never lists it", async () => {
+    const s = await fakeOllama(["qwen3.5:9b", "other:7b"]);
+    const loader = loaderFor(s, []);
+    expect(await loader.imageMayUnload()).toEqual([]);
+    await turnOn(loader, "qwen3.5:9b");
+    expect(await loader.imageMayUnload()).toEqual(["qwen3.5:9b"]);
+    expect(loader.appLoadedModels(), "the picker's answer and the reclaim list keep their meaning").toEqual([]);
+  });
+  it("the GPU status says what an image may unload: a warm model is protected until a turn answers on it, and that answer refreshes the status", async () => {
+    const s = await fakeOllama(["qwen3.5:9b"]);
+    let pokes = 0;
+    const loader = loaderFor(s, [], "fits", { onLoaded: () => { pokes += 1; } });
+    // the status reader wired as services.ts wires it, on fake GPU and memory reads
+    const guarded = async () => (await readGpuStatus({
+      platform: "win32",
+      freemem: () => 0,
+      runNvidiaSmi: async (args) => (args[0]?.startsWith("--query-gpu") ? "RTX, 16303, 7000, 9303\n" : ""),
+      residentModels: async () => (await loader.residentModels()).map((m) => ({ name: canonicalTag(m.name), sizeVramBytes: m.sizeVramBytes })),
+      mayUnload: () => loader.loadedOrAnswered(),
+      ownsRuntime: () => false,
+    })).occupants.filter((o) => o.kind === "chat-model").map((o) => [o.label, o.protected]);
+    const turn = loader.reserve("qwen3.5:9b");
+    await turn.admit(16384);
+    expect(await guarded(), "warm, before this app's first token: another program's").toEqual([["qwen3.5:9b", true]]);
+    turn.firstToken();
+    expect(pokes, "joining the list refreshes the status at once, not at the next poll").toBe(1);
+    expect(await guarded(), "a turn of this app answered on it: an image may unload it").toEqual([["qwen3.5:9b", false]]);
+    turn.end();
+    await turnOn(loader, "qwen3.5:9b");
+    expect(pokes, "a model already in the list asks no second refresh").toBe(1);
+  });
+  it("a turn that never answered does not count", async () => {
+    const s = await fakeOllama(["qwen3.5:9b"]);
+    const loader = loaderFor(s, []);
+    const turn = loader.reserve("qwen3.5:9b");
+    await turn.admit(16384);
+    turn.end();
+    expect(await loader.imageMayUnload()).toEqual([]);
+  });
+  it("in an Ollama the app started, a model it never loaded or used is the app's too", async () => {
+    const s = await fakeOllama(["stray:7b"]);
+    expect(await loaderFor(s, [], "fits", { ownsRuntime: () => true }).imageMayUnload()).toEqual(["stray:7b"]);
+    expect(await loaderFor(s, [], "fits", { ownsRuntime: () => false }).imageMayUnload()).toEqual([]);
+  });
+  it("a runtime switch forgets the models the old runtime's turns ran on", async () => {
+    const ps = ["qwen3.5:9b"];
+    const s = await fakeOllama(ps);
+    const loader = loaderFor(s, []);
+    await turnOn(loader, "qwen3.5:9b");
+    loader.runtimeChanged();
+    loader.runtimeSettled();
+    expect(await loader.imageMayUnload()).toEqual([]);
+  });
+  it("unloaded() drops a model from both lists, with an unloaded push for a loaded one; a reading without it prunes it", async () => {
+    const ps: string[] = ["warm:7b"];
+    const s = await fakeOllama(ps);
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    await loader.load("cold:7b", 16384);
+    await turnOn(loader, "cold:7b");
+    await turnOn(loader, "warm:7b");
+    expect((await loader.imageMayUnload()).toSorted()).toEqual(["cold:7b", "warm:7b"]);
+    loader.unloaded("cold:7b");
+    expect(pushes.at(-1)).toEqual({ model: "cold:7b", numCtx: 16384, state: "unloaded" });
+    expect(loader.appLoadedModels()).toEqual([]);
+    expect(await loader.imageMayUnload()).toEqual(["warm:7b"]);
+    loader.prune([]);
+    expect(await loader.imageMayUnload()).toEqual([]);
+  });
+});
 
 describe("the GPU poll's /api/ps failures are logged quietly", () => {
   it("ten failing polls in a row log one line", async () => {

@@ -84,10 +84,15 @@ test("Tools rows say what each tool needs, and go where it is fixed", async ({ p
   await expect(set.getByRole("heading", { name: "Library" })).toBeVisible();
 
   await section(page, "Tools");
-  const images = set.getByRole("button", { name: /^Make images/ });
-  await expect(images).toContainText("Turned off");
+  // Make images is the chat model's image switch: it cannot be turned on until image generation is,
+  // its reason says so, and the reason's link goes to Image generation, where that is fixed
+  const images = set.locator('.srow[data-tool="images"]');
+  await expect(images).toContainText("Needs Generate images, in Image generation.");
   await expect(images).toHaveClass(/\bdim\b/);
-  await images.click();
+  const make = images.getByRole("switch", { name: "Make images" });
+  await expect(make).toHaveAttribute("aria-checked", "false");
+  await expect(make).toBeDisabled();
+  await images.getByRole("button", { name: "Image generation" }).click();
   await expect(set.getByRole("heading", { name: "Image generation" })).toBeVisible();
 
   await addFolder(page, "s2-tools");

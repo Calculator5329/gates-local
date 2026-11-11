@@ -58,7 +58,7 @@ it("renders over fake HTTP and real WebSocket frames, ignoring unrelated object_
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const image = createImageModule({ dataDir, store, lease: createGpuLease(), requiredBytes: 10,
     settings: () => ({ imageGen: true, comfyUrl: baseUrl }),
-    appLoadedModels: () => ["app-only"], ollamaUrl: () => baseUrl,
+    imageMayUnload: () => ["app-only"], ollamaUrl: () => baseUrl,
     readGpu: async () => ({ freeBytes, holders: "whisper; external-chat" }),
     service: { inspect: async () => { throw new Error("custom URL must not inspect units"); }, start: async () => { throw new Error("must not start"); }, stop: async () => { throw new Error("must not stop"); } },
     push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },

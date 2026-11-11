@@ -9,10 +9,17 @@
 // A chat turn reserves its model synchronously (so models.remove sees it at
 // once), then admit() decides, before the chat request goes out, whether the
 // turn is a cold load: "loading" is pushed then and "ready" at the first
-// content or thinking token. Either way the model joins appLoadedModels(),
-// the one list the image lane may unload from. The list is pruned against
+// content or thinking token. A cold load joins appLoadedModels(); any turn's
+// first token puts its model in `used`, so a model that was warm before the
+// app started still counts as the app's when an image needs its memory
+// (imageMayUnload(), the one list the image lane may unload from; in an
+// Ollama the app started, everything /api/ps lists). loadedOrAnswered() is the
+// two together, and the GPU status marks exactly those (or, in the app's own
+// Ollama, every resident model) unprotected, so the picker says what an image
+// will free. A tag joining `used` pokes the GPU status. Both are pruned against
 // /api/ps whenever this module reads it (the GPU poll reads it here too, via
-// residentModels()), so a model Ollama let go of leaves it ("unloaded" push).
+// residentModels()), so a model Ollama let go of leaves both (an owned one
+// with an "unloaded" push).
 // A reading of a runtime switched away from prunes nothing. A preload takes
 // the same per-model reservation as a turn, so models.remove refuses while
 // either runs.
@@ -31,7 +38,7 @@
 // base URL. Its fit, residency read and generate all go to that URL, and
 // after every await a changed generation stops it (no request, nothing
 // owned). A runtime switch (runtimeChanged .. runtimeSettled) refuses new
-// work, clears the owned list without pushes (models left in an external
+// work, clears the owned and used lists without pushes (models left in an external
 // Ollama are not the app's any more), aborts the old runtime's preloads and
 // waiting admissions, and ends every open "loading" notice with an error.
 // close() refuses new work and aborts and drains every preload, so a
@@ -160,6 +167,17 @@ export interface ModelLoader {
   close(): Promise<void>;
   /** Models this app loaded that are still resident, by tag. */
   appLoadedModels(): readonly string[];
+  /** The models this app loaded and the ones a turn of it answered on, by tag, without reading /api/ps. */
+  loadedOrAnswered(): readonly string[];
+  /**
+   * What an image job may unload to make room, by tag: the models this app loaded, the ones a
+   * chat turn of this app answered on since the start (warm before it, too), and, in an Ollama
+   * the app started, every model /api/ps lists. A model no turn of this app touched in an Ollama
+   * the app did not start is never in it.
+   */
+  imageMayUnload(): Promise<readonly string[]>;
+  /** The image job unloaded `model` (keep_alive 0): it is neither loaded nor used by the app any more. */
+  unloaded(model: string): void;
   /**
    * The GPU poll's /api/ps of the current runtime, pruning the owned list on the way. Empty
    * when no runtime is ready, the read fails, or the runtime changed while it was in flight:
@@ -185,8 +203,10 @@ export interface ModelLoaderDeps {
   readonly gate?: LoadGate;
   /** models.load holds a shared chat claim, so it never loads beside an image job. */
   readonly lease?: Pick<GpuLease, "run">;
-  /** After a load the app caused, so the GPU status refreshes (gpu watcher poke). */
+  /** After a load the app caused or a model joining `used`, so the GPU status refreshes (gpu watcher poke). */
   readonly onLoaded?: () => void;
+  /** The current Ollama is one this app started (runtime owner "app"): every model in it is the app's. */
+  readonly ownsRuntime?: () => boolean;
   readonly log?: (line: string) => void;
 }
 
@@ -229,6 +249,12 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const gate = deps.gate ?? createFifoGate();
   /** Tag -> the num_ctx it was loaded at. */
   const owned = new Map<string, number>();
+  /**
+   * Tags a chat turn of this app got a first token from since the start: warm models it did not
+   * load count too. Pruned against /api/ps with `owned`, cleared on a runtime switch.
+   */
+  const used = new Set<string>();
+  const loadedOrAnswered = (): readonly string[] => [...new Set([...owned.keys(), ...used])];
   /** Tag -> reservations (turns and preloads) on it. */
   const reservations = new Map<string, number>();
   const removing = new Set<string>();
@@ -276,6 +302,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
 
   const prune = (resident: readonly string[]) => {
     const here = new Set(resident.map(canonicalTag));
+    for (const tag of used) if (!here.has(tag)) used.delete(tag);
     for (const [tag, numCtx] of owned) {
       if (here.has(tag)) continue;
       owned.delete(tag);
@@ -505,6 +532,11 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
           if (answered || ended) return;
           answered = true;
           letGo();
+          if (gen === generation && !used.has(tag)) {
+            used.add(tag);
+            // the status pushed already calls it protected: refresh it now, not at the next poll
+            deps.onLoaded?.();
+          }
           if (notice !== undefined && gen === generation) loaded(model, numCtx, notice);
         },
         end() {
@@ -543,6 +575,7 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     runtimeChanged() {
       generation++;
       owned.clear();
+      used.clear();
       switching = true;
       current.abort(switched());
       if (!closed) current = new AbortController();
@@ -567,6 +600,25 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
     },
 
     appLoadedModels: () => [...owned.keys()],
+    loadedOrAnswered,
+    async imageMayUnload() {
+      const baseUrl = deps.baseUrl();
+      if (deps.ownsRuntime?.() === true && baseUrl !== undefined) {
+        const gen = generation;
+        const here = await residency(baseUrl, gen, current.signal);
+        // An unreadable /api/ps falls back to what the app knows it loaded or used.
+        if (here.ok && gen === generation) return [...here.models.keys()];
+      }
+      return loadedOrAnswered();
+    },
+    unloaded(model) {
+      const tag = canonicalTag(model);
+      used.delete(tag);
+      const numCtx = owned.get(tag);
+      if (numCtx === undefined) return;
+      owned.delete(tag);
+      send({ model: tag, numCtx, state: "unloaded" });
+    },
     async residentModels() {
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) return [];

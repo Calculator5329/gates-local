@@ -46,8 +46,6 @@ const pctOf = (done: number, total: number | undefined) => (total ? Math.round((
 // The first send replaces Draft's composer with the thread's in the same commit.
 // Transfer primary-action focus only to that immediate replacement.
 let primaryFocus = false;
-/** The model button's width showing a chat model: with Image on it keeps that width, so nothing in the row moves. */
-let chatButtonWidth = 0;
 
 /** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
@@ -134,10 +132,6 @@ export function Composer() {
   const online = useStore((s) => s.conn.kind === "open");
   const ta = useRef<HTMLTextAreaElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
-  const modelBtn = useRef<HTMLButtonElement>(null);
-  useLayoutEffect(() => {
-    if (!drawing && modelBtn.current) chatButtonWidth = modelBtn.current.getBoundingClientRect().width;
-  });
   // Preparing a reply is user intent, not an idle startup download. The
   // renderer can arrive while the person types, before the first Send.
   useEffect(() => {
@@ -338,16 +332,13 @@ export function Composer() {
               type="button"
               className="ctl gate"
               id="modelBtn"
-              ref={modelBtn}
               aria-haspopup="dialog"
               aria-expanded={drawing ? pop === "images" : pop === "picker" && !pickerPending}
               aria-busy={!drawing && (boot || loading || pickerPending) || undefined}
               // the placeholder has no text, so the button needs a name of its own
               aria-label={!drawing && boot && shownTag === undefined ? "Model" : undefined}
-              data-tip={drawing ? undefined : modelTip}
-              // the name only when the fixed width cuts it
-              data-tipt={drawing ? named?.preset.name : undefined}
-              style={drawing && chatButtonWidth > 0 ? { width: chatButtonWidth } : undefined}
+              // Image on: the button says the short name beside the family mark, the tip the full one
+              data-tip={drawing ? (named === undefined ? undefined : esc(named.preset.name)) : modelTip}
               // Load the picker's code on intent: hover, keyboard focus, or the press
               // before a click (touch has no hover). Its fit values are already in the
               // last fit table, so nothing is asked of the server here.
@@ -359,7 +350,7 @@ export function Composer() {
               {/* Image on: the image model and size Send uses, in the same box */}
               {drawing ? <>
                 {named === undefined ? null : <ImageMark family={named.preset.family} />}
-                <span className="t">{named?.preset.name ?? "Image model"}</span>
+                <span className="t">{named === undefined ? "Image model" : named.preset.short ?? named.preset.name}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
                 {/* loading shows in the tile, never in the label: the trigger keeps its width */}
