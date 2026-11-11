@@ -268,7 +268,8 @@ function ChatNav() {
             onChange={(e) => setState({ search: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
-                e.stopPropagation();
+                // an empty field has nothing to clear: the same Escape goes on and closes the drawer
+                if (search !== "") e.stopPropagation();
                 clearSearch();
                 e.currentTarget.blur();
               }

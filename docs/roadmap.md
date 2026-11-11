@@ -484,6 +484,15 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:381cb334-9c6b-52f3-9713-b285120cb91c --> Fit answers, the owner's call: a memory change replaces a verdict in place (built); the other options are to withdraw it on every change, or only when no new table has come after a few seconds. A pick made before the first table does nothing; it could be held and applied when the table lands.
       *Accept:* the owner picks; `docs/design.md` states the rule.
 
+*Main reds, follow-ups:*
+
+- [ ] <!-- workspace:id=work:b797504b-f046-53db-b7e2-048b8260b92b --> `test/e2e/real-smoke.spec.ts` still waits for `.stop-note` after a person's Stop, which the chat window trim replaced with the stop square and its seconds. It needs a real Ollama, so no landing run shows it red.
+      *Accept:* the journey expects the stop square's seconds as `streaming.spec.ts` does, and is run once against a real model with the owner's go.
+- [ ] <!-- workspace:id=work:f70791ab-8948-5db4-9d57-45e64ef558b2 --> The three load-only waits (`runtime-wrong.spec.ts` twice, `sidebar-footer.spec.ts` at 320 px) were seen green on a quiet machine only; the app-copy `runtime-wrong` wait was never seen red. Before the runtime is read the footer gear opens Settings at General: a person who clicks that early lands on a different section than a moment later.
+      *Accept:* three full suites in a row pass these tests under four shards, and the gear either waits for the runtime or opens the same section before and after.
+- [ ] <!-- workspace:id=work:2642d7c2-779f-5e7a-ba98-f487cee0c551 --> One chunk rule decides which screens preload the picker's files, held by `chunks.spec.ts` in a browser only; a new import from `Picker.tsx` in a Settings file puts the picker back into Settings' preload with no unit check.
+      *Accept:* a build check fails when the Settings chunk's preload list names the picker chunk or its CSS.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and

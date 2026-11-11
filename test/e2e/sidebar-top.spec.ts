@@ -378,8 +378,7 @@ test.describe("drawer with a keyboard and pointer", () => {
     await expect(sb.locator(".sb-row").first()).toBeInViewport({ ratio: 1 });
     await expect(page.locator("#searchIn"), "the first thing in the drawer, as the row's Search button was").toBeFocused();
     await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#app")).not.toHaveClass(/drawer/);
+    await expect(page.locator("#app"), "one Escape from the empty field closes the drawer").not.toHaveClass(/drawer/);
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set")).toBeVisible();
     await page.getByRole("button", { name: "Open threads" }).click();

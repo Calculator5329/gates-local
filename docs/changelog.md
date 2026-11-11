@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-11: Escape closes the drawer in one press, and Settings opens without the picker's files
+
+- With the thread drawer open and its search box empty, one Escape closes
+  the drawer. It took two since the chat window trim. A box with text in it
+  still clears on the first press.
+- Settings no longer loads the model picker's code and styles with its
+  own. The image picker lives with the model picker now, which is where it
+  takes its look from. Since the image picker landed, Settings waited on
+  the picker's stylesheet before opening.
+- Five browser tests were wrong, not the app: two still expected screens
+  the trim and the first-frame work changed on purpose, and three clicked
+  before the state they act on had arrived, which only failed on a busy
+  test machine. Each now waits for what it acts on.
+
 ## 2026-11-11: One memory answer for every screen
 
 - Whether a model fits is worked out in one place, on the server, as one

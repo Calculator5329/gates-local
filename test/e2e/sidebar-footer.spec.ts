@@ -446,6 +446,7 @@ test("a narrow desktop window at 320px: four 44 px buttons in the drawer, the up
   console.log(`NARROW320 ${JSON.stringify(boxes)}`);
 
   s.update("available");
+  await expect(page.locator(".sb-foot .upd"), "the pushed update is shown; a click before it checks instead").toHaveAccessibleName("Update to def5678");
   await page.locator(".sb-foot .upd").click();
   const ask = page.getByRole("group", { name: "Confirm update" });
   await expect(ask).toBeVisible();

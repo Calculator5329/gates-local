@@ -6,11 +6,18 @@
 // (apps/web/src/session.ts hydrate).
 import { expect, sendMessage, test } from "./fixtures.ts";
 
-/** Record the model label in the first DOM state that shows the runtime ready. */
+/**
+ * Record the model label in the first DOM state that shows the runtime ready.
+ * Before the first read the composer is not greyed either, and the model
+ * button holds a placeholder that only that boot frame draws (Composer.tsx),
+ * so the first unblocked frame without it is the one where the runtime turned
+ * ready.
+ */
 function watchReady(): void {
   const w = window as unknown as { glReadyModel?: string | null };
   const seen = () => {
     if (w.glReadyModel !== undefined || document.querySelector(".composer:not(.blocked)") === null) return;
+    if (document.querySelector("#modelBtn [data-skel]") !== null) return;
     w.glReadyModel = document.querySelector("#modelBtn > span:not(.maker-mark)")?.textContent ?? null;
   };
   new MutationObserver(seen).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });

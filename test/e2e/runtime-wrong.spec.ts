@@ -31,6 +31,7 @@ test.describe("with the app's own copy chosen", () => {
   test("on a computer with no copy to run, Settings still offers the way back to the system Ollama", async ({ page, open }) => {
     await noAppCopyHere(page);
     await open();
+    await expect(gear(page), "the runtime is read: before it the gear claims nothing and opens General").toHaveAccessibleName(/^Settings · /);
     await gear(page).click();
     await page.getByRole("button", { name: "Use the system Ollama" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Go back to the system Ollama?");
@@ -67,6 +68,7 @@ test.describe("with the system Ollama chosen", () => {
   test("on a computer with no copy to run, Settings says so instead of offering to install it", async ({ page, open }) => {
     await noAppCopyHere(page);
     await open();
+    await expect(gear(page), "the runtime is read: before it the gear claims nothing and opens General").toHaveAccessibleName(/^Settings · /);
     await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await expect(page.locator(".set")).toContainText("Not available on this computer");
