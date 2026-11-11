@@ -372,6 +372,150 @@ tasks for the remaining consumers, including the broad suite. The newer
 `next.spec.ts` path already records elapsed time, CPU cost and counters rather
 than these rows; its measurements and scorer are unchanged.
 
+## Picker freshness and throttle review, 2026-11-11
+
+First opening now requires current fit answers, or an explicit error, rather
+than merely retained reports. A completed warm followed by `gpu.changed` or
+model-load completion could previously open on history while replacements were
+pending. The same four in-memory cases failed on main and with the parent
+Picker module (`e59179e`) given the same populated cache. The `prepared`
+expression was byte-identical in that parent, `d55debf`, and main `11b1a73`.
+Warming makes the populated-cache case reachable before the first click; the
+parent's barrier did not enforce a different freshness rule. This comparison
+uses the parent Picker in the same session fixture, not the whole parent app.
+
+The fix reuses `fitIsCurrent`, permits error answers to settle, and leaves the
+already-open picker's history and startup-failure escape intact. Existing
+GPU/model-read error and timeout tests still pass. Both extra picker perf
+helpers also apply `Emulation.setCPUThrottlingRate` before navigation. Checks
+against both real helpers failed at rate 4 before the fix and pass at rates
+4 and 1 afterwards, without launching a browser.
+
+The new tests were written in the implementation lane, not independently.
+Six diagnostic assertions failed before the fixes; focused runs passed twice.
+Final local verify: 224 files, 3,227 passed, 2 skipped. The original whole-picker
+`f.checking` assertion was unchanged, and passed at all three delivery delays.
+
+Two detached runner jobs completed with no owned processes left. The first,
+`picker-round4-functional-1-20261111T080943.761812Z`, passed 78 existing tests
+and skipped 2; its new probe failed because repeated startup reads of one
+selected pair were mistaken for a complete warm. The corrected precondition
+requires all six distinct first-view pairs and every response before
+invalidation. Repeated intent uses the existing in-flight dedupe.
+
+The second, `picker-round4-proof-2-20261111T082045.490678Z`, was the single
+exclusive job. It repeated the full explicit functional selection (79 passed,
+2 skipped), then compared only the picker group. The invalidation journey
+held every replacement reply, kept the picker hidden until the last answer,
+and asserted six replacements with no additional check on opening. The job
+finished in 759.271 seconds; the comparison itself took 450.880 seconds.
+There were no overlapping jobs from this lane. No further runner job was used.
+
+Comparison: merged-main BASE `11b1a73`, candidate `088e3f9`, four paired rounds,
+two timed repetitions per arm per round and three counter repetitions. Rate 1
+was used in both arms; comparing rate 4 would mix the throttle-helper repair
+with the product change. The medians below use nearest rank. Limits apply to
+the lower-quartile shuffle test, not median differences. Every timing row was
+within noise; no threshold, scorer or label changed.
+
+| Action | Base median ms | Candidate median ms | Limit ms |
+| --- | ---: | ---: | ---: |
+| picker-open | 293.80 | 293.60 | 11.75 |
+| picker-open-hover | 36.20 | 42.10 | 8.82 |
+| picker-open-cold-ready | 298.30 | 294.60 | 15.50 |
+| picker-open-hand | 109.40 | 119.20 | 13.55 |
+| picker-open-keyboard | 68.30 | 59.00 | 29.15 |
+
+| Full session | Base fit.check | Candidate fit.check |
+| --- | ---: | ---: |
+| main after-reply journey | 11 | 11 |
+| after-reply hand | 7 | 7 |
+| after-reply keyboard focus | 7 | 7 |
+| after-reply hover-away | 7 | 7 |
+| ready hover | 6 | 6 |
+| ready cold click | 6 | 6 |
+
+Each count was identical across all 12 counter repetitions in each arm. A
+still-current warm also opens on the first layout pass without another check
+in the in-memory test. Hover waits 350 ms after readiness; cold-ready clicks
+as soon as automation sees readiness. Hand and keyboard-focus wait 150 ms
+between intent and activation after a reply. Those dwells are outside the
+timing window. The new invalidation browser case is correctness evidence,
+not a separately timed perf row.
+
+The only changed exact action counter was picker-window network bytes:
+7,826 to 7,840. Total JS gzip grew 15 bytes (182.093 to 182.107 KiB), entry
+JS fell one byte (140.449 to 140.448 KiB), and CSS was unchanged. Existing
+soft-target warnings remain. First-run and thread-open latency were not
+remeasured in this review; the first-screen/full-mount thread windows remain.
+
+## Final picker shortcut comparison, 2026-11-11
+
+Run `picker-shortcut-final-compare-1-20261111T071412.692386Z` compared merged
+main `67a1519` with experiment `1ed119a`. Main already contained button-intent
+warming. The experiment additionally started the same checks on Control/Command+M
+before mounting the picker. It retained the complete-view barrier and original
+whole-picker flicker assertion. One detached exclusive job completed in
+772.261 seconds with no owned processes left. Four paired rounds recorded
+12 timed and 12 counter repetitions per arm for startup/picker, plus 8 first-run
+timing repetitions per arm in the same job. No other job from this lane overlapped.
+
+The medians use the harness's nearest-rank convention. The next scorer's limits
+apply to its lower-quartile shuffle test, not to differences between medians.
+Every row stayed within noise; first-run's existing too-noisy label remains.
+
+| Action | Base median ms | Experiment median ms | Limit ms |
+| --- | ---: | ---: | ---: |
+| cold-composer | 269.90 | 278.40 | 17.45 |
+| picker-open | 293.50 | 308.80 | 1.10 |
+| picker-open-hand | 110.80 | 107.50 | 6.08 |
+| picker-open-keyboard | 57.00 | 62.90 | 24.35 |
+| picker-open-shortcut | 311.30 | 294.80 | 16.58 |
+| picker-open-hover | 36.00 | 38.40 | 8.05 |
+| picker-open-cold-ready | 288.10 | 294.30 | 7.58 |
+| picker-open-idle | 295.40 | 292.40 | 7.85 |
+| first-run-ready | 358.70 | 350.40 | 82.60 |
+
+The shortcut's p = 0.0145 missed the unchanged 0.01 threshold. Hover and idle
+each wait 350 ms after readiness; only hover touches the button before the
+click. Cold-ready clicks immediately after readiness. Hand and keyboard-focus
+rows wait 150 ms between intent and activation after a completed reply. Shortcut
+presses Control+M after a reply without prior button intent. Dwells are setup,
+outside the timing window. These extra idle/shortcut experiment rows were removed.
+
+| Session | Base fit.check | Experiment fit.check |
+| --- | ---: | ---: |
+| main after-reply journey | 11 | 11 |
+| after-reply hand | 7 | 7 |
+| after-reply keyboard focus | 7 | 7 |
+| after-reply shortcut | 7 | 7 |
+| after-reply hover-away, never opens | 7 | 7 |
+| ready hover | 6 | 6 |
+| ready cold click | 6 | 6 |
+| ready idle click | 6 | 6 |
+
+Every picker count above was identical across all 12 counter repetitions in
+each arm. Hover-away includes five checks whose results no opening uses, in
+both arms. The only changed exact action counter was picker network bytes,
+7,825 to 7,827. Entry JS gzip grew 140.419 to 140.425 KiB and total JS 181.902
+to 181.912 KiB; CSS was unchanged. Those changes were reverted.
+
+First-run counters were sampled at the readiness marker, before screenshot and
+context close, so they did not establish complete-session counts. The recorded
+vectors, in rounds 1 through 4, were base `[1,1] / [2,1] / [2,1] / [1,1]` and
+experiment `[2,1] / [1,1] / [1,1] / [2,1]`. Both total ten checks, but paired
+sessions differ. Strict per-session parity remains unproven. This experimental
+counter was also removed; no measurement or scorer label was changed.
+
+The new shortcut unit test failed on both Control and Meta before the change
+and passed twice afterwards. Candidate verification passed 3,210 tests with 2
+skipped; the explicitly selected browser run passed 97 tests with 2 skipped,
+including the original cold-picker flicker guard at all three delays, picker,
+downloads, context, composer and native paste. Revert `f9b7c9a` restores the exact
+main product/harness tree; fallback verification passed 3,208 tests, 2 skipped.
+There was no further browser or timing job after the revert. First-screen
+thread rows and their full-mount twins were retained, not remeasured here.
+
 ## How to climb
 
 This section is written to replace "How to climb" in the climb lanes' brief.

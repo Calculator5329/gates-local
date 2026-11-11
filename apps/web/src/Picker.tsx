@@ -19,6 +19,7 @@ const MARGIN = 512 * 1024 ** 2; // Display the server's existing VRAM safety mar
 const FAVORITES = "gates-local.model-favorites";
 /** Below this height the picker's rail, list and context column stop being usable. */
 const CRAMPED = 280;
+const PREPARE_TIMEOUT_MS = 30_000;
 const makers: readonly Maker[] = ["Gemma", "Qwen", "Milo", "gpt-oss", "Phi", "Mistral", "Other"];
 interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean }
 interface ContextChoice { tag: string; size: ContextSize }
@@ -102,14 +103,24 @@ export function Picker() {
   const actual = active ? ctxFor(numCtx, models, active.tag) : numCtx;
   const present = new Set([...rows.map(r => makerOf(r.tag)), ...(catalog ?? []).map(c => makerOf(c.name))]);
   const rowKey = rows.map(r => r.tag).toSorted().join("\n");
-  // Prepare the first view with the existing checks. Later refreshes keep
-  // readable history on screen; neither history nor opening authorizes a pick.
+  const answered = (tag: string, c = numCtx) => { const r = checked(tag, c); return r === "error" || fitIsCurrent(r); };
+  // First opening needs current answers; explicit errors also settle a check.
+  // Later refreshes keep readable history on screen; opening never authorizes a pick.
   const prepared = !readyForFits || (models !== undefined || settled) && (gpu !== undefined || settled) &&
-    installed.every(m => checked(m.name) !== undefined) &&
-    (!active || CONTEXT_SIZES.every(c => activeMax !== undefined && c > activeMax || checked(active.tag, c) !== undefined));
+    installed.every(m => answered(m.name)) &&
+    (!active || CONTEXT_SIZES.every(c => activeMax !== undefined && c > activeMax || answered(active.tag, c)));
   useLayoutEffect(() => {
     if (pop && !pop.ready && prepared && getState().pop === pop) setState({ pop: { ...pop, ready: true } });
   }, [pop, prepared]);
+  useLayoutEffect(() => {
+    if (!pop || pop.ready || getState().pop !== pop) return;
+    // Bound this opening, not an epoch: repeated invalidations may discard
+    // every request's timeout. Retained rows already mark stale answers busy.
+    const timer = setTimeout(() => {
+      if (getState().pop === pop) setState({ pop: { ...pop, ready: true } });
+    }, PREPARE_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [pop]);
   useEffect(() => {
     if (!pop) return;
     for (const m of chatModels(getState().models ?? [])) ensureFit(m.name, ctxFor(numCtx, models, m.name));

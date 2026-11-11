@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-11: The picker waits for a new reading after memory changes
+
+- Warming the model picker and then changing GPU memory or finishing a model
+  load could let its first view show old answers while replacements were pending.
+  The first view now waits for current fit answers. A failed check counts as an
+  answer, so it can open with the error instead of hanging.
+- An already open picker keeps readable history during refresh. A warm whose
+  answers are still current is reused, with no extra check on opening. Failed
+  startup GPU/model reads retain the existing usable-picker fallback.
+- Picker performance sessions now apply the requested CPU throttle before
+  navigation, matching the other journeys and the rate recorded in the output.
+- If memory keeps changing while checks never answer, the first view opens
+  after 30 seconds (the check timeout) with the answers it has, rows still
+  checking marked as such. Nothing stale can be picked.
+
 ## 2026-11-11: A tool call the model wrote out as text is run
 
 - Some models write a tool call as their reply instead of making the call,

@@ -85,12 +85,13 @@ const handDwellMs = 150;
  * later, or keyboard focus and then Enter. `hover-away` hovers and leaves
  * without opening: the one warm-up whose checks no opening uses.
  */
-async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "hand" | "keyboard" | "hover-away") {
+export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "hand" | "keyboard" | "hover-away") {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   try {
     const page = await context.newPage(); await install(page);
     const cdp = await context.newCDPSession(page);
     await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+    if (throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
     let checks = 0;
     cdp.on("Network.webSocketFrameSent", event => {
       const request = decodeRequest(event.response.payloadData);
@@ -134,12 +135,13 @@ async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mode: "ha
 }
 
 /** Each case owns a fresh client session; none warms the next case's fit cache. */
-async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mode: "hover" | "cold-ready") {
+export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mode: "hover" | "cold-ready") {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "dark" });
   try {
     const page = await context.newPage(); await install(page);
     const cdp = await context.newCDPSession(page);
     await cdp.send("Network.enable"); await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+    if (throttle > 1) await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttle });
     let checks = 0;
     cdp.on("Network.webSocketFrameSent", event => {
       const request = decodeRequest(event.response.payloadData);

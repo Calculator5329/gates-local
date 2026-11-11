@@ -91,6 +91,12 @@ async function openPicker() {
   hooks.effects.length = 0; hooks.layout.length = 0; Picker(); runAll(hooks.effects); await tick();
 }
 
+async function pickerFrame() {
+  hooks.effects.length = 0; hooks.layout.length = 0; Picker();
+  Object.assign(document, { getElementById: () => null });
+  runAll(hooks.layout); runAll(hooks.effects); await tick();
+}
+
 it("a ready composer checks only the selected pair, even after two frames and idle", async () => {
   await settle();
   expect(checked().filter(key => key !== `${selected}@16384`)).toEqual([]);
@@ -143,6 +149,38 @@ it("an opening right after a warm makes no further check and shows a complete fi
   Object.assign(document, { getElementById: () => null });
   runAll(hooks.layout);
   expect(store.getState().pop).toMatchObject({ id: "picker", ready: true });
+});
+
+it.each([
+  ["gpu.changed", "report"], ["gpu.changed", "error"],
+  ["model ready", "report"], ["model ready", "error"],
+] as const)("first opening after a warm then %s waits for replacement answers (%s)", async (change, ending) => {
+  await settle(); intent("onPointerEnter"); await tick();
+  // Read keys through the public store helper rather than the display's history.
+  const reports = () => [
+    store.getState().fits[store.fitKey(selected, 8192)], store.getState().fits[store.fitKey(selected, 16384)],
+    store.getState().fits[store.fitKey(selected, 32768)], store.getState().fits[store.fitKey(other, 8192)],
+  ];
+  expect(reports().every(session.fitIsCurrent)).toBe(true);
+  const held = Array.from({ length: needed().length }, () => b.server.hold("fit.check"));
+  if (change === "gpu.changed") await afterReply();
+  else { b.server.push("models.load", { model: selected, numCtx: 16384, state: "ready" }); await tick(); }
+  intent("onPointerEnter"); await tick();
+  const answers = await Promise.all(held), before = checked();
+  expect(reports().some(session.fitIsCurrent)).toBe(false);
+  const isReady = () => { const pop = store.getState().pop; return pop?.id === "picker" && pop.ready === true; };
+  store.setState({ pop: { id: "picker", kb: false } }); await pickerFrame();
+  expect(isReady(), "old reports must not open the first view").toBe(false);
+  for (const answer of answers.slice(0, -1)) answer.respond({ ...methodSamples["fit.check"].result, ...answer.params });
+  await tick(); await pickerFrame();
+  expect(isReady(), "one pending answer still holds the first view").toBe(false);
+  const last = answers.at(-1);
+  if (!last) throw new Error("Missing replacement check");
+  if (ending === "error") last.fail("unavailable", "Cannot measure");
+  else last.respond({ ...methodSamples["fit.check"].result, ...last.params });
+  await tick(); await pickerFrame();
+  expect(store.getState().pop).toMatchObject({ id: "picker", ready: true });
+  expect(checked(), "opening reuses the warm's pending checks").toEqual(before);
 });
 
 // With nothing selected the first row is the active one, ordered by label (not

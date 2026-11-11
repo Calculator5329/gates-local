@@ -1,5 +1,5 @@
 import { expect, test, waitReady } from "./fixtures.ts";
-import { decodeRequest, decodeServerMessage } from "@gates-local/contracts";
+import { decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 
 test.use({ viewport: { width: 1137, height: 749 }, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
@@ -40,6 +40,69 @@ test("idle warms nothing; hover prepares the first picker view and focus and ope
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   expect(requests.size, "an opening after a warm, and repeated hover or focus, make no further check").toBe(warmed);
   await test.info().attach("session-fit-checks", { body: JSON.stringify({ idle, warmed, after: requests.size, pairs: [...requests.values()] }), contentType: "application/json" });
+});
+
+test("a warm invalidated before opening waits for current answers and reuses replacement checks", async ({ page, open }) => {
+  const requests = new Map<string, string>(), answered = new Set<string>(), gpuRequests = new Set<string>();
+  const held: (() => void)[] = [];
+  let gpu: unknown, holding = false;
+  let invalidate: () => void = () => { throw new Error(`No GPU connection after ${requests.size} fit requests`); };
+  await page.routeWebSocket(/.*/, ws => {
+    const server = ws.connectToServer();
+    invalidate = () => {
+      if (gpu === undefined) throw new Error("Missing measured GPU snapshot");
+      holding = true;
+      ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpu }));
+    };
+    ws.onMessage(message => {
+      const request = decodeRequest(message);
+      if (request.ok && request.value.method === "gpu.status") gpuRequests.add(request.value.id);
+      if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const response = decodeServerMessage(message);
+      if (response.ok && response.value.type === "response") {
+        const frame = response.value;
+        if (gpuRequests.delete(frame.id) && frame.ok) {
+          const snapshot = decodeResult("gpu.status", frame.result);
+          if (snapshot.ok) gpu = snapshot.value;
+        }
+        if (requests.has(frame.id)) {
+          const deliver = () => { answered.add(frame.id); ws.send(message); };
+          if (holding) held.push(deliver); else deliver();
+          return;
+        }
+      }
+      ws.send(message);
+    });
+  });
+  await open(); await waitReady(page);
+  const button = page.locator("#modelBtn"), picker = page.locator("#picker");
+  // Composer readiness can precede hydration. Retry intent until the models
+  // fixture has all six first-view pairs, not two startup reads of one pair.
+  await expect.poll(async () => {
+    await page.locator("#ta").hover(); await button.hover();
+    return new Set(requests.values()).size;
+  }).toBe(6);
+  await expect.poll(() => answered.size === requests.size).toBe(true);
+  const warmedPairs = new Set(requests.values()), warmed = requests.size;
+  try {
+    await page.locator("#ta").hover(); invalidate(); await button.hover();
+    await expect.poll(() => held.length).toBe(warmedPairs.size);
+    const replacing = requests.size;
+    expect(replacing - warmed, "one replacement per warmed pair").toBe(warmedPairs.size);
+    await button.click(); await expect(picker).toBeHidden();
+    for (const release of held.splice(0, held.length - 1)) release();
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(picker).toBeHidden();
+    holding = false; for (const release of held.splice(0)) release();
+    await expect(picker).toBeVisible(); await expect(page.locator("#pkSearch")).toBeFocused();
+    await expect(picker).not.toContainText("Checking…");
+    expect(requests.size, "opening adds no check to the replacement warm").toBe(replacing);
+    await page.screenshot({ path: test.info().outputPath("picker-current-after-invalidation.png") });
+    await test.info().attach("fit-check-counts", { body: JSON.stringify({ warmed, replacing, afterOpen: requests.size }), contentType: "application/json" });
+  } finally { holding = false; for (const release of held.splice(0)) release(); }
 });
 
 test("the picker waits for missing fit replies and opens with a complete context column", async ({ page, open }) => {
