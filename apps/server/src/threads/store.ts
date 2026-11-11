@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
-import { ImageEvent } from "@gates-local/contracts";
+import { ImageEvent, type ImageChoice } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 
 import {
@@ -44,7 +44,8 @@ export interface ThreadStore {
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
   saveImageJob(event: ImageEvent, prompt: string): void;
   /** Links the failed attempt and creates its retry card in one write transaction. */
-  claimImageRetry(threadId: string, previousJobId: string, jobId: string): { jobId: string; prompt: string; created: boolean };
+  /** `choice` is the retry's when the failed card has none (cards saved before presets). */
+  claimImageRetry(threadId: string, previousJobId: string, jobId: string, choice: ImageChoice): { jobId: string; prompt: string; choice: ImageChoice; created: boolean };
   /** Called once by the image module at startup; an old process cannot finish these jobs. */
   interruptImageJobs(): ImageEvent[];
   /** Each model's measured decode speed over the last SPEED_WINDOW_MS, by model name without ":latest"; models under the floor are left out. */
@@ -294,7 +295,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       });
     },
 
-    claimImageRetry(threadId, previousJobId, jobId) {
+    claimImageRetry(threadId, previousJobId, jobId, fallback) {
       guard();
       return transaction(() => {
         loadThread(threadId);
@@ -302,15 +303,16 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         if (!row) throw new InvalidInputError("retryOf", "the image job is not in this thread");
         const previous = S.decodeUnknownSync(ImageEvent)(JSON.parse(str(row, "image_job_json")));
         const prompt = str(row, "content");
+        const choice = previous.choice ?? fallback;
         // Keep the link even after completion: a late duplicate is still the same request.
         // A failed retry can be retried from its own card, with its own id.
-        if (previous.retryJobId) return { jobId: previous.retryJobId, prompt, created: false };
+        if (previous.retryJobId) return { jobId: previous.retryJobId, prompt, choice, created: false };
         if (previous.state !== "error" && previous.state !== "cancelled") throw new InvalidInputError("retryOf", "only a failed or cancelled image can be retried");
-        const next: ImageEvent = { jobId, threadId, state: "queued" };
+        const next: ImageEvent = { jobId, threadId, state: "queued", choice };
         stmt.insertImageCard.run(jobId, threadId, prompt, now(), JSON.stringify(next));
         stmt.updateImageCard.run(JSON.stringify({ ...previous, retryJobId: jobId }), null, previousJobId, threadId);
         stmt.touchThread.run(now(), threadId);
-        return { jobId, prompt, created: true };
+        return { jobId, prompt, choice, created: true };
       });
     },
 
@@ -319,7 +321,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       return transaction(() => stmt.unfinishedImages.all().map((row) => {
         const old = S.decodeUnknownSync(ImageEvent)(JSON.parse(str(row, "image_job_json")));
         if (!old.threadId) throw new Error("Saved image job is missing its thread");
-        const event: ImageEvent = { jobId: old.jobId, threadId: old.threadId, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again." };
+        const event: ImageEvent = { jobId: old.jobId, threadId: old.threadId, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again.", ...(old.choice ? { choice: old.choice } : {}), ...(old.sent ? { sent: old.sent } : {}) };
         stmt.updateImageCard.run(JSON.stringify(event), null, old.jobId, old.threadId);
         return event;
       }));

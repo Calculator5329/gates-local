@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { afterFirstPaint, type deferred } from "./deferred.ts";
 import { firstRunScreen, settingsScreen } from "./screen-loaders.ts";
-export { firstRunScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
+export { firstRunScreen, imagePickerScreen, pickerScreen, settingsScreen, threadScreen } from "./screen-loaders.ts";
 
 const unwatched = () => () => {};
 

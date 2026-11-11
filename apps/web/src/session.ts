@@ -111,6 +111,11 @@ async function hydrate(c: Client): Promise<void> {
   c.subscribe("image.status", (imageStatus) => applyServerEvent(() => {
     imageOrder.next(); // Receipt supersedes probes even while hydration buffers application.
     dispatch("image.status", () => applyServerEvent({ imageStatus }));
+    // ComfyUI coming up, or image generation turning off, changes which presets it has the files for; a job's busy and ready again does not
+    if ((imageStatus.state === "ready" || imageStatus.state === "off") && imageStatus.state !== presetsAt) {
+      presetsAt = imageStatus.state;
+      void loadImagePresets();
+    }
   }));
   try {
     await hydrateWith(on, release, c.negotiate);
@@ -138,6 +143,8 @@ async function hydrateWith(
   on("usage.changed", () => usageSession.usageChanged());
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
+    // the job settled to other files than the button names: the server read ComfyUI's list again
+    if (e.sent !== undefined && !settledJobs.has(e.jobId)) { settledJobs.add(e.jobId); void loadImagePresets(); }
   });
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
@@ -188,15 +195,17 @@ async function hydrateWith(
   const updateTicket = updateOrder.next();
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
-  const [gpu, catalog, sources, imageStatus, update, speeds] = await Promise.all([
+  const presetsTicket = presetsOrder.next();
+  const [gpu, catalog, sources, imageStatus, update, speeds, imagePresets] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
     probe("image.status", {}),
     probe("update.status", {}),
     probe("models.speed", {}),
+    probe("image.presets", {}),
   ]);
-  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
+  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...(presetsOrder.current(presetsTicket) ? { imagePresets } : {}), ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
   release("none");
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
   // Read after the release: a GPU push held behind gpu.status is the newer answer.
@@ -214,6 +223,19 @@ async function hydrateWith(
 }
 
 const imageOrder = newestOnly();
+const presetsOrder = newestOnly();
+/** The ComfyUI state the presets were last read again for. */
+let presetsAt: string | undefined;
+/** Image jobs that settled to another choice than they were sent with; each reads the presets again once. */
+const settledJobs = new Set<string>();
+
+/** Read the image models ComfyUI has every file for again: the picker opening, Image turning on, ComfyUI's state changing. */
+export function loadImagePresets(): Promise<void> {
+  const ticket = presetsOrder.next();
+  return probe("image.presets", {}).then((imagePresets) => {
+    if (imagePresets !== undefined && presetsOrder.current(ticket)) applyServerEvent({ imagePresets });
+  });
+}
 
 const navigation = createNavigation({
   flushQueued, catchUp, chooseModel, loadThread, loading,

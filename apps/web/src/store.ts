@@ -9,6 +9,8 @@ import type {
   ContextSize,
   FitReport,
   GpuStatus,
+  ImageChoice,
+  ImagePresets,
   ImageStatus,
   Message,
   ModelInfo,
@@ -67,6 +69,8 @@ export interface LiveTurn {
    * saves the question and may drop it with no event, so nothing waits for it.
    */
   readonly listed?: true;
+  /** An Image turn: the words went to the image model and the reply is its picture card; nothing of a chat reply shows. */
+  readonly image?: true;
 }
 
 /** A message typed during setup, the first download or a reply being written; it sends when that is over. */
@@ -84,6 +88,8 @@ export interface Queued {
   readonly held?: true;
   /** Send now: it goes as soon as the reply in its way has ended. */
   readonly now?: true;
+  /** Typed with Image on: it goes to this image model and size, not to a chat model. */
+  readonly draw?: ImageChoice;
 }
 
 /** A send waiting for a yes, because the load it needs would stop these chats' replies. */
@@ -101,6 +107,8 @@ export interface StopAsk {
   readonly queuedId?: string;
   /** Retry or Regenerate: this answer replaces a stopped reply instead of following it. */
   readonly regenerate?: true;
+  /** An Image send: the words go to this image model and size. */
+  readonly draw?: ImageChoice;
 }
 
 export interface State {
@@ -135,7 +143,7 @@ export interface State {
   /** The open popover. A thread menu belongs to its row and opens at its button or a right-click point. */
   readonly pop:
     | { readonly id: "picker"; readonly kb: boolean; readonly ready?: true }
-    | { readonly id: "plus" | "opts"; readonly kb: boolean }
+    | { readonly id: "plus" | "opts" | "images"; readonly kb: boolean }
     | { readonly id: "thread"; readonly kb: boolean; readonly thread: string; readonly at?: { readonly x: number; readonly y: number } }
     | null;
   /** The pop-up over the chat area (the footer's Usage); the chat stays mounted under it. */
@@ -182,6 +190,8 @@ export interface State {
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
+  /** The image models ComfyUI has every file for, and what an Image send runs now. */
+  readonly imagePresets: Maybe<ImagePresets>;
   /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
   readonly update: Maybe<UpdateStatus>;
   /** A "Check for updates" click waiting for its answer. */
@@ -247,6 +257,7 @@ const initial: State = {
   pulls: {},
   sources: undefined,
   imageStatus: undefined,
+  imagePresets: undefined,
   update: undefined,
   updateChecking: false,
   updateInstalling: false,

@@ -15,8 +15,11 @@ test("an image call the model wrote as text queues the image and never shows its
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
   await page.getByRole("switch", { name: "Generate images" }).click();
+  // the chat model's image call is Tools › Make images; the composer's Image button would skip the chat model
+  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("switch", { name: "Make images" }).click();
+  await expect(page.getByRole("switch", { name: "Make images" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Image", exact: true }).click();
   // Watch every frame of the reply for the call's JSON while it streams.
   await page.evaluate(() => {
     const seen: string[] = [];

@@ -5,7 +5,7 @@
 // thread opens with its last turns mounted and adds the older ones when idle.
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { CatalogEntry, Message, ToolStep } from "@gates-local/contracts";
+import type { CatalogEntry, ImageEvent, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -254,32 +254,68 @@ function ImageOut({ path, origin, token }: { path: string } & Files) {
   return <img className="img-out" src={src} alt="Generated image" loading="lazy" onError={() => setMissing(true)} />;
 }
 
+/** A retry this client started, from the job it retries, until the thread's copy names it. */
+interface Accepted { readonly from: string; readonly to: string }
+
+/**
+ * The job a card shows: the newest of its retry chain. A retry is a card message
+ * of its own (the server's claimImageRetry), but it takes over the box of the
+ * card it retries; the Timeline does not render it as a row.
+ */
+export function chainEnd(first: ImageEvent, thread: readonly Message[], accepted?: Accepted): ImageEvent {
+  let job = first;
+  const seen = new Set([job.jobId]);
+  for (;;) {
+    const next = job.retryJobId ?? (accepted?.from === job.jobId ? accepted.to : undefined);
+    if (next === undefined || seen.has(next)) return job;
+    seen.add(next);
+    // accepted, and the thread has not caught up yet: it is waiting to start
+    job = thread.find(m => m.id === next)?.imageJob ?? { jobId: next, state: "queued", ...(job.choice ? { choice: job.choice } : {}) };
+  }
+}
+
+/** Card messages that are a retry of another card in the thread: their box is the first card's. */
+export function retryRows(thread: readonly Message[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const m of thread) if (m.imageJob?.retryJobId !== undefined) ids.add(m.imageJob.retryJobId);
+  return ids;
+}
+
+/** The card's words: what is happening now, in two or three words and the percent. */
+function jobWords(job: ImageEvent): string {
+  if (job.phase === "freeing") return "Freeing memory";
+  if (job.state === "queued") return "Waiting for the GPU";
+  const pct = Math.round((job.progress ?? 0) * 100);
+  return pct > 0 ? `Making image · ${pct}%` : "Making image";
+}
+
 function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [acceptedRetry, setAcceptedRetry] = useState<string>();
-  const job = msg.imageJob!;
-  const retryId = job.retryJobId ?? acceptedRetry;
-  const retried = retryId === undefined ? undefined : thread.find(m => m.id === retryId)?.imageJob;
-  const retryLabel = retried?.state === "done" ? "Image ready" : retried?.state === "error" ? "Retry failed" : retried?.state === "cancelled" ? "Retry cancelled" : retried?.state === "queued" ? "Retry queued" : "Retrying…";
+  const [accepted, setAccepted] = useState<Accepted>();
+  const job = chainEnd(msg.imageJob!, thread, accepted);
   const pending = job.state === "queued" || job.state === "running";
-  const label = job.state === "queued" ? "Waiting for the GPU" : "Making image";
+  // the picture's own size from the first moment, and the first card's for its whole retry chain:
+  // a retry of a default can run another size (the default settles to the files ComfyUI has),
+  // and the box never changes when a retry takes over; that picture is fitted inside. A job that
+  // settles to another size keeps the shape it was first drawn with (`sent`) the same way.
+  const choice = msg.imageJob!.sent ?? msg.imageJob!.choice ?? job.choice;
+  const size = choice ? { aspectRatio: `${choice.width} / ${choice.height}`, width: `${choice.width}px` } : undefined;
   const action = async () => {
     setBusy(true);
     if (pending) setError(await cancelImage(job.jobId));
     else {
       const result = await retryImage(msg.threadId, msg.content, job.jobId);
       if (typeof result === "string") setError(result);
-      else { setError(null); setAcceptedRetry(result.jobId); }
+      else { setError(null); setAccepted({ from: job.jobId, to: result.jobId }); }
     }
     setBusy(false);
   };
-  return <div className="image-job" data-image-job={job.state} data-fit={job.errorKind === "wont-fit" ? "refuse" : undefined}>
+  return <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status">
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
-      <p>{pending ? label : job.message ?? "The image did not finish; try again."}</p>
-      {job.state === "running" && (job.progress ?? 0) > 0 ? <span>{Math.round(job.progress! * 100)}%</span> : null}
-      <button type="button" className="qa" disabled={busy || retryId !== undefined} onClick={() => void action()}>{retryId !== undefined ? retryLabel : busy && !pending ? "Retrying…" : pending ? "Cancel image" : "Try again"}</button>
+      <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>
+      <button type="button" className="qa" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>
       {error ? <p>{error}</p> : null}
     </div>}
   </div>;
@@ -410,6 +446,9 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
       : Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000)));
   const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
+  // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
+  // the turn shows its question until that is saved, and nothing of a chat reply.
+  if (msg === undefined && live?.image === true) return live.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null;
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
@@ -504,6 +543,8 @@ export function Timeline({ threadId }: { threadId: string }) {
     return { msg, key: msg.role === "user" ? msg.id : msg.imageJob ? `image:${msg.id}` : `reply:${owner ?? msg.id}` };
   });
   if (liveOwner !== null) turns.push({ msg: undefined, key: `reply:${liveOwner}` });
+  // A retry shows in the box of the card it retries, never as a second box.
+  const retries = retryRows(messages);
   // A reply that was live while this timeline was open stays a LiveReply once
   // it is saved: a different component under its key would remount it.
   const [wasLive] = useState(() => new Set<string>());
@@ -604,6 +645,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
         {loading && loadError === undefined ? <p className="na" role="status" data-thread-loading>Loading conversation…</p> : null}
         {turns.slice(skip).map(({ msg: m, key }, j) => {
+          if (m !== undefined && retries.has(m.id)) return null;
           const last = skip + j === messages.length - 1;
           return (
             <Fragment key={key}>

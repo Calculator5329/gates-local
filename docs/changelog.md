@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-11: Image mode sends your words straight to an image model you pick
+
+- With Image on in the composer, the message is the prompt and no chat model
+  runs that turn. The model button becomes a picker for the image setup and
+  size: FLUX.2 Klein 4B, SDXL Lightning, and SDXL Lightning with the pixel art
+  LoRA, each listed only when ComfyUI has its files.
+- With nothing picked, a job runs FLUX.2 Klein at 1024×1024 when its files are
+  there, then plain SDXL Lightning at 768×512. Pixel art runs only when picked.
+  A saved pick is never swapped for another setup.
+- A chat model may still make an image by itself in an ordinary turn, behind a
+  new switch: Settings › Tools › Make images, off by default. It uses the setup
+  and size the picker holds.
+- When the image and the chat model do not fit together, the app unloads the
+  chat models it loaded, then waits up to 20 seconds for that memory to show
+  as free before it refuses; the card says it is freeing memory meanwhile.
+  Before, it read the GPU once, at once, and could refuse an image that fit.
+- A refusal is one sentence: what the image needs, what is free and who holds
+  the rest. It names a smaller setup only when one in the list would fit, and
+  it no longer says to close another app when the holder is this app's own
+  chat model.
+- A retry takes over the failed card's box, so one image is one card. The box
+  keeps the shape it was first drawn with, also after a restart.
+- Not run on a real GPU yet: the memory each setup needs is an estimate, and
+  the unload and wait are checked against test doubles only.
+
 ## 2026-11-11: Usage, tokens and speed by model over time
 
 - A Usage icon in the sidebar footer opens a pop-up over the chat: tokens,

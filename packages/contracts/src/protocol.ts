@@ -10,7 +10,9 @@ import {
   ChatEvent,
   FitReport,
   GpuStatus,
+  ImageChoice,
   ImageEvent,
+  ImagePresets,
   ImageStatus,
   Message,
   ModelInfo,
@@ -148,8 +150,17 @@ export const methods = {
       think: S.optional(S.Boolean),
       /** Tool calls for this turn; omitted means the settings default. */
       tools: S.optional(S.Boolean),
-      /** The model may make an image this turn (needs image generation set up). */
+      /**
+       * Older clients' Image button. Accepted and ignored: a chat model is offered the image
+       * tool only when Settings › Tools › Make images is on (settings.imageTool).
+       */
       image: S.optional(S.Boolean),
+      /**
+       * Image mode: `content` is the prompt of one image job with this preset and size. No chat
+       * model runs; `model` and `numCtx` are not used. The turn ends when the job does; its card
+       * is the reply. Refused with attachments or while image generation is off.
+       */
+      draw: S.optional(ImageChoice),
       /**
        * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
        * end those turns first: each saves its partial reply and ends with error code "preempted"
@@ -213,8 +224,11 @@ export const methods = {
   "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport, phone: "deny" },
   "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
   "image.status": { params: NoParams, result: ImageStatus, phone: "allow" },
+  /** The presets ComfyUI has every file for, read from ComfyUI (or its last answer when it is not running). */
+  "image.presets": { params: NoParams, result: ImagePresets, phone: "allow" },
   "image.generate": {
-    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String) }),
+    /** `choice` omitted: Settings' imageChoice. A retry runs its failed job's choice. */
+    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String), choice: S.optional(ImageChoice) }),
     result: S.Struct({ jobId: S.String }),
     phone: "allow",
   },

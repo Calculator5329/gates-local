@@ -1,0 +1,14 @@
+/* ImagePicker-only rules over picker.css: a few presets, so the popover is as tall as its rows. */
+.image-picker{height:auto}
+.image-picker .pk-layout{grid-template-columns:44px 280px minmax(0,1fr)}
+.image-picker .pk-layout.no-rail{grid-template-columns:316px minmax(0,1fr)}
+.image-picker .pk-list-scroll{min-height:136px}
+.image-picker .pk-search{justify-content:space-between}
+.image-picker .pk-title,.image-picker .pk-context-head>span{font-size:14px;color:var(--muted-foreground)}
+.image-picker .pk-ctx-row{grid-template-columns:72px minmax(0,1fr) 12px;font-variant-numeric:tabular-nums}
+.image-picker .maker-mark{font-size:9px;font-weight:600;letter-spacing:0}
+@media(max-width:640px){
+.image-picker .pk-layout,.image-picker .pk-layout.no-rail{grid-template-columns:minmax(0,1fr)}
+.image-picker .pk-layout:not(.no-rail){grid-template-columns:44px minmax(0,1fr)}
+.image-picker .pk-list-scroll{min-height:180px}
+}

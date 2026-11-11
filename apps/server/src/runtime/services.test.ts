@@ -344,7 +344,8 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     },
     models: { handlers: s.handlers, loader: s.loader },
     fit: options.fit ?? fit,
-    ...(options.image ? { image: options.image } : {}),
+    // With an image module the chat model is offered the image tool (Tools › Make images on).
+    ...(options.image ? { image: options.image, toolsEnabled: () => true, imageTool: () => ({ preset: "sdxl-lightning-pixel", width: 768, height: 512 }) } : {}),
     ...(options.lease ? { lease: options.lease } : {}),
     log: () => undefined,
   });
@@ -409,7 +410,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       },
       { image },
     );
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect([queued, r.chats()]).toEqual([1, 1]);
     const switching = r.s.runtime.setMode("app");
@@ -454,7 +455,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       },
       { image, lease, turnDrainMs: 15_000, onEvent: event => { if (event.type === "error") aborted.resolve(); } },
     );
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384, image: true }, { clientId: 1 });
+    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect(lease.status().holders).toBe(1);
     // The held tool must be aborted before the 15-second turn-drain fallback.

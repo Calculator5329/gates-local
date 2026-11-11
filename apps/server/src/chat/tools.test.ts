@@ -50,7 +50,9 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
   return { image: { current: noComfy, generate, cancel, wait } as unknown as ImageModule, generate, cancel, ran };
 };
 /** A tool turn whose first reply calls the image tool (or is `first`); `second` answers the request after the tool ran. */
-const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>, first?: (signal: AbortSignal | undefined) => Response) => {
+const TOOL_CHOICE = { preset: "sdxl-lightning-pixel", width: 768, height: 512 };
+/** `imageTool` is Tools › Make images; on unless a test turns it off. */
+const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>, first?: (signal: AbortSignal | undefined) => Response, imageTool = true) => {
   const root = scratch("gl-app-image-");
   const sources = createSources({ dataDir: path.join(root, "data") });
   const file = path.join(root, "notes.txt"); writeFileSync(file, "hello");
@@ -72,7 +74,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
     return second(init?.signal ?? undefined);
   });
   vi.stubGlobal("fetch", fetcher);
-  const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, lease,
+  const app = createApp({ store, sources, toolsEnabled: () => true, image: fake.image, imageTool: () => (imageTool ? TOOL_CHOICE : undefined), lease,
     runtime: { status: () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }), lookIfDown: async () => ({ state: "ready", owner: "external", baseUrl: "http://fake" }) },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
     push: (channel, payload) => pushed.push({ channel, payload }), fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
@@ -253,18 +255,18 @@ describe("tool chat transport", () => {
       expect(JSON.stringify(pushed)).toContain('"state":"running"');
     } finally { await app.shutdown(); store.close(); vi.unstubAllGlobals(); }
   });
-  for (const image of [true, undefined]) {
-    it(`chat.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when image is ${image}`, async () => {
-      const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]));
+  for (const image of [true, false]) {
+    it(`chat.send ${image ? "offers the image tool and queues the job, which runs after the reply" : "neither offers nor runs the image tool"} when Tools › Make images is ${image ? "on" : "off"}`, async () => {
+      const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]), undefined, undefined, image);
       try {
         const thread = t.store.createThread();
-        await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, ...(image ? { image } : {}) }, { clientId: 1 });
+        await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         // The turn holds a shared GPU claim to its end; a tool that waited for the picture would never get here.
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
         const offered = t.chatBodies[0]!.tools!.map(tool => tool.function.name);
         if (image) {
           expect(offered).toContain("image");
-          expect(t.fake.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: thread.id });
+          expect(t.fake.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: thread.id, choice: TOOL_CHOICE });
           expect(t.chatBodies).toHaveLength(1);
           expect(t.atSecond()).toBeUndefined();
           await vi.waitFor(() => expect(t.fake.ran).toEqual(["job-1"]));
@@ -288,7 +290,7 @@ describe("tool chat transport", () => {
       const t = await imageApp(hang, gate);
       try {
         const thread = t.store.createThread();
-        const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
+        const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
         expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
         open?.();

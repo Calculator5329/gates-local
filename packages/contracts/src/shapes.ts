@@ -46,17 +46,31 @@ export const ToolStep = S.Struct({
 });
 export type ToolStep = typeof ToolStep.Type;
 
+/** An image preset (the server's table, image.presets) and one of its sizes: what an image job runs. */
+export const ImageChoice = S.Struct({
+  preset: S.String.check(S.isMaxLength(100)),
+  width: S.Int.check(S.isGreaterThan(0)),
+  height: S.Int.check(S.isGreaterThan(0)),
+});
+export type ImageChoice = typeof ImageChoice.Type;
+
 /** Image jobs are durable messages; events carry the same state as the saved card. */
 export const ImageEvent = S.Struct({
   jobId: S.String,
   threadId: S.optional(S.String),
   state: S.Literals(["queued", "running", "done", "error", "cancelled"]),
+  /** Running, and still freeing GPU memory (unloading this app's chat models and waiting for the memory). Absent once that step ends. */
+  phase: S.optional(S.Literals(["freeing"])),
   progress: S.optional(S.Finite),
   imagePath: S.optional(S.String),
   message: S.optional(S.String),
   errorKind: S.optional(S.String),
   /** One accepted retry per failed attempt; duplicates return this same job. */
   retryJobId: S.optional(S.String),
+  /** The preset and size the job runs; a retry runs the same. Absent on cards saved before presets. */
+  choice: S.optional(ImageChoice),
+  /** The choice the card was first drawn with, when the job settled to another (an unset default passed over for the files ComfyUI has). The card's box keeps this shape. */
+  sent: S.optional(ImageChoice),
 });
 export type ImageEvent = typeof ImageEvent.Type;
 
@@ -180,7 +194,8 @@ export type FitReport = typeof FitReport.Type;
 export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it
   // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
-  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message }),
+  // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
+  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)) }),
   // An empty delta can carry context metadata without becoming reply text.
   S.Struct({ type: S.Literal("delta"), text: S.String, contextNotice: S.optional(S.String) }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
@@ -296,6 +311,10 @@ export const Settings = S.Struct({
   tools: S.Boolean,
   /** Image generation through ComfyUI; off until the user sets it up. */
   imageGen: S.Boolean,
+  /** The image preset and size for every image job (the composer's Image mode and the tool). Unset means the server's first listed preset. */
+  imageChoice: S.optional(ImageChoice),
+  /** Tools › Make images: a chat model may call the image tool. Unset means off. */
+  imageTool: S.optional(S.Boolean),
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
   /** Local dictation; absent means off. Only a loopback HTTP IP literal is accepted. */
@@ -320,6 +339,8 @@ export const SettingsPatch = S.Struct({
   runtimeMode: S.optional(RuntimeMode),
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
+  imageChoice: S.optional(S.NullOr(ImageChoice)),
+  imageTool: S.optional(S.Boolean),
   comfyUrl: S.optional(S.NullOr(S.String)),
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
@@ -429,6 +450,35 @@ export const ImageStatus = S.Struct({
   detail: S.optional(S.String),
 });
 export type ImageStatus = typeof ImageStatus.Type;
+
+/** One size of a preset and the GPU memory a job at that size needs. */
+export const ImageSize = S.Struct({ width: S.Int, height: S.Int, bytes: Count });
+export type ImageSize = typeof ImageSize.Type;
+
+/** A preset ComfyUI has every file for: what the image picker lists. */
+export const ImagePreset = S.Struct({
+  id: S.String,
+  name: S.String,
+  /** The model family the graph is built for (one rail icon per family). */
+  family: S.String,
+  sizes: S.Array(ImageSize),
+  /** False: the bytes are an estimate, not a measured peak. */
+  measured: S.Boolean,
+});
+export type ImagePreset = typeof ImagePreset.Type;
+
+export const ImagePresets = S.Struct({
+  /** Only the presets whose every file ComfyUI listed. */
+  presets: S.Array(ImagePreset),
+  /** When ComfyUI's file list was last read; absent means never (presets is then empty). */
+  readAt: S.optional(Millis),
+  /**
+   * What an Image send runs now: Settings' choice, else the default. Named from every preset the
+   * server knows, so the composer can say it before ComfyUI has listed its files.
+   */
+  current: S.Struct({ preset: ImagePreset, width: S.Int, height: S.Int }),
+});
+export type ImagePresets = typeof ImagePresets.Type;
 
 // ---------------------------------------------------------------- setup
 

@@ -156,7 +156,8 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     catalog,
     ...(opts.admit ? { admit: opts.admit } : {}),
     ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
-    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir) } : {}),
+    // Tools › Make images on: a send with tools: true offers the chat model the image tool.
+    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir), imageTool: () => ({ preset: "sdxl-lightning-pixel", width: 768, height: 512 }) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { turnId, threadId, event } = p as Payload<"chat.event">;
@@ -1062,7 +1063,7 @@ describe("threads.delete marks the thread before it waits", () => {
     const t = await r.client.call("threads.create", {});
     // The first turn's image runs and stays running until cancelled.
     comfy.ctl.holdNext = gate().shut;
-    const first = await r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    const first = await r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
     await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
     const jobId = comfy.events.find((e) => e.threadId === t.id && e.state === "queued")?.jobId;
     if (jobId === undefined) throw new Error(`the turn queued no image; saw ${JSON.stringify(comfy.events)}`);
@@ -1076,7 +1077,7 @@ describe("threads.delete marks the thread before it waits", () => {
     await until(() => comfy.states(jobId).includes("cancelled"));
     expect(r.lease!.status().holders).toBe(0);
 
-    const send = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, image: true }), "chat.send"));
+    const send = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true }), "chat.send"));
     expect(send.code).toBe("thread-not-found");
     const generate = await rejection(within(3000, r.client.call("image.generate", { prompt: "another", threadId: t.id }), "image.generate"));
     expect(generate.code).toBe("thread-not-found");
@@ -1140,7 +1141,7 @@ describe("threads.delete and the image jobs its turns queued", () => {
     const talking = await r.client.call("threads.create", {});
     // Another thread's turn streams the whole time and holds its shared chat claim.
     const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
-    const draw = await r.client.call("chat.send", { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, image: true });
+    const draw = await r.client.call("chat.send", { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
     await r.waitFor("chat.event", (p) => p.turnId === draw.turnId && p.event.type === "done");
     const jobId = comfy.events.find((e) => e.threadId === drawing.id && e.state === "queued")?.jobId;
     if (jobId === undefined) throw new Error(`the drawing turn queued no image; saw ${JSON.stringify(comfy.events)}`);

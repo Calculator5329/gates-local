@@ -27,7 +27,7 @@ export interface SettingsReader {
 export interface SettingsStore extends SettingsReader {
   /** The revision captured with this immutable value, never the latest revision at serialization. */
   stamp(value: Settings): SyncChange;
-  /** Apply a patch (`null` clears defaultModel and comfyUrl), persist, notify. */
+  /** Apply a patch (`null` clears defaultModel, comfyUrl and imageChoice), persist, notify. */
   update(patch: SettingsPatch): Settings;
   /** Merge fields for one model; null fields inherit again, a null patch resets the model. */
   updateModel(model: string, patch: ModelSettingsPatch | null): Settings;
@@ -107,9 +107,10 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
-  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, ...rest } = { ...current };
+  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, imageChoice, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
+  const choice = patch.imageChoice === undefined ? imageChoice : (patch.imageChoice ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
   const whisper = patch.whisperUrl === undefined ? whisperUrl : (patch.whisperUrl ?? undefined);
   const prompt = patch.systemPrompt === undefined ? systemPrompt : (patch.systemPrompt ?? undefined);
@@ -119,6 +120,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(comfy === undefined ? {} : { comfyUrl: comfy }),
     ...(whisper === undefined ? {} : { whisperUrl: whisper }),
     ...(prompt === undefined ? {} : { systemPrompt: prompt }),
+    ...(choice === undefined ? {} : { imageChoice: choice }),
     ...(patch.modelSettings === null || modelSettings === undefined ? {} : { modelSettings }),
     ...(patch.defaultNumCtx === undefined ? {} : { defaultNumCtx: patch.defaultNumCtx }),
     ...(patch.thinking === undefined ? {} : { thinking: patch.thinking }),
@@ -126,6 +128,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(patch.runtimeMode === undefined ? {} : { runtimeMode: patch.runtimeMode }),
     ...(patch.tools === undefined ? {} : { tools: patch.tools }),
     ...(patch.imageGen === undefined ? {} : { imageGen: patch.imageGen }),
+    ...(patch.imageTool === undefined ? {} : { imageTool: patch.imageTool }),
     ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
     ...(patch.updateAutomatic === undefined ? {} : { updateAutomatic: patch.updateAutomatic }),
     ...(patch.textSize === undefined ? {} : { textSize: patch.textSize }),

@@ -8,21 +8,33 @@ let comfy: Awaited<ReturnType<typeof fakeComfy>>;
 test.beforeEach(async () => { comfy = await fakeComfy(); });
 test.afterEach(async () => { await comfy.close(); });
 
-async function setup(page: Page, open: () => Promise<void>) {
+/**
+ * Image generation on, then one ask for a picture: `image` sends it with the composer's Image
+ * button (straight to the image model), `tool` turns on Settings › Tools › Make images and lets
+ * the chat model call the image tool.
+ */
+async function setup(page: Page, open: () => Promise<void>, via: "image" | "tool" = "image") {
   await stack.reset("image-turn", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
   await page.getByRole("switch", { name: "Generate images" }).click();
+  if (via === "tool") {
+    await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+    const make = page.getByRole("switch", { name: "Make images" });
+    await expect(make).toBeEnabled();
+    await make.click();
+    await expect(make).toHaveAttribute("aria-checked", "true");
+  }
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  if (via === "image") await page.getByRole("button", { name: "Image", exact: true }).click();
   await sendMessage(page, "Generate an image of a Star Trek ship");
 }
 
-test("an image tool answers with a durable job card, never the invented follow-up URL", async ({ page, open }, info) => {
+test("the chat model's image tool answers with a durable job card, never the invented follow-up URL", async ({ page, open }, info) => {
   const remote: string[] = [];
   page.on("request", req => { if (req.url().includes("example.com")) remote.push(req.url()); });
-  await setup(page, open);
+  await setup(page, open, "tool");
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText("Making image");
   await expect(page.locator(".tl")).not.toContainText("Here's an image");
@@ -42,18 +54,29 @@ test("an image tool answers with a durable job card, never the invented follow-u
   await page.screenshot({ path: info.outputPath("done.png"), animations: "disabled" });
 });
 
-test("a failed image has one retry across clients and its button follows the outcome", async ({ page, open, context }, info) => {
+// no preset has every file: the card names the first default's file
+const MISSING = "Install flux-2-klein-4b-fp8.safetensors in ComfyUI, then try again.";
+
+test("a retry takes over the failed card's box across clients and reloads, and one request stays one retry", async ({ page, open, context }, info) => {
   comfy.missing();
   await setup(page, open);
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Install the image checkpoint and LoRA");
+  await expect(card).toContainText(MISSING);
   await page.reload(); await waitReady(page);
-  await expect(card).toContainText("Install the image checkpoint and LoRA");
+  await expect(card).toContainText(MISSING);
+  const box = await card.boundingBox();
   await page.screenshot({ path: info.outputPath("failed.png"), animations: "disabled" });
   comfy.restore(false);
   await card.getByRole("button", { name: "Try again" }).click();
-  const original = card.first();
-  await expect(original.getByRole("button", { name: /Retry queued|Retrying/ })).toBeDisabled();
+  // the one box now says what the retry is doing; the old reason is gone
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText(/Waiting for the GPU|Making image/);
+  await expect(card).not.toContainText(MISSING);
+  expect(await card.boundingBox()).toEqual(box);
+  await page.reload(); await waitReady(page);
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText(/Waiting for the GPU|Making image/);
+  expect(await card.boundingBox()).toEqual(box);
   const server = new URL(page.url()).searchParams.get("server");
   const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
   if (!server || !threadId) throw new Error("No test server or thread");
@@ -61,17 +84,53 @@ test("a failed image has one retry across clients and its button follows the out
   const client = createClient(new WebSocket(server));
   try {
     await other.goto(page.url()); await waitReady(other);
-    await expect(other.locator("[data-image-job]").first().getByRole("button", { name: /Retry queued|Retrying/ })).toBeDisabled();
+    await expect(other.locator("[data-image-job]")).toHaveCount(1);
+    await expect(other.locator("[data-image-job]")).toContainText(/Waiting for the GPU|Making image/);
     const snapshot = await client.call("threads.get", { threadId });
     const failed = snapshot.messages.find(m => m.imageJob?.retryJobId !== undefined)?.imageJob;
     if (!failed?.retryJobId) throw new Error("No accepted retry link");
     expect(await client.call("image.generate", { threadId, prompt: "ignored duplicate", retryOf: failed.jobId })).toEqual({ jobId: failed.retryJobId });
-    await expect(card).toHaveCount(2);
+    // the thread keeps both attempts as card messages; the page shows one box
     expect((await client.call("threads.get", { threadId })).messages.filter(m => m.imageJob !== undefined)).toHaveLength(2);
+    await expect(card).toHaveCount(1);
     comfy.finish();
-    await expect(original.getByRole("button", { name: "Image ready" })).toBeDisabled();
-    await expect(page.getByRole("img", { name: "Generated image" })).toBeVisible();
+    await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
+    await expect(card).toHaveCount(1);
+    await expect(page.locator(".tl")).not.toContainText(MISSING);
+    await expect(page.locator(".tl")).not.toContainText("Image ready");
+    expect(await card.boundingBox()).toEqual(box);
+    await page.reload(); await waitReady(page);
+    await expect(card).toHaveCount(1);
+    await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
+    expect(await card.boundingBox()).toEqual(box);
+    await page.screenshot({ path: info.outputPath("retried.png"), animations: "disabled" });
   } finally { client.close(); await other.close(); }
+});
+
+test("a retry that fails shows its own reason and Try again in the same box, after a reload too", async ({ page, open }) => {
+  comfy.missing();
+  await setup(page, open);
+  const card = page.locator("[data-image-job]");
+  await expect(card).toContainText(MISSING);
+  const box = await card.boundingBox();
+  const firstJob = await card.getAttribute("data-job");
+  await card.getByRole("button", { name: "Try again" }).click();
+  // the retry fails the same way: one box, one reason, Try again again
+  await expect(card).not.toHaveAttribute("data-job", firstJob ?? "");
+  await expect(card).toHaveAttribute("data-image-job", "error");
+  await expect(card).toHaveCount(1);
+  await expect(card.getByRole("button", { name: "Try again" })).toBeEnabled();
+  await expect(card.getByText(MISSING)).toHaveCount(1);
+  expect(await card.boundingBox()).toEqual(box);
+  await page.reload(); await waitReady(page);
+  await expect(card).toHaveCount(1);
+  await expect(card.getByText(MISSING)).toHaveCount(1);
+  await expect(card.getByRole("button", { name: "Try again" })).toBeEnabled();
+  expect(await card.boundingBox()).toEqual(box);
+  comfy.restore();
+  await card.getByRole("button", { name: "Try again" }).click();
+  await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
+  await expect(card).toHaveCount(1);
 });
 
 test("a restart cannot strand an unfinished image", async ({ page, open }) => {

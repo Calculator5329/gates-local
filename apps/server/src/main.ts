@@ -60,6 +60,7 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
+import { imageToolChoice } from "./image/presets.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, installedFeed } from "./update/installed/module.ts";
@@ -204,6 +205,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     // The loader forgets a model the image module unloaded (keep_alive 0).
     onModelUnloaded: (model) => services.loader.prune(services.loader.appLoadedModels().filter((m) => m !== model)),
     ollamaUrl: () => runtime.baseUrl(),
+    // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
+    ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),
   });
   const imports = createImportActivity(admission);
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
@@ -265,6 +268,11 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     settings: services.settings,
     // A turn that does not say runs tools when Settings has them on.
     toolsEnabled: () => services.settings.get().tools,
+    // Tools › Make images: off unless switched on; an unset choice is the first preset ComfyUI has.
+    imageTool: () => {
+      const settings = services.settings.get();
+      return imageToolChoice({ ...settings, imageChoice: settings.imageChoice ?? image.defaultChoice() });
+    },
     // discover-only never starts Ollama: runtime Retry looks again without starting one
     runtime: discoverOnly
       ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover(), lookIfDown: () => runtime.lookIfDown() }

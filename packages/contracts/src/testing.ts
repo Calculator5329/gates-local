@@ -220,6 +220,14 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "sources.clone": { params: { url: "https://github.com/example/docs" }, result: { id: "i2", key: "https://github.com/example/docs", label: "example/docs", kind: "repository", state: "cloning", bytes: 0 } },
   "sources.cancelImport": { params: { id: "i1" }, result: { cancelled: true } },
   "image.status": { params: {}, result: imageReady },
+  "image.presets": {
+    params: {},
+    result: {
+      presets: [{ id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9_663_676_416 }] }],
+      readAt: 1_762_500_006_000,
+      current: { preset: { id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9_663_676_416 }] }, width: 768, height: 512 },
+    },
+  },
   "image.generate": { params: { prompt: "a gate at dusk", threadId: "t1" }, result: { jobId: "j1" } },
   "image.cancel": { params: { jobId: "j1" }, result: { cancelled: true } },
   "setup.probe": { params: {}, result: probe },

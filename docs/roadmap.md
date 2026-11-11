@@ -385,8 +385,9 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* scroll from that callback during backfill and keep the requested reader position.
 - [ ] <!-- workspace:id=work:c4d16987-5cb6-53ea-8d23-e21803f52bab --> Deleting the user message between two replies can give both the same `reply:` owner key in `Timeline`.
       *Accept:* remove that message and retain both replies with distinct keys and stable content.
-- [ ] <!-- workspace:id=work:6327fe6f-c001-5916-aa4c-7e9fdd2bad6c --> Image fit rereads free VRAM immediately after unload in `image/module.ts`; delayed reclamation can produce a false refusal.
+- [x] <!-- workspace:id=work:6327fe6f-c001-5916-aa4c-7e9fdd2bad6c --> Image fit rereads free VRAM immediately after unload in `image/module.ts`; delayed reclamation can produce a false refusal.
       *Accept:* hold VRAM reclamation after a successful unload and wait within a bounded read loop before refusing.
+      *Completed 2026-11-11:* after the unloads the fit reads the GPU every 250 ms until free memory covers the need or 20 s pass; a cancel ends the wait. Checked against a test GPU reader only.
 - [ ] <!-- workspace:id=work:25435160-b10d-5f49-9f80-058db4ba46d0 --> `planLoad` has no explicit-versus-default context provenance, so it cannot safely offer a smaller default while respecting a deliberate context pick.
       *Accept:* a default may step down to a fitting context while an explicit size retains its choice and truthful refusal.
 - [ ] <!-- workspace:id=work:df33005b-e223-558e-a587-00377eb43b07 --> Missing model context metadata is published as a 4k maximum by `runtime/models.ts`, so the picker/fit panel calls it the model's actual limit.
@@ -454,6 +455,17 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       Real-runtime acceptance remains open.
 - [ ] <!-- workspace:id=work:efd92470-9e03-54a8-97a0-00dd3401270c --> Image presets measured in the room left beside whisper; a smaller
       preset or a refusal when the room is short.
+- [ ] <!-- workspace:id=work:6cb56f29-0648-5699-ac90-926de5dd53a7 --> A chat model that was already loaded when this app first used it is not counted as the app's own (`runtime/load.ts`), so an image never unloads it and is refused while that model holds the memory. Reported by the owner after a restart with a warm model.
+      *Accept:* a model a chat turn of this app used is unloaded for an image that needs its memory, a model no turn of this app touched is left alone, and the refusal names which case it is.
+- [ ] <!-- workspace:id=work:f982f32c-1dd3-55d6-8128-c60cd4c5f4a8 --> The image swap and the three setups on a real GPU: `real-check.ts --execute --swap-model` has never been run, and every setup's memory need is an estimate. Needs the owner's go.
+      *Accept:* one run per setup on a 16 GB card with the measured need written into the setup, and one swap run that prints how long the unload and the wait took.
+- [ ] <!-- workspace:id=work:4442601c-3c32-51b4-8106-1c517b857cba --> The image picker and the server judge fit differently: the picker subtracts a 512 MiB margin and the server none, so inside that band the picker says "Stops chat" or "Too big" where the server does otherwise, and a refusal can name a setup the picker marks "Too big".
+      *Accept:* one function decides for both, and a test at the edge of the margin gets the same answer from each.
+- [ ] <!-- workspace:id=work:b1d89071-72da-568f-a5ea-766bb4e700e8 --> Image refusals, small holes: with several Ollama runners the byte count in the sentence can be another runner's (take this app's bytes from `/api/ps`); a file list that gains FLUX.2 Klein after ComfyUI starts stops the chat model and then refuses what was sent while offering that same setup; a refused pixel art offers plain SDXL, another look; a refusal on a file list that was never read starts ComfyUI first; the credit in `smallerFit` has no test.
+- [ ] <!-- workspace:id=work:bbb27b74-f736-50f7-9038-ef22971aedcd --> After an image wait that times out or is cancelled the chat model stays unloaded and nothing says the next reply loads it again. With no setup listed Send is still allowed. A saved setup id that no longer exists throws on the tool path. Hidden retry rows still reach the chat model's context as "Image job" rows.
+- [ ] <!-- workspace:id=work:3bb9e774-1ee2-5909-94f1-1248928a4a8b --> Image picker look: the button cuts the setup name ("FLU… 1024×1024") with room to spare and two SDXL rows can cut to the same text; the same GB number is on every model row and again on every size row, and "Fits" shows three times; the composer button changes width on a thread switch with Image on.
+- [ ] <!-- workspace:id=work:6d0fa9f5-cc7e-5965-b5cf-36e40cb9ed16 --> Image setups as data files, one or two per hardware level, and the app fetches the missing model files into a known folder with progress and resume (today nothing is downloaded and the three setups are constants in `image/presets.ts`).
+- [ ] <!-- workspace:id=work:34d1f23b-6d57-5ca2-ace4-e54040c89f17 --> `real-check.ts` keeps its database and image under a fixed folder name in the shared temp folder; give each run its own folder.
 - [ ] <!-- workspace:id=work:d69f75c9-1b4a-5781-a36c-dd4bb9a21052 --> Turn loop in `packages/harness` (D3): pi's loop shape, a length stop
       fails every pending call, format-error budget, head/tail elision.
       *Accept:* `pnpm verify:tools`: a truncated call never runs; three bad

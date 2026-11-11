@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
-import type { BlockingTurn, Channel, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -90,9 +90,11 @@ export class AppError extends Error {
 export const RUNTIME_CHANGED_TURN_MESSAGE = "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.";
 const runtimeChangedTurn = (): AppError => new AppError("runtime-changed", RUNTIME_CHANGED_TURN_MESSAGE);
 /** What a Retry of `questionId` replaces: that question and the unfinished rows after it. None once something else was asked or a finished reply followed: then it is a new question. */
-function retriedRows(messages: readonly { readonly id: string; readonly role: string; readonly interrupted?: true }[], questionId: string): string[] {
+function retriedRows(messages: readonly { readonly id: string; readonly role: string; readonly interrupted?: true; readonly imageJob?: { readonly state: string } }[], questionId: string): string[] {
   const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
-  return rows[0]?.id === questionId && rows.slice(1).every((m) => m.interrupted === true) ? rows.map((m) => m.id) : [];
+  // A picture that failed or was cancelled is unfinished the way a stopped reply is.
+  const unfinished = (m: (typeof rows)[number]) => m.interrupted === true || m.imageJob?.state === "error" || m.imageJob?.state === "cancelled";
+  return rows[0]?.id === questionId && rows.slice(1).every(unfinished) ? rows.map((m) => m.id) : [];
 }
 
 const HALTED = Symbol("halted");
@@ -137,8 +139,13 @@ export interface AppDeps {
    * (admit), which pushes models.load around a turn whose model is not resident.
    */
   readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
-  /** Image jobs; a turn's image tool queues one here for its thread (chat.send image: true). */
+  /** Image jobs: chat.send draw (Image mode) and a chat turn's image tool queue them here for their thread. */
   readonly image?: ImageModule;
+  /**
+   * Tools › Make images: the preset and size a chat turn's image tool uses, or undefined while
+   * that switch (or image generation) is off and no chat turn is offered the tool.
+   */
+  readonly imageTool?: () => ImageChoice | undefined;
   /**
    * The app's one GPU lease. A turn holds a shared chat claim from just after
    * its reservation to its end, so an image job never runs beside a stream.
@@ -180,6 +187,11 @@ interface Turn {
    * Set inside the load gate when its fit passes, before the user message is saved.
    */
   started: boolean;
+  /**
+   * An Image mode turn: one image job, no chat model. It runs (turns.active lists it) but never
+   * counts as a chat model in GPU memory: the job's own GPU claim covers it.
+   */
+  drawing?: true;
   terminal: boolean;
   start?: Extract<WireEvent, { type: "start" }>;
   /** The reply's row on disk while it streams. threads.get hides it: this reply reaches clients as its live turn. */
@@ -322,15 +334,15 @@ export function createApp(deps: AppDeps): App {
    * thread after the reply; a cancelled turn takes its jobs back, and so does
    * deleting the thread after the turn ended.
    */
-  const queueImageFor = (threadId: string, turnSignal: AbortSignal) => async (prompt: string): Promise<{ jobId: string }> => {
-    const job = await queueImage(deps.image!, { prompt, threadId });
+  const queueImageFor = (threadId: string, turnSignal: AbortSignal, choice: ImageChoice) => async (prompt: string): Promise<{ jobId: string }> => {
+    const job = await queueImage(deps.image!, { prompt, threadId, choice });
     const takeBack = () => deps.image?.cancel(job.jobId);
     if (turnSignal.aborted) takeBack();
     else turnSignal.addEventListener("abort", takeBack, { once: true });
     return job;
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; image?: boolean; contextNotice?: string; settings?: TurnSettings } = {}) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; contextNotice?: string; settings?: TurnSettings } = {}) => {
     const { turnId, threadId, controller } = turn;
     // Exactly the text that reached the client: the reply a halted turn saves.
     turn.contextNotice = options.contextNotice;
@@ -424,8 +436,9 @@ export function createApp(deps: AppDeps): App {
     try {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
       const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
-      // The image tool is offered only when this turn asked for it and image generation is wired.
-      const image = options.image === true && deps.image !== undefined;
+      // The image tool is offered only while Tools › Make images is on, with the app's chosen preset and size.
+      const imageChoice = wantsTools && deps.image !== undefined ? deps.imageTool?.() : undefined;
+      const image = imageChoice !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
       const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
@@ -459,7 +472,7 @@ export function createApp(deps: AppDeps): App {
         } } : {}),
       };
       if (turn.contextNotice) imageOmitted();
-      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(image ? { queueImage: queueImageFor(threadId, controller.signal) } : {}) }) : streamTurn(input);
+      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
       const iterator = events[Symbol.asyncIterator]();
       let dropped = false;
       try {
@@ -552,6 +565,58 @@ export function createApp(deps: AppDeps): App {
     await Promise.all(ids.map((id) => image.wait(id).catch(() => undefined)));
   };
 
+  /**
+   * Image mode (chat.send draw): the words go to the image module as its prompt and no chat model
+   * runs, so there is no fit, no load and no chat claim; the job claims the GPU alone. The turn
+   * lasts as long as the job: a second send in the thread waits, Stop (or deleting the thread or
+   * the question, or shutdown) cancels the job, and the card ends the turn as its reply. A job
+   * that fails says why on its card, the way a tool-made picture does.
+   */
+  const drawTurn = async (threadId: string, content: string, choice: ImageChoice, messageId: string | undefined, replaced: readonly string[], attached: boolean) => {
+    const image = deps.image;
+    if (attached) throw new AppError("image-input", "Image mode makes a picture from words alone. Remove the attachments, or turn Image off to ask a chat model about them.");
+    if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
+    const { turn, end } = reserve(threadId, choice.preset);
+    turn.drawing = true;
+    let jobId: string;
+    let userMessage: Message;
+    try {
+      userMessage = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content }, replaced);
+      try {
+        ({ jobId } = await queueImage(image, { prompt: content, threadId, choice }));
+      } catch (e) {
+        // Nothing was made: the question goes too, so the words return to the composer as unsent.
+        store.deleteMessage(threadId, userMessage.id);
+        push("threads.changed", { threadId });
+        throw e;
+      }
+    } catch (e) {
+      end();
+      throw e;
+    }
+    push("threads.changed", { threadId });
+    turn.start = { type: "start", model: choice.preset, userMessage, image: true };
+    push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
+    const stop = () => image.cancel(jobId);
+    if (turn.controller.signal.aborted) stop();
+    else turn.controller.signal.addEventListener("abort", stop, { once: true });
+    void image.wait(jobId).catch(() => undefined).then(() => {
+      turn.terminal = true;
+      turn.controller.signal.removeEventListener("abort", stop);
+      const card = store.getMessage(jobId);
+      // Deleting the question takes its picture with it, as it takes a chat reply.
+      if (turn.dropReply && card !== undefined) {
+        try { store.deleteMessage(threadId, jobId); } catch (e) { log(`turn ${turn.turnId}: image card not removed: ${(e as Error).message}`); }
+      }
+      const event: WireEvent = card === undefined || turn.dropReply
+        ? { type: "error", code: "cancelled", message: "cancelled: its question was deleted" }
+        : { type: "done", message: card, stopReason: "stop" };
+      push("chat.event", { turnId: turn.turnId, threadId, event });
+      push("threads.changed", { threadId });
+    }).finally(end);
+    return { turnId: turn.turnId, userMessage };
+  };
+
   const handlers = {
     ...deps.models?.handlers,
     ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
@@ -634,7 +699,7 @@ export function createApp(deps: AppDeps): App {
     },
 
     "turns.active": () => [...turns.values()]
-      .filter((turn) => turn.started && !turn.terminal && !turn.controller.signal.aborted)
+      .filter((turn) => (turn.started || turn.drawing) && !turn.terminal && !turn.controller.signal.aborted)
       .map(({ turnId, threadId }) => ({ turnId, threadId })),
     "turns.blocking": async ({ model, numCtx }) => {
       if (![...turns.values()].some((t) => t.started)) return [];
@@ -643,7 +708,8 @@ export function createApp(deps: AppDeps): App {
       return blockingTurns((await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).stop);
     },
 
-    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, image, stopOthers, stopTurns, askFirst }) => {
+    // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
+    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, draw, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
@@ -659,6 +725,7 @@ export function createApp(deps: AppDeps): App {
       }
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
+      if (draw !== undefined) return drawTurn(threadId, content, draw, messageId, replaced, images.length > 0);
       try { checkAttachments(images); }
       catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
       const settings = turnSettings(deps.settings?.get(), model);
@@ -822,7 +889,7 @@ export function createApp(deps: AppDeps): App {
         // Before the answer, so every client (also one that did not send this) knows the turn first.
         turn.start = { type: "start", model, userMessage };
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
-        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, image, contextNotice, settings });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, contextNotice, settings });
         return { turnId: turn.turnId, userMessage };
       } finally {
         try {

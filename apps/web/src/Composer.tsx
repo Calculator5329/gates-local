@@ -12,7 +12,9 @@ import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } fro
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { warmPickerFits } from "./picker-fit.ts";
-import { pickerScreen, threadScreen } from "./screen-loaders.ts";
+import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
+import { chosenImage, imageMode, sizeLabel } from "./image-choice.ts";
+import { ImageMark } from "./ImageMark.tsx";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -46,6 +48,8 @@ const pctOf = (done: number, total: number | undefined) => (total ? Math.round((
 // The first send replaces Draft's composer with the thread's in the same commit.
 // Transfer primary-action focus only to that immediate replacement.
 let primaryFocus = false;
+/** The model button's width showing a chat model: with Image on it keeps that width, so nothing in the row moves. */
+let chatButtonWidth = 0;
 
 /** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
@@ -80,6 +84,7 @@ function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
 
 /** Someone is about to open the picker: load its code and the fit reports its first view needs. */
 function pickerIntent(): void {
+  if (imageMode(getState())) { void imagePickerScreen.load(); return; }
   void pickerScreen.load();
   warmPickerFits();
 }
@@ -130,8 +135,17 @@ export function Composer() {
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
   const view = useStore((s) => s.view);
   const voiceThread = useStore((s) => s.threadId);
+  const drawing = useStore(imageMode);
+  const pictured = useStore(chosenImage);
+  // a default ComfyUI does not list is still sent (the server settles it) but never named
+  const named = pictured?.listed === true ? pictured : undefined;
+  const online = useStore((s) => s.conn.kind === "open");
   const ta = useRef<HTMLTextAreaElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
+  const modelBtn = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!drawing && modelBtn.current) chatButtonWidth = modelBtn.current.getBoundingClientRect().width;
+  });
   // Preparing a reply is user intent, not an idle startup download. The
   // renderer can arrive while the person types, before the first Send.
   useEffect(() => {
@@ -211,9 +225,13 @@ export function Composer() {
   if (imageNo !== null) sendTip = esc(imageNo);
   if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first. A message carries text and images only.`;
   if (pasting) sendTip = "Preparing pasted images. They will be ready in a moment.";
-  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
+  // Image on: the words go to the image model, so the chat model's readiness, memory and sight do not count.
+  const drawNo = !drawing ? null : images.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : pictured === undefined ? "Reading the image models…" : null;
+  if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? (text ? `Make the image${enter}` : "Describe the image to make");
+  const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
+    : (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
-  const memRefused = !blocked && !queueable && !noModel && memNo && imageNo === null && !refused && !pasting;
+  const memRefused = !drawing && !blocked && !queueable && !noModel && memNo && imageNo === null && !refused && !pasting;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
   // Touch Enter inserts a newline, so a typed draft needs the queue arrow.
@@ -294,8 +312,8 @@ export function Composer() {
                 aria-label="Image"
                 data-tip={
                   image
-                    ? "<b>Image on.</b> The model may queue a ComfyUI job on this GPU. Click to turn off."
-                    : "<b>Image off.</b> Click to let the model make images for this chat."
+                    ? "<b>Image on.</b> Send makes a picture from your words. Click to turn off."
+                    : "<b>Image off.</b> Click to send your words to an image model."
                 }
                 onClick={() => {
                   setState({ image: !image });
@@ -344,21 +362,32 @@ export function Composer() {
               type="button"
               className="ctl gate"
               id="modelBtn"
+              ref={modelBtn}
               aria-haspopup="dialog"
-              aria-expanded={pop === "picker" && !pickerPending}
-              aria-busy={loading || pickerPending || undefined}
-              data-tip={modelTip}
+              aria-expanded={drawing ? pop === "images" : pop === "picker" && !pickerPending}
+              aria-busy={!drawing && (loading || pickerPending) || undefined}
+              data-tip={drawing ? undefined : modelTip}
+              // the name only when the fixed width cuts it
+              data-tipt={drawing ? named?.preset.name : undefined}
+              style={drawing && chatButtonWidth > 0 ? { width: chatButtonWidth } : undefined}
               // Warm only on intent: hover, keyboard focus, or the press before a
               // click (touch has no hover). Never at idle; see picker-fit.ts.
               onPointerEnter={pickerIntent}
               onFocus={pickerFocus}
               onPointerDown={pickerIntent}
-              onClick={() => togglePop("picker")}
+              onClick={() => togglePop(drawing ? "images" : "picker")}
             >
-              {/* loading shows in the tile, never in the label: the trigger keeps its width */}
-              {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
-              <span>{modelLbl}</span>
-              <small className="picker-trigger-ctx">{k(ctx)}</small>
+              {/* Image on: the image model and size Send uses, in the same box */}
+              {drawing ? <>
+                {named === undefined ? null : <ImageMark family={named.preset.family} />}
+                <span className="t">{named?.preset.name ?? "Image model"}</span>
+                {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
+              </> : <>
+                {/* loading shows in the tile, never in the label: the trigger keeps its width */}
+                {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
+                <span>{modelLbl}</span>
+                <small className="picker-trigger-ctx">{k(ctx)}</small>
+              </>}
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
@@ -584,7 +613,7 @@ export function PlusMenu() {
           <Icon id="image" />
           <span>
             <b>Generate image</b>
-            <small>ComfyUI on this GPU, for this chat</small>
+            <small>Send makes a picture from your words</small>
           </span>
           <Icon id="check" cls="chk" />
         </button>
@@ -658,7 +687,7 @@ export function OptsMenu() {
           <Icon id="image" />
           <span>
             <b>Image</b>
-            <small>{image ? "The model may queue a ComfyUI job" : "Off: no image jobs in this chat"}</small>
+            <small>{image ? "Send makes a picture from your words" : "Off: Send goes to the chat model"}</small>
           </span>
           <span className="switch" aria-hidden="true" />
         </button>

@@ -20,8 +20,8 @@ for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]]
       const file = info.outputPath("report.txt");
       await writeFile(file, "The report total is 42. Source: https://tool.example/report\n");
       await client.call("sources.add", { kind: "file", path: file });
-      await client.call("settings.update", { imageGen: true, tools: true });
-      await page.getByRole("button", { name: "Image", exact: true }).click();
+      // the chat model makes the picture through its tool: Settings › Tools › Make images
+      await client.call("settings.update", { imageGen: true, tools: true, imageTool: true });
       await sendMessage(page, "Tell me the report total and draw a ship; https://person.example/brief");
       const reply = page.locator(".turn.a .md").last();
       const card = page.locator("[data-image-job]");

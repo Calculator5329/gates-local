@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { expect, it } from "vitest";
+import { fakeComfy } from "./fake-comfy.ts";
 
 it.each([false, true])("an upgraded fake peer reset is expected, but unrelated socket errors still fail (unexpected=%s)", async unexpected => {
   // Isolate the unhandled Socket error so it proves the worker-crash boundary
@@ -45,4 +46,20 @@ it.each([false, true])("an upgraded fake peer reset is expected, but unrelated s
   expect(result.code, result.stderr).toBe(unexpected ? 1 : 0);
   if (unexpected) expect(result.stderr).toContain("EIO");
   else expect(result.stdout).toContain("still answers");
+});
+
+it("gpu() names a CUDA device and progress() reaches an open socket as ComfyUI's frame", async () => {
+  const fake = await fakeComfy();
+  try {
+    expect(await (await fetch(`${fake.url}/system_stats`)).json()).toMatchObject({ devices: [{ type: "cpu" }] });
+    fake.gpu();
+    expect(await (await fetch(`${fake.url}/system_stats`)).json()).toMatchObject({ devices: [{ type: "cuda" }] });
+    const socket = new WebSocket(`${fake.url.replace("http:", "ws:")}/ws?clientId=c`);
+    await new Promise((resolve, reject) => { socket.addEventListener("open", resolve); socket.addEventListener("error", reject); });
+    const frame = new Promise<unknown>((resolve) => socket.addEventListener("message", (event) => resolve(JSON.parse(String(event.data)))));
+    await fetch(`${fake.url}/prompt`, { method: "POST", body: JSON.stringify({ prompt: {} }) });
+    fake.progress(2, 5);
+    expect(await frame).toEqual({ type: "progress", data: { prompt_id: "p1", value: 2, max: 5 } });
+    socket.close();
+  } finally { await fake.close(); }
 });

@@ -9,6 +9,7 @@
 // runs the real nvidia-smi (main.ts does not hand GATES_LOCAL_NVIDIA_SMI to
 // the image module), which the e2e stack must never touch.
 import type { Page } from "@playwright/test";
+import { createClient } from "@gates-local/contracts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { release, state } from "./threads-support.ts";
 
@@ -71,7 +72,7 @@ test("a Library with no sources says nothing is connected, and a chat that asks 
   await expect(reply.locator(".wr")).toHaveCount(0);
 });
 
-test("image generation with no ComfyUI says none was found, and a chat with Image on still finishes", async ({ page, open }) => {
+test("image generation with no ComfyUI says none was found, and a chat still finishes", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await imageWithNoComfy(page);
@@ -87,9 +88,7 @@ test("image generation with no ComfyUI says none was found, and a chat with Imag
 
   await page.keyboard.press("Escape");
   await waitReady(page);
-  const pill = page.getByRole("button", { name: "Image", exact: true });
-  await pill.click();
-  await expect(pill).toHaveAttribute("aria-pressed", "true");
+  // Image stays off: with it on, Send would queue a job, and a job's GPU check runs the real nvidia-smi
   await sendMessage(page, "Describe a lighthouse at dusk");
   await replyEnded(page);
   await expect(page.locator(".turn.a").last().locator(".md")).toContainText("You asked: Describe a lighthouse at dusk.");
@@ -100,11 +99,15 @@ test("image generation with no ComfyUI says none was found, and a chat with Imag
 test("a live tool step that cannot run says why while the reply streams, and the reply still ends", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  // Image on offers the model tools; the Library is empty, so its read fails
+  // Make images offers the model tools; the Library is empty, so its read fails. Its Settings
+  // row stays disabled while ComfyUI does not answer, so the setting goes in over the socket.
   await imageWithNoComfy(page);
+  const server = new URL(page.url()).searchParams.get("server");
+  if (!server) throw new Error("No test server URL");
+  const client = createClient(new WebSocket(server));
+  try { await client.call("settings.update", { imageTool: true }); } finally { client.close(); }
   await page.keyboard.press("Escape");
   await waitReady(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
   await stack.scenario("threads", { tokenDelayMs: 1, firstTokenDelayMs: 0, holdAfterTokens: 1, repeatToolCalls: 1 });
   await sendMessage(page, "Use a tool to open my docs");
 

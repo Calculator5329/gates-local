@@ -58,6 +58,7 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
         ...turn,
         model: event.model,
         userMessageId: turn.userMessageId ?? event.userMessage.id,
+        ...(event.image === true ? { image: true as const } : {}),
         ...(turn.end === undefined || closed(turn) ? { end: undefined, text: "", thinking: "", tools: [] } : {}),
       };
     case "thinking":

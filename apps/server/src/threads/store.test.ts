@@ -409,6 +409,16 @@ describe("concurrent connections (WAL)", () => {
 });
 
 describe("tool steps and images (schema step 2)", () => {
+  it("a settled image card interrupted by a restart keeps the choice it was sent with, so its box keeps its shape", () => {
+    const s = store();
+    const t = s.createThread();
+    const settled = { preset: "sdxl-lightning", width: 768, height: 512 };
+    const sent = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    s.saveImageJob({ jobId: "j1", threadId: t.id, state: "running", progress: 0, choice: settled, sent }, "a tree");
+    s.interruptImageJobs();
+    expect(s.getThread(t.id).messages[0]?.imageJob).toEqual({ jobId: "j1", threadId: t.id, state: "error", errorKind: "restarted",
+      message: "The app restarted before this image finished; try again.", choice: settled, sent });
+  });
   it("round-trips tool steps and image paths, and refuses malformed ones", () => {
     const s = store();
     const t = s.createThread();

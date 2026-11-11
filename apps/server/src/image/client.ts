@@ -1,7 +1,7 @@
-import * as Option from "effect/Option";
+import type { ImageChoice } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 import { setTimeout as delay } from "node:timers/promises";
-import { CHECKPOINT, LORA, workflow } from "./workflow.ts";
+import { DEFAULT_CHOICE, findFile, loaderFiles, resolveChoice, type LoaderFiles } from "./presets.ts";
 
 const Device = S.Struct({ type: S.optional(S.String), torch_vram_total: S.optional(S.Finite) });
 const Stats = S.Struct({ system: S.Record(S.String, S.Unknown), devices: S.Array(Device) });
@@ -11,7 +11,6 @@ const Image = S.Struct({ filename: S.String, subfolder: S.optional(S.String), ty
 const History = S.Record(S.String, S.Struct({ outputs: S.Record(S.String, S.Struct({ images: S.optional(S.Array(Image)) })) }));
 const Queue = S.Struct({ queue_running: S.Array(S.Array(S.Unknown)), queue_pending: S.Array(S.Array(S.Unknown)) });
 const ObjectInfo = S.Record(S.String, S.Unknown);
-const LoaderInfo = S.Struct({ input: S.Struct({ required: S.Record(S.String, S.Array(S.Unknown)) }) });
 const failure = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 export interface ComfyClientDeps {
@@ -42,16 +41,19 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
     /** Nothing queued and nothing running, except possibly `except` (our own prompt stuck past its cancel deadline). */
     async idle(except?: string) { const q = await queue(); return q.queue_pending.length === 0 && q.queue_running.every((row) => except !== undefined && row[1] === except); },
     async running(signal?: AbortSignal) { return (await queue(signal)).queue_running.map((row) => String(row[1])); },
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}): Promise<Buffer> {
-      const info = S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json());
-      const select = (node: string, field: string, wanted: string) => {
-        const loader = S.decodeUnknownOption(LoaderInfo)(info[node]);
-        const choices = Option.isSome(loader) ? loader.value.input.required[field]?.[0] : undefined;
-        const choice = Array.isArray(choices) ? choices.find((v: unknown) => typeof v === "string" && (v === wanted || v.replaceAll("\\", "/").endsWith(`/${wanted}`))) : undefined;
-        if (typeof choice !== "string") throw failure("image-model", `ComfyUI model ${wanted} is absent. Install it in ComfyUI's model folders, then retry.`);
-        return choice;
-      };
-      const graph = workflow(prompt, Math.floor(Math.random() * 2 ** 32), select("CheckpointLoaderSimple", "ckpt_name", CHECKPOINT), select("LoraLoader", "lora_name", LORA));
+    /** The file lists ComfyUI reports for every loader input a preset reads. */
+    async files(signal?: AbortSignal): Promise<LoaderFiles> {
+      return loaderFiles(S.decodeUnknownSync(ObjectInfo)(await (await request("/object_info", undefined, signal)).json()));
+    },
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE): Promise<Buffer> {
+      const { preset, size } = resolveChoice(choice);
+      const files = await this.files(signal);
+      const names = preset.files.map((file) => {
+        const name = findFile(files, file);
+        if (name === undefined) throw Object.assign(failure("image-model", `ComfyUI model ${file.name} is absent. Install it in ComfyUI's model folders, then retry.`), { file: file.name });
+        return name;
+      });
+      const graph = preset.graph(prompt, Math.floor(Math.random() * 2 ** 32), names, size);
       // Do not submit into another client's queue.
       if (!await this.idle()) throw failure("image-busy", "ComfyUI is busy with another job. Wait for it to finish, then retry.");
       signal.throwIfAborted();

@@ -12,7 +12,8 @@ import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
-import { ScreenError, firstRunScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
+import { imageMode } from "./image-choice.ts";
+import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, focusComposer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
 import { PopPanel } from "./Panel.tsx";
@@ -440,7 +441,7 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
     openSearch();
   } else if (key === "m") {
     e.preventDefault();
-    if (s.view !== "settings" && s.panel === null) setState({ pop: { id: "picker", kb: true } });
+    if (s.view !== "settings" && s.panel === null) setState({ pop: { id: imageMode(s) ? "images" : "picker", kb: true } });
   } else if (key === ",") {
     e.preventDefault();
     openSettings();
@@ -481,6 +482,7 @@ export function App() {
   const settings = useScreen(settingsScreen, view === "settings");
   const firstRun = useScreen(firstRunScreen, !noServer && view === "firstrun");
   const picker = useScreen(pickerScreen, popId === "picker");
+  const imagePicker = useScreen(imagePickerScreen, popId === "images");
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
   const popOpen = popId !== null && (popId !== "picker" || picker.kind === "error" || !pickerPending);
   const thread = useScreen(threadScreen, view === "thread" || (view === "settings" && threadId !== null));
@@ -585,6 +587,7 @@ export function App() {
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
       {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
       {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
+      {popId === "images" ? imagePicker.kind === "ready" ? <imagePicker.value.ImagePicker /> : imagePicker.kind === "error" ? <div id="imagePicker" className="model-picker open picker-error" role="dialog" aria-label="Choose an image model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       <PlusMenu />
       <OptsMenu />
       <ThreadMenu />

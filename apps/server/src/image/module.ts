@@ -2,17 +2,26 @@ import { randomUUID } from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import os from "node:os";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { ImageEvent, ImageStatus, Params } from "@gates-local/contracts";
+import type { ImageChoice, ImageEvent, ImagePresets, ImageStatus, Params } from "@gates-local/contracts";
+import * as S from "effect/Schema";
 import type { Push } from "../app.ts";
 import { readGpu, untilAborted } from "../fit/gpu.ts";
+import type { NvidiaSmiRunner } from "../fit/types.ts";
 import type { GpuLease } from "../gpu/lease.ts";
+import { canonicalTag } from "../runtime/recommended.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
+import { availablePresets, defaultChoice, describeChoice, isDefaultChoice, resolveChoice, smallerFit, type LoaderFiles } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
-import { IMAGE_ESTIMATED_BYTES } from "./workflow.ts";
+
+/** ComfyUI's last file list, kept in the data dir so the picker lists presets while ComfyUI is stopped. */
+const FILES_NAME = "image-files.json";
+const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)) });
+type KnownFiles = typeof KnownFiles.Type;
 
 export interface ImageDeps extends ComfyClientDeps {
   admit?(): void;
@@ -20,16 +29,22 @@ export interface ImageDeps extends ComfyClientDeps {
   lease: GpuLease;
   store: ThreadStore;
   push: Push;
-  settings(): { imageGen: boolean; comfyUrl?: string };
+  settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice };
   /** Only models the app loaded, never the complete /api/ps list. */
   appLoadedModels(): readonly string[];
   ollamaUrl(): string | undefined;
   onModelUnloaded?(model: string): void;
-  readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly { pid: number; usedBytes?: number }[] }>;
+  readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly GpuHolder[] }>;
+  /** The nvidia-smi the default readGpu runs; the e2e stack's fake (GATES_LOCAL_NVIDIA_SMI), as every chat fit uses. */
+  runNvidiaSmi?: NvidiaSmiRunner;
   service?: ComfyService;
   requiredBytes?: number;
   idleMs?: number;
   startupTimeoutMs?: number;
+  /** How long a swap waits for unloaded memory to show as free; SWAP_WAIT_MS unless a test sets it. */
+  swapWaitMs?: number;
+  /** The spacing of those reads; SWAP_POLL_MS unless a test sets it. */
+  swapPollMs?: number;
   jobTimeoutMs?: number;
   queueTimeoutMs?: number;
   /** This machine's own interface addresses; tests inject them. */
@@ -44,6 +59,14 @@ export interface ImageModule {
   activeJobs?(): number;
   current(): ImageStatus;
   status(): Promise<ImageStatus>;
+  /**
+   * The presets ComfyUI has every file for. Reads ComfyUI's file list when it answers (never
+   * starts it), else returns the last list read at this address, kept across restarts.
+   */
+  presets(): Promise<ImagePresets>;
+  /** The choice an unset Settings choice means now: the first preset ComfyUI last listed every file for. */
+  defaultChoice(): ImageChoice;
+  /** A job runs `choice`, else Settings' imageChoice, else defaultChoice(); a retry runs its failed job's. */
   generate(params: Params<"image.generate">): Promise<{ jobId: string }>;
   cancel(jobId: string): { cancelled: boolean };
   /** Test/CLI completion seam; errors are reported on image.event. */
@@ -126,16 +149,49 @@ export async function isLocalHost(hostname: string, own: readonly string[] = loc
   }
 }
 
+/**
+ * After unloading chat models, how long the fit keeps reading the GPU before it refuses.
+ * Ollama answers the unload before its runner has handed the memory back.
+ */
+export const SWAP_WAIT_MS = 20_000;
+/** The spacing of those reads, as readNvidiaSmi spaces its retries. */
+export const SWAP_POLL_MS = 250;
+
 const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
 const imageError = (code: string, message: string) => Object.assign(new Error(message), { code });
 const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+const same = (a: ImageChoice, b: ImageChoice) => a.preset === b.preset && a.width === b.width && a.height === b.height;
 
-/** Raw bytes stay available to callers without putting byte counts in the UI. */
-export function imageFitError(estimatedBytes: number, creditedBytes: number, freeBytes: number, holders: string) {
+/** One process on the GPU as nvidia-smi lists it (fit/gpu.ts GpuTenant). */
+export interface GpuHolder { pid: number; usedBytes?: number; label?: string; role?: string }
+
+/**
+ * The refusal the card shows, in one sentence: what the image needs, what is free, who holds the
+ * most of the rest, and a setup that would fit when one does (`smaller`, from smallerFit). `ours`
+ * are this app's chat models Ollama still lists after the unload and the wait: an Ollama runner is
+ * then this app's, and the sentence never says to close another app. Undefined when Ollama's list
+ * could not be read; the sentence then names Ollama and claims nothing about whose model it is.
+ */
+export function fitSentence(needBytes: number, freeBytes: number, holders: readonly GpuHolder[], ours: readonly string[] | undefined, smaller?: string): string {
+  const base = `The image needs ${gib(needBytes)} and ${gib(freeBytes)} is free`;
+  const out = smaller === undefined ? "" : `; ${smaller} would fit`;
+  const top = holders.filter((h) => (h.usedBytes ?? 0) > 0).toSorted((a, b) => (b.usedBytes ?? 0) - (a.usedBytes ?? 0))[0];
+  if (top === undefined) return `${base}${out}.`;
+  const held = gib(top.usedBytes ?? 0);
+  if (top.role === "ollama") {
+    if (ours === undefined) return `${base}; Ollama holds ${held}${out}.`;
+    if (ours.length > 0) return `${base}; this app's chat model${ours.length === 1 ? ` ${ours[0]} still holds` : `s ${ours.join(", ")} still hold`} ${held}, try again in a moment${out}.`;
+    return `${base}; a chat model this app did not load holds ${held}, stop it${out}.`;
+  }
+  return `${base}; ${top.label ?? `process ${top.pid}`} holds ${held}, close it${out}.`;
+}
+
+/** The long form (status detail and log) keeps every number; `said` is the card's one sentence. */
+export function imageFitError(estimatedBytes: number, creditedBytes: number, freeBytes: number, holders: string, said?: string) {
   const needBytes = Math.max(0, estimatedBytes - creditedBytes);
   const shortfallBytes = Math.max(0, needBytes - freeBytes);
-  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). Memory holders: ${holders}. Close another GPU app or choose a smaller image setup. Protected occupants are left running.`),
-    { estimatedBytes, creditedBytes, needBytes, freeBytes, shortfallBytes, holders });
+  return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). Memory holders: ${holders}. Protected occupants are left running.`),
+    { estimatedBytes, creditedBytes, needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
 }
 
 export function createImageModule(deps: ImageDeps): ImageModule {
@@ -165,6 +221,23 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     return { enabled: settings.imageGen, baseUrl, managed: baseUrl === DEFAULT_URL && settings.comfyUrl === undefined, hostname: url.hostname };
   };
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
+  const filesPath = path.join(deps.dataDir, FILES_NAME);
+  let known: KnownFiles | undefined;
+  try { known = S.decodeUnknownSync(KnownFiles)(JSON.parse(readFileSync(filesPath, "utf8"))); }
+  catch { known = undefined; /* absent or unreadable: read again from ComfyUI */ }
+  const remember = (baseUrl: string, files: LoaderFiles) => {
+    known = { baseUrl, readAt: Date.now(), files };
+    try {
+      const tmp = `${filesPath}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(known));
+      renameSync(tmp, filesPath);
+    } catch (error) { log(`ComfyUI file list not kept: ${detail(error)}`); }
+  };
+  /** The last file list read at the configured address, or undefined. */
+  const knownFiles = (): KnownFiles | undefined => {
+    try { return known?.baseUrl === config().baseUrl ? known : undefined; }
+    catch { return undefined; }
+  };
   const clearIdle = () => { clearTimeout(idleTimer); idleTimer = undefined; };
   const armIdle = () => {
     clearIdle();
@@ -196,16 +269,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : "ComfyUI did not answer. Install the local user service or set a running ComfyUI address in Settings." });
   };
   const measure = deps.readGpu ?? (async () => {
-    const gpu = await readGpu();
+    const gpu = await readGpu(deps.runNvidiaSmi);
     return { freeBytes: gpu.freeBytes, tenants: gpu.tenants, holders: gpu.tenants.map((t) => `${t.label} (${t.usedBytes === undefined ? "unknown" : gib(t.usedBytes)})`).join(", ") || "unlisted GPU occupants" };
   });
-  const fit = async (cfg: ReturnType<typeof config>, signal: AbortSignal) => {
+  /**
+   * `needBytes`: the preset's need at the job's size (presets.ts). `freeing` is told when the
+   * unload of this app's chat models begins (true) and when the memory is back or the wait gave up (false).
+   */
+  const fit = async (cfg: ReturnType<typeof config>, needBytes: number, signal: AbortSignal, freeing: (on: boolean) => void) => {
     if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return;
     signal.throwIfAborted();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal.throwIfAborted();
     if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return;
-    const estimate = deps.requiredBytes ?? IMAGE_ESTIMATED_BYTES;
+    const estimate = deps.requiredBytes ?? needBytes;
     const unit = stats && cfg.managed ? await service.inspect() : undefined;
     const resident = (gpu: Awaited<ReturnType<typeof measure>>) => {
       if (!stats) return 0;
@@ -222,26 +299,62 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     let credited = resident(gpu);
     let need = Math.max(0, estimate - credited);
     if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error("GPU free memory could not be measured. Retry when the GPU status is available.");
-    if (gpu.freeBytes < need) {
-      const models = [...new Set(deps.appLoadedModels())];
-      const ollama = deps.ollamaUrl();
-      if (ollama) for (const model of models) {
-        signal.throwIfAborted();
-        const response = await (deps.fetch ?? fetch)(`${ollama.replace(/\/$/, "")}/api/generate`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, keep_alive: 0 }),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-        });
-        if (!response.ok) throw new Error(`Could not unload app chat model ${model}: Ollama HTTP ${response.status}.`);
-        await response.arrayBuffer();
-        deps.onModelUnloaded?.(model);
-      }
+    const remeasure = async () => {
       gpu = await measure();
       credited = resident(gpu);
       need = Math.max(0, estimate - credited);
+    };
+    let models: string[] = [];
+    if (gpu.freeBytes < need) {
+      models = [...new Set(deps.appLoadedModels())];
+      const ollama = deps.ollamaUrl();
+      if (ollama && models.length > 0) {
+        freeing(true);
+        for (const model of models) {
+          signal.throwIfAborted();
+          const response = await (deps.fetch ?? fetch)(`${ollama.replace(/\/$/, "")}/api/generate`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, keep_alive: 0 }),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+          });
+          if (!response.ok) throw new Error(`Could not unload app chat model ${model}: Ollama HTTP ${response.status}.`);
+          await response.arrayBuffer();
+          deps.onModelUnloaded?.(model);
+        }
+        // Ollama answers before its runner has handed the memory back: read until it shows, or the bound passes.
+        const deadline = Date.now() + (deps.swapWaitMs ?? SWAP_WAIT_MS);
+        for (;;) {
+          await remeasure();
+          if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0 || gpu.freeBytes >= need || Date.now() >= deadline) break;
+          await delay(deps.swapPollMs ?? SWAP_POLL_MS, undefined, { signal });
+        }
+        if (gpu.freeBytes >= need) freeing(false); // a refusal's own event ends the step otherwise
+      } else await remeasure();
     }
     signal.throwIfAborted();
     if (!Number.isFinite(gpu.freeBytes) || gpu.freeBytes < 0) throw new Error("GPU free memory could not be measured after unloading app chat.");
-    if (gpu.freeBytes < need) throw imageFitError(estimate, credited, gpu.freeBytes, gpu.holders);
+    if (gpu.freeBytes < need) {
+      const others = (gpu.tenants ?? []).filter((tenant) => !(unit && unit.pid > 0 && tenant.pid === unit.pid)); // ComfyUI's own memory is credited
+      // this app's only while Ollama still lists it: an unloaded model that is gone holds nothing
+      const ours = await stillListed([...new Set([...models, ...deps.appLoadedModels()])], signal);
+      const smaller = smallerFit(knownFiles()?.files, estimate, gpu.freeBytes + credited);
+      throw imageFitError(estimate, credited, gpu.freeBytes, gpu.holders, fitSentence(need, gpu.freeBytes, others, ours, smaller));
+    }
+  };
+  /** Of `models`, the ones Ollama's /api/ps still lists; undefined when that list cannot be read. */
+  const stillListed = async (models: readonly string[], signal: AbortSignal): Promise<string[] | undefined> => {
+    const ollama = deps.ollamaUrl();
+    if (models.length === 0) return [];
+    if (!ollama) return undefined;
+    try {
+      const response = await (deps.fetch ?? fetch)(`${ollama.replace(/\/$/, "")}/api/ps`, { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
+      if (!response.ok) return undefined;
+      const body = await response.json() as { models?: readonly { name?: unknown }[] };
+      const listed = new Set((body.models ?? []).flatMap((m) => typeof m.name === "string" ? [canonicalTag(m.name)] : []));
+      return models.filter((model) => listed.has(canonicalTag(model)));
+    } catch {
+      signal.throwIfAborted();
+      return undefined;
+    }
   };
   const ensure = async (baseUrl: string, managed: boolean, signal: AbortSignal) => {
     const comfy = client(baseUrl);
@@ -270,10 +383,25 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     signal.throwIfAborted();
     return comfy;
   };
+  const chooseDefault = () => defaultChoice(knownFiles()?.files);
+  /** What a send runs now: the saved choice, or the default for the files last read. */
+  const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault());
   const module: ImageModule = {
     current: () => status,
     activeJobs: () => jobs.size,
     status: discover,
+    defaultChoice: chooseDefault,
+    async presets() {
+      const cfg = config();
+      if (!cfg.enabled) return { presets: [], current: currentChoice() };
+      const comfy = client(cfg.baseUrl);
+      if (await comfy.healthy()) {
+        try { remember(cfg.baseUrl, await comfy.files()); }
+        catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
+      }
+      const last = knownFiles();
+      return last === undefined ? { presets: [], current: currentChoice() } : { presets: availablePresets(last.files), readAt: last.readAt, current: currentChoice() };
+    },
     async generate(params) {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
       deps.admit?.();
@@ -281,13 +409,23 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (params.threadId) deps.store.getThread(params.threadId);
       const jobId = randomUUID();
       let prompt = params.prompt;
+      // Unset: nothing saved in Settings, and the choice sent (or a retry's stored one) is absent
+      // or one of the defaults. The picker saves every pick, so with nothing saved a default is all
+      // a send can carry (the composer and the image tool send the one they show). The job settles
+      // it again from ComfyUI's own list, so a default whose files went missing is passed over.
+      const saved = deps.settings().imageChoice;
+      let choice = params.choice ?? saved ?? chooseDefault();
+      let unset = saved === undefined && isDefaultChoice(params.choice);
       if (params.retryOf !== undefined) {
         if (!params.threadId) throw imageError("bad-params", "An image retry must name its thread.");
-        const retry = deps.store.claimImageRetry(params.threadId, params.retryOf, jobId);
+        const retry = deps.store.claimImageRetry(params.threadId, params.retryOf, jobId, choice);
         if (!retry.created) return { jobId: retry.jobId };
         prompt = retry.prompt;
-      }
+        choice = retry.choice;
+        unset = saved === undefined && isDefaultChoice(retry.choice);
+      } else resolveChoice(choice); // an unknown preset or size is refused before any card
       if (!prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
+      const sent = choice; // the card's box keeps this shape whatever the job settles to
       clearIdle();
       const controller = new AbortController();
       const deadline = new AbortController();
@@ -296,7 +434,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let timedOut = false;
       let stage = "image-config";
       const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => {
-        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, ...rest };
+        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...rest };
         deps.store.saveImageJob(payload, prompt);
         emit("image.event", payload);
       };
@@ -317,10 +455,33 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             activeJob = jobId;
             event("running", { progress: 0 });
             update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
-            stage = "image-fit";
-            await fit(cfg, signal);
+            // Inside the job: a retry's stored choice a newer table no longer has fails its card in words.
+            let { size } = resolveChoice(choice);
+            const freeing = (on: boolean) => event("running", on ? { progress: 0, phase: "freeing" } : { progress: 0 });
+            // An unset default settles to the files ComfyUI lists, so the fit and any unload judge the
+            // setup that will really run. A default whose files ComfyUI does not list is passed over without a word.
+            const read = async (from: Awaited<ReturnType<typeof ensure>>) => {
+              try { remember(cfg.baseUrl, await from.files(signal)); }
+              catch (error) { signal.throwIfAborted(); log(`ComfyUI file list not read: ${detail(error)}`); }
+            };
+            const settle = () => {
+              const settled = chooseDefault();
+              if (same(settled, choice)) return;
+              choice = settled;
+              ({ size } = resolveChoice(choice));
+              event("running", { progress: 0 });
+            };
+            // Never read: ComfyUI is started (or found) and its list read before the first fit.
             stage = "image-missing";
-            const comfy = await ensure(cfg.baseUrl, cfg.managed, signal);
+            const early = unset && knownFiles() === undefined ? await ensure(cfg.baseUrl, cfg.managed, signal) : undefined;
+            if (early) await read(early);
+            if (unset) settle();
+            stage = "image-fit";
+            await fit(cfg, size.bytes, signal, freeing);
+            stage = "image-missing";
+            const comfy = early ?? await ensure(cfg.baseUrl, cfg.managed, signal);
+            // read before: the read now ComfyUI is up catches files gone since
+            if (unset && !early) { await read(comfy); settle(); }
             stage = "image-render";
             const earlier = stuck.get(cfg.baseUrl);
             if (earlier) {
@@ -328,14 +489,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               stuck.delete(cfg.baseUrl);
             }
             stage = "image-fit";
-            await fit(cfg, signal); // startup or another GPU app may have changed the room
+            await fit(cfg, size.bytes, signal, freeing); // startup or another GPU app may have changed the room
             stage = "image-render";
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
             const bytes = await comfy.render(prompt, jobId, signal, (progress) => event("running", { progress }), () => {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
-            });
+            }, choice);
             const imagePath = `images/${jobId}.png`;
             stage = "image-save";
             await mkdir(path.join(deps.dataDir, "images"), { recursive: true });
@@ -352,13 +513,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           const stuckPromptId = error instanceof Error && "stuckPromptId" in error && typeof error.stuckPromptId === "string" ? error.stuckPromptId : undefined;
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
           const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
+          const missingFile = error instanceof Error && "file" in error && typeof error.file === "string" ? error.file : undefined;
           const reasons: Record<string, string> = {
             "image-config": "Check the ComfyUI address in Settings, then try again.",
             "image-off": "Turn on image generation in Settings, then try again.",
             "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
-            "wont-fit": "There is not enough GPU memory; close another GPU app and try again.",
+            "wont-fit": "There is not enough GPU memory for this image.", // the fit's own sentence wins below
             "image-missing": "ComfyUI is not ready; check its service or address in Settings and try again.",
-            "image-model": "Install the image checkpoint and LoRA in ComfyUI, then try again.",
+            "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : `Install ${missingFile} in ComfyUI, then try again.`,
             "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
             "image-disconnected": "ComfyUI disconnected; wait until it is ready and try again.",
             "image-workflow": "ComfyUI did not make an image; check its workflow and try again.",
@@ -367,7 +529,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             "image-save": "The image could not be saved; check free disk space and try again.",
           };
           const errorKind = controller.signal.aborted ? "cancelled" : timedOut ? "timeout" : Object.hasOwn(reasons, code) ? code : stage;
-          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : timedOut ? "The image timed out; wait until ComfyUI is ready and try again." : reasons[errorKind];
+          const reason = controller.signal.aborted ? "The image was cancelled; try again when you are ready." : timedOut ? "The image timed out; wait until ComfyUI is ready and try again."
+            : errorKind === "wont-fit" && error instanceof Error && "said" in error && typeof error.said === "string" ? error.said : reasons[errorKind];
           log(`job ${jobId} failed kind=${errorKind}`);
           event(controller.signal.aborted ? "cancelled" : "error", { message: reason, errorKind });
           if (cancelDetail && activeJob === jobId) {

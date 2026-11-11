@@ -272,12 +272,15 @@ function Tools() {
   const [err, run] = useAct();
   const on = settings === NA || settings?.tools === true;
   const windows = /\bWindows\b/.test(navigator.userAgent);
-  // images ask for their own switch and a chat's Image button, whatever the master switch says
+  const [imageErr, runImage] = useAct();
+  // The chat model's image tool: app-wide, off by default, offered only with the master switch on.
+  // The composer's Image button sends to the image model itself and never needs it.
   const image = imageFace(status);
-  const images: ToolState = {
-    ...(settings === NA || settings?.imageGen !== true ? quiet("Turned off") : status === NA ? quiet("Not available") : { word: image.usable ? "Ready" : image.word, dot: image.dot, dim: image.state === "missing" }),
-    go: () => openSettings("images"),
-  };
+  const imageTool = settings !== NA && settings?.imageTool === true;
+  // Why it cannot be turned on with the master switch on; both sentences hold one cell, so the
+  // row keeps its height when the switch above flips.
+  const onWhy = settings === NA || settings?.imageGen !== true ? "Needs Generate images, in Image generation." : status === NA ? "Not available in this build." : !image.usable ? `ComfyUI: ${image.word}.` : null;
+  const imageWhy = on ? onWhy : "Needs the switch above.";
   return (
     <>
       <Head title="Tools">What the model can do in a chat beyond writing a reply.</Head>
@@ -285,7 +288,7 @@ function Tools() {
         <Grp>
           <Row label="Let the model use tools" desc={<span className="steady">
             <span aria-hidden={!on}>On. It can use the tools below when a chat needs them.</span>
-            <span aria-hidden={on}>Off. It answers from the conversation alone, unless you turn Image on in a chat.</span>
+            <span aria-hidden={on}>Off. It answers from the conversation alone.</span>
           </span>} err={err}>
             {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}
           </Row>
@@ -298,7 +301,19 @@ function Tools() {
         ) : (
           <ToolRow name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={libraryTool(on, sources, "run", "Add something to your Library")} />
         )}
-        <ToolRow name="Make images" desc="Uses ComfyUI, only in chats where you turn Image on." state={images} />
+        <div className={`srow tool${imageWhy === null ? "" : " dim"}`} data-tool="images">
+          <span className="sl">
+            <b>Make images</b>
+            <span className="d"><span className="steady">
+              <span aria-hidden={on}>Needs the switch above.</span>
+              <span aria-hidden={!on}>{onWhy ?? "It can make a picture with the image model picked in the message box."}</span>
+            </span></span>
+            <Fail err={imageErr} />
+          </span>
+          <span className="sv">
+            {locked || settings === NA ? null : <button type="button" className="switch" role="switch" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
+          </span>
+        </div>
       </Grp>
     </>
   );

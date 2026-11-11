@@ -17,11 +17,14 @@ async function setup(page: Page, open: () => Promise<void>) {
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
   await page.getByRole("switch", { name: "Generate images" }).click();
+  // the chat model makes the picture through its tool
+  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("switch", { name: "Make images" }).click();
+  await expect(page.getByRole("switch", { name: "Make images" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 }
 
 async function askForImage(page: Page) {
-  await page.getByRole("button", { name: "Image", exact: true }).click();
   await pick(page, "qwen3.5:9b");
   await contextSize(page, 16384);
   await sendMessage(page, "Use a tool to draw a ship");

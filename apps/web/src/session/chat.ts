@@ -4,6 +4,7 @@ import { ctxFor, describeModel, k } from "../format.ts";
 import { firstChatPull, sendableModel } from "../pick.ts";
 import { type LiveTurn, NA, type Queued, type State, type StopAsk, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
 import { imageReason } from "../paste.ts";
+import { drawChoice, imageMode } from "../image-choice.ts";
 import { beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
 import { type ChatEvent, type TurnEvent, reduceTurn, unfinished, withTurn } from "./turn.ts";
@@ -143,10 +144,13 @@ function asSentence(text: string): string {
   return ` ${/[.!?]$/.test(sentence) ? sentence : `${sentence}.`}`;
 }
 
+/** A row Retry replaces: a stopped reply, or a picture that failed or was cancelled (the server's retriedRows). */
+const retriable = (m: Message) => m.interrupted === true || m.imageJob?.state === "error" || m.imageJob?.state === "cancelled";
+
 /** What a Retry replaces on the server: the last question and the unfinished rows after it. None when a finished reply followed: Regenerate is then a new question. */
 function retriedRows(messages: readonly Message[]): readonly Message[] {
   const rows = messages.slice(messages.findLastIndex((m) => m.role === "user"));
-  return rows[0]?.role === "user" && rows.slice(1).every((m) => m.interrupted === true) ? rows : [];
+  return rows[0]?.role === "user" && rows.slice(1).every(retriable) ? rows : [];
 }
 
 /** The reply these messages waited for stopped or failed: they wait for Send now instead of going out on their own. */
@@ -285,7 +289,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (creatingDraft(draft.version)) return;
     if ((content === "" && images.length === 0) || asking) return;
     if (s.pasting) return;
-    const cannotSee = imageReason(s.models, s.model, images);
+    // Image on: the words go to the image model, so no chat model has to be ready, see the attachments or fit
+    const draw = drawChoice(s);
+    if (draw === undefined && imageMode(s)) return setState({ notice: "The image models are still being read. Send again in a moment." });
+    const cannotSee = draw === undefined ? imageReason(s.models, s.model, images) : null;
     if (cannotSee) return setState({ notice: cannotSee });
     const threadId = s.view === "thread" || opts.reuseThread ? s.threadId : null;
     const messageId = draft.sendId ?? queueId();
@@ -297,16 +304,17 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       flushQueued();
       return;
     }
-    const wait = queueReason(s) ?? (streamingHere(s) ? "reply" : null);
-    if (!chatReady(s) && wait === null) return;
+    const wait = (draw === undefined ? queueReason(s) : null) ?? (streamingHere(s) ? "reply" : null);
+    if (!(draw === undefined ? chatReady(s) : s.conn.kind === "open") && wait === null) return;
     const model = sendableModel(s.models, s.model);
-    if (model === undefined && wait === null) return;
+    if (model === undefined && draw === undefined && wait === null) return;
+    const drawing = draw === undefined ? {} : { draw };
 
-    if (wait === null) return admit({ content, images, messageId, model: model ?? "", threadId, keepDraft: false });
+    if (wait === null) return admit({ content, images, messageId, model: model ?? "", threadId, keepDraft: false, ...drawing });
     // Keep the draft visible while a first thread is being created.
     const queueIn = threadId ?? (await createThread(content, model));
     if (queueIn === null) return;
-    const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }) };
+    const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }), ...drawing };
     // Unchanged since Send, by its words: New thread during the creation gives the same draft a new identity.
     const now = getDraft(key);
     if (now.text === draft.text && now.images === draft.images && now.sendId === draft.sendId) clearDraft(key);
@@ -323,7 +331,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (asking) return;
     out = { ...out, messageId: out.messageId ?? queueId() };
     asking = true;
-    const blocking = await blockingFor(out.model, getState().numCtx);
+    // a picture loads no chat model, so it stops no other chat's reply (the image job keeps its own GPU rules)
+    const blocking = out.draw === undefined ? await blockingFor(out.model, getState().numCtx) : [];
     asking = false;
     if (gone(out)) return;
     if (blocking.length > 0 && !stopOthersOk()) {
@@ -341,7 +350,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const from = q === undefined ? undefined : leaving(queued, q);
     settleEnded(undefined, out.regenerate === true ? out.threadId ?? undefined : undefined);
     // Keep the words in view until a new chat exists. A failed create leaves the draft alone.
-    const threadId = out.threadId ?? (await createThread(out.content, out.model));
+    const threadId = out.threadId ?? (await createThread(out.content, out.model === "" ? undefined : out.model));
     if (threadId === null) return;
     const draftKey = out.threadId;
     const draft = getDraft(draftKey);
@@ -393,10 +402,11 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const withoutReplaced = (st: State): State => replacing.length === 0 ? st : { ...st, messages: { ...st.messages, [threadId]: (st.messages[threadId] ?? []).filter((m) => !replacedIds.has(m.id)) } };
     const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
     opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
-    const turn: LiveTurn = { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images };
+    const draw = opts.out?.draw ?? opts.from?.q.draw;
+    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
-    // The next new chat starts on this model (navigation.ts newThread).
-    setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" ? {} : { chosen: model }) }));
+    // The next new chat starts on this model (navigation.ts newThread). An Image send uses no chat model.
+    setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
     try {
       const r = await call("chat.send", {
         threadId,
@@ -407,7 +417,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         numCtx: s.numCtx,
         think: s.think,
         ...(images.length ? { images } : {}),
-        ...(s.image ? { image: true } : {}),
+        ...(draw === undefined ? {} : { draw }),
         ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
       });
       confirmCopy(r.userMessage);
@@ -468,7 +478,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const blocking = e instanceof WireError ? e.blocking : undefined;
     // halted: the person has already said no; a message that went to the queue instead of the box would warn about words not in view
     const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && (from !== undefined || where !== "queue") ? { ...out, threadId, blocking } : null;
-    const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, at: Date.now(), waitFor: "reply", model, held: true };
+    const draw = out?.draw ?? from?.q.draw;
+    const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, at: Date.now(), waitFor: "reply", model, held: true, ...(draw === undefined ? {} : { draw }) };
     const consented = ask !== null && stopOthersOk();
     if (where === "box") replaceDraft(threadId, { text: content, images, sendId: messageId ?? null });
     const title = st.threads.find(t => t.id === threadId)?.title;
@@ -512,7 +523,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (s.threadId === null || !canRetry(s)) return;
     const last = (s.messages[s.threadId] ?? []).findLast((m) => m.role === "user");
     if (!last) return;
-    void admit({ content: last.content, images: last.images, model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true });
+    // sent again the way Send would send it now: with Image on, to the image model
+    const draw = drawChoice(s);
+    void admit({ content: last.content, images: last.images, model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true, ...(draw === undefined ? {} : { draw }) });
   }
 
   /**
@@ -725,7 +738,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (event.type !== "start" || oldTurns.has(turnId)) return;
     noteMessage(threadId, event.userMessage);
     retire(getState().turns[threadId]);
-    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: null };
+    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
     applyServerEvent((st) => ({
       ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
       turns: withTurn(st.turns, threadId, turn),
@@ -739,13 +752,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    */
   function flushQueued(): void {
     const s = getState();
-    if (!chatReady(s) || queueReason(s) !== null) return;
     const next = s.queued.find((q) => q.id !== s.editingQueued && (q.now === true || q.held !== true));
-    const model = next?.model ?? s.model;
+    // a picture needs no chat model: only the connection
+    if (next?.draw === undefined ? !chatReady(s) || queueReason(s) !== null : s.conn.kind !== "open") return;
+    const model = next?.model ?? s.model ?? (next?.draw === undefined ? undefined : "");
     if (next === undefined || model === undefined) return;
     if (next.now === true) {
       if (unfinished(s.turns[next.threadId])) return;
-      void admit({ content: next.text, images: next.images, messageId: next.messageId, model, threadId: next.threadId, keepDraft: true, queuedId: next.id });
+      void admit({ content: next.text, images: next.images, messageId: next.messageId, model, threadId: next.threadId, keepDraft: true, queuedId: next.id, ...(next.draw === undefined ? {} : { draw: next.draw }) });
       return;
     }
     // one reply at a time: a queued message waits while any reply this client knows of, in any chat, is unfinished
@@ -771,7 +785,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       stop(q.threadId);
       return;
     }
-    void admit({ content: q.text, images: q.images, messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id });
+    void admit({ content: q.text, images: q.images, messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id, ...(q.draw === undefined ? {} : { draw: q.draw }) });
   }
 
   function cancelQueuedEdit(): void {

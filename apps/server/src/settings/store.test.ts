@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync,
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { imageToolChoice } from "../image/presets.ts";
 import { createSettingsHandlers } from "./handlers.ts";
 import { openSettingsStore, SETTINGS_FILE_NAME } from "./store.ts";
 
@@ -25,6 +26,24 @@ describe("settings store", () => {
     expect(s.get()).toEqual({ defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: false });
     expect(s.loadNote).toBeUndefined();
     expect(JSON.parse(readFileSync(fileIn(dir), "utf8"))).toEqual({ version: 1, settings: s.get() });
+  });
+
+  it("a file from before image presets loads with Make images off; the choice and the switch persist and clear", async () => {
+    const dir = dataDir();
+    // What a person who used the Image button had on disk: image generation on, nothing else.
+    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: true, comfyUrl: "http://127.0.0.1:8188" } }));
+    const s = await open(dir);
+    expect(s.loadNote).toBeUndefined();
+    expect(s.get().imageTool).toBeUndefined();
+    expect(imageToolChoice(s.get())).toBeUndefined();
+    s.update({ imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 }, imageTool: true });
+    const again = await open(dir);
+    expect(again.get()).toMatchObject({ imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 }, imageTool: true });
+    expect(imageToolChoice(again.get())).toEqual({ preset: "sdxl-lightning", width: 1024, height: 1024 });
+    again.update({ imageChoice: null, imageGen: false });
+    expect(again.get()).not.toHaveProperty("imageChoice");
+    // Image generation off turns the tool off with it, whatever the switch says.
+    expect(imageToolChoice(again.get())).toBeUndefined();
   });
 
   it("first run with no system Ollama picks the app's own copy", async () => {
