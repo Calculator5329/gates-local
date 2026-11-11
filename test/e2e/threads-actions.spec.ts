@@ -83,7 +83,7 @@ test("runtime switch while two threads run stops both with their partial words a
   // and start. This changes the real server's runtime mode, never a real service.
   await page.getByRole("button", { name: "Install and switch", exact: true }).click();
   await expect.poll(async () => (await state()).turns.every((t) => t.outcome === "cancelled")).toBe(true);
-  await page.getByRole("button", { name: "Back to chat Esc" }).click();
+  await page.getByRole("button", { name: "Back to chat", exact: true }).click();
   for (const prompt of ["alpha", "beta"]) {
     await page.locator(".sb-row", { hasText: prompt }).click();
     await expect(page.locator(".stop-note")).toHaveText("Stopped when the Ollama runtime changed. Its text is kept here and excluded from later model prompts.");

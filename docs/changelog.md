@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-10: One row at the top of the sidebar
+
+- The top of the sidebar is one row now: Search on the left and a New
+  thread button on the right. A click on Search, or Ctrl K, turns it into
+  the search field in place.
+- The keyboard shortcuts moved into tooltips: "New thread · Ctrl N",
+  "Search threads · Ctrl K" and "Back to chat · Esc". The shortcuts
+  themselves did not change.
+- In Settings, "Back to chat" sits exactly where Search sits, so the top of
+  the sidebar no longer jumps when you open or leave Settings. Before, it
+  sat 16 px lower in the app window and 36 px higher in a browser tab.
+- The sidebar keeps its name in Settings in a browser tab, and the tablet
+  drawer in Settings has its close button.
+- Not checked in the real desktop window: the app-window case is tested
+  with a browser stand-in for the window controls.
+
 ## 2026-11-10: Each key does less work, and a new chat's first key no longer redraws the sidebar
 
 - The message box now sizes itself to its text with CSS. Before, every key

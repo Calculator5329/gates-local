@@ -145,13 +145,17 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .mark{width:20px;height:20px;flex:none;color:var(--foreground)}
 .wordmark{font-size:14px;font-weight:600;letter-spacing:-.005em}
 .sb-body{flex:1;min-height:0;display:flex;flex-direction:column}
-.sb-actions{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+/* the chat sidebar's top row and the Settings nav share one box model: 8 px sides, no top padding,
+   rows 32 px with a 10 px inset, so Search and Back to chat land on the same line and edges */
+.sb-top{flex:none;display:flex;align-items:center;gap:2px;padding:0 8px 8px}
+.sb-top>.sb-act,.sb-top>.sb-search{flex:1;min-width:0}
+.sb-tools{flex:none;display:flex;align-items:center;gap:2px}
+.sb-tools .ibtn{width:32px;height:32px}
 .sb-act,.sb-set{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);text-align:left;width:100%;transition:background-color .12s}
 .sb-act .ic,.sb-set .ic{color:var(--muted-foreground)}
 .sb-act:hover,.sb-set:hover{background:var(--hover)}
 .sb-act.on,.sb-set.on{background:var(--selected)}
 .sb-act .grow,.sb-row .t,.rt .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sb-act .ks{font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .sb-search{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
 .sb-search .ic{color:var(--muted-foreground)}
 .sb-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:14px}
@@ -593,7 +597,7 @@ a.btn{text-decoration:none}
 .cfm li+li{margin-top:2px}
 .cfm .mono{font-size:12.5px;color:var(--foreground);white-space:nowrap}
 .cfm .ca{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
-.snav{flex:1;overflow-y:auto;padding:16px 8px 8px;display:flex;flex-direction:column;gap:2px}
+.snav{flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
 .snav .sb-act{font-size:14px;flex:none}
 .snav .sb-act.on{background:var(--snav-on);box-shadow:inset 2px 0 0 var(--green)}
 .snav .sb-act.gap{margin-top:12px}
@@ -697,7 +701,7 @@ a.btn{text-decoration:none}
 .hdr{padding-left:8px}
 #menuBtn,.hdr .nb,.set-bar{display:flex}
 .set-bar .bk,.set-bar .sp{display:none}
-.hb,.sb-x{width:44px;height:44px}
+.hb,.sb-x,.sb-tools .ibtn{width:44px;height:44px}
 .sb-x{display:inline-flex;margin-left:auto}
 .sb-row,.sb-act,.sb-set,.rt,.sb-search{min-height:44px}
 .sb-row .ago{width:40px;text-align:right}
@@ -806,7 +810,7 @@ a.btn{text-decoration:none}
 .u-act{visibility:hidden}
 .turn:focus-within .u-act{visibility:visible;opacity:1}
 .a-act{visibility:visible;opacity:1;height:44px;margin-left:-14px}
-.ibtn.xs{width:44px;height:44px}
+.ibtn.xs,.sb-tools .ibtn{width:44px;height:44px}
 .ctl.sq{width:44px}
 .a-det{display:inline-flex}
 .a-act .meta{display:none}
@@ -1038,8 +1042,6 @@ a.btn{text-decoration:none}
 .wco .wordmark{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .wco .set-bar{display:flex}
 .wco .set-bar .bk,.wco .set-bar .sp{display:none}
-.sb-head.set-brand{display:none}
-.wco .set-brand{display:flex}
 @media (max-width:1023px){
   .wco .hdr{padding-left:max(8px,calc(env(titlebar-area-x,0px) + 8px))}
   .wco .sb-head{padding-right:max(16px,calc(var(--window-controls-right) - 100vw + min(340px,85vw) + 12px))}

@@ -57,6 +57,8 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
 - [ ] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes
 
+- [ ] <!-- workspace:id=work:835820d7-09e1-5ef8-ae5d-e027a7d3613e --> Phone drawer: the New thread button's centre sits about 8 px left of the close button above it and about 4 px left of the thread rows' menu buttons. Line the three up.
+
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
 

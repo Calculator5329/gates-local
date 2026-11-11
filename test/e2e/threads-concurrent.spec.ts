@@ -186,7 +186,7 @@ test("thinking and a tool row survive leaving mid-reply and returning during the
   await page.getByRole("textbox", { name: "Add a folder path" }).fill(source);
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.locator(".srow.src")).toHaveCount(1);
-  await page.getByRole("button", { name: "Back to chat Esc" }).click();
+  await page.getByRole("button", { name: "Back to chat", exact: true }).click();
   await page.getByRole("button", { name: "New thread" }).click();
   await configure({ prompts: { "use a tool alpha": { holdAfterTokens: 28 } } });
   await start(page, "use a tool alpha", "qwen3.5:9b");

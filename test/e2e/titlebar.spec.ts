@@ -85,6 +85,7 @@ for (const width of [320, 390]) {
   });
 }
 
+// The sidebar's brand head stays in Settings too, so the first sidebar row does not move (sidebar-top.spec.ts).
 test("ordinary browser and phone retain their original header layout", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -94,7 +95,8 @@ test("ordinary browser and phone retain their original header layout", async ({ 
   await expect(page.locator(".sb-head")).toHaveCSS("border-bottom-width", "0px");
   await expect(page.locator(".set-bar")).toHaveCount(0);
   await page.keyboard.press("Control+Comma");
-  await expect(page.locator(".sb-head")).toBeHidden();
+  await expect(page.locator(".sb-head")).toBeVisible();
+  await expect(page.locator(".sb-head")).toHaveCSS("border-bottom-width", "0px");
   await expect(page.locator(".set-bar")).toBeHidden();
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 390, height: 844 });

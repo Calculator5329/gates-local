@@ -209,12 +209,8 @@ function ChatNav() {
   const search = useStore((s) => s.search);
   return (
     <div className="sb-body">
-      <div className="sb-actions">
-        <button type="button" className="sb-act" onClick={goNew}>
-          <Icon id="pen" />
-          <span className="grow">New thread</span>
-          <span className="ks">Ctrl N</span>
-        </button>
+      {/* one row: Search fills the left and turns into the field in place; icon buttons sit at the right end */}
+      <div className="sb-top">
         {searchOpen ? (
           <label className="sb-search">
             <Icon id="search" />
@@ -236,12 +232,16 @@ function ChatNav() {
             />
           </label>
         ) : (
-          <button type="button" className="sb-act" onClick={openSearch}>
+          <button type="button" className="sb-act" data-tip="Search threads · Ctrl K" onClick={openSearch}>
             <Icon id="search" />
             <span className="grow">Search</span>
-            <span className="ks">Ctrl K</span>
           </button>
         )}
+        <div className="sb-tools">
+          <button type="button" className="ibtn" aria-label="New thread" data-tip="New thread · Ctrl N" onClick={goNew}>
+            <Icon id="pen" />
+          </button>
+        </div>
       </div>
       <ThreadList />
     </div>
@@ -253,10 +253,9 @@ function SettingsNav() {
   return (
     <nav className="sb-body">
       <div className="snav">
-        <button type="button" className="sb-act back" onClick={() => closeDrawer(leaveSettings, true)}>
+        <button type="button" className="sb-act back" data-tip="Back to chat · Esc" onClick={() => closeDrawer(leaveSettings, true)}>
           <Icon id="left" />
           <span className="grow">Back to chat</span>
-          <span className="ks">Esc</span>
         </button>
         {SECTIONS.map(([id, label, icon]) => (
           <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
@@ -312,7 +311,8 @@ export function Sidebar() {
   const inSettings = useStore((s) => s.view === "settings");
   return (
     <aside className="sb">
-      <div className={`sb-head${inSettings ? " set-brand" : ""}`}>
+      {/* the same head in chat and Settings, so the first row below it never moves between the two */}
+      <div className="sb-head">
         <svg className="mark" aria-hidden="true">
           <use href="#i-mark" />
         </svg>
