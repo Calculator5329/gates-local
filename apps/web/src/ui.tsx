@@ -186,7 +186,9 @@ export function Tip() {
       if (next !== null && (next === tipFor || next === waitingFor)) return;
       hide();
     };
-    const show = (t: Element) => {
+    // stay: the same anchor's new words; the left edge holds unless the tip would leave the screen
+    const show = (t: Element, stay = false) => {
+      const was = stay ? parseFloat(el.style.left) : NaN;
       cancelWait();
       const pop = getState().pop;
       if (!t.isConnected || (pop !== null && t.closest(`#${POP_EL[pop.id]}`) === null)) return hide();
@@ -226,7 +228,7 @@ export function Tip() {
       }
       if (top < 6) top = r.bottom + 6;
       el.style.top = `${top}px`;
-      el.style.left = `${clamp(left, 6, window.innerWidth - w - 6)}px`;
+      el.style.left = `${was >= 6 && was + w <= window.innerWidth - 6 ? was : clamp(left, 6, window.innerWidth - w - 6)}px`;
     };
     const focusIn = (e: FocusEvent) => {
       const target = e.target instanceof Element ? e.target : null;
@@ -251,7 +253,15 @@ export function Tip() {
     const changes = new MutationObserver(records => {
       const target = tipFor ?? waitingFor;
       if (!target) return;
-      if (!target.isConnected || source !== (target.getAttribute("data-tip") || target.getAttribute("data-tipt"))) return hide();
+      const now = target.getAttribute("data-tip") || target.getAttribute("data-tipt");
+      if (!target.isConnected || !now) return hide();
+      // new words at the same anchor (a download's percentage): the open tip follows in place; a pending one shows the newest
+      if (source !== now) {
+        // an anchor with no box (hidden, collapsed) has nowhere to point
+        const box = target.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) return hide();
+        return target === tipFor ? show(target, true) : remember(target);
+      }
       if (!records.some(record => record.target.contains(target) || target.contains(record.target))) return;
       const box = target.getBoundingClientRect();
       if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();

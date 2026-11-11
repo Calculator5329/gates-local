@@ -22,7 +22,8 @@ test("the runtime turning ready and a chosen model appear in the same render, an
   await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
   await expect(page.locator("#ta")).toBeFocused();
   await page.screenshot({ path: test.info().outputPath("ready-focused.png") });
-  await expect(page.locator(".sb-foot .rt")).toHaveCount(0);
+  await expect(page.locator(".sb-foot").getByRole("button", { name: "Settings", exact: true }).locator(".fdot")).toHaveCount(0);
+  await expect(page.locator(".sb-foot").getByRole("button", { name: "Settings", exact: true })).toHaveCount(1);
   expect(await page.evaluate(() => (window as unknown as { glReadyModel?: string | null }).glReadyModel)).toBe("Qwen 3.5 9B");
   await sendMessage(page, "Right away");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Right away", { timeout: 10_000 });

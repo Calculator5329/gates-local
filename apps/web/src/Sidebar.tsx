@@ -1,14 +1,16 @@
 // Layout adapts T3 Code (MIT, Copyright (c) 2026 T3 Tools Inc.); full notice in LICENSES/T3-Code-MIT.txt.
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
-// the Settings section nav, and the footer with the download and runtime rows.
-import { Fragment, type KeyboardEvent, type MouseEvent, useEffect, useState } from "react";
+// the Settings section nav, and the footer's row of icons (Settings, Models, the update icon).
+import type { PullProgress } from "@gates-local/contracts";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
 import { rtInfo, rtOf } from "./Banner.tsx";
-import { NBSP, describeModel, gb, shortAge, when } from "./format.ts";
+import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
+import { describeModel, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { cancelPendingSettings, leaveSettings, newThread, openSettings, openThread, preloadThread } from "./session.ts";
-import { NA, type Section, type State, getState, runningThreads, setState, useStore } from "./store.ts";
-import { closePop, closeTip, esc, isTouch, useMedia } from "./ui.tsx";
-import { SidebarUpdate } from "./Updates.tsx";
+import { NA, type Section, getState, runningThreads, setState, useStore } from "./store.ts";
+import { closePop, closeTip, isTouch, useMedia } from "./ui.tsx";
+import { FootButton, SidebarUpdate } from "./Updates.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
   ["general", "General", "gear"],
@@ -268,42 +270,76 @@ function SettingsNav() {
   );
 }
 
-/** The download in progress, if any, for the footer row. */
-function activePull(s: State) {
-  return Object.values(s.pulls).find((p) => p.state === "downloading" || p.state === "verifying" || p.state === "queued");
+// ---------------------------------------------------------------- the footer
+// One row of 32 px icon buttons, the same in chat and Settings and the same height in every
+// state: Settings and Models at the left, the update icon at the far right. No words in the
+// row; they live in each button's tooltip and aria-label.
+
+/** The words of a node rtInfo builds (<><b>Port 11434</b> · busy</>), for a tooltip and an aria-label. */
+function plain(n: ReactNode): string {
+  if (n === null || n === undefined || typeof n === "boolean") return "";
+  if (typeof n === "string" || typeof n === "number") return String(n);
+  if (Array.isArray(n)) return n.map(plain).join("");
+  return isValidElement<{ children?: ReactNode }>(n) ? plain(n.props.children) : "";
 }
 
-function DownloadRow() {
-  const p = useStore(activePull);
-  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
-  if (!p) return null;
-  const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
-  const name = describeModel(p.name, catalog).name;
-  const tip = `<b>${esc(name)}</b> · ${p.totalBytes ? `${gb(p.completedBytes).replace(`${NBSP}GB`, "")} of ${gb(p.totalBytes)}` : "starting"}. Opens the downloads in Settings.`;
-  return (
-    <button type="button" className="rt" data-tip={tip} onClick={() => closeDrawer(() => openSettings("models", true), true)}>
-      <Icon id="download" />
-      <span className="grow">
-        <b>Downloading</b> · {pct}%
-      </span>
-      <span className="pct" />
-    </button>
-  );
-}
-
-function RuntimeRow() {
+/** The gear. While the runtime is not ready it carries what the runtime row said, and a click opens Settings › Runtime as the row did. */
+function SettingsButton() {
+  const inSettings = useStore((s) => s.view === "settings");
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const settings = useStore((s) => s.settings);
-  // a healthy runtime has no row; the version lives in Settings › Runtime
-  if (rtOf({ conn, runtime, settings }) === "ready") return null;
-  const info = rtInfo({ conn, runtime, settings });
+  const info = rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
+  const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
-    <button type="button" className="rt" data-tip={info.tip} onClick={() => closeDrawer(() => openSettings("runtime"), true)}>
-      <span className={`dot ${info.dot}`} />
-      <span className="grow">{info.text}</span>
-      <span className="pct" />
-    </button>
+    <FootButton
+      icon="gear"
+      label={g.label}
+      tip={g.tip}
+      {...(inSettings ? { tone: "on" as const, current: true } : {})}
+      dot={g.dot}
+      onClick={() =>
+        closeDrawer(() => {
+          if (g.runtime) return openSettings("runtime");
+          // a phone opens Settings on its section list
+          setState({ setList: true });
+          openSettings();
+        }, true)
+      }
+    />
+  );
+}
+
+/** Failed downloads already seen in Settings › Models. A new attempt's failure is a new store object, so it shows again. Memory only. */
+const seenFailures = new WeakSet<PullProgress>();
+const running = (p: PullProgress) => p.state === "queued" || p.state === "downloading" || p.state === "verifying";
+
+/** The chip: a ring while models download, red with a dot after a failure until Settings › Models is opened. */
+function ModelsButton() {
+  const pulls = useStore((s) => s.pulls);
+  const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
+  const inModels = useStore((s) => s.view === "settings" && s.section === "models");
+  const [, seen] = useState(0);
+  useEffect(() => {
+    if (!inModels) return;
+    const fresh = Object.values(pulls).filter((p) => p.state === "error" && !seenFailures.has(p));
+    for (const p of fresh) seenFailures.add(p);
+    if (fresh.length > 0) seen((n) => n + 1);
+  }, [inModels, pulls]);
+  const all = Object.values(pulls);
+  // downloads that finished in this burst stay in the ring's total, so it never goes backwards
+  const burst = useRef<readonly PullProgress[]>([]);
+  burst.current = finishedInBurst(burst.current, all);
+  const m = modelsIcon(all.filter((p) => p.state !== "error" || !seenFailures.has(p)), (tag) => describeModel(tag, catalog).name, burst.current);
+  return (
+    <FootButton
+      icon="cpu"
+      label={m.label}
+      tip={m.tip}
+      {...(m.state === "failed" ? { tone: "red" as const } : m.state === "downloading" ? { tone: "fg" as const, ring: m.progress } : {})}
+      dot={m.failed ? "red" : null}
+      onClick={() => closeDrawer(() => openSettings("models", all.some(running)), true)}
+    />
   );
 }
 
@@ -323,28 +359,9 @@ export function Sidebar() {
       </div>
       {inSettings ? <SettingsNav /> : <ChatNav />}
       <div className="sb-foot">
-        {inSettings ? null : <SidebarUpdate />}
-        <DownloadRow />
-        <RuntimeRow />
-        {inSettings ? null : (
-          <button
-            type="button"
-            className="sb-set"
-            onClick={() =>
-              closeDrawer(() => {
-                // a phone opens Settings on its section list
-                setState({ setList: true });
-                openSettings();
-              }, true)
-            }
-          >
-            <Icon id="gear" />
-            Settings
-            <span className="ks" aria-label="Ctrl comma">
-              Ctrl<b>,</b>
-            </span>
-          </button>
-        )}
+        <SettingsButton />
+        <ModelsButton />
+        <SidebarUpdate via={(then) => closeDrawer(then, true)} />
       </div>
     </aside>
   );

@@ -155,11 +155,11 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-top>.sb-act,.sb-top>.sb-search{flex:1;min-width:0}
 .sb-tools{flex:none;display:flex;align-items:center;gap:2px}
 .sb-tools .ibtn{width:32px;height:32px}
-.sb-act,.sb-set{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);text-align:left;width:100%;transition:background-color .12s}
-.sb-act .ic,.sb-set .ic{color:var(--muted-foreground)}
-.sb-act:hover,.sb-set:hover{background:var(--hover)}
-.sb-act.on,.sb-set.on{background:var(--selected)}
-.sb-act .grow,.sb-row .t,.rt .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-act{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:14px;color:var(--foreground);text-align:left;width:100%;transition:background-color .12s}
+.sb-act .ic{color:var(--muted-foreground)}
+.sb-act:hover{background:var(--hover)}
+.sb-act.on{background:var(--selected)}
+.sb-act .grow,.sb-row .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-search{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
 .sb-search .ic{color:var(--muted-foreground)}
 .sb-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:14px}
@@ -180,19 +180,18 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-row .live{width:7px;height:7px;border-radius:50%;background:var(--foreground);animation:breathe 1.4s ease-in-out infinite;flex:none;margin-right:2px}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(.6)}}
 .sb-empty{padding:12px 10px;font-size:13px;color:var(--muted-foreground)}
-.sb-foot{position:relative;flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
-.sb-update{position:absolute;right:8px;bottom:12px;width:32px;height:32px;color:var(--amber);background:var(--sidebar)}
-.sb-update.failed{color:var(--red)}
-.rt{height:32px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--muted-foreground);width:100%;text-align:left;transition:background-color .12s}
-.rt:hover{background:var(--hover)}
-.rt .dot{width:7px;height:7px;border-radius:50%;flex:none}
-.rt b{font-weight:500;color:var(--foreground)}
-.rt .pct{font-size:12px;color:var(--foreground);font-variant-numeric:tabular-nums}
-.rt>.ic{width:14px;height:14px;margin:0 -3px 0 -3px;color:var(--muted-foreground)}
+/* the footer: one row of icon buttons, update icon at the far right; a dot sits clear of the stroke and the ring inside the box */
+.sb-foot{position:relative;flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;gap:2px;background:inherit}
+.sb-foot .ibtn{width:32px;height:32px;position:relative}
+.sb-foot .ibtn:active,.sb-foot .on{background:var(--selected);color:var(--foreground)}
+.sb-foot .ibtn[aria-disabled]{background:none;cursor:default}
+.sb-foot .fg{color:var(--foreground)}.sb-foot .red{color:var(--red)}.sb-foot .green{color:var(--green)}
+.fdot{position:absolute;top:calc(50% - 14px);left:calc(50% + 8px);width:6px;height:6px;border-radius:50%;color:var(--amber);background:currentColor}
+.ring{position:absolute;inset:0;margin:auto;width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2}
+.sb-foot .end{margin-left:auto;display:flex}
+.sb-foot .cfm{position:absolute;inset:auto 0 100%;background:inherit}
+@media (prefers-reduced-motion:reduce){.sb-foot .spin{animation:none}}
 .dot.off{background:var(--faint)}.dot.ok{background:var(--green)}.dot.warn{background:var(--amber)}.dot.err{background:var(--red)}.dot.run{background:var(--amber);animation:pulse 1.6s infinite steps(6)}
-.sb-set{padding-right:44px}
-.sb-set .ks{margin-left:auto;font-size:12px;color:var(--muted-foreground);display:inline-flex;align-items:baseline;gap:5px}
-.sb-set .ks b{font-size:14px;font-weight:600;line-height:1}   /* the comma key reads as a key (F52) */
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--background);position:relative}
 .hdr{height:var(--header-h);flex:none;display:flex;align-items:center;gap:4px;padding:0 12px 0 24px;border-bottom:1px solid var(--border)}
@@ -623,7 +622,6 @@ a.btn{text-decoration:none}
 .snav .sb-act{font-size:14px;flex:none}
 .snav .sb-act.on{background:var(--snav-on);box-shadow:inset 2px 0 0 var(--green)}
 .snav .sb-act.gap{margin-top:12px}
-.sb-foot:empty{display:none}
 .snav .back{color:var(--muted-foreground);margin-bottom:8px}
 .snav .back:hover{color:var(--foreground)}
 
@@ -725,9 +723,9 @@ a.btn{text-decoration:none}
 .hdr{padding-left:8px}
 #menuBtn,.hdr .nb,.set-bar{display:flex}
 .set-bar .bk,.set-bar .sp{display:none}
-.hb,.sb-x,.sb-tools .ibtn{width:44px;height:44px}
+.hb,.sb-x,.sb-tools .ibtn,.sb-foot .ibtn{width:44px;height:44px}
 .sb-x{display:inline-flex;margin-left:auto}
-.sb-row,.sb-act,.sb-set,.rt,.sb-search{min-height:44px}
+.sb-row,.sb-act,.sb-search{min-height:44px}
 .sb-row .ago{width:40px;text-align:right}
 .sb-status{width:40px}
 .md table{display:block;overflow-x:auto}
@@ -822,23 +820,22 @@ a.btn{text-decoration:none}
 .fr-m .v{margin-left:0}
 /* one secondary grey, nothing under 14 px */
 .af-t b,.af-t small{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.rt,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.prog-l,.card .cd,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.prog-l,.card .cd,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */
 @media (hover:none){
-.ks,.sb .ks{display:none}
 .tipd{text-decoration:none}
 .u-act{visibility:hidden}
 .turn:focus-within .u-act{visibility:visible;opacity:1}
 .a-act{visibility:visible;opacity:1;height:44px;margin-left:-14px}
-.ibtn.xs,.sb-tools .ibtn{width:44px;height:44px}
+.ibtn.xs,.sb-tools .ibtn,.sb-foot .ibtn{width:44px;height:44px}
 .ctl.sq{width:44px}
 .a-det{display:inline-flex}
 .a-act .meta{display:none}
 .a-act.det .meta{display:block}
 .col{--turn-after-done:24px}
-.ctl,.pill,.meter,.btn,.think,.wr-line,.qa,.link,.sb-row,.sb-act,.sb-set,.rt,.sb-search{min-height:44px}
+.ctl,.pill,.meter,.btn,.think,.wr-line,.qa,.link,.sb-row,.sb-act,.sb-search{min-height:44px}
 .send{width:44px;height:44px;padding:4px;transform:none!important}
 .cf-r .send{background-clip:content-box}
 .seg2 button,.mini-seg button{height:40px;min-width:44px}

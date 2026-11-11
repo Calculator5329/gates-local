@@ -24,7 +24,8 @@ class ElementFixture {
   closest(selector: string) { return selector === "[data-tip],[data-tipt]" ? this : null; }
   querySelector() { return null; }
   contains(target: ElementFixture) { return target === this; }
-  getBoundingClientRect() { return { x: 10, y: this.top, left: 10, top: this.top, right: 130, bottom: this.top + 20, width: 120, height: 20 }; }
+  width = 120;
+  getBoundingClientRect() { return { x: 10, y: this.top, left: 10, top: this.top, right: 10 + this.width, bottom: this.top + 20, width: this.width, height: this.width === 0 ? 0 : 20 }; }
 }
 let listeners: Map<string, (event: { target: ElementFixture }) => void>;
 let observers: Set<(records: { target: ElementFixture }[]) => void>;
@@ -55,15 +56,54 @@ beforeEach(() => {
 });
 afterEach(() => { for (const cleanup of cleanups) cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it.each(["move", "text", "remove"])("keeps an unchanged tooltip, then closes it on anchor %s", async change => {
+it.each(["move", "tip removed", "remove"])("keeps an unchanged tooltip, then closes it on anchor %s", async change => {
   listeners.get("mouseover")!({ target: anchor });
   await vi.advanceTimersByTimeAsync(400);
   expect(tip.classes.has("open")).toBe(true);
   for (const changed of observers) changed([{ target: anchor }]);
   expect(tip.classes.has("open")).toBe(true);
   if (change === "move") anchor.top += 20;
-  else if (change === "text") anchor.text = "Other explanation";
+  else if (change === "tip removed") anchor.text = "";
   else anchor.isConnected = false;
   for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(false);
+});
+
+// New words at the same anchor (a download's percentage) follow in the open tooltip.
+it("follows a changed data-tip in place", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  expect(tip.style["left"]).toBe("20px");
+  anchor.text = "Downloading, 42%";
+  tip.offsetWidth = 160;
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(true);
+  expect(tip.innerHTML).toContain("Downloading, 42%");
+  expect(tip.style["left"], "wider words keep the left edge still").toBe("20px");
+  // words that would leave the screen are placed again
+  anchor.text = "Downloading, 43%";
+  tip.offsetWidth = 1420;
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.style["left"]).toBe("6px");
+});
+
+it("closes instead of moving when the anchor's new words come with no box", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(true);
+  anchor.text = "Hidden now";
+  anchor.width = 0;
+  for (const changed of observers) changed([{ target: anchor }]);
+  expect(tip.classes.has("open")).toBe(false);
+});
+
+it("words removed while a tooltip waits cancel the wait, even if they come back unannounced", async () => {
+  listeners.get("mouseover")!({ target: anchor });
+  await vi.advanceTimersByTimeAsync(100);
+  anchor.text = "";
+  for (const changed of observers) changed([{ target: anchor }]);
+  anchor.text = "Back again";
+  await vi.advanceTimersByTimeAsync(400);
   expect(tip.classes.has("open")).toBe(false);
 });

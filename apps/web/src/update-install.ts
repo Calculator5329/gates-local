@@ -1,12 +1,12 @@
 // Rare install interaction, loaded on click while the shell reserves the UI action.
 import type { UpdateInstallRequest } from "@gates-local/contracts";
 import type { ActionCall, ActionResult } from "./session/connection.ts";
-import { getState, setState } from "./store.ts";
-import { savedDrafts } from "./drafts.ts";
+import type { setState } from "./store.ts";
+import { updateWork, workLines } from "./update-work.ts";
 
 type StartUpdate = (request: UpdateInstallRequest) => Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
 
-export async function installUpdate(act: ActionCall, start: StartUpdate, priorCommit: string | undefined, applyServerEvent: typeof setState): Promise<ActionResult> {
+export async function installUpdate(act: ActionCall, start: StartUpdate, priorCommit: string | undefined, applyServerEvent: typeof setState, approved?: string): Promise<ActionResult> {
   let error: string | null = null;
   let accepted = false;
   let reservation: string | undefined;
@@ -30,8 +30,11 @@ export async function installUpdate(act: ActionCall, start: StartUpdate, priorCo
         error = check?.state === "cannot-check" ? check.lines.join(" ") : "Check for updates and review the target before installing.";
         return error;
       }
-      const work = [...snapshot.activity ?? [], ...(getState().queued.length ? ["queued messages in this window"] : []), ...(savedDrafts().some(({ draft }) => draft.text.trim() || draft.images.length) ? ["unsent drafts in this window"] : [])];
-      if ((changed || work.length > 0 || snapshot.activity === undefined) && !window.confirm(`Update to ${check.target} (${check.targetCommit}) and restart Gates Local?\n\n${check.notes ?? check.changes.slice(0, 3).join("\n")}\n\n${work.length ? `This interrupts:\n${work.join("\n")}` : "No running work was found."}\n\nReplies written so far are kept as interrupted. Downloaded model parts are kept; start the download again to resume. Image jobs stop. Save unsent drafts and queued messages before continuing.\n\nThe window closes during install and build, then opens again.`)) return null;
+      // The footer asked once, for this approval: if the server's moved on, nothing installs and its ask shows the new words.
+      if (approved !== undefined && snapshot.approval !== approved) return null;
+      const work = updateWork(snapshot.activity);
+      // the footer's ask's lines (update-work.ts), so both say the same once
+      if (approved === undefined && (changed || (work?.length ?? 1) > 0) && !window.confirm(`Update to ${check.target} (${check.targetCommit}) and restart Gates Local?\n\n${check.notes ?? check.changes.slice(0, 3).join("\n")}\n\n${[...workLines(work), `Falls back to ${check.current} if a step fails.`].join("\n")}`)) return null;
       const prepared = await act("update.prepare", { approval: snapshot.approval }, "reserve the approved update");
       if (!prepared.ok) { error = prepared.message; return error; }
       if (prepared.value.state === "blocked") { error = prepared.value.message; return error; }

@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-11: Three icons at the foot of the sidebar, and one update ask
+
+- The foot of the sidebar is one row of three icon buttons: Settings, Models
+  and updates. The rows of words that were there are gone; each icon's
+  tooltip names it.
+- The gear carries an amber or red dot while Ollama is not ready. Its tooltip
+  then leads with what is wrong, and a click opens Settings › Runtime.
+- The Models icon draws a ring while models download, filled by the share of
+  all their bytes, and a red dot when a download failed.
+- The update icon checks, shows an amber dot when there is something newer,
+  and says in its tooltip what a click will do. A copy that cannot update
+  itself says so and opens Settings or the release page instead.
+- An update from the footer asks once, in the sidebar, with one short line
+  per thing it stops ("1 reply stops. Its text is kept.") and the version it
+  falls back to. If that list changes before you press Go, nothing installs:
+  the new line is marked and Go waits a moment. The browser's own dialog no
+  longer follows it.
+- A tooltip whose words change while it is open now follows them in place
+  instead of closing or showing the old words.
+- Known limits: the Update button in Settings › General still asks with the
+  browser's dialog. An import is never interrupted, so the update refuses
+  until it ends; the ask says so but does not start by itself afterwards.
+
 ## 2026-11-11: Read a thought while the model is still thinking
 
 - The "Thinking" line on a reply is now the thought itself: click it (or

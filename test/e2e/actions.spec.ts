@@ -58,8 +58,10 @@ test.describe("while the server is down", () => {
     await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
 
     const restart = stack.restart(4000);
-    // Settings has no banner; the sidebar footer says it
-    await expect(page.locator(".sb-foot .rt")).toContainText("Reconnecting");
+    // Settings has no banner; the sidebar footer's Settings icon says it, with a dot and in its tooltip
+    const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+    await expect(gear).toHaveAccessibleName("Settings · Reconnecting");
+    await expect(gear).toHaveAttribute("data-tip", /^<b>Reconnecting<\/b>/);
     await theme.getByRole("button", { name: "Light" }).click();
     const saved = page.getByRole("alert");
     await expect(saved).toHaveText("Couldn't save the theme because Gates Local isn't connected; try again once it reconnects.");
@@ -79,8 +81,9 @@ test.describe("while the server is down", () => {
     calm(await removed.textContent());
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await restart;
-    // back online (a healthy runtime has no footer row, and only the runtime row has a dot), the model is still there
-    await expect(page.locator(".sb-foot .rt .dot")).toHaveCount(0, { timeout: 10_000 });
+    // back online (a healthy runtime puts no dot on the Settings icon), the model is still there
+    await expect(gear.locator(".fdot")).toHaveCount(0, { timeout: 10_000 });
+    await expect(gear).toHaveAccessibleName("Settings");
     await expect(page.getByRole("button", { name: label })).toHaveCount(1);
   });
 });

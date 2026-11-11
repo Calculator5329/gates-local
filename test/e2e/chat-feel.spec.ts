@@ -181,12 +181,15 @@ test.describe("phone Thinking", () => {
   });
 });
 
-test("no runtime row in the sidebar while the runtime is healthy", async ({ page, open }) => {
+test("no runtime dot or words on the sidebar's Settings icon while the runtime is healthy", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await expect(page.locator(".sb-foot")).toBeVisible();
-  await expect(page.locator(".sb-foot .rt")).toHaveCount(0);
+  const gear = page.locator(".sb-foot").getByRole("button", { name: "Settings", exact: true });
+  await expect(gear).toHaveAttribute("data-tip", "Settings · Ctrl ,");
+  await expect(gear.locator(".fdot")).toHaveCount(0);
   await expect(page.locator(".sb-foot")).not.toContainText("Ollama 0.40.4");
+  await expect(gear).not.toHaveAttribute("data-tip", /0\.40\.4/);
   // Settings > Runtime carries the state, and no version number anywhere (test/e2e/no-ollama-version.spec.ts)
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Runtime", exact: true }).click();
@@ -197,12 +200,13 @@ test("no runtime row in the sidebar while the runtime is healthy", async ({ page
 test.describe("runtime down", () => {
   test.use({ scenario: "wrong-service", runtimeMode: "system" });
 
-  test("the runtime row shows when the runtime needs the user, and opens Settings > Runtime", async ({ page, open }) => {
+  test("the Settings icon shows a dot and the runtime's words when the runtime needs the user, and opens Settings > Runtime", async ({ page, open }) => {
     await open();
-    const row = page.locator(".sb-foot .rt");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("Port 5288 · busy");
-    await row.click();
+    const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+    await expect(gear.locator(".fdot.red")).toBeVisible();
+    await expect(gear).toHaveAccessibleName("Settings · Port 5288 · busy");
+    await expect(gear).toHaveAttribute("data-tip", /^<b>Port 5288 · busy<\/b>/);
+    await gear.click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
   });
 });

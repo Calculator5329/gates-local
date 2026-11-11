@@ -55,7 +55,7 @@ for (const width of [390, 640]) {
     await open();
     await waitReady(page);
     await page.getByRole("button", { name: "Open threads", exact: true }).click();
-    await page.locator(".sb-set").click();
+    await page.locator(".sb-foot").getByRole("button", { name: /^Settings/ }).click();
     await expect(page.locator(".set.listing")).toBeVisible();
     await page.locator(".set-list").getByRole("button", { name: /^General/ }).click();
     await expect(page.locator(".set.listing")).toBeHidden();

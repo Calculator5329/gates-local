@@ -76,27 +76,34 @@ test("AV-05 Settings notice spans the content top and dismissal never shifts its
   expect(await geometry(), "AV-05 dismissing changed Settings width").toEqual(before);
 });
 
-test("update appears beside Settings without moving or resizing the shell", async ({ page, open }) => {
+test("an update turns the footer's update icon to Update without moving or resizing the shell", async ({ page, open }) => {
   const update = await updates(page);
   await open();
   await waitReady(page);
-  await expect(page.locator(".sb-update")).toHaveCount(0);
-  const selectors = [".sb-head", ".sb-list", ".sb-set", ".hdr", "#ta"];
+  // the desktop app always has the update icon, idle until there is something to update to
+  await expect(page.locator(".sb-foot .upd")).toHaveAccessibleName("Check for updates");
+  const selectors = [".sb-head", ".sb-list", ".sb-foot", ".sb-foot .upd", ".hdr", "#ta"];
   const before = await Promise.all(selectors.map((s) => page.locator(s).boundingBox()));
   update.show();
-  const button = page.getByRole("button", { name: "Update def5678", exact: true });
+  const button = page.getByRole("button", { name: "Update to def5678", exact: true });
   await expect(button).toBeVisible();
-  await expect(button).toHaveAttribute("title", /Faster chat/);
+  await expect(button).toHaveAttribute("data-tip", /Faster chat/);
   const after = await Promise.all(selectors.map((s) => page.locator(s).boundingBox()));
   expect(before.every((box) => box !== null)).toBe(true);
   expect(after).toEqual(before);
   await button.click();
+  await page.getByRole("group", { name: "Confirm update" }).getByRole("button", { name: "Update and restart" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
-  await expect(page.locator(".sb-update")).toBeDisabled();
+  await expect(page.locator(".sb-foot .upd")).toBeDisabled();
 });
 
-test("a reply running brings a confirmation; cancel keeps writing and accept shares the action", async ({ page, open }) => {
+test("a reply running: one ask, in the footer's panel, that names the reply; cancel keeps writing and accept starts it", async ({ page, open }) => {
   const update = await updates(page);
+  const dialogs: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.dismiss();
+  });
   await stack.scenario("models", { tokenDelayMs: 120 });
   await open();
   await waitReady(page);
@@ -104,18 +111,59 @@ test("a reply running brings a confirmation; cancel keeps writing and accept sha
   await expect(page.locator(".writing")).toBeVisible();
   update.work(["1 running reply (including other windows)"]);
   update.show();
-  const button = page.getByRole("button", { name: "Update def5678", exact: true });
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("1 running reply");
+  const button = page.getByRole("button", { name: "Update to def5678", exact: true });
+  const ask = page.getByRole("group", { name: "Confirm update" });
+  await button.click();
+  await expect(ask.locator("li")).toHaveText(["1 reply stops. Its text is kept.", "Falls back to abc1234 if a step fails."]);
+  await expect(ask).toContainText("Update to def5678 and restart?");
+  await page.screenshot({ path: test.info().outputPath("update-confirm-reply-running.png"), animations: "disabled", caret: "hide" });
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(page.locator(".writing")).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-update-started", "yes");
+  await button.click();
+  await ask.getByRole("button", { name: "Update and restart" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
+  expect(dialogs, "one ask: no native prompt after the panel").toEqual([]);
+});
+
+test("what is running changes behind an open ask: the panel's words follow and its button waits a moment, still one ask", async ({ page, open }) => {
+  const update = await updates(page);
+  const dialogs: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogs.push(dialog.message());
     await dialog.dismiss();
   });
-  await button.click();
+  await open();
+  await waitReady(page);
+  update.show();
+  const ask = page.getByRole("group", { name: "Confirm update" });
+  const go = ask.getByRole("button", { name: "Update and restart" });
+  await page.getByRole("button", { name: "Update to def5678", exact: true }).click();
+  await expect(ask.locator("li")).toHaveText(["Falls back to abc1234 if a step fails."]);
+  await expect(go).toBeEnabled();
+  await page.screenshot({ path: test.info().outputPath("footer-confirm-idle.png"), animations: "disabled", caret: "hide" });
+  const height = () => ask.evaluate((e) => e.getBoundingClientRect().height);
+  const one = await height();
+  // announced: a new approval arrives while the panel is open
+  update.work(["model download: qwen3:14b"]);
+  update.show();
+  await expect(ask.locator("li").first()).toHaveText("Download of qwen3:14b stops. It resumes.");
+  await expect(ask.getByRole("status")).toContainText("Changed: Download of qwen3:14b stops.");
+  await expect(go).toBeDisabled();
+  const two = await height();
+  expect(two, "a line was added").toBeGreaterThan(one);
+  await expect(go).toBeEnabled({ timeout: 3000 });
+  expect(await height(), "the mark goes without moving anything").toBe(two);
+  // unannounced: the server's approval moved on before the click landed
+  update.work(["2 image generation jobs (queued or running)"]);
+  await go.click();
+  await expect(ask.locator("li").first()).toHaveText("2 image jobs stop.");
   await expect(page.locator("html")).not.toHaveAttribute("data-update-started", "yes");
-  await expect(button).toBeVisible();
-  await expect(button).toBeEnabled();
-  page.once("dialog", (dialog) => dialog.accept());
-  await button.click();
+  await expect(go).toBeEnabled({ timeout: 3000 });
+  await go.click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
+  expect(dialogs).toEqual([]);
 });
 
 test("a phone has status and computer-update instructions without update controls", async ({ page, open }) => {
@@ -131,7 +179,7 @@ test("a phone has status and computer-update instructions without update control
   if (await general.isVisible()) await general.click();
   await expect(page.getByRole("button", { name: "Check for updates", exact: true })).toHaveCount(0);
   await expect(page.getByRole("switch", { name: "Check for updates automatically", exact: true })).toHaveCount(0);
-  await expect(page.locator(".sb-update")).toHaveCount(0);
+  await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Update and restart", exact: true })).toHaveCount(0);
   await expect(page.getByText("To install it, close Gates Local on the computer it runs on", { exact: false })).toBeVisible();
 });

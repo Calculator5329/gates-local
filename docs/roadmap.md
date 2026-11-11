@@ -68,7 +68,17 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 
 - [ ] <!-- workspace:id=work:4a67ae55-fe9f-548f-8749-1318755bce48 --> Download rows: say Ollama is stopped instead of Rechecking when the runtime is down.
 
-- [ ] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes
+- [x] <!-- workspace:id=work:ba90d67f-9fcc-5806-b1b8-66998aaf2d92 --> Tooltip layer closes an open tooltip when its target's `data-tip` changes (done 2026-11-11 with the sidebar footer: the tip follows its anchor's new words in place)
+
+- [ ] <!-- workspace:id=work:0a5c2069-fd11-5ce8-ab69-dc95e6abf647 --> Update ask in the footer: when Go finds that only the update's target changed, no line is marked and the screen reader status says just "Changed:". Say what changed. The status region is also in the page from the first render, so its first words may not be announced; check with a screen reader.
+- [ ] <!-- workspace:id=work:3bed893c-95bb-50a1-8273-f79de8250400 --> The update ask tells the server's activity lines apart by matching their words (`update-work.ts` against the strings built in the server's `main.ts`). A reworded server line would fall through to "must finish before the update", which is untrue for a reply. Send a kind and a count with each line and build every word in the client.
+- [ ] <!-- workspace:id=work:69f9ff9e-cbc0-5a39-8474-2714f488329e --> Settings › General: the Update button still asks with the browser's dialog (`update-install.ts`). Use the footer's ask, or its lines in our own dialog. The sentence under it ("Falls back to … if a step fails.") can be shortened at the same time.
+- [ ] <!-- workspace:id=work:1c1f4645-fb03-5c2a-8da8-60dd55b65f5a --> Footer update ask: Go dismisses the shown result before the install's outcome is known. Keep it until the outcome arrives.
+- [ ] <!-- workspace:id=work:ac0688c8-5c8a-5e45-9db3-ff28388854c2 --> A tooltip that kept its left edge while its anchor's words changed can end up no longer over its anchor when the anchor moved a long way. Keep the old edge only while it still overlaps the anchor.
+- [ ] <!-- workspace:id=work:8f735c71-ed2b-50ce-af38-4f7fb674a909 --> An installed copy with a bad release signature: the footer's click that opens the release page is not built; it opens Settings.
+- [ ] <!-- workspace:id=work:fc4fd672-4932-5890-95b8-e2804d8dcdb5 --> Footer browser specs for the fix rounds (errors cleared by good news, the ask re-read at Go, Escape order) were written with their fixes and were not each watched failing in a browser first; the unit tests for the same rules were.
+- [ ] <!-- workspace:id=work:7e2a1ab5-0243-5df4-af60-1c19313125cb --> Escape in the footer's ask is handled in the capture phase, ahead of any dialog a later change opens above it (older than the footer work).
+- [ ] <!-- workspace:id=work:aea0540e-2704-5bfa-a6a6-f41ee69c8d04 --> In browser tabs, drafts for every thread share one stored record per host, so two tabs can overwrite each other's draft list (older than the footer work; the desktop window is not affected).
 
 - [ ] <!-- workspace:id=work:835820d7-09e1-5ef8-ae5d-e027a7d3613e --> Phone drawer: the New thread button's centre sits about 8 px left of the close button above it and about 4 px left of the thread rows' menu buttons. Line the three up.
 

@@ -41,6 +41,8 @@ const SETTINGS: Settings = methodSamples["settings.get"].result;
 const CLONE: UpdateStatus = { version: { kind: "commit", commit: "abc1234", date: Date.UTC(2026, 10, 7) }, result: null, lastCheck: null };
 const OFFERED: UpdateStatus = { ...CLONE, lastCheck: { state: "available", checkedAt: 1, channel: "main", current: "abc1234", target: "bbbbbbb", targetCommit: "b".repeat(40), total: 1, changes: ["Approved B"] }, approval: "approval-b", activity: [] };
 const AT = Date.UTC(2026, 10, 7, 12, 0);
+/** The offered status, checked at another time. */
+const at = (checkedAt: number, more: Partial<UpdateStatus> = {}): UpdateStatus => ({ ...OFFERED, ...more, lastCheck: { ...(OFFERED.lastCheck as Extract<UpdateCheck, { state: "available" }>), checkedAt } });
 
 const props = (over: Partial<Parameters<Updates["UpdatesView"]>[0]> = {}) => ({
   status: CLONE,
@@ -264,9 +266,11 @@ describe("the Updates group of an installed copy", () => {
     expect(plain).not.toContain("Following releases");
   });
 
-  it("puts no install button in the sidebar for a newer version", async () => {
-    const { updateButton } = await import("../src/update-state.ts");
-    expect(updateButton({ ...INSTALLED, lastCheck: { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE } }, true)).toBeNull();
+  it("puts no install control in the sidebar for a newer version", async () => {
+    const { updateIcon } = await import("../src/update-state.ts");
+    // Not ready, not update: the icon downloads it, and a downloaded version goes to the release page.
+    expect(updateIcon({ status: { ...INSTALLED, lastCheck: { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE } }, desktop: true })?.click).toBe("download");
+    expect(updateIcon({ status: { ...INSTALLED, lastCheck: { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: [], page: PAGE, download: "ready" } }, desktop: true })?.click).toBe("page");
   });
 });
 
@@ -318,7 +322,7 @@ describe("the check runs only on a click", () => {
     await until(hydrated, 2000, "hydration");
     await session.updateAndRestart();
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("model download: new-model"));
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("Download of new-model stops."));
     expect(updateAndRestart).not.toHaveBeenCalled();
     expect(store.getState().updateInstalling).toBe(false);
   });
@@ -354,6 +358,28 @@ describe("the check runs only on a click", () => {
     expect(b.server.calls("update.check").length).toBe(1);
     const update = store.getState().update;
     expect(update !== undefined && update !== "na" && update.lastCheck).toEqual(answer);
+  });
+
+  it("a check that answered anywhere since clears a failed install's words, but not while an install runs", async () => {
+    b.server.answer("update.status", () => OFFERED);
+    disconnect = session.connect();
+    await until(hydrated, 2000, "hydration");
+    await until(() => store.getState().update !== undefined && store.getState().update !== "na", 2000, "the status");
+    store.setState({ updateError: "Couldn't start the update." });
+    b.server.broadcast("update.changed", at(1, { activity: ["1 running reply"] }));
+    await tick();
+    expect(store.getState().updateError, "the same check again is no news").toBe("Couldn't start the update.");
+    b.server.broadcast("update.changed", at(2, { installing: true }));
+    await tick();
+    expect(store.getState().updateError, "another window's install runs").toBe("Couldn't start the update.");
+    store.setState({ updateInstalling: true });
+    b.server.broadcast("update.changed", at(3));
+    await tick();
+    expect(store.getState().updateError, "this window's install runs").toBe("Couldn't start the update.");
+    store.setState({ updateInstalling: false });
+    b.server.broadcast("update.changed", at(4));
+    await tick();
+    expect(store.getState().updateError).toBeNull();
   });
 
   it("the Download click sends update.download once and shows the answer", async () => {
@@ -409,9 +435,12 @@ describe("the check runs only on a click", () => {
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
     expect(await session.updateAndRestart()).toBeNull();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("model download: alpha:7b"));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("2 running replies"));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 image generation job"));
+    // the same lines as the footer's ask (update-work.ts), each said once
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Download of alpha:7b stops. It resumes."));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("2 replies stop. Their text is kept."));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 image job stops."));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Falls back to abc1234 if a step fails."));
+    expect(confirm).not.toHaveBeenCalledWith(expect.stringMatching(/including other windows|Save unsent drafts|kept as interrupted/));
     expect(updateAndRestart).not.toHaveBeenCalled();
     expect(store.getState().updateInstalling).toBe(false);
     expect(store.getState().updateError).toBeNull();

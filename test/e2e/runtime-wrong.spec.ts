@@ -7,6 +7,9 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "wrong-service", controlledRuntimePorts: true });
 
+/** The footer's Settings icon: while the runtime is not ready it carries the old runtime row's words and opens Settings › Runtime. */
+const gear = (page: Page) => page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
+
 function marked(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(marked);
   if (typeof v !== "object" || v === null) return v;
@@ -28,7 +31,7 @@ test.describe("with the app's own copy chosen", () => {
   test("on a computer with no copy to run, Settings still offers the way back to the system Ollama", async ({ page, open }) => {
     await noAppCopyHere(page);
     await open();
-    await page.locator(".sb-foot .rt").click();
+    await gear(page).click();
     await page.getByRole("button", { name: "Use the system Ollama" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Go back to the system Ollama?");
   });
@@ -39,13 +42,15 @@ test.describe("with the system Ollama chosen", () => {
   test("a wrong service on the Ollama port blocks chat and says why", async ({ page, open, runtimePorts }) => {
     await open();
     const port = String(runtimePorts.system);
-    await expect(page.locator(".sb-foot .rt")).toContainText(`Port ${port} · busy`);
+    await expect(gear(page)).toHaveAccessibleName(`Settings · Port ${port} · busy`);
+    await expect(gear(page)).toHaveAttribute("data-tip", new RegExp(`^<b>Port ${port} · busy</b>`));
+    await expect(gear(page).locator(".fdot.red")).toBeVisible();
     await expect(page.locator(".banner")).toBeVisible();
     await expect(page.locator(".banner")).toContainText(port);
     await expect(page.locator("#ta")).toHaveAttribute("placeholder", "Chat starts when Ollama answers on its port");
     await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
 
-    await page.locator(".sb-foot .rt").click();
+    await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await expect(page.locator(".set")).toContainText(`Port ${port} busy`);
     await expect(page.locator(".set")).toContainText(`Something other than Ollama answers on port ${port}.`);
@@ -53,7 +58,7 @@ test.describe("with the system Ollama chosen", () => {
 
   test("Settings still offers the app's own copy while the system Ollama cannot be used", async ({ page, open }) => {
     await open();
-    await page.locator(".sb-foot .rt").click();
+    await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await page.getByRole("button", { name: "Use Gates Local's Ollama" }).click();
     await expect(page.getByRole("group", { name: "Confirm switch" })).toContainText("Use Gates Local's own Ollama?");
@@ -62,7 +67,7 @@ test.describe("with the system Ollama chosen", () => {
   test("on a computer with no copy to run, Settings says so instead of offering to install it", async ({ page, open }) => {
     await noAppCopyHere(page);
     await open();
-    await page.locator(".sb-foot .rt").click();
+    await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
     await expect(page.locator(".set")).toContainText("Not available on this computer");
     await expect(page.getByRole("button", { name: "Use Gates Local's Ollama" })).toHaveCount(0);
@@ -87,8 +92,8 @@ test("with the app's own copy chosen, the banner says which port is taken instea
   await expect(banner).toContainText(`Gates Local uses its own Ollama on port ${runtimePorts.app}.`);
   await expect(banner).not.toContainText("system-wide");
   await expect(banner).not.toContainText("Start Ollama");
-  // the sidebar footer's tooltip tells the same story
-  await expect(page.locator(".sb-foot .rt")).toHaveAttribute("data-tip", new RegExp(`Something other than Ollama answers on ports? ${runtimePorts.system}\\b.*own Ollama on port ${runtimePorts.app}`));
+  // the Settings icon's tooltip in the sidebar footer tells the same story
+  await expect(gear(page)).toHaveAttribute("data-tip", new RegExp(`Something other than Ollama answers on ports? ${runtimePorts.system}\\b.*own Ollama on port ${runtimePorts.app}`));
 });
 
 test.describe("on first launch", () => {

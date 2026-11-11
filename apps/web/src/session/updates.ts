@@ -9,7 +9,14 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
   const updateOrder = newestOnly();
 
   function receiveUpdate(update: UpdateStatus): void {
-    applyServerEvent(s => ({ update: s.update !== undefined && s.update !== NA && s.update.canControl === false ? { ...update, canControl: false } : update }));
+    applyServerEvent(s => {
+      const known = s.update === undefined || s.update === NA ? undefined : s.update;
+      // a check that answered anywhere since (hourly, Settings, another window) clears a failed install's words, unless an install runs
+      const before = known?.lastCheck?.checkedAt;
+      const answered = update.lastCheck != null && (before === undefined || update.lastCheck.checkedAt > before);
+      const clear = answered && !s.updateInstalling && update.installing !== true && s.updateError !== null;
+      return { update: known?.canControl === false ? { ...update, canControl: false } : update, ...(clear ? { updateError: null } : {}) };
+    });
   }
 
   /** Manual checks share the desktop server's checked target and activity. */
@@ -20,7 +27,8 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     applyServerEvent((s) => {
       if (r.ok && s.update !== undefined && s.update !== NA) {
         updateOrder.next();
-        return { updateChecking: false, update: { ...s.update, lastCheck: r.value } };
+        // a check that answered clears a failed install click's stale words
+        return { updateChecking: false, updateError: null, update: { ...s.update, lastCheck: r.value } };
       }
       return { updateChecking: false };
     });
@@ -51,8 +59,22 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     await act("update.dismissResult", {}, "hide the update note");
   }
 
-  /** Reserve once locally, then load the existing checked-commit installer. */
-  async function updateAndRestart(): Promise<ActionResult> {
+  /** Re-read the status (target, approval and running work) for an ask that is about to show it. */
+  async function readUpdateStatus(): Promise<ActionResult> {
+    const r = await act("update.status", {}, "read what an update would stop");
+    if (!r.ok) return r.message;
+    updateOrder.next();
+    receiveUpdate(r.value);
+    return null;
+  }
+
+  /**
+   * Reserve once locally, then load the existing checked-commit installer.
+   * approved: the server approval the footer's ask showed; that ask was the
+   * only one, and if the approval moved on nothing installs (the ask shows the
+   * new words). Without it, the installer asks natively as before.
+   */
+  async function updateAndRestart(approved?: string): Promise<ActionResult> {
     const bridge = window.gatesLocal;
     if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
     if (bridge.updateApprovalVersion !== 1) return "Close and reopen Gates Local before using this update button, or run pnpm run app-update in its folder.";
@@ -62,7 +84,7 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     setState({ updateInstalling: true, updateError: null });
     try {
       const { installUpdate } = await import("../update-install.ts");
-      return await installUpdate(act, bridge.updateAndRestart, priorCommit, applyServerEvent);
+      return await installUpdate(act, bridge.updateAndRestart, priorCommit, applyServerEvent, approved);
     } catch (error) {
       const message = `Couldn't load the update action (${error instanceof Error ? error.message : String(error)}). Reload Gates Local and try again.`;
       applyServerEvent({ updateInstalling: false, updateError: message });
@@ -70,5 +92,5 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
     }
   }
 
-  return { updateOrder, receiveUpdate, checkForUpdates, downloadUpdate, dismissUpdateResult, updateAndRestart };
+  return { updateOrder, receiveUpdate, checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart };
 }
