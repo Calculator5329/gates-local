@@ -28,9 +28,9 @@ beforeEach(async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   session = await import("../src/session.ts");
   store = await import("../src/store.ts");
-  store.setState({ models: undefined, model: undefined, chosen: undefined, gpu: undefined, runtime: undefined, catalog: undefined, fits: {}, fitStatus: {}, fitHistory: {}, pulls: {}, pop: null, numCtx: 16384, hydrationSettled: false });
+  store.setState({ models: undefined, model: undefined, chosen: undefined, gpu: undefined, runtime: undefined, catalog: undefined, fitTable: undefined, pulls: {}, pop: null, numCtx: 16384, hydrationSettled: false });
   Picker = (await import("../src/Picker.tsx")).Picker;
-  browser.server.answer("fit.check", () => { throw { code: "internal", message: "No fit reading" }; });
+  browser.server.answer("fit.table", () => { throw { code: "internal", message: "No fit reading" }; });
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 });
 afterEach(async () => {
@@ -54,16 +54,15 @@ async function render() {
 it("opens unknown state before any connection can start the initial reads", async () => {
   store.setState({ conn: { kind: "connecting" }, pop: { id: "picker", kb: false } });
   expect(await render()).toContain('id="picker"');
-  expect(browser.server.calls("fit.check")).toHaveLength(0);
+  expect(browser.server.calls("fit.table")).toHaveLength(0);
   expect(browser.server.calls("models.load")).toHaveLength(0);
 });
 
-it("opens unknown costs when the runtime cannot start any fit requests", async () => {
+it("opens unknown costs when the runtime is stopped", async () => {
   browser.server.answer("runtime.status", () => ({ ...methodSamples["runtime.status"].result, state: "stopped" }));
   disconnect = session.connect(); await vi.advanceTimersByTimeAsync(0);
   store.setState({ pop: { id: "picker", kb: false } });
   expect(await render()).toContain('id="picker"');
-  expect(browser.server.calls("fit.check")).toHaveLength(0);
   expect(browser.server.calls("models.load")).toHaveLength(0);
 });
 
@@ -75,7 +74,7 @@ it("does not settle failed startup before negotiation authorizes the initial rea
   expect(store.getState().hydrationSettled).toBe(false);
   expect(browser.server.calls("models.list")).toHaveLength(0);
   expect(browser.server.calls("gpu.status")).toHaveLength(0);
-  expect(browser.server.calls("fit.check")).toHaveLength(0);
+  expect(browser.server.calls("fit.table")).toHaveLength(0);
   negotiation.fail("internal", "Negotiation refused");
   await vi.advanceTimersByTimeAsync(0);
   expect(store.getState().conn.kind).toBe("down");
@@ -105,6 +104,36 @@ it("does not let a closed connection settle preparation during the next connecti
   expect(store.getState().hydrationSettled).toBe(true);
 });
 
+/** Connected, the runtime ready, the model list not in yet and the reads not settled: the picker's first view waits. */
+const waitingForModels = () => store.setState({ conn: { kind: "open" }, runtime: { ...methodSamples["runtime.status"].result, state: "ready" }, models: undefined, hydrationSettled: false });
+/** Whether the open picker has been marked ready to show. */
+const pickerReady = () => { const pop = store.getState().pop; return pop?.id === "picker" ? pop.ready : undefined; };
+
+it("the picker's first view waits for the model list, then shows", async () => {
+  waitingForModels();
+  store.setState({ pop: { id: "picker", kb: false } });
+  expect(await render(), "nothing shows before the model list").not.toContain('id="picker"');
+  expect(store.getState().pop).toMatchObject({ id: "picker" });
+  expect(pickerReady()).toBeFalsy();
+  store.setState({ models: [] });
+  expect(await render()).toContain('id="picker"');
+  expect(pickerReady()).toBe(true);
+});
+
+it("a picker dismissed before it was ready does not open when the model list lands", async () => {
+  waitingForModels();
+  store.setState({ pop: { id: "picker", kb: false } });
+  await render();
+  // the model list lands and that frame renders; the person dismisses the picker before its effects run
+  store.setState({ models: [] });
+  effects.length = 0;
+  renderToStaticMarkup(createElement(Picker));
+  store.setState({ pop: null });
+  for (const run of effects.splice(0)) run();
+  expect(store.getState().pop).toBeNull();
+  expect(await render()).not.toContain('id="picker"');
+});
+
 for (const method of ["gpu.status", "models.list"] as const) {
   for (const ending of ["error", "timeout"] as const) {
     it(`opens a usable picker after ${method} settles with ${ending}, without a current fit`, async () => {
@@ -116,7 +145,8 @@ for (const method of ["gpu.status", "models.list"] as const) {
       store.setState({ pop: { id: "picker", kb: false } });
       if (held) {
         const pending = await render();
-        if (method === "gpu.status") expect(pending).not.toContain('id="picker"');
+        // The picker no longer waits for a GPU reading: fit values are a skeleton until the first table.
+        if (method === "gpu.status") expect(pending).toContain("fit-skel");
         // The real protocol client's existing 30-second deadline, without a
         // new picker timer or a 30-second browser journey.
         await vi.advanceTimersByTimeAsync(30_000);
@@ -124,7 +154,7 @@ for (const method of ["gpu.status", "models.list"] as const) {
       const html = await render();
       expect(html).toContain('id="picker"');
       expect(html).toContain("Download models");
-      expect(Object.values(store.getState().fits).some(session.fitIsCurrent)).toBe(false);
+      expect(store.getState().fitTable).toBeUndefined();
       expect(browser.server.calls("models.load")).toHaveLength(0);
     });
   }

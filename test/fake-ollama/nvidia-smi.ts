@@ -17,25 +17,32 @@ const RESIDENT = [
   { pid: 3388, name: "/opt/media-vault/bin/media-vault-vision", mib: 1822 },
 ];
 
-function ollamaMib(): number {
+/** The runner's MiB (loaded models' GPU parts) and another program's MiB, from the fake Ollama's state file. */
+function fakeState(): { runner: number; other: number } {
   const file = process.env["GATES_LOCAL_FAKE_GPU_STATE"];
-  if (!file) return 0;
+  if (!file) return { runner: 0, other: 0 };
   try {
     const state: unknown = JSON.parse(readFileSync(file, "utf8"));
-    const loaded = typeof state === "object" && state !== null ? (state as { loaded?: unknown }).loaded : undefined;
-    if (!Array.isArray(loaded)) return 0;
-    return loaded.reduce((sum: number, l: unknown) => {
+    const s = typeof state === "object" && state !== null ? (state as { loaded?: unknown; otherMib?: unknown }) : {};
+    const other = typeof s.otherMib === "number" ? s.otherMib : 0;
+    if (!Array.isArray(s.loaded)) return { runner: 0, other };
+    const runner = s.loaded.reduce((sum: number, l: unknown) => {
       const size = typeof l === "object" && l !== null ? (l as { sizeBytes?: unknown }).sizeBytes : 0;
       return sum + (typeof size === "number" ? Math.round(size / MIB) : 0);
     }, 0);
+    return { runner, other };
   } catch {
-    return 0;
+    return { runner: 0, other: 0 };
   }
 }
 
 const query = process.argv.slice(2).find((a) => a.startsWith("--query-"));
-const runner = ollamaMib();
-const apps = [...RESIDENT, ...(runner > 0 ? [{ pid: 4410, name: "/usr/local/bin/ollama", mib: runner }] : [])];
+const { runner, other } = fakeState();
+const apps = [
+  ...RESIDENT,
+  ...(other > 0 ? [{ pid: 3902, name: "/usr/bin/blender", mib: other }] : []),
+  ...(runner > 0 ? [{ pid: 4410, name: "/usr/local/bin/ollama", mib: runner }] : []),
+];
 const used = apps.reduce((s, a) => s + a.mib, 0) + 210;
 
 const NAME = "NVIDIA GeForce RTX 5070 Ti";

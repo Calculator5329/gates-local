@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import { defaultSettings } from "../settings/store.ts";
-import { buildCatalog, estimateOffered, markRecommended } from "./catalog.ts";
+import { buildCatalog, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
 import { CURATED_MODELS } from "./recommended.ts";
 
@@ -101,27 +101,6 @@ describe("models.catalog", () => {
     expect(entries.some((x) => x.fit?.verdict === "fits")).toBe(false);
     const recommended = entries.filter((x) => x.recommended);
     expect(recommended.map((x) => x.name)).toEqual(["qwen3.5:4b"]);
-  });
-
-  it("estimateOffered gives a model offered for download the catalog's own estimate at any context", async () => {
-    const s = await fakeOllama();
-    const fitDeps = { runNvidiaSmi: smi, readMeminfo: async () => MEMINFO, now: () => 1 };
-    for (const numCtx of [16384, 65536] as const) {
-      const entries = await buildCatalog({
-        baseUrl: () => s.baseUrl,
-        installed: () => listModels(s.baseUrl),
-        settings: { get: () => ({ ...defaultSettings("system"), defaultNumCtx: numCtx }) },
-        fit: fitDeps,
-      });
-      const report = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", numCtx);
-      expect(report).toEqual(byName(entries).get("gpt-oss:20b")?.fit);
-      expect(report?.numCtx).toBe(numCtx);
-    }
-    const at16 = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", 16384);
-    const at64 = await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, "gpt-oss:20b", 65536);
-    expect(at64?.needVramBytes ?? 0).toBeGreaterThan(at16?.needVramBytes ?? 0);
-    // local-only builds and unknown models are not offered for download
-    for (const model of ["gemma4-abliterated:26b", "nope:1b"]) expect(await estimateOffered({ baseUrl: s.baseUrl, fit: fitDeps }, model, 16384)).toBeUndefined();
   });
 
   it("MP-01: an installed curated model whose capabilities are unknown is neither a chat choice nor a download", async () => {

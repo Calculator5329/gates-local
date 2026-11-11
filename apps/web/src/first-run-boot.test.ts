@@ -35,9 +35,9 @@ vi.mock("react", async (original) => {
     },
   };
 });
-vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(h.state), fitKey: (m: string, c: number) => `${m}@${c}` }));
+vi.mock("./store.ts", () => ({ NA: "na", useStore: (fn: (s: unknown) => unknown) => fn(h.state) }));
 vi.mock("./session.ts", () =>
-  Object.fromEntries(["ensureFit", "finishFirstRun", "firstPull", "openSettings", "pull", "cancelPull", "recheckRuntime"].map((name) => [name, () => undefined])),
+  Object.fromEntries(["finishFirstRun", "firstPull", "openSettings", "pull", "cancelPull", "recheckRuntime"].map((name) => [name, () => undefined])),
 );
 vi.mock("./Sidebar.tsx", () => ({ focusComposer: () => undefined }));
 vi.mock("./Settings.tsx", () => ({ DlDetail: () => null }));
@@ -57,10 +57,16 @@ const show = (state: object) => {
   }
   for (const run of h.pending.splice(0)) run();
   const words = html.replaceAll(/<[^>]*>/g, " ").replaceAll("&#x27;", "'").replaceAll(/\s+/g, " ").trim();
-  return { skel: html.includes("data-skel"), words };
+  return { skel: html.includes("data-skel"), words, html };
 };
 
-const boot = { conn: { kind: "open" }, runtime: undefined, hydrationSettled: false, bootWaited: false, models: undefined, catalog: undefined, gpu: undefined, numCtx: 16384, pulls: {}, unavailable: {}, fits: {}, fitStatus: {}, staleFits: {}, settings: {} };
+const boot = { conn: { kind: "open" }, runtime: undefined, hydrationSettled: false, bootWaited: false, models: undefined, catalog: undefined, gpu: undefined, numCtx: 16384, pulls: {}, unavailable: {}, fitTable: undefined, settings: {} };
+/** The server's fit table holding `model` at 16k with this verdict. */
+const tableWith = (model: string, verdict: string) => ({
+  reading: { boot: "b", seq: 1, measuredAt: 0 },
+  memory: { kind: "gpu", freeBytes: 0, usableBytes: 0 },
+  rows: [{ model, numCtx: 16384, verdict, needVramBytes: 1, freeVramBytes: 2, spillRamBytes: 0, source: "estimate", stops: [] }],
+});
 
 beforeEach(() => {
   h.slots.clear(); h.deps.clear(); h.pending = [];
@@ -91,10 +97,48 @@ it("a first read at 2.5 s: placeholders at 1 s, neutral words at 2.2 s, the foun
     expect(found.skel).toBe(false);
     expect(found.words).toContain("Ollama · 1 chat model");
     expect(found.words).toContain("Checking memory");
+    expect(found.words, "no table yet: never Ready").not.toContain("Ready to chat");
+    expect(found.html, "still checking: the dot runs, it is not green").toContain('class="dot run"');
+    // the table lands with this model's row: the verdict, in place
+    const read = show({ ...late, models: installed, fitTable: tableWith("qwen3.5:9b", "fits") });
+    expect(read.words).toContain("Ready to chat");
+    expect(read.words).not.toContain("Checking");
   } finally {
     vi.useRealTimers();
   }
 });
+
+// A table built before the runtime was up has no rows, and one whose GPU reading failed has
+// unreadable memory: neither answers whether the model runs here.
+const emptyTable = { ...tableWith("qwen3.5:9b", "fits"), rows: [] };
+const unreadableTable = { ...emptyTable, memory: { kind: "unreadable", detail: "nvidia-smi failed" } };
+for (const [what, table] of [["an empty", emptyTable], ["an unreadable", unreadableTable]] as const) {
+  it(`${what} table is no answer: Connecting holds to the bound, then the title and the card both say Checking, and the next table replaces them in place`, () => {
+    vi.useFakeTimers();
+    try {
+      show(boot);
+      show({ ...boot, bootWaited: true });
+      const catalog = [{ ...qwen, installed: true }];
+      const held = show({ ...late, models: installed, catalog, fitTable: table });
+      expect(held.words, "such a table does not end the wait").toBe("Gates Local Connecting…");
+      vi.advanceTimersByTime(1000);
+      const found = show({ ...late, models: installed, catalog, fitTable: table });
+      expect(found.skel).toBe(false);
+      expect(found.words).toContain("Checking memory");
+      expect(found.words).toContain("Checking…");
+      expect(found.words, "the card never disagrees with the title").not.toContain("Couldn't check");
+      expect(found.words).not.toContain("Ready to chat");
+      expect(found.html, "the dot says it is still checking").toContain('class="dot run"');
+      const read = show({ ...late, models: installed, catalog, fitTable: { ...tableWith("qwen3.5:9b", "fits"), reading: { boot: "b", seq: 2, measuredAt: 0 } } });
+      expect(read.skel, "never back to placeholders").toBe(false);
+      expect(read.words).toContain("Ready to chat");
+      expect(read.words).not.toContain("Checking");
+      expect(read.html).toContain('class="dot ok"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+}
 
 it("a late first read with no models never shows the ollama pull sentence before the catalog: Connecting, then the download card", () => {
   vi.useFakeTimers();

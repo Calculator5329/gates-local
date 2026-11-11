@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import type { GpuStatus } from "@gates-local/contracts";
+import type { FitTable } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
 import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
@@ -167,49 +167,42 @@ test("Default context is a normal row with one live line, and the model's status
 type FitProbe = { frames: number; issues: string[]; stop(): void };
 
 for (const width of [1280, 360]) {
-  test(`SQ-03: a GPU refresh keeps the row, status and open Details mounted at ${width}px`, async ({ page, open }, info) => {
+  test(`SQ-03: a pushed fit table keeps the row, status and open Details mounted at ${width}px`, async ({ page, open }, info) => {
     await page.setViewportSize({ width, height: 800 });
-    let hold = false;
-    let gpuStatus: GpuStatus | undefined;
-    let pushGpu: (() => void) | undefined;
+    let table: FitTable | undefined;
+    let pushTable: (() => void) | undefined;
     const requests = new Map<string, string>();
-    const queued: (() => void)[] = [];
-    let pendingFits = 0;
     await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
       const server = ws.connectToServer();
       ws.onMessage(message => {
         const frame = typeof message === "string" ? JSON.parse(message) as { type?: string; method?: string; id?: string } : undefined;
-        if (frame?.type === "request" && frame.method !== undefined && frame.id !== undefined) {
-          requests.set(frame.id, frame.method);
-          if (frame.method === "fit.check") {
-            pendingFits++;
-            if (hold) { queued.push(() => server.send(message)); return; }
-          }
-        }
+        if (frame?.type === "request" && frame.method !== undefined && frame.id !== undefined) requests.set(frame.id, frame.method);
         server.send(message);
       });
       server.onMessage(message => {
-        const frame = typeof message === "string" ? JSON.parse(message) as { type?: string; id?: string; channel?: string; result?: GpuStatus } : undefined;
+        const frame = typeof message === "string" ? JSON.parse(message) as { type?: string; id?: string; channel?: string; result?: FitTable } : undefined;
         // Drive this transition ourselves rather than racing the periodic GPU watcher.
-        if (frame?.type === "push" && frame.channel === "gpu.changed") return;
+        if (frame?.type === "push" && (frame.channel === "gpu.changed" || frame.channel === "fit.changed")) return;
         if (frame?.type === "response" && frame.id !== undefined) {
-          const method = requests.get(frame.id);
+          if (requests.get(frame.id) === "fit.table") table = frame.result;
           requests.delete(frame.id);
-          if (method === "gpu.status") gpuStatus = frame.result;
-          if (method === "fit.check") pendingFits--;
         }
         ws.send(message);
       });
-      pushGpu = () => {
-        if (gpuStatus === undefined) throw new Error("GPU snapshot has not arrived");
-        ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: { ...gpuStatus, freeBytes: 0, measuredAt: gpuStatus.measuredAt + 1 } }));
+      pushTable = () => {
+        if (table === undefined) throw new Error("The fit table has not arrived");
+        const reading = { ...table.reading, seq: table.reading.seq + 1, measuredAt: table.reading.measuredAt + 1 };
+        // A newer reading with a little less free memory: the same verdicts, new numbers.
+        const rows = table.rows.map(r => ({ ...r, freeVramBytes: Math.max(0, r.freeVramBytes - 256 * 1024 ** 2) }));
+        table = { ...table, reading, rows };
+        ws.send(JSON.stringify({ type: "push", channel: "fit.changed", payload: table }));
       };
     });
     await open();
     await waitReady(page);
     await section(page, "Advanced");
     await expect(page.locator("#gpuMemory .fp-v")).toContainText("Should run well");
-    await expect.poll(() => pendingFits).toBe(0);
+    await expect.poll(() => table !== undefined).toBe(true);
     await page.locator("#gpuMemory .fp-more summary").click();
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: info.outputPath(`fit-before-${width}.png`), fullPage: true });
@@ -240,25 +233,17 @@ for (const width of [1280, 360]) {
       (window as Window & { fitProbe?: FitProbe }).fitProbe = probe;
     });
     try {
-      hold = true;
-      if (pushGpu === undefined) throw new Error("WebSocket is not connected");
-      pushGpu();
-      await expect.poll(() => queued.length).toBeGreaterThan(0);
-      await expect(page.locator("#gpuMemory .fp-v")).toContainText("Rechecking");
-      await expect(page.locator("#gpuMemory .fp-v")).not.toContainText("Should run well");
+      if (pushTable === undefined) throw new Error("WebSocket is not connected");
+      pushTable();
+      pushTable();
       await page.evaluate(() => new Promise<void>(resolve => {
         let remaining = 6;
         const tick = () => { if (--remaining === 0) resolve(); else requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
       }));
-      await page.screenshot({ path: info.outputPath(`fit-pending-${width}.png`), fullPage: true });
-      hold = false;
-      for (const send of queued.splice(0)) send();
-      await expect.poll(() => pendingFits).toBe(0);
+      await expect(page.locator("#gpuMemory .fp-v")).toContainText("Should run well");
       await page.screenshot({ path: info.outputPath(`fit-after-${width}.png`), fullPage: true });
     } finally {
-      hold = false;
-      for (const send of queued.splice(0)) send();
       await page.evaluate(() => (window as Window & { fitProbe?: FitProbe }).fitProbe?.stop());
     }
     const probe = await page.evaluate(() => {

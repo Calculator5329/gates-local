@@ -35,7 +35,6 @@ interface ChatEffects {
   readonly untrackedDone: (threadId: string, message: Message) => void;
   readonly openThread: (threadId: string) => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
-  readonly invalidateFits: (hideOld?: boolean) => void;
 }
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
@@ -208,7 +207,7 @@ interface Waiting {
 }
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
-export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor, invalidateFits }: ChatEffects) {
+export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects) {
   /** A saved user message confirms its exact copy; edited words already have a new identity. */
   function confirmCopy(message: Message): void {
     const matchedDraft = getDraft(message.threadId).sendId === message.id;
@@ -684,7 +683,6 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         }));
         // a chat not on screen reloads: its cached history may be behind
         if (!open) untrackedDone(threadId, msg);
-        invalidateFits();
         // the person said stop: a Stop that lost the race to the last token holds the queue like any other
         if (turn.end?.kind === "stopped") holdQueue(threadId);
         flushQueued();

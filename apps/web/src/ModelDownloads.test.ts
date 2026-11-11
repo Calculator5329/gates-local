@@ -39,10 +39,9 @@ vi.mock("./store.ts", () => ({
   NA: "na",
   useStore: (fn: (s: unknown) => unknown) => fn(h.state),
   getState: () => h.state,
-  fitKey: (m: string, c: number) => `${m}@${c}`,
   setState: () => undefined,
 }));
-vi.mock("./session.ts", () => Object.fromEntries(["ensureFit", "pull", "cancelPull"].map((name) => [name, () => undefined])));
+vi.mock("./session.ts", () => Object.fromEntries(["pull", "cancelPull"].map((name) => [name, () => undefined])));
 vi.mock("./FitPanel.tsx", () => ({ shortGpu: (name: string) => name }));
 
 const { DownloadTab } = await import("./ModelDownloads.tsx");
@@ -55,7 +54,10 @@ const fit = (model: string, verdict: Verdict, numCtx = 16384) => ({
 const entry = (name: string, label: string, recommended: boolean, verdict: Verdict) => ({
   name, label, purpose: "General chat", recommended, installed: false, downloadBytes: 5 * GIB, fit: fit(name, verdict),
 });
-const base = (over: object) => ({ gpu: { vendor: "nvidia", name: "RTX" }, models: [], pulls: {}, unavailable: {}, settings: {}, fits: {}, fitStatus: {}, staleFits: {}, numCtx: 16384, ...over });
+const base = (over: object) => ({ gpu: { vendor: "nvidia", name: "RTX" }, models: [], pulls: {}, unavailable: {}, settings: {}, fitTable: undefined, numCtx: 16384, ...over });
+let seq = 0;
+/** The server's fit table holding these rows, each one newer than the last. */
+const table = (...rows: ReturnType<typeof fit>[]) => ({ reading: { boot: "b", seq: ++seq, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 16 * GIB, usableBytes: 15 * GIB }, rows: rows.map(r => ({ ...r, stops: [] })) });
 
 const render = (state: object) => {
   h.state = state;
@@ -84,47 +86,70 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it("F2: a recommended download with no answer at this context waits on placeholders, and a refusal never lands under Recommended", () => {
-  // The catalog estimated 16k; the tab is at 64k, where nothing has answered yet.
+it("F2: a recommended download waits on placeholders for the table, never on the catalog's own estimate, and a refusal never lands under Recommended", () => {
+  // The catalog estimated "fits"; the table is not in yet.
   const rec = entry("qwen3.5:9b", "Qwen 3.5 9B", true, "fits");
   const state = base({ catalog: [rec], numCtx: 65536 });
   const first = render(state);
   expect(groups(first)["Recommended"] ?? [], "no group on the first frame claims the row").not.toContain("qwen3.5:9b");
   expect(first).toContain('aria-busy="true"');
   expect(first).toContain("data-skel");
-  const refused = { "qwen3.5:9b@65536": fit("qwen3.5:9b", "refuse", 65536) };
-  const later = render({ ...state, fits: refused, fitStatus: { "qwen3.5:9b@65536": "fresh" } });
+  const later = render({ ...state, fitTable: table(fit("qwen3.5:9b", "refuse", 65536)) });
   expect(groups(later)["Recommended"] ?? []).not.toContain("qwen3.5:9b");
   expect(groups(later)["Also available"]).toEqual(["qwen3.5:9b"]);
 });
 
-it("F2: at the one-second bound a row with no answer is not recommended", () => {
+it("F2: at the one-second bound with no table, a row with no answer is not recommended", () => {
   vi.useFakeTimers();
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", true, "fits");
-  const state = base({ catalog: [a, b], numCtx: 65536, fits: { "a:1@65536": fit("a:1", "fits", 65536) }, fitStatus: { "a:1@65536": "fresh" } });
+  const state = base({ catalog: [a, b], numCtx: 65536 });
   expect(render(state)).toContain("data-skel");
   vi.advanceTimersByTime(1000);
   const shown = render(state);
   expect(shown).not.toContain("data-skel");
+  expect(groups(shown)).toEqual({ "Also available": ["a:1", "b:1"], "Something else": [] });
+});
+
+for (const [what, memory] of [["an empty", { kind: "gpu", freeBytes: 16 * GIB, usableBytes: 15 * GIB }], ["an unreadable", { kind: "unreadable", detail: "nvidia-smi failed" }]] as const) {
+  it(`F2: ${what} table is no answer: the groups wait for the one-second bound, then a row with no reading is a dash and not recommended`, () => {
+    vi.useFakeTimers();
+    const a = entry("a:1", "A", true, "fits");
+    const b = entry("b:1", "B", true, "fits");
+    const state = base({ catalog: [a, b], numCtx: 65536, fitTable: { ...table(), memory } });
+    expect(render(state), "such a table does not settle the groups").toContain("data-skel");
+    vi.advanceTimersByTime(1000);
+    const shown = render(state);
+    expect(shown).not.toContain("data-skel");
+    expect(groups(shown)).toEqual({ "Also available": ["a:1", "b:1"], "Something else": [] });
+    expect(shown).toMatch(/data-cat="b:1"[\s\S]*?<div class="dl-v" data-wait=""><small>–<\/small>/);
+  });
+}
+
+it("F2: a table that has no reading for a row answers it: grouped at once, that row not recommended and shown as a dash", () => {
+  const a = entry("a:1", "A", true, "fits");
+  const b = entry("b:1", "B", true, "fits");
+  const shown = render(base({ catalog: [a, b], numCtx: 65536, fitTable: table(fit("a:1", "fits", 65536)) }));
+  expect(shown).not.toContain("data-skel");
   expect(groups(shown)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
+  expect(shown).toMatch(/data-cat="b:1"[\s\S]*?<div class="dl-v" data-wait=""><small>–<\/small>/);
 });
 
 it("F2: once grouped, the groups stay put, except that a row whose verdict becomes does-not-fit leaves Recommended once and never comes back", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", true, "fits");
   const c = entry("c:1", "C", false, "spills");
-  const state = base({ catalog: [a, b, c] });
+  const state = base({ catalog: [a, b, c], fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
   const first = render(state);
   expect(groups(first)).toEqual({ Recommended: ["a:1", "b:1"], "Also available · uses system memory": ["c:1"], "Something else": [] });
-  // a spill reply does not move a row
-  const spills = render({ ...state, fits: { "a:1@16384": fit("a:1", "spills") }, fitStatus: { "a:1@16384": "fresh" } });
+  // a spill reading does not move a row
+  const spills = render({ ...state, fitTable: table(fit("a:1", "spills"), fit("b:1", "fits"), fit("c:1", "spills")) });
   expect(groups(spills)["Recommended"]).toEqual(["a:1", "b:1"]);
   // a refusal moves it, and the other group no longer only spills
-  const refused = render({ ...state, fits: { "b:1@16384": fit("b:1", "refuse") }, fitStatus: { "b:1@16384": "fresh" } });
+  const refused = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "refuse"), fit("c:1", "spills")) });
   expect(groups(refused)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1", "c:1"], "Something else": [] });
   // it fits again: it stays where it went for this visit
-  const back = render({ ...state, fits: { "b:1@16384": fit("b:1", "fits") }, fitStatus: { "b:1@16384": "fresh" } });
+  const back = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
   expect(groups(back)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1", "c:1"], "Something else": [] });
 });
 
@@ -154,12 +179,12 @@ it("no slot is kept where the placeholder drew one header", () => {
 it("the uses-system-memory title follows the rows' live verdicts, and its rows stay where they are", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", false, "spills");
-  const state = base({ catalog: [a, b] });
+  const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "spills")) });
   expect(groups(render(state))).toEqual({ Recommended: ["a:1"], "Also available · uses system memory": ["b:1"], "Something else": [] });
-  // b is rechecked and now fits: the title no longer says it uses system memory
-  const fits = render({ ...state, fits: { "b:1@16384": fit("b:1", "fits") }, fitStatus: { "b:1@16384": "fresh" } });
+  // the next table says b now fits: the title no longer says it uses system memory
+  const fits = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
   expect(groups(fits)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
   // and back to spilling: the words come back
-  const spills = render({ ...state, fits: { "b:1@16384": fit("b:1", "spills") }, fitStatus: { "b:1@16384": "fresh" } });
+  const spills = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "spills")) });
   expect(groups(spills)).toEqual({ Recommended: ["a:1"], "Also available · uses system memory": ["b:1"], "Something else": [] });
 });

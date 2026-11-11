@@ -20,7 +20,7 @@ async function pickerOverConversation(page: Page, width: number, name: string) {
   await page.locator("#modelBtn").click();
   const picker = page.locator("#picker");
   await expect(picker).toBeVisible();
-  await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
+  await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
   const p = await box(picker), b = await box(page.locator("#modelBtn")), c = await box(page.locator(".composer"));
   const view = page.viewportSize()!;
   // Inside the window at every width.

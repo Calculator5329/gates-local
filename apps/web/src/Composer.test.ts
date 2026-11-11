@@ -12,7 +12,7 @@ vi.mock("./store.ts", async (original) => {
   return { ...store, useStore: <T,>(selector: (s: State) => T): T => selector(store.getState()) };
 });
 vi.mock("./session.ts", () => ({
-  ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued", "ensureFit", "openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
+  ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued","openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
   firstPull: () => undefined,
   queueReason: () => null,
 }));
@@ -54,7 +54,7 @@ const states: readonly [string, Partial<State> & { draft?: string }, string, str
   ["disconnected", { conn: { kind: "down", since: 0 } }, "Send message"],
   ["no model", { models: [], model: undefined }, "Send message"],
   ["installing", { runtime: { state: "installing", owner: "app", baseUrl: "http://127.0.0.1:5288" } }, "Send message"],
-  ["memory refused", { draft: "Too big", fits: { "qwen3.5:9b@16384": { model: "qwen3.5:9b", numCtx: 16384, freeVramBytes: 0, needVramBytes: 2 ** 30, spillRamBytes: 0, shortfallBytes: 2 ** 30, verdict: "refuse", source: "estimate", measuredAt: 0 } } }, "Send message"],
+  ["memory refused", { draft: "Too big", fitTable: { reading: { boot: "b", seq: 1, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 0, usableBytes: 0 }, rows: [{ model: "qwen3.5:9b", numCtx: 16384, freeVramBytes: 0, needVramBytes: 2 ** 30, spillRamBytes: 0, shortfallBytes: 2 ** 30, verdict: "refuse", source: "estimate", stops: [] }] } }, "Send message"],
 ];
 
 describe("the composer's primary action", () => {
@@ -91,6 +91,26 @@ describe("the composer's primary action", () => {
       });
     }
   }
+});
+
+/** A table where the model does not fit at 16k unless the chats named in `stops` stop their replies. */
+const tooBigUnless = (stops: string[]): State["fitTable"] => ({
+  reading: { boot: "b", seq: 1, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 0, usableBytes: 0 },
+  rows: [{ model: "qwen3.5:9b", numCtx: 16384, freeVramBytes: 0, needVramBytes: 2 ** 30, spillRamBytes: 0, shortfallBytes: 2 ** 30, verdict: "refuse", source: "estimate", stops }],
+});
+const sendButton = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*class="send(?: [^"]*)?"[^>]*>/)?.[0] ?? "";
+
+it("a model that fits once another chat's reply stops can be sent to, and Send says that reply stops first; with nothing to free it is refused", () => {
+  const other = { other: { ...live, threadId: "other" } };
+  setFixture({ ...ready, draft: "hello", turns: other, fitTable: tooBigUnless(["other"]) });
+  const freed = sendButton();
+  expect(freed, "no memory refusal").not.toContain('aria-disabled="true"');
+  expect(freed).not.toContain("not enough memory");
+  expect(freed).toMatch(/Another chat(?:&#x27;|')s reply is using this memory, so it stops first/);
+  setFixture({ ...ready, draft: "hello", turns: other, fitTable: tooBigUnless([]) });
+  const refused = sendButton();
+  expect(refused).toContain('aria-disabled="true"');
+  expect(refused).toContain("not enough memory at 16k");
 });
 
 it("F6: before the first read, Send claims nothing about Ollama or models and the model button still has a name", () => {

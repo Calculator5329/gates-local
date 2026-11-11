@@ -48,8 +48,6 @@ export function anchorOf(id: PopId): HTMLElement | null {
 
 /** Open a popover, or close it when it is already open from the same control. */
 export function togglePop(id: FixedPopId, kb = false): void {
-  // Reopening the size control must not discard a choice awaiting its fit.
-  if (id === "picker" && getState().pop?.id === id && document.getElementById("picker")?.getAttribute("aria-busy") === "true") return;
   closeTip();
   setState((s) => ({ pop: s.pop?.id === id ? null : { id, kb } }));
 }
@@ -102,6 +100,9 @@ export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.mi
  * says aria-busy while one shows; the block itself is hidden from assistive tech.
  */
 export const Skel = ({ w = "8em" }: { w?: string }) => <span className="skel" data-skel="" aria-hidden="true" style={{ width: w }} />;
+
+/** A fit value before the first fit table: the same placeholder, named so a test can find the fit's own. */
+export const FitSkel = ({ w = "40px" }: { w?: string }) => <span className="skel fit-skel" data-skel="" aria-hidden="true" style={{ width: w }} />;
 
 /** Line widths of the placeholder turns: a short question, a reply a few lines long. */
 const TURN_SKEL = [["38%"], ["94%", "88%", "62%"], ["26%"], ["90%", "71%"]] as const;

@@ -98,33 +98,34 @@ No thresholds changed.
 
 The `picker` group measures a first picker opening after a completed reply,
 without visiting the picker or settings first. Every row ends two frames after
-`#picker.open` appears, with the complete-view barrier intact. The picker warms
-its fit reports only on intent (pointer entering the model button, keyboard
-focus, pointer-down), never at idle and never while a reply runs or a model
-loads, so how the opening arrives decides how much of the wait is hidden.
+`#picker.open` appears. Its fit values come from the fit table the server
+pushed before the opening, so no opening asks for a fit; intent (pointer
+entering the model button, keyboard focus, pointer-down) loads only the
+picker's code, so how the opening arrives decides how much of that load is hidden.
 Keyboard focus means focus with a focus ring: `picker-open-keyboard` focuses
 the button by script straight after typing in the composer, which Chromium
 treats as keyboard focus. The row asserts the focus ring; without it the row
 would measure a cold open.
 
 `picker-open` is a scripted click with no hover before it: the pointer moves
-onto the button and presses in the same instant, so the warm-up starts with the
-click. Its `session-fit-checks` counter includes every `fit.check` sent since
-navigation, including setup and the completed reply.
+onto the button and presses in the same instant. Its `session-fit-checks`
+counter includes every fit request (`fit.*`) sent since navigation, including
+setup and the completed reply. The client asks for the fit table once at
+hydration and the server pushes every later one, so the expected count is 1.
 
 Three more after-reply rows each use a fresh client session with one completed
 reply. `picker-open-hand` moves the pointer onto the button and clicks 150 ms
 later, the way a hand does. `picker-open-keyboard` focuses the button and
 presses Enter 150 ms later; its window starts at the keydown. Both record wall
-time and exact session `fit.check` counts. `picker-open-hover-away` hovers for
-350 ms, leaves and never opens; it records only the session's `fit.check`
-count, the one warm-up whose checks no opening uses.
+time and exact session fit request counts. `picker-open-hover-away` hovers for
+350 ms, leaves and never opens; it records only the session's fit request
+count, which must not grow on hover.
 
 Two rows each use a fresh client session with no reply or earlier picker
 visit, and leave the app's own idle work alone. `picker-open-hover` hovers the
 model button for 350 ms before clicking. `picker-open-cold-ready` clicks as
 soon as automation observes the enabled composer. These rows record wall time
-and exact session `fit.check` counts, including repeated hover/focus and a
+and exact session fit request counts, including repeated hover/focus and a
 second opening; repeated intent must not add requests. (Earlier lane jobs also
 had `picker-open-idle` and held idle callbacks to separate an idle warm-up
 that no longer exists; both are gone.)

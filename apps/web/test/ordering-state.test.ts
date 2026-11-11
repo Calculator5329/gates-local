@@ -1,6 +1,6 @@
 // Guard-specific replays: real sessions, stepped time, and captured wire replies.
 import { expect, it, vi } from "vitest";
-import type { Channel, FitReport, MethodName, Payload, ResultOf } from "@gates-local/contracts";
+import type { Channel, MethodName, Payload, ResultOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Held, type FakeSocket } from "./harness.ts";
 import { drain, openTurn, OrderingWorld, runningIds } from "./ordering-world.ts";
@@ -15,10 +15,8 @@ vi.mock("react", async (original) => ({
 }));
 
 const MODEL = "gemma3:4b", OLD_MODEL = "qwen3:14b", CTX = 16384;
-const FIT_CTX = 32768, KEY = `${MODEL}@${FIT_CTX}`;
 const initialModels = methodSamples["models.list"].result;
 const remainingModels = initialModels.filter((model) => model.name !== OLD_MODEL);
-const report = (verdict: FitReport["verdict"], measuredAt: number): FitReport => ({ ...methodSamples["fit.check"].result, model: MODEL, numCtx: FIT_CTX, verdict, measuredAt });
 const noop = () => {};
 const frame = (socket: string, name: string): ReplayFrame => ({ socket, event: name });
 const before = (order: readonly string[], a: string, b: string) => order.indexOf(a) < order.indexOf(b);
@@ -52,44 +50,6 @@ type Event = ReplayEvent<World>;
 const event = (name: string, after: readonly string[], run: Event["run"], extra: Pick<Event, "delivery" | "emit" | "discard"> = {}): Event => ({ name, after, run, ...extra });
 const dispose = (w: World) => w.wire.dispose();
 const run = async (scenario: ReplayScenario<World>): Promise<void> => { await replay(scenario, { limit: 64, order: process.env["REPLAY_ORDER"] }); };
-
-function fitEpoch(): ReplayScenario<World> {
-  return {
-    name: "fitEpoch: delayed verdict and blocker preflight cross a memory change", create: async () => {
-      const w = await World.create();
-      await w.wire.step(() => w.wire.a.store.setState({ numCtx: FIT_CTX }));
-      return w;
-    }, dispose,
-    witnesses: [["fit.request", "gpu.change", "gpu.push-B", "gpu.push-A", "fit.old.ready", "fit.old.response", "fit.new.ready", "fit.new.response", "blockers.old.ready", "blockers.old.response"]],
-    events: [
-      event("fit.request", [], (w) => w.capture("fit.old", "fit.check", () => w.wire.a.session.ensureFit(MODEL, FIT_CTX), report("refuse", 1))),
-      // Input story: an already-requested fit crosses a later GPU reading.
-      event("gpu.change", ["fit.request"], noop, { emit: () => [frame("A", "gpu.push-A"), frame("B", "gpu.push-B")] }),
-      // gpu.changed calls invalidateFits, advancing fitEpoch and requesting a replacement.
-      event("gpu.push-A", ["gpu.change"], (w) => w.capture("fit.new", "fit.check", () => {
-        w.wire.a.socket.frame({ type: "push", channel: "gpu.changed", payload: { ...methodSamples["gpu.status"].result, measuredAt: 2 } });
-      }, report("fits", 2)), { delivery: true }),
-      event("gpu.push-B", ["gpu.change"], (w) => w.push(w.wire.b.socket, "gpu.changed", { ...methodSamples["gpu.status"].result, measuredAt: 2 }), { delivery: true }),
-      // app.ts fit.check awaits memory planning; its result may complete on either side of the push.
-      event("fit.old.ready", ["fit.request"], noop, { emit: () => [frame("A", "fit.old.response")] }),
-      // checkFit awaits turns.blocking for a refusal before applying the epoch guard.
-      event("fit.old.response", ["fit.old.ready"], (w) => w.capture("blockers.old", "turns.blocking", () => {
-        const reply = w.replies.get("fit.old"); if (!reply) throw new Error("Missing old fit"); w.replies.delete("fit.old"); reply();
-      }, [{ threadId: "busy", title: "Another reply", model: OLD_MODEL, turnId: "busy-turn" }]), { delivery: true }),
-      event("fit.new.ready", ["gpu.push-A"], noop, { emit: () => [frame("A", "fit.new.response")] }),
-      event("fit.new.response", ["fit.new.ready"], (w) => w.respond("fit.new"), { delivery: true }),
-      event("blockers.old.ready", ["fit.old.response"], noop, { emit: () => [frame("A", "blockers.old.response")] }),
-      event("blockers.old.response", ["blockers.old.ready"], (w) => w.respond("blockers.old"), { delivery: true }),
-    ],
-    check(w, order) {
-      const state = w.wire.a.store.getState();
-      if (order.includes("fit.new.response")) {
-        expect(state.fits[KEY], "an old fit/preflight cannot replace the new memory verdict").toMatchObject({ verdict: "fits", measuredAt: 2 });
-        expect(state.stopFrees[KEY], "stale preflight cannot tell Send to stop another reply").toBeUndefined();
-      }
-    },
-  };
-}
 
 function preloadChoice(): ReplayScenario<World> {
   return {
@@ -279,7 +239,6 @@ function pullTimeout(): ReplayScenario<World> {
   };
 }
 
-it("fitEpoch rejects stale fit and blocker results", () => run(fitEpoch()));
 it("preload rejects a superseded model choice", () => run(preloadChoice()));
 it("modelsOrder rejects an old model refresh after a push", () => run(modelRefresh()));
 it("lostTurn clears off-screen marks across completion and hydration", () => run(offscreenReconnect()));

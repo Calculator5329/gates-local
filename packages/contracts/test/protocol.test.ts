@@ -78,8 +78,8 @@ describe("boundary refusals", () => {
       ["threads.get", {}],
       ["threads.get", { threadId: 4 }],
       ["threads.rename", { threadId: "t1" }],
-      ["fit.check", { model: "m", numCtx: 0 }],
-      ["fit.check", { model: "m", numCtx: 1.5 }],
+      ["turns.blocking", { model: "m", numCtx: 0 }],
+      ["turns.blocking", { model: "m", numCtx: 1.5 }],
       ["chat.send", { threadId: "t1", content: "x", model: "m" }],
       ["threads.list", null],
     ];
@@ -126,7 +126,7 @@ export function compileOnlyContractChecks(): void {
     // @ts-expect-error threadId is required
     encodeRequest("1", "threads.get", {});
     // @ts-expect-error numCtx is a number
-    encodeRequest("1", "fit.check", { model: "m", numCtx: "16k" });
+    encodeRequest("1", "turns.blocking", { model: "m", numCtx: "16k" });
     // @ts-expect-error not a method
     encodeRequest("1", "threads.nuke", {});
     // @ts-expect-error not a channel

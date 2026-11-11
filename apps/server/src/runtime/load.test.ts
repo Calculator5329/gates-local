@@ -742,7 +742,8 @@ describe("R2-01: a resident model's measured memory counts only at its proven co
   const SHOW_9B = JSON.parse(readFileSync(new URL("../fit/fixtures/show-qwen3-5-9b.json", import.meta.url), "utf8")) as unknown;
   /** The real loader and the real fit check over a fake Ollama, a full GPU and no free RAM. */
   async function fullMachine(contextLength: number | undefined) {
-    const entry = { name: "qwen3.5:9b", size: GB, size_vram: GB, ...(contextLength === undefined ? {} : { context_length: contextLength }) };
+    // Wholly on the GPU: it holds at least its 6.6 GB of weights there, so its measurement counts.
+    const entry = { name: "qwen3.5:9b", size: 7 * GB, size_vram: 7 * GB, ...(contextLength === undefined ? {} : { context_length: contextLength }) };
     const s = await startFakeServer({
       "GET /api/ps": (_b, res) => json(res, 200, { models: [entry] }),
       "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: "qwen3.5:9b", size: 6594474711, digest: "a", modified_at: "2026-11-01T00:00:00Z" }] }),

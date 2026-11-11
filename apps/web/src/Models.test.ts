@@ -9,10 +9,9 @@ const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({
   NA: "na",
   useStore: (fn: (s: unknown) => unknown) => fn(store.state),
-  fitKey: (m: string, c: number) => `${m}@${c}`,
   setState: () => undefined,
 }));
-vi.mock("./session.ts", () => Object.fromEntries(["ensureFit", "leaveSettings", "pull", "cancelPull", "updateSettings", "removeModel"].map((name) => [name, () => undefined])));
+vi.mock("./session.ts", () => Object.fromEntries(["leaveSettings", "pull", "cancelPull", "updateSettings", "removeModel"].map((name) => [name, () => undefined])));
 vi.mock("./FitPanel.tsx", () => ({ shortGpu: (name: string) => name }));
 
 const { ModelsPage } = await import("./Models.tsx");
@@ -27,6 +26,12 @@ const fit = (model: string, verdict: "spills" | "refuse", needGb: number) => ({
   verdict,
   source: "estimate",
   measuredAt: 0,
+});
+/** A fit table of these reports, from one reading. */
+const tableOf = (...reports: readonly object[]) => ({
+  reading: { boot: "b", seq: 1, measuredAt: 0 },
+  memory: { kind: "cpu" },
+  rows: reports.map((r) => ({ ...r, stops: [] })),
 });
 const installed = (name: string) => ({ name, digest: name, sizeBytes: 5 * GIB, modifiedAt: "", capabilities: ["completion"] });
 const entry = (name: string, label: string, verdict: "spills" | "refuse", needGb: number) => ({
@@ -43,7 +48,7 @@ const noGpuComputer = (over: object) => ({
   gpu: { vendor: "none" },
   models: [installed("qwen3.5:4b"), installed("huge:1t")],
   catalog,
-  fits: { "qwen3.5:4b@16384": fit("qwen3.5:4b", "spills", 6), "huge:1t@16384": fit("huge:1t", "refuse", 900) },
+  fitTable: tableOf(fit("qwen3.5:4b", "spills", 6), fit("huge:1t", "refuse", 900)),
   numCtx: 16384,
   pulls: {},
   unavailable: {},
@@ -58,31 +63,49 @@ const render = (state: object) => {
 /** Every mention of a GPU left once the page's own "no supported GPU" is set aside, with its surroundings. */
 // The group title, with or without its explaining tooltip around the word.
 const RECOMMENDED = /class="grp-t">(?:<span[^>]*>)?Recommended</;
+/** An installed row's Fit cell: a placeholder inside it, or a word. */
+const fitCell = (html: string) => html.match(/<span class="mp-fit(?: [^"]*)?"[^>]*>[\s\S]*?<\/span><\/span>|<span class="mp-fit(?: [^"]*)?"[^>]*>[^<]*<\/span>/)?.[0] ?? "";
 const gpuPromises =(html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
-  it("PL-01: catalog-only downloads wait for a checked verdict, grouped once from the catalog's estimate", () => {
-    // The group comes from the catalog's own estimate so a fit reply never
-    // moves the row; the verdict words wait for the check (docs/design.md).
+  it("PL-01: catalog-only downloads wait for the fit table, never grouped or worded from the catalog's own estimate", () => {
+    // Before the table the groups' placeholder stands where both groups will be (docs/design.md);
+    // the catalog's estimate says "spills" and must not leak through as a verdict.
     const offered = entry("qwen3.5:4b", "Qwen 3.5 4B", "spills", 6);
-    const pending = render(noGpuComputer({ models: [], addPage: true, fits: {}, catalog: [offered] }));
-    expect(pending).toContain("Qwen 3.5 4B");
-    expect(pending).toContain("Rechecking");
+    const pending = render(noGpuComputer({ models: [], addPage: true, fitTable: undefined, catalog: [offered] }));
+    expect(pending).toContain('aria-busy="true"');
+    expect(pending).toContain("data-skel");
     expect(pending).not.toContain('class="vl spill"');
-    expect(pending).toMatch(RECOMMENDED);
+    expect(pending).not.toMatch(RECOMMENDED);
     expect(pending).not.toContain("Also available · uses system memory");
-    const refused = render(noGpuComputer({ models: [], addPage: true, fits: {}, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
+    const refused = render(noGpuComputer({ models: [], addPage: true, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
     expect(refused).not.toMatch(RECOMMENDED);
     const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
     expect(checked).toContain('class="vl spill"');
     expect(checked).toMatch(RECOMMENDED);
-    expect(checked).not.toContain("Rechecking");
+    expect(checked).not.toContain("data-skel");
   });
 
-  it("PL-01: embedding models without catalog reports have no pending chat-fit advice", () => {
-    const html = render(noGpuComputer({ models: [{ ...installed("embed:latest"), capabilities: ["embedding"] }], catalog: [], fits: {} }));
+  it("PL-01: an installed model's fit waits on a placeholder before the table, and says – when the table has no reading for it", () => {
+    const pending = fitCell(render(noGpuComputer({ models: [installed("qwen3.5:4b")], fitTable: undefined })));
+    expect(pending).toContain('aria-busy="true"');
+    expect(pending).toContain("data-skel");
+    const none = fitCell(render(noGpuComputer({ models: [installed("qwen3.5:4b")], fitTable: tableOf() })));
+    expect(none).toContain("–");
+    expect(none).not.toContain("data-skel");
+  });
+
+  it("with nothing installed, the suggested download is the one the table says runs here, not the catalog's own estimate", () => {
+    // the catalog estimated Qwen spills and Huge refuses; the table's reading says the opposite
+    const html = render(noGpuComputer({ models: [], fitTable: tableOf(fit("qwen3.5:4b", "refuse", 6), fit("huge:1t", "spills", 9)) }));
+    expect(html).toContain("We suggest <b>Huge</b>");
+    expect(html).not.toContain("We suggest <b>Qwen 3.5 4B</b>");
+  });
+
+  it("PL-01: embedding models have no chat-fit advice, not even a skeleton", () => {
+    const html = render(noGpuComputer({ models: [{ ...installed("embed:latest"), capabilities: ["embedding"] }], catalog: [], fitTable: undefined }));
     expect(html).toContain("Embedding model, not for chat");
-    expect(html).not.toMatch(/Checking|Rechecking/);
+    expect(html).not.toMatch(/Checking|data-skel/);
   });
   it("catalog hydration replaces the raw name consistently on the row and its More control", () => {
     const early = render(noGpuComputer({ catalog: undefined }));
@@ -97,7 +120,7 @@ describe("Models on a computer with no supported GPU", () => {
     const name = "qwen3:14b";
     const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };
     const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
-      catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fits: { [`${name}@65536`]: measured } }));
+      catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fitTable: tableOf(measured) }));
     expect(html).toMatch(/measured 9\.0(?:&#160;| | )GB at 64k/);
     expect(html).not.toContain("Measured after the first load");
   });
@@ -107,7 +130,7 @@ describe("Models on a computer with no supported GPU", () => {
     const at64 = { ...fit(name, "spills", 15), numCtx: 65536, freeVramBytes: 12 * GIB, spillRamBytes: 3 * GIB };
     const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
-      fits: { [`${name}@65536`]: at64 } }));
+      fitTable: tableOf(at64) }));
     expect(html).toContain("Uses system memory · slower");
     expect(html).toMatch(/est\. 15\.0(?:&#160;| | )GB at 64k/);
     expect(html).not.toContain("Runs on GPU");
@@ -156,7 +179,7 @@ describe("Models with a model whose window is smaller than the default", () => {
         gpu: { vendor: "nvidia", name: "Test GPU" },
         models: [{ ...installed(tag), maxContext: 2048 }],
         catalog: [],
-        fits: { [`${tag}@16384`]: report },
+        fitTable: tableOf(report),
         settings: { defaultModel: tag },
       }),
     );

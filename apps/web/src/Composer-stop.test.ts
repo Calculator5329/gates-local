@@ -20,7 +20,7 @@ vi.mock("./store.ts", async (original) => {
   return { ...store, useStore: <T,>(selector: (s: State) => T): T => selector(store.getState()) };
 });
 vi.mock("./session.ts", () => ({
-  ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued", "ensureFit", "openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
+  ...Object.fromEntries(["cancelQueuedEdit", "cancelStopAsk", "confirmStopAsk", "editQueued", "openSettings", "pickModel", "pull", "removeQueued", "send", "sendQueuedNow", "setContext", "stop", "recheckRuntime"].map((name) => [name, vi.fn()])),
   firstPull: () => undefined,
   queueReason: () => null,
 }));

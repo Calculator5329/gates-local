@@ -320,7 +320,8 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     },
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
     "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 6_600_000_000, digest: "d", modified_at: "2026-11-01T00:00:00Z" }] }),
-    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 1, size_vram: 1, context_length: 16384 }] }),
+    // Wholly on the GPU and at least its weights: a measurement of the whole model.
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [{ name: MODEL, size: 7_000_000_000, size_vram: 7_000_000_000, context_length: 16384 }] }),
     "POST /api/show": (_b, res) => json(res, 200, SHOW),
     ...routes,
   });
@@ -1097,7 +1098,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     await r.done();
   });
 
-  it("R5-03: ~1 GB free, an idle 9 GB model, RAM under its margin: fit.check, a preload and chat.send give one verdict", async () => {
+  it("R5-03: ~1 GB free, an idle 9 GB model, RAM under its margin: the fit table, a preload and chat.send give one verdict", async () => {
     const Z = "llama3.1:8b";
     const r = await rig(
       {
@@ -1111,7 +1112,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       },
       { fit: { runNvidiaSmi: smi(1000), readMeminfo: async () => "MemAvailable: 1000000 kB\n" } },
     );
-    expect(await r.app.handlers["fit.check"]({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ verdict: "fits" });
+    const table = await r.app.handlers["fit.table"]({}, ctx);
+    expect(table.rows.find((row) => row.model === Y && row.numCtx === 16384)).toMatchObject({ verdict: "fits" });
     expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
     const y = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
     await until(() => r.events.some((e) => e.turnId === y.turnId && e.type === "done"));

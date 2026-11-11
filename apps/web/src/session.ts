@@ -14,7 +14,7 @@ import { createChat } from "./session/chat.ts";
 import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
 import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
-import { createFit, staleFitReports, staleFitStatus } from "./session/fit.ts";
+import { newerTable } from "./fit-table.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
 import { applyTextSize, applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
 import { createSettingsReads } from "./session/settings-reads.ts";
@@ -35,8 +35,10 @@ export const applyServerEvent = createServerState(getState, setState);
 
 const connection = createConnection({ applyServerEvent,
   serverUrl, webServerUrl, desktopBridge: () => window.gatesLocal, hydrate,
-  beforeDisconnect: () => markFitsStale(),
   afterDisconnect: () => {
+    // A lost connection withdraws the fit table: until the next server's own table is in, every
+    // fit value waits on its placeholder, as before the first table.
+    applyServerEvent({ fitTable: undefined });
     settingsSession.disconnected();
     lostTurn();
   },
@@ -57,9 +59,12 @@ const threadSession = createThreads({ applyServerEvent,
 export const { reloadThread, renameThread, deleteThread, waitForThreadDeletion, preloadThread } = threadSession;
 const { noteMessage, loadThread, restoreSaved, loading, createThread, untrackedDone, imageSaved } = threadSession;
 
-const fitSession = createFit({ applyServerEvent, call, blockingFor, isStopped: () => connection.stopped });
-export const { currentFit, fitIsCurrent, ensureFit } = fitSession;
-const { markFitsStale, invalidateFits } = fitSession;
+/**
+ * The last fit table stays until a newer reading replaces it; a late push or answer never does.
+ * A closed connection rejects its unanswered calls, so nothing it asked for lands after the
+ * disconnect has withdrawn the table.
+ */
+const fitTableArrived = (fitTable: Payload<"fit.changed">) => applyServerEvent((s) => (newerTable(fitTable, s.fitTable) ? { fitTable } : {}));
 
 const chat = createChat({ applyServerEvent,
   call, codeOf,
@@ -69,13 +74,13 @@ const chat = createChat({ applyServerEvent,
   loading,
   noteMessage, withMessage,
   untrackedDone,
-  openThread: (threadId) => openThread(threadId), blockingFor, invalidateFits,
+  openThread: (threadId) => openThread(threadId), blockingFor,
 });
 export const { send, confirmStopAsk, stop, retry, sendQueuedNow, cancelQueuedEdit } = chat;
 const { onChatEvent, lostTurn, catchUp, activeTurns, flushQueued } = chat;
 
 const modelsSession = createModels({ applyServerEvent,
-  call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued,
+  call, probe, act, isNA, restoreSaved, flushQueued,
   blockingFor,
 });
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
@@ -88,7 +93,7 @@ const { settingsPatch } = settingsSession;
 // ---------------------------------------------------------------- hydrate and pushes
 
 /** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status, models.speed). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "sources.changed", "image.status", "update.changed", "models.speed"]);
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "image.status", "update.changed", "models.speed"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -138,7 +143,8 @@ async function hydrateWith(
   on("runtime.changed", modelsSession.runtimeChanged);
   on("models.changed", modelsSession.modelsChanged);
   on("threads.changed", ({ threadId }) => threadSession.threadsChanged(threadId));
-  on("gpu.changed", fitSession.gpuChanged);
+  on("gpu.changed", (gpu) => applyServerEvent({ gpu }));
+  on("fit.changed", fitTableArrived);
   on("models.pull", modelsSession.pullChanged);
   on("models.load", modelsSession.loadChanged);
   on("models.speed", (list) => applyServerEvent((s) => speedsChanged(s, list)));
@@ -178,17 +184,15 @@ async function hydrateWith(
   ]);
   const models = modelsOrder.current(ticket) ? listed : undefined;
   const runtime = runtimeOrder.current(statusTicket) ? status : undefined;
-  markFitsStale();
   const settings = settingsSession.endHydration(snapshot);
   settingsSession.noteVoiceSnapshot(settings);
   applyServerEvent((s) => {
     const withSettings = settings === NA || settings === undefined ? { settings } : settingsPatch(s, settings, true);
     const ordered = threadSession.listOrder.current(listTicket) ? sortThreads(threads) : s.threads;
-    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), fits: { ...s.fits }, staleFits: staleFitReports(s), fitStatus: staleFitStatus(s), ...withSettings };
+    const next: State = { ...s, runtime: runtime ?? s.runtime, models: models ?? s.models, pulls: settlePulls(reconcilePulls(s.pulls, pendingPulls), models ?? s.models), threads: ordered, ...activeTurns(s, active), ...withSettings };
     return { ...next, ...decided(modelChoice(next)) };
   });
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
-  ensureFit(getState().model, getState().numCtx);
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
   applyTextSize(settings === NA || settings === undefined ? undefined : settings.textSize);
@@ -197,6 +201,9 @@ async function hydrateWith(
 
   const catalogTicket = catalogOrder.next();
   const updateTicket = updateOrder.next();
+  // The fit table waits for nothing and nothing waits for it: until it lands every fit value is a
+  // skeleton, and a pushed table that is newer wins whichever arrives first.
+  void probe("fit.table", {}).then((fitTable) => { if (fitTable !== undefined && fitTable !== NA) fitTableArrived(fitTable); });
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
   const presetsTicket = presetsOrder.next();

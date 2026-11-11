@@ -57,7 +57,7 @@ import { createImportActivity, withImportAdmission } from "./sources/activity.ts
 import { createLibraryImports, type ImportsDeps } from "./sources/imports.ts";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
-import { ORDERED_DOMAINS } from "@gates-local/contracts";
+import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
 import { imageToolChoice } from "./image/presets.ts";
@@ -175,11 +175,17 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   // One lease for the process: chat turns and loads share it, image jobs hold it alone.
   const gpuLease = createGpuLease();
   let services: ModelServices;
+  // The fit table follows the GPU watcher's readings and the loader's loads (bound once the app exists).
+  let fitTable: App["fitTable"] | undefined;
   try {
     services = await createModelServices({
       admit: admission.admit,
       dataDir,
-      push: (channel, payload, changes) => server?.push(channel, payload, changes),
+      push: (channel, payload, changes) => {
+        server?.push(channel, payload, changes);
+        if (channel === "gpu.changed") fitTable?.changed();
+        if (channel === "models.load") fitTable?.load(payload as Payload<"models.load">);
+      },
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
         ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),
@@ -283,6 +289,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     models: services,
     log,
   });
+  fitTable = app.fitTable;
   const stopAutomatic = automaticChecks({
     desktop: process.env["GATES_LOCAL_DESKTOP"] === "1",
     enabled: () => services.settings.get().updateAutomatic !== false,

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import type { FitRow, FitTable } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import type { State } from "../src/store.ts";
 import { installBrowser, tick, until } from "./harness.ts";
@@ -9,9 +10,13 @@ vi.mock("../src/store.ts", async (original) => {
   const actual = await original<typeof import("../src/store.ts")>();
   return { ...actual, useStore: <T>(selector: (s: State) => T) => selector(actual.getState()) };
 });
-import { fitKey, getState, setState } from "../src/store.ts";
+import { getState, setState } from "../src/store.ts";
 
-const report = methodSamples["fit.check"].result;
+const sample = methodSamples["fit.table"].result;
+const row = sample.rows[0]!;
+const MODEL = row.model;
+const at = (numCtx: number, over: Partial<FitRow> = {}): FitRow => ({ ...row, numCtx, verdict: "fits", ...over });
+const tableOf = (rows: FitRow[], seq = 1): FitTable => ({ ...sample, reading: { ...sample.reading, seq }, rows });
 let GpuMemory: typeof import("../src/FitPanel.tsx")["GpuMemory"];
 const html = () => renderToStaticMarkup(createElement(GpuMemory));
 const text = () => html().replace(/<div(?=[^>]*aria-hidden="true")[^>]*>[\s\S]*?<\/div><\/div>/g, "").replace(/<[^>]*>/g, " ").replaceAll("&#x27;", "'");
@@ -24,16 +29,16 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
   setState({
     conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result,
-    model: report.model, numCtx: 65536, models: [{ ...methodSamples["models.list"].result[0]!, name: report.model }],
+    model: MODEL, numCtx: 65536, models: [{ ...methodSamples["models.list"].result[0]!, name: MODEL }],
     settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 16384 },
     fitPanel: { model: null }, gpu: methodSamples["gpu.status"].result,
-    fits: { [fitKey(report.model, 16384)]: { ...report, numCtx: 16384, verdict: "fits" } },
+    fitTable: tableOf([at(16384)]),
   });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 it("describes the selected chat's 64k breakdown while the saved default stays 16k", () => {
-  setState(s => ({ fits: { ...s.fits, [fitKey(report.model, 65536)]: { ...report, numCtx: 65536, verdict: "refuse", needVramBytes: report.freeVramBytes + 1024 ** 3 } } }));
+  setState({ fitTable: tableOf([at(16384), at(65536, { verdict: "refuse", needVramBytes: row.freeVramBytes + 1024 ** 3 })]) });
   expect(text()).toContain("Memory at 64k context");
   expect(text()).toContain("Needs");
   expect(text()).toContain("more at 64k");
@@ -42,41 +47,37 @@ it("describes the selected chat's 64k breakdown while the saved default stays 16
   expect(getState().settings).toMatchObject({ defaultNumCtx: 16384 });
 });
 
-it("does not borrow the saved default's fits verdict while the selected size is pending or failed", () => {
-  expect(text()).toContain("Checking GPU memory");
-  setState(s => ({ fits: { ...s.fits, [fitKey(report.model, 65536)]: "error" } }));
-  expect(text()).toContain("couldn't check GPU memory");
-  expect(text()).not.toContain("Runs well");
+it("does not borrow the saved default's fits verdict when the table has no row for the selected size", () => {
+  expect(text()).toContain("No GPU memory reading");
+  expect(text()).not.toMatch(/run(s)? well/i);
+});
+
+it("shows a skeleton, not words, before the first table", () => {
+  setState({ fitTable: undefined });
+  expect(html()).toContain("fit-skel");
+  expect(text()).not.toContain("Checking");
 });
 
 it("labels the clamped size that will actually be sent", () => {
-  setState(s => ({ models: s.models?.map(m => ({ ...m, maxContext: 32768 })), fits: { [fitKey(report.model, 65536)]: { ...report, numCtx: 32768 } } }));
+  setState(s => ({ models: s.models?.map(m => ({ ...m, maxContext: 32768 })), fitTable: tableOf([at(32768)]) }));
   expect(text()).toContain("Memory at 32k context");
   expect(text()).not.toContain("Memory at 64k context");
 });
 
-it("withholds a previous fits verdict while free memory is being checked again", async () => {
+it("a pushed table changes the verdict in place, with no checking state between", async () => {
   const b = installBrowser();
+  b.server.answer("fit.table", () => tableOf([at(65536)], 1));
   const session = await import("../src/session.ts");
-  b.server.answer("fit.check", ({ numCtx }) => ({ ...report, numCtx, verdict: "fits" }));
   const disconnect = session.connect();
   try {
-    await until(() => getState().imageStatus !== undefined);
-    setState({ model: report.model, numCtx: 65536, fits: {}, settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 65536 } });
-    session.ensureFit(report.model, 65536);
-    await until(() => getState().fits[fitKey(report.model, 65536)] !== undefined);
-    expect(text()).toContain("Runs well");
-    const next = b.server.hold("fit.check");
-    b.server.push("gpu.changed", methodSamples["gpu.status"].result);
-    const held = await next;
-    expect(text()).toContain("Rechecking");
-    expect(text()).not.toContain("Runs well");
-    held.respond({ ...report, numCtx: 65536, verdict: "refuse" });
-    await until(() => {
-      const r = getState().fits[fitKey(report.model, 65536)];
-      return r !== undefined && r !== "error" && r.verdict === "refuse";
-    });
+    setState({ fitTable: undefined });
+    await until(() => getState().fitTable !== undefined);
+    setState({ model: MODEL, numCtx: 65536, settings: { ...methodSamples["settings.get"].result, defaultNumCtx: 65536 } });
+    expect(text()).toContain("Should run well");
+    b.server.push("fit.changed", tableOf([at(65536, { verdict: "refuse", needVramBytes: row.freeVramBytes + 1024 ** 3 })], 2));
+    await until(() => getState().fitTable?.reading.seq === 2);
     expect(text()).toContain("more at 64k");
+    expect(text()).not.toContain("run well");
   } finally {
     disconnect();
     b.server.accepting = false;

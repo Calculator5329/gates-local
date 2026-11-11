@@ -171,8 +171,9 @@ gets noticed in review. A missing entry, missing stylesheet href or asset, or
 unmeasurable size still fails. Timing comparisons remain informational too.
 
 Picker-only styles load with its dynamic import. Settings and first run still
-warm after first paint; the picker warms only on pointer/focus intent or open,
-so idle warming does not fetch its stylesheet. Vite waits for that stylesheet
+warm after first paint; the picker's code loads only on pointer/focus intent or
+open, so idle warming does not fetch its stylesheet, and its fit values come
+from the last fit table the server pushed, so it asks for none. Vite waits for that stylesheet
 before resolving the picker module. A failed CSS or JS asset reaches the same
 reload screen, whose frame remains in startup CSS. Deferred selectors are
 picker-scoped; their phone overrides follow their base rules, and loading the

@@ -58,11 +58,14 @@ describe("real module outputs survive the wire", () => {
         measuredAt: 1_762_520_000_000,
       });
       expect(report.verdict).toBe(c.name);
-      const frame = encodeResult("req-1", "fit.check", report);
+      // A fit table row is the report without its reading, which the table holds once.
+      const { measuredAt, ...row } = report;
+      const table = { reading: { boot: "b", seq: 1, measuredAt }, memory: { kind: "cpu" as const }, rows: [{ ...row, stops: [] }] };
+      const frame = encodeResult("req-1", "fit.table", table);
       if (!frame.ok) throw frame.error;
-      const back = decodeResult("fit.check", JSON.parse(frame.value).result);
+      const back = decodeResult("fit.table", JSON.parse(frame.value).result);
       if (!back.ok) throw back.error;
-      expect(back.value).toEqual(report);
+      expect(back.value).toEqual(table);
     });
   }
 

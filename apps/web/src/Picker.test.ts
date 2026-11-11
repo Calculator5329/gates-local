@@ -2,30 +2,33 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const mock = vi.hoisted(() => ({ state: undefined as unknown, stale: false }));
-vi.mock("./store.ts", () => ({ NA: "na", chatReady: () => true, useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, fitKey: (m: string, c: number) => `${m}@${c}`, streamingHere: () => false }));
-vi.mock("./session.ts", () => ({ ...Object.fromEntries(["ensureFit", "pickModel", "pull", "openSettings", "setContext", "firstPull", "queueReason"].map(name => [name, () => undefined])), currentFit: (r: unknown) => mock.stale ? undefined : r, fitIsCurrent: (r: unknown) => r !== undefined && r !== "error" && !mock.stale }));
+const mock = vi.hoisted(() => ({ state: undefined as unknown }));
+vi.mock("./store.ts", () => ({ NA: "na", chatReady: () => true, useStore: (fn: (s: unknown) => unknown) => fn(mock.state), getState: () => mock.state, setState: () => undefined, streamingHere: () => false }));
+vi.mock("./session.ts", () => Object.fromEntries(["pickModel", "pull", "openSettings", "setContext", "firstPull", "queueReason"].map(name => [name, () => undefined])));
 const { Picker, ContextMemory } = await import("./Picker.tsx");
 
-function markup(stale = false) {
-  mock.stale = stale;
+/** The picker for one installed model; `tabled`: the first fit table has arrived. */
+function markup(tabled = true) {
   const tag = "milo-e4b-v4:latest", gib = 1024 ** 3;
+  const row = { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [] };
   mock.state = {
     pop: { id: "picker", kb: true, ready: true }, unavailable: {}, numCtx: 16384, model: tag,
     models: [{ name: tag, digest: "test", sizeBytes: 5.37 * gib, modifiedAt: "", capabilities: ["completion", "thinking"], maxContext: 131072 }],
     catalog: [{ name: tag, label: "milo-e4b-v4", purpose: "Installed by you", installed: true, downloadBytes: 5.37 * gib, recommended: false }],
-    fits: { [`${tag}@16384`]: { model: tag, numCtx: 16384, freeVramBytes: 12.06 * gib, needVramBytes: 6.87 * gib, spillRamBytes: 0, verdict: "fits", source: "estimate", measuredAt: 0 } },
-    pulls: {}, loads: {}, stopFrees: {}, gpu: { vendor: "nvidia", freeVramBytes: 12.06 * gib }, settings: {},
+    fitTable: tabled ? { reading: { boot: "b", seq: 1, measuredAt: 0 }, memory: { kind: "gpu", freeBytes: 12.06 * gib, usableBytes: 12.06 * gib }, rows: [row] } : undefined,
+    pulls: {}, loads: {}, gpu: { vendor: "nvidia", freeVramBytes: 12.06 * gib }, settings: {},
   };
   return renderToStaticMarkup(createElement(Picker));
 }
 describe("approved model picker", () => {
-  it("TL-04: a stale report shows its previous cost without Fits, tint or settled tooltips", () => {
-    const html = markup(true);
+  it("before the first table every fit value is a skeleton, with no Fits, tint or settled tooltip", () => {
+    const html = markup(false);
     const context = html.match(/<button[^>]*data-ctx="16384"[\s\S]*?<\/button>/)?.[0];
     expect(context).toBeDefined();
-    expect(context).toContain("Previous check");
+    expect(context).toMatch(/class="pk-cost"><span class="skel fit-skel" data-skel="" aria-hidden="true"/);
+    expect(context).toContain('aria-busy="true"');
     expect(context).not.toContain("Fits");
+    expect(html).toContain("fit-skel");
     expect(html).not.toContain('class="pk-v gpu"');
     expect(html).not.toMatch(/fits on (?:the )?GPU/);
   });

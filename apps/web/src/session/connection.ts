@@ -8,7 +8,6 @@ interface ConnectionEffects {
   readonly webServerUrl: () => string | null;
   readonly desktopBridge: () => Window["gatesLocal"];
   readonly hydrate: (client: Client) => Promise<void>;
-  readonly beforeDisconnect: () => void;
   readonly afterDisconnect: () => void;
 }
 
@@ -43,8 +42,8 @@ function reasonOf(message: string): string {
   return `Gates Local refused it (${short.length > 120 ? `${short.slice(0, 117)}…` : short})`;
 }
 
-/** Domain cleanup stays with the session; its two hooks surround clearing the current client. */
-export function createConnection({ applyServerEvent, serverUrl, webServerUrl, desktopBridge, hydrate, beforeDisconnect, afterDisconnect }: ConnectionEffects) {
+/** Domain cleanup stays with the session; its hook runs once the current client is cleared. */
+export function createConnection({ applyServerEvent, serverUrl, webServerUrl, desktopBridge, hydrate, afterDisconnect }: ConnectionEffects) {
   /** Resolves on the bridge's next ready state, or after ms when there is no bridge. */
   function nextChance(ms: number): Promise<void> {
     return new Promise((resolve) => {
@@ -121,7 +120,6 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
           if (!stopped && client === c && ws.readyState === 1 && c.sync !== undefined) applyServerEvent({ hydrationSettled: true });
         });
         await c.closed;
-        beforeDisconnect();
         client = null;
         afterDisconnect();
       }

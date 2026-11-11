@@ -552,6 +552,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .meas{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 /* Warnings under the default-context control. */
 .ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
+/* Room for the longest verdict's warning, so switching context never moves the panel. */
 #gpuMemory .ctx-line{min-height:3em}
 @media(min-width:641px){.ctx-c{width:min-content}#gpuMemory .ctx-line{min-height:6em;align-self:stretch}}
 @media(max-width:640px){.fp-numbers{min-height:7.5em}.lg-r:has(>.sw-chat){min-height:calc(2lh + 8px)}}
@@ -1040,7 +1041,7 @@ a.btn{text-decoration:none}
 .dlrow+.dlrow{border-top:1px solid var(--border)}
 /* the maker mark sits 8 px before the name, as in the picker */
 .dlrow>.maker-mark{margin-right:-8px}
-/* Keep both verdict lines' space while rechecking, including the scroll anchor. */
+/* Keep both verdict lines' space before the first table too, including the scroll anchor. */
 .dl-v{flex:none;width:196px;min-height:44px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px;font-variant-numeric:tabular-nums}
 .dl-v small{font-size:12.5px;color:var(--muted-foreground)}
 .dl-a{flex:none;width:140px;display:flex;justify-content:flex-end;align-items:center;gap:8px}

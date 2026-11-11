@@ -28,7 +28,8 @@ function nodes(node: unknown): Node[] {
 }
 import { setState } from "../src/store.ts";
 
-const fit = methodSamples["fit.check"].result;
+const { stops: _rowOnly, ...sampleRow } = methodSamples["fit.table"].result.rows[0]!;
+const fit = { ...sampleRow, measuredAt: 0 };
 const model = methodSamples["models.list"].result[0]!;
 const pulls = { [fit.model]: { name: fit.model, state: "done" as const, completedBytes: model.sizeBytes, totalBytes: model.sizeBytes } };
 let DownloadTab: typeof import("../src/ModelDownloads.tsx")["DownloadTab"];
@@ -45,7 +46,8 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ model: fit.model, models: [], pulls, fits: {}, numCtx: 32768, pop: { id: "picker", kb: false, ready: true }, catalog: [{ name: fit.model, label: "Fixture model", purpose: "Fixture chat model", downloadBytes: model.sizeBytes, installed: false, recommended: false, fit }] });
+  // the table is in, so the Download tab's groups stand from the first render
+  setState({ model: fit.model, models: [], pulls, fitTable: { ...methodSamples["fit.table"].result, rows: [{ ...sampleRow, numCtx: 32768, stops: [] }] }, numCtx: 32768, pop: { id: "picker", kb: false, ready: true }, catalog: [{ name: fit.model, label: "Fixture model", purpose: "Fixture chat model", downloadBytes: model.sizeBytes, installed: false, recommended: false, fit }] });
 });
 afterEach(() => vi.unstubAllGlobals());
 

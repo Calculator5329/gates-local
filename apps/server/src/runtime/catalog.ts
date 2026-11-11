@@ -7,7 +7,7 @@
 import type { CatalogEntry, FitReport } from "@gates-local/contracts";
 import { estimateBeforeDownload, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
 import type { SettingsReader } from "../settings/store.ts";
-import { canonicalTag, CURATED_MODELS, type CuratedModel, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
+import { canonicalTag, CURATED_MODELS, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
 import { canChat } from "./pick.ts";
 import type { ModelInfo } from "./types.ts";
 
@@ -27,7 +27,7 @@ const withFit = (entry: Omit<CatalogEntry, "fit" | "recommended">, fit: FitRepor
   ...(fit === undefined ? {} : { fit }),
 });
 
-const preDownload = (c: CuratedModel, numCtx: number, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
+const preDownload = (c: Pick<CatalogEntry, "name" | "downloadBytes">, numCtx: number, survey: FitSurvey, fit: CatalogDeps["fit"]): FitReport =>
   estimateBeforeDownload({
     model: c.name,
     numCtx,
@@ -38,51 +38,42 @@ const preDownload = (c: CuratedModel, numCtx: number, survey: FitSurvey, fit: Ca
     ...(fit?.margins ? { margins: fit.margins } : {}),
   });
 
-/**
- * The catalog's pre-download estimate for one model offered for download, at any
- * context: the fit check's answer for a model not installed yet, so a download row
- * states its fit at the size the picker shows. Undefined for a model not offered.
- */
-export async function estimateOffered(deps: { baseUrl: string; fit?: CatalogDeps["fit"] }, model: string, numCtx: number): Promise<FitReport | undefined> {
-  const c = curated(model);
-  if (c === undefined || !c.pullable) return undefined;
-  const survey = await surveyFit({ ...deps.fit, baseUrl: deps.baseUrl, numCtx, models: [] });
-  return preDownload(c, numCtx, survey, deps.fit);
+/** A model the catalog lists, before its fit: the installed chat models, then the ones offered for download. */
+export type CatalogModel = Omit<CatalogEntry, "fit" | "recommended">;
+
+/** The models the catalog lists, from the installed list: the fit table states the same ones. */
+export function catalogModels(listed: readonly ModelInfo[]): CatalogModel[] {
+  const installed = listed.filter(canChat); // embedding models never chat; unknown ones wait for discovery
+  // Every installed name, chat or not: an installed model is never offered as a download (MP-01).
+  const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
+  const models: CatalogModel[] = [];
+  const byTag = new Map(installed.map((m) => [canonicalTag(m.name), m]));
+  for (const c of CURATED_MODELS) {
+    const own = byTag.get(c.name);
+    if (own) models.push({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true });
+    else if (c.pullable && !installedTags.has(c.name)) models.push({ name: c.name, label: c.label, purpose: c.purpose, downloadBytes: c.downloadBytes, installed: false });
+  }
+  for (const m of installed) {
+    if (!curated(m.name)) models.push({ name: m.name, label: modelLabel(m.name), purpose: OWN_MODEL_PURPOSE, downloadBytes: m.sizeBytes, installed: true });
+  }
+  return models;
 }
 
 export async function buildCatalog(deps: CatalogDeps): Promise<CatalogEntry[]> {
   const numCtx = deps.settings.get().defaultNumCtx;
   const baseUrl = deps.baseUrl();
-  const listed = baseUrl === undefined ? [] : await deps.installed();
-  const installed = listed.filter(canChat); // embedding models never chat; unknown ones wait for discovery
-  // Every installed name, chat or not: an installed model is never offered as a download (MP-01).
-  const installedTags = new Set(listed.map((m) => canonicalTag(m.name)));
+  const models = catalogModels(baseUrl === undefined ? [] : await deps.installed());
 
   let survey: FitSurvey | undefined;
   if (baseUrl !== undefined) {
     try {
-      survey = await surveyFit({ ...deps.fit, baseUrl, numCtx, models: installed.map((m) => m.name) });
+      survey = await surveyFit({ ...deps.fit, baseUrl, numCtx, models: models.filter((m) => m.installed).map((m) => m.name) });
     } catch (e) {
       deps.log?.(`catalog fit survey failed: ${(e as Error).message}`);
     }
   }
 
-  const entries: CatalogEntry[] = [];
-  const byTag = new Map(installed.map((m) => [canonicalTag(m.name), m]));
-  for (const c of CURATED_MODELS) {
-    const own = byTag.get(c.name);
-    if (own) {
-      entries.push(withFit({ name: own.name, label: c.label, purpose: c.purpose, downloadBytes: own.sizeBytes, installed: true }, survey?.reports.get(own.name)));
-    } else if (c.pullable && !installedTags.has(c.name)) {
-      const fit = survey ? preDownload(c, numCtx, survey, deps.fit) : undefined;
-      entries.push(withFit({ name: c.name, label: c.label, purpose: c.purpose, downloadBytes: c.downloadBytes, installed: false }, fit));
-    }
-  }
-  for (const m of installed) {
-    if (curated(m.name)) continue;
-    entries.push(withFit({ name: m.name, label: modelLabel(m.name), purpose: OWN_MODEL_PURPOSE, downloadBytes: m.sizeBytes, installed: true }, survey?.reports.get(m.name)));
-  }
-
+  const entries = models.map((m) => withFit(m, m.installed ? survey?.reports.get(m.name) : survey && preDownload(m, numCtx, survey, deps.fit)));
   return markRecommended(entries, numCtx);
 }
 

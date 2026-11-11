@@ -24,21 +24,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it.each([false, true])("the trigger preserves a pending size choice (keyboard %s)", kb => {
-  const pop = probe.state.pop;
-  vi.stubGlobal("document", { getElementById: () => ({ getAttribute: () => "true" }) });
-  togglePop("picker", kb);
-  expect(probe.state.pop).toBe(pop);
-});
-
-it("the trigger closes normally after the size check is no longer pending", () => {
-  vi.stubGlobal("document", { getElementById: () => ({ getAttribute: () => null }) });
+it("the trigger closes an open picker", () => {
   togglePop("picker");
   expect(probe.state.pop).toBeNull();
 });
 
-it("a pending picker does not block switching to another popover", () => {
-  vi.stubGlobal("document", { getElementById: () => ({ getAttribute: () => "true" }) });
+it("the trigger switches from the picker to another popover", () => {
   togglePop("opts");
   expect(probe.state.pop).toEqual({ id: "opts", kb: false });
 });

@@ -13,7 +13,6 @@ interface ModelEffects {
   readonly act: Act;
   readonly isNA: (error: unknown) => boolean;
   readonly restoreSaved: () => void;
-  readonly invalidateFits: (hideOld?: boolean) => void;
   readonly flushQueued: () => void;
   readonly blockingFor: (model: string, numCtx: number) => Promise<readonly BlockingTurn[]>;
 }
@@ -47,7 +46,7 @@ export function modelChoice(s: State): ModelDecision {
 
 export const decided = (d: ModelDecision): Partial<State> => (d.kind === "keep" ? {} : { model: d.kind === "set" ? d.model : undefined });
 
-export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, invalidateFits, flushQueued, blockingFor }: ModelEffects) {
+export function createModels({ applyServerEvent, call, probe, act, isNA, restoreSaved, flushQueued, blockingFor }: ModelEffects) {
   const modelsOrder = newestOnly();
   const runtimeOrder = newestOnly();
   // A catalog asked before a later models.changed describes the list before it: only the newest lands.
@@ -70,12 +69,19 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
     applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
     restoreSaved();
     chooseModel();
-    invalidateFits();
     if (getState().catalog === undefined) void refreshCatalog();
   }
 
+  /** The server's last refusal of a pick, said in the status line; it leaves when the pick changes. */
+  let refusal: string | null = null;
+
   function pickModel(model: string): void {
-    setState((st) => ({ model, chosen: model, ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }) }));
+    setState((st) => ({
+      model,
+      chosen: model,
+      ...(st.threadId === null ? {} : { threadModels: { ...st.threadModels, [st.threadId]: model } }),
+      ...(refusal !== null && st.notice === refusal && st.model !== model ? { notice: null } : {}),
+    }));
     const s = getState();
     if (!s.unavailable["models.load"] && chatReady(s)) void preload(model, s.numCtx);
   }
@@ -88,7 +94,14 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
    */
   async function preload(model: string, numCtx: number): Promise<void> {
     if (Object.values(getState().turns).some((turn) => turn.model === model && turn.end === undefined)) return;
-    if ((await blockingFor(model, numCtx)).length === 0 && getState().model === model) void act("models.load", { model, numCtx }, `load ${model}`);
+    if ((await blockingFor(model, numCtx)).length !== 0 || getState().model !== model) return;
+    const r = await act("models.load", { model, numCtx }, `load ${model}`);
+    // The pick passed on this client's table; the server refused it on its own, newer reading.
+    // Say why once, in the status line under the box the pick was made from, while it is still the pick.
+    if (r.ok && r.value.state === "error" && r.value.message !== undefined && getState().model === model) {
+      refusal = r.value.message;
+      setState({ notice: refusal });
+    }
   }
 
   async function pull(name: string): Promise<string | null> {
@@ -145,7 +158,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
       runtimeOrder.next(); // and a runtime.status asked before it is older than this (MP4-03)
       applyServerEvent({ runtime });
       if (runtime.state === "ready") {
-        invalidateFits();
         flushQueued();
         void refreshModels();
       }
@@ -153,16 +165,9 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
 
   function modelsChanged(models: Payload<"models.changed">): void {
       modelsOrder.next();
-      const previous = getState().models;
-      // Saving context changes pick advice, not the files the fit answers describe.
-      const filesChanged = previous?.length !== models.length || models.some(m => {
-        const old = previous?.find(p => p.name === m.name);
-        return !old || old.digest !== m.digest || old.sizeBytes !== m.sizeBytes || old.maxContext !== m.maxContext;
-      });
       applyServerEvent((s) => ({ models, pulls: settlePulls(s.pulls, models) }));
       restoreSaved();
       chooseModel();
-      if (filesChanged) invalidateFits();
       flushQueued();
       // The catalog's Installed marks follow the list: a removal or a runtime
       // switch (the app's own copy has its own models) must not leave them stale.
@@ -176,8 +181,6 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
 
   function loadChanged(l: Payload<"models.load">): void {
       applyServerEvent((s) => ({ loads: { ...s.loads, [l.model]: l } }));
-      // a failed load may have freed what it took, so it changes memory too
-      if (l.state === "ready" || l.state === "unloaded" || l.state === "error") invalidateFits(false);
   }
 
   return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels,

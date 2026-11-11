@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Locator, Page } from "@playwright/test";
-import { decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
+import { decodeRequest } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, type Frame, transitionMetrics } from "./flicker-probe.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
@@ -23,21 +23,20 @@ async function mark(locator: Locator, key: string) {
   await locator.evaluate((el, id) => { (el as HTMLElement).dataset["flickerBox"] = id; }, key);
 }
 
-/** Holds every fit.check reply until `release` runs. */
+/** Holds the fit table, its answer and its pushes, until `release` runs. */
 async function holdFits(page: Page) {
   const held: Array<() => void> = [];
   let holding = true;
   await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
     const server = ws.connectToServer();
-    const fits = new Set<unknown>();
+    const fits = fitTraffic();
     ws.onMessage(message => {
-      const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-      if (request.method === "fit.check") fits.add(request.id);
+      fits.sent(JSON.parse(String(message)) as { method?: unknown; id?: unknown });
       server.send(message);
     });
     server.onMessage(message => {
-      const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
-      if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
+      const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown; channel?: unknown };
+      if (fits.is(response) && holding) held.push(() => ws.send(message));
       else ws.send(message);
     });
   });
@@ -99,27 +98,24 @@ const ownRow = (group: Locator, kind: string, label: string) => group.locator(ki
 const boxFor = (page: Page, control: Locator) => page.locator(".set .grp").filter({ has: control }).locator(":scope > .box");
 const nounOf = (kind: string) => kind === "sqlite" ? "database" : kind;
 
-async function refuseAction(page: Page, method: string, holdFitsUntilAction = false) {
+/** The fit table's answer and its pushes, which the routes below hold back. */
+function fitTraffic() {
+  const asked = new Set<unknown>();
+  return {
+    sent(request: { method?: unknown; id?: unknown }) { if (request.method === "fit.table") asked.add(request.id); },
+    is(message: { type?: unknown; id?: unknown; channel?: unknown }) { return (message.type === "response" && asked.delete(message.id)) || (message.type === "push" && message.channel === "fit.changed"); },
+  };
+}
+
+async function refuseAction(page: Page, method: string) {
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
     const server = ws.connectToServer();
-    const fits = new Set<unknown>();
-    const held: Array<() => void> = [];
-    let holding = holdFitsUntilAction;
     ws.onMessage((message) => {
       const req = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-      if (req.method === "fit.check" && holding) fits.add(req.id);
-      if (req.method === method) {
-        holding = false;
-        for (const deliver of held.splice(0)) deliver();
-        setTimeout(() => ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: "Fixture action refused." } })), 150);
-      }
+      if (req.method === method) setTimeout(() => ws.send(JSON.stringify({ type: "response", id: req.id, ok: false, error: { code: "internal", message: "Fixture action refused." } })), 150);
       else server.send(message);
     });
-    server.onMessage((message) => {
-      const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
-      if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
-      else ws.send(message);
-    });
+    server.onMessage((message) => ws.send(message));
   });
 }
 
@@ -183,32 +179,6 @@ for (const width of [1440, 360]) {
     });
 
     test("expanded GPU details keep their size when the verdict changes to spill", async ({ page, open }) => {
-      let holding = false;
-      let invalidate: (() => void) | undefined;
-      let gpuSnapshot: unknown;
-      const held: Array<() => void> = [];
-      await page.routeWebSocket(/.*/, (ws) => {
-        const server = ws.connectToServer();
-        const checks = new Set<unknown>();
-        let gpuRequest: unknown;
-        ws.onMessage((message) => {
-          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-          if (typeof request.method === "string") invalidate = () => {
-            if (gpuSnapshot === undefined) throw new Error("A measured GPU snapshot is required before invalidation");
-            holding = true;
-            ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpuSnapshot }));
-          };
-          if (request.method === "gpu.status") gpuRequest = request.id;
-          if (request.method === "fit.check") checks.add(request.id);
-          server.send(message);
-        });
-        server.onMessage((message) => {
-          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown; result?: unknown };
-          if (response.type === "response" && response.id === gpuRequest) gpuSnapshot = response.result;
-          if (response.type === "response" && checks.delete(response.id) && holding) held.push(() => ws.send(message));
-          else ws.send(message);
-        });
-      });
       await open();
       await waitReady(page);
       await page.keyboard.press("Control+Comma");
@@ -220,55 +190,12 @@ for (const width of [1440, 360]) {
       const verdict = gpu.locator(".fp-v:visible");
       await expect(verdict).toHaveCount(1);
       await expect(verdict).toBeVisible();
-      await expect(verdict).not.toContainText("Checking");
+      await expect(gpu.locator(".fit-skel")).toHaveCount(0);
       await expect(gpu.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /.+/);
-      await expect(gpu.locator('[data-ctx="65536"]')).not.toHaveAttribute("data-tip", "Checking…");
-      await expect.poll(() => gpuSnapshot !== undefined).toBe(true);
       const details = gpu.locator("details.fp-more");
       await details.locator("summary").click();
       await expect(details).toHaveJSProperty("open", true);
       await mark(details, "gpu-details");
-      try {
-        const refresh = await burst(page, `r2-${width}/gpu-refresh`, "#gpuMemory", async () => {
-          if (!invalidate) throw new Error("The app socket must be connected before invalidation");
-          invalidate();
-          await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(1);
-          await expect(verdict).toHaveCount(1);
-          await expect(verdict).toHaveText("Rechecking…");
-          await expect(details).toHaveJSProperty("open", true);
-          await expect(details.locator("summary")).toHaveText("Details · previous check");
-          await expect(details.locator(".fp-n").first()).toContainText("Previously fit on the GPU.");
-          const history = details.locator(".fp-mt").first();
-          await expect(history).toHaveText("Previous memory check");
-          const staleWords = /Runs entirely on the GPU|Where the memory goes/;
-          const accessible = await gpu.ariaSnapshot();
-          expect(accessible).toContain("Rechecking");
-          expect(accessible).toContain("Previous memory check");
-          expect(accessible).not.toMatch(staleWords);
-          const start = await verdict.boundingBox();
-          const end = await history.boundingBox();
-          if (!start || !end) throw new Error("Visible text endpoints are required for the selection check");
-          await page.mouse.move(start.x + 1, start.y + start.height / 2);
-          await page.mouse.down();
-          await page.mouse.move(end.x + end.width - 1, end.y + end.height / 2, { steps: 10 });
-          await page.mouse.up();
-          const selected = await page.evaluate(() => document.getSelection()?.toString() ?? "");
-          expect(selected).toContain("Rechecking");
-          expect(selected).toContain("Previous memory check");
-          expect(selected).not.toMatch(staleWords);
-          await page.evaluate(() => document.getSelection()?.removeAllRanges());
-          await page.screenshot({ path: test.info().outputPath("gpu-refresh-open-details.png") });
-        });
-        stableSize(refresh, "surface", `gpu-refresh-${width}`);
-        stableSize(refresh, "gpu-details", `gpu-details-refresh-${width}`);
-      } finally {
-        holding = false;
-        for (const deliver of held.splice(0)) deliver();
-      }
-      await expect(gpu.locator('[aria-busy="true"]')).toHaveCount(0);
-      await expect(gpu.locator('[data-ctx="65536"]')).not.toHaveAttribute("data-tip", "Checking…");
-      await expect(details).toHaveJSProperty("open", true);
-      await expect(details).toHaveAttribute("data-flicker-box", "gpu-details");
       const frames = await burst(page, `r2-${width}/gpu-spill`, "#gpuMemory", () => gpu.locator('[data-ctx="65536"]').click());
       stableSize(frames, "surface", `gpu-spill-${width}`);
       stableSize(frames, "gpu-details", `gpu-details-spill-${width}`);
@@ -276,9 +203,9 @@ for (const width of [1440, 360]) {
       await expect(verdict).toContainText("Should run slower");
     });
 
-    test("Download groups the fit replies that land within a second, on placeholders until then", async ({ page, open }) => {
+    test("Download groups the fit table that lands within a second, on placeholders until then", async ({ page, open }) => {
       // the page's clock stands still from the tab's opening, so "within a second" is the
-      // page's second, not the test machine's: the replies land, then the second passes
+      // page's second, not the test machine's: the table lands, then the second passes
       const fits = await holdFits(page);
       await page.clock.install();
       await open();
@@ -301,7 +228,7 @@ for (const width of [1440, 360]) {
       await expect(row.locator(".vl")).toBeVisible();
     });
 
-    test("Download groups after a second without fit replies, and a late reply moves nothing until the next visit", async ({ page, open }) => {
+    test("Download groups after a second without a fit table, and a late table moves nothing until the next visit", async ({ page, open }) => {
       const fits = await holdFits(page);
       await open();
       await waitReady(page);
@@ -328,7 +255,7 @@ for (const width of [1440, 360]) {
       const box = await row.boundingBox();
       fits.release();
       await expect(row.locator(".vl")).toBeVisible();
-      await expect(dlGroup(page, "Also available").locator('.dlrow[data-cat="qwen3.5:4b"]'), "a late reply that fits does not move the row").toBeVisible();
+      await expect(dlGroup(page, "Also available").locator('.dlrow[data-cat="qwen3.5:4b"]'), "a late table that fits does not move the row").toBeVisible();
       expect(await row.boundingBox(), "the row stays where it is").toEqual(box);
       await page.getByRole("tab", { name: /Installed/ }).click();
       await page.getByRole("tab", { name: /Download/ }).click();
@@ -345,17 +272,17 @@ for (const width of [1440, 360]) {
       await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
         const server = ws.connectToServer();
         const catalogRequests = new Set<unknown>();
-        const fitRequests = new Set<unknown>();
+        const fits = fitTraffic();
         ws.onMessage(message => {
           const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
           if (request.method === "models.catalog") catalogRequests.add(request.id);
-          if (request.method === "fit.check") fitRequests.add(request.id);
+          fits.sent(request);
           server.send(message);
         });
         server.onMessage(message => {
-          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown; channel?: unknown };
           if (response.type === "response" && catalogRequests.delete(response.id) && holdingCatalog) heldCatalog.push(() => ws.send(message));
-          else if (response.type === "response" && fitRequests.delete(response.id) && holdingFits) heldFits.push(() => ws.send(message));
+          else if (fits.is(response) && holdingFits) heldFits.push(() => ws.send(message));
           else ws.send(message);
         });
       });
@@ -387,7 +314,7 @@ for (const width of [1440, 360]) {
       });
       stableSize(frames, "surface", `download-start-${width}`);
       expect.soft(sizeChange(frames, "surface").positionPx, "starting and progressing must keep the clicked row in place").toBeLessThanOrEqual(0.5);
-      expect.soft(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "fit replies must not remount the download row").toBe(true);
+      expect.soft(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "a fit table must not remount the download row").toBe(true);
       await page.screenshot({ path: test.info().outputPath("download-progress-in-place.png") });
       const cancelled = await burst(page, `r2-${width}/download-cancel`, '.dlrow[data-cat="qwen3.5:4b"]', () => row.getByRole("button", { name: "Cancel download" }).click());
       stableSize(cancelled, "surface", `download-cancel-${width}`);
@@ -420,16 +347,15 @@ for (const width of [1440, 360]) {
     });
 
     test("a failed download replaces its detail without growing the row", async ({ page, open }) => {
-      // Keep pre-click regrouping outside the measurement; release real fit
-      // replies only once the pull request proves that the click occurred.
-      await refuseAction(page, "models.pull", true);
+      await refuseAction(page, "models.pull");
       await open();
       await waitReady(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
       const selector = '.dlrow[data-cat="qwen3.5:4b"]';
       const row = page.locator(selector);
-      await expect(row).toBeVisible();
+      // The first table groups the rows before the measurement starts.
+      await expect(row.locator(".vl")).toBeVisible();
       await row.scrollIntoViewIfNeeded();
       const original = await row.elementHandle();
       if (!original) throw new Error("The download row must exist before failure");
@@ -468,26 +394,6 @@ for (const width of [1440, 360]) {
     });
 
     test("Download finishes in place without briefly offering Download again", async ({ page, open }) => {
-      const heldFits: Array<() => void> = [];
-      let holdingFits = false;
-      const releaseFits = () => {
-        holdingFits = false;
-        for (const deliver of heldFits.splice(0)) deliver();
-      };
-      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
-        const server = ws.connectToServer();
-        const fits = new Set<unknown>();
-        ws.onMessage(message => {
-          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-          if (request.method === "fit.check") fits.add(request.id);
-          server.send(message);
-        });
-        server.onMessage(message => {
-          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
-          if (response.type === "response" && fits.delete(response.id) && holdingFits) heldFits.push(() => ws.send(message));
-          else ws.send(message);
-        });
-      });
       await open();
       await waitReady(page);
       await section(page, "Models", true);
@@ -498,8 +404,6 @@ for (const width of [1440, 360]) {
       await expect(row).toBeVisible();
       const count = await page.locator(".dlrow").count();
       await expect(page.locator(".dlrow .vl")).toHaveCount(count);
-      // Arm before starting: completion can outrun any awaited setup afterward.
-      holdingFits = true;
       await row.getByRole("button", { name: "Download", exact: true }).click();
       await expect(row.getByRole("button", { name: "Cancel download" })).toBeVisible();
       await row.scrollIntoViewIfNeeded();
@@ -520,17 +424,14 @@ for (const width of [1440, 360]) {
       if (!original) throw new Error("The download row must exist before completion");
       const frames = await burst(page, `r2-${width}/download-complete`, selector, async () => {
         await expect(row.locator(".badge")).toHaveText("Installed", { timeout: 15_000 });
-        await expect(page.locator(".dlrow .vl")).toHaveCount(0);
-        await expect.poll(() => heldFits.length).toBeGreaterThan(0);
-        await page.screenshot({ path: test.info().outputPath("download-complete-rechecking.png") });
-        console.log(`RECHECK_GEOMETRY ${width} ${JSON.stringify({ before, rechecking: await geometry() })}`);
-        releaseFits();
         await expect(page.locator(".dlrow .vl")).toHaveCount(count);
+        console.log(`INSTALL_GEOMETRY ${width} ${JSON.stringify({ before, installed: await geometry() })}`);
       });
       stableSize(frames, "surface", `download-complete-${width}`);
       const heights = frames.map(frame => frame.boxes["download-verdict"]?.[3]).filter((height): height is number => height !== undefined);
       expect(heights, "every frame must include the verdict block").toHaveLength(frames.length);
-      expect.soft(Math.max(...heights) - Math.min(...heights), "a recheck must preserve the verdict block height").toBeLessThanOrEqual(0.5);
+      expect.soft(Math.max(...heights) - Math.min(...heights), "a new table must preserve the verdict block height").toBeLessThanOrEqual(0.5);
+      expect(frames.filter((f) => f.checking), "an installed model keeps its verdicts while the table is rebuilt").toHaveLength(0);
       expect(sizeChange(frames, "surface").positionPx, "completion must keep the row in place").toBeLessThanOrEqual(0.5);
       expect(await original.evaluate(node => node === document.querySelector('.dlrow[data-cat="qwen3.5:4b"]')), "completion must preserve the row").toBe(true);
       expect(frames.filter((f) => f.elements.includes("BUTTON:Download")), "completion must not return to the idle action while the list catches up").toHaveLength(0);
@@ -620,29 +521,34 @@ for (const width of [1440, 360]) {
 }
 
 for (const delay of [0, 150, 600]) {
-  test(`cold picker uses already available fit reports without regrouping at ${delay} ms`, async ({ page, open }) => {
+  test(`cold picker shows the table it already has without regrouping at ${delay} ms`, async ({ page, open }) => {
     await delayedMemory(page, delay);
-    let catalogReady = false;
-    const requests = new Set<string>();
+    // A routed socket reports a frame when the server sends it, before the
+    // delayed copy reaches the page, so the page itself notes the first table.
+    await page.addInitScript(() => {
+      const Native = window.WebSocket;
+      window.WebSocket = class extends Native {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          this.addEventListener("message", (event: MessageEvent) => {
+            const message = JSON.parse(String(event.data)) as { type?: string; ok?: boolean; result?: { reading?: unknown; rows?: unknown } };
+            if (message.type === "response" && message.ok === true && message.result?.reading !== undefined && Array.isArray(message.result.rows)) (window as { fitTableSeen?: boolean }).fitTableSeen = true;
+          });
+        }
+      };
+    });
     const fitCalls: unknown[] = [];
     page.on("websocket", ws => {
       ws.on("framesent", frame => {
         const request = decodeRequest(frame.payload);
-        if (request.ok && request.value.method === "models.catalog") requests.add(request.value.id);
-        if (request.ok && request.value.method === "fit.check") fitCalls.push(request.value.params);
-      });
-      ws.on("framereceived", frame => {
-        const response = decodeServerMessage(frame.payload);
-        if (!response.ok || response.value.type !== "response" || !requests.delete(response.value.id) || !response.value.ok) return;
-        const catalog = decodeResult("models.catalog", response.value.result);
-        catalogReady = catalog.ok && catalog.value.some(model => model.name.includes("gpt-oss") && model.fit?.numCtx === 16384);
+        if (request.ok && request.value.method.startsWith("fit.")) fitCalls.push(request.value.method);
       });
     });
     await open();
     await waitReady(page);
-    // The deferred picker has no closed DOM. Observe delivery of the real
-    // catalog answer containing the fit, before the first opening.
-    await expect.poll(() => catalogReady).toBe(true);
+    // The deferred picker has no closed DOM. Observe delivery of the first
+    // table before the first opening.
+    await expect.poll(() => page.evaluate(() => (window as { fitTableSeen?: boolean }).fitTableSeen === true)).toBe(true);
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const before = fitCalls.length;
     let observations: Promise<void> | undefined;
@@ -665,8 +571,9 @@ for (const delay of [0, 150, 600]) {
     const visible = frames.filter((f) => f.boxes["surface"] !== undefined);
     console.log(`STATE_SWAP cold-picker-${delay} ${JSON.stringify(transitionMetrics(visible))}`);
     expect(visible.length, "the cold picker must render enough frames to exercise the guard").toBeGreaterThan(10);
-    expect(visible.filter((f) => f.checking), "already measured catalog fits must not become Checking").toHaveLength(0);
-    expect(transitionMetrics(visible).overshootPx, "fit arrivals must not regroup rows back and forth").toBeLessThanOrEqual(0.5);
+    expect(visible.filter((f) => f.checking), "a table already here must not show skeletons").toHaveLength(0);
+    expect(fitCalls.slice(before), "opening the picker asks for no fit").toEqual([]);
+    expect(transitionMetrics(visible).overshootPx, "opening must not regroup rows back and forth").toBeLessThanOrEqual(0.5);
   });
 
   test(`an uncached conversation does not flash an unexplained empty timeline at ${delay} ms`, async ({ page, open, seededThread }) => {

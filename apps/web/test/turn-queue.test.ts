@@ -3,7 +3,7 @@
 // keeps, a turn left running behind another chat, and the queue of messages
 // typed while a reply is being written.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BlockingTurn, FitReport, Message, Payload } from "@gates-local/contracts";
+import type { BlockingTurn, Message, Payload } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 import { replay } from "./ordering-replay.ts";
@@ -371,8 +371,6 @@ it.each([false, true])("keeps omission notices beside stopped words (notice befo
   if (earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p-notice", "A", "Partial answer"), contextNotice: "Some earlier images are unavailable.", interrupted: true } });
   expect((st().messages["A"] ?? []).at(-1)).toMatchObject({ content: "Partial answer", contextNotice: "Some earlier images are unavailable." });
 });
-
-const report = (verdict: FitReport["verdict"]): FitReport => ({ ...methodSamples["fit.check"].result, verdict });
 
 /** Chat A is answering and a new chat's send is waiting on the warning. */
 async function warned(text = "for B"): Promise<void> {
@@ -762,28 +760,6 @@ describe("picking a model while another is answering", () => {
     await tick(5);
     expect(st().model).toBe("qwen3:14b");
     expect(b.server.calls("models.load")).toHaveLength(0);
-  });
-});
-
-describe("a model that fits only once the other chat stops", () => {
-  it("is marked sendable when stopping the turn makes room", async () => {
-    b.server.answer("fit.check", () => report("refuse"));
-    b.server.answer("turns.blocking", () => BLOCKING);
-    b.server.push("gpu.changed", methodSamples["gpu.status"].result);
-    session.ensureFit(MODEL, 16384);
-    await until(() => st().stopFrees[store.fitKey(MODEL, 16384)] === true, 2000, "the mark");
-  });
-
-  it("stays refused when nothing is in the way", async () => {
-    b.server.answer("fit.check", () => report("refuse"));
-    b.server.push("gpu.changed", methodSamples["gpu.status"].result);
-    session.ensureFit(MODEL, 16384);
-    await until(() => {
-      const fit = st().fits[store.fitKey(MODEL, 16384)];
-      return fit !== undefined && fit !== "error" && fit.verdict === "refuse";
-    }, 2000, "the refused fit");
-    await tick(5);
-    expect(st().stopFrees[store.fitKey(MODEL, 16384)]).toBeUndefined();
   });
 });
 

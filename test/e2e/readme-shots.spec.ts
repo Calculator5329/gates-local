@@ -39,7 +39,7 @@ const SHOTS: readonly Shot[] = [
       const picker = p.locator("#picker");
       await expect(picker.locator('.pk-r[aria-disabled="true"]').first()).toBeVisible();
       // every row's verdict has landed
-      await expect(picker.getByText("Checking…")).toHaveCount(0);
+      await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
     },
   },
   { name: "first-run", theme: "dark", start: "firstrun" },

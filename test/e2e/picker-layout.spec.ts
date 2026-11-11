@@ -1,139 +1,148 @@
-import { expect, test, waitReady } from "./fixtures.ts";
-import { decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
-
+import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { decodeRequest, decodeResult, decodeServerMessage, type FitTable } from "@gates-local/contracts";
+import { FAKE_URL } from "./env.ts";
 test.use({ viewport: { width: 1137, height: 749 }, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
-test("idle warms nothing; hover prepares the first picker view and focus and opening reuse its checks", async ({ page, open }) => {
-  const requests = new Map<string, string>(), answered = new Set<string>();
+test("the client asks for the fit table once; hover, focus and opening the picker ask for nothing", async ({ page, open }) => {
+  const asked: string[] = [];
   page.on("websocket", ws => {
     ws.on("framesent", frame => {
       const request = decodeRequest(frame.payload);
-      if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
-    });
-    ws.on("framereceived", frame => {
-      const response = decodeServerMessage(frame.payload);
-      if (response.ok && response.value.type === "response" && requests.has(response.value.id)) answered.add(response.value.id);
+      if (request.ok && request.value.method.startsWith("fit.")) asked.push(request.value.method);
     });
   });
-  const settled = async () => {
-    await expect.poll(() => answered.size === requests.size).toBe(true);
-    // Two frames, an idle callback and a pause: every chance a background warm-up would take.
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestIdleCallback(() => resolve())))));
-    await page.waitForTimeout(500);
-  };
-  await open(); await waitReady(page); await settled();
-  const idle = requests.size;
-  expect(new Set(requests.values()).size, "idle checks only the selected pair").toBeLessThanOrEqual(1);
+  await open(); await waitReady(page);
+  await expect.poll(() => asked.length, "the session asks for the table at hydration").toBe(1);
   const button = page.locator("#modelBtn");
   await button.hover();
-  await expect.poll(() => requests.size, "hover warms the first view's checks").toBeGreaterThan(idle);
-  await settled();
-  expect(await page.locator("#picker").count(), "warming must not mount the picker").toBe(0);
-  const warmed = requests.size;
+  // Two frames, an idle callback and a pause: every chance a background warm-up would take.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestIdleCallback(() => resolve())))));
+  await page.waitForTimeout(500);
+  expect(await page.locator("#picker").count(), "hover must not mount the picker").toBe(0);
   await button.focus(); await button.click();
   await expect(page.locator("#picker")).toBeVisible();
-  await expect(page.locator("#picker")).not.toContainText("Checking…");
+  await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("picker-hover-complete.png") });
   await page.keyboard.press("Escape");
   await page.locator("#ta").focus(); await button.hover(); await button.focus(); await button.click();
   await expect(page.locator("#picker")).toBeVisible();
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  expect(requests.size, "an opening after a warm, and repeated hover or focus, make no further check").toBe(warmed);
-  await test.info().attach("session-fit-checks", { body: JSON.stringify({ idle, warmed, after: requests.size, pairs: [...requests.values()] }), contentType: "application/json" });
+  expect(asked, "opening, hover and focus make no fit request").toEqual(["fit.table"]);
 });
 
-test("a warm invalidated before opening waits for current answers and reuses replacement checks", async ({ page, open }) => {
-  const requests = new Map<string, string>(), answered = new Set<string>(), gpuRequests = new Set<string>();
-  const held: (() => void)[] = [];
-  let gpu: unknown, holding = false;
-  let invalidate: () => void = () => { throw new Error(`No GPU connection after ${requests.size} fit requests`); };
+test("a GPU change: a pick made on the older table cannot load what the new reading refuses, and the rows end on the new table", async ({ page, open }) => {
+  const GIB = 1024 ** 3;
+  // Tables the page got, tables held back, models.load asked and answered.
+  const shown: FitTable[] = [], held: { table: FitTable; send: () => void }[] = [];
+  const loadsAsked: string[] = [], loadEnds: string[] = [];
+  let holding = false;
   await page.routeWebSocket(/.*/, ws => {
-    const server = ws.connectToServer();
-    invalidate = () => {
-      if (gpu === undefined) throw new Error("Missing measured GPU snapshot");
-      holding = true;
-      ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpu }));
-    };
+    const server = ws.connectToServer(), tableIds = new Set<string>(), loadIds = new Set<string>();
     ws.onMessage(message => {
       const request = decodeRequest(message);
-      if (request.ok && request.value.method === "gpu.status") gpuRequests.add(request.value.id);
-      if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
+      if (request.ok && request.value.method === "fit.table") tableIds.add(request.value.id);
+      if (request.ok && request.value.method === "models.load") { loadIds.add(request.value.id); loadsAsked.push(request.value.params.model); }
       server.send(message);
     });
     server.onMessage(message => {
-      const response = decodeServerMessage(message);
-      if (response.ok && response.value.type === "response") {
-        const frame = response.value;
-        if (gpuRequests.delete(frame.id) && frame.ok) {
-          const snapshot = decodeResult("gpu.status", frame.result);
-          if (snapshot.ok) gpu = snapshot.value;
-        }
-        if (requests.has(frame.id)) {
-          const deliver = () => { answered.add(frame.id); ws.send(message); };
-          if (holding) held.push(deliver); else deliver();
-          return;
-        }
+      const frame = decodeServerMessage(message);
+      let table: FitTable | undefined;
+      // A load refused at its fit check answers the request; one that started also pushes its end.
+      if (frame.ok && frame.value.type === "response" && loadIds.delete(frame.value.id)) {
+        const l = frame.value.ok ? decodeResult("models.load", frame.value.result) : undefined;
+        loadEnds.push(l?.ok ? `${l.value.model}:${l.value.state}` : `answer:${frame.value.ok ? "undecoded" : "error"}`);
       }
+      if (frame.ok && frame.value.type === "response" && tableIds.delete(frame.value.id) && frame.value.ok) {
+        const r = decodeResult("fit.table", frame.value.result);
+        if (r.ok) table = r.value;
+      }
+      if (frame.ok && frame.value.type === "push" && frame.value.channel === "fit.changed") {
+        const r = decodeResult("fit.table", frame.value.payload);
+        if (r.ok) table = r.value;
+      }
+      if (frame.ok && frame.value.type === "push" && frame.value.channel === "models.load") {
+        const l = decodeResult("models.load", frame.value.payload);
+        if (l.ok && l.value.state !== "loading") loadEnds.push(`${l.value.model}:${l.value.state}`);
+      }
+      if (table && holding) { const t = table; held.push({ table: t, send: () => { shown.push(t); ws.send(message); } }); return; }
+      if (table) shown.push(table);
       ws.send(message);
     });
   });
   await open(); await waitReady(page);
-  const button = page.locator("#modelBtn"), picker = page.locator("#picker");
-  // Composer readiness can precede hydration. Retry intent until the models
-  // fixture has all six first-view pairs, not two startup reads of one pair.
-  await expect.poll(async () => {
-    await page.locator("#ta").hover(); await button.hover();
-    return new Set(requests.values()).size;
-  }).toBe(6);
-  await expect.poll(() => answered.size === requests.size).toBe(true);
-  const warmedPairs = new Set(requests.values()), warmed = requests.size;
+  const picker = page.locator("#picker"), button = page.locator("#modelBtn");
+  await expect.poll(() => shown.length, "the first table").toBeGreaterThan(0);
+  const ctxText = (await button.locator(".picker-trigger-ctx").textContent())?.trim() ?? "";
+  const numCtx = Number.parseInt(ctxText, 10) * 1024;
+  await button.click();
+  const selected = await picker.locator(".pk-r.sel").getAttribute("data-m");
+  await page.keyboard.press("Escape"); await expect(picker).toBeHidden();
   try {
-    await page.locator("#ta").hover(); invalidate(); await button.hover();
-    await expect.poll(() => held.length).toBe(warmedPairs.size);
-    const replacing = requests.size;
-    expect(replacing - warmed, "one replacement per warmed pair").toBe(warmedPairs.size);
-    await button.click(); await expect(picker).toBeHidden();
-    for (const release of held.splice(0, held.length - 1)) release();
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await expect(picker).toBeHidden();
-    holding = false; for (const release of held.splice(0)) release();
-    await expect(picker).toBeVisible(); await expect(page.locator("#pkSearch")).toBeFocused();
-    await expect(picker).not.toContainText("Checking…");
-    expect(requests.size, "opening adds no check to the replacement warm").toBe(replacing);
-    await page.screenshot({ path: test.info().outputPath("picker-current-after-invalidation.png") });
-    await test.info().attach("fit-check-counts", { body: JSON.stringify({ warmed, replacing, afterOpen: requests.size }), contentType: "application/json" });
-  } finally { holding = false; for (const release of held.splice(0)) release(); }
+    // Another program fills the GPU. The server builds a table from the new reading; the page does not get it yet.
+    holding = true;
+    await stack.gpu(14_000);
+    await expect.poll(() => held.length, { message: "the server pushes a table from the new reading", timeout: 15_000 }).toBeGreaterThan(0);
+    const older = shown.at(-1)!, newer = held.at(-1)!.table;
+    const row = (t: FitTable, model: string) => t.rows.find(r => r.model === model && r.numCtx === numCtx);
+    // A model the older table lets the person pick and the new reading refuses outright.
+    const target = older.rows.map(r => r.model).find(m => m !== selected && row(older, m)?.verdict !== "refuse" && row(newer, m)?.verdict === "refuse" && row(newer, m)?.stops.length === 0);
+    expect(target, `a row pickable at ${ctxText} before and refused after: ${JSON.stringify(newer.rows.map(r => [r.model, r.numCtx, r.verdict]))}`).toBeDefined();
+    if (!target) return;
+    // The pick, made on the older table.
+    await button.click();
+    await picker.locator(`.pk-r[data-m="${target}"] .pk-select`).click();
+    await expect.poll(() => loadsAsked.includes(target), "the pick asks the server to load it").toBe(true);
+    await expect.poll(() => loadEnds, "the server judges the load on its own reading and refuses it").toContain(`${target}:error`);
+    const state = (await (await fetch(`${FAKE_URL}/__fake/state`)).json()) as { loads: { model: string }[]; loaded: { name: string }[] };
+    expect(state.loads.filter(l => l.model === target), "the runtime never started loading it").toEqual([]);
+    expect(state.loaded.filter(l => l.name === target)).toEqual([]);
+    // The new table arrives: the rows end on its values.
+    holding = false;
+    for (const h of held.splice(0)) h.send();
+    const newest = shown.at(-1)!, need = row(newest, target)!.needVramBytes;
+    await button.click();
+    await expect(picker.locator(`.pk-r[data-m="${target}"] .pk-v`)).toHaveText(new RegExp(`^${(need / GIB).toFixed(1)}\\sGB$`, "u"));
+    await expect(picker.locator(`.pk-r[data-m="${target}"] .pk-v`)).toHaveClass(/\bno\b/u);
+    if (newest.memory.kind === "gpu") await expect(picker.locator(".pk-bottom")).toContainText(`${(newest.memory.freeBytes / GIB).toFixed(1)} GB free`);
+    await page.screenshot({ path: test.info().outputPath("picker-after-gpu-change.png") });
+  } finally {
+    holding = false;
+    for (const h of held.splice(0)) h.send();
+    await stack.gpu(0);
+  }
 });
 
-test("the picker waits for missing fit replies and opens with a complete context column", async ({ page, open }) => {
-  let holding = false;
+test("the picker opens before the first table with skeletons, and the table fills them in place", async ({ page, open }) => {
+  let holding = true;
   const held: (() => void)[] = [];
   await page.routeWebSocket(/.*/, ws => {
     const server = ws.connectToServer(), requests = new Set<unknown>();
     ws.onMessage(message => {
       const frame = JSON.parse(String(message)) as { id?: unknown; method?: string };
-      if (holding && frame.method === "fit.check") requests.add(frame.id);
+      if (frame.method === "fit.table") requests.add(frame.id);
       server.send(message);
     });
     server.onMessage(message => {
-      const frame = JSON.parse(String(message)) as { id?: unknown; type?: string };
-      if (frame.type === "response" && requests.delete(frame.id) && holding) held.push(() => ws.send(message));
+      const frame = JSON.parse(String(message)) as { id?: unknown; type?: string; channel?: string };
+      const table = (frame.type === "response" && requests.delete(frame.id)) || (frame.type === "push" && frame.channel === "fit.changed");
+      if (table && holding) held.push(() => ws.send(message));
       else ws.send(message);
     });
   });
   await open(); await waitReady(page);
-  holding = true;
   try {
     await page.locator("#modelBtn").click();
     const picker = page.locator("#picker"), search = page.locator("#pkSearch");
     await expect.poll(() => held.length).toBeGreaterThan(0);
-    await expect(picker).toBeHidden();
-    holding = false;
-    for (const release of held.splice(0)) release();
     await expect(picker).toBeVisible();
     await expect(search).toBeFocused();
-    await expect(picker).not.toContainText("Checking…");
+    await expect(picker.locator(".pk-cost .fit-skel").first()).toBeVisible();
+    const before = await picker.boundingBox();
+    holding = false;
+    for (const release of held.splice(0)) release();
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
     const bounds = await picker.boundingBox();
+    expect(bounds, "the table fills the skeletons without moving the picker").toEqual(before);
     await page.screenshot({ path: test.info().outputPath("picker-complete-first-view.png") });
     await search.fill("qwen");
     await search.press("ArrowRight");
@@ -162,27 +171,24 @@ test("approved picker closes when the composer is clicked and lets that click fo
   await expect(ta).toBeFocused();
 });
 
-test("a loaded picker report counts the model's held allocation before drawing overflow", async ({ page, open }) => {
-  const measured = new Set<unknown>();
+test("a loaded picker row counts the model's held allocation before drawing overflow", async ({ page, open }) => {
+  // A measured row for the loaded pair whose need is larger than the free memory: the model already
+  // holds its allocation, so the picker must not draw the part above free as overflow.
+  const gib = 1024 ** 3;
+  const measured = (table: FitTable): FitTable => ({ ...table, rows: table.rows.map(row => row.model === "qwen3.5:9b" && row.numCtx === 16384
+    ? { ...row, source: "measured", verdict: "fits", needVramBytes: 7 * gib, freeVramBytes: 2 * gib, spillRamBytes: 0 } : row) });
   await page.routeWebSocket(/.*/, ws => {
-    const server = ws.connectToServer();
+    const server = ws.connectToServer(), requests = new Set<unknown>();
     ws.onMessage(message => {
-      try {
-        const frame = JSON.parse(String(message)) as { id?: unknown; method?: string; params?: { model?: string; numCtx?: number } };
-        if (frame.method === "fit.check" && frame.params?.model === "qwen3.5:9b" && frame.params.numCtx === 16384) measured.add(frame.id);
-      } catch { /* Non-RPC frames pass through unchanged. */ }
+      const frame = JSON.parse(String(message)) as { id?: unknown; method?: string };
+      if (frame.method === "fit.table") requests.add(frame.id);
       server.send(message);
     });
     server.onMessage(message => {
-      try {
-        const frame = JSON.parse(String(message)) as { id?: unknown; type?: string; ok?: boolean; result?: Record<string, unknown> };
-        if (frame.type === "response" && frame.ok && measured.has(frame.id)) {
-          const gib = 1024 ** 3;
-          ws.send(JSON.stringify({ ...frame, result: { ...frame.result, source: "measured", verdict: "fits", needVramBytes: 7 * gib, freeVramBytes: 2 * gib, spillRamBytes: 0 } }));
-          return;
-        }
-      } catch { /* Non-RPC frames pass through unchanged. */ }
-      ws.send(message);
+      const frame = JSON.parse(String(message)) as { id?: unknown; type?: string; ok?: boolean; channel?: string; result?: FitTable; payload?: FitTable };
+      if (frame.type === "response" && frame.ok && requests.delete(frame.id) && frame.result) ws.send(JSON.stringify({ ...frame, result: measured(frame.result) }));
+      else if (frame.type === "push" && frame.channel === "fit.changed" && frame.payload) ws.send(JSON.stringify({ ...frame, payload: measured(frame.payload) }));
+      else ws.send(message);
     });
   });
   await open(); await waitReady(page);
@@ -204,8 +210,7 @@ test("approved picker keeps its columns fixed through hover, filtering and empty
   await expect(picker.locator(".pk-context")).toBeVisible();
   const box = await picker.boundingBox();
   await expect(picker.locator(".pk-cost.gpu").first()).toBeVisible();
-  await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
-  await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
+  await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("picker-desktop.png") });
   await picker.locator('[data-m="gemma4:12b"]').hover();
   await expect(picker.getByRole("radiogroup")).toHaveAccessibleName("Context length for Gemma 4 12B");
@@ -292,12 +297,12 @@ test.describe("phone", () => {
     await page.locator("#modelBtn").tap();
     const picker = page.locator("#picker");
     await expect(picker.locator(".pk-main")).toBeVisible();
-    await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
     const bounds = await picker.boundingBox();
     await page.screenshot({ path: test.info().outputPath("picker-phone-models.png") });
     await picker.locator('[data-m="gemma4:12b"]').tap();
     await expect(picker.locator(".pk-context")).toBeVisible();
-    await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
     expect(await picker.boundingBox()).toEqual(bounds);
     await page.screenshot({ path: test.info().outputPath("picker-phone-context.png") });
     await picker.getByRole("radio", { name: /^8k/ }).tap();
@@ -306,45 +311,38 @@ test.describe("phone", () => {
     await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("8k");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
-  // The closing sheet hands focus back to the model button by script. That is
-  // not someone reaching for the picker, so it must not warm every installed
-  // model at the new size. The pick itself preloads the model, and each fit
-  // invalidation on the way rechecks the picked pair, as it did before warming.
-  test("a pick at a new context size checks only the picked model after the sheet closes", async ({ page, open }) => {
-    // `readyAt` is how many checks had been sent when the preload reported ready.
-    const requests = new Map<string, string>(), answered = new Set<string>();
-    let readyAt: number | undefined;
+  // The closing sheet hands focus back to the model button by script. A pick
+  // preloads the model; the server pushes the next table after the load, and
+  // the client asks for nothing on the way.
+  test("a pick at a new context size asks for no fit value; the load pushes the next table", async ({ page, open }) => {
+    const asked: string[] = [];
+    let readyAt: number | undefined, tables = 0;
     page.on("websocket", ws => {
       ws.on("framesent", frame => {
         const request = decodeRequest(frame.payload);
-        if (request.ok && request.value.method === "fit.check") requests.set(request.value.id, `${request.value.params.model}@${request.value.params.numCtx}`);
+        if (request.ok && request.value.method.startsWith("fit.")) asked.push(request.value.method);
       });
       ws.on("framereceived", frame => {
-        const response = decodeServerMessage(frame.payload);
-        if (!response.ok) return;
-        if (response.value.type === "response" && requests.has(response.value.id)) answered.add(response.value.id);
-        const payload: unknown = response.value.type === "push" && response.value.channel === "models.load" ? response.value.payload : undefined;
-        if (readyAt === undefined && typeof payload === "object" && payload !== null && "state" in payload && payload.state === "ready") readyAt = requests.size;
+        const message = decodeServerMessage(frame.payload);
+        if (!message.ok || message.value.type !== "push") return;
+        if (message.value.channel === "fit.changed") tables++;
+        const payload: unknown = message.value.channel === "models.load" ? message.value.payload : undefined;
+        if (readyAt === undefined && typeof payload === "object" && payload !== null && "state" in payload && payload.state === "ready") readyAt = tables;
       });
     });
     await open(); await waitReady(page);
     await page.locator("#modelBtn").tap();
     const picker = page.locator("#picker");
-    await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
     await picker.locator('[data-m="gemma4:12b"]').tap();
-    await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
-    const before = new Set(requests.keys());
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
+    const before = asked.length;
     readyAt = undefined;
     await picker.getByRole("radio", { name: /^8k/ }).tap();
     await expect(picker).toBeHidden();
     await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("8k");
-    // The refocus comes a frame after the close; the preload's ready push and the
-    // recheck it causes come later, so by then any warm has been sent.
     await expect.poll(() => readyAt !== undefined, "the preload reports ready").toBe(true);
-    await expect.poll(() => [...requests.values()].slice(readyAt).includes("gemma4:12b@8192"), "the recheck after the load").toBe(true);
-    await expect.poll(() => answered.size === requests.size).toBe(true);
-    const after = [...requests].filter(([id]) => !before.has(id)).map(([, pair]) => pair);
-    expect(after.filter(pair => pair !== "gemma4:12b@8192"), `checks after the pick: ${after.join(", ")}`).toEqual([]);
+    await expect.poll(() => tables > (readyAt ?? Infinity), "the server pushes a table after the load").toBe(true);
+    expect(asked.slice(before), "fit requests after the pick").toEqual([]);
   });
 });
 

@@ -26,6 +26,7 @@
 //                           (the stand-in's) and phoneSocket
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
+//   POST /gpu {otherMib}    forward to the fake's /__fake/gpu: another program's GPU memory
 //
 // The server exits on stdin EOF, so each child keeps a stdin pipe open for
 // its whole life. Nothing here talks to a real Ollama, GPU or nvidia-smi, and
@@ -296,6 +297,10 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /scenario") {
         await fakeScenario(await readJson(req));
+        res.writeHead(200).end("ok");
+      } else if (route === "POST /gpu") {
+        const r = await fetch(`${FAKE_URL}/__fake/gpu`, { method: "POST", body: JSON.stringify(await readJson(req)) });
+        if (!r.ok) throw new Error(`fake gpu: ${r.status} ${await r.text()}`);
         res.writeHead(200).end("ok");
       } else {
         res.writeHead(404).end("not found");

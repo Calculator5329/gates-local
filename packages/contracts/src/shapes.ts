@@ -191,6 +191,36 @@ export const FitReport = S.Struct({
 });
 export type FitReport = typeof FitReport.Type;
 
+const { measuredAt: _rowsShareTheTableReading, ...fitRowFields } = FitReport.fields;
+/**
+ * One model at one context in the fit table. needVramBytes is always the total the model needs
+ * there (GPU plus system memory). A row has no reading of its own: the table's is the only one.
+ * stops: the models whose chats a send stops first, set only when stopping them is what makes it fit.
+ */
+export const FitRow = S.Struct({ ...fitRowFields, stops: S.Array(S.String) });
+export type FitRow = typeof FitRow.Type;
+
+/** The memory line the picker's footer shows, from the table's reading. */
+export const FitMemory = S.Union([
+  S.Struct({ kind: S.Literal("gpu"), freeBytes: Count, usableBytes: Count }),
+  S.Struct({ kind: S.Literal("cpu") }),
+  S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
+]);
+export type FitMemory = typeof FitMemory.Type;
+
+/**
+ * Every installed chat model and every model offered for download, at each context the app offers
+ * (one row per size a model runs at), from one GPU reading. boot names the server process and seq
+ * rises with each table it builds: a client keeps a table unless the next has another boot or a
+ * greater seq, so a late table never replaces a newer one.
+ */
+export const FitTable = S.Struct({
+  reading: S.Struct({ boot: S.String, seq: Count, measuredAt: Millis }),
+  memory: FitMemory,
+  rows: S.Array(FitRow),
+});
+export type FitTable = typeof FitTable.Type;
+
 export const ChatEvent = S.Union([
   // The turn began: its model and saved user message, so a client that did not send it
   // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).

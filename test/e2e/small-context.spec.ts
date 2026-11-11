@@ -25,7 +25,10 @@ test.describe("a model with a 2,048 context window", () => {
     await expect(row.locator(".mp-fitc")).toHaveText("Should run well");
     await expect(row).not.toHaveClass(/\bcant\b/);
     await expect(page.locator(".mp")).not.toContainText(/supports up to|too small|unsupported|won't run/i);
-    await expect(page.locator(".mp-defrow")).toContainText("If it can't run here");
+    // the fallback rule is the tip of "Default for new chats", not words on the row
+    const defaultLabel = page.locator(".mp-defrow .tipped").filter({ hasText: "Default for new chats" });
+    await expect(defaultLabel).toHaveAttribute("data-tip", /If it can't run here/);
+    await expect(defaultLabel).toHaveAttribute("aria-description", /If it can't run here/);
     await expect(page.locator(".mp-defrow")).not.toContainText("16k");
     });
     await page.keyboard.press("Escape");
@@ -61,21 +64,21 @@ test.describe("a model with a 2,048 context window", () => {
 test.describe("a 2,048 model when a reply ends while Settings is open", () => {
   test.use({ installed: ["tiny-chat:2k"] });
 
-  test("Settings › Advanced gets its answer again rather than checking forever", async ({ page, open }) => {
+  test("Settings › Advanced keeps its value when the reply ends, with no fit request and no checking state", async ({ page, open }) => {
     await stack.scenario("slow-drip", { tokenDelayMs: 1, firstTokenDelayMs: 0, installed: ["tiny-chat:2k"] });
     let release: (() => void) | undefined;
     let holding = true;
     let deliveredTerminals = 0;
-    let checks = 0;
+    const asked: string[] = [];
     await page.routeWebSocket(/.*/, ws => {
       const server = ws.connectToServer();
       ws.onMessage(message => {
         const request = JSON.parse(String(message)) as { method?: string };
-        if (request.method === "fit.check") checks++;
+        if (request.method?.startsWith("fit.")) asked.push(request.method);
         server.send(message);
       });
       server.onMessage(message => {
-        const response = JSON.parse(String(message)) as { channel?: string; payload?: { event?: { type?: string } } };
+        const response = JSON.parse(String(message)) as { type?: string; channel?: string; payload?: { event?: { type?: string } } };
         if (holding && response.channel === "chat.event" && response.payload?.event?.type === "done") release = () => { deliveredTerminals++; ws.send(message); };
         else ws.send(message);
       });
@@ -88,13 +91,15 @@ test.describe("a 2,048 model when a reply ends while Settings is open", () => {
     // The terminal frame is held outside the page, so the reply is still running.
     expect(deliveredTerminals).toBe(0);
     await expect.poll(() => release !== undefined).toBe(true);
-    // the end of a reply clears every saved memory answer, and the chat box that would ask again is not on this screen
-    const before = checks;
+    await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
+    const before = asked.length;
+    // The end of a turn makes the server rebuild the table; it pushes only when something changed.
     holding = false;
     release?.();
-    await expect.poll(() => checks).toBeGreaterThan(before);
+    await expect(stopButton(page)).toHaveCount(0, { timeout: 10_000 });
     await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
-    await expect(gpu).not.toContainText("Checking");
+    await expect(gpu.locator(".fit-skel")).toHaveCount(0);
+    expect(asked.slice(before), "the reply's end makes no fit request").toEqual([]);
   });
 });
 

@@ -22,6 +22,7 @@
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
+// POST /__fake/gpu {"otherMib": n} puts another program's n MiB on the fake GPU.
 import { writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DEFAULT_INSTALLED, EMBED_ONLY_INSTALLED, EMBED_SMALLEST_INSTALLED, FAKE_MODELS, LONG_NAME_INSTALLED, findFakeModel, showBody, type FakeModel } from "./models.ts";
@@ -78,6 +79,13 @@ export interface FakeOptions {
   parallelLimit: number;
   /** Idle runners are evicted to make room; active runners must finish first. */
   capacityBytes: number;
+  /**
+   * 0 puts every loaded model wholly on the GPU. Above 0, a loaded model holds at
+   * most this much GPU memory and the rest sits in system memory: /api/ps then
+   * answers size_vram = the GPU part and size = the GPU part plus 256 MiB, as a
+   * real runtime did for a model whose CPU-side weights are mapped from disk.
+   */
+  vramCapBytes: number;
 }
 
 const LOAD_STEPS = 6;
@@ -99,6 +107,7 @@ const DEFAULTS: FakeOptions = {
   showDelayMs: 0,
   parallelLimit: 1,
   capacityBytes: 12 * 1024 ** 3,
+  vramCapBytes: 0,
 };
 
 /** The slow-drip reply: one of each block kind the reply renderer draws. */
@@ -275,9 +284,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     writeGpu();
   });
 
+  /** Another program's GPU memory, set by POST /__fake/gpu: moves the GPU reading without touching the runtime. */
+  let otherMib = 0;
+  const onGpu = (l: LoadedEntry): number => (options.vramCapBytes > 0 ? Math.min(l.sizeBytes, options.vramCapBytes) : l.sizeBytes);
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
-    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling] }));
+    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling].map((l) => ({ ...l, sizeBytes: onGpu(l) })), otherMib }));
   };
   writeGpu();
 
@@ -294,6 +306,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     turns.length = 0;
     loads.length = 0;
     released.clear();
+    otherMib = 0;
     writeGpu();
   };
   if (scenario === "slow-first-token" || scenario === "slow-drip" || scenario === "threads") setScenario(scenario, start.options);
@@ -523,6 +536,13 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         return json(res, 200, { scenario });
       }
       if (route === "GET /__fake/state") return json(res, 200, api.state());
+      if (route === "POST /__fake/gpu") {
+        const mib = field(body, "otherMib");
+        if (typeof mib !== "number" || !Number.isInteger(mib) || mib < 0) return json(res, 400, { error: "otherMib must be a whole number of MiB, 0 or more" });
+        otherMib = mib;
+        writeGpu();
+        return json(res, 200, { otherMib });
+      }
       if (route === "POST /__fake/release") {
         const id = field(body, "id");
         for (const turn of turns) if (id === undefined || id === turn.id) {
@@ -553,8 +573,8 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
             models: loaded.map((l) => ({
               name: l.name,
               model: l.name,
-              size: l.sizeBytes,
-              size_vram: l.sizeBytes,
+              size: onGpu(l) < l.sizeBytes ? onGpu(l) + 256 * 1024 * 1024 : l.sizeBytes,
+              size_vram: onGpu(l),
               context_length: l.numCtx,
               expires_at: "2026-11-07T23:59:00Z",
             })),

@@ -94,6 +94,11 @@ export function sameModel(a: string, b: string): boolean {
   return withTag(a) === withTag(b);
 }
 
+/** `m` is a copy of `model`, listed under its own name or another one. */
+export function isCopyOf(m: PsEntry, model: string): boolean {
+  return sameModel(m.name, model) || (m.model !== undefined && sameModel(m.model, model));
+}
+
 export function findLoaded(ps: PsResponse, model: string): PsEntry | undefined {
-  return ps.models.find((m) => sameModel(m.name, model) || (m.model !== undefined && sameModel(m.model, model)));
+  return ps.models.find((m) => isCopyOf(m, model));
 }

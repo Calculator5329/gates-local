@@ -8,13 +8,13 @@ import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
-import { fitPendingWord, fitReading } from "./fit-state.ts";
+import { answers, rowOf } from "./fit-table.ts";
 import { nameOf, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
-import { type ActionResult, cancelPull, ensureFit, pull } from "./session.ts";
+import { type ActionResult, cancelPull, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
-import { NA, type State, fitKey, getState, useStore } from "./store.ts";
+import { NA, type State, getState, useStore } from "./store.ts";
 import { Skel, VLabel, closeTip, esc } from "./ui.tsx";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
@@ -127,8 +127,8 @@ interface DownloadActions {
 function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; actions: DownloadActions }) {
   const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
   const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
-  const phase = useStore(s => fitReading(s, c.name, numCtx).phase);
-  const v = report && phase === "fresh" ? verdictOf(report) : undefined;
+  const tabled = useStore((s) => s.fitTable !== undefined);
+  const v = report ? verdictOf(report) : undefined;
   const context = report?.numCtx ?? numCtx;
   const basis = v?.measured ? "Measured" : "Estimated";
   const note = v?.measured ? "From the current load." : "Measured after the first load.";
@@ -165,7 +165,8 @@ function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number
           </small>
         </div>
       ) : (
-        <div className="dl-v" data-wait=""><small>{fitPendingWord(phase, report !== undefined)} at {k(numCtx)}</small></div>
+        // the table has no reading for this row: a dash; before the table, the check's word
+        <div className="dl-v" data-wait=""><small>{tabled ? "–" : `Checking… at ${k(numCtx)}`}</small></div>
       )}
       <div className="dl-a">{action}</div>
       {dling ? <Progress p={p} name={c.label} /> : null}
@@ -251,7 +252,7 @@ export function DownloadTab() {
   const models = useStore(s => s.models), pulls = useStore(s => s.pulls);
   const numCtx = useStore((s) => s.numCtx);
   const gpu = useStore((s) => s.gpu);
-  const fits = useStore((s) => s.fits);
+  const table = useStore((s) => s.fitTable);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
   // Only a changed installation or successful progress confirms a start.
@@ -283,23 +284,12 @@ export function DownloadTab() {
       return attempt && !retired(key, attempt) ? attempt.error ?? null : null;
     },
   };
-  const report = (c: CatalogEntry) => {
-    const r = fits[fitKey(c.name, numCtx)];
-    return r === "error" ? undefined : r ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
-  };
-  useEffect(() => {
-    for (const c of list) ensureFit(c.name, numCtx);
-  }, [catalog, numCtx, fits]);
-  const fitStatus = useStore(s => s.fitStatus), staleFits = useStore(s => s.staleFits);
-  // What this context has answered for a row: a report that is not waiting on
-  // changed memory (the catalog's own estimate counts when it was made at this
-  // context), "none" when the check failed, undefined while nothing has.
-  const answer = (c: CatalogEntry): FitReport | "none" | undefined => {
-    const key = fitKey(c.name, numCtx), raw = fits[key], phase = fitStatus?.[key];
-    if (raw === "error" || phase === "error") return "none";
-    if (phase === "stale" || staleFits?.[key]) return undefined;
-    return raw ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
-  };
+  // the table's row at this context: the one source, never the catalog's own fit
+  const report = (c: CatalogEntry) => rowOf({ fitTable: table, models, numCtx }, c.name);
+  // What this context has answered for a row: the table's row, "none" when the
+  // table is in without one, undefined until a table that answers comes (an
+  // empty or unreadable one does not).
+  const answer = (c: CatalogEntry): FitReport | "none" | undefined => !answers(table) ? undefined : report(c) ?? "none";
   const verdict = (c: CatalogEntry) => { const a = answer(c); return a === "none" ? undefined : a?.verdict; };
   // Grouped once per visit and context, when every row has an answer at this
   // context or a second has passed (a row with none is then not recommended).

@@ -27,7 +27,7 @@ async function retryDelays(attempts: readonly Attempt[]): Promise<number[]> {
       client.close();
       if (attempts[attempted - 1] === "hydration-error") throw new Error("Snapshot unavailable");
     },
-    beforeDisconnect: () => {}, afterDisconnect: () => {},
+    afterDisconnect: () => {},
   });
   const stop = connection.connect();
   const delays: number[] = [];
@@ -67,7 +67,6 @@ it("stopping one connection leaves another instance's pending and subsequent RPC
     webServerUrl: () => `ws://${name}.invalid/ws`,
     desktopBridge: () => undefined,
     hydrate: async () => { hydrated.push(name); },
-    beforeDisconnect: () => { cleanup.push(`${name}:before`); },
     afterDisconnect: () => { cleanup.push(`${name}:after`); },
   });
   const first = instance("first");
@@ -85,7 +84,7 @@ it("stopping one connection leaves another instance's pending and subsequent RPC
     await tick();
     expect(first.stopped).toBe(true);
     expect(second.stopped).toBe(false);
-    expect(cleanup).toEqual(["first:before", "first:after"]);
+    expect(cleanup).toEqual(["first:after"]);
     await expect(first.call("models.list", {})).rejects.toMatchObject({ code: "closed" });
     await expect(first.libraryRequest("sources.imports", {})).rejects.toThrow("Gates Local isn't connected. Try again once it reconnects.");
 

@@ -1,9 +1,10 @@
 /// <reference lib="dom" />
-// Fixes from the first review of the chat-feel lane: a failed fit check ends
-// the held verdict, Export as Markdown makes a file only from a loaded thread,
-// and downloads remain reachable from the picker.
+// Fixes from the first review of the chat-feel lane: the Send hold follows the
+// fit table, Export as Markdown makes a file only from a loaded thread, and
+// downloads remain reachable from the picker.
 import { readFile } from "node:fs/promises";
 import type { Download, Page, WebSocketRoute } from "@playwright/test";
+import { type FitTable, decodePayload, decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 /**
@@ -123,39 +124,58 @@ async function refusedGemma(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: "Send message" })).toHaveAttribute("data-tip", /not enough memory at 64k/);
 }
 
-test.describe("a failed fit check", () => {
-  test("memory frees and the refresh fails: Send is not left refused by the old verdict, and the check is asked again", async ({ page, open }) => {
+/** The last fit table the page received, answered or pushed. */
+function lastTable(page: Page): () => FitTable | undefined {
+  let table: FitTable | undefined;
+  const asked = new Set<string>();
+  page.on("websocket", ws => {
+    ws.on("framesent", frame => {
+      const request = decodeRequest(frame.payload);
+      if (request.ok && request.value.method === "fit.table") asked.add(request.value.id);
+    });
+    ws.on("framereceived", frame => {
+      const message = decodeServerMessage(frame.payload);
+      if (!message.ok) return;
+      const m = message.value;
+      if (m.type === "push" && m.channel === "fit.changed") {
+        // decodePayload checks the payload against the channel's FitTable schema.
+        const pushed = decodePayload("fit.changed", m.payload);
+        if (pushed.ok) table = pushed.value.payload as FitTable;
+      } else if (m.type === "response" && asked.delete(m.id) && m.ok) {
+        const answered = decodeResult("fit.table", m.result);
+        if (answered.ok) table = answered.value;
+      }
+    });
+  });
+  return () => table;
+}
+
+test.describe("the Send hold follows the fit table", () => {
+  test("a pushed table that fits releases Send and the next refusal holds it again, with no fit request", async ({ page, open }) => {
     const t = await tap(page);
+    const table = lastTable(page);
     await open();
     await waitReady(page);
     await refusedGemma(page);
     const send = page.getByRole("button", { name: "Send message" });
     await expect(send).toHaveAttribute("aria-disabled", "true");
     await expect.poll(() => t.pending.size).toBe(0);
+    const asked = t.calls.get("fit.table") ?? 0;
+    const base = table();
+    if (!base) throw new Error("No fit table reached the page");
+    // Newer than anything the fake server pushes during this test.
+    const pushWith = (verdict: "fits" | "refuse", step: number) => t.push("fit.changed", {
+      ...base,
+      reading: { ...base.reading, seq: base.reading.seq + 1000 + step, measuredAt: base.reading.measuredAt + step },
+      rows: base.rows.map(r => r.model === "gemma4:12b" && r.numCtx === 65536 ? { ...r, verdict, stops: [] } : r),
+    });
 
-    // another model leaves the GPU; the fresh check fails
-    t.fail.add("fit.check");
-    const before = t.calls.get("fit.check") ?? 0;
-    t.push("models.load", { model: "qwen3.5:9b", numCtx: 16384, state: "unloaded" });
-    await expect.poll(() => t.calls.get("fit.check") ?? 0).toBeGreaterThan(before);
+    pushWith("fits", 1);
     await expect(send).not.toHaveAttribute("data-tip", /not enough memory/);
     await expect(send).not.toHaveAttribute("aria-disabled", /./);
-
-    // a failure is not a verdict to keep: the check is asked again with no other change
-    t.fail.delete("fit.check");
-    await expect(send).toHaveAttribute("data-tip", /not enough memory at 64k/, { timeout: 15_000 });
-  });
-
-  test("a load error invalidates the fit checks", async ({ page, open }) => {
-    const t = await tap(page);
-    await open();
-    await waitReady(page);
-    await refusedGemma(page);
-    await expect.poll(() => t.pending.size).toBe(0);
-    const before = t.calls.get("fit.check") ?? 0;
-    t.push("models.load", { model: "gemma4:12b", numCtx: 65536, state: "error", message: "test: the load failed" });
-    await expect.poll(() => t.calls.get("fit.check") ?? 0).toBeGreaterThan(before);
-    await expect(page.getByRole("button", { name: "Send message" })).toHaveAttribute("data-tip", /not enough memory at 64k/);
+    pushWith("refuse", 2);
+    await expect(send).toHaveAttribute("data-tip", /not enough memory at 64k/);
+    expect(t.calls.get("fit.table") ?? 0, "the client asks for no fit of its own").toBe(asked);
   });
 });
 
@@ -163,11 +183,9 @@ const ctx = (page: Page, size: string) => page.locator("#picker").getByRole("rad
 
 test.describe("downloads from the approved picker", () => {
   test("the footer opens the real Download tab; estimates follow 16k to 64k and back", async ({ page, open }) => {
-    const t = await tap(page), reports = new Map<number, string>();
-    t.edit.set("fit.check", result => {
-      if (result && typeof result === "object" && "model" in result && result.model === "qwen3:14b" && "numCtx" in result && typeof result.numCtx === "number" && "verdict" in result && typeof result.verdict === "string") reports.set(result.numCtx, result.verdict);
-      return result;
-    });
+    await tap(page);
+    const table = lastTable(page);
+    const reports = { get: (numCtx: number) => table()?.rows.find(r => r.model === "qwen3:14b" && r.numCtx === numCtx)?.verdict };
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").click();

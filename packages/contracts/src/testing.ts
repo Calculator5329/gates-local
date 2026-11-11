@@ -3,6 +3,7 @@
 // tests that walk these tables cover every channel by construction.
 import type { Channel, MethodName, Params, Payload, ResultOf } from "./protocol.ts";
 import type {
+  FitTable,
   GpuStatus,
   ImageStatus,
   Message,
@@ -98,6 +99,16 @@ const gpu: GpuStatus = {
   measuredAt: 1_762_500_005_000,
 };
 
+const fitTable: FitTable = {
+  reading: { boot: "sample-process", seq: 3, measuredAt: 1_762_500_005_000 },
+  memory: { kind: "gpu", freeBytes: 12_884_901_888, usableBytes: 12_348_030_976 },
+  rows: [
+    { model: "qwen3:14b", numCtx: 16384, freeVramBytes: 12_884_901_888, needVramBytes: 11_200_000_000, spillRamBytes: 0, verdict: "fits", source: "estimate", stops: [], message: "qwen3:14b at num_ctx 16384 needs 11.2 GB (estimate): fits." },
+    { model: "qwen3:14b", numCtx: 32768, freeVramBytes: 11_000_000_000, needVramBytes: 12_500_000_000, spillRamBytes: 1_500_000_000, verdict: "spills", source: "estimate", stops: [] },
+    { model: "qwen3.5:9b", numCtx: 65536, freeVramBytes: 4_000_000_000, needVramBytes: 9_000_000_000, spillRamBytes: 0, verdict: "refuse", shortfallBytes: 500_000_000, source: "measured", stops: ["gemma3:4b"] },
+  ],
+};
+
 const probe: SetupProbe = {
   os: { platform: "linux", release: "7.2.9", arch: "x64" },
   cpu: { model: "AMD Ryzen 7 7800X3D", threads: 16 },
@@ -162,21 +173,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "runtime.status": { params: {}, result: runtime },
   "runtime.retry": { params: {}, result: runtime },
   "runtime.discover": { params: {}, result: runtime },
-  "fit.check": {
-    params: { model: "qwen3:14b", numCtx: 32768 },
-    result: {
-      model: "qwen3:14b",
-      numCtx: 32768,
-      freeVramBytes: 11_000_000_000,
-      needVramBytes: 12_500_000_000,
-      spillRamBytes: 1_500_000_000,
-      verdict: "spills",
-      shortfallBytes: 1_500_000_000,
-      source: "measured",
-      measuredAt: 1_762_500_004_000,
-      message: "qwen3:14b at num_ctx 32768 spills 1.50 GB to system RAM.",
-    },
-  },
+  "fit.table": { params: {}, result: fitTable },
   "chat.send": {
     params: { threadId: "t1", content: "hello", model: "qwen3:14b", numCtx: 16384 },
     result: { turnId: "turn-1", userMessage },
@@ -308,6 +305,7 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "threads.changed": [{ threadId: "t1" }],
   "settings.changed": [settings],
   "gpu.changed": [gpu, { vendor: "none", occupants: [], systemMemoryAvailableBytes: 9_000_000_000, measuredAt: 1 }],
+  "fit.changed": [fitTable, { reading: { boot: "sample-process", seq: 4, measuredAt: 1 }, memory: { kind: "cpu" }, rows: [] }],
   "models.pull": [pull, { name: "qwen3.5:14b", state: "error", completedBytes: 0, message: "no space left" }],
   "update.changed": [methodSamples["update.status"].result],
   "models.load": [

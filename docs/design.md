@@ -48,7 +48,15 @@ Before the first read, nothing claims a problem nobody has seen: no
 that drops later still says so, and so does a first read that has not come
 in two seconds: it says "Connecting…", once, and nothing about Ollama until
 the runtime has answered. A screen that has left its placeholders never
-goes back to them.
+goes back to them, with one exception below.
+
+Every fit answer on screen ("Ready to chat", a verdict, Recommended, a
+context row's memory) comes from the server's fit table. When GPU memory
+changes, the server's next table replaces those answers in place; nothing
+goes back to "Checking". A pick the newer reading rules out is refused, and
+the refusal says why. A lost connection withdraws the table: every fit
+value goes back to its placeholder until the reconnected server's own
+table is in, since a restarted server may see different memory.
 
 ## Placeholders
 

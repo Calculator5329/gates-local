@@ -8,7 +8,7 @@ import {
   BlockingTurn,
   CatalogEntry,
   ChatEvent,
-  FitReport,
+  FitTable,
   GpuStatus,
   ImageChoice,
   ImageEvent,
@@ -132,7 +132,8 @@ export const methods = {
   "runtime.retry": { params: NoParams, result: RuntimeStatus, phone: "deny" },
   /** Look for an Ollama that came back; starts and installs nothing, and a ready status stays as it is. The phone's Retry. */
   "runtime.discover": { params: NoParams, result: RuntimeStatus, phone: "allow" },
-  "fit.check": { params: S.Struct({ model: S.String, numCtx: NumCtx }), result: FitReport, phone: "allow" },
+  /** The server's current fit table (built now if it has none); fit.changed pushes each newer one. */
+  "fit.table": { params: NoParams, result: FitTable, phone: "allow" },
   "chat.send": {
     phone: "allow",
     params: S.Struct({
@@ -261,6 +262,8 @@ export const pushes = {
   // its older save completing from a new action in another window.
   "settings.changed": { payload: S.Struct({ ...Settings.fields, voiceChange: S.optional(S.String.check(S.isMaxLength(128))) }) },
   "gpu.changed": { payload: GpuStatus },
+  /** A newer fit table: after a GPU reading moves, the model list changes, a load ends, a model unloads, or a turn starts or ends. */
+  "fit.changed": { payload: FitTable },
   /** One per progress step of every download, until done, error or cancelled. */
   "models.pull": { payload: PullProgress },
   "models.load": { payload: ModelLoad },

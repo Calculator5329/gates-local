@@ -28,16 +28,17 @@ vi.mock("../src/store.ts", async original => {
   const actual = await original<typeof import("../src/store.ts")>();
   return { ...actual, useStore: <T>(select: (s: ReturnType<typeof actual.getState>) => T) => select(actual.getState()) };
 });
-import { fitKey, setState } from "../src/store.ts";
+import { setState } from "../src/store.ts";
+const fitTable = methodSamples["fit.table"].result;
+const fit = fitTable.rows[0]!;
 let GpuMemory: typeof import("../src/FitPanel.tsx")["GpuMemory"];
 beforeAll(async () => { vi.stubGlobal("window", {}); GpuMemory = (await import("../src/FitPanel.tsx")).GpuMemory; });
 afterAll(() => vi.unstubAllGlobals());
 it("keys legend rows by occupant identity across memory-order changes", () => {
-  const fit = { ...methodSamples["fit.check"].result, numCtx: 16384 };
   const whisper = { kind: "whisper" as const, label: "Whisper", bytes: 2 * 1024 ** 3, protected: true };
   const other = { kind: "unknown" as const, label: "Other", bytes: 1024 ** 3, protected: true };
   const gpu = { ...methodSamples["gpu.status"].result, vendor: "nvidia" as const, totalBytes: 16 * 1024 ** 3, occupants: [whisper, other] };
-  setState({ conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, model: fit.model, numCtx: 16384, fits: { [fitKey(fit.model, 16384)]: fit }, gpu, fitPanel: { model: null } });
+  setState({ conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, model: fit.model, numCtx: 16384, fitTable, gpu, fitPanel: { model: null } });
   keys.length = 0; renderToStaticMarkup(createElement(GpuMemory));
   const before = keys.find(row => row.tip.includes("Whisper"))?.key;
   expect(before).toBeDefined();
@@ -47,11 +48,10 @@ it("keys legend rows by occupant identity across memory-order changes", () => {
 });
 
 it("FR-06 keeps duplicate occupants distinct and stable across other occupants and byte changes", () => {
-  const fit = { ...methodSamples["fit.check"].result, numCtx: 16384 };
   const python = { kind: "other-app" as const, label: "Python", bytes: 2 * 1024 ** 3, protected: true };
   const whisper = { kind: "whisper" as const, label: "Whisper", bytes: 1024 ** 3, protected: true };
   const gpu = { ...methodSamples["gpu.status"].result, vendor: "nvidia" as const, totalBytes: 16 * 1024 ** 3, occupants: [python, { ...python, bytes: 1024 ** 3 }, whisper] };
-  setState({ conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, model: fit.model, numCtx: 16384, fits: { [fitKey(fit.model, 16384)]: fit }, gpu, fitPanel: { model: null } });
+  setState({ conn: { kind: "open" }, runtime: methodSamples["runtime.status"].result, model: fit.model, numCtx: 16384, fitTable, gpu, fitPanel: { model: null } });
   keys.length = 0; bars.length = 0; renderToStaticMarkup(createElement(GpuMemory));
   const before = keys.filter(row => !row.tip.includes("Whisper")).map(row => row.key);
   expect(before).toHaveLength(2);

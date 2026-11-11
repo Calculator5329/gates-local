@@ -9,25 +9,25 @@ const store = vi.hoisted(() => ({ state: undefined as unknown }));
 vi.mock("./store.ts", () => ({
   NA: "na", chatReady: () => true,
   useStore: (select: (s: unknown) => unknown) => select(store.state),
-  fitKey: (model: string, ctx: number) => `${model}@${ctx}`, setState: () => undefined,
+  setState: () => undefined,
 }));
-vi.mock("./session.ts", () => ({ ensureFit: () => undefined, setContext: () => undefined, updateSettings: () => undefined }));
+vi.mock("./session.ts", () => ({ setContext: () => undefined, updateSettings: () => undefined }));
 const { GpuMemory } = await import("./FitPanel.tsx");
 
 const detail = "Gates Local could not read GPU memory (nvidia-smi timed out), so it cannot check whether a model fits. Try again. If this keeps happening, run nvidia-smi in a terminal to check the NVIDIA driver.";
 
-function panel(gpu: GpuStatus, history: boolean, pending = false): string {
-  const previous = { model: "chat", numCtx: 16384, verdict: "fits", needVramBytes: 5e9, freeVramBytes: 8e9, spillRamBytes: 0, source: "estimate", measuredAt: 0 };
+/** The panel for model "chat"; `tabled`: a fit table has arrived (with no row for "chat"). */
+function panel(gpu: GpuStatus, tabled: boolean): string {
   store.state = {
     model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
     gpu, models: [], catalog: [], loads: { chat: { state: "ready", numCtx: 16384 } }, messages: {}, firstToken: {},
-    fits: pending ? {} : { "chat@16384": "error" }, fitStatus: { "chat@16384": pending ? "checking" : "error" }, fitHistory: history ? { "chat@16384": previous } : {}, staleFits: {}, unavailable: {},
+    fitTable: tabled ? { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "cpu" }, rows: [] } : undefined, unavailable: {},
   };
   return renderToStaticMarkup(createElement(GpuMemory));
 }
 
-it.each([false, true])("shows the GPU refusal outside collapsed details, earlier check: %s", (history) => {
-  const html = panel({ vendor: "unreadable", detail, occupants: [], systemMemoryAvailableBytes: 16e9, measuredAt: 1 }, history);
+it.each([false, true])("shows the GPU refusal outside collapsed details, table arrived: %s", (tabled) => {
+  const html = panel({ vendor: "unreadable", detail, occupants: [], systemMemoryAvailableBytes: 16e9, measuredAt: 1 }, tabled);
   expect(html.split("<details")[0]).toContain(detail);
   expect(html.split(detail)).toHaveLength(2);
 });
@@ -44,9 +44,22 @@ it.each(["No devices were found", "NVIDIA-SMI has failed because it couldn't com
   expect.soft(html).not.toContain("no supported GPU");
 });
 
-it.each([false, true])("a no-GPU notice keeps the memory check line, pending: %s", (pending) => {
-  const html = panel({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16e9, measuredAt: 1 }, false, pending);
-  expect(html).toContain(pending ? "Checking memory…" : "Gates Local couldn&#x27;t check memory for chat right now.");
+it.each([false, true])("a no-GPU notice keeps the memory line, table arrived: %s", (tabled) => {
+  const html = panel({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16e9, measuredAt: 1 }, tabled);
+  expect(html).toContain(tabled ? "No memory reading for chat." : "fit-skel");
+  expect(html).not.toContain("Checking");
+});
+
+it("waits for the GPU reading before showing a row, so Details never grows when it lands", () => {
+  store.state = {
+    model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
+    gpu: undefined, models: [], catalog: [], loads: {}, messages: {}, firstToken: {}, unavailable: {},
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory: { kind: "gpu", freeBytes: 12e9, usableBytes: 11e9 }, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 12e9, needVramBytes: 9e9, spillRamBytes: 0, verdict: "gpu", source: "estimate", stops: [] }] },
+  };
+  const html = renderToStaticMarkup(createElement(GpuMemory));
+  expect(html).toContain("fit-skel");
+  expect(html).not.toContain("<details");
+  expect(html).not.toContain("couldn't read the GPU");
 });
 
 it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {

@@ -84,12 +84,13 @@ test("real model streams, stops, recalls the thread and survives a server restar
     // First find out what the unchanged fit does. Refusal stops the journey here.
     const fitAt = Date.now();
     const gpu = await server.client.call("gpu.status", {});
-    const fit = await server.client.call("fit.check", { model, numCtx: 8192 });
+    const table = await server.client.call("fit.table", {});
+    const fit = table.rows.find((r) => r.model === model && r.numCtx === 8192);
     evidence["gpu"] = gpu;
     evidence["fit"] = fit;
     evidence["fitMs"] = Date.now() - fitAt;
-    console.log(`[real-smoke] fit ${Date.now() - fitAt} ms; GPU ${gpu.vendor}; ${fit.verdict}: ${fit.message}`);
-    expect(fit.verdict, "Unchanged product must admit this model; do not fake GPU measurements to pass").not.toBe("refuse");
+    console.log(`[real-smoke] fit ${Date.now() - fitAt} ms; GPU ${gpu.vendor}; ${fit?.verdict}: ${fit?.message}`);
+    expect(fit?.verdict, "Unchanged product must admit this model; do not fake GPU measurements to pass").toMatch(/^(fits|spills)$/);
     await server.client.call("settings.model.update", { model, patch: { temperature: 0, seed: 42, num_predict: 256 } });
     await server.client.call("settings.update", { defaultNumCtx: 8192 });
     await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));

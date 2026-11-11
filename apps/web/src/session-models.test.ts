@@ -36,6 +36,7 @@ const defaults: Record<string, unknown> = {
   "threads.get": { messages: [] },
   "turns.blocking": [],
   "turns.active": [],
+  "models.load": { model: QWEN, numCtx: 16384, state: "ready" },
   "settings.get": { theme: "system", defaultNumCtx: 16384, thinking: true, imageGen: false },
 };
 
@@ -255,6 +256,40 @@ it("a new chat starts on the model chosen last while it is still loading, and re
   expect(store.getState().loads[store.getState().model ?? ""]).toMatchObject({ state: "error" });
   session.openThread("A");
   expect(store.getState().loads[store.getState().model ?? ""]).toMatchObject({ state: "error" });
+});
+
+describe("a pick the server refuses on its own, newer reading", () => {
+  const REFUSED = "gemma4:12b needs 11.2 GB at 16k; 9.8 GB is free.";
+  const refusing = { "models.load": () => Promise.resolve({ model: GEMMA, numCtx: 16384, state: "error", message: REFUSED }) };
+
+  it("says why once, in the status line under the box the pick was made from", async () => {
+    const { session, store, hydrated } = await boot(refusing);
+    await hydrated();
+    session.pickModel(GEMMA);
+    await vi.waitFor(() => expect(store.getState().notice).toBe(REFUSED));
+  });
+
+  it("leaves when the person picks another model", async () => {
+    const loads = [{ model: GEMMA, numCtx: 16384, state: "error", message: REFUSED }, { model: QWEN, numCtx: 16384, state: "ready" }];
+    const { session, store, hydrated } = await boot({ "models.load": () => Promise.resolve(loads.shift()) });
+    await hydrated();
+    session.pickModel(GEMMA);
+    await vi.waitFor(() => expect(store.getState().notice).toBe(REFUSED));
+    session.pickModel(QWEN);
+    expect(store.getState().notice).toBeNull();
+  });
+
+  it("says nothing when the person has picked another model before the answer", async () => {
+    const answer = defer<unknown>();
+    const { session, store, hydrated, calls } = await boot({ "models.load": () => answer.promise });
+    await hydrated();
+    session.pickModel(GEMMA);
+    await vi.waitFor(() => expect(calls).toContain("models.load"));
+    store.setState({ model: QWEN });
+    answer.resolve({ model: GEMMA, numCtx: 16384, state: "error", message: REFUSED });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(store.getState().notice).toBeNull();
+  });
 });
 
 const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });

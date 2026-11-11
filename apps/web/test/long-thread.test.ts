@@ -213,7 +213,6 @@ async function realChat() {
     untrackedDone: () => {},
     openThread: () => {},
     blockingFor: async () => [],
-    invalidateFits: () => {},
   });
 }
 

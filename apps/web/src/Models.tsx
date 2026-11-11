@@ -6,11 +6,11 @@
 // download flow as it was (ModelDownloads.tsx). The rules live in
 // models-rules.ts and the session calls in models-actions.ts.
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { FitReport, ModelInfo, PullProgress } from "@gates-local/contracts";
+import type { ModelInfo, PullProgress } from "@gates-local/contracts";
 import { copyText } from "./copy.ts";
 import { k, noGpu } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
+import { type TableFit, rowOf } from "./fit-table.ts";
 import { DownloadTab, DownloadingRow, DownloadingRows, usePendingDownloads } from "./ModelDownloads.tsx";
 import { cardDefault, makeDefault, removeModelAndMoveDefault, savedDefault } from "./models-actions.ts";
 import {
@@ -33,11 +33,11 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { ensureFit, pull } from "./session.ts";
+import { pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
 import { COMPUTER_ONLY, Fail, Tipped, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
-import { closeTip, esc } from "./ui.tsx";
+import { FitSkel, closeTip, esc } from "./ui.tsx";
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
@@ -46,11 +46,10 @@ const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["sett
 // ---------------------------------------------------------------- names and fit
 
 /** A dot carries the verdict and the words stay body colour; the exceptions give their reason on hover or focus. */
-function Fit({ report, phase = "fresh" }: { report: FitReport | "error" | undefined; phase?: FitPhase }) {
+function Fit({ report }: { report: TableFit | undefined }) {
   const cpu = useStore((s) => noGpu(s.gpu));
-  if (phase !== "fresh") return <span className="mp-fit none">{fitPendingWord(phase, report !== undefined && report !== "error")}</span>;
-  if (report === undefined) return <span className="mp-fit none">Checking…</span>;
-  if (report === "error") return <span className="mp-fit none">Couldn't check</span>;
+  const tabled = useStore((s) => s.fitTable !== undefined);
+  if (report === undefined) return tabled ? <span className="mp-fit none">–</span> : <span className="mp-fit none" aria-busy="true"><FitSkel w="120px" /></span>;
   const exception = report.verdict !== "fits";
   return (
     <span className={`mp-fit${exception ? " x" : ""}`} tabIndex={exception ? 0 : undefined} data-tip={exception ? esc(fitReason(report, cpu)) : undefined}>
@@ -65,27 +64,20 @@ function Fit({ report, phase = "fresh" }: { report: FitReport | "error" | undefi
 interface InstalledRow extends Row {
   readonly info: ModelInfo;
   readonly label: ModelName;
-  readonly report: FitReport | "error" | undefined;
-  readonly phase: FitPhase;
+  readonly report: TableFit | undefined;
 }
 
 function useInstalledRows(): { rows: InstalledRow[]; def: string | undefined } {
   const models = useStore((s) => s.models);
   const catalog = useStore(catalogOf);
   const numCtx = useStore((s) => s.numCtx);
-  const fits = useStore((s) => s.fits);
-  const fitStatus = useStore(s => s.fitStatus);
-  const fitHistory = useStore(s => s.fitHistory);
+  const fitTable = useStore((s) => s.fitTable);
   const def = useStore(cardDefault);
-  useEffect(() => {
-    for (const m of models ?? []) if (canChat(m)) ensureFit(m.name, numCtx);
-  }, [models, numCtx, fits]);
   const rows = (models ?? []).map((info): InstalledRow => {
     const chat = canChat(info);
-    const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, info.name, numCtx);
-    const report = !chat ? undefined : reading.report;
+    const report = chat ? rowOf({ fitTable, models, numCtx }, info.name) : undefined;
     const label = nameOf(info.name, catalog);
-    return { name: info.name, display: label.text, chat, verdict: reading.phase === "fresh" && report !== undefined ? report.verdict : undefined, info, label, report, phase: reading.phase };
+    return { name: info.name, display: label.text, chat, verdict: report?.verdict, info, label, report };
   });
   return { rows: sortRows(rows, def), def };
 }
@@ -232,7 +224,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
       {why.label}
     </span>
   ) : (
-    <Fit report={r.report} phase={r.phase} />
+    <Fit report={r.report} />
   );
   const chip = isDef ? (
     <span className="mp-chip">
@@ -498,7 +490,7 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
         <span className="mp-nmn">{r.label.text}</span>
         {variantOf(r.name)}
       </span>
-      {r.phase !== "fresh" || (r.report !== undefined && r.report !== "error" && r.report.verdict !== "fits") ? <Fit report={r.report} phase={r.phase} /> : <span />}
+      {r.report?.verdict !== "fits" ? <Fit report={r.report} /> : <span />}
       <span className="mp-osz">{sizeText(r.info.sizeBytes)}</span>
     </div>
   );
@@ -559,16 +551,13 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
 // ---------------------------------------------------------------- zero models
 
 function NoModels() {
-  const catalog = useStore(catalogOf);
   const downloading = useStore((s) => Object.values(s.pulls).some(awaitingInstall));
   const pullNA = useStore((s) => s.unavailable["models.pull"] === true);
   const cpu = useStore((s) => noGpu(s.gpu));
   const [err, run] = useAct();
-  const fits = useStore(s => s.fits);
-  const fitStatus = useStore(s => s.fitStatus);
-  const fitHistory = useStore(s => s.fitHistory);
-  const numCtx = useStore(s => s.numCtx);
-  useEffect(() => { for (const c of catalog ?? []) ensureFit(c.name, numCtx); }, [catalog, fits, numCtx]);
+  // the suggestion's verdict is the table's row for it, never the catalog's own estimate
+  const want = cpu ? "spills" : "fits";
+  const pick = useStore(s => catalogOf(s)?.find((c) => c.recommended && rowOf(s, c.name)?.verdict === want));
   if (downloading) {
     return (
       <div className="mp-first">
@@ -578,7 +567,6 @@ function NoModels() {
       </div>
     );
   }
-  const pick = catalog?.find((c) => c.recommended && currentFit({ fits, fitStatus, fitHistory, catalog }, c.name, numCtx)?.verdict === (cpu ? "spills" : "fits"));
   return (
     <div className="mp-empty">
       <Icon id="bot" cls="mp-big" />
@@ -588,7 +576,7 @@ function NoModels() {
         {pick && !pullNA ? (
           <>
             {" "}
-            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {fitLabel(pick.fit?.verdict ?? "fits", false, cpu).toLowerCase()} on this computer.
+            We suggest <b>{pick.label}</b>: {about(pick.downloadBytes)}, {fitLabel(want, false, cpu).toLowerCase()} on this computer.
           </>
         ) : null}
       </p>

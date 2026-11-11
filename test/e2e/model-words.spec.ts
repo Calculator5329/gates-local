@@ -3,15 +3,13 @@
 // apart (G7-01) and keeps context fit on hover (S1), a refused verdict's
 // dot is red in the first-run card (item 4), and tok/s counts decode time only.
 import type { Page } from "@playwright/test";
-import { decodeResult, type GpuStatus } from "@gates-local/contracts";
+import { decodeResult, type FitTable } from "@gates-local/contracts";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
 
-/** Prepare normally, then hold real fit answers during an open picker's refresh. */
-async function holdPickerReports(page: Page) {
-  let holding = false;
-  let gpu: GpuStatus | undefined;
+/** Prepare normally, then push a newer fit table while the picker is open. */
+async function pickerReports(page: Page) {
+  let table: FitTable | undefined;
   let refresh: (() => void) | undefined;
-  const held: Array<() => void> = [];
   const received = new Set<string>();
   await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
     const server = ws.connectToServer();
@@ -22,22 +20,20 @@ async function holdPickerReports(page: Page) {
       server.send(message);
     });
     server.onMessage(message => {
-      const res = JSON.parse(String(message)) as { type?: string; id?: unknown; result?: unknown };
+      const res = JSON.parse(String(message)) as { type?: string; id?: unknown; result?: unknown; channel?: string; payload?: unknown };
       const method = res.type === "response" ? methods.get(res.id) : undefined;
       methods.delete(res.id);
-      if (method === "gpu.status") {
-        const reading = decodeResult("gpu.status", res.result);
-        if (reading.ok) gpu = reading.value;
-      }
-      const report = method === "models.catalog" || method === "fit.check";
-      if (report) received.add(method);
-      if (holding && report) held.push(() => ws.send(message));
-      else ws.send(message);
+      const pushed = res.type === "push" && res.channel === "fit.changed" ? decodeResult("fit.table", res.payload) : undefined;
+      const answered = method === "fit.table" ? decodeResult("fit.table", res.result) : undefined;
+      const next = pushed ?? answered;
+      if (next?.ok) table = next.value;
+      if (method !== undefined) received.add(method);
+      ws.send(message);
     });
     refresh = () => {
-      if (!gpu) throw new Error("No GPU reading to refresh");
-      holding = true; received.clear();
-      ws.send(JSON.stringify({ type: "push", channel: "gpu.changed", payload: gpu }));
+      if (!table) throw new Error("No fit table to refresh");
+      const reading = { ...table.reading, seq: table.reading.seq + 1, measuredAt: table.reading.measuredAt + 1 };
+      ws.send(JSON.stringify({ type: "push", channel: "fit.changed", payload: { ...table, reading } }));
     };
   });
   return {
@@ -46,7 +42,6 @@ async function holdPickerReports(page: Page) {
       if (!refresh) throw new Error("Picker connection has not opened");
       refresh();
     },
-    release: () => { holding = false; for (const send of held.splice(0)) send(); },
   };
 }
 
@@ -71,25 +66,23 @@ async function rowsOpenNoTip(page: Page): Promise<void> {
 for (const width of [1440, 760]) {
   test(`picker rows open no tooltip, and the picker holds still through a fit refresh at ${width} px (F72)`, async ({ page, open }) => {
     await page.setViewportSize({ width, height: 900 });
-    const reports = await holdPickerReports(page);
+    const reports = await pickerReports(page);
     await open();
     await waitReady(page);
-    await expect.poll(() => reports.received.has("models.catalog")).toBe(true);
+    await expect.poll(() => reports.received.has("models.catalog") && reports.received.has("fit.table")).toBe(true);
     await page.locator("#modelBtn").click();
     const picker = page.locator("#picker");
     await expect(picker).toBeVisible();
+    await expect(picker.locator(".fit-skel")).toHaveCount(0);
     await picker.evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)));
     const before = await picker.boundingBox();
-    reports.refresh();
-    await expect.poll(() => reports.received.has("fit.check")).toBe(true);
-    await expect(picker).toBeVisible();
-    await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
     await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
-    reports.release();
+    reports.refresh();
+    await expect(picker).toBeVisible();
     await expect(picker.locator('.pk-r[aria-busy="true"]')).toHaveCount(0);
     await expect(picker.locator(".pk-bottom").getByRole("button", { name: "Download models", exact: true })).toBeVisible();
-    await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
-    expect(await picker.boundingBox(), "fit replies keep the picker under the resting pointer").toEqual(before);
+    await expect(picker.locator(".fit-skel")).toHaveCount(0);
+    expect(await picker.boundingBox(), "a pushed table keeps the picker under the resting pointer").toEqual(before);
     await rowsOpenNoTip(page);
     await page.screenshot({ path: test.info().outputPath(`picker-stable-${width}.png`) });
   });

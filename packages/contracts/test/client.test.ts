@@ -269,7 +269,7 @@ describe("createClient", () => {
     const socket = new FakeSocket();
     socket.open();
     const client = createClient(socket);
-    await expect(client.call("fit.check", { model: "m", numCtx: -1 })).rejects.toMatchObject({ code: "bad-params" });
+    await expect(client.call("turns.blocking", { model: "m", numCtx: -1 })).rejects.toMatchObject({ code: "bad-params" });
     expect(socket.sent).toEqual([]);
   });
 

@@ -2,15 +2,15 @@
 // chat. Found: a recommended installed model and Start chatting. No Ollama: a
 // calm status with Retry. No models: download the recommended one, with
 // progress and Cancel; the chat can open to draft while it downloads.
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { CatalogEntry, FitReport } from "@gates-local/contracts";
+import { type ReactNode, useEffect, useState } from "react";
+import type { CatalogEntry } from "@gates-local/contracts";
 import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
 import { DlDetail, canCancelPull } from "./ModelDownloads.tsx";
-import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
+import { ctxFor, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
-import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
-import { NA, type State, fitKey, useStore } from "./store.ts";
+import { type RowPhase, phaseOf, rowOf } from "./fit-table.ts";
+import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
+import { NA, type State, useStore } from "./store.ts";
 import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
@@ -38,24 +38,8 @@ function startChat(): void {
   focusComposer();
 }
 
-/**
- * The memory reading this screen shows. A check that runs again after a
- * current answer, with nothing changed, keeps that answer's words until it
- * answers. Once memory has changed (the report is stale) the held answer is
- * dropped, so the screen waits in its fixed slots rather than repeat a fit
- * that may no longer be true; an error or a different answer shows at once.
- */
-function useSteadyFit(tag: string | undefined, numCtx: number): { report: FitReport | undefined; phase: FitPhase } {
-  const key = tag === undefined ? "" : fitKey(tag, numCtx);
-  const report = useStore((s) => (tag === undefined ? undefined : fitReading(s, tag, numCtx).report));
-  const phase = useStore((s) => (tag === undefined ? "checking" : fitReading(s, tag, numCtx).phase));
-  const changed = useStore((s) => s.staleFits[key] === true);
-  const last = useRef<{ key: string; report: FitReport } | null>(null);
-  if (phase === "fresh" && report !== undefined) last.current = { key, report };
-  else if (phase !== "checking" || changed) last.current = null;
-  if (phase === "checking" && last.current?.key === key) return { report: last.current.report, phase: "fresh" };
-  return { report, phase };
-}
+/** The card's verdict slot before the table has this model: the table is on its way, or it has no reading for it. */
+const pendingWord = (phase: RowPhase): string => (phase === "checking" ? "Checking…" : "Couldn't check");
 
 const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
 const SPILL_TIP = "Your best fit uses system memory, so it is slower.";
@@ -70,15 +54,13 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const numCtx = useStore((s) => s.numCtx);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
-  const fits = useStore(s => s.fits);
-  const reading = useSteadyFit(tag, numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const ctx = info?.maxContext === undefined ? numCtx : Math.min(numCtx, info.maxContext);
-  useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
-  const fit = reading.report;
-  const v = fit && reading.phase === "fresh" ? verdictOf(fit) : undefined;
+  const ctx = useStore((s) => ctxFor(s.numCtx, s.models, tag));
+  const fit = useStore((s) => rowOf(s, tag));
+  const phase = useStore((s) => phaseOf(s.fitTable, rowOf(s, tag)));
+  const v = fit ? verdictOf(fit) : undefined;
   const d = describeModel(tag, catalog);
-  const tip = reading.phase !== "fresh" ? "Suggested model. Current memory is being checked." : have ? pickRuleText(numCtx, cpu) : v?.k === "no" ? "Choose a smaller model or context." : cpu
+  const tip = !v ? "Suggested model." : have ? pickRuleText(numCtx, cpu) : v?.k === "no" ? "Choose a smaller model or context." : cpu
     ? `The first of Gates Local's recommended models that fits in system memory with room for ${k(numCtx)} of context.`
     : v?.k === "spill" ? SPILL_TIP
     : `The first of Gates Local's recommended models that runs on your GPU with room for ${k(numCtx)} of context.`;
@@ -93,7 +75,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
           </span>
         </span>
         <span className="v" data-wait="" data-watch="fit">
-          {v ? <VLabel v={v} /> : fitPendingWord(reading.phase, fit !== undefined)}
+          {v ? <VLabel v={v} /> : pendingWord(phase)}
         </span>
       </div>
       {!have && entry ? <div className="fr-sub">{gb(entry.downloadBytes)} download</div> : null}
@@ -131,7 +113,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             {fit ? (
               <tr>
                 <td>{cpu ? "Memory" : "GPU memory"}</td>
-                <td>{reading.phase !== "fresh" ? `Previous check: ${gb(fit.needVramBytes)} needed; ${gb(fit.freeVramBytes)} available.` : cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} available to this model`}</td>
+                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} available to this model`}</td>
               </tr>
             ) : null}
           </tbody>
@@ -147,7 +129,7 @@ const rtOfState = (s: State) => rtOf(s);
 /** The model to recommend when none is installed: the catalog's first recommended entry. */
 function recommendedEntry(s: State): CatalogEntry | undefined {
   if (s.catalog === NA || s.catalog === undefined) return undefined;
-  return s.catalog.find((c) => c.recommended && c.fit?.verdict !== "refuse") ?? s.catalog.find((c) => c.recommended);
+  return s.catalog.find((c) => c.recommended && rowOf(s, c.name)?.verdict !== "refuse") ?? s.catalog.find((c) => c.recommended);
 }
 
 function NoModels() {
@@ -161,7 +143,7 @@ function NoModels() {
   // Embedding models can be installed and still leave nothing to chat with.
   const others = useStore((s) => (s.models ?? []).length);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const fresh = useStore(s => entry === undefined ? undefined : currentFit(s, entry.name, s.numCtx));
+  const fresh = useStore(s => entry === undefined ? undefined : rowOf(s, entry.name));
   const st = (
     <>
       <span className="dot ok" />
@@ -271,17 +253,17 @@ function Found() {
   const name = tag === undefined ? "This model" : describeModel(tag, catalog).name;
   const numCtx = useStore((s) => s.numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
-  const fits = useStore(s => s.fits);
-  const { report, phase } = useSteadyFit(tag, numCtx);
-  const fresh = phase === "fresh" ? report : undefined;
-  useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
-  // still checking: the title and the card's "Checking…" say it; no sentence
-  const words = fresh === undefined ? { title: "Checking memory" } : foundWords(fresh.verdict, numCtx, cpu, name);
+  const fresh = useStore(s => rowOf(s, tag));
+  const phase = useStore(s => phaseOf(s.fitTable, rowOf(s, tag)));
+  // no row for it: the title says what the card's slot says (still checking, or the table has no
+  // reading for it); no sentence, never "Ready"
+  const words = fresh !== undefined ? foundWords(fresh.verdict, numCtx, cpu, name) : { title: phase === "checking" ? "Checking memory" : "Couldn't check memory" };
+  const dot = fresh === undefined ? (phase === "checking" ? "run" : "warn") : fresh.verdict === "refuse" ? "err" : "ok";
   return (
     <Shell
       st={
         <>
-          <span className={`dot ${fresh?.verdict === "refuse" ? "err" : fresh === undefined ? "run" : "ok"}`} />
+          <span className={`dot ${dot}`} />
           Ollama · {count} chat {count === 1 ? "model" : "models"}
         </>
       }
@@ -374,26 +356,22 @@ function screenModel(s: State): string | undefined {
   return s.models.some(canChat) ? (s.model ?? pickedModel(s.models)?.name) : recommendedEntry(s)?.name;
 }
 
-/** The catalog is read (the card's model name and download size) and the model's memory check has answered. */
+/** The catalog is read (the card's model name and download size) and the fit table has answered for the model. */
 function inHand(s: State): boolean {
   // an Ollama to update, or no way to download here: the words need no catalog and no check
   if (chatBlockedReason(s.models, undefined) !== undefined || s.unavailable["models.pull"] === true) return true;
   if (s.catalog === undefined) return false;
   const tag = screenModel(s);
   if (tag === undefined) return true;
-  const phase = fitReading(s, tag, s.numCtx).phase;
-  return phase === "fresh" || phase === "error";
+  // the table has this model's row, or it is in and has no reading for it ("Couldn't check")
+  return phaseOf(s.fitTable, rowOf(s, tag)) !== "checking";
 }
 
 export function FirstRun() {
   const rt = useStore(rtOfState);
   const boot = useStore(booting);
   const models = useStore((s) => s.models);
-  const tag = useStore(screenModel);
-  const numCtx = useStore((s) => s.numCtx);
   const ready = useStore(inHand);
-  // a memory change makes fits anew: ask again, as the card does once it shows
-  const fits = useStore((s) => s.fits);
   const known = !boot && rt === "ready" && models !== undefined;
   const [waited, setWaited] = useState(false);
   const [shown, setShown] = useState(false);
@@ -404,7 +382,6 @@ export function FirstRun() {
   if (known && (ready || waited) && !shown) setShown(true);
   const placeholders = !left && (boot || (known && !shown && !ready && !waited));
   if (!placeholders && !left) setLeft(true);
-  useEffect(() => { if (known) ensureFit(tag, numCtx); }, [known, tag, numCtx, fits]);
   useEffect(() => {
     if (!known || ready) return;
     const t = setTimeout(() => setWaited(true), WHOLE_WAIT_MS);

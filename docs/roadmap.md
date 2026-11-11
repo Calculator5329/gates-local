@@ -426,8 +426,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 - [ ] <!-- workspace:id=work:0a695dc7-75db-5946-8a75-26f2a58da1a8 --> The Download tab's group placeholder comes back when the context size changes mid-visit, and first run's `waited` flag never clears (`ModelDownloads.tsx`, `FirstRun.tsx`).
       *Accept:* a context change regroups in place with no placeholder, and a second wait in one visit is bounded again.
-- [ ] <!-- workspace:id=work:1c4aa5fa-e686-5042-865d-222669e5e248 --> First run goes from "Ready to chat" to "Checking memory" and back when something outside the app moves GPU memory.
-      *Accept:* the title changes only when the verdict does; a recheck that ends in the same verdict shows nothing.
+- [x] <!-- workspace:id=work:1c4aa5fa-e686-5042-865d-222669e5e248 --> First run goes from "Ready to chat" to "Checking memory" and back when something outside the app moves GPU memory.
+      *Done 2026-11-11:* "One memory answer for every screen"; the server's next fit table replaces the verdict in place.
 - [ ] <!-- workspace:id=work:c4453c4f-2bef-50b9-a034-74d567ecdce9 --> Decide whether a Recommended row that now spills into system memory stays under Recommended; today only "does not fit" moves it out.
       *Accept:* one rule, written in `docs/design.md`, and a test for the spilling case.
 - [ ] <!-- workspace:id=work:fc39d851-10b1-5cc4-a49f-9e580f32a5c2 --> The "uses system memory" group title drops its suffix while a recheck runs (`ModelDownloads.tsx`).
@@ -466,6 +466,23 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* each named mutant fails a test, and the journey's wait states a condition that does not depend on the machine's speed.
 - [ ] <!-- workspace:id=work:86a8c045-ad11-5aa2-b0d4-e781d58f1f52 --> Library words and samples, the owner's call: "Sample ·" starts four rows; "Add a database" sits beside "Add database…"; a question sends at once (the other option fills the message box); tell the model each sample's quirks (World Cup dates are days since 1970; Northwind's 1997 views have no 1997 orders); two larger samples.
       *Accept:* the owner picks, and the row says each thing once.
+
+*One fit table, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:31927474-23ee-57f0-920f-8d1050a26245 --> A GPU reading that keeps failing reads as still checking: first run says "Checking memory" with a running dot for as long as it fails, every picker row stays busy and cannot be picked, and only the picker's footer names the cause. A failed build, or one model's reading failing, shows "–" with no reason and no retry (`fit-table.ts` `answers`, `fit/table.ts`).
+      *Accept:* after a stated bound each screen says once that memory could not be read and why, offers a retry, and a later table replaces it in place.
+- [ ] <!-- workspace:id=work:135756d8-8fa1-546d-b411-607551116537 --> A table that never comes: a rebuild that never finishes leaves the old table shown; a row the table lacks is never asked for again (the old client retried with backoff); "Start chatting" is enabled while first run is still checking; `recommendedEntry` changes its offer when the table lands after the one-second bound.
+      *Accept:* each wait has a bound and one true thing to say after it; an offer already shown does not change under the pointer.
+- [ ] <!-- workspace:id=work:b4b6f3f1-23a6-5212-8009-b0440f2d4cf8 --> The dropped build checks "a load is open now", not "a load opened while this build read", and the loader's `prune` can empty the set early when a model is reloaded at another context (`fit/table.ts`, `runtime/load.ts`).
+      *Accept:* a build that overlapped any load is dropped, held by a test that opens and closes a load inside one build.
+- [ ] <!-- workspace:id=work:4b5be8b8-6f22-5592-907f-4bcf27703bd2 --> Not wired as table triggers: a settings change, and ComfyUI going busy or idle without a 64 MiB move of GPU memory. The one line that refreshes the catalog when a download finishes (`services.ts`) has no test.
+      *Accept:* each trigger rebuilds the table once, and removing the download line fails a test.
+- [ ] <!-- workspace:id=work:b13d1697-e79d-52df-ae7d-c5b2947ee2a1 --> A negative measured offset is carried to much larger contexts with no second real measurement behind it; unsafe if real growth from 16k to 64k is a third steeper than the estimate (`fit/fit.ts`).
+      *Accept:* a carried offset is bounded by context distance, or a second measurement is taken before it is trusted.
+- [ ] <!-- workspace:id=work:3c11e60d-0935-5916-b1ac-5f8aacb08e14 --> The perf counter `session-fit-checks` now counts hydration's one `fit.table`, so it does not compare with older baselines; old helper names remain in `docs/design/shell.html` and `docs/perf-method.md`; the dead `.pk-cost.skel` halves sit in about 15 selectors.
+      *Accept:* the counter is renamed or rebaselined, and the dead names and selectors are gone.
+- [ ] <!-- workspace:id=work:381cb334-9c6b-52f3-9713-b285120cb91c --> Fit answers, the owner's call: a memory change replaces a verdict in place (built); the other options are to withdraw it on every change, or only when no new table has come after a few seconds. A pick made before the first table does nothing; it could be held and applied when the table lands.
+      *Accept:* the owner picks; `docs/design.md` states the rule.
 
 ## Next: slices 2 to 4
 

@@ -49,8 +49,8 @@ async function traffic(page: Page) {
 for (const missing of ["gpu.status", "models.list"]) {
   test(`FR-01: failed ${missing} settles picker preparation without authorizing a pick`, async ({ page, open }) => {
     const t = await traffic(page);
-    t.fail.add(missing); t.fail.add("fit.check");
-    t.skip.add("gpu.changed");
+    t.fail.add(missing); t.fail.add("fit.table");
+    t.skip.add("gpu.changed"); t.skip.add("fit.changed");
     if (missing === "models.list") { t.fail.add("models.refresh"); t.skip.add("models.changed"); }
     await open(); await waitReady(page);
     await page.locator("#modelBtn").click();
@@ -58,8 +58,12 @@ for (const missing of ["gpu.status", "models.list"]) {
     await expect(picker).toBeVisible();
     await expect(picker.getByRole("button", { name: "Download models", exact: true })).toBeEnabled();
     if (missing === "gpu.status") {
-      await expect(picker.locator(".pk-context")).toContainText("Couldn't check");
-      await picker.locator('[data-m="gemma4:12b"] .pk-select').click();
+      // With no table yet the fit values stay skeletons, the same size as a value, and no row can be picked yet.
+      await expect(picker.locator(".pk-context .pk-cost .fit-skel").first()).toBeVisible();
+      const row = picker.locator('[data-m="gemma4:12b"]');
+      await expect(row).toHaveAttribute("aria-disabled", "true");
+      // Playwright will not click inside an aria-disabled row; a user still can, and nothing may change.
+      await row.locator(".pk-select").dispatchEvent("click");
       await expect(picker).toBeVisible();
       await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
     } else await expect(picker.getByRole("option")).toHaveCount(0);

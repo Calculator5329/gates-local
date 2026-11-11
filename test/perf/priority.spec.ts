@@ -119,8 +119,7 @@ test("focused priority production journeys", async ({ browser }) => {
           await expect(page.locator(".turn.a.done")).toHaveCount(1);
           await timing(page, "picker-open", () => page.locator("#modelBtn").click(), "click", "#picker.open");
           await expect(page.locator("#pkSearch")).toBeFocused();
-          await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
-          await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+          await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
           await page.keyboard.press("Escape");
         }
 

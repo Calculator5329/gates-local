@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-11: One memory answer for every screen
+
+- Whether a model fits is worked out in one place, on the server, as one
+  table for every model and context size. The model picker, first run, the
+  Download tab, Settings and the composer all read that table, so two
+  screens can no longer disagree about the same model.
+- When something moves GPU memory, the next table replaces what is on
+  screen in place. "Ready to chat" no longer drops to "Checking memory" and
+  comes back, and picker values no longer flicker.
+- A pick the newer reading rules out is refused, and the line under the
+  message box says why. The line leaves when you pick another model.
+- A lost connection withdraws every fit value until the reconnected app's
+  own table is in, since a restarted app may see different memory.
+- Before the first table, picker rows cannot be picked yet and look as they
+  will after it; nothing changes colour when the values arrive.
+- A model that finishes downloading gets its memory answer without a
+  restart.
+
 ## 2026-11-11: Library databases: one list, a download that stays in its row, and questions to start with
 
 - Settings, Library shows one list of databases. A sample you download

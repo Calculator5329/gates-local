@@ -95,7 +95,7 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
     let checks = 0;
     cdp.on("Network.webSocketFrameSent", event => {
       const request = decodeRequest(event.response.payloadData);
-      if (request.ok && request.value.method === "fit.check") checks++;
+      if (request.ok && request.value.method.startsWith("fit.")) checks++;
     });
     await page.goto(appUrl()); await page.evaluate(() => window.perfJourney.result); await ready(page);
     await page.locator("#ta").fill("Measure first picker opening");
@@ -126,9 +126,7 @@ export async function pickerReplyCase(browser: Browser, kind: RepetitionKind, mo
     }
     if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
     await expect(page.locator("#pkSearch")).toBeFocused();
-    await expect(page.locator("#picker")).not.toContainText("Checking…");
-    await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
-    await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+    await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
     await quiet(page);
     if (kind === "counters") add(counted, { action: `${name}.session-fit-checks`, unit: "count", value: checks });
   } finally { await context.close(); }
@@ -145,7 +143,7 @@ export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mo
     let checks = 0;
     cdp.on("Network.webSocketFrameSent", event => {
       const request = decodeRequest(event.response.payloadData);
-      if (request.ok && request.value.method === "fit.check") checks++;
+      if (request.ok && request.value.method.startsWith("fit.")) checks++;
     });
     await page.goto(appUrl()); await page.evaluate(() => window.perfJourney.result); await ready(page);
     const button = page.locator("#modelBtn");
@@ -154,9 +152,7 @@ export async function pickerReadyCase(browser: Browser, kind: RepetitionKind, mo
     const name = `picker-open-${mode}`;
     const observation = await measure(page, () => page.mouse.click(location.x, location.y), "click", "#picker.open");
     if (kind === "timed") add(timed, { action: name, unit: "ms", value: observation.elapsed });
-    await expect(page.locator("#picker")).not.toContainText("Checking…");
-    await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
-    await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
+    await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
     const first = checks;
     // A session includes repeated pointer/focus intent and a second opening.
     // This must not multiply answers which are current or already in flight.
@@ -194,7 +190,7 @@ test("priority journeys with costs", async ({ browser }) => {
         cdp.on("Network.webSocketFrameSent", event => {
           network.wsOut++; network.wsBytes += frameBytes(event.response.opcode, event.response.payloadData);
           const request = decodeRequest(event.response.payloadData);
-          if (request.ok && request.value.method === "fit.check") sessionFitChecks++;
+          if (request.ok && request.value.method.startsWith("fit.")) sessionFitChecks++;
         });
         cdp.on("Network.webSocketFrameReceived", event => { network.wsIn++; network.wsBytes += frameBytes(event.response.opcode, event.response.payloadData); });
         if (kind === "profile") { await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 500 }); }
@@ -263,10 +259,7 @@ test("priority journeys with costs", async ({ browser }) => {
           await expect(page.locator(".turn.a.done")).toHaveCount(1);
           await timing("picker-open", await clicking(page.locator("#modelBtn")), "click", "#picker.open");
           await expect(page.locator("#pkSearch")).toBeFocused();
-          // Finish deferred checks outside the opening window, so they cannot
-          // spill into the next group's thread measurements.
-          await expect(page.locator("#picker .pk-cost.pending")).toHaveCount(0);
-          await expect(page.locator("#picker .pk-r[aria-busy=true]")).toHaveCount(0);
+          await expect(page.locator("#picker .fit-skel, #picker .pk-cost.skel")).toHaveCount(0);
           if (kind === "counters") add(counted, { action: "picker-open.session-fit-checks", unit: "count", value: sessionFitChecks });
           await page.keyboard.press("Escape");
         }

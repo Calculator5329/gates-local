@@ -7,7 +7,7 @@ import type {
   BlockingTurn,
   CatalogEntry,
   ContextSize,
-  FitReport,
+  FitTable,
   GpuStatus,
   ImageChoice,
   ImagePresets,
@@ -176,14 +176,8 @@ export interface State {
   readonly numCtx: ContextSize;
   readonly think: boolean;
   readonly image: boolean;
-  readonly fits: Readonly<Record<string, FitReport | "error">>;
-  /** Freshness is separate so historical numbers and expanded Details can stay mounted. */
-  readonly fitHistory: Readonly<Record<string, FitReport>>;
-  readonly fitStatus: Readonly<Record<string, "stale" | "checking" | "fresh" | "error">>;
-  /** Retained reports awaiting a check against the latest memory reading. */
-  readonly staleFits: Readonly<Record<string, true>>;
-  /** By fitKey: refused only because another chat's reply holds the memory, so a send may stop it. */
-  readonly stopFrees: Readonly<Record<string, true>>;
+  /** The server's last fit table (fit-table.ts): every fit value on screen is read from it; undefined before the first. */
+  readonly fitTable: FitTable | undefined;
   readonly loads: Readonly<Record<string, ModelLoad>>;
 
   readonly settings: Maybe<Settings>;
@@ -209,8 +203,6 @@ export interface State {
   /** Per thread, why its newest load failed; the timeline shows it with Retry while that thread is open (WF-03). */
   readonly loadErrors: Readonly<Record<string, string>>;
 }
-
-export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
 
 const initial: State = {
   conn: { kind: "connecting" },
@@ -248,11 +240,7 @@ const initial: State = {
   numCtx: 16384,
   think: true,
   image: false,
-  fits: {},
-  fitHistory: {},
-  fitStatus: {},
-  staleFits: {},
-  stopFrees: {},
+  fitTable: undefined,
   loads: {},
   settings: undefined,
   gpu: undefined,

@@ -102,6 +102,10 @@ interface Rig {
   /** Stored message count of the thread at the moment each done event left app.ts (in process, before the socket). */
   storedAtDonePush: number[];
   replayedAtDone: Payload<"chat.event">[];
+  /** The model catalog the app reads; a finished download forces its refresh. */
+  catalog: ReturnType<typeof createModelCatalog>;
+  /** Replaces the /api/tags answer: what Ollama has installed. */
+  setTags(tags: typeof TAGS): void;
   waitFor<C extends Channel>(channel: C, match: (p: Payload<C>) => boolean, timeoutMs?: number): Promise<Payload<C>>;
 }
 
@@ -110,13 +114,14 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
+  let tags = TAGS;
   const ollama = await startFakeServer({
     "GET /": (_b, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("Ollama is running");
     },
     "GET /api/version": (_b, res) => json(res, 200, { version: "0.0.9-fake" }),
-    "GET /api/tags": (_b, res) => json(res, 200, TAGS),
+    "GET /api/tags": (_b, res) => json(res, 200, tags),
     "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
     "POST /api/show": (body, res) => show(res, body),
     "POST /api/chat": (body, res) => chat(res, body),
@@ -193,7 +198,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
 
   const pushes: Rig["pushes"] = [];
   const waiters = new Set<() => void>();
-  for (const channel of ["chat.event", "runtime.changed", "models.changed", "threads.changed", "models.speed"] as const) {
+  for (const channel of ["chat.event", "runtime.changed", "models.changed", "threads.changed", "models.speed", "fit.changed"] as const) {
     client.subscribe(channel, (payload) => {
       pushes.push({ channel, payload });
       for (const w of waiters) w(); // a waiter deleting itself mid-iteration is safe on a Set
@@ -219,7 +224,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
   // The pushes below come from this discover(): runtime.changed, then the
   // catalog refresh it triggers, then models.changed.
   await runtime.discover();
-  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, waitFor };
+  return { app, server, client, store, runtime, ollama, gpu, lease, setChat: (r) => (chat = r), setShow: (r) => (show = r), pushes, storedAtDonePush, replayedAtDone, catalog, setTags: (t) => (tags = t), waitFor };
 }
 
 const events = (r: Rig, turnId: string) =>
@@ -576,7 +581,7 @@ describe("chat.send", () => {
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("runtime-not-ready");
     expect(err.message).toContain("missing");
-    expect((await rejection(r.client.call("fit.check", { model: MODEL, numCtx: 16384 }))).code).toBe("runtime-not-ready");
+    expect((await r.client.call("fit.table", {})).rows).toEqual([]);
     expect(r.store.getThread(t.id).messages).toEqual([]);
     expect(r.app.activeTurns()).toBe(0);
     expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
@@ -587,8 +592,7 @@ describe("chat.send", () => {
     const t = await r.client.call("threads.create", {});
     r.gpu.freeMib = 3000;
     r.gpu.memAvailableKb = 1_000_000;
-    const report = await r.client.call("fit.check", { model: MODEL, numCtx: 16384 });
-    expect(report.verdict).toBe("refuse");
+    const report = await freshRow(r, MODEL, 16384, "refuse");
     const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("wont-fit");
     expect(err.message).toBe(report.message);
@@ -598,11 +602,19 @@ describe("chat.send", () => {
 
     r.gpu.freeMib = 6000;
     r.gpu.memAvailableKb = 40_000_000;
-    expect((await r.client.call("fit.check", { model: MODEL, numCtx: 16384 })).verdict).toBe("spills");
+    await freshRow(r, MODEL, 16384, "spills");
     const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
   });
 });
+
+/** Builds a fit table now, as a new GPU reading does, and waits for one with this verdict for `model` at `numCtx`. */
+async function freshRow(r: Rig, model: string, numCtx: number, verdict: string) {
+  const at = (t: Payload<"fit.changed">) => t.rows.find((x) => x.model === model && x.numCtx === numCtx);
+  const seen = Math.max(0, ...r.pushes.filter((p) => p.channel === "fit.changed").map((p) => (p.payload as Payload<"fit.changed">).reading.seq));
+  r.app.fitTable.changed();
+  return at(await r.waitFor("fit.changed", (t) => t.reading.seq > seen && at(t)?.verdict === verdict))!;
+}
 
 /** One turn against a fake whose /api/show is `show`; returns the chat request body. */
 const sendWith = async (show: unknown, think: boolean) => {
@@ -637,6 +649,31 @@ const TINY_SHOW = {
   capabilities: ["completion"],
 };
 
+describe("the fit table", () => {
+  it("builds once when a turn starts and once when it ends", async () => {
+    const r = await rig();
+    await fitSettled(r);
+    const before = (await r.client.call("fit.table", {})).reading.seq;
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    await fitSettled(r);
+    expect((await r.client.call("fit.table", {})).reading.seq).toBe(before + 2);
+  });
+
+  it("a finished download gives the new model its rows, with no restart", async () => {
+    const r = await rig();
+    await fitSettled(r);
+    const PULLED = "pulled-here:9b";
+    expect((await r.client.call("fit.table", {})).rows.some((row) => row.model === PULLED)).toBe(false);
+    r.setTags({ models: [...TAGS.models, { ...TAGS.models[0]!, name: PULLED, model: PULLED, digest: "sha256:b" }] });
+    // What the pull manager does when a download finishes (runtime/services.ts, onDone).
+    await r.catalog.refresh({ force: true });
+    const table = await r.waitFor("fit.changed", (t) => t.rows.some((row) => row.model === PULLED));
+    expect(table.rows.filter((row) => row.model === PULLED).map((row) => row.numCtx)).toEqual([8192, 16384, 32768, 65536]);
+  });
+});
+
 describe("a model with a 2,048 context window", () => {
   it("is allowed, runs at 2,048 when 16k is asked for, and says so in its stats", async () => {
     const r = await rig({ show: TINY_SHOW });
@@ -645,8 +682,9 @@ describe("a model with a 2,048 context window", () => {
       bodies.push(body);
       return quickReply(res, body);
     });
-    const report = await r.client.call("fit.check", { model: MODEL, numCtx: 16384 });
-    expect(report).toMatchObject({ verdict: "fits", numCtx: 2048 });
+    // One row for the size it runs at, whatever context is offered.
+    const rows = (await r.client.call("fit.table", {})).rows.filter((row) => row.model === MODEL);
+    expect(rows).toEqual([expect.objectContaining({ verdict: "fits", numCtx: 2048 })]);
     expect(await r.client.call("models.list", {})).toEqual([expect.objectContaining({ name: MODEL, maxContext: 2048 })]);
 
     const t = await r.client.call("threads.create", {});
@@ -712,6 +750,15 @@ function within<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
  * A started turn whose think probe never answers: the fit check's /api/show
  * answers, every later one hangs. The rig has a lease, so the turn holds a claim.
  */
+/** The fit table reads /api/show too, after the runtime, the catalog or a job changes: let its builds finish. */
+async function fitSettled(r: Rig): Promise<void> {
+  await r.client.call("fit.table", {});
+  for (let seen = -1; seen !== r.ollama.requests.length; ) {
+    seen = r.ollama.requests.length;
+    await sleep(60);
+  }
+}
+
 async function stalledThinkTurn() {
   const r = await rig({ image: idleComfy("external", () => undefined).build });
   // The catalog reads each model's capabilities with /api/show too (runtime/models.ts), on the
@@ -721,6 +768,7 @@ async function stalledThinkTurn() {
     if (i > 100) throw new Error("the catalog never listed the model");
     await sleep(20);
   }
+  await fitSettled(r);
   let shows = 0;
   r.setShow((res) => {
     shows += 1;
@@ -728,7 +776,8 @@ async function stalledThinkTurn() {
   });
   const t = await r.client.call("threads.create", {});
   const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think: true });
-  await until(() => shows === 2);
+  // The fit check, then the turn's start builds a fit table (its /api/show stalls too) beside the think probe.
+  await until(() => shows === 3);
   expect(r.app.activeTurns()).toBe(1);
   expect(r.lease?.status().holders).toBe(1);
   return { r, t, sent };
@@ -1023,6 +1072,7 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     expect(image.current().owner).toBe("app");
 
     // The first fit check (beside ComfyUI) answers; the one after the stop never does until released.
+    await fitSettled(r);
     const stalled = gate();
     let shows = 0;
     r.setShow(async (res) => {

@@ -20,8 +20,9 @@ import type { ChatEvent, TurnMessage } from "./chat/types.ts";
 import { planLoad, type FitDeps } from "./fit/fit.ts";
 import { untilAborted } from "./fit/gpu.ts";
 import { fetchShow, sameModel } from "./fit/ollama.ts";
-import { FitError, type FitReport } from "./fit/types.ts";
-import { estimateOffered } from "./runtime/catalog.ts";
+import { createFitTable, type FitTableSource } from "./fit/table.ts";
+import type { FitReport } from "./fit/types.ts";
+import { catalogModels } from "./runtime/catalog.ts";
 import { AdmitCancelled, ModelActionError, type ModelLoader, type TurnLoad, type TurnReservation } from "./runtime/load.ts";
 import type { ModelCatalog } from "./runtime/models.ts";
 import type { RuntimeSwitch } from "./runtime/switch.ts";
@@ -46,7 +47,7 @@ type CoreMethod =
   | "models.list"
   | "models.refresh"
   | "runtime.status"
-  | "fit.check"
+  | "fit.table"
   | "chat.send"
   | "chat.cancel";
 export type AppHandlers = Pick<Handlers, CoreMethod> & Partial<Handlers>;
@@ -163,6 +164,8 @@ export interface App {
   activeTurns(): number;
   /** Send only this client's current in-flight words before it starts receiving newer events. */
   replayTurns(target: Push): void;
+  /** The fit table: main feeds it the GPU watcher's gpu.changed and the loader's models.load. */
+  readonly fitTable: Pick<FitTableSource, "changed" | "load">;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */
   shutdown(): Promise<void>;
 }
@@ -244,11 +247,25 @@ export function createApp(deps: AppDeps): App {
   const refreshModels = () => {
     catalog.refresh().catch((e: unknown) => log(`model refresh failed: ${(e as Error).message}`));
   };
+  // Every model at every offered context from one reading, pushed when what it reads changes.
+  const fitTable = createFitTable({
+    baseUrl: () => runtime.baseUrl(),
+    ...(deps.fit ? { fit: deps.fit } : {}),
+    models: async () => catalogModels(catalog.current() ?? (await catalog.refresh()).models),
+    busy: () => [...turns.values()].filter((t) => t.started).map((t) => t.model),
+    comfyPid: () => reclaimableComfy(),
+    push: (table) => push("fit.changed", table),
+    log,
+  });
   const offRuntime = runtime.onChange((status) => {
     push("runtime.changed", status);
     refreshModels();
+    fitTable.changed();
   });
-  const offCatalog = catalog.onChange((models) => push("models.changed", models));
+  const offCatalog = catalog.onChange((models) => {
+    push("models.changed", models);
+    fitTable.changed();
+  });
   /** Measured speeds change only when a finished reply is saved or replies are deleted; one read then, never per word. */
   const pushSpeeds = () => {
     try {
@@ -297,6 +314,8 @@ export function createApp(deps: AppDeps): App {
         turns.delete(turn.turnId);
         if (byThread.get(threadId) === turn) byThread.delete(threadId);
         end();
+        // An admitted turn's model was busy in every row's plan; now it is not.
+        if (turn.started) fitTable.changed();
       },
     };
   };
@@ -684,19 +703,8 @@ export function createApp(deps: AppDeps): App {
     "runtime.retry": () => runtime.ensure(),
     "runtime.discover": () => runtime.lookIfDown(),
 
-    "fit.check": async ({ model, numCtx }) => {
-      const baseUrl = runtime.baseUrl();
-      if (baseUrl === undefined) throw notReady();
-      try {
-        // chat.send's plan without stopping any turn: the verdict the composer gates Send on.
-        return (await planBeside(baseUrl, model, numCtx, { comfyPid: reclaimableComfy() })).report;
-      } catch (e) {
-        // not installed yet: a model offered for download gets the catalog's pre-download estimate at this size
-        const offered = e instanceof FitError && e.code === "model-not-found" ? await estimateOffered({ baseUrl, ...(deps.fit ? { fit: deps.fit } : {}) }, model, numCtx) : undefined;
-        if (offered === undefined) throw e;
-        return offered;
-      }
-    },
+    // chat.send's plan for every model and context without stopping any turn, from one reading.
+    "fit.table": () => fitTable.get(),
 
     "turns.active": () => [...turns.values()]
       .filter((turn) => (turn.started || turn.drawing) && !turn.terminal && !turn.controller.signal.aborted)
@@ -889,6 +897,7 @@ export function createApp(deps: AppDeps): App {
         // Before the answer, so every client (also one that did not send this) knows the turn first.
         turn.start = { type: "start", model, userMessage };
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
+        fitTable.changed();
         void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, contextNotice, settings });
         return { turnId: turn.turnId, userMessage };
       } finally {
@@ -913,6 +922,7 @@ export function createApp(deps: AppDeps): App {
 
   return {
     handlers,
+    fitTable,
     activeTurns: () => turns.size,
     replayTurns(target) {
       for (const turn of turns.values()) {

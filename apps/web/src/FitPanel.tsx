@@ -1,19 +1,18 @@
 // GPU memory in Settings › Advanced (shell.md F16, F17b, F36, F48, F63): the
 // verdict for a model at a context, the context control, and where the memory
-// goes, from fit.check plus gpu.status when the server has it.
-import { type ReactNode, useEffect } from "react";
+// goes, from the server's fit table plus gpu.status when the server has it.
+import type { ReactNode } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
-import { ensureFit, setContext, updateSettings } from "./session.ts";
-import { NA, type State, chatReady, fitKey, setState, useStore } from "./store.ts";
+import { fitFor } from "./fit-table.ts";
+import { setContext, updateSettings } from "./session.ts";
+import { NA, type State, chatReady, setState, useStore } from "./store.ts";
 import { Status } from "./settings-controls.tsx";
 import { Row, useAct } from "./settings-ui.tsx";
-import { closeTip, esc } from "./ui.tsx";
+import { FitSkel, closeTip, esc } from "./ui.tsx";
 export { openFit } from "./fit-actions.ts";
 import { FIT_DOT, fitLabel } from "./models-rules.ts";
-import { displayFit } from "./fit-display.ts";
 
 const gpuHead = (gpu: GpuStatus | undefined): string =>
   gpu === undefined ? "" : gpu.vendor === "none" ? gpu.detail ? "NVIDIA GPU unavailable" : "No supported GPU" : gpu.totalBytes ? `${shortGpu(gpu.name)} · ${gb(gpu.totalBytes)}` : shortGpu(gpu.name);
@@ -30,10 +29,9 @@ export function shortGpu(name: string | undefined): string {
 const runsAtMost = (max: number) => `Runs at ${k(max)}, the most this model takes.`;
 
 /** A context segment's tooltip in Settings, and whether that size cannot run. */
-function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | "error" | undefined, cpu: boolean, pending = false): { tip: string | undefined; wont: boolean } {
+function ctxFit(c: ContextSize, max: number | undefined, r: FitReport | undefined, cpu: boolean): { tip: string | undefined; wont: boolean } {
   if (max !== undefined && c > max) return { tip: `This model takes at most ${k(max)}.`, wont: false };
-  if (pending) return { tip: "Checking…", wont: false };
-  if (r === undefined || r === "error") return { tip: undefined, wont: false };
+  if (r === undefined) return { tip: undefined, wont: false };
   const v = verdictOf(r);
   const at = k(c);
   if (v.k === "gpu") return { tip: `Runs on the GPU at ${at}.`, wont: false };
@@ -186,7 +184,7 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
   );
 }
 
-function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean; phase: FitPhase }) {
+function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
   const ctx = k(r.numCtx);
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
@@ -204,7 +202,7 @@ function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict;
     <div className="fp-n fp-numbers">
       Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? gpu?.detail ? gpuHead(gpu) : "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
       <br />
-      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : phase === "fresh" ? "Runs entirely on the GPU." : "Previously fit on the GPU."}
+      {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
       <br />
       {r.source === "measured" ? (loaded ? `Measured ${gb(r.needVramBytes)} on last load.` : "Measured at this context.") : `Not measured at ${ctx} yet.`}
     </div>
@@ -212,7 +210,7 @@ function Numbers({ r, v, name, gpu, loaded, phase }: { r: FitReport; v: Verdict;
 }
 
 /** Where the memory goes, folded under Details in Settings. */
-function Breakdown({ model, name, numCtx, gpuRaw, report, loaded, phase }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean; phase: FitPhase }) {
+function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
   if (gpuRaw === NA) return v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />;
@@ -220,7 +218,7 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded, phase }: { mod
   return (
     <>
       <div className="fp-sep" />
-      <div className="fp-mt">{phase === "fresh" ? "Where the memory goes" : "Previous memory check"}</div>
+      <div className="fp-mt">Where the memory goes</div>
       {gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
       ) : (
@@ -232,11 +230,11 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded, phase }: { mod
 }
 
 /** The model's status, in the same words and the same dot as its row in Models. */
-function FitLine({ r, ctx, cpu, phase }: { r: FitReport; ctx: number; cpu: boolean; phase: FitPhase }) {
+function FitLine({ r, ctx, cpu }: { r: FitReport; ctx: number; cpu: boolean }) {
   const v = verdictOf(r);
   return (
-    <div className="fp-v" aria-busy={phase === "checking" || phase === "stale" || undefined}>
-      {phase !== "fresh" ? <Status dot={phase === "error" ? "err" : "run"}>{fitPendingWord(phase, true)}</Status> : v.k === "no" ? (
+    <div className="fp-v">
+      {v.k === "no" ? (
         <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more at ${k(ctx)}`}</Status>
       ) : (
         <>
@@ -274,40 +272,24 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const saved = useStore((s) => (s.settings === NA ? undefined : s.settings?.defaultNumCtx));
   const chosen = useStore(s => s.model === undefined ? undefined : s.numCtx);
   const { numCtx, max, ctx, gpuRaw, gpu, name, loaded } = useFitModel(model, chosen ?? saved);
-  const fits = useStore((s) => s.fits);
-  const stale = useStore(s => s.staleFits);
-  const fitStatus = useStore(s => s.fitStatus);
-  const fitHistory = useStore(s => s.fitHistory);
-  const load = useStore(s => s.loads[model]);
-  const catalog = useStore(s => s.catalog);
+  const table = useStore((s) => s.fitTable);
   const settingsNA = useStore((s) => s.settings === NA);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   const [err, run] = useAct();
-  useEffect(() => {
-    if (CONTEXT_SIZES.some(c => stale[fitKey(model, c)] === true)) closeTip("#gpuMemory .ctx-c");
-    // the report shown is keyed by the size asked for, even one over the model's limit; the server clamps it
-    ensureFit(model, numCtx);
-    for (const c of CONTEXT_SIZES) if (max === undefined || c <= max) ensureFit(model, c);
-  }, [model, numCtx, max, fits, stale]);
   const cpu = noGpu(gpu);
   const gpuNotice = gpu?.vendor === "unreadable" ? gpu.detail ?? GPU_UNREADABLE_TEXT : gpu?.vendor === "none" ? gpu.detail ?? NO_GPU_TEXT : undefined;
-  const report = fits[fitKey(model, numCtx)];
   const pick = (c: ContextSize) => {
     closeTip();
     setContext(c);
     if (!settingsNA) void run(updateSettings({ defaultNumCtx: c }));
   };
   const memory = cpu ? "memory" : "GPU memory";
-  const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, model, numCtx);
-  const previous = catalog === NA ? undefined : catalog?.find(m => m.name === model)?.fit;
-  const shown = displayFit(fitKey(model, numCtx), report === "error" ? "error" : reading.report, load?.state === "loading" && load.numCtx === ctx, previous?.numCtx === ctx ? previous : undefined);
-  const fit = shown?.numCtx === ctx ? shown : report === "error" && reading.report?.numCtx === ctx ? reading.report : undefined;
-  // says it is an estimate until this model has really run at this size (fit.ts)
-  const phase = reading.phase;
+  // the table's row at the size this model runs at; it says estimate until the model has really run there.
+  // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
+  const fit = gpuRaw === undefined ? undefined : fitFor(table, model, ctx);
   const defaultSize = saved ?? numCtx;
-  const defaultFit = fitReading({ fits, fitStatus, fitHistory, catalog }, model, defaultSize);
-  const defaultReport = displayFit(fitKey(model, defaultSize), fits[fitKey(model, defaultSize)] === "error" ? "error" : defaultFit.report, load?.state === "loading" && load.numCtx === defaultSize);
-  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultReport === undefined ? undefined : defaultFit.phase !== "fresh" ? `${fitPendingWord(defaultFit.phase, true)} at ${k(defaultSize)}` : `${defaultReport.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultReport, cpu).tip ?? ""}`;
+  const defaultReport = fitFor(table, model, defaultSize);
+  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultReport === undefined ? undefined : `${defaultReport.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultReport, cpu).tip ?? ""}`;
   return (
     <>
       {locked ? null : (
@@ -315,9 +297,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
           <div className="ctx-c">
             <span className="mini-seg" role="group" aria-label="Default context">
               {CONTEXT_SIZES.map((c) => {
-                const raw = currentFit({ fits, fitStatus, catalog }, model, c);
-                const advice = displayFit(fitKey(model, c), fits[fitKey(model, c)] === "error" ? "error" : raw, load?.state === "loading" && load.numCtx === c);
-                const f = ctxFit(c, max, advice, cpu, stale[fitKey(model, c)] === true);
+                const f = ctxFit(c, max, fitFor(table, model, c), cpu);
                 return (
                   <button
                     key={c}
@@ -340,17 +320,17 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
         </Row>
       )}
       <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context{gpuNotice === undefined ? null : <><br />{gpuNotice}</>}</>}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : <span className="fp-n">{report === "error" ? `Gates Local couldn't check ${memory} for ${name} right now.` : `Checking ${memory}…`}</span> : <FitLine r={fit} ctx={ctx} cpu={cpu} phase={phase} />}
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} ctx={ctx} cpu={cpu} />}
         {action}
       </Row>
       {fit === undefined ? null : (
         <details className="upd-more fp-more">
           <summary>
             <Icon id="right" cls="s14" />
-            {phase === "fresh" ? "Details" : "Details · previous check"}
+            Details
           </summary>
-          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} phase={phase} />
-          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} phase={phase} />
+          <Numbers r={fit} v={verdictOf(fit)} name={name} gpu={gpu} loaded={loaded} />
+          <Breakdown model={model} name={name} numCtx={ctx} gpuRaw={gpuRaw} report={fit} loaded={loaded} />
         </details>
       )}
     </>

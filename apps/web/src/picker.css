@@ -12,7 +12,8 @@
 .model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
 .model-picker .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .model-picker .pk-r.sel{background:var(--hover)}
-.model-picker .pk-r[aria-busy=true] .pk-select{cursor:progress;color:var(--muted-foreground)}
+/* before the first table: not pickable yet, with the look it keeps once the table lands (nothing pops) */
+.model-picker .pk-r[aria-busy=true] .pk-select,.pk-ctx-row[aria-busy=true]{cursor:progress}
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
 /* the size column is as wide as its words, so a long model name gets the rest of the row */
 .pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
@@ -42,13 +43,13 @@
 .pk-context-check{display:flex;justify-content:flex-end;align-items:center}
 .pk-cap{font-size:12px;text-align:right;font-weight:400;color:var(--muted-foreground)}
 .pk-cost{display:block;justify-self:end;width:144px;min-width:0;height:28px;color:var(--foreground);font-variant-numeric:tabular-nums}
+.pk-cost.none{font-size:11px;line-height:28px;text-align:right;color:var(--muted-foreground)}
 .pk-cost.pending{height:auto;font-size:11px;text-align:right;color:var(--muted-foreground)}
 .pk-cost-caption{height:14px;display:flex;justify-content:space-between;align-items:center;gap:4px;font-size:10px;line-height:12px}
 .pk-cost-caption small{font-size:10px;color:var(--muted-foreground)}
 .pk-cost.spill small{color:var(--amber-fg)}
 .pk-cost.no small{color:var(--red-fg)}
 .pk-cost-track{position:relative;display:block;width:104px;height:12px;margin-top:4px}
-.pk-cost.history .pk-cost-track{filter:grayscale(1)}
 .pk-cost-track i{position:absolute;top:0;height:6px;display:block}
 .pk-cost-room{left:0;width:100%;background:var(--track)}
 .pk-cost-fill{left:0;background:var(--green)}
@@ -59,7 +60,6 @@
 .pk-cost.no b{color:var(--red-fg)}
 .pk-detail{display:block;margin-top:16px;font-size:12px;color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px}
 .pk-help{margin:16px 0 0;font-size:12px;line-height:20px;color:var(--muted-foreground)}
-.pk-choice{font-size:14px;color:var(--amber-fg)}
 .pk-back{display:none}
 .pk-close{display:none;align-items:center;justify-content:center;width:24px;height:24px;flex:none}
 .pk-bottom{height:44px;min-height:44px;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:0 12px;border-top:1px solid var(--border)}

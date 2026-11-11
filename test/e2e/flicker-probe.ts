@@ -21,7 +21,7 @@ interface ProbeWindow extends Window {
 }
 
 /** Delay real RPC answers without replacing their contents or the push stream. */
-export async function delayedMemory(page: Page, ms: number, methods: readonly string[] = ["fit.check", "gpu.status"]): Promise<void> {
+export async function delayedMemory(page: Page, ms: number, methods: readonly string[] = ["fit.table", "gpu.status"]): Promise<void> {
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
     const server = ws.connectToServer();
     const delayed = new Set<unknown>();
@@ -61,7 +61,9 @@ export async function burst(page: Page, surface: string, selector: string, actio
         });
       }
       const text = el?.innerText ?? "";
-      w.flickerFrames?.push({ at: performance.now() - start, text, boxes, checking: /checking[^\n]*…/i.test(text), verdicts: [...(el?.querySelectorAll(".fp-v, .vl, .mp-fit, .pk-v") ?? [])].map((n) => n.textContent ?? ""), elements: [...(el?.querySelectorAll("button, input, details, [role=alert]") ?? [])].map((n) => `${n.tagName}:${n.getAttribute("aria-label") ?? n.textContent}`) });
+      // A fit value still loading: the skeleton before the first table, or an old "Checking…".
+      const loading = /checking[^\n]*…/i.test(text) || el?.querySelector(".fit-skel, .pk-cost.skel") != null;
+      w.flickerFrames?.push({ at: performance.now() - start, text, boxes, checking: loading, verdicts: [...(el?.querySelectorAll(".fp-v, .vl, .mp-fit, .pk-v") ?? [])].map((n) => n.textContent ?? ""), elements: [...(el?.querySelectorAll("button, input, details, [role=alert]") ?? [])].map((n) => `${n.tagName}:${n.getAttribute("aria-label") ?? n.textContent}`) });
       if (active) requestAnimationFrame(sample);
     };
     sample();

@@ -90,8 +90,7 @@ test.describe("sheets on a phone", () => {
     await open(); await waitReady(page);
     await page.locator("#modelBtn").tap();
     const picker = page.locator("#picker");
-    await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
-    await expect(picker.locator(".pk-cost.pending")).toHaveCount(0);
+    await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
     await page.setViewportSize({ width: 412, height: 500 });
     const frame = await picker.boundingBox();
     await page.screenshot({ path: test.info().outputPath("picker-phone-short-viewport.png") });
@@ -546,8 +545,8 @@ test.describe("sheet content at 360", () => {
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").tap();
-    // the wider "Checking…" holds a row only until its fit arrives
-    await expect(page.locator("#picker .pk-v", { hasText: "Checking" })).toHaveCount(0);
+    // every row's value has arrived
+    await expect(page.locator("#picker .fit-skel")).toHaveCount(0);
     // the text's own width against its box: scrollWidth rounds up and reports a name that is not cut
     const cut = await page.locator("#picker .pk-nm").evaluateAll((els) =>
       els

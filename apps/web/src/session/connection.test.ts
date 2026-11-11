@@ -23,7 +23,7 @@ async function boot(hydrate = async () => {}) {
   Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined);
   const connection = createConnection({
     applyServerEvent: () => {}, serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
-    hydrate, beforeDisconnect: () => {}, afterDisconnect: () => {},
+    hydrate, afterDisconnect: () => {},
   });
   stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
   const first = Socket.all[0]; if (!first) throw new Error("Missing initial socket");
@@ -73,7 +73,7 @@ test("F3: with no first read after two seconds the app stops booting and the con
     applyServerEvent: (patch) => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; },
     serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
     // the first read never lands
-    hydrate: () => new Promise(() => {}), beforeDisconnect: () => {}, afterDisconnect: () => {},
+    hydrate: () => new Promise(() => {}), afterDisconnect: () => {},
   });
   stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
   Socket.all[0]!.open(); await vi.advanceTimersByTimeAsync(0);
@@ -93,7 +93,7 @@ test("a connection stopped before the boot bound does not end booting two second
   const connection = createConnection({
     applyServerEvent: (patch) => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; },
     serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
-    hydrate: () => new Promise(() => {}), beforeDisconnect: () => {}, afterDisconnect: () => {},
+    hydrate: () => new Promise(() => {}), afterDisconnect: () => {},
   });
   const end = connection.connect(); await vi.advanceTimersByTimeAsync(0);
   await vi.advanceTimersByTimeAsync(500);

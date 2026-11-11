@@ -5,13 +5,12 @@
 import { type FocusEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
-import { composerFit } from "./composer-fit.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
-import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
+import { fitFor, stopsChat } from "./fit-table.ts";
+import { ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
-import { warmPickerFits } from "./picker-fit.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { chosenImage, imageMode, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
@@ -27,7 +26,6 @@ import {
   cancelStopAsk,
   confirmStopAsk,
   editQueued,
-  ensureFit,
   firstPull,
   openSettings,
   queueReason,
@@ -36,7 +34,7 @@ import {
   sendQueuedNow,
   stop,
 } from "./session.ts";
-import { NA, type Queued, type State, fitKey, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
+import { NA, type Queued, type State, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
 import { editDraft, getDraft, useDraft } from "./drafts.ts";
 import { SheetHead, Skel, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 import { Voice } from "./Voice.tsx";
@@ -82,21 +80,13 @@ function tagTip(name: string, m: ModelInfo | undefined, tag: string): string {
   return `${head}${q && !tag.toLowerCase().includes(q.toLowerCase()) ? ` · ${esc(q)}` : ""}`;
 }
 
-/** Someone is about to open the picker: load its code and the fit reports its first view needs. */
+/** Someone is about to open the picker: load its code. Its fit values are already in the last fit table. */
 function pickerIntent(): void {
   if (imageMode(getState())) { void imagePickerScreen.load(); return; }
   void pickerScreen.load();
-  warmPickerFits();
 }
 
-/**
- * Focus is intent only with a focus ring, that is from the keyboard. A sheet
- * closing on phone hands focus back to this button by script, and after a pick
- * at a new size a warm there would check every installed model at that size.
- * Known limit: a keyboard pick in the sheet layout (narrow window, or a phone
- * with a keyboard) still warms when the sheet gives focus back, because the
- * last input was a key.
- */
+/** Focus is intent only with a focus ring, that is from the keyboard; a sheet closing on phone hands focus back by script. */
 function pickerFocus(e: FocusEvent<HTMLElement>): void {
   if (e.currentTarget.matches(":focus-visible")) pickerIntent();
 }
@@ -115,7 +105,7 @@ export function Composer() {
   const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
   const notice = useStore((s) => s.notice);
-  const fit = useStore((s) => (s.model === undefined ? undefined : s.fits[fitKey(s.model, s.numCtx)]));
+  const fit = useStore((s) => fitFor(s.fitTable, s.model, ctxFor(s.numCtx, s.models, s.model)));
   const models = useStore((s) => s.models);
   const catalog = useStore(catalogOf);
   const imageGen = useStore(imageGenOf);
@@ -124,7 +114,7 @@ export function Composer() {
   const editing = editingId !== null;
   const running = useStore((s) => runningTurn(s, s.threadId)?.gen ?? null);
   const touch = useMedia("(hover: none)");
-  const freed = useStore((s) => s.model !== undefined && s.stopFrees[fitKey(s.model, s.numCtx)] === true);
+  const freed = stopsChat(fit);
   const wait = useStore(queueReason);
   const first = useStore(firstPull);
   const firstProgress = useStore((s) => {
@@ -164,10 +154,6 @@ export function Composer() {
   }, []);
 
   const ready = rt === "ready";
-  useEffect(() => {
-    if (ready) ensureFit(model, numCtx);
-  }, [ready, model, numCtx, fit]);
-
   const blocked = !ready;
   useEffect(() => {
     if (!blocked && !isTouch() && document.activeElement === document.body) ta.current?.focus({ preventScroll: true });
@@ -177,19 +163,8 @@ export function Composer() {
   const info = models?.find((m) => m.name === shownTag);
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
-  // The verdict holds still: between an invalidation and the fresh answer the last one for this
-  // model and context stays, and while the model loads it keeps the one from before the load
-  // (its own memory filling the GPU, not yet listed by Ollama, is no reason to refuse it).
-  // A failed check ends the hold: the old verdict no longer says anything about memory now.
-  const fitAt = model === undefined ? "" : fitKey(model, numCtx);
-  const failed = fit === "error";
-  const fresh = fit === undefined || failed ? undefined : verdictOf(fit);
-  const held = useRef<{ at: string; v: Verdict } | undefined>(undefined);
-  const duringLoad = useRef<typeof fit>(undefined);
-  if (loading) duringLoad.current = fit;
-  const kept = held.current?.at === fitAt ? held.current.v : undefined;
-  const { shown: v, held: next } = composerFit(kept, failed ? "error" : fresh, loading, fit === duringLoad.current);
-  held.current = next === undefined ? undefined : { at: fitAt, v: next };
+  // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
+  const v = fit === undefined ? undefined : verdictOf(fit);
   const text = hasText || images.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
@@ -373,8 +348,9 @@ export function Composer() {
               // the name only when the fixed width cuts it
               data-tipt={drawing ? named?.preset.name : undefined}
               style={drawing && chatButtonWidth > 0 ? { width: chatButtonWidth } : undefined}
-              // Warm only on intent: hover, keyboard focus, or the press before a
-              // click (touch has no hover). Never at idle; see picker-fit.ts.
+              // Load the picker's code on intent: hover, keyboard focus, or the press
+              // before a click (touch has no hover). Its fit values are already in the
+              // last fit table, so nothing is asked of the server here.
               onPointerEnter={pickerIntent}
               onFocus={pickerFocus}
               onPointerDown={pickerIntent}

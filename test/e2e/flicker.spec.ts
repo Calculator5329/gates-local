@@ -16,7 +16,7 @@ for (const delay of [0, 150, 600]) {
     const frames = await burst(page, `gpu-context-${delay}`, "#gpuMemory", () => gpu.locator('[data-ctx="32768"]').click());
     const metrics = memoryMetrics(frames);
     console.log(`FLICKER gpu-context-${delay} ${JSON.stringify(metrics)}`);
-    expect(metrics.transients, "settled GPU memory must not disappear or return to Checking after a pick").toBe(0);
+    expect(metrics.transients, "settled GPU memory must not disappear or return to a skeleton after a pick").toBe(0);
     expect(metrics.shiftPx, "context selection must not collapse the expanded details").toBeLessThanOrEqual(0.5);
     await expect(gpu.locator('[data-ctx="32768"]')).toHaveAttribute("aria-pressed", "true");
     await expect(gpu.locator(".fp-v:visible")).toContainText("32k");
@@ -27,12 +27,14 @@ for (const delay of [0, 150, 600]) {
     await open();
     await waitReady(page);
     await page.locator("#modelBtn").click();
-    await expect(page.locator("#picker")).not.toContainText("Checking…");
+    const loading = page.locator("#picker .fit-skel, #picker .pk-cost.skel");
+    await expect(loading).toHaveCount(0);
     // The context column follows the highlight. Check Gemma's contexts before
     // asking whether those same answers survive closing and loading it.
     const gemma = page.locator('#picker .pk-r[data-m="gemma4:12b"]');
     await gemma.hover();
     await expect(page.locator("#picker").getByRole("radiogroup")).toHaveAccessibleName("Context length for Gemma 4 12B");
+    await expect(loading).toHaveCount(0);
     await expect(page.locator("#picker")).not.toContainText("Checking…");
     await gemma.click();
     await expect(page.locator("#modelBtn")).not.toHaveAttribute("aria-busy", "true");
