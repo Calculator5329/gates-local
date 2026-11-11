@@ -435,6 +435,23 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:516a18cf-d146-532f-9076-42131a5c09b1 --> "Connecting…" has no way forward when the server never answers: no Retry and no "still connecting" line (`FirstRun.tsx`, `Banner.tsx`).
       *Accept:* after a stated bound the screen offers one action or names what to check, and says nothing untrue before it.
 
+*Chat window trim, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:2f2898c8-a1d5-5fe8-a0b0-fa79e8a129a3 --> A Stop hides a real failure that arrives after it: stop, leave the chat, and a later `model-not-found` leaves no note and no message anywhere (`session/turn.ts`, `settle` in `session/chat.ts`); the `settle` guard has no test.
+      *Accept:* only an abort-shaped error counts as the Stop, or the server's message stays on the square's tip; a unit test fails when the guard is removed.
+- [ ] <!-- workspace:id=work:426a78ac-aafe-5fcc-9fc1-ec23c705527d --> A first answer word that arrives between Stop and the server's cancel sets `textAt`: the saved pill's seconds differ from the live pill's and the square can gain seconds too (`session/chat.ts`; by reading, not reproduced).
+      *Accept:* `textAt` is ignored once the turn has ended stopped; the time shows once and does not change.
+- [ ] <!-- workspace:id=work:63e1916b-623f-5c9a-b313-8f1fe368237a --> A tool step the person stopped reads "stopped" live and is saved and shown as "failed" (`Thread.tsx`, `app.ts`, `keepStoppedWords`).
+      *Accept:* the saved row says stopped, and a step that really failed still says failed.
+- [ ] <!-- workspace:id=work:25fd9761-b8ac-5db9-b616-a53122419763 --> On desktop, clicking the pencil on a queued message while a reply runs shifts Dictate and the model button 38 px; they shift back when the reply ends.
+      *Accept:* the Stop slot is held while a queued message is edited, as on touch, and a browser check reads equal left edges.
+- [ ] <!-- workspace:id=work:bb688358-2d42-5866-9c6c-1deaca30c0fc --> A stopped reply that is only an image shows no stop square.
+      *Accept:* the square leads that row too, with the same tooltip.
+- [ ] <!-- workspace:id=work:0a7960eb-4f24-5510-9751-35814ba811a3 --> Model picker: the cut point of a long name moves when "Checking…" becomes a size; the disk size and the tag are shown nowhere; a keyboard tip stays open after typing in the search clears the highlight (`Picker.tsx`).
+      *Accept:* the name's room is fixed before the size arrives, the tag and disk size have one place, and typing closes the tip.
+- [ ] <!-- workspace:id=work:328ba710-331e-5b4d-8477-7312d1035483 --> Tests held too thinly: the cut-name tip by one browser journey only; `screen-overlay.test.ts` no longer states that Search opened, and Usage at a narrow width is uncovered; `Usage.tsx` puts `data-tipt` on cells with no `.t` inside, so those tips never open.
+      *Accept:* a unit test per rule that fails when the rule is removed, and the Usage cells either open their tip or drop the attribute.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and

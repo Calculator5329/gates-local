@@ -215,7 +215,7 @@ test.describe("downloads from the approved picker", () => {
     const downloading = page.locator("#picker .pk-r.dis", { hasText: "Qwen 3.5 4B" });
     await expect(downloading).toHaveAttribute("aria-disabled", "true");
     await expect(downloading.locator(".pk-v")).toHaveText(/\d+%/);
-    await expect(downloading).toHaveAttribute("data-tip", /GB estimated; fits on GPU/);
+    await expect(downloading.locator(".pk-select")).toHaveAccessibleDescription(/GB estimated; fits on GPU/);
   });
 });
 

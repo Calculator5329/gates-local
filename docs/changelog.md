@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-11: A quieter chat window: fewer words, and nothing moves while you type
+
+- The "Reply running" line above the composer is gone. While a reply runs,
+  Stop is a square beside Dictate. On a phone, Stop and the queue arrow keep
+  their own places for the whole reply, so typing the first character moves
+  nothing.
+- A stopped reply is marked by a stop square and its seconds, not a sentence,
+  and looks the same live and after a reload. Stopped while the model was
+  thinking, the pill keeps "Thought for N s" and the time shows once.
+- A reply you stopped stays stopped when the server then ends it with an
+  error. Before, a Stop during a model load turned into "The reply didn't
+  finish. Retry".
+- A sent message's time, Edit and Copy sit under it, not beside it.
+- Sidebar Search is a field that is always there, not a button that turns
+  into one. While you search, the heading counts the matches and the matched
+  words are brighter. Ctrl K from Settings or Usage ends in the field.
+- Model picker: rows open no tooltip (size and fit stay in words for screen
+  readers), the wide picker's context header drops the model name, and a long
+  name gets the row's room. A name that is still cut shows in full in a tip.
+
 ## 2026-11-11: Every screen is whole on its first frame
 
 - Settings opens with its data already read (at most a second later), so no

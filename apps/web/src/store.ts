@@ -111,6 +111,9 @@ export interface StopAsk {
   readonly draw?: ImageChoice;
 }
 
+/** Why a reply stopped: the person pressed Stop this many seconds in (a mark, no words), or a reason they did not cause, in its own words. */
+export type StopNote = { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "said"; readonly words: string };
+
 export interface State {
   readonly conn: Conn;
   /** The initial read attempt ended, including failure, for this connection. */
@@ -133,7 +136,7 @@ export interface State {
   /** The warning before a send stops another chat's reply. */
   readonly stopAsk: StopAsk | null;
   /** Why a reply stopped, by the message it hangs on: the saved partial, or the question when no word came. This session only: the server saves the words, not the reason. */
-  readonly stopNotes: Readonly<Record<string, string>>;
+  readonly stopNotes: Readonly<Record<string, StopNote>>;
 
   readonly view: View;
   readonly threadId: string | null;
@@ -159,7 +162,6 @@ export interface State {
   readonly voiceConnectionVersion: number;
   /** The header title is an input (thread menu › Rename). */
   readonly renaming: boolean;
-  readonly searchOpen: boolean;
   readonly search: string;
 
   readonly model: string | undefined;
@@ -239,7 +241,6 @@ const initial: State = {
   pasting: 0,
   voiceConnectionVersion: 0,
   renaming: false,
-  searchOpen: false,
   search: "",
   model: undefined,
   chosen: undefined,

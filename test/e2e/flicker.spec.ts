@@ -32,7 +32,7 @@ for (const delay of [0, 150, 600]) {
     // asking whether those same answers survive closing and loading it.
     const gemma = page.locator('#picker .pk-r[data-m="gemma4:12b"]');
     await gemma.hover();
-    await expect(page.locator(".pk-context-head small")).toHaveText("Gemma 4 12B");
+    await expect(page.locator("#picker").getByRole("radiogroup")).toHaveAccessibleName("Context length for Gemma 4 12B");
     await expect(page.locator("#picker")).not.toContainText("Checking…");
     await gemma.click();
     await expect(page.locator("#modelBtn")).not.toHaveAttribute("aria-busy", "true");

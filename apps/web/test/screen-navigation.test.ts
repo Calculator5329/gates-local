@@ -66,7 +66,7 @@ describe("pending navigation exits", () => {
           else if (exit === "new thread") expect(store.getState()).toMatchObject({ view: "new", threadId: null });
           else {
             expect(store.getState()).toMatchObject({ view: "thread", threadId: exit === "another thread" ? "t2" : "t1" });
-            if (exit === "Search") expect(store.getState().searchOpen).toBe(true);
+            // Search leaves Settings (above) and focuses the always-there field, which the browser specs drive
             if (exit === "thread drawer") expect(store.getState().drawer).toBe(true);
             if (exit === "drawer Back") expect(store.getState().drawer).toBe(false);
           }

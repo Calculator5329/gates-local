@@ -49,7 +49,9 @@ describe("approved model picker", () => {
   });
   it("offers a Context length column and an actual Download models control", () => {
     const html = markup();
-    expect(html).toContain('aria-label="Context length"');
+    // the size group is named for its model; the wide header itself is just "Context length"
+    expect(html).toMatch(/role="radiogroup" aria-label="Context length for [^"]+"/);
+    expect(/<header class="pk-context-head">.*?<\/header>/.exec(html)?.[0]).not.toContain("<small");
     expect(html).toContain("Download models");
   });
   it("shows a clean name and estimated memory need instead of disk size as its row metric", () => {

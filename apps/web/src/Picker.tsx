@@ -13,7 +13,7 @@ import { activeEntry, contextRuler, makerOf, pickerEntries, type Maker } from ".
 import { focusComposer } from "./Sidebar.tsx";
 import { ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
 import { NA, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
-import { PHONE, closePop, closeTip, esc, isTouch, tabStops, useMedia } from "./ui.tsx";
+import { PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, useMedia } from "./ui.tsx";
 
 const MARGIN = 512 * 1024 ** 2; // Display the server's existing VRAM safety margin; never decide fit here.
 const FAVORITES = "gates-local.model-favorites";
@@ -40,14 +40,6 @@ export function ContextMemory({ v, cpu, frees = false, failed = false, history =
     <span className="pk-cost-caption"><span>{gb(v.need)}</span><small>{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
-}
-
-function contextTip(v: Verdict | undefined, cpu: boolean, frees: boolean, history: boolean): string {
-  if (!v) return "Checking memory…";
-  if (history) return `${gb(v.need)} previous check; checking again.`;
-  const word = frees ? "sending stops another chat first" : v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : v.k === "gpu" ? "fits on the GPU" : "spills into system memory";
-  const room = cpu ? "" : `; ${gb(contextRuler(v).room)} ${v.measured ? "GPU room including this model’s existing allocation; extension is its measured system-memory spill" : "usable after the 512 MiB reserve"}`;
-  return `${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}${room}.`;
 }
 
 export function Picker() {
@@ -226,7 +218,15 @@ export function Picker() {
       e.preventDefault();
       keepChoice(null);
       const i = visible.findIndex(r => r.tag === highlight), next = visible[(i + (e.key === "ArrowDown" ? 1 : -1) + visible.length) % visible.length];
-      if (next) { setHighlight(next.tag); requestAnimationFrame(() => ref.current?.querySelector(`[data-m="${CSS.escape(next.tag)}"]`)?.scrollIntoView({ block: "nearest" })); }
+      if (next) {
+        setHighlight(next.tag);
+        requestAnimationFrame(() => {
+          const row = ref.current?.querySelector(`[data-m="${CSS.escape(next.tag)}"]`);
+          row?.scrollIntoView({ block: "nearest" });
+          // focus stays in the search field: the highlighted row's cut name opens its tip as focus would
+          openTip(row?.querySelector(".pk-select"));
+        });
+      }
     } else if (e.key === "Enter" && active) { e.preventDefault(); choose(active); }
     else if (e.key === "ArrowRight" && active && e.currentTarget.selectionStart === query.length) {
       e.preventDefault();
@@ -258,7 +258,14 @@ export function Picker() {
     : choiceReport === "error" ? `Couldn't check ${k(choice.size)}. Your choice is kept while we retry.`
     : refused.current === choice || choiceReport?.verdict === "refuse" ? `${k(choice.size)} needs more memory. Choose another size.`
     : `Choosing ${k(choice.size)}. Checking memory…`;
-  const tip = (row: Row) => `<b>${esc(row.label)}</b> · <span class="mono">${esc(row.tag)}</span>${row.info ? `<br>${gb(row.info.sizeBytes)} on disk` : ""}${row.v ? stale(row.tag) ? `<br>${gb(row.v.need)} previous check; checking again.` : `<br>${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}` : "<br>Checking memory…"}`;
+  // A row's facts have no hover tooltip (the owner's call): its face shows the size and,
+  // by colour, the fit. Screen readers get the size and the fit in words. Only a cut name has a tip.
+  const facts = (row: Row) => {
+    const fit = !row.v ? checked(row.tag) === "error" ? "Couldn't check memory" : "Checking memory"
+      : stale(row.tag) ? `${gb(row.v.need)} previous check; checking again`
+      : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
+    return row.downloading === undefined ? fit : `Downloading, ${row.downloading}%. ${fit}`;
+  };
   if (!pop?.ready) return null;
   return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} aria-busy={choosing || undefined} onKeyDown={keys}>
     <div className="pk-layout">
@@ -272,8 +279,11 @@ export function Picker() {
         <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { keepChoice(null); setQuery(e.target.value); setHighlight(null); }} onKeyDown={modelKeys} /><button className="pk-close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>
         <div className="pk-list-scroll">
           <div id="pkList" role="listbox" aria-label="Models">
-            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !fitIsCurrent(checked(r.tag)) || (r.v?.k === "no" && !r.frees) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !fitIsCurrent(checked(r.tag)) || undefined} aria-disabled={r.downloading !== undefined || (!phone && fitIsCurrent(checked(r.tag)) && r.v?.k === "no" && !r.frees)} data-m={r.tag} data-i={i} data-tip={tip(r)} onMouseMove={() => setHighlight(r.tag)}>
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : checked(r.tag) === "error" ? "Couldn't check" : "Checking…"}</span></button>
+            {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !fitIsCurrent(checked(r.tag)) || (r.v?.k === "no" && !r.frees) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !fitIsCurrent(checked(r.tag)) || undefined} aria-disabled={r.downloading !== undefined || (!phone && fitIsCurrent(checked(r.tag)) && r.v?.k === "no" && !r.frees)} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
+              {/* a name cut by its row reads in full in a tip, and only then (data-tipt) */}
+              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${stale(r.tag) ? "" : r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : checked(r.tag) === "error" ? "Couldn't check" : "Checking…"}</span></button>
+              {/* after the row's name, so the option is announced name first */}
+              <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
             </div>)}
             {visible.length === 0 ? <div className="pk-empty">{models === undefined ? "Couldn't read installed models." : group === "favorites" && !q ? "No favorites yet. Star a model to keep it here." : "No installed model matches."}</div> : null}
@@ -282,8 +292,8 @@ export function Picker() {
         </div>
       </div>
       <section className="pk-context" aria-label="Context length">
-        <header className="pk-context-head"><button className="pk-back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button><span>Context length</span><small data-tip={active ? esc(active.label) : undefined}>{active?.label}</small></header>
-        <div className="pk-context-rows" role="radiogroup" aria-label="Context length" onKeyDown={e => {
+        <header className="pk-context-head"><button className="pk-back" aria-label="Back to models" onClick={e => backToModels(!isTouch() || pop?.kb === true || e.detail === 0)}><Icon id="left" /></button><span>Context length</span>{/* the wide picker shows the model list beside it; the phone's context screen does not */}{phone ? <small data-tip={active ? esc(active.label) : undefined}>{active?.label}</small> : null}</header>
+        <div className="pk-context-rows" role="radiogroup" aria-label={active ? `Context length for ${active.label}` : "Context length"} onKeyDown={e => {
           if (e.key === "ArrowLeft") { e.preventDefault(); backToModels(true); return; }
           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
           e.preventDefault(); const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")], i = buttons.findIndex(button => button === document.activeElement);
@@ -293,7 +303,7 @@ export function Picker() {
             const v = active ? report(active.tag, c) : undefined, history = active ? stale(active.tag, c) : false, frees = active ? stopFrees[keyFor(active.tag, c)] === true : false;
             const capped = activeMax !== undefined && c > activeMax;
             const disabled = !active || active.downloading !== undefined || capped || (!history && v?.k === "no" && !frees);
-            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={history || choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} data-tip={capped ? `This model takes up to ${k(activeMax)}.` : contextTip(v, cpu, frees, history)} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} history={history} failed={active !== undefined && checked(active.tag, c) === "error"} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
+            return <button key={c} className="pk-ctx-row" role="radio" aria-checked={c === actual} aria-disabled={disabled} aria-busy={history || choice?.size === c && waiting || undefined} tabIndex={c === actual ? 0 : -1} data-ctx={c} disabled={disabled} onClick={() => { if (active) chooseContext(active, c); }}><span>{k(c)}</span>{capped ? <small className="pk-cap">Max {k(activeMax)}</small> : <ContextMemory v={v} cpu={cpu} frees={frees} history={history} failed={active !== undefined && checked(active.tag, c) === "error"} />}<span className="pk-context-check">{c === actual ? <Icon id="check" cls="s12" /> : null}</span></button>;
           })}
         </div>
         {choiceMessage ? <p className="pk-help pk-choice" role="status">{choiceMessage}</p> : null}

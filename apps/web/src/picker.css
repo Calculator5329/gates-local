@@ -10,15 +10,17 @@
 .pk-main{min-width:0;min-height:0;display:flex;flex-direction:column}
 .pk-list-scroll{flex:1;min-height:0;overflow-y:auto;scrollbar-gutter:stable;padding:8px 12px}
 .model-picker .pk-r{height:34px;min-height:34px;width:100%;position:relative;padding:0;display:block;border-radius:var(--r-picker)}
+.model-picker .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .model-picker .pk-r.sel{background:var(--hover)}
 .model-picker .pk-r[aria-busy=true] .pk-select{cursor:progress;color:var(--muted-foreground)}
 .model-picker .pk-r.hl,.model-picker .pk-r:hover{background:var(--selected)}
-.pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) 72px;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
+/* the size column is as wide as its words, so a long model name gets the rest of the row */
+.pk-select{height:34px;width:100%;display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:8px;align-items:center;padding:0 8px;text-align:left;font-size:14px}
 .pk-name{display:flex;align-items:center;min-width:0;gap:4px}
 .pk-name .pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-name .pk-variant{flex:none;font-size:11px;font-weight:400;color:var(--muted-foreground);white-space:nowrap}
 .pk-name .ic{color:var(--muted-foreground)}
-.model-picker .pk-v{width:72px;overflow:hidden;white-space:nowrap;text-align:right;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.model-picker .pk-v{overflow:hidden;white-space:nowrap;text-align:right;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .model-picker .pk-v.spill{color:var(--amber-fg)}
 .model-picker .pk-v.no{color:var(--red-fg)}
 .pk-favorite{position:absolute;left:8px;top:8px;height:18px;width:16px;opacity:0;display:flex;align-items:center;justify-content:center;color:var(--foreground)}

@@ -86,7 +86,8 @@ test("runtime switch while two threads run stops both with their partial words a
   await page.getByRole("button", { name: "Back to chat", exact: true }).click();
   for (const prompt of ["alpha", "beta"]) {
     await page.locator(".sb-row", { hasText: prompt }).click();
-    await expect(page.locator(".stop-note")).toHaveText("Stopped when the Ollama runtime changed. Its text is kept here and excluded from later model prompts.");
+    await expect(page.locator(".stop-note")).toHaveText("Stopped when the Ollama runtime changed.");
+    await expect(page.locator(".stop-note").getByRole("img", { name: "Stopped. The model won't see this reply.", exact: true })).toBeVisible();
     await expect(page.locator(".turn.a.interrupted .md")).toContainText(`Reply 1 for ${prompt}.`);
   }
   expect((await state()).turns).toHaveLength(2);

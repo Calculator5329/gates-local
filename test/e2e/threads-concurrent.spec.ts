@@ -223,7 +223,9 @@ test.describe("another client stops an off-screen reply", () => {
     await expect.poll(async () => (await state()).turns[0]?.outcome).toBe("cancelled");
     await page.locator(".sb-row", { hasText: "A long thread" }).click();
     await expect(page.locator(".turn.a .md").last()).toContainText("Reply 1 for alpha.");
-    await expect(page.locator(".stop-note, .stopped")).toContainText(/Stopped/i);
+    await expect(page.getByRole("img", { name: "Stopped. The model won't see this reply.", exact: true }).first()).toBeVisible();
+    // stopped while not on screen: the mark still has Stop's seconds
+    await expect(page.locator(".turn.a .a-act.stop .s").last()).toHaveText(/^\d+ s$/);
     expect((await state()).turns.find((t) => t.prompt === "beta")?.endedAt).toBeUndefined();
     await other.close();
   });
@@ -272,9 +274,10 @@ test("cold starts: Stop while waiting never writes a reply after the first load 
   await sendMessage(other, "beta");
   await expect(other.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
   await other.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(other.locator(".stopped")).toContainText("Stopped after");
+  await expect(other.locator(".turn.a .a-act.stop .s")).toHaveText(/^\d+ s$/);
   await finished(page, "alpha");
-  await expect(other.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+  // the stopped turn draws the row its saved reply would: Regenerate, on once the server has ended the turn
+  await expect(other.getByRole("button", { name: "Regenerate", exact: true })).toBeEnabled();
   await expect(other.locator(".turn.a .md")).toHaveCount(0);
   const beta = (await state()).turns.find((t) => t.prompt === "beta");
   expect(beta?.firstTokenAt).toBeUndefined();

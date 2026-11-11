@@ -223,7 +223,8 @@ test("the picker's context column changes the context size shown in the model tr
   await expect(ctx).toBeVisible();
   await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("aria-checked", "true");
   await expect(ctx.locator('[data-ctx="16384"] .pk-cost.gpu')).toHaveCount(1);
-  await expect(ctx.locator('[data-ctx="16384"]')).toHaveAttribute("data-tip", /fits/i);
+  // the fit is on the row's face and in its name; the row opens no tooltip
+  await expect(ctx.locator('[data-ctx="16384"] .pk-cost.gpu')).toHaveAccessibleName(/; Fits$/);
   await ctx.locator('[data-ctx="32768"]').click();
   await expect(picker).toBeHidden();
   await expect(page.locator("#modelBtn .picker-trigger-ctx")).toHaveText("32k");

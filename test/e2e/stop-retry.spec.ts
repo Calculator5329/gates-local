@@ -2,6 +2,8 @@
 // writing it again does not ask the question twice.
 import { expect, sendMessage, test, waitReady, stack } from "./fixtures.ts";
 
+const UNSEEN = "Stopped. The model won't see this reply.";
+
 test("a stopped reply survives a reload and Regenerate replaces it without a second question", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -14,8 +16,10 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   await expect(live.locator(".md")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop" }).click();
 
-  await expect(page.locator(".stop-note")).toHaveCount(1);
-  await expect(page.locator(".stop-note")).toHaveText(/^Stopped after \d+ s\. Its text is kept here and excluded from later model prompts\.$/);
+  // the stop square and its seconds in the reply's actions row; no line of words
+  await expect(live.locator(".a-act.stop .s")).toHaveText(/^\d+ s$/);
+  await expect(live.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
+  await expect(page.locator(".stop-note")).toHaveCount(0);
   await expect(page.locator(".writing")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
   await expect(page.locator(".turn.a")).toHaveCount(1);
@@ -27,8 +31,10 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   const kept = page.locator(".turn.a.interrupted");
   await expect(kept).toHaveCount(1);
   await expect(kept.locator(".md")).toContainText(stopped);
-  await expect(page.locator(".stop-note")).toHaveCount(1);
-  await expect(page.locator(".stop-note")).toHaveText(/^Interrupted before this reply finished\. Its text is kept/);
+  // after a reload who stopped it and when are not known here: the square alone
+  await expect(kept.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
+  await expect(kept.locator(".stop-mark .s")).toHaveCount(0);
+  await expect(page.locator(".stop-note")).toHaveCount(0);
 
   await stack.scenario("models");
   await kept.hover();
@@ -47,5 +53,7 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   await sendMessage(page, "And at boot?");
   await expect(page.locator(".turn.a.interrupted .md")).not.toBeEmpty();
   await expect(page.locator(".stop-note")).toHaveCount(1);
-  await expect(page.locator(".stop-note")).toHaveText(/^The reply didn't finish\. .*unexpected EOF.* Its text is kept here and excluded from later model prompts\.$/);
+  await expect(page.locator(".stop-note")).toHaveText(/^The reply didn't finish\. .*unexpected EOF/);
+  await expect(page.locator(".stop-note")).not.toContainText("excluded from later model prompts");
+  await expect(page.locator(".stop-note").getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
 });

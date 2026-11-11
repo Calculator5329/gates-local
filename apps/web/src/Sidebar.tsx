@@ -61,11 +61,13 @@ const onDrawerEntry = () => (history.state as { [DRAWER_ENTRY]?: boolean } | nul
 export function openDrawer(): void {
   cancelPendingSettings();
   if (getState().drawer) return;
-  setState({ drawer: true, pop: null, searchOpen: false, search: "" });
+  setState({ drawer: true, pop: null, search: "" });
   // a screen just closed for this (search) leaves its entry: the drawer takes it over rather than stacking on it
   if (spareScreenEntry()) history.replaceState({ [DRAWER_ENTRY]: true }, "");
   else if (!onDrawerEntry()) history.pushState({ [DRAWER_ENTRY]: true }, "");
-  requestAnimationFrame(() => document.querySelector<HTMLElement>(".sb .sb-act, .sb button")?.focus());
+  // the first thing in the drawer, as the row's Search button was: the Search field, or in Settings Back to chat.
+  // On touch focus takes New thread beside the field instead, so the keyboard stays down, as in the phone picker.
+  requestAnimationFrame(() => document.querySelector<HTMLElement>(isTouch() ? ".sb .sb-tools button, .sb .snav .sb-act" : ".sb #searchIn, .sb .snav .sb-act")?.focus());
 }
 
 /** After the drawer closes, focus goes to the top bar's first visible control: never a row sliding off screen. */
@@ -110,7 +112,7 @@ export function onDrawerPop(): void {
   }
 }
 
-/** Ctrl K and the Search button: show the search field (leaving Settings first). */
+/** Ctrl K: focus the search field (leaving Settings first). */
 export function openSearch(): void {
   const s = getState();
   if (s.view === "firstrun") return;
@@ -121,11 +123,10 @@ export function openSearch(): void {
   else if (s.view === "settings" && narrow) closeSettings();
   else if (s.view === "settings") leaveSettings();
   if (narrow) openDrawer();
-  setState({ searchOpen: true });
   requestAnimationFrame(() => document.querySelector<HTMLInputElement>("#searchIn")?.focus());
 }
 
-const closeSearch = () => setState({ searchOpen: false, search: "" });
+const clearSearch = () => setState({ search: "" });
 
 /** The row's thread actions, anchored to its button or to a context-menu point. */
 function openThreadMenu(thread: string, at: { x: number; y: number } | undefined, kb: boolean): void {
@@ -147,6 +148,22 @@ function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
   // the context-menu key also sends this event after its keydown opened the menu
   if (p?.id === "thread" && p.thread === thread && p.kb) return;
   openThreadMenu(thread, { x: e.clientX, y: e.clientY }, false);
+}
+
+/** The title with each match of q (already lower case) in a <mark>: a plain string split rendered as
+ *  text nodes, never HTML. A title whose lower case changes its length keeps no marks. */
+function marked(title: string, q: string): ReactNode {
+  const lower = title.toLowerCase();
+  if (q === "" || lower.length !== title.length) return title;
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (let i = lower.indexOf(q); i !== -1; i = lower.indexOf(q, at)) {
+    if (i > at) parts.push(title.slice(at, i));
+    parts.push(<mark key={i}>{title.slice(i, i + q.length)}</mark>);
+    at = i + q.length;
+  }
+  if (at < title.length) parts.push(title.slice(at));
+  return parts;
 }
 
 /** Widths of the placeholder rows: varied like titles, never a full-width block. */
@@ -183,9 +200,11 @@ function ThreadList() {
   let last = "";
   return (
     <nav className="sb-list">
+      {/* while searching, one heading counts the matches in place of the date groups */}
+      {q === "" ? null : <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div>}
       {shown.map((t) => {
         const w = when(t.updatedAt, now);
-        const head = w.group !== last ? <div className="sb-group">{w.group}</div> : null;
+        const head = q === "" && w.group !== last ? <div className="sb-group">{w.group}</div> : null;
         last = w.group;
         // a Fragment, not a wrapper: .sb-group:first-child must match only the list's first heading
         return (
@@ -205,7 +224,7 @@ function ThreadList() {
                 // a keyboard pause on a row reads it ahead, as a mouse pause does
                 onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) preloadThread(t.id); }}
                 onBlur={() => preloadThread(null)}>
-                <span className="t">{t.title}</span>
+                <span className="t">{q === "" ? t.title : marked(t.title, q)}</span>
                 <span className="sb-status">
                   {running.has(t.id) ?<span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
                 </span>
@@ -231,38 +250,49 @@ function ThreadList() {
 }
 
 function ChatNav() {
-  const searchOpen = useStore((s) => s.searchOpen);
   const search = useStore((s) => s.search);
   return (
     <div className="sb-body">
-      {/* one row: Search fills the left and turns into the field in place; icon buttons sit at the right end */}
+      {/* one row: an always-there Search field at the left (nothing swaps, so nothing jumps); icon buttons sit at the right end */}
       <div className="sb-top">
-        {searchOpen ? (
-          <label className="sb-search">
-            <Icon id="search" />
-            <input
-              id="searchIn"
-              placeholder="Search threads"
-              autoComplete="off"
-              value={search}
-              onChange={(e) => setState({ search: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  closeSearch();
-                }
+        <label className="sb-search">
+          <Icon id="search" />
+          <input
+            id="searchIn"
+            type="text"
+            placeholder="Search"
+            aria-label="Search threads"
+            autoComplete="off"
+            spellCheck={false}
+            value={search}
+            onChange={(e) => setState({ search: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                clearSearch();
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          {search === "" ? (
+            <span className="sb-kbd" aria-hidden="true">Ctrl K</span>
+          ) : (
+            <button
+              type="button"
+              className="sb-clear"
+              aria-label="Clear search"
+              data-tip="Clear · Esc"
+              // the field keeps its focus through the press
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => {
+                clearSearch();
+                document.querySelector<HTMLInputElement>("#searchIn")?.focus();
               }}
-              onBlur={(e) => {
-                if (e.target.value === "") closeSearch();
-              }}
-            />
-          </label>
-        ) : (
-          <button type="button" className="sb-act" data-tip="Search threads · Ctrl K" onClick={openSearch}>
-            <Icon id="search" />
-            <span className="grow">Search</span>
-          </button>
-        )}
+            >
+              <Icon id="x" cls="s14" />
+            </button>
+          )}
+        </label>
         <div className="sb-tools">
           <button type="button" className="ibtn" aria-label="New thread" data-tip="New thread · Ctrl N" onClick={goNew}>
             <Icon id="pen" />

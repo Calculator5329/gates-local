@@ -339,7 +339,7 @@ require("./out/main.cjs");
       assert.ok(messages.at(-1).content.length > 0);
       await page.evaluate((threadId) => { location.hash = `thread=${threadId}`; }, interruptedThread);
       await expect(page.getByLabel("Interrupted reply", { exact: true })).toBeVisible();
-      await expect(page.getByText("Interrupted before this reply finished.", { exact: false })).toBeVisible();
+      await expect(page.getByLabel("Interrupted reply", { exact: true }).getByRole("img", { name: "Stopped. The model won't see this reply.", exact: true })).toBeVisible();
       await shot("interrupted-reopened");
     } finally { control.close(); }
   });

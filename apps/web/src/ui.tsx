@@ -1,7 +1,7 @@
 // Shared pieces: the tooltip layer, popover placement and the verdict label.
 // Tooltips follow the design: any element with data-tip (HTML built by the
 // client, data always escaped with esc) or data-tipt (plain text, shown only
-// when the row's .t is truncated).
+// when the anchor's .t or .pk-nm is truncated).
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { Verdict } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -158,6 +158,11 @@ let hideTip: (within?: string) => void = () => undefined;
 export function closeTip(within?: string): void {
   hideTip(within);
 }
+let showTipAt: (anchor: Element) => void = () => undefined;
+/** Open an anchor's tooltip now, as focus would: a row the keyboard highlights without focusing it. */
+export function openTip(anchor: Element | null | undefined): void {
+  if (anchor) showTipAt(anchor);
+}
 
 /** The one tooltip element and its document listeners. Mount once. */
 export function Tip() {
@@ -221,7 +226,7 @@ export function Tip() {
       if (t.getAttribute("aria-expanded") === "true" && t.closest(".cf, .hdr")) return hide();
       let html = t.getAttribute("data-tip");
       if (!html) {
-        const tt = t.querySelector(".t");
+        const tt = t.querySelector(".t, .pk-nm");
         if (!tt || tt.scrollWidth <= tt.clientWidth) return hide();
         html = esc(t.getAttribute("data-tipt") ?? "");
       }
@@ -229,8 +234,7 @@ export function Tip() {
       remember(t);
       el.innerHTML = html;
       el.classList.add("open");
-      // a tag inside a picker row places its tip by the row (F72); the picker's foot keeps the default
-      const r = (t.closest("#picker .pk-r, #picker .pk-dr") ?? t).getBoundingClientRect();
+      const r = t.getBoundingClientRect();
       // Measure at the left edge: left where the last tip was (near the window's
       // right edge) it shrinks to fit, then widens once moved and covers its row.
       el.style.left = "0px";
@@ -293,6 +297,7 @@ export function Tip() {
       if (!at || box.x !== at.x || box.y !== at.y || box.width !== at.width || box.height !== at.height) hide();
     });
     changes.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip", "data-tipt"] });
+    showTipAt = t => show(t);
     document.addEventListener("mouseover", over);
     document.addEventListener("mouseout", out);
     document.addEventListener("focusin", focusIn);
@@ -304,6 +309,7 @@ export function Tip() {
       changes.disconnect();
       hide();
       hideTip = () => undefined;
+      showTipAt = () => undefined;
       document.removeEventListener("mouseover", over);
       document.removeEventListener("mouseout", out);
       document.removeEventListener("focusin", focusIn);

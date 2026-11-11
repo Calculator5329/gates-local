@@ -53,7 +53,7 @@ test("Send now stops only this thread, keeping its partial words while another t
   await page.locator(".sb-row", { hasText: "alpha" }).click();
   await page.locator("[data-send-now]").click();
   await expect(page.locator(".turn.u")).toHaveCount(2);
-  await expect(page.locator(".stop-note")).toContainText("Stopped after");
+  await expect(page.locator(".turn.a.interrupted .a-act.stop .s")).toHaveText(/^\d+ s$/);
   await expect(page.locator(".turn.a.interrupted .md").first()).toContainText("Reply 1 for alpha.");
   expect((await state()).turns.find((t) => t.prompt === "beta")?.endedAt).toBeUndefined();
   await expect.poll(async () => (await state()).turns.find((t) => t.prompt === "send now")?.outcome).toBe("done");
@@ -79,7 +79,7 @@ test("won't fit together: exact warning, Cancel preserves draft and running repl
   await warning(page).getByRole("button", { name: "Stop and send" }).click();
   await finished(page, "beta");
   await page.locator(".sb-row", { hasText: "alpha" }).click();
-  await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load. Its text is kept here and excluded from later model prompts.");
+  await expect(page.locator(".stop-note")).toHaveText("Stopped so Qwen 3.5 9B could load.");
   await expect(page.locator(".turn.a.interrupted .md")).toContainText("Reply 1 for alpha.");
   await shot(page, "preempted");
   const [a, b] = (await state()).turns;

@@ -425,7 +425,7 @@ export function errorSavedPartial(): ReplayScenario<World> {
       const state = w.a.store.getState();
       expect(state.turns["t1"]).toBeUndefined();
       expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
-      expect(state.stopNotes["reply-turn-1"]).toBe("The reply didn't finish. The model runner crashed.");
+      expect(state.stopNotes["reply-turn-1"]).toEqual({ kind: "said", words: "The reply didn't finish. The model runner crashed." });
     },
   };
 }

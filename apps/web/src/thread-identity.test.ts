@@ -21,7 +21,13 @@ import { setState } from "./store.ts";
 
 afterEach(() => { setState({ messages: {}, turns: {}, stopNotes: {} }); vi.unstubAllGlobals(); });
 
-it("retains interrupted text and its unfinished label in the shared live-to-saved reply slot", () => {
+/** The stop square's name and tooltip: the one place the app says a stopped reply stays out of later prompts. */
+const UNSEEN = "Stopped. The model won&#x27;t see this reply.";
+/** Focusable (tabindex 0), so the keyboard reaches the square's tooltip. */
+const MARK = `role="img" tabindex="0" aria-label="${UNSEEN}" data-tip="${UNSEEN}"`;
+const OLD_WORDS = /excluded from later model prompts|Its text is kept here|Stopped after|Interrupted before this reply finished/;
+
+it("marks an interrupted reply whose cause this client does not know (a reload) with the stop square alone", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] } });
@@ -29,20 +35,76 @@ it("retains interrupted text and its unfinished label in the shared live-to-save
   expect(html).toContain('class="turn a interrupted"');
   expect(html).toContain('aria-label="Interrupted reply"');
   expect(html).toContain("A retained partial answer");
-  expect(html).toContain("excluded from later model prompts");
+  expect(html.split(MARK)).toHaveLength(2);
+  expect(html).toMatch(/<div class="a-act stop"><span class="stop-mark"><span [^>]*><\/span><\/span>/);
+  expect(html).not.toMatch(OLD_WORDS);
+  expect(html).not.toContain('class="stop-note"');
   expect(html).not.toContain('class="turn a done"');
 });
 
-it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime changed."])("shows only the known stop reason: %s", reason => {
+it("marks a reply the person stopped with the stop square and its seconds in its actions row, and no line of words", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: reason } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "stopped", secs: 187 } } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  expect(html.split(MARK)).toHaveLength(2);
+  expect(html).toMatch(/<div class="a-act stop"><span class="stop-mark"><span [^>]*><\/span><span class="s">187 s<\/span><\/span>/);
+  expect(html).not.toMatch(OLD_WORDS);
+  expect(html).not.toContain('class="stop-note"');
+});
+
+it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime changed.", "The reply didn't finish. The model crashed."])("shows only the known stop reason, in its own words, with the stop square: %s", reason => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "said", words: reason } } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html.match(/class="stop-note"/g)).toHaveLength(1);
-  expect(html).toContain(`${reason} Its text is kept here and excluded from later model prompts.`);
-  expect(html).not.toContain("Interrupted before this reply finished");
+  expect(html).toMatch(new RegExp(`<div class="stop-note" role="status"><span class="stop-mark"><span ${MARK}></span></span>${reason.replace(/[.']/g, (c) => c === "." ? "\\." : "&#x27;")}</div>`));
+  expect(html.split(MARK)).toHaveLength(2);
+  expect(html).not.toContain('class="a-act stop"');
+  expect(html).not.toMatch(OLD_WORDS);
   expect(html).toContain("A retained partial answer");
   expect(html).toContain('aria-label="Interrupted reply"');
+});
+
+it("keeps a reason under a question with no reply as words alone: there is no reply for the model not to see", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  setState({ turns: {}, messages: { proof: [{ id: "q", threadId: "proof", role: "user", content: "A question", createdAt: 1 }] }, stopNotes: { q: { kind: "said", words: "Stopped so another model could load." } } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  // under-u: the note starts below the message's action row, so the row's unseen Edit and Copy never sit over it
+  expect(html).toContain('<div class="stop-note under-u" role="status">Stopped so another model could load.</div>');
+  expect(html).not.toContain(UNSEEN);
+});
+
+it("draws the saved reply's row the moment Stop ends a reply: the mark, then Regenerate, off until the server has ended the turn", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const turn = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "Words so far", thinking: "", tools: [], pendingUser: null, end: { kind: "stopped", secs: 187 } };
+  for (const ending of [true, false]) {
+    setState({ messages: { proof: [] }, turns: { proof: { ...turn, ...(ending ? { ending } : {}) } as never } });
+    const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+    expect(html).toMatch(/<div class="a-act stop"><span class="stop-mark"><span [^>]*><\/span><span class="s">187 s<\/span><\/span>/);
+    expect(html).not.toContain('class="stopped"');
+    expect(html.match(/<button [^>]*aria-label="Regenerate"[^>]*>/)?.[0]).toMatch(ending ? /\sdisabled=""/ : /^(?![^>]*\sdisabled)/);
+    expect(html.split(MARK)).toHaveLength(2);
+    expect(html).not.toMatch(OLD_WORDS);
+  }
+});
+
+it("a reply stopped while thinking keeps Stop's seconds on the thought's pill, not on the square too, live and saved", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const live = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], pendingUser: null, end: { kind: "stopped", secs: 4 } };
+  setState({ messages: { proof: [] }, turns: { proof: live as never }, stopNotes: {} });
+  const liveHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "", thinking: "The question is short", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "stopped", secs: 4 } } });
+  const savedHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  for (const html of [liveHtml, savedHtml]) {
+    expect(html).toContain("Thought for 4 s");
+    expect(html.split(MARK)).toHaveLength(2);
+    expect(html).not.toContain('class="s"');
+  }
 });
 
 const at = (id: string, role: "user" | "assistant", more: object = {}) => ({ id, threadId: "proof", role, content: `Words of ${id}`, createdAt: 1, ...more });
@@ -55,11 +117,12 @@ it("marks exactly the turns with a stop note under them, whatever state the turn
   setState({
     turns: {},
     messages: { proof: [at("u1", "user"), at("a1", "assistant"), at("u2", "user"), at("a2", "assistant"), at("u3", "user"), at("a3", "assistant", { interrupted: true }), at("u4", "user")] },
-    stopNotes: { a2: "The reply didn't finish.", a3: "Stopped after 3 s.", u4: "Stopped so another model could load." },
+    stopNotes: { a2: { kind: "said", words: "The reply didn't finish." }, a3: { kind: "stopped", secs: 3 }, u4: { kind: "said", words: "Stopped so another model could load." } },
   });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
-  const classes = [...html.matchAll(/<div class="(turn [^"]*|stop-note)"/g)].map((m) => m[1]);
-  expect(classes).toEqual(["turn u", "turn a done", "turn u", "turn a done noted", "stop-note", "turn u", "turn a interrupted noted", "stop-note", "turn u noted", "stop-note"]);
+  const classes = [...html.matchAll(/<div class="(turn [^"]*|stop-note[^"]*)"/g)].map((m) => m[1]);
+  // a reply the person stopped carries its mark in its own actions row, so it has no note and keeps its gap
+  expect(classes).toEqual(["turn u", "turn a done", "turn u", "turn a done noted", "stop-note", "turn u", "turn a interrupted", "turn u noted", "stop-note under-u"]);
 });
 
 function child(node: unknown, index: number): unknown {

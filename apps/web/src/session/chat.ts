@@ -2,7 +2,7 @@
 import { type BlockingTurn, type Message, type MethodName, type Params, type Payload, type ResultOf, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../format.ts";
 import { firstChatPull, sendableModel } from "../pick.ts";
-import { type LiveTurn, NA, type Queued, type State, type StopAsk, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
+import { type LiveTurn, NA, type Queued, type State, type StopAsk, type StopNote, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
 import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
@@ -129,11 +129,11 @@ function stopReason(event: { readonly code: string; readonly neededBy?: string |
   return `Stopped so ${by} could load.`;
 }
 
-/** Why a reply the server saved unfinished stopped; the row adds that its words are kept. `end` is how this client saw it stop; none: the row's general marker says it, because this client cannot say why. */
-function savedNote(event: Extract<ChatEvent, { type: "error" }>, end: LiveTurn["end"]): string | undefined {
-  if (end?.kind === "stopped") return `Stopped after ${end.secs} s.`;
+/** Why a reply the server saved unfinished stopped. `end` is how this client saw it stop; none: the row's stop square alone marks it, because this client cannot say why. */
+function savedNote(event: Extract<ChatEvent, { type: "error" }>, end: LiveTurn["end"]): StopNote | undefined {
+  if (end?.kind === "stopped") return { kind: "stopped", secs: end.secs };
   if (event.code === "cancelled") return undefined;
-  return stopReason(event) ?? `The reply didn't finish.${asSentence(event.message)}`;
+  return { kind: "said", words: stopReason(event) ?? `The reply didn't finish.${asSentence(event.message)}` };
 }
 
 /** The server's error text as a following sentence of a note; nothing when it has none. */
@@ -383,11 +383,16 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const { threadId } = l;
     const tools = l.tools.map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
     const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), ...(tools.length === 0 ? {} : { tools }), ...(l.contextNotice ? { contextNotice: l.contextNotice } : {}), model: l.model, createdAt: Date.now() };
-    const note = l.end.kind === "stopped" ? `Stopped after ${l.end.secs} s.` : "The reply didn't finish.";
+    const note: StopNote = l.end.kind === "stopped" ? { kind: "stopped", secs: l.end.secs } : { kind: "said", words: "The reply didn't finish." };
     // A partial is not the whole history of a chat this client never opened.
     if (getState().messages[threadId] === undefined && !loading(threadId)) void loadThread(threadId);
     noteMessage(threadId, msg);
-    applyServerEvent((s) => ({ messages: withMessage(s, threadId, msg), stopNotes: { ...s.stopNotes, [msg.id]: note } }));
+    const first = l.firstTokenAt;
+    applyServerEvent((s) => ({
+      messages: withMessage(s, threadId, msg),
+      stopNotes: { ...s.stopNotes, [msg.id]: note },
+      ...(first === undefined ? {} : { firstToken: { ...s.firstToken, [msg.id]: first - l.startedAt } }),
+    }));
   }
 
   async function startTurn(threadId: string, content: string, model: string, opts: TurnOptions = {}): Promise<void> {
@@ -683,6 +688,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         holdQueue(threadId);
         if (said.partial !== undefined) {
           // the saved partial has every word the turn showed: it takes the turn's place
+          const w = waiting.get(threadId);
+          const firstAt = turn.firstTokenAt ?? (w !== undefined && w.gen === turn.gen ? w.textAt : undefined);
           waiting.delete(threadId);
           const { partial } = said;
           noteMessage(threadId, partial);
@@ -692,6 +699,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
             turns: withTurn(s.turns, threadId, null),
             ...(open || s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),
             ...(note === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: note } }),
+            // the thought's length stays on the pill once the saved row takes over, as it does for a finished reply
+            ...(firstAt === undefined ? {} : { firstToken: { ...s.firstToken, [partial.id]: firstAt - turn.startedAt } }),
           }));
         } else {
           flushWords(threadId);
@@ -710,14 +719,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   function settle(turn: LiveTurn, event: Extract<ChatEvent, { type: "error" }>): void {
     applyServerEvent((s) => ({ turns: withTurn(s.turns, turn.threadId, null) }));
     if (turn.text !== "" || turn.thinking !== "" || turn.tools.length > 0) keepStoppedWords(turn);
-    else if (event.code !== "cancelled") keepStopped(turn.threadId, turn.userMessageId, event);
+    else if (event.code !== "cancelled" && turn.end?.kind !== "stopped") keepStopped(turn.threadId, turn.userMessageId, event);
   }
 
   /** A turn that ended without being on screen: what it saved goes into its thread, with why it stopped under it. */
   function keepStopped(threadId: string, userMessageId: string | undefined, event: Extract<ChatEvent, { type: "error" }>): void {
     const { partial } = event;
     if (partial !== undefined) noteMessage(threadId, partial);
-    const why = partial === undefined ? stopReason(event) ?? "The reply didn't finish." : savedNote(event, undefined);
+    const why: StopNote | undefined = partial === undefined ? { kind: "said", words: stopReason(event) ?? "The reply didn't finish." } : savedNote(event, undefined);
     const on = partial?.id ?? userMessageId;
     applyServerEvent((s) => ({
       ...(partial !== undefined && s.messages[threadId] !== undefined ? { messages: withMessage(s, threadId, partial) } : {}),

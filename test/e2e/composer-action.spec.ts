@@ -78,7 +78,7 @@ test("the second click of Send's double-click cannot stop the reply it just star
   expect(cancellations).toHaveLength(0);
   await expect(action).toHaveAccessibleName("Stop");
   await expect(action).toHaveCount(1);
-  await expect(page.locator(".stopped")).toHaveCount(0);
+  await expect(page.locator(".turn.a:not(.interrupted) .a-act.stop"), "no reply was stopped").toHaveCount(0);
   // A fresh, intentional Stop still works.
   await action.click();
   await expect(action).toHaveAccessibleName("Send message");
@@ -105,37 +105,43 @@ test.describe("a fresh chat", () => {
 
 test.describe("a touch keyboard", () => {
   test.use({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true });
-  test("Enter inserts a newline, typing offers Queue, and clearing or queueing returns Stop", async ({ page, open, seededThread }, info) => {
+  test("Enter inserts a newline; the queue arrow and Stop hold their own slots through typing, clearing and queueing", async ({ page, open, seededThread }, info) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     await stack.scenario("slow-drip", { holdAfterTokens: 46 });
     const action = page.locator(".composer button.send");
+    const stop = page.locator(".composer .stop-sq");
     await page.locator("#ta").fill("A touch reply");
     await action.tap();
-    await expect(action).toHaveAccessibleName("Stop");
-    const stopBox = await action.boundingBox();
+    await expect(action).toHaveAccessibleName("Queue message");
+    await expect(action, "the arrow is off while the draft is empty").toHaveAttribute("aria-disabled", "true");
+    await expect(stop).toHaveAccessibleName("Stop");
+    const boxes = async () => [await action.boundingBox(), await stop.boundingBox()];
+    const still = await boxes();
     await page.locator("#ta").fill("Next line");
     await page.locator("#ta").press("Enter");
     await expect(page.locator("#ta")).toHaveValue("Next line\n");
     await expect(page.locator(".qt-r")).toHaveCount(0);
     await expect(action).toHaveAccessibleName("Queue message");
+    await expect(action).not.toHaveAttribute("aria-disabled", "true");
     await expect(action).toHaveCount(1);
+    expect(await boxes()).toEqual(still);
     await page.locator("#ta").fill("");
-    await expect(action).toHaveAccessibleName("Stop");
-    expect(await action.boundingBox()).toEqual(stopBox);
+    await expect(action).toHaveAttribute("aria-disabled", "true");
+    expect(await boxes()).toEqual(still);
     await page.locator("#ta").fill("Queued from touch");
-    await expect(action).toHaveAccessibleName("Queue message");
     await action.tap();
     await expect(page.locator(".qt-r")).toContainText("Queued from touch");
-    await expect(action).toHaveAccessibleName("Stop");
+    await expect(action).toHaveAccessibleName("Queue message");
     await expect(action).toHaveCount(1);
-    expect(await action.boundingBox()).toEqual(stopBox);
+    expect(await boxes()).toEqual(still);
     await page.locator(".qt-r [data-edit-queued]").tap();
     await expect(action).toHaveAccessibleName("Update queued message");
     await page.locator("#ta").fill("Updated on touch");
     await action.tap();
     await expect(page.locator(".qt-r")).toContainText("Updated on touch");
-    await expect(action).toHaveAccessibleName("Stop");
+    await expect(action).toHaveAccessibleName("Queue message");
+    await expect(stop).toBeVisible();
     await page.screenshot({ path: info.outputPath("touch-queue-updated.png") });
   });
 });

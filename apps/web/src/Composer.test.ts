@@ -44,7 +44,7 @@ const turns = { thread: live };
 const states: readonly [string, Partial<State> & { draft?: string }, string, string?][] = [
   ["idle", {}, "Send message"],
   ["typing", { draft: "hello" }, "Send message"],
-  ["running", { turns }, "Stop"],
+  ["running", { turns }, "Stop", "Queue message"],
   ["running with a draft", { turns, draft: "next" }, "Stop", "Queue message"],
   ["editing a queued message", { turns, editingQueued: "queued", draft: "edited" }, "Update queued message"],
   ["editing an empty queued message", { turns, editingQueued: "queued" }, "Update queued message"],
@@ -58,12 +58,17 @@ const states: readonly [string, Partial<State> & { draft?: string }, string, str
 ];
 
 describe("the composer's primary action", () => {
-  for (const touch of [false, true]) {
-    it(`keeps a separate Stop available without replacing the ${touch ? "touch queue" : "queued edit"} action`, () => {
+  for (const [touch, draft] of [[false, "Keep this draft"], [true, "Keep this draft"], [true, ""]] as const) {
+    it(`keeps a separate Stop available without replacing the ${touch ? `touch queue action, ${draft ? "with" : "without"} a draft` : "queued edit action"}`, () => {
       device.touch = touch;
-      setFixture({ ...ready, turns, draft: "Keep this draft", editingQueued: touch ? null : "queued" });
+      setFixture({ ...ready, turns, draft, editingQueued: touch ? null : "queued" });
       const html = renderToStaticMarkup(createElement(Composer));
-      expect(html.match(/<button\b[^>]*aria-label="Stop reply"[^>]*>/g) ?? []).toHaveLength(1);
+      const stops = html.match(/<button\b[^>]*aria-label="Stop"[^>]*>/g) ?? [];
+      expect(stops).toHaveLength(1);
+      expect(stops[0], "an icon square in the button row, like Dictate").toMatch(/class="ctl sq\b/);
+      // on touch the arrow holds its slot from the reply's start, off while the draft is empty
+      if (touch) expect(html.match(/<button\b[^>]*class="send"[^>]*>/)?.[0]).toMatch(draft ? /aria-label="Queue message"(?![^>]*aria-disabled)/ : /aria-label="Queue message"[^>]*aria-disabled="true"/);
+      expect(html, "no running line above the composer").not.toMatch(/Reply running|data-running-status/);
     });
   }
   for (const touch of [false, true]) {

@@ -1,13 +1,10 @@
-// Pins for the model-pick lane's words and geometry: picker row tooltips sit
-// beside their own row (F72), the fit panel names its two memory quantities
+// Pins for the model-pick lane's words and geometry: picker rows open no
+// tooltip and the picker holds still through a fit refresh (F72), the fit panel names its two memory quantities
 // apart (G7-01) and keeps context fit on hover (S1), a refused verdict's
 // dot is red in the first-run card (item 4), and tok/s counts decode time only.
 import type { Page } from "@playwright/test";
 import { decodeResult, type GpuStatus } from "@gates-local/contracts";
 import { expect, openGpuMemory, sendMessage, test, waitReady } from "./fixtures.ts";
-
-type Box = { top: number; bottom: number; left: number; right: number };
-const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
 /** Prepare normally, then hold real fit answers during an open picker's refresh. */
 async function holdPickerReports(page: Page) {
@@ -53,33 +50,26 @@ async function holdPickerReports(page: Page) {
   };
 }
 
-/** Hover every picker row; for each, the tip's box and the boxes it must leave clear. */
-async function rowTips(page: Page): Promise<{ tag: string; tip: Box; row: Box; others: Box[] }[]> {
-  const rows = page.locator("#picker .pk-r[data-tip]");
+/** The tooltip opens 400 ms after the pointer settles (ui.tsx); twice that leaves no doubt it would have. */
+const PAST_TIP_DELAY_MS = 800;
+
+/** Hover every picker row: a row's facts open no tooltip (the owner removed them); a cut name opens one with the full name, and only then. */
+async function rowsOpenNoTip(page: Page): Promise<void> {
+  const rows = page.locator("#picker .pk-r");
   const n = await rows.count();
   expect(n).toBeGreaterThan(1);
-  const out = [];
   for (let i = 0; i < n; i++) {
-    const row = rows.nth(i);
-    await row.locator(".pk-n").hover();
-    await expect(page.locator("#tip.open")).toBeVisible();
-    out.push(
-      await row.evaluate((el) => {
-        // DOMRect's own fields are getters, so copy them into plain objects for the trip back.
-        const [tip, own, ...others] = [document.getElementById("tip") ?? el, el, ...[...document.querySelectorAll("#picker .pk-n, #picker .pk-context-head, #picker .pk-fam")].filter((x) => !el.contains(x))].map((e) => {
-          const r = e.getBoundingClientRect();
-          return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
-        });
-        const none = { top: 0, bottom: 0, left: 0, right: 0 };
-        return { tag: el.getAttribute("data-m") ?? "", tip: tip ?? none, row: own ?? none, others };
-      }),
-    );
+    const nm = rows.nth(i).locator(".pk-nm");
+    await rows.nth(i).locator(".pk-n").hover();
+    await page.waitForTimeout(PAST_TIP_DELAY_MS);
+    const cut = await nm.evaluate((el) => el.scrollWidth > el.clientWidth);
+    if (cut) await expect(page.locator("#tip.open"), `row ${i}, its name cut`).toHaveText((await nm.textContent()) ?? "");
+    else await expect(page.locator("#tip.open"), `row ${i}`).toHaveCount(0);
   }
-  return out;
 }
 
 for (const width of [1440, 760]) {
-  test(`a picker row's tooltip leaves every other row name and heading clear at ${width} px (F72)`, async ({ page, open }) => {
+  test(`picker rows open no tooltip, and the picker holds still through a fit refresh at ${width} px (F72)`, async ({ page, open }) => {
     await page.setViewportSize({ width, height: 900 });
     const reports = await holdPickerReports(page);
     await open();
@@ -95,18 +85,12 @@ for (const width of [1440, 760]) {
     await expect(picker).toBeVisible();
     await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
     await picker.locator('.pk-r[data-m="gemma4:12b"] .pk-n').hover();
-    await expect(page.locator("#tip.open")).toBeVisible();
     reports.release();
     await expect(picker.locator('.pk-r[aria-busy="true"]')).toHaveCount(0);
     await expect(picker.locator(".pk-bottom").getByRole("button", { name: "Download models", exact: true })).toBeVisible();
     await expect(picker.locator(".pk-v").filter({ hasText: "Checking" })).toHaveCount(0);
     expect(await picker.boundingBox(), "fit replies keep the picker under the resting pointer").toEqual(before);
-    // The refreshed fit changes the tip's advice. It must update or close;
-    // subsequent hovers still exercise every original non-overlap assertion.
-    await expect.poll(() => page.locator("#tip").evaluate(el => !el.classList.contains("open") || !el.textContent?.includes("previous check"))).toBe(true);
-    for (const t of await rowTips(page)) {
-      for (const o of t.others) expect(meets(t.tip, o), `${t.tag}: tip ${JSON.stringify(t.tip)} covers ${JSON.stringify(o)}`).toBe(false);
-    }
+    await rowsOpenNoTip(page);
     await page.screenshot({ path: test.info().outputPath(`picker-stable-${width}.png`) });
   });
 }

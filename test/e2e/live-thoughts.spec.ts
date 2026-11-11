@@ -162,8 +162,11 @@ test("Stop while thinking keeps what arrived readable, with the stopped line", a
   await expect(pill).toContainText("Thinking");
   await pill.click();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  // the stopped reply's note, as for a reply stopped while writing; the thought stays as the person left it
-  await expect(page.locator(".stop-note")).toContainText("Stopped after");
+  // the stopped reply's square; stopped while thinking, Stop's seconds are the thought's, on the pill, not twice
+  await expect(reply.getByRole("img", { name: "Stopped. The model won't see this reply.", exact: true })).toBeVisible();
+  await expect(pill).toContainText(/^Thought for \d+ s/);
+  await expect(reply.locator(".a-act.stop .s")).toHaveCount(0);
+  await expect(page.locator(".stop-note")).toHaveCount(0);
   await expect(pill).not.toHaveClass(/\blive\b/);
   await expect(pill).not.toHaveAccessibleName("Thinking");
   await expect(pill).toHaveAttribute("aria-expanded", "true");

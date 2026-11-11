@@ -111,9 +111,9 @@ test.describe("tooltips", () => {
     await settle(page);
     expect((await rec(page)).opened).toBeNull();
     });
-    await test.step("a row inside the open picker still has its tooltip", async () => {
+    await test.step("an icon-only family button inside the open picker still has its tooltip", async () => {
     await expect(page.locator("#picker")).toBeVisible();
-    await page.locator("#picker .pk-r").first().hover();
+    await page.locator("#picker .pk-fam").first().hover();
     await expect(page.locator("#tip.open")).toBeVisible();
     });
   });

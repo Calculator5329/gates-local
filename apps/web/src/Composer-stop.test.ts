@@ -58,7 +58,7 @@ for (const touch of [false, true]) {
     probe.touch = touch;
     setState({ ...running, editingQueued: touch ? null : "queued" });
     replaceDraft("thread", { text: "Keep this draft" });
-    const stops = nodes(Composer()).filter(n => n.type === "button" && n.props["aria-label"] === "Stop reply");
+    const stops = nodes(Composer()).filter(n => n.type === "button" && n.props["aria-label"] === "Stop");
     expect(stops).toHaveLength(1);
     const press = stops[0]!.props as { onPointerDown(): void; onClick(event: unknown): void };
     press.onPointerDown();

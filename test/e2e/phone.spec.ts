@@ -157,7 +157,7 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
   await stack.scenario("slow-drip", { holdAfterTokens: 46 });
   await sendMessage(page, "Stop this one");
   await page.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(page.locator(".stopped")).toContainText("Stopped after");
+  await expect(page.locator(".turn.a .a-act.stop .s").last()).toHaveText(/^\d+ s$/);
   await stack.scenario("models");
 
   // Pick another installed model. Downloading a new one is not offered.

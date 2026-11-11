@@ -35,9 +35,10 @@ async function watchRequests(page: Page) {
   });
 }
 
-const statusBounds = (page: Page) => page.locator("[data-running-status]").evaluateAll((els) => {
-  const rect = els[0]?.getBoundingClientRect();
-  return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null;
+/** The composer's box: compact Stop appearing must not move or resize it. */
+const composerBounds = (page: Page) => page.locator(".composer").evaluate((el) => {
+  const rect = el.getBoundingClientRect();
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 });
 
 // Hover scales the paint around its center; compare layout independently of that animation.
@@ -54,7 +55,8 @@ async function startHeld(page: Page, open: (hash?: string) => Promise<void>, thr
   const primary = page.locator(".composer button.send");
   if (touch) await primary.tap();
   else await primary.click();
-  await expect(primary).toHaveAccessibleName("Stop");
+  // on touch the arrow keeps its slot while a reply runs, and Stop has its own
+  await expect(primary).toHaveAccessibleName(touch ? "Queue message" : "Stop");
   await expect(page.locator(".turn.a").last().locator(".md ul li")).toHaveCount(3);
   return primary;
 }
@@ -62,17 +64,17 @@ async function startHeld(page: Page, open: (hash?: string) => Promise<void>, thr
 test("CP-01 editing queued text keeps compact Stop reachable without losing the edit", async ({ page, open, seededThread }, info) => {
   const primary = await startHeld(page, open, seededThread);
   const before = await primaryBounds(page);
-  const statusBefore = await statusBounds(page);
+  const composerBefore = await composerBounds(page);
   await page.locator("#ta").fill("Keep this queued draft");
   await page.locator("#ta").press("Enter");
   await page.locator(".qt-r [data-edit-queued]").click();
   await expect(primary).toHaveAccessibleName("Update queued message");
-  const stop = page.getByRole("button", { name: "Stop reply", exact: true });
+  const stop = page.getByRole("button", { name: "Stop", exact: true });
   await expect(stop).toBeVisible();
   await expect(stop).toBeInViewport();
   await expect(page.locator(".composer button.send")).toHaveCount(1);
   expect(await primaryBounds(page)).toEqual(before);
-  expect(await page.locator("[data-running-status]").boundingBox()).toEqual(statusBefore);
+  expect(await composerBounds(page)).toEqual(composerBefore);
   await page.screenshot({ path: info.outputPath("queued-edit-stop.png") });
   await stop.click();
   await expect(page.locator("#ta")).toHaveValue("Keep this queued draft");
@@ -88,17 +90,19 @@ test.describe("a touch draft", () => {
     await page.setViewportSize({ width: 412, height: 480 });
     const primary = await startHeld(page, open, seededThread, true);
     const before = await primaryBounds(page);
-    const statusBefore = await statusBounds(page);
-    await expect(page.getByRole("button", { name: "Stop reply", exact: true })).toHaveCount(0);
+    const composerBefore = await composerBounds(page);
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    await expect(stop, "Stop has its slot before anything is typed").toBeVisible();
+    const stopBefore = await stop.boundingBox();
     await page.locator("#ta").fill("An unfinished phone draft");
     await expect(primary).toHaveAccessibleName("Queue message");
-    const stop = page.getByRole("button", { name: "Stop reply", exact: true });
     await expect(stop).toBeVisible();
     await expect(stop).toBeInViewport();
     const bounds = await stop.boundingBox();
+    expect(bounds, "typing leaves Stop where it was").toEqual(stopBefore);
     expect(Math.min(bounds?.width ?? 0, bounds?.height ?? 0)).toBeGreaterThanOrEqual(44);
     expect(await primaryBounds(page)).toEqual(before);
-    expect(await page.locator("[data-running-status]").boundingBox()).toEqual(statusBefore);
+    expect(await composerBounds(page), "the composer keeps its box when compact Stop appears").toEqual(composerBefore);
     await expect(page.locator(".composer button.send")).toHaveCount(1);
     await page.screenshot({ path: info.outputPath("phone-draft-stop.png") });
     await stop.tap();

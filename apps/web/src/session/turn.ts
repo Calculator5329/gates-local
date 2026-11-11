@@ -81,7 +81,8 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
     case "error": {
       if (event.partial !== undefined) return null;
       const ended = { ...turn, ending: undefined, ...(event.contextNotice ? { contextNotice: event.contextNotice } : {}) };
-      if (event.code !== "cancelled") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
+      // the person's Stop is why it ended, whatever the server calls it (a cancel during a model load comes back as an error)
+      if (event.code !== "cancelled" && turn.end?.kind !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
       return { ...ended, end: turn.end ?? { kind: "stopped", secs: secsSince(turn, now) } };
     }
     case "sent":

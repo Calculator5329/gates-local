@@ -511,7 +511,7 @@ describe("the chat that got stopped", () => {
     chat("turn-A-1", "A", preempted(asstMsg("p1", "A", "so far")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p1");
-    expect(st().stopNotes["p1"]).toMatch(/^Stopped so .+ could load\.$/);
+    expect(st().stopNotes["p1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
     expect(live()?.threadId).toBe("B");
     expect(live()?.end).toBeUndefined();
   });
@@ -524,7 +524,7 @@ describe("the chat that got stopped", () => {
     await tick();
     expect(live()).toBeNull();
     expect(st().messages["A"]?.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual(["so far"]);
-    expect(st().stopNotes["p1"]).toMatch(/^Stopped so .+ could load\.$/);
+    expect(st().stopNotes["p1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
   });
 
   describe("Retry", () => {
@@ -571,7 +571,7 @@ describe("the chat that got stopped", () => {
       await tick();
       expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p4"]).toMatch(/^Stopped after \d+ s\.$/);
+      expect(st().stopNotes["p4"]).toEqual({ kind: "stopped", secs: expect.any(Number) });
       expect(st().queued).toMatchObject([{ text: "next", held: true }]);
       expect(sends()).toHaveLength(1);
     });
@@ -610,7 +610,7 @@ describe("the chat that got stopped", () => {
       await tick();
       expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p6"]).toBe("The reply didn't finish. The model crashed.");
+      expect(st().stopNotes["p6"]).toEqual({ kind: "said", words: "The reply didn't finish. The model crashed." });
     });
 
     it("a reply this window left running, stopped from elsewhere, still says it was stopped", async () => {
@@ -621,7 +621,7 @@ describe("the chat that got stopped", () => {
       chat(turn, "A", cancelledWith(saved("p7")));
       await tick();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p7"]).toMatch(/^Stopped after \d+ s\.$/);
+      expect(st().stopNotes["p7"]).toEqual({ kind: "stopped", secs: expect.any(Number) });
     });
   });
 
@@ -639,7 +639,7 @@ describe("the chat that got stopped", () => {
     await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
     chat("turn-A-1", "A", preempted());
     await tick();
-    expect(st().stopNotes["u-A-1"]).toMatch(/^Stopped so .+ could load\.$/);
+    expect(st().stopNotes["u-A-1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
   });
 
   it("a runtime switch reads the same way", async () => {
@@ -648,7 +648,7 @@ describe("the chat that got stopped", () => {
     chat(turn, "A", { type: "error", code: "runtime-changed", message: "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.", partial: asstMsg("p2", "A", "so far") });
     await tick();
     expect(live()).toBeNull();
-    expect(st().stopNotes["p2"]).toBe("Stopped when the Ollama runtime changed.");
+    expect(st().stopNotes["p2"]).toEqual({ kind: "said", words: "Stopped when the Ollama runtime changed." });
   });
 
   it("a turn this client never showed still leaves its partial in a thread it has", async () => {
@@ -659,7 +659,7 @@ describe("the chat that got stopped", () => {
     chat("elsewhere", "A", preempted(asstMsg("p3", "A", "from the phone")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p3");
-    expect(st().stopNotes["p3"]).toMatch(/^Stopped so /);
+    expect(st().stopNotes["p3"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so /) });
   });
 });
 
@@ -883,7 +883,7 @@ describe("messages typed while a reply is being written", () => {
       await tick();
       expect(roles()).toEqual(["user", "assistant", "user"]);
       expect(kept()?.content).toBe("words so far");
-      expect(st().stopNotes[kept()?.id ?? ""]).toMatch(/^Stopped after \d+ s\.$/);
+      expect(st().stopNotes[kept()?.id ?? ""]).toEqual({ kind: "stopped", secs: expect.any(Number) });
     });
 
     it("a later send keeps it too", async () => {
@@ -1048,7 +1048,7 @@ async function refusedAfterSetup(): Promise<string> {
 function stoppedWords(threadId = "A"): void {
   const m = (st().messages[threadId] ?? []).find((x) => x.role === "assistant");
   expect(m?.content).toBe("words so far");
-  expect(st().stopNotes[m?.id ?? ""]).toMatch(/^Stopped after \d+ s\.$/);
+  expect(st().stopNotes[m?.id ?? ""]).toEqual({ kind: "stopped", secs: expect.any(Number) });
 }
 
 describe("a message the person typed is never lost", () => {

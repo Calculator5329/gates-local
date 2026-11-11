@@ -208,7 +208,7 @@ test("approved picker keeps its columns fixed through hover, filtering and empty
   await expect(picker.locator(".pk-v").filter({ hasText: "Checking…" })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("picker-desktop.png") });
   await picker.locator('[data-m="gemma4:12b"]').hover();
-  await expect(picker.locator(".pk-context-head small")).toHaveText("Gemma 4 12B");
+  await expect(picker.getByRole("radiogroup")).toHaveAccessibleName("Context length for Gemma 4 12B");
   expect(await picker.boundingBox()).toEqual(box);
   await picker.locator("#pkSearch").fill("no matching local model");
   await expect(picker.getByRole("option")).toHaveCount(0);

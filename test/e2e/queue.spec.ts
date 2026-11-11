@@ -67,7 +67,8 @@ test("a queued message can be edited in the composer, removed, or sent now in pl
   await expect(page.locator(".turn.u").last()).toContainText("First thought, reworded");
   await expect(page.locator(".turn.u")).toHaveCount(2);
   await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
-  await expect(page.locator(".stop-note")).toContainText("Stopped after");
+  await expect(page.locator(".turn.a.interrupted .a-act.stop .s")).toHaveText(/^\d+ s$/);
+  await expect(page.locator(".stop-note")).toHaveCount(0);
 });
 
 test("Stop leaves a queued message on hold instead of sending it", async ({ page, open }) => {

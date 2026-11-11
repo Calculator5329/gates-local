@@ -253,7 +253,7 @@ describe("history", () => {
       await tick();
       openSearch();
       await tick();
-      expect(store.getState()).toMatchObject({ view: "thread", panel: null, drawer: true, searchOpen: true });
+      expect(store.getState()).toMatchObject({ view: "thread", panel: null, drawer: true });
       expect(browser.history.index()).toBe(start + 1);
       history.back();
       await tick();
@@ -268,7 +268,7 @@ describe("history", () => {
     session.toggleSettings();
     openSearch();
     await tick();
-    expect(store.getState()).toMatchObject({ view: "thread", searchOpen: true });
+    expect(store.getState()).toMatchObject({ view: "thread", drawer: false });
     expect(browser.history.index()).toBe(start);
   });
 

@@ -240,8 +240,9 @@ export function Composer() {
   const memRefused = !drawing && !blocked && !queueable && !noModel && memNo && imageNo === null && !refused && !pasting;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
-  // Touch Enter inserts a newline, so a typed draft needs the queue arrow.
-  const showStop = isStreaming && !editing && !(touch && text);
+  // Touch Enter inserts a newline, so a draft needs the queue arrow: on touch, Stop and the arrow hold
+  // their own slots for the whole reply, so the first character moves nothing under the finger.
+  const showStop = isStreaming && !editing && !touch;
 
   const submit = () => {
     if (sendDisabled) return;
@@ -268,12 +269,6 @@ export function Composer() {
       <DropMarker />
       <QueueTray />
       <StopWarning />
-      {isStreaming ? (
-        <div className="composer-running" data-running-status>
-          <span>Reply running</span>
-          {!showStop ? <button type="button" className="qa" aria-label="Stop reply" data-tip="Stop this reply. Your draft stays here" {...compactStopPress}>Stop</button> : null}
-        </div>
-      ) : null}
       <form
         className={`composer${blocked && !boot ? " blocked" : ""}`}
         autoComplete="off"
@@ -401,12 +396,14 @@ export function Composer() {
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
             </button>
+            {/* the main button is not Stop (a queued edit, or any reply on touch): Stop stays one press away */}
+            {isStreaming && !showStop ? <button type="button" className="ctl sq stop-sq" aria-label="Stop" data-tip="Stop this reply. Your draft stays here" {...compactStopPress}><span className="sqr" /></button> : null}
             <button
               ref={primary}
               type="button"
               className={showStop ? "send stop" : "send"}
               aria-label={showStop ? "Stop" : sendLabel}
-              data-tip={showStop ? (touch ? "Stop. Type a message to queue it after this reply" : "Stop. Enter queues your message after this reply") : sendTip}
+              data-tip={showStop ? "Stop. Enter queues your message after this reply" : sendTip}
               // Keep the same focusable node through empty, running and finished states.
               aria-disabled={!showStop && sendDisabled ? true : undefined}
               {...primaryPress}

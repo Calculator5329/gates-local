@@ -161,7 +161,7 @@ export function modelFacts(m: ModelInfo | undefined): { quant: string; disk: str
 }
 
 /** The meta line under a finished reply: "Qwen 3.5 9B · 2.9 s to first token · 38 tok/s". */
-export function replyMeta(name: string, msg: Message, firstTokenMs?: number): string {
+export function replyMeta(name: string, msg: Pick<Message, "stats">, firstTokenMs?: number): string {
   const parts = [name];
   if (firstTokenMs !== undefined) parts.push(`${(firstTokenMs / 1000).toFixed(1)} s to first token`);
   const speed = decodeSpeed(msg.stats);

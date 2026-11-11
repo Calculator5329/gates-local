@@ -126,7 +126,7 @@ test("production browser journeys", async ({ browser }) => {
       latency("type-during-stream", observation);
       add("stream-input-delay", observation.inputDelays[0]!);
     }
-    latency("stop", await measure(page, () => page.getByRole("button", { name: "Stop", exact: true }).click(), "click", ".stopped", "Stopped"));
+    latency("stop", await measure(page, () => page.getByRole("button", { name: "Stop", exact: true }).click(), "click", ".turn.a .a-act.stop .stop-mark"));
 
     // Same model/context permits two real server turns at once. Both must visibly start.
     await scenario({ longDrip: 1, tokenDelayMs: 12, burstTokens: 4, parallelLimit: 2 });
