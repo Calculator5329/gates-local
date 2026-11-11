@@ -11,7 +11,7 @@ export function savedDefault(s: State): string | undefined {
   return saved !== undefined && (s.models ?? []).some((m) => m.name === saved) ? saved : undefined;
 }
 
-/** The model the Default card shows: the saved default, else the one a new chat starts on, never the open chat's. */
+/** The model the Default card shows: the saved default, else the one a new chat starts on before anyone picks, never the open chat's. */
 export function cardDefault(s: State): string | undefined {
   const saved = savedDefault(s);
   if (saved !== undefined) return saved;

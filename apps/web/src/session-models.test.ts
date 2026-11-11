@@ -154,21 +154,107 @@ it("a catalog asked before a later models.changed never lands over the newer one
   expect(store.getState().catalog).toEqual(fresh);
 });
 
-it("a thread keeps its model when the pick changes; only a new empty chat follows the pick (MP-02)", async () => {
+it("a thread keeps its model when the pick changes; a new chat follows the pick until the person chooses (MP-02)", async () => {
   const { session, store, push, hydrated } = await boot();
   await hydrated();
   const model = () => store.getState().model;
   expect(model()).toBe(LLAMA);
   session.openThread("A");
-  session.pickModel(GEMMA);
-  session.newThread();
-  expect(model()).toBe(LLAMA); // the new chat starts on the pick
-  session.openThread("A");
-  expect(model()).toBe(GEMMA); // A is back on the model picked in it
   push("models.changed", [info(QWEN, true), info(GEMMA), info(LLAMA)]);
+  session.newThread();
+  expect(model()).toBe(QWEN); // nothing chosen yet: the new, empty chat follows the pick
+  session.openThread("A");
+  session.pickModel(GEMMA);
+  push("models.changed", [info(QWEN), info(GEMMA), info(LLAMA, true)]);
   expect(model()).toBe(GEMMA); // a recommendation never moves a thread
   session.newThread();
-  expect(model()).toBe(QWEN); // the new, empty chat follows it
+  expect(model()).toBe(GEMMA); // a new chat starts on the model chosen last
+  // and New thread keeps that choice: a later pick does not take the new chat, nor the next one
+  push("models.changed", [info(QWEN, true), info(GEMMA), info(LLAMA)]);
+  expect(model()).toBe(GEMMA);
+  session.newThread();
+  expect(model()).toBe(GEMMA);
+  session.openThread("A");
+  expect(model()).toBe(GEMMA);
+});
+
+it("a new default is the latest choice: a new chat follows the pick that honours it, not an earlier pick in a thread", async () => {
+  const { session, store, push, hydrated } = await boot();
+  await hydrated();
+  session.openThread("A");
+  session.pickModel(GEMMA);
+  push("settings.changed", { ...(defaults["settings.get"] as object), defaultModel: QWEN });
+  push("models.changed", [info(QWEN, true), info(GEMMA), info(LLAMA)]);
+  expect(store.getState().model).toBe(GEMMA); // the thread keeps its own
+  session.newThread();
+  expect(store.getState().model).toBe(QWEN);
+});
+
+it("sending is using: after a send in a thread restored on its saved model, a new chat starts on that model, not an older pick", async () => {
+  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => savedReply(GEMMA), "chat.send": () => new Promise(noop) });
+  await hydrated();
+  session.pickModel(QWEN); // picked in the new chat, never sent
+  session.openThread("A");
+  await vi.waitFor(() => expect(store.getState().model).toBe(GEMMA)); // A reopens on its saved model
+  void session.send("Hello again").catch(noop);
+  await vi.waitFor(() => expect(calls).toContain("chat.send"));
+  session.newThread();
+  expect(store.getState().model).toBe(GEMMA);
+});
+
+it("Retry and Regenerate are using: a new chat starts on the model the thread was answered again with", async () => {
+  const { session, store, calls, hydrated } = await boot({ "threads.get": async () => askedAndAnswered(GEMMA), "chat.send": () => new Promise(noop) });
+  await hydrated();
+  session.pickModel(QWEN); // picked in the new chat, never sent
+  session.openThread("A");
+  await vi.waitFor(() => expect(store.getState().messages.A).toHaveLength(2));
+  expect(store.getState().model).toBe(GEMMA);
+  session.retry();
+  await vi.waitFor(() => expect(calls).toContain("chat.send"));
+  session.newThread();
+  expect(store.getState().model).toBe(GEMMA);
+});
+
+it("a send cancelled at the stop-other-chats warning is not using: a new chat keeps the model chosen before it", async () => {
+  const { session, store, calls, hydrated } = await boot({
+    "threads.get": async () => savedReply(GEMMA),
+    "turns.blocking": async () => [{ threadId: "B", title: "B", model: LLAMA }],
+  });
+  await hydrated();
+  // the warning asks: nobody has said "don't ask again"
+  vi.stubGlobal("localStorage", { getItem: (k: string) => (k === "gates-local.stop-others-ok" ? null : "1"), setItem: noop });
+  session.pickModel(QWEN);
+  session.openThread("A");
+  await vi.waitFor(() => expect(store.getState().model).toBe(GEMMA));
+  void session.send("Hello again").catch(noop);
+  await vi.waitFor(() => expect(store.getState().stopAsk).not.toBeNull());
+  session.cancelStopAsk();
+  session.newThread();
+  expect(store.getState().model).toBe(QWEN);
+  expect(calls).not.toContain("chat.send");
+});
+
+const askedAndAnswered = (model: string) => ({
+  messages: [
+    { id: "m0", role: "user", content: "Hello", createdAt: 1 },
+    { id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 2 },
+  ],
+});
+
+it("a new chat starts on the model chosen last while it is still loading, and reads its load from the one per-model fact", async () => {
+  const { session, store, push, hydrated } = await boot();
+  await hydrated();
+  session.openThread("A");
+  session.pickModel(GEMMA);
+  push("models.load", { model: GEMMA, numCtx: 16384, state: "loading" });
+  session.newThread();
+  const s = store.getState();
+  expect(s.model).toBe(GEMMA);
+  expect(s.loads[s.model ?? ""]?.state).toBe("loading");
+  push("models.load", { model: GEMMA, numCtx: 16384, state: "error", message: "Could not load gemma4:12b: out of memory" });
+  expect(store.getState().loads[store.getState().model ?? ""]).toMatchObject({ state: "error" });
+  session.openThread("A");
+  expect(store.getState().loads[store.getState().model ?? ""]).toMatchObject({ state: "error" });
 });
 
 const savedReply = (model: string) => ({ messages: [{ id: "m1", role: "assistant", model, content: "Saved answer", createdAt: 1 }] });

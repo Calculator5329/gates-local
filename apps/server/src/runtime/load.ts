@@ -20,7 +20,10 @@
 // One load gate per loader: the residency read, the fit and the load run
 // inside it, so a second load measures the memory the first one took. A
 // preload holds it until /api/generate completes; a cold turn holds it until
-// its first token or its end. A turn releases it after its fit only when
+// its first token or its end. A models.load for a model already loading at
+// the same context joins that load and gets its one answer, so two chats
+// asking for one model never queue a second residency read, fit or
+// /api/generate behind the first. A turn releases it after its fit only when
 // /api/ps proves the model resident at the turn's num_ctx; anything less
 // (unreadable, absent, another context: Ollama may reload) holds it too.
 //
@@ -231,6 +234,8 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
   const removing = new Set<string>();
   const notices = new Set<Notice>();
   const pendingLoads = new Set<Promise<ModelLoad>>();
+  /** Tag -> the load running for it: a request at the same context and runtime joins it and gets its answer. */
+  const running = new Map<string, { readonly numCtx: number; readonly gen: number; readonly run: Promise<ModelLoad> }>();
   let generation = 0;
   let switching = false;
   let closed = false;
@@ -383,13 +388,18 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const baseUrl = deps.baseUrl();
       if (baseUrl === undefined) return Promise.reject(new ModelActionError("runtime-not-ready", "Ollama is not running, so no model can be loaded."));
       const tag = canonicalTag(model);
+      // One model, one load: a second request (another chat, another window) never queues a second one behind it.
+      const joined = running.get(tag);
+      if (joined !== undefined && joined.numCtx === numCtx && joined.gen === generation) return joined.run;
       // Reserved before the first await, so models.remove refuses from here to the end.
       hold(tag);
       const run = loadModel(model, numCtx, baseUrl, generation, current.signal).finally(() => {
         letGoOf(tag);
         pendingLoads.delete(run);
+        if (running.get(tag)?.run === run) running.delete(tag);
       });
       pendingLoads.add(run);
+      running.set(tag, { numCtx, gen: generation, run });
       return run;
     },
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-11: A model that is loading looks the same from every chat
+
+- Picking a model in one chat and opening a new chat while it was still
+  loading showed the previous model in the new chat, so two chats disagreed
+  about what was loading. A new chat now starts on the model used last,
+  loading or not, at the one app-wide context size.
+- "Used" means picked, or a turn started on it: a send, a queued send,
+  Retry or Regenerate. A send cancelled at the stop-other-chats warning does
+  not count. Saving a new default model clears it, so the default leads new
+  chats again.
+- Two chats asking for one model at the same context now share one load.
+  Before, the second request queued its own memory reading, fit check and
+  possibly a second load behind the first, and every view could go back to
+  loading after the first had finished.
+- Known limit: the last-used model is kept in the page, so a reload or a
+  restart goes back to the default (on the roadmap).
+
 ## 2026-11-11: A smaller machine can also be slower
 
 - The smaller machine for speed comparisons could take cores and memory

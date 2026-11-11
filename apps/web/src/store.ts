@@ -151,7 +151,11 @@ export interface State {
   readonly search: string;
 
   readonly model: string | undefined;
-  /** The model the user picked in this chat; `model` returns to it when the list has it again (pick.ts). */
+  /**
+   * The model the person used last, for the whole app (not per thread): the last one picked, or that a
+   * turn started on (send, Retry, Regenerate; not a send cancelled at the warning), in any chat, loaded or still loading. A new chat starts on it (with the one app-wide
+   * `numCtx`), and `model` returns to it when the list has it again (pick.ts). A new saved default clears it.
+   */
   readonly chosen: string | undefined;
   /** The model each thread opened this session was last on; the composer's model is one value, so leaving a thread would lose it. */
   readonly threadModels: Readonly<Record<string, string>>;

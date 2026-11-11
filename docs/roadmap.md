@@ -24,6 +24,14 @@ accordingly.
       *Accept:* the checks for one opening share one GPU reading, or the picker opens on the previous reading and corrects itself without rows swapping, with the scripted-click row measured faster.
 - [ ] <!-- workspace:id=work:a685bc32-2449-5e0b-8625-2a38dfb08221 --> The page's record of which models are loading is never reset on reconnect. A "ready" message lost across a reconnect leaves a model shown as loading, and the picker then never warms for the rest of the session (it still opens, as slowly as before). In the code before the picker warm-up.
       *Accept:* a reconnect reads the load states again, shown by a test that drops the ready message.
+- [ ] <!-- workspace:id=work:86339694-3177-51df-8f04-7808d922bef8 --> The model used last is kept in the page only, so a reload or a restart starts new chats on the default again.
+      *Accept:* the server keeps one app-wide last-used model; a new chat after a restart starts on it, and a second window agrees.
+- [ ] <!-- workspace:id=work:15d9fb0b-e9fa-5869-ab20-abd8734989da --> The page throws away the answer to its own `models.load` and waits for the pushed state, and it keys a load by model only, so two context sizes of one model share one loading mark.
+      *Accept:* a failed load shows its reason on the composer that asked, and a load at 16k does not mark the 32k row as loading.
+- [ ] <!-- workspace:id=work:6a2527cb-d90e-58ff-a765-2a74a27da126 --> A first message to a model that a preload is already loading starts its own wait behind that load.
+      *Accept:* the turn joins the running preload, shown by one residency read and one generate for the pair.
+- [ ] <!-- workspace:id=work:44254433-4354-58d3-ba51-04fdcd40fd17 --> The Default card in Settings shows the app's pick before anyone picks, while New thread starts on the model used last; the two can name different models with no saved default.
+      *Accept:* decide which one the card means and say it once on the card.
 
 *Measured 2026-11-09:* Native launch now includes Electron and the supervised
 server, with separate phase markers and import counters. Startup imports fell
@@ -664,11 +672,18 @@ RS-03 remains dropped.
       *Accept:* read the gap under a stop note in a browser for a reply kept while its last words are still appearing.
 - [ ] <!-- workspace:id=work:78a260ae-f934-5e92-8357-0f4dcc13926a --> The gap between timeline neighbours was measured for the per-turn gap change by a staging-only spec (four screen profiles, 12 and 2,000 turns, four stop-note states); nothing in the suite fails when a spacing rule changes a gap.
       *Accept:* keep one fast gap journey, or record that spacing changes are measured by hand before landing.
+- [ ] <!-- workspace:id=work:543fdcd7-6967-54f0-93d7-18fb49288bd4 --> `composer-polish.spec.ts` "refused chips stay with their own thread across a thread switch" failed once in a browser run (the second file's chip never appeared after the file chooser) and passed 4 of 4 alone.
+      *Accept:* repeat it under load, name the step that raced, and make it wait on state.
+- [ ] <!-- workspace:id=work:401929a4-0929-5173-9777-085a40ec48cb --> `styles.css` and the session wiring in `session.ts` are edited by most screen changes at once (four open changes touched each on 2026-11-11), so they merge by hand.
+      *Accept:* styles split per screen and session parts registered additively, so two screen changes merge without touching the same lines.
 - [ ] <!-- workspace:id=work:3d565764-5f08-5010-9dd5-4ff0df759b71 --> Replace routine five-second journey warnings with the whole-suite budget; `budget-reporter.ts` still prints both after the suite trim.
       *Accept:* one complete-run report identifies budget overruns and expensive setup without per-journey warning noise.
 
 ## Later: slices 5 to 7
 
+- [ ] <!-- workspace:id=work:c0cb50be-fb59-52f0-b9e6-bb7c914b700e --> Models and Usage open as pop-up panels over the chat; Settings stays its own screen (owner, 2026-11-11). Usage is built that way first; Models moves out of Settings into the same panel after.
+- [ ] <!-- workspace:id=work:d21037c3-719b-54b6-838d-a22f2d39e131 --> Sample databases that are more useful: starter questions that open a chat on the database (first), then real public data, the person's own chat history as a database, and a sample used as a model test.
+- [ ] <!-- workspace:id=work:f68ef1fa-e2f8-5aa4-867e-a1c199c7fa0c --> Screens the owner has named for later: custom image generation workflows, custom benchmarks, fine tuning, a memory viewer, a gallery viewer.
 - [ ] <!-- workspace:id=work:411e875c-2a37-5b28-a5ce-379b3bd446e0 --> Benchmarks: speed, tools and sql suites through the real turn code,
       recording model digest, runtime version, profile and harness revision.
       *Accept:* `pnpm bench:local --suite speed,tools,sql` writes a result

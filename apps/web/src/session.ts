@@ -213,7 +213,7 @@ const imageOrder = newestOnly();
 
 const navigation = createNavigation({
   flushQueued, catchUp, chooseModel, loadThread, loading,
-  newChatModel: (s) => decided(pickChoice(s.models, s.model, undefined)),
+  newChatModel: (s) => decided(pickChoice(s.models, s.model, s.chosen)),
 });
 export const { openThread, newThread, openSettings, leaveSettings, cancelPendingSettings, initialView, finishFirstRun } = navigation;
 const { firstRunDone } = navigation;

@@ -394,7 +394,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
     opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
     const turn: LiveTurn = { gen, threadId, turnId: null, model, startedAt: Date.now(), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images };
-    setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn) }));
+    // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
+    // The next new chat starts on this model (navigation.ts newThread).
+    setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" ? {} : { chosen: model }) }));
     try {
       const r = await call("chat.send", {
         threadId,

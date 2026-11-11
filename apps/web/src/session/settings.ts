@@ -88,9 +88,12 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
   } as const satisfies SettingsPatch;
 
   // The default model is not applied here: the server's pick (pick.ts) already honours it when it can chat.
+  // A changed default is the person's latest choice for new chats, so an earlier pick in a thread stops leading them.
   function settingsPatch(_s: State, settings: Settings, first: boolean): Partial<State> {
+    const before = _s.settings === NA ? undefined : _s.settings;
     return {
       settings,
+      ...(before !== undefined && before.defaultModel !== settings.defaultModel ? { chosen: undefined } : {}),
       ...(ordered() ? { voiceConnectionVersion: _s.voiceConnectionVersion } : {}),
       ...(first && !contextSeeded ? { numCtx: settings.defaultNumCtx } : {}),
       ...(first && !thinkSeeded ? { think: settings.thinking } : {}),

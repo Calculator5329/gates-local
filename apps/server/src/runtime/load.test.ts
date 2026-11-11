@@ -152,6 +152,124 @@ describe("models.load", () => {
     expect(generates(s)).toBe(2);
   });
 
+  it("a second request for a model already loading joins that load: one fit, one generate, one loading and one ready", async () => {
+    const generate = deferred();
+    const ps: string[] = [];
+    const s = await fakeOllama(ps, [], {
+      "POST /api/generate": async (b, res) => {
+        await generate.promise;
+        const model = (b as { model: string }).model;
+        ps.push(model);
+        json(res, 200, { model, response: "", done: true });
+      },
+    });
+    const pushes: ModelLoad[] = [];
+    let fits = 0;
+    const loader = loaderFor(s, pushes, "fits", { fit: async (_m, numCtx) => (fits++, { ...report("fits"), numCtx }) });
+    const first = loader.load("gemma4:12b", 16384);
+    await until(() => generates(s) === 1);
+    const second = loader.load("gemma4:12b", 16384);
+    generate.release();
+    const both = await Promise.all([first, second]);
+    expect(both).toEqual([{ model: "gemma4:12b", numCtx: 16384, state: "ready" }, { model: "gemma4:12b", numCtx: 16384, state: "ready" }]);
+    expect(pushes.map((p) => p.state)).toEqual(["loading", "ready"]);
+    expect(fits).toBe(1);
+    expect(generates(s)).toBe(1);
+    // Over: the next request is a load of its own again (here a resident one, so no generate).
+    await loader.load("gemma4:12b", 16384);
+    expect(fits).toBe(2);
+    expect(generates(s)).toBe(1);
+  });
+
+  it("a joined request never reloads when /api/ps reports another context than the fit settled on", async () => {
+    // The fit settles at 2048; this fake's /api/ps says 16384, so a queued second load reads the model as needing a reload.
+    const generate = deferred();
+    const ps: string[] = [];
+    const s = await fakeOllama(ps, [], {
+      "POST /api/generate": async (b, res) => {
+        await generate.promise;
+        const model = (b as { model: string }).model;
+        ps.push(model);
+        json(res, 200, { model, response: "", done: true });
+      },
+    });
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes, "fits", { fit: async () => ({ ...report("fits"), numCtx: 2048 }) });
+    const first = loader.load("gemma4:12b", 16384);
+    await until(() => generates(s) === 1);
+    const second = loader.load("gemma4:12b", 16384);
+    generate.release();
+    await Promise.all([first, second]);
+    expect(pushes.map((p) => p.state)).toEqual(["loading", "ready"]);
+    expect(generates(s)).toBe(1);
+  });
+
+  it("a request for a loading model at another context is its own load, after the first", async () => {
+    const pushes: ModelLoad[] = [];
+    const s = await fakeOllama([]);
+    const loader = loaderFor(s, pushes);
+    const [a, b] = await Promise.all([loader.load("m:7b", 16384), loader.load("m:7b", 32768)]);
+    expect([a.numCtx, b.numCtx]).toEqual([16384, 32768]);
+    expect(generates(s)).toBe(2);
+  });
+
+  it("a request after a runtime change never joins a load still settling from the old runtime: it is a load of its own", async () => {
+    const a = await fakeOllama([]);
+    const b = await fakeOllama([]);
+    let url = a.baseUrl;
+    const fitHeld = deferred();
+    let fits = 0;
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(a, pushes, "fits", {
+      baseUrl: () => url,
+      fit: async (_m, numCtx) => {
+        if (++fits === 1) await fitHeld.promise;
+        return { ...report("fits"), numCtx };
+      },
+    });
+    const old = loader.load("gemma4:12b", 16384);
+    await until(() => fits === 1);
+    loader.runtimeChanged();
+    url = b.baseUrl;
+    loader.runtimeSettled();
+    // The old load is still in its fit, so it has not ended yet.
+    const fresh = loader.load("gemma4:12b", 16384);
+    fitHeld.release();
+    expect(await old).toMatchObject({ state: "error", message: CHANGED });
+    expect(await fresh).toEqual({ model: "gemma4:12b", numCtx: 16384, state: "ready" });
+    expect(generates(a)).toBe(0);
+    expect(generates(b)).toBe(1);
+  });
+
+  it("a load that ends never drops a newer load's place: a later request at that load's context still joins it", async () => {
+    const holds = [deferred(), deferred()];
+    let g = 0;
+    const ps: string[] = [];
+    const s = await fakeOllama(ps, [], {
+      "POST /api/generate": async (body, res) => {
+        await holds[g++]?.promise;
+        const model = (body as { model: string }).model;
+        ps.push(model);
+        json(res, 200, { model, response: "", done: true });
+      },
+    });
+    const pushes: ModelLoad[] = [];
+    const loader = loaderFor(s, pushes);
+    const at16 = loader.load("gemma4:12b", 16384);
+    await until(() => generates(s) === 1);
+    const at32 = loader.load("gemma4:12b", 32768); // its own load, queued behind the 16k one
+    holds[0]?.release();
+    await at16;
+    const later = loader.load("gemma4:12b", 32768); // the 16k load has ended; the 32k one has not
+    await until(() => generates(s) === 2);
+    holds[1]?.release();
+    const [x, y] = await Promise.all([at32, later]);
+    expect(y).toEqual(x);
+    expect(s.requests.filter((r) => r.path === "/api/ps")).toHaveLength(2);
+    expect(generates(s)).toBe(2);
+    expect(pushes.map((p) => `${p.numCtx}:${p.state}`)).toEqual(["16384:loading", "16384:ready", "32768:loading", "32768:ready"]);
+  });
+
   it("R-03: an HTTP 200 whose body carries an error (or no done: true) is a failed load, nothing owned", async () => {
     let body: unknown = { error: "model requires more system memory (12.0 GiB) than is available (4.0 GiB)" };
     const s = await fakeOllama([], [], { "POST /api/generate": (_b, res) => json(res, 200, body) });

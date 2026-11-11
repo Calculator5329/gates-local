@@ -70,8 +70,9 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
   function newThread(): void {
     beginNavigation();
     wakeAfterEdit();
-    // A new chat is the app's choice again: it starts on the pick and follows it if the pick lands later (MP-05).
-    setState((s) => ({ view: "new", threadId: null, chosen: undefined, ...leavingChat(s), ...newChatModel(s) }));
+    // A new chat starts on the model the person used last (store.ts `chosen`), loading or not, at the
+    // app-wide context; with nothing used yet it follows the pick (MP-05).
+    setState((s) => ({ view: "new", threadId: null, ...leavingChat(s), ...newChatModel(s) }));
     // Asking for a new chat while already on one changes no slot, so nothing else would tell a late paste it is stale.
     renewDraft(null);
     setHash(null);
