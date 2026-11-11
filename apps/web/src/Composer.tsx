@@ -16,8 +16,10 @@ import { pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { AttachmentImages } from "./attachment-images.tsx";
-import { imageReason, paste } from "./paste.ts";
+import { AttachmentImages, RefusedFiles } from "./attachment-images.tsx";
+import { DropMarker } from "./file-drop.tsx";
+import { attachFiles, imageReason, paste } from "./paste.ts";
+import { useRefused } from "./refused-files.ts";
 import {
   cancelQueuedEdit,
   cancelStopAsk,
@@ -102,6 +104,7 @@ export function Composer() {
   const image = useStore((s) => s.image);
   const hasText = useDraft(d => d.text.trim() !== "");
   const images = useDraft(d => d.images);
+  const refused = useRefused().length;
   const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
   const notice = useStore((s) => s.notice);
@@ -206,10 +209,11 @@ export function Composer() {
   else if (!text) sendTip = "Type a message to send";
   else if (freed) sendTip = `Send${enter}. Another chat's reply is using this memory, so it stops first`;
   if (imageNo !== null) sendTip = esc(imageNo);
+  if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first. A message carries text and images only.`;
   if (pasting) sendTip = "Preparing pasted images. They will be ready in a moment.";
-  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || pasting > 0;
+  const sendDisabled = (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
   // Refused for memory: the button stays focusable and clickable, and the click opens the why.
-  const memRefused = !blocked && !queueable && !noModel && memNo && imageNo === null && !pasting;
+  const memRefused = !blocked && !queueable && !noModel && memNo && imageNo === null && !refused && !pasting;
   // T3 Code's composer: Enter never stops a reply; the words queue behind it.
   const sendLabel = editing ? "Update queued message" : isStreaming ? "Queue message" : "Send message";
   // Touch Enter inserts a newline, so a typed draft needs the queue arrow.
@@ -237,6 +241,7 @@ export function Composer() {
 
   return (
     <>
+      <DropMarker />
       <QueueTray />
       <StopWarning />
       {isStreaming ? (
@@ -253,7 +258,19 @@ export function Composer() {
           submit();
         }}
       >
-        <div className="att"><AttachmentImages images={images} removable /></div>
+        <div className="att"><AttachmentImages images={images} removable /><RefusedFiles /></div>
+        {/* "+ › Attach a file" opens this; like T3 Code's paperclip it takes any file, and each is sorted at its chip */}
+        <input
+          type="file"
+          id="attachInput"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.currentTarget.files ?? []);
+            e.currentTarget.value = "";
+            void attachFiles(files);
+          }}
+        />
         <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={submit} />
         <div className="cf">
           <div className="cf-l">
@@ -322,7 +339,7 @@ export function Composer() {
             </button>
           </div>
           <div className="cf-r">
-            <Suspense fallback={<span className="ctl voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} /></Suspense>
+            <Suspense fallback={<span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} /></Suspense>
             <button
               type="button"
               className="ctl gate"
@@ -342,7 +359,6 @@ export function Composer() {
               {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
               <span>{modelLbl}</span>
               <small className="picker-trigger-ctx">{k(ctx)}</small>
-              <Icon id="down" cls="chev" />
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
@@ -519,11 +535,21 @@ export function PlusMenu() {
   return (
     <div className={`pop menu${open ? " open" : ""}`} id="plusMenu" role="menu" ref={ref}>
       <SheetHead title="Add" />
-      <button type="button" className="mi" role="menuitem" aria-disabled="true" data-attach>
+      <button
+        type="button"
+        className="mi"
+        role="menuitem"
+        data-attach
+        data-tip="Images go with this message. Other files show as not sent. You can also drop files on the window."
+        onClick={() => {
+          closePop();
+          document.getElementById("attachInput")?.click();
+        }}
+      >
         <Icon id="clip" />
         <span>
           <b>Attach a file</b>
-          <small>Not available in this build</small>
+          <small>Images, for this message</small>
         </span>
       </button>
       <button

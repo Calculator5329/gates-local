@@ -135,7 +135,7 @@ test("a finished thinking row keeps its label and chevron at rest", async ({ pag
   await expect(reply.locator(".think-body")).toContainText("Answer it plainly");
 });
 
-test("composer Thinking reveals its label on hover and focus without moving its neighbours", async ({ page, open }, info) => {
+test("composer Thinking keeps its size on hover and focus, so its neighbours never move", async ({ page, open }, info) => {
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
@@ -149,18 +149,20 @@ test("composer Thinking reveals its label on hover and focus without moving its 
   const model = await page.locator("#modelBtn").boundingBox();
   const image = await page.locator('.cf-l button[aria-label="Image"]').boundingBox();
   const send = await page.getByRole("button", { name: "Send message" }).boundingBox();
-  const collapsed = await pill.boundingBox();
+  const rest = await pill.boundingBox();
   await pill.hover();
-  await expect(label).toBeVisible();
+  await expect(page.locator("#tip")).toHaveClass(/\bopen\b/);
+  await expect(page.locator("#tip")).toContainText("Thinking");
   await page.screenshot({ path: info.outputPath("thinking-pill-hover.png") });
-  expect((await pill.boundingBox())!.width).toBeGreaterThan(collapsed!.width);
+  await expect(label).toBeHidden();
+  expect(await pill.boundingBox()).toEqual(rest);
   expect(await page.locator("#modelBtn").boundingBox()).toEqual(model);
   expect(await page.locator('.cf-l button[aria-label="Image"]').boundingBox()).toEqual(image);
   expect(await page.getByRole("button", { name: "Send message" }).boundingBox()).toEqual(send);
   await page.mouse.move(5, 5);
-  await expect(label).toBeHidden();
   await pill.focus();
-  await expect(label).toBeVisible();
+  await expect(label).toBeHidden();
+  expect(await pill.boundingBox()).toEqual(rest);
   const on = await pill.evaluate((el) => ({ color: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }));
   await pill.click();
   await expect(pill).toHaveAttribute("aria-pressed", "false");

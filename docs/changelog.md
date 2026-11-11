@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-11: Composer polish: the model picker, Dictate, thoughts, and attaching files
+
+- The model picker opens over the conversation with its right edge on the
+  model button, and it no longer jumps as it opens. Its height is limited
+  to the room above it.
+- The model button lost its caret. Dictate is one microphone icon in every
+  state, with its words in the tooltip.
+- The Thinking pill keeps its size, and a reply's thought slides open and
+  closed in place of popping. Long links in a thought wrap.
+- Gemma has its own mark in the model list and picker.
+- "+" has "Attach a file", and you can drop files on the window. Images
+  are attached like pasted images. Any other file, a folder, or an empty
+  image shows as a chip marked "not sent" with the reason in its tooltip,
+  and Send waits until you remove it. Sending other files is planned.
+- A drop is ignored where you could not type: under the first-run screen,
+  with the thread drawer open, or with a menu open. Dragging an image that
+  is already in the chat does not attach a copy.
+- Tooltips no longer flash at the left edge before moving into place.
+- Not checked with a real drag from the desktop into the desktop window;
+  the tests send the drag events themselves.
+
 ## 2026-11-11: The app measures each model's speed on this computer (nothing shows yet)
 
 - For each model the app now works out a measured speed in tokens per

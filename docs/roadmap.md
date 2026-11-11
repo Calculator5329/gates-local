@@ -62,6 +62,13 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:d6f9ccae-85c3-5fbb-8144-9701313e3fcf --> Show each model's measured speed on the installed-model rows in Settings › Models and on the model picker's rows (the data and the small component landed 2026-11-11; nothing renders it yet). The browser spec should then read the number from the row, with a fixture that sets its own token count.
 - [ ] <!-- workspace:id=work:b7c16486-811b-5ff4-b102-bbbcae47de41 --> A model's measured speed can stay on a page left open past the 14-day window with no chat in between; it corrects on the next finished reply or reload. Drop it on time without a polling timer (for example when the window is shown again).
 
+- [ ] <!-- workspace:id=work:ac143e6e-95f6-5116-a351-159edf9b6db9 --> Send a non-image file by path (owner decision 2026-11-11): the app keeps a copy of an attached file with the thread, the model is told the file's name and reads it in pieces with its read tool, and the message shows a file chip. Today a non-image file becomes a "not sent" chip that blocks Send.
+- [ ] <!-- workspace:id=work:f14a8e12-81be-5e22-b536-c6e83c659b45 --> The model picker is placed when it opens and is not placed again when the window is resized while it is open.
+- [ ] <!-- workspace:id=work:429d2e26-ea6a-5741-a4f3-a493e0274206 --> No browser spec covers the "this model cannot see images" message for an image picked with "Attach a file", the 8-image limit reached through a drop, or the file chooser at phone width.
+- [ ] <!-- workspace:id=work:e2c7100d-e7e6-59b0-87d1-f31241b341db --> Dropping files is proven with synthetic drag events only. Try a real drag from the desktop into the desktop window, and a dropped folder end to end (unit test only today).
+- [ ] <!-- workspace:id=work:148c4e5e-87c5-5429-8cf7-709ba730f126 --> Under reduced motion only Dictate's spinner holds still; the shared `.spin` rule still turns in seven other places (update checks, tool rows and status, two banners, the maker mark). Fix the shared rule.
+- [ ] <!-- workspace:id=work:981392c1-7213-5ef6-9031-9cd0c746d284 --> While a reply runs, Stop's tooltip says "Enter queues your message" even when a "not sent" chip will block the queue.
+
 Known limit: reloading in the seconds while a send is being accepted can lose
 that message. Keep the message recoverable across that reload in a future pass.
 

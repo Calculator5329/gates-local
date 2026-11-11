@@ -4,6 +4,7 @@ import { NA, setState, useStore } from "./store.ts";
 import { getDraft, useDraft } from "./drafts.ts";
 import type { captureAudio } from "./voice-audio.ts";
 import { insertAtCursor } from "./draft-insertion.ts";
+import { Icon } from "./icons.tsx";
 
 type Phase = "idle" | "asking" | "listening" | "transcribing";
 type Dictation = { id: string; draftVersion: number };
@@ -116,10 +117,18 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
     window.addEventListener("keydown", key, true);
     return () => window.removeEventListener("keydown", key, true);
   });
-  const label = phase === "listening" ? `Listening ${seconds}s` : phase === "transcribing" ? "Transcribing…" : phase === "asking" ? "Allow mic…" : "Dictate";
-  const tip = unsupported ?? (!enabled ? "Connect whisper.cpp in Settings › General" : "Dictate (Ctrl+Shift+Space). Click again to stop. Esc cancels.");
-  return <button type="button" className={`ctl voice ${phase}`} aria-label={phase === "listening" ? "Stop dictation" : "Dictate"} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} title={tip} onPointerDown={(e) => e.preventDefault()} onClick={() => void toggle()}>
-    <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>
-    <span role="status">{label}</span>
+  // Only the microphone shows; the state is its colour (amber asking, green
+  // listening) or a spinner, and the words live in the tooltip, the label and
+  // a hidden status line. Seconds stay out of data-tip: a changing tip closes.
+  const status = phase === "listening" ? "Listening" : phase === "transcribing" ? "Transcribing" : phase === "asking" ? "Waiting for microphone permission" : "";
+  const tip = phase === "listening" ? "Listening. Click or Ctrl+Shift+Space to stop and transcribe. Esc cancels."
+    : phase === "transcribing" ? "Transcribing… Esc cancels."
+    : phase === "asking" ? "Allow microphone access to dictate. Esc cancels."
+    : unsupported ?? (!enabled ? "Dictate: connect whisper.cpp in Settings › General" : "Dictate (Ctrl+Shift+Space). Click again to stop. Esc cancels.");
+  const name = phase === "listening" ? "Stop dictation" : phase === "transcribing" ? "Dictate, transcribing" : phase === "asking" ? "Dictate, waiting for microphone permission" : "Dictate";
+  return <button type="button" className={`ctl sq voice ${phase}`} aria-label={name} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} data-tip={tip} data-elapsed={phase === "listening" ? seconds : undefined} onPointerDown={(e) => e.preventDefault()} onClick={() => void toggle()}>
+    {phase === "transcribing" ? <Icon id="spin" cls="spin" />
+      : <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>}
+    <span className="vh" role="status">{status}</span>
   </button>;
 }

@@ -203,6 +203,9 @@ export function Tip() {
       el.classList.add("open");
       // a tag inside a picker row places its tip by the row (F72); the picker's foot keeps the default
       const r = (t.closest("#picker .pk-r, #picker .pk-dr") ?? t).getBoundingClientRect();
+      // Measure at the left edge: left where the last tip was (near the window's
+      // right edge) it shrinks to fit, then widens once moved and covers its row.
+      el.style.left = "0px";
       const w = el.offsetWidth;
       const h = el.offsetHeight;
       let top = r.top - h - 6;

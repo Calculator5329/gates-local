@@ -12,9 +12,9 @@ const values = (prop: string, sheet = css) => [...sheet.matchAll(new RegExp(`(?:
 const hex = (name: string) => [...css.matchAll(new RegExp(`--seg-${name}:#([0-9a-f]{6})`, "g"))].map((m) => parseInt(m[1] ?? "0", 16));
 
 describe("styles.css", () => {
-  it("keeps the phone Dictate label at the existing 14 px secondary-text minimum", () => {
-    const phone = css.slice(css.indexOf("@media (max-width:640px)"), css.indexOf("/* touch:"));
-    expect(/(?:^|[},])\s*\.voice span(?:,|\{)(?:[^{}]*\{)?font-size:14px[;}]/m.test(phone)).toBe(true);
+  it("keeps Dictate a square icon button: nothing gives it its own width or a visible label", () => {
+    expect(css).not.toMatch(/\.voice\s*\{[^}]*(?:^|[;{\s])(?:width|flex(?:-basis)?):\s*[^;}]*\d+px/m);
+    expect(css).not.toMatch(/\.voice span[,{\s]/);
   });
   it("PK-05: declares reachable 44 px phone controls without hover-only favorite actions", () => {
     const phone = css.slice(css.indexOf("@media(max-width:640px){\n.pk-layout"));

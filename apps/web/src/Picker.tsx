@@ -13,10 +13,12 @@ import { activeEntry, contextRuler, makerOf, pickerEntries, type Maker } from ".
 import { focusComposer } from "./Sidebar.tsx";
 import { ensureFit, fitIsCurrent, openSettings, pickModel, setContext } from "./session.ts";
 import { NA, chatReady, fitKey, getState, setState, useStore } from "./store.ts";
-import { PHONE, closePop, closeTip, esc, isTouch, place, tabStops, useMedia } from "./ui.tsx";
+import { PHONE, closePop, closeTip, esc, isTouch, tabStops, useMedia } from "./ui.tsx";
 
 const MARGIN = 512 * 1024 ** 2; // Display the server's existing VRAM safety margin; never decide fit here.
 const FAVORITES = "gates-local.model-favorites";
+/** Below this height the picker's rail, list and context column stop being usable. */
+const CRAMPED = 280;
 const makers: readonly Maker[] = ["Gemma", "Qwen", "Milo", "gpt-oss", "Phi", "Mistral", "Other"];
 interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean }
 interface ContextChoice { tag: string; size: ContextSize }
@@ -146,8 +148,21 @@ export function Picker() {
   useLayoutEffect(() => {
     const root = ref.current, anchor = document.getElementById("modelBtn");
     if (!pop || !root || !anchor) return;
-    if (phone) { root.style.left = `${Math.max(8, (window.innerWidth - root.offsetWidth) / 2)}px`; root.style.top = ""; }
-    else place(root, anchor, "start");
+    root.style.maxHeight = "";
+    if (phone) { root.style.left = `${Math.max(8, (window.innerWidth - root.offsetWidth) / 2)}px`; root.style.top = ""; return; }
+    // A popover over the conversation: its right edge on the button's right
+    // edge, growing left and up from just above the button, over the composer
+    // and the text above it. `place` would lift it clear of the whole composer.
+    // On the empty new-thread screen the composer sits mid-window: the picker
+    // gives up a little height (its list scrolls) rather than cover the button,
+    // and opens below only when even that leaves it cramped.
+    const r = anchor.getBoundingClientRect(), pw = root.offsetWidth, ph = root.offsetHeight;
+    const above = r.top - 6 - 8, below = window.innerHeight - r.bottom - 6 - 8;
+    const up = ph <= above || above >= CRAMPED || above >= below;
+    const h = Math.min(ph, up ? above : below);
+    if (h < ph) root.style.maxHeight = `${h}px`;
+    root.style.left = `${Math.max(8, Math.min(r.right - pw, window.innerWidth - pw - 8))}px`;
+    root.style.top = `${up ? r.top - 6 - h : r.bottom + 6}px`;
   });
   function finish(row: Row, c?: ContextSize) {
     if (!fitIsCurrent(checked(row.tag, c))) return;
