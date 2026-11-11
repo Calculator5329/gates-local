@@ -18,6 +18,7 @@
 //                     same way, inside its thinking)
 //   long-name         the three models plus a long Hugging Face GGUF tag
 //   threads           prompt-labelled paragraphs with independent request timing
+//   image-text-call   streams IMAGE_TEXT_CALL, an image call written as reply text, with no tool_calls
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
@@ -35,8 +36,11 @@ const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
 };
 const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims", "image-text-call"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
+/** A Gemma 4 12B reply seen 2026-11-11: it wrote its image call as text in a shape of its own. */
+const IMAGE_TEXT_CALL_PROMPT ="A cinematic sci-fi background featuring a massive, high-tech space station orbiting a ringed planet within a vibrant, colorful nebula. The scene includes distant stars, glowing energy fields, and intricate hull details on the station. High-resolution, 8k, photorealistic, epic scale, and dramatic lighting.";
+export const IMAGE_TEXT_CALL = `{ "action": "image", "action_input": "${IMAGE_TEXT_CALL_PROMPT}" }`;
 
 export interface FakeOptions {
   /** Delay between streamed tokens. */
@@ -379,6 +383,17 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           if (abort.signal.aborted) return;
           line({ ...base(), message: { role: "assistant", content: "" }, done: true });
         }
+        turn.outcome = "done";
+        res.end(); return;
+      }
+      if (mode === "image-text-call") {
+        // Content pieces only, as the runtime passes on a call it could not parse: no tool_calls.
+        for (const content of IMAGE_TEXT_CALL.match(/[\s\S]{1,6}/g) ?? []) {
+          if (abort.signal.aborted) return;
+          line({ ...base(), message: { role: "assistant", content }, done: false });
+          await sleep(timing.tokenDelayMs, abort.signal);
+        }
+        line({ ...base(), message: { role: "assistant", content: "" }, done: true, done_reason: "stop" });
         turn.outcome = "done";
         res.end(); return;
       }

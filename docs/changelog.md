@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-11: A tool call the model wrote out as text is run
+
+- Some models write a tool call as their reply instead of making the call,
+  for example `{ "action": "image", "action_input": "a sci-fi background" }`.
+  The app showed that text as the answer and made no image. When a reply's
+  whole text is one such object, names a tool that was offered this turn and
+  its arguments fit that tool, the app now runs it as the call.
+- Five shapes are read (`name` with `arguments` or `parameters`, `tool` with
+  `tool_input`, `action` with `action_input`, a `function` wrapper), bare or
+  inside one code fence. Anything else is left as text: words beside the
+  object, two objects, an unknown tool, arguments that do not fit.
+- A reply that starts like a call is held back until it is clear whether it
+  is one, so the text does not flash on screen and then vanish. It is shown
+  as soon as it cannot be a call, and on Stop, a stall or an error. The hold
+  ends at 8,000 characters in any case.
+- A reply that is itself JSON and starts with an arguments key can be held
+  until its next key or the limit before it shows (on the roadmap).
+- Checked with the test model only. Not yet tried with the real model that
+  showed the problem.
+
 ## 2026-11-11: Three icons at the foot of the sidebar, and one update ask
 
 - The foot of the sidebar is one row of three icon buttons: Settings, Models

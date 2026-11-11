@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { urlsFromText } from "../../contracts/src/links.ts";
-import { parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
+import { createCallHold, looseCall, parseTextCalls, partialAnswer, repairCall } from "./parser.ts";
+import type { ToolDefinition } from "./prompt.ts";
 import type { LoopEvent, ModelEvent, ModelMessage, ModelStream, ToolCall, ToolResult, ToolStep } from "./types.ts";
 
 export function trimOutput(output: string): string {
@@ -112,6 +113,8 @@ export interface LoopInput {
   /** The turn's cancel: aborts the model request or tool in flight at once. */
   signal: AbortSignal;
   native: boolean;
+  /** The tools offered this turn: a reply that is only a call to one of them, written as JSON text, is run (looseCall). */
+  definitions?: readonly ToolDefinition[];
   maxTurns?: number;
   /** The turn's num_ctx; the tool output budget is num_ctx * 3 / 2 characters. */
   numCtx?: number;
@@ -155,6 +158,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
   const endPart = () => { partOpen = false; held = ""; };
   /** A whole part at once: a text-mode answer, a reply that streamed no deltas, the loop's own notices. */
   function* say(text: string): Generator<LoopEvent> { endPart(); yield* show(text); endPart(); }
+  const offered = input.definitions ?? [];
   const stallMs = input.stallMs ?? STREAM_STALL_MS;
   const finalMs = input.finalAnswerMs ?? FINAL_ANSWER_MS;
   const outputBudget = toolOutputBudget(input.numCtx ?? 16384);
@@ -191,6 +195,17 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     let complete: Extract<ModelEvent, { type: "complete" }> | undefined;
     // Answer text as it streamed, kept if the deadline cuts this request.
     const arrived: string[] = [];
+    // Native text is held while the reply could still be a call written as text (looseCall),
+    // so a call never flashes as an answer; it is shown the moment it cannot be one. The final
+    // round offers the model no tools, so nothing is held there: its reply is the answer.
+    const hold = input.native && !final && offered.length > 0 ? createCallHold(offered) : undefined;
+    let holding = hold !== undefined;
+    /** Held text goes on screen, and so into what the turn saves. */
+    const release = function* (): Generator<LoopEvent> {
+      if (!holding) return;
+      holding = false;
+      yield* show(arrived.join(""));
+    };
     const cap = new AbortController();
     const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
     try {
@@ -201,24 +216,39 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
         else {
           arrived.push(event.text);
           // Text-mode call syntax must not leak into the answer: its visible part is shown after parsing.
-          if (input.native) yield* show(event.text);
+          if (!input.native) continue;
+          if (!holding) yield* show(event.text);
+          else if (!hold?.push(event.text)) yield* release();
         }
       }
     } catch (e) {
-      input.signal.throwIfAborted();
-      if (final || !phase.aborted) throw e;
-      // Cut by the deadline. Native deltas are already shown, and so saved; the final answer is a
-      // new part. Text mode showed nothing: its answer part, with the call syntax the cut left
-      // unfinished stripped too, goes to the model only.
+      if (input.signal.aborted || final || !phase.aborted) {
+        // Stop, a stall or a stream error ends the turn here: held text is shown, and so saved, like any other.
+        yield* release();
+        input.signal.throwIfAborted();
+        throw e;
+      }
+      // Cut by the deadline; the final request asks for the whole answer again, as a new part.
+      // Native text already shown stays shown, and saved; text still held as a possible call is
+      // not shown (if the final request then fails or comes back empty, that start of a call is
+      // lost with it). Text mode showed nothing. Either way the cut reply (text mode: its answer part,
+      // with the call syntax the cut left unfinished stripped too) goes to the model only.
       endPart();
       const partial = input.native ? arrived.join("") : partialAnswer(arrived.join(""));
       askFinal("time", partial.trim() ? partial : undefined);
       continue;
     } finally { clearTimeout(capTimer); }
+    if (!complete) yield* release();
     input.signal.throwIfAborted();
     if (!complete) throw new Error("The model stream ended without a done line");
     thinking += complete.thinking ?? "";
-    const parsed = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
+    let parsed: { items: readonly ({ call: unknown } | { error: string })[]; content: string } = input.native ? { items: complete.calls.map(call => ({ call })), content: complete.content } : parseTextCalls(complete.content);
+    // A call written as the whole reply in a JSON shape of the model's own. Native: only when the
+    // round has no tool_calls and none of its text was shown; text mode: after the parser's rules.
+    // Never on the final round: it offered no tools.
+    const loose = parsed.items.length === 0 && !final && (!input.native || holding) ? looseCall(complete.content, offered) : undefined;
+    if (loose) parsed = { items: [{ call: loose }], content: "" };
+    else yield* release();
     const pending: { call?: ToolCall; error?: string; name: string }[] = parsed.items.map(item => {
       if ("error" in item) return { error: item.error, name: "invalid" };
       try { const call = repairCall(item.call); return { call, name: call.name }; }
@@ -250,7 +280,8 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
       yield { ...finish(), stats: complete.stats };
       return;
     }
-    messages.push({ role: "assistant", content: complete.content,
+    // A recovered native call goes back as a real one would: tool_calls, no answer text.
+    messages.push({ role: "assistant", content: loose && input.native ? "" : complete.content,
       ...(input.native ? { tool_calls: pending.flatMap(p => p.call ? [{ function: { name: p.call.name, arguments: p.call.input } }] : []) } : {}) });
     let calls = 0;
     for (const [index, item] of pending.entries()) {

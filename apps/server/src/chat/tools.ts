@@ -70,7 +70,7 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
       }
       return ollamaStep({ input, fetcher, signal: options?.signal ?? signal, messages: fitted, definitions: withTools ? tools.definitions : undefined });
     };
-    for await (const event of runLoop({ messages, stream, execute: input.execute ?? tools.execute, signal, native, numCtx: input.numCtx })) {
+    for await (const event of runLoop({ messages, stream, execute: input.execute ?? tools.execute, definitions: tools.definitions, signal, native, numCtx: input.numCtx })) {
       if (event.type !== "complete") { yield event; continue; }
       signal.throwIfAborted();
       yield { type: "done", stopReason: event.stopReason, message: {

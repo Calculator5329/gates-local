@@ -49,8 +49,8 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
   });
   return { image: { current: noComfy, generate, cancel, wait } as unknown as ImageModule, generate, cancel, ran };
 };
-/** A tool turn whose first reply calls the image tool; `second` answers the request after the tool ran. */
-const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>) => {
+/** A tool turn whose first reply calls the image tool (or is `first`); `second` answers the request after the tool ran. */
+const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>, first?: (signal: AbortSignal | undefined) => Response) => {
   const root = scratch("gl-app-image-");
   const sources = createSources({ dataDir: path.join(root, "data") });
   const file = path.join(root, "notes.txt"); writeFileSync(file, "hello");
@@ -67,7 +67,7 @@ const imageApp = async (second: (signal: AbortSignal | undefined) => Response | 
     if (pathname === "/api/ps") return Response.json({ models: [{ name: "m", model: "m", size: 1000, size_vram: 1000, context_length: 16384, expires_at: "later", digest: "d" }] });
     if (pathname === "/api/tags") return Response.json({ models: [] });
     chatBodies.push(JSON.parse(String(init?.body)));
-    if (chatBodies.length === 1) return ndjson([{ message: { tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true }]);
+    if (chatBodies.length === 1) return first ? first(init?.signal ?? undefined) : ndjson([{ message: { tool_calls: [{ function: { name: "image", arguments: { prompt: "a cat" } } }] }, done: true }]);
     atSecond ??= lease.status();
     return second(init?.signal ?? undefined);
   });
@@ -161,6 +161,30 @@ describe("tool chat transport", () => {
     expect(events.at(-1)).toMatchObject({ message: { stats: { durationMs: 2000, evalDurationMs: 250, promptEvalDurationMs: 40, completionTokens: 5 } } });
     expect(JSON.stringify(requests[1])).toContain('"role":"tool"');
     for (const request of requests) expect(request["messages"]).toContainEqual({ role: "user", content: "read", images: ["aW1hZ2U="] });
+  });
+  it("runs an image call the model wrote as its whole reply, on both paths, and shows it as text only when the image tool is off", async () => {
+    // The owner's Gemma 4 12B reply (2026-11-11): its capabilities list tools, so this was the native path.
+    const prompt = "A cinematic sci-fi background featuring a massive, high-tech space station";
+    const reply = `{ "action": "image", "action_input": "${prompt}" }`;
+    for (const [native, image] of [[true, true], [false, true], [true, false]] as const) {
+      const queued: string[] = [];
+      const fetcher = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/api/show")
+        ? Response.json({ capabilities: native ? ["completion", "vision", "audio", "tools", "thinking"] : ["completion"] })
+        : ndjson([...reply.match(/.{1,9}/g)!.map(content => ({ message: { content } })), { message: { content: "" }, done: true, done_reason: "stop" }]));
+      const events = [];
+      for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "gemma4:12b", messages: [{ role: "user", content: "A sci fi background image" }], numCtx: 16384, sources: [], fetch: fetcher, image,
+        queueImage: async (text) => { queued.push(text); return { jobId: "job" }; } })) events.push(e);
+      const shown = events.flatMap(e => e.type === "delta" ? [e.text] : []).join("");
+      if (image) {
+        expect(queued).toEqual([prompt]);
+        expect(shown).toBe("");
+        expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "", tools: [{ name: "image", state: "done" }] } });
+      } else {
+        expect(queued).toEqual([]);
+        expect(shown).toBe(reply);
+        expect(events.at(-1)).toMatchObject({ type: "done", message: { content: reply } });
+      }
+    }
   });
   it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -274,6 +298,24 @@ describe("tool chat transport", () => {
         expect(t.fake.ran).toEqual([]);
         // the tool step is what the person saw, so it stays, marked, with no image behind it
         expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: "", interrupted: true, tools: [{ name: "image", state: "error" }] }]);
+      } finally { await t.close(); }
+    });
+    it("Stop while the reply is held as a possible call keeps the held text: shown, and saved on the stopped reply", async () => {
+      const held = '{"name":"image","arguments":{"prompt":"a sh';
+      // The thinking after the text in the same line arrives only once the loop has taken the text.
+      const first = (signal: AbortSignal | undefined) => new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify({ message: { content: held, thinking: "drawing" }, done: false }) + "\n"));
+        signal?.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      } }));
+      const t = await imageApp(hang, undefined, first);
+      try {
+        const thread = t.store.createThread();
+        const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
+        await vi.waitFor(() => expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "thinking", text: "drawing" } }) })));
+        expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
+        await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+        expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "delta", text: held } }) }));
+        expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: held, interrupted: true }]);
       } finally { await t.close(); }
     });
   for (const scenario of ["tools explicitly off", "tools default off", "empty Library"] as const) {
