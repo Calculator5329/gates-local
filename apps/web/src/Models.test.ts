@@ -56,20 +56,26 @@ const render = (state: object) => {
   return renderToStaticMarkup(createElement(ModelsPage));
 };
 /** Every mention of a GPU left once the page's own "no supported GPU" is set aside, with its surroundings. */
-const gpuPromises = (html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
+// The group title, with or without its explaining tooltip around the word.
+const RECOMMENDED = /class="grp-t">(?:<span[^>]*>)?Recommended</;
+const gpuPromises =(html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
-  it("PL-01: catalog-only downloads wait for a checked verdict before recommendation and memory grouping", () => {
+  it("PL-01: catalog-only downloads wait for a checked verdict, grouped once from the catalog's estimate", () => {
+    // The group comes from the catalog's own estimate so a fit reply never
+    // moves the row; the verdict words wait for the check (docs/design.md).
     const offered = entry("qwen3.5:4b", "Qwen 3.5 4B", "spills", 6);
     const pending = render(noGpuComputer({ models: [], addPage: true, fits: {}, catalog: [offered] }));
     expect(pending).toContain("Qwen 3.5 4B");
     expect(pending).toContain("Rechecking");
     expect(pending).not.toContain('class="vl spill"');
-    expect(pending).not.toContain('class="grp-t">Recommended');
+    expect(pending).toMatch(RECOMMENDED);
     expect(pending).not.toContain("Also available · uses system memory");
+    const refused = render(noGpuComputer({ models: [], addPage: true, fits: {}, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
+    expect(refused).not.toMatch(RECOMMENDED);
     const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
     expect(checked).toContain('class="vl spill"');
-    expect(checked).toContain('class="grp-t">Recommended');
+    expect(checked).toMatch(RECOMMENDED);
     expect(checked).not.toContain("Rechecking");
   });
 

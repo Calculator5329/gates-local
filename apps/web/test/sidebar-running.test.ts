@@ -261,3 +261,9 @@ describe("sidebar running replies", () => {
     expect(marked()).toEqual([]);
   });
 });
+
+it("past the boot bound with the runtime unread, the gear claims nothing about Ollama", () => {
+  store.setState({ bootWaited: true, runtime: undefined });
+  const html = renderToStaticMarkup(createElement(Sidebar));
+  expect(html.match(/aria-label="Settings[^"]*"/)?.[0], "the gear's name: no runtime words, no Runtime click").toBe('aria-label="Settings"');
+});

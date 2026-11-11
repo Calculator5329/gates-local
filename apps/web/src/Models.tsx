@@ -32,9 +32,10 @@ import {
   splitTail,
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
+import { MakerMark } from "./MakerMark.tsx";
 import { ensureFit, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
-import { COMPUTER_ONLY, Fail, useAct, useOutside, walk } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Fail, Tipped, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
 import { closeTip, esc } from "./ui.tsx";
 
@@ -196,7 +197,7 @@ function Installed() {
       ) : null}
       <div className="mp-card">
         <div className="mp-th" aria-hidden="true">
-          <span>Model</span>
+          <span className="mp-thn">Model</span>
           <span className="mp-sz">Size</span>
           <span className="mp-fitc">On this computer</span>
           <span />
@@ -247,6 +248,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
     >
       <div className="mp-nm">
         <div className="mp-l1">
+          <MakerMark tag={r.name} />
           <span className="mp-nmn">{r.label.text}</span>
           {chip}
         </div>
@@ -264,7 +266,8 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
         </div>
       </div>
       <span className="mp-sz">{sizeText(r.info.sizeBytes)}</span>
-      <span className="mp-fitc">{fit}</span>
+      {/* A fit check is long by nature: its words may change, its box does not (docs/design.md). */}
+      <span className="mp-fitc" data-wait="">{fit}</span>
       <RowMenu r={r} saved={saved} onRemove={onRemove} />
     </div>
   );
@@ -434,6 +437,8 @@ function RemoveDialog({ row, next, rows, onDefaultFailed, onClose }: { row: Inst
 
 // ---------------------------------------------------------------- default card
 
+const DEFAULT_TIP = "New chats start on this model. If it can't run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.";
+
 function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; def: string | undefined; disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [err, run] = useAct();
@@ -500,12 +505,13 @@ function DefaultCard({ rows, def, disabled }: { rows: readonly InstalledRow[]; d
   return (
     <div className="mp-defrow" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=option]", close)}>
       <div className="mp-dl-l">
-        <b>Default for new chats</b>
-        <span>
-          New chats start on this model. If it can't run here, they start on the first model that fits: recommended models first, then your largest. Any chat can switch from its model menu.
-          {limit === undefined ? null : ` This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
-          {locked ? ` Changing this default: ${COMPUTER_ONLY.toLowerCase()}` : null}
-        </span>
+        <b><Tipped tip={DEFAULT_TIP}>Default for new chats</Tipped></b>
+        {limit === undefined && !locked ? null : (
+          <span>
+            {limit === undefined ? null : `This model can only run at ${k(limit)}, so long chats drop their oldest messages.`}
+            {locked ? `${limit === undefined ? "" : " "}Changing this default: ${COMPUTER_ONLY.toLowerCase()}` : null}
+          </span>
+        )}
         {fallback === undefined ? null : (
           <span className="mp-fb">
             {current?.label.text} won't run here, so new chats start on <b>{fallback}</b>.

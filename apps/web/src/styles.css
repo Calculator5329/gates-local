@@ -180,6 +180,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .sb-row .live{width:7px;height:7px;border-radius:50%;background:var(--foreground);animation:breathe 1.4s ease-in-out infinite;flex:none;margin-right:2px}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(.6)}}
 .sb-empty{padding:12px 10px;font-size:13px;color:var(--muted-foreground)}
+/* the thread list before the first read: the list's whole height, rows where rows will be */
+.sb-skel{height:100%;padding-top:8px}
+.sb-skel-r{height:var(--row-h);display:flex;align-items:center;padding:0 10px;font-size:13.5px}
 /* the footer: one row of icon buttons, update icon at the far right; a dot sits clear of the stroke and the ring inside the box */
 .sb-foot{position:relative;flex:none;padding:8px 8px 12px;border-top:1px solid var(--border);display:flex;gap:2px;background:inherit}
 .sb-foot .ibtn{width:32px;height:32px;position:relative}
@@ -550,10 +553,16 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .set-h{margin-bottom:24px}
 .set-h h1{font-size:22px;font-weight:600;letter-spacing:-.01em;margin:0}
 .set-h p{font-size:14px;color:var(--muted-foreground);margin:6px 0 0}
-.grp+.grp{margin-top:24px}
+.grp+.grp,.grp-skel+.grp{margin-top:24px}
+/* an emptied Recommended's header, hidden; its rows joined the next box, which adds one 1px row border.
+   flow-root keeps the header's own 8px margin inside, where a group's box would have held it */
+.grp-keep{visibility:hidden;display:flow-root;margin-bottom:-1px}
+/* its title is one line tall by rule, not by whatever line a blank character gets */
+.grp-keep .grp-t{height:1lh}
 .grp-h{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 12px;margin:0 0 8px}
 .grp-t{font-size:15px;font-weight:600}
-.grp-d{font-size:13px;color:var(--muted-foreground);margin-top:2px}
+.tipped{border-bottom:1px dotted var(--muted-foreground);cursor:help}
+.tipped:hover{border-bottom-color:var(--foreground)}
 .grp-a{display:flex;gap:8px}
 .box{border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border);background:var(--card)}
 .srow{display:flex;align-items:center;gap:16px;padding:14px 16px;min-height:60px}
@@ -570,10 +579,23 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .src-help{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .src-help.act-err{margin:0;font:inherit;text-wrap:nowrap}
 .src-none{padding:14px 16px;font-size:13px;color:var(--muted-foreground)}
+/* A value still on its way (docs/design.md): a flat block the height of its text line, in one class so the look can change in one place. */
+.skel{display:inline-block;vertical-align:top;max-width:100%;height:1lh;padding:.3lh 0;background:var(--track);background-clip:content-box;border-radius:var(--r-sm);animation:skel 1.6s ease-in-out infinite}
+.sl .skel{display:block}
+/* turns still being read: at the conversation's text size, a question on the right, a reply under it */
+.tl-skel{font-size:var(--chat-fs);line-height:1.6}
+.tl-skel .skel{display:block}
+.tl-skel-u{display:flex;justify-content:flex-end;margin-bottom:var(--s2)}
+.tl-skel-a{margin-bottom:var(--turn-gap)}
+@keyframes skel{50%{opacity:.5}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
 .import-action{width:104px;min-width:104px;height:36px;flex:none}
-.import-status{display:block;height:40px;line-height:20px;overflow:hidden;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+/* The description line carries a started job's progress or result, drawn over the description so the row keeps its height; only an error may take a second line. */
+.sl .import-line{display:grid}
+.import-line>*{grid-area:1/1;min-width:0}
+.import-rest.gone{visibility:hidden}
+.import-status{overflow:hidden;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .sl .import-status{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.import-row{align-items:flex-start}
 .import-url{width:280px;max-width:100%}
 .import-row .sl{min-width:0;overflow-wrap:anywhere}
 .mp-menu.src-menu{width:140px}
@@ -633,13 +655,18 @@ a.btn{text-decoration:none}
 .fr-brand .mark{width:22px;height:22px}
 .fr-st{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted-foreground);margin-bottom:12px}
 .fr-st .dot{width:7px;height:7px;border-radius:50%}
-.fr h1{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
+.fr h1,.fr-h{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin:0}
+/* first run before its first read: placeholders at the found screen's line heights */
+.fr-btn-skel{width:156px;height:40px;padding:0;border-radius:var(--r-lg)}
 .fr .sub{font-size:15px;color:var(--muted-foreground);margin:8px 0 24px;line-height:1.55;text-wrap:pretty}
+/* most states have no sentence under the title: what follows keeps the same 24 px */
+.fr :is(h1,.fr-h)+:is(.fr-card,.fr-note){margin-top:24px}
 .fr-card{border-radius:var(--r-xl);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--card);padding:16px}
 .fr-m{display:flex;align-items:center;gap:8px}
 .fr-m .nm{font-size:15px;font-weight:500}
 .fr-m .rec{font-size:15px;color:var(--muted-foreground)}
-.fr-m .v{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--green-fg)}
+/* the verdict fills the rest of the row, so its words change without the slot moving */
+.fr-m .v{flex:1;justify-content:flex-end;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--green-fg)}
 .fr-card .think{margin-top:8px}
 .fr-card .think[aria-expanded="true"]+.think-body{margin-top:4px}
 .kv{border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
@@ -653,7 +680,6 @@ a.btn{text-decoration:none}
 .fr-sub{font-size:13.5px;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
 .fr-note{font-size:13.5px;color:var(--muted-foreground);margin-top:12px}
 .fr .sub .link,.fr-note .link{font-size:inherit}
-.fr-foot{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted-foreground);margin-top:40px;padding-top:16px;border-top:1px solid var(--border)}
 
 /* ---------- client additions (not in shell.html) ---------- */
 /* a calm line where a feature is not in this build yet (graceful degradation) */
@@ -811,17 +837,15 @@ a.btn{text-decoration:none}
 /* first run: the steps read top to bottom, the button stays in reach */
 .first{align-items:stretch;padding:24px 16px}
 .fr{display:flex;flex-direction:column;min-height:100%}
-.fr-foot{order:1}
-.fr-cta,.fr-note{order:2}
 .fr-cta{flex-direction:column;align-items:stretch;gap:0;position:sticky;bottom:max(0px,env(safe-area-inset-bottom));margin-top:auto;background:var(--background)}
 .fr-cta .btn{width:100%}
 .fr-cta .link{min-height:44px}
 .fr-m{flex-direction:column;align-items:flex-start}
 .fr-m .sep{display:none}
-.fr-m .v{margin-left:0}
+.fr-m .v{flex:none;align-self:stretch;justify-content:flex-start}
 /* one secondary grey, nothing under 14 px */
 .af-t b,.af-t small{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.grp-d,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.fr-foot,.na,.upd-res,.prog-l,.card .cd,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.wr-m,.think,.stopped,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.card .cd,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */
@@ -907,6 +931,8 @@ a.btn{text-decoration:none}
 .mp-fitc{padding-left:28px;min-width:0;display:flex}
 .mp-nm{min-width:0;display:flex;flex-direction:column;justify-content:center;padding-right:16px}
 .mp-l1{display:flex;align-items:center;gap:8px;min-width:0;line-height:20px;white-space:nowrap}
+/* the maker mark leads the name line; the lines under it start where the name does (16 px mark + 8 px gap) */
+.mp-nm>:not(.mp-l1),.mp-thn{padding-left:24px}
 .mp-nmn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--foreground)}
 .mp-h{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .mp-t{flex:none}
@@ -956,6 +982,8 @@ a.btn{text-decoration:none}
 /* Progress runs inside the row's existing inset, beside a persistent detail line. */
 .dlrow{position:relative;display:flex;align-items:center;gap:16px;padding:12px 16px;min-height:64px}
 .dlrow+.dlrow{border-top:1px solid var(--border)}
+/* the maker mark sits 8 px before the name, as in the picker */
+.dlrow>.maker-mark{margin-right:-8px}
 /* Keep both verdict lines' space while rechecking, including the scroll anchor. */
 .dl-v{flex:none;width:196px;min-height:44px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px;font-variant-numeric:tabular-nums}
 .dl-v small{font-size:12.5px;color:var(--muted-foreground)}
@@ -1010,6 +1038,7 @@ a.btn{text-decoration:none}
   .mp-th{display:none}
   .mp-row{grid-template-columns:minmax(0,1fr) auto;min-height:60px;padding:9px 2px 9px 14px;column-gap:4px}
   .mp-row .mp-nm{padding-right:0}
+  .mp-nm>:not(.mp-l1){padding-left:0}
   .mp-row>.mp-sz,.mp-row>.mp-fitc{display:none}
   .mp-meta{display:flex;align-items:center;gap:6px;min-width:0;margin-top:2px;color:var(--muted-foreground);font-size:14px;line-height:18px;white-space:nowrap}
   .mp-meta .mp-fit{font-size:14px}
@@ -1020,7 +1049,7 @@ a.btn{text-decoration:none}
   .mp-tabs .mp-tab{min-height:44px}
   /* the download rows and the typed name, stacked to fit: layout only */
   .mp .dlrow{flex-wrap:wrap;gap:8px 16px}
-  .mp .dlrow .sl{flex:1 1 100%}
+  .mp .dlrow .sl{flex:1 1 calc(100% - 24px)}
   .mp .dl-v{flex:1;width:auto;min-width:0;align-items:flex-start}
   .mp .dl-a{width:auto;min-height:44px}
   .mp .dlrow .qa,.mp .srow .qa{min-height:44px}
@@ -1047,10 +1076,12 @@ a.btn{text-decoration:none}
 .inst-text.inp{display:block;width:100%;height:144px;resize:none;margin-top:16px;padding:8px 12px;line-height:1.5}
 .inst-actions{display:flex;align-items:center;gap:8px;margin-top:12px;min-width:0}.inst-actions .btn{flex:none;white-space:nowrap}
 .inst-status{flex:1;min-width:0;height:40px;margin:0;overflow:auto;font-size:14px;line-height:20px;color:var(--muted-foreground)}.inst-status.act-err{color:var(--red-fg)}
-.inst-controls,.inst-defaults{margin-top:24px}.inst-controls .srow{min-height:64px}.inst-label{border-bottom:1px dotted var(--muted-foreground);cursor:help}
-.inst-mode.inp{width:144px}.inst-number.inp{width:88px;flex:none}.inst-reset{width:52px;flex:none}.inst-model.inp{max-width:100%;width:280px}
+.inst-controls,.inst-defaults{margin-top:24px}.inst-controls .srow{min-height:64px}
+.inst-number.inp{width:88px;flex:none}.inst-reset{width:52px;flex:none}
+.inst-pick{position:relative;max-width:100%}.inst-pick .mp-select{width:280px;max-width:100%}
+.inst-pick .mp-dd{right:0;top:calc(100% + 4px);width:320px;max-width:calc(100vw - 32px)}.inst-pick .mp-opt{grid-template-columns:16px minmax(0,1fr)}
 .inst-defaults details{padding:16px}.inst-defaults summary{cursor:pointer;font-size:14px}.inst-defaults b{font-size:13px;font-weight:500}.inst-shipped{height:96px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:12px;background:var(--code-bg);border-radius:var(--r-ctl);margin:8px 0 16px}
-@media(max-width:800px){.inst-controls .srow{align-items:flex-start;flex-direction:column;gap:8px}.inst-controls .sl{flex:none}.inst-controls .sv{width:100%}.inst-mode.inp{flex:1;min-width:0;width:120px}.inst-number.inp{width:76px}.inst-prompt .inst-actions{flex-wrap:wrap}.inst-prompt .inst-status{flex-basis:100%}.inst-controls .inst-actions{flex-wrap:wrap}.inst-controls .inst-status{flex-basis:100%}.inst-model.inp{width:100%}.instructions .srow:has(.inst-model){flex-wrap:wrap}.instructions .srow:has(.inst-model) .sv{max-width:100%}}
+@media(max-width:800px){.inst-controls .srow{align-items:flex-start;flex-direction:column;gap:8px}.inst-controls .sl{flex:none}.inst-controls .sv{width:100%}.inst-controls .seg2{flex:1;min-width:0}.inst-controls .seg2 button{padding:0 8px}.inst-number.inp{width:76px}.inst-prompt .inst-actions{flex-wrap:wrap}.inst-prompt .inst-status{flex-basis:100%}.inst-controls .inst-actions{flex-wrap:wrap}.inst-controls .inst-status{flex-basis:100%}.inst-pick,.inst-pick .mp-select{width:100%}.inst-pick .mp-dd{left:0;width:auto}.instructions .srow:has(.inst-pick){flex-wrap:wrap}.instructions .srow:has(.inst-pick) .sv{width:100%;max-width:100%}}
 
 /* Desktop only: the app header is the native titlebar. env() reserves native
    buttons on either side, including macOS traffic lights and fullscreen changes. */

@@ -1,11 +1,12 @@
 // Layout A: scope first. Editors and installed defaults stay separate so the page can be rearranged.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MODEL_CONTROL_BOUNDS, type ModelDefaults, type ModelSettings, type ModelSettingsPatch } from "@gates-local/contracts";
 import { describeModel } from "./format.ts";
+import { Icon } from "./icons.tsx";
 import { applyServerEvent, call, updateModelSettings, updateSettings } from "./session.ts";
 import { NA, useStore } from "./store.ts";
-import { Grp, Head, Row } from "./settings-ui.tsx";
-import { esc } from "./ui.tsx";
+import { Grp, Head, Row, Seg2, useOutside, walk } from "./settings-ui.tsx";
+import { closeTip, esc } from "./ui.tsx";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
 
 const WHEN = "Saved changes apply to your next message, including in existing chats. A reply already running keeps its settings.";
@@ -55,6 +56,33 @@ const CONTROLS = [
   { key: "num_predict", label: "Maximum reply length", hint: "Maximum reply tokens. -1 removes the limit; -2 fills the context window. 0 is not valid." },
   { key: "keep_alive", label: "Keep loaded", hint: "Seconds to keep the model in memory after a reply. 0 unloads it; -1 keeps it loaded. Gates Local may reclaim idle models when another load needs memory." },
 ] as const;
+const MODES = [["default", "Default"], ["custom", "Custom"]] as const;
+
+/** The app's own listbox (as Models' default card): arrows, letters to find, Enter, Escape back to the button. */
+function ModelMenu({ models, value, onPick }: { models: readonly { name: string; text: string }[]; value: string | undefined; onPick: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null), btn = useRef<HTMLButtonElement>(null);
+  const close = (refocus = true) => { setOpen(false); if (refocus) btn.current?.focus(); };
+  useOutside(box, open, () => close(false));
+  useEffect(() => {
+    if (open) (box.current?.querySelector<HTMLElement>("[role=option][aria-selected=true]") ?? box.current?.querySelector<HTMLElement>("[role=option]"))?.focus();
+  }, [open]);
+  const current = models.find(m => m.name === value);
+  const choose = (name: string) => { onPick(name); close(); };
+  return <div className="inst-pick" ref={box} onKeyDown={e => open && walk(e, box.current, "[role=option]", close)}>
+    <button ref={btn} type="button" className={`mp-select${open ? " on" : ""}`} aria-haspopup="listbox" aria-expanded={open} aria-label={`Installed model: ${current?.text ?? "none"}`} disabled={!models.length} onClick={() => { closeTip(); setOpen(o => !o); }}>
+      <span className="mp-sv"><span className="mp-nmn">{current?.text ?? "No installed chat models"}</span></span>
+      <Icon id="down" cls="s14" />
+    </button>
+    {open ? <div className="mp-dd" role="listbox" aria-label="Installed chat models">
+      {models.map(m => <div key={m.name} role="option" tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} data-tip={esc(m.name)} className="mp-opt" onClick={() => choose(m.name)}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(m.name); } }}>
+        {m.name === value ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
+        <span className="mp-nmx"><span className="mp-nmn">{m.text}</span></span>
+      </div>)}
+    </div> : null}
+  </div>;
+}
 
 function ReplyControls({ model, saved, defaults, locked }: { model: string; saved: ModelSettings; defaults: ModelDefaults | undefined; locked: boolean }) {
   const [draft, setDraft] = useState<ControlDraft | null>(null);
@@ -83,10 +111,10 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
         const key = control.key, custom = values[key] !== null;
         const bounds = MODEL_CONTROL_BOUNDS[key];
         const shipped = key === "keep_alive" ? undefined : defaults?.parameters.split("\n").find(line => line.trim().startsWith(`${key} `))?.trim().split(/\s+/)[1];
-        return <Row key={key} label={<span className="inst-label" tabIndex={0} data-tip={esc(`${control.hint} Range: ${bounds.min} to ${bounds.max}.`)}>{control.label}</span>}>
-          <select className="inp inst-mode" aria-label={`${control.label} mode`} disabled={busy || locked} value={custom ? "custom" : "default"} onChange={e => change(key, e.target.value === "default" ? null : (shipped ?? (key === "num_predict" ? "2048" : key === "keep_alive" ? "300" : key === "repeat_penalty" ? "1" : "0")))}>
-            <option value="default">{key === "keep_alive" ? "Ollama default" : "Model default"}</option><option value="custom">Custom</option>
-          </select>
+        const owner = key === "keep_alive" ? "Ollama's" : "the model's";
+        return <Row key={key} label={control.label} tip={`${control.hint} Default uses ${owner} own value. Range: ${bounds.min} to ${bounds.max}.`}>
+          <Seg2 label={`${control.label} mode`} disabled={busy || locked} value={custom ? "custom" : "default"} options={MODES}
+            onPick={mode => { if (mode !== (custom ? "custom" : "default")) change(key, mode === "default" ? null : (shipped ?? (key === "num_predict" ? "2048" : key === "keep_alive" ? "300" : key === "repeat_penalty" ? "1" : "0"))); }} />
           <input className="inp inst-number" type="number" aria-label={control.label} value={values[key] ?? ""} placeholder={shipped ?? ""} min={key === "num_predict" ? -2 : key === "keep_alive" ? -1 : bounds.min} max={bounds.max} step={bounds.integer ? 1 : "any"} required={custom} disabled={!custom || busy || locked} onChange={e => change(key, e.target.value)} />
           <button type="button" className="btn ghost inst-reset" aria-label={`Reset ${control.label}`} data-tip="Use the default after saving controls." disabled={!custom || busy || locked} onClick={() => change(key, null)}>Reset</button>
         </Row>;
@@ -132,9 +160,7 @@ export default function Instructions() {
       <button type="button" className={`mp-tab${scope === "model" ? " on" : ""}`} aria-pressed={scope === "model"} onClick={() => { setPicked(model ?? null); setScope("model"); }}>Per model</button>
     </div><span tabIndex={0} role="note" className="btn ghost" aria-label="When changes apply" aria-description={WHEN} data-tip={esc(WHEN)}>?</span></div>
     {scope === "all" ? <PromptEditor value={current?.systemPrompt} inherited="" locked={locked} /> : <>
-      <Grp><Row label="Installed model"><select className="inp inst-model" aria-label="Installed model" value={model ?? ""} disabled={!installed.length} onChange={e => setPicked(e.target.value)}>
-        {!installed.length ? <option value="">No installed chat models</option> : installed.map(m => <option key={m.name} value={m.name}>{describeModel(m.name, catalog === NA ? undefined : catalog).name}</option>)}
-      </select></Row></Grp>
+      <Grp><Row label="Installed model"><ModelMenu value={model} onPick={setPicked} models={installed.map(m => ({ name: m.name, text: describeModel(m.name, catalog === NA ? undefined : catalog).name }))} /></Row></Grp>
       {model === undefined ? null : <ModelEditors key={model} model={model} name={name} saved={current?.modelSettings?.[model] ?? {}} shared={current?.systemPrompt} locked={locked} />}
     </>}
   </div>;

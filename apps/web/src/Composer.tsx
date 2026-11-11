@@ -6,7 +6,7 @@ import { type FocusEvent, type RefObject, Suspense, useEffect, useLayoutEffect, 
 import type { ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { composerFit } from "./composer-fit.ts";
-import { PLACEHOLDER, rtOf } from "./Banner.tsx";
+import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { type Verdict, ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
 import { MakerMark } from "./MakerMark.tsx";
@@ -38,7 +38,7 @@ import {
 } from "./session.ts";
 import { NA, type Queued, type State, fitKey, getState, runningTurn, setState, streamingHere, useStore } from "./store.ts";
 import { editDraft, getDraft, useDraft } from "./drafts.ts";
-import { SheetHead, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
+import { SheetHead, Skel, closePop, closeTip, esc, isTouch, place, togglePop, useMedia } from "./ui.tsx";
 import { Voice } from "./Voice.tsx";
 
 const catalogOf = (s: Pick<State, "catalog">) => (s.catalog === NA ? undefined : s.catalog);
@@ -103,6 +103,8 @@ function pickerFocus(e: FocusEvent<HTMLElement>): void {
 
 export function Composer() {
   const rt = useStore(rtOf);
+  const boot = useStore(booting);
+  const none = useStore(unread);
   const model = useStore((s) => s.model);
   const numCtx = useStore((s) => s.numCtx);
   const think = useStore((s) => s.think);
@@ -208,7 +210,9 @@ export function Composer() {
   const pct = Math.min(1, used / ctx);
   const meterHidden = pct < 0.5 || blocked || view !== "thread";
 
-  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : PLACEHOLDER[rt];
+  // before the first read nothing is known: the words of a ready app, never a problem not yet seen;
+  // past the boot bound with still nothing read, one neutral word until the runtime answers
+  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
@@ -217,6 +221,8 @@ export function Composer() {
   if (editing) sendTip = text ? `Update the queued message${enter}` : "Type the message to queue";
   else if (isStreaming && !blocked) sendTip = text ? `Queue${enter}. It sends when this reply finishes` : "Type now; it sends when this reply finishes";
   else if (queueable) sendTip = `${text ? `Send${enter}. It goes out when ` : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
+  // before the first read nothing is known, so nothing is claimed
+  else if (boot || none) sendTip = text ? `Send${enter}` : "Type a message to send";
   else if (blocked) sendTip = "Chat starts when Ollama is ready";
   else if (noModel) sendTip = why ?? "Download a model to start chatting";
   else if (memNo) sendTip = `${esc(name)}: not enough memory at ${k(ctx)}. It needs an estimated ${gb(v.amt)} more. Pick a smaller model or context.<br>Click for GPU memory in Settings › Advanced.`;
@@ -269,7 +275,7 @@ export function Composer() {
         </div>
       ) : null}
       <form
-        className={`composer${blocked ? " blocked" : ""}`}
+        className={`composer${blocked && !boot ? " blocked" : ""}`}
         autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault();
@@ -365,7 +371,9 @@ export function Composer() {
               ref={modelBtn}
               aria-haspopup="dialog"
               aria-expanded={drawing ? pop === "images" : pop === "picker" && !pickerPending}
-              aria-busy={!drawing && (loading || pickerPending) || undefined}
+              aria-busy={!drawing && (boot || loading || pickerPending) || undefined}
+              // the placeholder has no text, so the button needs a name of its own
+              aria-label={!drawing && boot && shownTag === undefined ? "Model" : undefined}
               data-tip={drawing ? undefined : modelTip}
               // the name only when the fixed width cuts it
               data-tipt={drawing ? named?.preset.name : undefined}
@@ -382,7 +390,7 @@ export function Composer() {
                 {named === undefined ? null : <ImageMark family={named.preset.family} />}
                 <span className="t">{named?.preset.name ?? "Image model"}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
-              </> : <>
+              </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
                 {/* loading shows in the tile, never in the label: the trigger keeps its width */}
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
                 <span>{modelLbl}</span>

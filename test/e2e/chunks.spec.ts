@@ -76,9 +76,10 @@ test.describe("deferred conversation", () => {
       await messages;
       await capture(page, "conversation-held");
       const status = page.locator(".tl > .col > [data-thread-loading]");
+      // turn-shaped placeholders, hidden from assistive tech; the busy timeline says it is loading
       await expect(status).toBeVisible();
-      await expect(status).toHaveAttribute("role", "status");
-      await expect(status).toHaveText("Loading conversation…");
+      await expect(status).toHaveAttribute("data-skel", "");
+      await expect(status).toHaveAttribute("aria-hidden", "true");
       await expect(page.locator(".tl")).toHaveAttribute("aria-busy", "true");
       const timeline = await page.locator(".tl").boundingBox();
       const composer = await page.locator(".composer").boundingBox();

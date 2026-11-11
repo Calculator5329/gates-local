@@ -166,17 +166,22 @@ test("Theme applies the moment it is picked, and says only what the choice does"
   const theme = page.getByRole("group", { name: "Theme" });
   const row = page.locator(".srow", { has: theme });
   await expect(theme.getByRole("button")).toHaveText(["Dark", "Light", "System"]);
-  await expect(row).toContainText("Always dark, whatever your desktop uses.");
+  await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+  // The choice speaks for itself; what System means is in the label's tooltip.
+  await expect(row.locator(".d")).toHaveCount(0);
+  // a pointer reaches it here; keyboard focus shows the same tooltip only when focus is visible
+  await row.locator(".tipped", { hasText: "Theme" }).hover();
+  await expect(page.locator("#tip")).toContainText("System follows your desktop's light or dark setting.");
 
   await theme.getByRole("button", { name: "Light" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   expect(await bg()).not.toBe(dark);
-  await expect(row).toContainText("Always light, whatever your desktop uses.");
+  await expect(theme.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
 
   await theme.getByRole("button", { name: "System" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   expect(await bg()).toBe(dark);
-  await expect(row).toContainText("Follows your desktop's light or dark setting.");
+  await expect(theme.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Reset settings asks first, then puts the settings back and leaves who runs Ollama alone", async ({ page, open }) => {

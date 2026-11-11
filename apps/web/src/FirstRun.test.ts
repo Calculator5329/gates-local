@@ -37,6 +37,7 @@ const oldOllama = (catalog: unknown[], version?: string) => ({
   pulls: {},
   unavailable: {},
   fits: {},
+  staleFits: {},
   settings: {},
 });
 
@@ -103,18 +104,22 @@ describe("first run on a computer with no supported GPU", () => {
     it(`never promises a GPU when the pick ${verdict}`, () => {
       const t = text(cpuOnly(verdict));
       expect(t).not.toMatch(/your GPU|GPU fit/);
-      expect(t).toContain(verdict === "refuse" ? "Qwen 3.5 4B doesn't fit at 16k. Choose another model or a smaller context." : "This computer has no supported GPU, so models run in system memory");
+      expect(t).toContain(verdict === "refuse" ? "Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit." : "This computer has no supported GPU, so models run in system memory");
       // the tooltip is an attribute, which text() strips (W1-03)
       expect(raw(cpuOnly(verdict))).not.toContain("fits your GPU");
     });
   }
 });
 
-it("SR-03: a recommended download that spills describes system memory in the subtitle and tooltip", () => {
+it("SR-03: a recommended download that spills says so on the card's tooltip, never in a line its verdict already gives", () => {
   const fit = { model: gemma.name, numCtx: 16384, verdict: "spills", needVramBytes: 2 ** 30, freeVramBytes: 0, spillRamBytes: 2 ** 30, source: "estimate", measuredAt: 0 };
   const state = { ...oldOllama([{ ...gemma, fit }]), models: [], gpu: { vendor: "nvidia" }, fits: { [`${gemma.name}@16384`]: fit } };
-  expect(text(state)).toContain("Your best fit uses system memory, so it is slower.");
+  expect(text(state)).toContain("Download your first model");
+  expect(text(state)).not.toContain("Your best fit uses system memory, so it is slower.");
   expect(raw(state)).toContain('data-tip="Your best fit uses system memory, so it is slower."');
+  // the size is what the person decides on; the model's blurb is not
+  expect(text(state)).toContain("GB download");
+  expect(text(state)).not.toContain(" chat · ");
   expect(raw(state)).not.toContain("runs on your GPU with room");
 });
 
@@ -130,7 +135,34 @@ it("SR-07: a selected model's refusal names that model when another installed mo
     fits: { ...selected.fits, [`${gemma.name}@16384`]: { ...selected.fits["qwen3.5:4b@16384"], model: gemma.name, verdict: "fits" } },
   };
   const t = text(state);
-  expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. Choose another model or a smaller context.");
+  expect(t).toContain("Qwen 3.5 4B doesn't fit at 16k. A smaller context may fit.");
   expect(t).not.toMatch(/None of your models|Download a smaller/);
   expect(t).toContain("Choose a model");
+});
+
+it("F5: a busy port says its cause in the status line, one line and no sentence", () => {
+  const state = { ...oldOllama([]), models: [], runtime: { state: "wrong-service", owner: "external", baseUrl: "http://localhost:11434" } };
+  const t = text(state);
+  expect(t).toContain("Ollama isn't answering");
+  // the state also covers a port that did not answer in time, which can be a hung Ollama
+  expect(t).toContain("Something else holds port 11434");
+  expect(t).not.toContain("Another program");
+  expect(t).not.toContain("is busy");
+  expect(raw(state)).not.toMatch(/class="(sub|fr-sub)"/);
+});
+
+it("Ready to chat is the title, the status line and the card: no sentence under it, no blurb, no footer", () => {
+  const state = {
+    ...cpuOnly("fits"),
+    gpu: { vendor: "nvidia" },
+    catalog: [{ ...gemma, name: "qwen3.5:4b", label: "Qwen 3.5 4B", installed: true, purpose: "Careful longer answers" }],
+  };
+  const t = text(state);
+  expect(t).toContain("Ready to chat");
+  expect(t).toContain("Ollama · 1 chat model");
+  expect(t).toContain("Qwen 3.5 4B");
+  expect(t).not.toContain("Switch models in any chat");
+  expect(t).not.toContain("Careful longer answers");
+  expect(t).not.toContain("Nothing leaves your own network");
+  expect(raw(state)).not.toMatch(/class="(sub|fr-sub|fr-foot)"/);
 });

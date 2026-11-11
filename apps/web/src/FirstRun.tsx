@@ -2,19 +2,19 @@
 // chat. Found: a recommended installed model and Start chatting. No Ollama: a
 // calm status with Retry. No models: download the recommended one, with
 // progress and Cancel; the chat can open to draft while it downloads.
-import { type ReactNode, useEffect, useState } from "react";
-import type { CatalogEntry } from "@gates-local/contracts";
-import { ownCopyNote, portOf, rtOf } from "./Banner.tsx";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { CatalogEntry, FitReport } from "@gates-local/contracts";
+import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
 import { DlDetail, canCancelPull } from "./ModelDownloads.tsx";
 import { describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
+import { type FitPhase, currentFit, fitPendingWord, fitReading } from "./fit-state.ts";
 import { ensureFit, finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
-import { NA, type State, useStore } from "./store.ts";
+import { NA, type State, fitKey, useStore } from "./store.ts";
 import { canChat, chatBlockedReason, chatModels, pickRuleText, pickedModel } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { VLabel } from "./ui.tsx";
-import { Shell } from "./FirstRunShell.tsx";
+import { FirstRunLoading, Shell } from "./FirstRunShell.tsx";
 
 function Cta({ label, onGo, link, onLink }: { label: string; onGo: () => void; link?: string; onLink?: () => void }) {
   return (
@@ -38,18 +38,40 @@ function startChat(): void {
   focusComposer();
 }
 
-const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
+/**
+ * The memory reading this screen shows. A check that runs again after a
+ * current answer, with nothing changed, keeps that answer's words until it
+ * answers. Once memory has changed (the report is stale) the held answer is
+ * dropped, so the screen waits in its fixed slots rather than repeat a fit
+ * that may no longer be true; an error or a different answer shows at once.
+ */
+function useSteadyFit(tag: string | undefined, numCtx: number): { report: FitReport | undefined; phase: FitPhase } {
+  const key = tag === undefined ? "" : fitKey(tag, numCtx);
+  const report = useStore((s) => (tag === undefined ? undefined : fitReading(s, tag, numCtx).report));
+  const phase = useStore((s) => (tag === undefined ? "checking" : fitReading(s, tag, numCtx).phase));
+  const changed = useStore((s) => s.staleFits[key] === true);
+  const last = useRef<{ key: string; report: FitReport } | null>(null);
+  if (phase === "fresh" && report !== undefined) last.current = { key, report };
+  else if (phase !== "checking" || changed) last.current = null;
+  if (phase === "checking" && last.current?.key === key) return { report: last.current.report, phase: "fresh" };
+  return { report, phase };
+}
 
-/** The recommended model card: name, verdict, purpose, and a Details disclosure. */
+const CTX_TIP ="How much of the conversation the model keeps in view. Bigger needs more GPU memory.";
+const SPILL_TIP = "Your best fit uses system memory, so it is slower.";
+
+/**
+ * The recommended model card: name and verdict, a download's size when it is
+ * one, and a Details disclosure. The model's purpose phrase is not here: the
+ * screen is about whether it runs, and the picker and Settings carry it.
+ */
 function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; entry?: CatalogEntry | undefined; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const numCtx = useStore((s) => s.numCtx);
   const catalog = useStore((s) => (s.catalog === NA ? undefined : s.catalog));
   const info = useStore((s) => s.models?.find((m) => m.name === tag));
   const fits = useStore(s => s.fits);
-  const fitStatus = useStore(s => s.fitStatus);
-  const fitHistory = useStore(s => s.fitHistory);
-  const reading = fitReading({ fits, fitStatus, fitHistory, catalog }, tag, numCtx);
+  const reading = useSteadyFit(tag, numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
   const ctx = info?.maxContext === undefined ? numCtx : Math.min(numCtx, info.maxContext);
   useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
@@ -58,7 +80,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
   const d = describeModel(tag, catalog);
   const tip = reading.phase !== "fresh" ? "Suggested model. Current memory is being checked." : have ? pickRuleText(numCtx, cpu) : v?.k === "no" ? "Choose a smaller model or context." : cpu
     ? `The first of Gates Local's recommended models that fits in system memory with room for ${k(numCtx)} of context.`
-    : v?.k === "spill" ? foundWords("spills", numCtx).sub
+    : v?.k === "spill" ? SPILL_TIP
     : `The first of Gates Local's recommended models that runs on your GPU with room for ${k(numCtx)} of context.`;
   return (
     <div className="fr-card">
@@ -70,16 +92,11 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             Recommended
           </span>
         </span>
-        {v ? (
-          <span className="v">
-            <VLabel v={v} />
-          </span>
-        ) : <span className="v">{fitPendingWord(reading.phase, fit !== undefined)}</span>}
+        <span className="v" data-wait="" data-watch="fit">
+          {v ? <VLabel v={v} /> : fitPendingWord(reading.phase, fit !== undefined)}
+        </span>
       </div>
-      <div className="fr-sub">
-        {d.purpose}
-        {!have && entry ? ` · ${gb(entry.downloadBytes)} download` : ""}
-      </div>
+      {!have && entry ? <div className="fr-sub">{gb(entry.downloadBytes)} download</div> : null}
       <button type="button" className="think" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span>Details</span>
         <span className="th-x">
@@ -141,12 +158,10 @@ function NoModels() {
   const canCancel = useStore(canCancelPull);
   const active = useStore(firstPull);
   const p = useStore((s) => (active === undefined ? undefined : s.pulls[active]));
-  const numCtx = useStore((s) => s.numCtx);
   // Embedding models can be installed and still leave nothing to chat with.
   const others = useStore((s) => (s.models ?? []).length);
   const cpu = useStore((s) => noGpu(s.gpu));
   const fresh = useStore(s => entry === undefined ? undefined : currentFit(s, entry.name, s.numCtx));
-  const phase = useStore(s => entry === undefined ? "checking" : fitReading(s, entry.name, s.numCtx).phase);
   const st = (
     <>
       <span className="dot ok" />
@@ -155,12 +170,12 @@ function NoModels() {
   );
   // An Ollama that does not report capabilities: a download would not help, so say what would.
   const tooOld = useStore((s) => chatBlockedReason(s.models, undefined));
+  // a sentence only for what the title and the card's verdict do not say: the step, or why it is slower
   const sub =
     tooOld ??
-    (fresh === undefined ? `${fitPendingWord(phase, true)} Current memory must be checked before this model can be recommended.` : fresh.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu
-      ? `One model is enough. This computer has no supported GPU, so this one runs in system memory with room for ${k(numCtx)} of context. Replies are slower than on a GPU.`
-      : fresh.verdict === "spills" ? foundWords("spills", numCtx).sub
-      : `One model is enough. This one runs on your GPU with room for ${k(numCtx)} of context.`);
+    (fresh === undefined ? undefined : fresh.verdict === "refuse" ? "Not enough memory at this context. Choose a smaller model or context in Settings." : cpu
+      ? "This computer has no supported GPU, so this model runs in system memory and replies are slower."
+      : undefined);
   if (active !== undefined && p !== undefined) {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
@@ -198,7 +213,7 @@ function NoModels() {
   if (entry === undefined || pullNA) {
     // no catalog or no downloads in this build: say how to get a model without the app
     return (
-      <Shell st={st} title={pullNA ? "No model installed yet" : "Download your first model"} sub="Gates Local needs one model to chat.">
+      <Shell st={st} title={pullNA ? "No model installed yet" : "Download your first model"}>
         <p className="fr-note na">
           {pullNA || catalogNA ? "Gates Local can't download models from here. " : ""}
           On the computer, download one with Ollama, for example <span className="mono">ollama pull qwen3.5:9b</span>, then press Retry.
@@ -234,16 +249,17 @@ function NoModels() {
   );
 }
 
-/** The selected model's current verdict. A refusal says nothing about the other installed models. */
-export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false, name = "This model"): { title: string; sub: string } {
-  if (verdict === "refuse") {
-    return { title: "Choose another model", sub: `${name} doesn't fit at ${k(numCtx)}. Choose another model or a smaller context.` };
-  }
+/**
+ * The selected model's current verdict. A refusal says nothing about the other
+ * installed models. The title and the card's verdict say whether it runs; a
+ * sentence is added only for the number a refusal turns on, or for why every
+ * reply will be slower.
+ */
+export function foundWords(verdict: "fits" | "spills" | "refuse" | undefined, numCtx: number, cpu = false, name = "This model"): { title: string; sub?: string } {
+  if (verdict === "refuse") return { title: "Choose another model", sub: `${name} doesn't fit at ${k(numCtx)}. A smaller context may fit.` };
   // no supported GPU: every model runs in system memory, so no verdict may promise a GPU
-  if (cpu) return { title: "Ready to chat", sub: "This computer has no supported GPU, so models run in system memory and replies are slower. Switch models in any chat." };
-  if (verdict === "spills") return { title: "Ready to chat", sub: "Your best fit uses system memory, so it is slower." };
-  if (verdict === "fits") return { title: "Ready to chat", sub: "Your best GPU fit is ready. Switch models in any chat." };
-  return { title: "Ready to chat", sub: "Your best model is ready. Switch models in any chat." };
+  if (cpu) return { title: "Ready to chat", sub: "This computer has no supported GPU, so models run in system memory and replies are slower." };
+  return { title: "Ready to chat" };
 }
 
 function Found() {
@@ -256,10 +272,11 @@ function Found() {
   const numCtx = useStore((s) => s.numCtx);
   const cpu = useStore((s) => noGpu(s.gpu));
   const fits = useStore(s => s.fits);
-  const fresh = useStore(s => tag === undefined ? undefined : currentFit(s, tag, numCtx));
-  const phase = useStore(s => tag === undefined ? "checking" : fitReading(s, tag, numCtx).phase);
+  const { report, phase } = useSteadyFit(tag, numCtx);
+  const fresh = phase === "fresh" ? report : undefined;
   useEffect(() => ensureFit(tag, numCtx), [tag, numCtx, fits]);
-  const words = fresh === undefined ? { title: "Checking memory", sub: `${fitPendingWord(phase, true)} Keeping the previous numbers until a current check succeeds.` } : foundWords(fresh.verdict, numCtx, cpu, name);
+  // still checking: the title and the card's "Checking…" say it; no sentence
+  const words = fresh === undefined ? { title: "Checking memory" } : foundWords(fresh.verdict, numCtx, cpu, name);
   return (
     <Shell
       st={
@@ -270,6 +287,7 @@ function Found() {
       }
       title={words.title}
       sub={words.sub}
+      wait
     >
       {tag !== undefined ? <RecCard tag={tag} have /> : null}
       {fresh?.verdict === "refuse" ? (
@@ -290,14 +308,15 @@ function NoOllama() {
   const own = note !== "";
   const around = own ? `${note} ` : "";
   const port = portOf(baseUrl);
-  const [title, st, sub] =
+  // the sentence carries the cause or the step; a busy port's status line is its cause, so it has none
+  const [title, st, sub]: [string, string, string | undefined] =
     rt === "wrong"
-      ? ["Ollama isn't answering", `Port ${port} is busy`, `Something other than Ollama answers on port ${port}.`]
+      ? ["Ollama isn't answering", `Something else holds port ${port}`, undefined]
       : rt === "stopped"
         ? ["Ollama is stopped", "Ollama is installed but not running", own ? `${around}It starts when Gates Local opens; press Retry to check again.` : "Start Ollama, then press Retry."]
         : rt === "error"
-          ? ["Ollama didn't start", "Ollama reported a problem", (detail ?? "Ollama stopped with an error.")]
-          : ["Ollama isn't installed", "No Ollama found on this computer", `${around}Gates Local needs Ollama to chat. Install it from ollama.com, then press Retry.`];
+          ? ["Ollama didn't start", "Ollama reported a problem", detail]
+          : ["Ollama isn't installed", "No Ollama found on this computer", `${around}Install Ollama from ollama.com, then press Retry.`];
   return (
     <Shell
       st={
@@ -316,7 +335,15 @@ function NoOllama() {
   );
 }
 
+/** Nothing to say yet but that the app is connecting; the dot holds the status line. */
+function Connecting() {
+  return <Shell st={<span className="dot run" />} title={CONNECTING} />;
+}
+
 function Waiting({ installing }: { installing: boolean }) {
+  // the runtime has not answered once: no Ollama words yet
+  const none = useStore(unread);
+  if (none) return <Connecting />;
   return (
     <Shell
       st={
@@ -326,7 +353,7 @@ function Waiting({ installing }: { installing: boolean }) {
         </>
       }
       title={installing ? "Setting up Ollama" : "Starting up"}
-      sub={installing ? "Gates Local is installing its own copy into its app folder. It won't change anything else on your system." : "Checking for Ollama and your models."}
+      sub={installing ? "Gates Local is installing its own copy into its app folder. It won't change anything else on your system." : undefined}
     >
       {installing ? (
         <>
@@ -338,10 +365,54 @@ function Waiting({ installing }: { installing: boolean }) {
   );
 }
 
+/** How long first run waits for its card's words and memory check before it shows with the check still running; the same bound as Settings' reads. */
+const WHOLE_WAIT_MS = 1000;
+
+/** The model the screen will be about: the installed pick, else the one it offers to download. */
+function screenModel(s: State): string | undefined {
+  if (s.models === undefined) return undefined;
+  return s.models.some(canChat) ? (s.model ?? pickedModel(s.models)?.name) : recommendedEntry(s)?.name;
+}
+
+/** The catalog is read (the card's model name and download size) and the model's memory check has answered. */
+function inHand(s: State): boolean {
+  // an Ollama to update, or no way to download here: the words need no catalog and no check
+  if (chatBlockedReason(s.models, undefined) !== undefined || s.unavailable["models.pull"] === true) return true;
+  if (s.catalog === undefined) return false;
+  const tag = screenModel(s);
+  if (tag === undefined) return true;
+  const phase = fitReading(s, tag, s.numCtx).phase;
+  return phase === "fresh" || phase === "error";
+}
+
 export function FirstRun() {
   const rt = useStore(rtOfState);
+  const boot = useStore(booting);
   const models = useStore((s) => s.models);
-  if (rt === "ready" && models !== undefined) return models.some(canChat) ? <Found /> : <NoModels />;
+  const tag = useStore(screenModel);
+  const numCtx = useStore((s) => s.numCtx);
+  const ready = useStore(inHand);
+  // a memory change makes fits anew: ask again, as the card does once it shows
+  const fits = useStore((s) => s.fits);
+  const known = !boot && rt === "ready" && models !== undefined;
+  const [waited, setWaited] = useState(false);
+  const [shown, setShown] = useState(false);
+  // anything but the placeholders has shown (past the boot bound): they never come back,
+  // so until the screen's words are in hand "Connecting…" stays up instead
+  const [left, setLeft] = useState(false);
+  // once the screen shows it stays: a later recheck changes a verdict, never back to placeholders
+  if (known && (ready || waited) && !shown) setShown(true);
+  const placeholders = !left && (boot || (known && !shown && !ready && !waited));
+  if (!placeholders && !left) setLeft(true);
+  useEffect(() => { if (known) ensureFit(tag, numCtx); }, [known, tag, numCtx, fits]);
+  useEffect(() => {
+    if (!known || ready) return;
+    const t = setTimeout(() => setWaited(true), WHOLE_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [known, ready]);
+  if (placeholders) return <FirstRunLoading />;
+  // the same render that sets `shown` already shows the screen
+  if (known) return !shown && !ready && !waited ? <Connecting /> : models.some(canChat) ? <Found /> : <NoModels />;
   if (rt === "missing" || rt === "stopped" || rt === "wrong" || rt === "error") return <NoOllama />;
   return <Waiting installing={rt === "installing"} />;
 }

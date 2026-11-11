@@ -3,7 +3,7 @@
 // control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ImageStatus, Source, TextSize, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
@@ -12,37 +12,20 @@ import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { sizeText } from "./models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, updateSettings } from "./session.ts";
+import { addSource, canOpenFolder, checkImageStatus, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, settingsReads, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
-import { COMPUTER_ONLY, Fail, Grp, Head, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Fail, Grp, Head, Na, Row, Seg2, Skel, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { Updates } from "./SettingsUpdates.tsx";
+import Instructions from "./Instructions.tsx";
+import { VoiceSettings } from "./VoiceSettings.tsx";
 import { closeTip, esc } from "./ui.tsx";
 
-const VoiceSettings = lazy(() => import("./VoiceSettings.tsx").then((m) => ({ default: m.VoiceSettings })));
-
-const Instructions = lazy(() => import("./Instructions.tsx"));
-
-function Seg2<T extends string | number>({ value, options, onPick, label }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string }) {
-  return (
-    <span className="seg2" role="group" aria-label={label}>
-      {options.map(([v, text]) => (
-        <button key={String(v)} type="button" className={v === value ? "on" : ""} aria-pressed={v === value} onClick={() => onPick(v)}>
-          {text}
-        </button>
-      ))}
-    </span>
-  );
-}
+// Voice to text and Instructions ship in the Settings chunk: a section that
+// suspends shows its fallback and then the real cards ~300 ms later (docs/design.md).
 
 // ---------------------------------------------------------------- General
-
-const THEME_WORDS: Record<Theme, string> = {
-  dark: "Always dark, whatever your desktop uses.",
-  light: "Always light, whatever your desktop uses.",
-  system: "Follows your desktop's light or dark setting.",
-};
 
 const THEMES: readonly (readonly [Theme, string])[] = [
   ["dark", "Dark"],
@@ -67,7 +50,7 @@ function General() {
       <Head title="General" />
       {settings === NA || unavailable ? null : (
         <Grp title="Appearance">
-          <Row label="Theme" desc={current === undefined ? undefined : THEME_WORDS[current.theme]} err={themeErr}>
+          <Row label="Theme" tip="System follows your desktop's light or dark setting." err={themeErr}>
             <Seg2 label="Theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
           </Row>
           <Row label="Text size" desc="Applies to messages and the message box." err={textErr}>
@@ -76,7 +59,7 @@ function General() {
         </Grp>
       )}
       <Updates />
-      <Suspense fallback={null}><VoiceSettings /></Suspense>
+      <VoiceSettings />
     </>
   );
 }
@@ -134,7 +117,7 @@ function Runtime() {
   const switchable = !locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
   return (
     <>
-      <Head title="Runtime">Ollama is the program that runs your models. Gates Local finds it on its own.</Head>
+      <Head title="Runtime">Ollama is the program that runs your models.</Head>
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
           {switchable ? (
@@ -143,7 +126,7 @@ function Runtime() {
             </button>
           ) : null}
         </Row>
-        {nothingToSwitchTo ? <Row label="Gates Local's own Ollama" desc="Not available on this computer. Gates Local uses the Ollama your system runs." /> : null}
+        {nothingToSwitchTo ? <Row label="Gates Local's own Ollama" desc="Not available on this computer." /> : null}
         {switchable && confirm ? (
           <div className="cfm" role="group" aria-label="Confirm switch">
             {ownCopy ? (
@@ -392,13 +375,13 @@ function Images() {
   };
   return (
     <>
-      <Head title="Image generation">Let the assistant make images on this computer. It uses ComfyUI, a separate free program you install yourself.</Head>
+      <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "Once enabled, use the Image button in the message box for a chat. If the GPU is short, the chat model is unloaded while an image renders."} err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "Then turn Image on in a chat's message box. If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer." err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
-          <Row label="Set up ComfyUI" desc="Install ComfyUI first, then connect it to Gates Local.">
+          <Row label="Set up ComfyUI" desc="A separate free program you install yourself.">
             <SetupLink />
           </Row>
         </Grp>
@@ -543,7 +526,8 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   );
 }
 
-function SourceGroup({ title, desc, kinds, items }: { title: string; desc: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
+/** `note` is what sets this kind apart; it sits in the add row so the group stays a title and a card. */
+function SourceGroup({ title, note, kinds, items }: { title: string; note: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
   const locked = useStore((s) => s.unavailable["sources.add"] === true);
   const [adding, setAdding] = useState<SourceKind | null>(null);
   const entry = useRef<HTMLDivElement>(null);
@@ -559,14 +543,14 @@ function SourceGroup({ title, desc, kinds, items }: { title: string; desc: strin
     </button>
   ));
   return (
-    <Grp title={title} desc={desc}>
+    <Grp title={title}>
       {items.map((x) => (
         <SourceRow key={x.id} src={x} />
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">{locked ? COMPUTER_ONLY : "Choose a local path to share."}</span>}>
-            {locked ? null : action}
+          <Row label={items.length > 0 ? "Add another source" : kinds.includes("sqlite") ? "No databases yet." : "No folders or files yet."} desc={<span className="src-help">{note}</span>}>
+            {locked ? <Na>{COMPUTER_ONLY}</Na> : action}
           </Row>
         ) : <AddRow key={adding} kind={adding} close={close} />}
       </div>
@@ -584,8 +568,8 @@ function Library() {
       {sources === NA ? null : (
         <>
           {locked ? null : <LibraryImports />}
-          <SourceGroup title="Files and folders" desc="The model always sees the latest version." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
-          <SourceGroup title="SQLite databases" desc="The model reads a snapshot from when you added it. Later changes show up after you refresh it." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
+          <SourceGroup title="Files and folders" note="The model always sees the latest version." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
+          <SourceGroup title="SQLite databases" note="The model reads a snapshot; refresh it to see later changes." kinds={["sqlite"]} items={list.filter((x) => x.kind === "sqlite")} />
         </>
       )}
     </>
@@ -594,9 +578,9 @@ function Library() {
 
 // ---------------------------------------------------------------- Advanced
 
-/** Only the desktop window knows this folder and can open it. */
+/** Only the desktop app has one. Read before Settings opens (session/settings-reads.ts); a placeholder row if not yet. */
 function DataFolder() {
-  const [path, setPath] = useState<string | null>(null);
+  const [path, setPath] = useState<string | null | undefined>(() => settingsReads.folder() ?? (window.gatesLocal?.dataFolder === undefined ? null : undefined));
   const [err, run] = useAct();
   useEffect(() => {
     let live = true;
@@ -608,6 +592,7 @@ function DataFolder() {
     };
   }, []);
   if (path === null) return null;
+  if (path === undefined) return <Row label="Data folder" desc={<Skel w="24em" />} busy><Skel w="7em" /></Row>;
   return (
     <Row label="Data folder" desc={<span className="mono">{path}</span>} err={err}>
       <button type="button" className="btn outline" onClick={() => void run(openDataFolder())}>
@@ -622,7 +607,7 @@ function ResetSettings() {
   const [err, run] = useAct();
   return (
     <>
-      <Row label="Reset settings" desc="Put every setting back to how it started." err={err}>
+      <Row label="Reset settings" desc="Your chats, Library and models stay." err={err}>
         <button type="button" className={`btn outline${asking ? " pressed" : ""}`} aria-expanded={asking} onClick={() => setAsking(!asking)}>
           Reset…
         </button>
@@ -662,7 +647,7 @@ function Advanced() {
   const canReset = useStore((s) => s.settings !== NA && s.unavailable["settings.update"] !== true);
   return (
     <>
-      <Head title="Advanced">How your models use memory, and how to put settings back.</Head>
+      <Head title="Advanced" />
       <Grp title={cpu ? "System memory" : "GPU memory"}>
         <GpuMemory />
       </Grp>
@@ -703,7 +688,7 @@ const SHORTCUTS: readonly (readonly [string, readonly (readonly [string, readonl
 function Shortcuts() {
   return (
     <>
-      <Head title="Shortcuts">These are fixed for now.</Head>
+      <Head title="Shortcuts" />
       {SHORTCUTS.map(([group, rows]) => (
         <Grp key={group} title={group}>
           <table className="kl">
@@ -734,7 +719,7 @@ export function SettingsView() {
     case "models":
       return <ModelsPage />;
     case "instructions":
-      return <Suspense fallback={<><Head title="Instructions" /><div className="inst-status" role="status">Loading…</div></>}><Instructions /></Suspense>;
+      return <Instructions />;
     case "library":
       return <Library />;
     case "tools":

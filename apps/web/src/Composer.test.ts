@@ -87,3 +87,21 @@ describe("the composer's primary action", () => {
     }
   }
 });
+
+it("F6: before the first read, Send claims nothing about Ollama or models and the model button still has a name", () => {
+  setFixture({ ...initial, conn: { kind: "connecting" }, runtime: undefined, models: undefined, model: undefined, hydrationSettled: false, bootWaited: false, view: "new", threadId: null });
+  const html = renderToStaticMarkup(createElement(Composer));
+  const send = html.match(/<button\b[^>]*class="send(?: [^"]*)?"[^>]*>/)?.[0] ?? "";
+  expect(send).not.toMatch(/Chat starts|Ollama|Download a model/);
+  const model = html.match(/<button\b[^>]*id="modelBtn"[^>]*>/)?.[0] ?? "";
+  expect(html, "the model button shows its placeholder").toMatch(/id="modelBtn"[^>]*>(?:(?!<\/button>)[\s\S])*data-skel/);
+  expect(model).toMatch(/aria-label="Model"/);
+});
+
+it("after the two-second bound with nothing read, the composer says Connecting once and nothing about Ollama", () => {
+  setFixture({ ...initial, conn: { kind: "open" }, runtime: undefined, models: undefined, model: undefined, hydrationSettled: false, bootWaited: true, view: "new", threadId: null });
+  const html = renderToStaticMarkup(createElement(Composer));
+  expect(html).toMatch(/placeholder="Connecting…"/);
+  expect(html.split("Connecting…").length - 1, "said once").toBe(1);
+  expect(html).not.toMatch(/Ollama/);
+});

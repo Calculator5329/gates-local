@@ -3,7 +3,7 @@
 // the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
 import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { rtInfo, rtOf } from "./Banner.tsx";
+import { booting, rtInfo, rtOf, unread } from "./Banner.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
@@ -149,6 +149,9 @@ function rowMenuClick(e: MouseEvent<HTMLElement>, thread: string): void {
   openThreadMenu(thread, { x: e.clientX, y: e.clientY }, false);
 }
 
+/** Widths of the placeholder rows: varied like titles, never a full-width block. */
+const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
+
 function ThreadList() {
   useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
@@ -160,7 +163,20 @@ function ThreadList() {
   const menuFor = useStore((s) => (s.pop?.id === "thread" ? s.pop.thread : null));
   const now = useNow(30_000);
   const drawerWidth = useMedia("(max-width: 1023px)");
+  const boot = useStore(booting);
   const shown = q === "" ? threads : threads.filter((t) => t.title.toLowerCase().includes(q));
+  if (boot && threads.length === 0) {
+    // the list's shape is the data's: row-shaped placeholders until the first read lands
+    return (
+      <nav className="sb-list" aria-busy="true">
+        <div className="sb-skel" data-skel="" aria-hidden="true">
+          {SKEL_ROWS.map((w, i) => (
+            <div key={i} className="sb-skel-r"><span className="skel" style={{ width: w }} /></div>
+          ))}
+        </div>
+      </nav>
+    );
+  }
   if (shown.length === 0) {
     return <nav className="sb-list">{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
   }
@@ -185,7 +201,10 @@ function ThreadList() {
               onPointerLeave={() => preloadThread(null)}
               onContextMenu={(e) => rowMenuClick(e, t.id)}
             >
-              <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}>
+              <button type="button" className="sb-thread" onClick={() => closeDrawer(() => openThread(t.id), true)} onKeyDown={(e) => rowMenuKey(e, t.id)}
+                // a keyboard pause on a row reads it ahead, as a mouse pause does
+                onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) preloadThread(t.id); }}
+                onBlur={() => preloadThread(null)}>
                 <span className="t">{t.title}</span>
                 <span className="sb-status">
                   {running.has(t.id) ?<span className="live" aria-label="Reply in progress" /> : <span className="ago">{drawerWidth ? shortAge(t.updatedAt, now) : w.ago}</span>}
@@ -294,7 +313,10 @@ function SettingsButton() {
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const settings = useStore((s) => s.settings);
-  const info = rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
+  // before the runtime's first answer the gear claims nothing about it, past the boot bound too
+  const boot = useStore(booting);
+  const none = useStore(unread);
+  const info = boot || none || rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
   const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
     <Pressed on={inSettings}>

@@ -18,7 +18,7 @@ import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session
 import { AttachmentImages } from "./attachment-images.tsx";
 import { type LiveTurn, NA, type State, turnOf, useStore } from "./store.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
-import { closeTip, esc } from "./ui.tsx";
+import { TurnSkel, closeTip, esc } from "./ui.tsx";
 
 const EMPTY: readonly Message[] = [];
 const NO_TOOLS: readonly ToolStep[] = [];
@@ -643,7 +643,7 @@ export function Timeline({ threadId }: { threadId: string }) {
   return (
     <div className="tl" ref={tl} aria-busy={loading && loadError === undefined}>
       <div className={messages.length >= LONG_THREAD ? "col long" : "col"} ref={col}>
-        {loading && loadError === undefined ? <p className="na" role="status" data-thread-loading>Loading conversation…</p> : null}
+        {loading && loadError === undefined ? <TurnSkel /> : null}
         {turns.slice(skip).map(({ msg: m, key }, j) => {
           if (m !== undefined && retries.has(m.id)) return null;
           const last = skip + j === messages.length - 1;

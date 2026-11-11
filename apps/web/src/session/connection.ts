@@ -67,9 +67,12 @@ export function createConnection({ applyServerEvent, serverUrl, webServerUrl, de
   /** Start the connection loop. Called once at boot; the returned function ends it (the session tests use it). */
   function connect(): () => void {
     stopped = false;
+    // Booting holds placeholders for at most two seconds (Banner.tsx booting).
+    const boot = setTimeout(() => applyServerEvent({ bootWaited: true }), 2000);
     if (!desktopBridge() && webServerUrl() === null) applyServerEvent({ conn: { kind: "no-server" } });
     else void loop();
     return () => {
+      clearTimeout(boot);
       stopped = true;
       stopDrafts?.();
       stopDrafts = undefined;

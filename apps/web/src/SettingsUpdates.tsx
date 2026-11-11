@@ -11,7 +11,7 @@
 import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updateSettings } from "./session.ts";
-import { Fail, Grp, Na, Row, useAct } from "./settings-ui.tsx";
+import { Fail, Grp, Na, Row, Skel, useAct } from "./settings-ui.tsx";
 import { type Maybe, NA, useStore } from "./store.ts";
 
 /** Subjects shown before the rest fold away under "Show all". */
@@ -209,7 +209,8 @@ export function UpdatesView(p: UpdatesViewProps) {
       </Grp>
     );
   }
-  const version = p.status === undefined ? { value: "…", desc: "Reading the version." } : versionText(p.status.version);
+  // Settings waits for the version before it shows (whenSettingsReady); a placeholder covers a slow server.
+  const version = p.status === undefined ? { value: <Skel w="6em" />, desc: <Skel w="14em" /> } : versionText(p.status.version);
   const clone = p.status !== undefined && (p.status.version.kind === "release" || p.status.version.kind === "commit");
   const installed = p.status?.version.kind === "installed";
   const check = p.status?.lastCheck ?? null;
@@ -217,13 +218,16 @@ export function UpdatesView(p: UpdatesViewProps) {
   const every = settings?.updateEveryChange === true;
   const canControl = p.status?.canControl !== false;
   return (
-    <Grp title="Updates">
+    <Grp title="Updates" busy={p.status === undefined}>
       <Row label="Version" desc={version.desc}>
         <span className="mono">{version.value}</span>
       </Row>
       {clone || installed ? (
         <>
-          {canControl ? <Row label="Check for updates" desc={installed ? "Reads the signed list of versions on the Gates Local release page. Nothing is installed." : "Asks the git remote this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update."} err={p.checkErr ?? null}>
+          {canControl ? <Row label="Check for updates"
+            desc={installed ? "Reads the release page's list of versions; nothing is installed." : "Asks this copy's git remote; nothing installs until you update."}
+            tip={installed ? "The list of versions on the Gates Local release page is signed." : "The git remote is the one this copy was cloned from. Git fetches commit and tag data; dependencies install only when you choose to update."}
+            err={p.checkErr ?? null}>
             <button type="button" className="btn outline" disabled={p.checking || p.updating} onClick={p.onCheck}>
               {p.checking ? (
                 <>
@@ -246,10 +250,15 @@ export function UpdatesView(p: UpdatesViewProps) {
           )}
           {settings === undefined || p.settingsLocked || !canControl ? null : (
             <>
-            <Row label="Check for updates automatically" desc={installed ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly, and downloads a newer version for this copy. Default on. Off stops automatic requests, stops a download in progress and deletes downloaded versions; a check in progress finishes. Manual checks still work." : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."} err={p.switchErr ?? null}>
+            <Row label="Check for updates automatically"
+              desc={installed ? "Checks hourly and downloads newer versions; off deletes them." : "Asks this clone's git remote hourly."}
+              tip={installed
+                ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly, and downloads a newer version for this copy. Default on. Off stops automatic requests, stops a download in progress and deletes downloaded versions; a check in progress finishes. Manual checks still work."
+                : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."}
+              err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
             </Row>
-            {installed ? null : <Row label="Get every change, not only releases" desc="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
+            {installed ? null : <Row label="Get every change, not only releases" tip="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
               <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
             </Row>}
             </>

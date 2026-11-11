@@ -1,5 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
+import { booting, unread } from "../Banner.tsx";
+import { type State, getState } from "../store.ts";
 import { createConnection } from "./connection.ts";
+
+vi.mock("../session.ts", () => ({ recheckRuntime: () => undefined }));
 
 class Socket extends EventTarget {
   static all: Socket[] = [];
@@ -59,4 +63,41 @@ test("failed hydration never grants an immediate retry", async () => {
   const first = await boot(async () => { throw new Error("negotiation failed"); });
   first.close(); await vi.advanceTimersByTimeAsync(249); expect(Socket.all).toHaveLength(1);
   await vi.advanceTimersByTimeAsync(1); expect(Socket.all).toHaveLength(2);
+});
+
+test("F3: with no first read after two seconds the app stops booting and the connection words show", async () => {
+  let state: State = { ...getState() };
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined);
+  const connection = createConnection({
+    applyServerEvent: (patch) => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; },
+    serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
+    // the first read never lands
+    hydrate: () => new Promise(() => {}), beforeDisconnect: () => {}, afterDisconnect: () => {},
+  });
+  stop = connection.connect(); await vi.advanceTimersByTimeAsync(0);
+  Socket.all[0]!.open(); await vi.advanceTimersByTimeAsync(0);
+  expect(booting(state)).toBe(true);
+  await vi.advanceTimersByTimeAsync(1999);
+  expect(booting(state)).toBe(true);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(booting(state)).toBe(false);
+  // nothing is read yet: the words say Connecting, nothing about Ollama
+  expect(unread(state)).toBe(true);
+});
+
+test("a connection stopped before the boot bound does not end booting two seconds later", async () => {
+  let state: State = { ...getState() };
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  Socket.all = []; vi.stubGlobal("WebSocket", Socket); vi.stubGlobal("indexedDB", undefined);
+  const connection = createConnection({
+    applyServerEvent: (patch) => { state = { ...state, ...(typeof patch === "function" ? patch(state) : patch) }; },
+    serverUrl: async () => "ws://fixture", webServerUrl: () => "ws://fixture", desktopBridge: () => undefined,
+    hydrate: () => new Promise(() => {}), beforeDisconnect: () => {}, afterDisconnect: () => {},
+  });
+  const end = connection.connect(); await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(500);
+  end();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(state.bootWaited).toBe(false);
 });

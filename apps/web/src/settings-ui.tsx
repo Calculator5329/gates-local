@@ -2,6 +2,7 @@
 // group, a row with its failure line, and the keyboard rules of a popover.
 import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
 import type { ActionResult } from "./session.ts";
+import { esc } from "./ui.tsx";
 
 export function Head({ title, children }: { title: string; children?: ReactNode }) {
   return (
@@ -12,15 +13,25 @@ export function Head({ title, children }: { title: string; children?: ReactNode 
   );
 }
 
-/** A group: its label above its helper line, any Add buttons on the right. */
-export function Grp({ title, desc, action, children }: { title?: string; desc?: ReactNode; action?: ReactNode; children: ReactNode }) {
+export { Skel } from "./ui.tsx";
+
+/**
+ * A label that explains itself on hover or keyboard focus: mechanism, timings
+ * and caveats live here, not in a grey paragraph (docs/design.md). The tip is
+ * plain text, also given to screen readers as the label's description;
+ * `data-tipt` would show only when the label is cut off.
+ */
+export const Tipped = ({ tip, children }: { tip: string | undefined; children: ReactNode }) =>
+  tip === undefined ? <>{children}</> : <span className="tipped" tabIndex={0} aria-description={tip} data-tip={esc(tip)}>{children}</span>;
+
+/** A group is a title and a card, never a line under the title (docs/design.md); `tip` explains the title. `busy` while a placeholder in it shows. */
+export function Grp({ title, tip, action, busy = false, children }: { title?: string; tip?: string; action?: ReactNode; busy?: boolean; children: ReactNode }) {
   return (
-    <div className="grp">
+    <div className="grp" aria-busy={busy || undefined}>
       {title ? (
         <div className="grp-h">
           <div className="grp-l">
-            <div className="grp-t">{title}</div>
-            {desc === undefined ? null : <div className="grp-d">{desc}</div>}
+            <div className="grp-t"><Tipped tip={tip}>{title}</Tipped></div>
           </div>
           {action === undefined ? null : <div className="grp-a">{action}</div>}
         </div>
@@ -53,11 +64,12 @@ export const Fail = ({ err, line = false }: { err: string | null; line?: boolean
     </span>
   );
 
-export function Row({ label, desc, err = null, children }: { label: ReactNode; desc?: ReactNode; err?: string | null; children?: ReactNode }) {
+/** A row: its label, at most one short grey line that the label and control do not already say, and `tip` for the rest. */
+export function Row({ label, desc, tip, err = null, busy = false, children }: { label: ReactNode; desc?: ReactNode; tip?: string; err?: string | null; busy?: boolean; children?: ReactNode }) {
   return (
-    <div className="srow">
+    <div className="srow" aria-busy={busy || undefined}>
       <div className="sl">
-        <b>{label}</b>
+        <b><Tipped tip={tip}>{label}</Tipped></b>
         {desc !== undefined ? <span className="d">{desc}</span> : null}
         <Fail err={err} />
       </div>
@@ -83,8 +95,33 @@ export function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, cl
   }, [ref, open, close]);
 }
 
-/** Arrow keys walk the items of a menu or list, skipping disabled ones; Escape closes it. */
+/** Two choices side by side; the app's control for a short fixed set, never a native select. */
+export function Seg2<T extends string | number>({ value, options, onPick, label, disabled = false }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string; disabled?: boolean }) {
+  return (
+    <span className="seg2" role="group" aria-label={label}>
+      {options.map(([v, text]) => (
+        <button key={String(v)} type="button" className={v === value ? "on" : ""} aria-pressed={v === value} disabled={disabled} onClick={() => onPick(v)}>
+          {text}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+const typed = { text: "", at: 0 };
+const nameOf = (el: HTMLElement) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim().toLowerCase();
+/** Letters typed within a moment of each other find the next item whose name starts with them. */
+function find(items: HTMLElement[], at: number, key: string): HTMLElement | undefined {
+  const now = Date.now();
+  typed.text = now - typed.at < 800 ? typed.text + key.toLowerCase() : key.toLowerCase();
+  typed.at = now;
+  const from = typed.text.length === 1 ? at + 1 : Math.max(at, 0);
+  return [...items.slice(from), ...items.slice(0, from)].find((el) => nameOf(el).startsWith(typed.text));
+}
+
+/** Arrow keys walk the items of a menu or list, skipping disabled ones; letters find one by name; Escape closes it. */
 export function walk(e: KeyboardEvent<HTMLElement>, box: HTMLElement | null, selector: string, close: () => void): void {
+  if (e.key.length !== 1) typed.text = "";
   if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
@@ -94,6 +131,11 @@ export function walk(e: KeyboardEvent<HTMLElement>, box: HTMLElement | null, sel
   if (e.key === "Tab") return close();
   const items = [...(box?.querySelectorAll<HTMLElement>(selector) ?? [])].filter((el) => el.getAttribute("aria-disabled") !== "true");
   const at = items.indexOf(document.activeElement as HTMLElement);
+  if (e.key.length === 1 && e.key !== " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const hit = find(items, at, e.key);
+    if (hit) { e.preventDefault(); hit.focus(); }
+    return;
+  }
   const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
   if (step === 0 && e.key !== "Home" && e.key !== "End") return;
   e.preventDefault();

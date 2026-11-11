@@ -422,6 +422,19 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:09c3acc4-ad82-5517-beb5-32d601ec0f3a --> Extend the phone tap-through journey to confirmation and menu actions; `phone.spec.ts`'s broad sweep reaches only first-tap writers.
       *Accept:* those paths offer no forbidden mutation, with the exhaustive server method-table test retained.
 
+*Whole first frame, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:0a695dc7-75db-5946-8a75-26f2a58da1a8 --> The Download tab's group placeholder comes back when the context size changes mid-visit, and first run's `waited` flag never clears (`ModelDownloads.tsx`, `FirstRun.tsx`).
+      *Accept:* a context change regroups in place with no placeholder, and a second wait in one visit is bounded again.
+- [ ] <!-- workspace:id=work:1c4aa5fa-e686-5042-865d-222669e5e248 --> First run goes from "Ready to chat" to "Checking memory" and back when something outside the app moves GPU memory.
+      *Accept:* the title changes only when the verdict does; a recheck that ends in the same verdict shows nothing.
+- [ ] <!-- workspace:id=work:c4453c4f-2bef-50b9-a034-74d567ecdce9 --> Decide whether a Recommended row that now spills into system memory stays under Recommended; today only "does not fit" moves it out.
+      *Accept:* one rule, written in `docs/design.md`, and a test for the spilling case.
+- [ ] <!-- workspace:id=work:fc39d851-10b1-5cc4-a49f-9e580f32a5c2 --> The "uses system memory" group title drops its suffix while a recheck runs (`ModelDownloads.tsx`).
+      *Accept:* the title keeps its last words until the new verdict is in.
+- [ ] <!-- workspace:id=work:516a18cf-d146-532f-9076-42131a5c09b1 --> "Connecting…" has no way forward when the server never answers: no Retry and no "still connecting" line (`FirstRun.tsx`, `Banner.tsx`).
+      *Accept:* after a stated bound the screen offers one action or names what to check, and says nothing untrue before it.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and

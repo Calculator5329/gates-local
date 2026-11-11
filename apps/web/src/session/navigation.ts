@@ -54,6 +54,8 @@ interface NavigationEffects {
   readonly newChatModel: (s: State) => Partial<State>;
   readonly loadThread: (threadId: string) => Promise<void>;
   readonly loading: (threadId: string) => boolean;
+  /** Null when Settings' cheap reads are in hand; else resolves once they are, or at a bound. */
+  readonly settingsData?: () => Promise<void> | null;
   /** A pop-up still waiting to open is dropped by any destination picked meanwhile. */
   readonly dropPendingPanel: () => void;
 }
@@ -65,7 +67,7 @@ function leavingChat(s: State): Partial<State> {
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */
-export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading, dropPendingPanel }: NavigationEffects) {
+export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel }: NavigationEffects) {
   /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
   let navGen = 0;
   let pendingSettings: number | null = null;
@@ -127,10 +129,12 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
       enterScreen();
     };
     // The visible composer must still send into its visible thread while a chunk
-    // loads. Commit the navigation only when the screen (or its error) can render.
-    if (settingsScreen.get().kind === "pending") {
+    // loads. Commit the navigation only when the screen (or its error) can render,
+    // with the data it shows in hand, so its first frame is whole (docs/design.md).
+    const data = settingsData();
+    if (settingsScreen.get().kind === "pending" || data !== null) {
       pendingSettings = nav;
-      void settingsScreen.load().then(show);
+      void Promise.all([settingsScreen.load(), data]).then(show);
     } else show();
   }
 

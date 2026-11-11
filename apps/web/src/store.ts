@@ -115,6 +115,8 @@ export interface State {
   readonly conn: Conn;
   /** The initial read attempt ended, including failure, for this connection. */
   readonly hydrationSettled: boolean;
+  /** Two seconds passed since the app opened without a first read: booting ends and the connection words show. */
+  readonly bootWaited: boolean;
   readonly serverOrigin: string | null;
   readonly fileToken: string | null;
   readonly runtime: RuntimeStatus | undefined;
@@ -211,6 +213,7 @@ export const fitKey = (model: string, numCtx: number) => `${model}@${numCtx}`;
 const initial: State = {
   conn: { kind: "connecting" },
   hydrationSettled: false,
+  bootWaited: false,
   serverOrigin: null,
   fileToken: null,
   runtime: undefined,

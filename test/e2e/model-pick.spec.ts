@@ -24,7 +24,7 @@ test.describe("first run", () => {
     await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();
     await expect(page.locator(".fr-st")).toContainText("3 chat models");
     await expect(page.locator(".fr-card .nm")).toHaveText("Qwen 3.5 9B");
-    await expect(page.locator(".fr .sub")).toHaveText("Your best GPU fit is ready. Switch models in any chat.");
+    await expect(page.locator(".fr-card .v")).toHaveText("Runs on GPU");
     await page.getByRole("button", { name: "Start chatting" }).click();
 
     await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
@@ -35,25 +35,30 @@ test.describe("first run", () => {
     await expect(page.locator(".c-note")).toHaveCount(0);
   });
 
-  test("the subtitle is one line inside the 540 px card column at 1440 px (F77)", async ({ page, open }) => {
-    await open();
-    const sub = page.locator(".fr .sub");
-    await expect(sub).toHaveText(/Switch models in any chat\./);
-    const measure = () => sub.evaluate((el) => {
-      const lh = parseFloat(getComputedStyle(el).lineHeight);
-      const col = el.closest(".fr")?.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      return { ready: /Switch models in any chat\./.test(el.textContent ?? ""), lines: Math.round(r.height / lh), right: r.right, colRight: col?.right ?? 0, colWidth: col?.width ?? 0, scroll: el.scrollWidth, client: el.clientWidth };
+  test.describe("at 1440 px", () => {
+    test.use({ viewport: { width: 1440, height: 900 } });
+    test("Ready to chat says nothing its title says, has no blurb or footer, and leaves no gap for them", async ({ page, open }) => {
+      await open();
+      const fr = page.locator(".fr");
+      await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();
+      await expect(fr.locator(".fr-card .v")).toHaveText("Runs on GPU");
+      await page.screenshot({ path: test.info().outputPath("first-run-ready-1440.png") });
+      // the title is the news; the card is the model, its fit and its details
+      await expect(fr.locator(".sub")).toHaveCount(0);
+      await expect(fr).not.toContainText("Switch models in any chat");
+      await expect(fr.locator(".fr-card .fr-sub")).toHaveCount(0);
+      await expect(fr).not.toContainText("Fast everyday answers");
+      await expect(fr.locator(".fr-foot")).toHaveCount(0);
+      await expect(fr).not.toContainText("Nothing leaves your own network");
+      const g = await fr.evaluate((el) => {
+        const h = el.querySelector("h1")?.getBoundingClientRect();
+        const card = el.querySelector(".fr-card")?.getBoundingClientRect();
+        return { gap: (card?.top ?? 0) - (h?.bottom ?? 0), width: el.getBoundingClientRect().width, bottom: el.getBoundingClientRect().bottom, cta: el.querySelector(".fr-cta")?.getBoundingClientRect().bottom ?? 0 };
+      });
+      expect(g.width).toBeLessThanOrEqual(540);
+      expect(g.gap, "the card sits the usual 24 px under the title").toBe(24);
+      expect(g.bottom - g.cta, "nothing reserved under the buttons").toBeLessThanOrEqual(0.5);
     });
-    // A memory refresh can replace the ready copy between two protocol calls.
-    // Capture the intended copy and its geometry together; poll only the copy,
-    // so a wrapped ready subtitle still fails the geometry assertions below.
-    let g = await measure();
-    await expect.poll(async () => { g = await measure(); return g.ready; }).toBe(true);
-    expect(g.colWidth).toBeLessThanOrEqual(540);
-    expect(g.lines).toBe(1);
-    expect(g.scroll).toBeLessThanOrEqual(g.client);
-    expect(g.right).toBeLessThanOrEqual(g.colRight + 0.5);
   });
 });
 

@@ -96,6 +96,32 @@ export function esc(s: string): string {
 
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+/**
+ * Stands in for a value still on its way, at the height of the line it stands
+ * for (docs/design.md). The look lives in the one `.skel` class. Its container
+ * says aria-busy while one shows; the block itself is hidden from assistive tech.
+ */
+export const Skel = ({ w = "8em" }: { w?: string }) => <span className="skel" data-skel="" aria-hidden="true" style={{ width: w }} />;
+
+/** Line widths of the placeholder turns: a short question, a reply a few lines long. */
+const TURN_SKEL = [["38%"], ["94%", "88%", "62%"], ["26%"], ["90%", "71%"]] as const;
+
+/**
+ * A conversation whose turns are still being read: turn-shaped placeholders
+ * at the text's line height, a question on the right and a reply under it,
+ * since how many turns and how long is the data's (docs/design.md). The
+ * timeline around it says aria-busy.
+ */
+export const TurnSkel = () => (
+  <div className="tl-skel" data-skel="" aria-hidden="true" data-thread-loading="" data-flicker-box="thread-loading">
+    {TURN_SKEL.map((lines, i) => (
+      <div key={i} className={i % 2 === 0 ? "tl-skel-u" : "tl-skel-a"}>
+        {lines.map((w, j) => <span key={j} className="skel" style={{ width: w }} />)}
+      </div>
+    ))}
+  </div>
+);
+
 /** The verdict label: a dot and the words in the verdict color (F35). */
 export function VLabel({ v, cls = "vl", hidden }: { v: Verdict; cls?: string; hidden?: boolean }) {
   return (

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { call, updateSettings } from "./session.ts";
 import { getState, NA, setState, useStore } from "./store.ts";
-import { COMPUTER_ONLY, Grp, Row } from "./settings-ui.tsx";
+import { COMPUTER_ONLY, Grp, Row, Skel } from "./settings-ui.tsx";
+
+const TIP = "Your local whisper.cpp transcribes audio into a draft you review before sending. Gates Local keeps no recording and never starts or stops this service.";
 
 function begin() {
   setState((s) => ({ voiceConnectionVersion: s.voiceConnectionVersion + 1 }));
@@ -18,7 +20,11 @@ export function VoiceSettings() {
   const attempt = useRef(0);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
   useEffect(() => () => { attempt.current++; }, []);
-  if (!settings || settings === NA) return null;
+  if (settings === NA) return null;
+  // Settings arrive before Settings can open on a healthy start; the card keeps its shape when they do not.
+  if (settings === undefined) return <Grp title="Voice to text" busy>
+    <Row label="Speech server" tip={TIP} desc={<Skel w="22em" />}><Skel w="18em" /></Row>
+  </Grp>;
   const connect = async () => {
     const current = ++attempt.current;
     const version = begin();
@@ -40,8 +46,8 @@ export function VoiceSettings() {
     const error = await updateSettings({ whisperUrl: null }, { voiceActionStarted: true });
     if (attempt.current === current && getState().voiceConnectionVersion === version) fail(error);
   };
-  return <Grp title="Voice to text" desc="Your local whisper.cpp transcribes audio. Gates Local keeps no recording. Review the draft before sending.">
-    <Row label="Speech server" desc={settings.whisperUrl ? "Connected for dictation. Gates Local never starts or stops this service." : locked ? `Off. ${COMPUTER_ONLY}` : "Off. Connect your running local server to use the microphone."} err={err}>
+  return <Grp title="Voice to text">
+    <Row label="Speech server" tip={TIP} desc={settings.whisperUrl ? "Connected for dictation. Gates Local keeps no recording." : locked ? `Off. ${COMPUTER_ONLY}` : "Off. Connect your running local server to use the microphone."} err={err}>
       {locked ? null : <>
         <input className="inp" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
         <button type="button" className="btn outline" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>

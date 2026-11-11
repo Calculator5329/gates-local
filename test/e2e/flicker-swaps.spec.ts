@@ -23,6 +23,32 @@ async function mark(locator: Locator, key: string) {
   await locator.evaluate((el, id) => { (el as HTMLElement).dataset["flickerBox"] = id; }, key);
 }
 
+/** Holds every fit.check reply until `release` runs. */
+async function holdFits(page: Page) {
+  const held: Array<() => void> = [];
+  let holding = true;
+  await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
+    const server = ws.connectToServer();
+    const fits = new Set<unknown>();
+    ws.onMessage(message => {
+      const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
+      if (request.method === "fit.check") fits.add(request.id);
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
+      if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
+      else ws.send(message);
+    });
+  });
+  return {
+    held: () => held.length,
+    release: () => { holding = false; for (const deliver of held.splice(0)) deliver(); },
+  };
+}
+/** A Download tab group by the start of its title. */
+const dlGroup = (page: Page, title: string) => page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: new RegExp(`^${title}`) }) });
+
 async function libraryBoxes(page: Page) {
   // Samples and repository imports have their own groups above these lists.
   // Keep box identities attached to manual-source controls after navigation.
@@ -247,37 +273,63 @@ for (const width of [1440, 360]) {
       await expect(verdict).toContainText("Should run slower");
     });
 
-    test("Download groups late fit replies before any download action", async ({ page, open }) => {
-      const held: Array<() => void> = [];
-      let holding = true;
-      await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
-        const server = ws.connectToServer();
-        const fits = new Set<unknown>();
-        ws.onMessage(message => {
-          const request = JSON.parse(String(message)) as { method?: unknown; id?: unknown };
-          if (request.method === "fit.check") fits.add(request.id);
-          server.send(message);
-        });
-        server.onMessage(message => {
-          const response = JSON.parse(String(message)) as { type?: unknown; id?: unknown };
-          if (response.type === "response" && fits.delete(response.id) && holding) held.push(() => ws.send(message));
-          else ws.send(message);
-        });
-      });
+    test("Download groups the fit replies that land within a second, on placeholders until then", async ({ page, open }) => {
+      // the page's clock stands still from the tab's opening, so "within a second" is the
+      // page's second, not the test machine's: the replies land, then the second passes
+      const fits = await holdFits(page);
+      await page.clock.install();
+      await open();
+      await waitReady(page);
+      await section(page, "Models", true);
+      // the clock still runs until it pauses: aim far enough ahead that the pause is not in its past;
+      // the Download tab has not opened, so its one-second bound has not started
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 500));
+      await page.getByRole("tab", { name: /Download/ }).click();
+      const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
+      await expect.poll(fits.held).toBeGreaterThan(0);
+      // nothing answered yet: no row claims a group
+      await expect(page.locator('.mp .grp-skel[aria-busy="true"] > [data-skel]')).toBeVisible();
+      await expect(row).toHaveCount(0);
+      fits.release();
+      const placed = dlGroup(page, "Recommended").locator('.dlrow[data-cat="qwen3.5:4b"]');
+      await expect(placed, "an answer inside the bound places the row").toBeVisible();
+      await page.clock.runFor(1000);
+      await expect(placed, "the bound passing moves nothing").toBeVisible();
+      await expect(row.locator(".vl")).toBeVisible();
+    });
+
+    test("Download groups after a second without fit replies, and a late reply moves nothing until the next visit", async ({ page, open }) => {
+      const fits = await holdFits(page);
       await open();
       await waitReady(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
-      const selector = '.dlrow[data-cat="qwen3.5:4b"]';
-      const row = page.locator(selector);
-      await expect(row).toBeVisible();
+      const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
+      await expect.poll(fits.held).toBeGreaterThan(0);
+      // the top of "Something else", and whether the groups' placeholder is up, read in one frame
+      const below = () => page.evaluate(() => {
+        const grp = [...document.querySelectorAll(".mp .grp")].find(g => g.querySelector(".grp-t")?.textContent?.startsWith("Something else"));
+        return { held: document.querySelector(".mp .grp-skel") !== null, top: grp?.getBoundingClientRect().top };
+      });
+      let before: { held: boolean; top: number | undefined } = { held: false, top: undefined };
+      await expect.poll(async () => { before = await below(); return before.held && before.top !== undefined; }, "read on the placeholder").toBe(true);
+      // at the bound a row with no answer is not recommended
+      await expect(dlGroup(page, "Also available").locator('.dlrow[data-cat="qwen3.5:4b"]')).toBeVisible();
+      const after = await below();
+      expect(after.held).toBe(false);
+      test.info().annotations.push({ type: "something-else-top", description: `placeholder ${before.top}, groups ${after.top}` });
+      console.log(`something-else-top placeholder=${before.top} groups=${after.top}`);
+      // within a pixel: sub-pixel line boxes round differently between a placeholder bar and a word
+      expect(Math.abs((after.top ?? 0) - (before.top ?? 0)), "Something else stays where the placeholder put it").toBeLessThanOrEqual(1);
       await expect(row.locator(".vl")).toHaveCount(0);
-      await expect.poll(() => held.length).toBeGreaterThan(0);
-      holding = false;
-      for (const deliver of held.splice(0)) deliver();
+      const box = await row.boundingBox();
+      fits.release();
       await expect(row.locator(".vl")).toBeVisible();
-      const recommended = page.locator(".mp .grp").filter({ has: page.locator(".grp-t", { hasText: /^Recommended$/ }) });
-      await expect(recommended.locator(selector), "late fit replies must update grouping before any download action").toBeVisible();
+      await expect(dlGroup(page, "Also available").locator('.dlrow[data-cat="qwen3.5:4b"]'), "a late reply that fits does not move the row").toBeVisible();
+      expect(await row.boundingBox(), "the row stays where it is").toEqual(box);
+      await page.getByRole("tab", { name: /Installed/ }).click();
+      await page.getByRole("tab", { name: /Download/ }).click();
+      await expect(dlGroup(page, "Recommended").locator('.dlrow[data-cat="qwen3.5:4b"]'), "a new visit groups by the answers in hand").toBeVisible();
     });
 
     test("download progress replaces an equal-sized model row", async ({ page, open }) => {
@@ -620,7 +672,8 @@ for (const delay of [0, 150, 600]) {
     await waitReady(page);
     await expect(page.locator(".turn").first()).toBeVisible();
     const frames = await burst(page, `r2-thread-open-${delay}`, ".stage", () => page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click());
-    const empty = frames.filter((f) => !Object.keys(f.boxes).some((key) => key.startsWith("turn ")) && !f.text.includes("Loading conversation…"));
+    // turns, or the turn-shaped placeholder that stands in for them while they are read
+    const empty = frames.filter((f) => !Object.keys(f.boxes).some((key) => key.startsWith("turn ") || key === "thread-loading"));
     console.log(`STATE_SWAP thread-open-${delay} ${JSON.stringify({ frames: frames.length, unexplainedEmptyFrames: empty.length })}`);
     expect(empty, "a real thread load needs a visible explanation rather than an empty conversation").toHaveLength(0);
     await expect(page.locator(".hdr")).toContainText("Fix the backup cron");

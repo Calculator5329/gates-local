@@ -16,7 +16,8 @@ import { createSettings } from "./session/settings.ts";
 import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
 import { createFit, staleFitReports, staleFitStatus } from "./session/fit.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
-import { applyTextSize, applyTheme, serverUrl, webServerUrl } from "./session/platform.ts";
+import { applyTextSize, applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
+import { createSettingsReads } from "./session/settings-reads.ts";
 import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./session/navigation.ts";
 import { createUpdates } from "./session/updates.ts";
 import { speedsChanged, speedsRead } from "./session/speed.ts";
@@ -42,6 +43,7 @@ const connection = createConnection({ applyServerEvent,
 });
 export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
+export const settingsReads = createSettingsReads({ readImports: () => libraryRequest("sources.imports", {}), readFolder: dataFolder });
 const updatesSession = createUpdates({ applyServerEvent, act });
 export const { checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart } = updatesSession;
 const { updateOrder } = updatesSession;
@@ -117,11 +119,13 @@ async function hydrate(c: Client): Promise<void> {
       void loadImagePresets();
     }
   }));
+  settingsReads.begin();
   try {
     await hydrateWith(on, release, c.negotiate);
   } finally {
     settingsSession.releasePresentation();
     release("none");
+    settingsReads.end();
   }
 }
 
@@ -207,6 +211,7 @@ async function hydrateWith(
   ]);
   applyServerEvent((s) => ({ gpu, sources, imageStatus, ...(presetsOrder.current(presetsTicket) ? { imagePresets } : {}), ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
   release("none");
+  void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
   // Read after the release: a GPU push held behind gpu.status is the newer answer.
   settingsSession.seedThinking();
@@ -239,6 +244,7 @@ export function loadImagePresets(): Promise<void> {
 
 const navigation = createNavigation({
   flushQueued, catchUp, chooseModel, loadThread, loading,
+  settingsData: () => settingsReads.ready(),
   // usageSession is made below; this runs only on a navigation, long after
   dropPendingPanel: () => usageSession.dropPendingOpen(),
   newChatModel: (s) => decided(pickChoice(s.models, s.model, s.chosen)),

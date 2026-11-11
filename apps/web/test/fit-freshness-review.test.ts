@@ -6,16 +6,37 @@ import { methodSamples } from "@gates-local/contracts/testing";
 import type { State } from "../src/store.ts";
 import { type Browser, installBrowser, tick, until } from "./harness.ts";
 
-const effects = vi.hoisted(() => ({ index: 0, deps: new Map<number, readonly unknown[]>(), pending: [] as (() => void)[] }));
-vi.mock("react", async original => ({
-  ...await original<typeof import("react")>(),
-  useEffect: (run: () => void, deps: readonly unknown[]) => {
-    const index = effects.index++;
-    const old = effects.deps.get(index);
-    if (!old || deps.some((value, i) => !Object.is(value, old[i]))) effects.pending.push(run);
-    effects.deps.set(index, deps);
-  },
-}));
+// With `mounted` set, useState and useRef keep their values from one render to
+// the next, by call order, as a mounted component's do.
+const effects = vi.hoisted(() => {
+  const hooks = {
+    index: 0, deps: new Map<number, readonly unknown[]>(), pending: [] as (() => void)[], mounted: false, slot: 0, slots: new Map<number, { current: unknown }>(),
+    take: (init: () => unknown): { current: unknown } => {
+      const i = hooks.slot++;
+      if (!hooks.slots.has(i)) hooks.slots.set(i, { current: init() });
+      return hooks.slots.get(i)!;
+    },
+  };
+  return hooks;
+});
+vi.mock("react", async original => {
+  const react = await original<typeof import("react")>();
+  return {
+    ...react,
+    useEffect: (run: () => void, deps: readonly unknown[]) => {
+      const index = effects.index++;
+      const old = effects.deps.get(index);
+      if (!old || deps.some((value, i) => !Object.is(value, old[i]))) effects.pending.push(run);
+      effects.deps.set(index, deps);
+    },
+    useRef: (init: unknown) => effects.mounted ? effects.take(() => init) : react.useRef(init),
+    useState: (init: unknown) => {
+      if (!effects.mounted) return react.useState(init);
+      const s = effects.take(() => typeof init === "function" ? (init as () => unknown)() : init);
+      return [s.current, (v: unknown) => { s.current = typeof v === "function" ? (v as (x: unknown) => unknown)(s.current) : v; }];
+    },
+  };
+});
 vi.mock("../src/store.ts", async original => {
   const actual = await original<typeof import("../src/store.ts")>();
   return { ...actual, useStore: <T>(select: (state: State) => T) => select(actual.getState()) };
@@ -31,7 +52,7 @@ const model = report.model;
 const installed = { ...methodSamples["models.list"].result[0]!, name: model, capabilities: ["completion" as const], maxContext: 65536 };
 const entry = { name: model, label: "Test model", purpose: "Chat", recommended: true, installed: false, downloadBytes: 100, fit: { ...report, verdict: "fits" as const } };
 const render = (view: string) => {
-  effects.index = 0;
+  effects.index = 0; effects.slot = 0;
   const html = renderToStaticMarkup(createElement(views[view]!));
   for (const run of effects.pending.splice(0)) run();
   return html.replaceAll("&#x27;", "'");
@@ -39,7 +60,7 @@ const render = (view: string) => {
 beforeEach(async () => {
   b = installBrowser();
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  effects.deps.clear(); effects.pending = [];
+  effects.deps.clear(); effects.pending = []; effects.mounted = false; effects.slots.clear();
   vi.resetModules();
   session = await import("../src/session.ts");
   store = await import("../src/store.ts");
@@ -133,20 +154,30 @@ it("SR-02: Settings refreshes the displayed requested 16k key for an 8k-capped m
 
 for (const have of [false, true]) {
   it(`SR-03: first run uses the refreshed refusal instead of ${have ? "the installed pick" : "the catalog promise"}`, async () => {
+    // one mounted screen, so what it held from the earlier answer is still there
+    effects.mounted = true;
     store.setState({ models: have ? [{ ...installed, pick: { verdict: "fits", numCtx: 16384 } }] : [], model: have ? model : undefined });
     render("first");
     await tick();
+    render("first");
+    const settled = render("first");
+    expect(settled, "the screen is past its loading placeholders").not.toContain("fr-skel");
+    expect(settled).toContain(have ? "Ready to chat" : "Download your first model");
+    expect(settled).toContain("Runs on GPU");
     b.server.answer("fit.check", ({ model: tag, numCtx }) => ({ ...report, model: tag, numCtx, verdict: "refuse", freeVramBytes: 0, shortfallBytes: report.needVramBytes }));
     const calls = b.server.calls("fit.check").length;
     b.server.push("gpu.changed", { ...methodSamples["gpu.status"].result, freeBytes: 0 });
     const pending = render("first");
-    expect(pending).not.toContain("Your best GPU fit is ready");
-    expect(pending).not.toContain("This one runs on your GPU");
+    // memory changed: the old answer is withdrawn while the new one is measured
+    expect(pending).not.toContain("fr-skel");
+    expect(pending).not.toContain("Ready to chat");
+    expect(pending).not.toContain("Runs on GPU");
+    expect(pending).toContain("Rechecking…");
     await tick();
     expect(b.server.calls("fit.check").length, "uninstalled recommendations also refresh").toBeGreaterThan(calls);
     const html = render("first");
-    expect(html).not.toContain("Your best GPU fit is ready");
-    expect(html).not.toContain("This one runs on your GPU");
+    expect(html).not.toContain("Ready to chat");
+    expect(html).not.toContain("Runs on GPU");
     expect(html).toContain(have ? "doesn't fit at 16k" : "Not enough memory");
   });
 }

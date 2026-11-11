@@ -97,7 +97,9 @@ describe("the Updates group", () => {
     expect(html).toContain("abc1234");
     expect(text(html)).toContain("A commit from");
     expect(text(html)).toContain("Check for updates");
-    expect(text(html)).toContain("15 seconds after startup, then hourly");
+    // The row says what it sends; the schedule's detail is in its label's tooltip.
+    expect(text(html)).toContain("git remote hourly");
+    expect(html).toContain("15 seconds after startup, then hourly");
     expect(html).toContain('aria-label="Check for updates automatically"');
     expect(html).toContain('aria-checked="true"');
     expect(text(html)).toContain("Get every change, not only releases");
@@ -117,7 +119,11 @@ describe("the Updates group", () => {
     const na = text(view({ status: "na" }));
     expect(na).toContain("To update, run pnpm run app-update in the Gates Local folder.");
     expect(na).not.toContain("Check for updates");
-    expect(text(view({ status: undefined }))).toContain("Reading the version.");
+    // Before the version arrives: the same row with a placeholder, no stand-in words to flash (docs/design.md).
+    const before = view({ status: undefined });
+    expect(before).toContain('aria-busy="true"');
+    expect(before).toContain("data-skel");
+    expect(text(before)).toContain("Version");
   });
 
   it("shows checking while the check runs", () => {

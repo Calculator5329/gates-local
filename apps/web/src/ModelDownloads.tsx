@@ -7,6 +7,7 @@ import type { CatalogEntry, FitReport, PullProgress } from "@gates-local/contrac
 import { shortGpu } from "./FitPanel.tsx";
 import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
+import { MakerMark } from "./MakerMark.tsx";
 import { fitPendingWord, fitReading } from "./fit-state.ts";
 import { nameOf, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
@@ -14,7 +15,7 @@ import { type ActionResult, cancelPull, ensureFit, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
 import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
 import { NA, type State, fitKey, getState, useStore } from "./store.ts";
-import { VLabel, closeTip, esc } from "./ui.tsx";
+import { Skel, VLabel, closeTip, esc } from "./ui.tsx";
 
 function Progress({ p, name }: { p: PullProgress; name: string }) {
   const pct = p.totalBytes ? Math.round((p.completedBytes / p.totalBytes) * 100) : 0;
@@ -84,6 +85,7 @@ export function DownloadingRow({ p }: { p: PullProgress }) {
     <div className="mp-row mp-dling" data-pull={p.name}>
       <div className="mp-nm" data-tip={`${esc(p.name)}${n.purpose ? `<br>${esc(n.purpose)}` : ""}<br>${err ? `${esc(err)}<br>` : ""}${esc(etaText(p))}`}>
         <div className="mp-l1">
+          <MakerMark tag={p.name} />
           {n.id ? <span className="mp-tag"><span className="mp-h">{head}</span>{tail ? <span className="mp-t">{tail}</span> : null}</span> : <span className="mp-nmn">{n.text}</span>}
         </div>
         {n.purpose ? <div className="mp-p">{detail}</div> : n.id === undefined ? null : <div className="mp-p"><PathText path={n.id} shown={shortTag(n.id)} /></div>}
@@ -146,6 +148,7 @@ function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number
   );
   return (
     <div className="dlrow" data-cat={c.name}>
+      <MakerMark tag={c.name} />
       <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>`}>
         <b>{c.label}</b>
         <span className="d">{c.purpose}</span>
@@ -153,15 +156,16 @@ function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number
           <span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? (dling ? etaText(p) : `${gb(c.downloadBytes)} download`)}</span>
         </div>
       </div>
+      {/* A fit check is long by nature: the slot keeps its box while its words change (docs/design.md). */}
       {v ? (
-        <div className="dl-v" data-tip={cpu ? `${basis} ${gb(v.need)} at ${k(context)}, all in system memory (no supported GPU). ${note}` : `${basis} ${gb(v.need)} at ${k(context)}, of ${gb(v.avail)} available on the GPU. ${note}`}>
+        <div className="dl-v" data-wait="" data-tip={cpu ? `${basis} ${gb(v.need)} at ${k(context)}, all in system memory (no supported GPU). ${note}` : `${basis} ${gb(v.need)} at ${k(context)}, of ${gb(v.avail)} available on the GPU. ${note}`}>
           <VLabel v={v} />
           <small>
             {v.measured ? "measured" : "est."} {gb(v.need)} at {k(context)}
           </small>
         </div>
       ) : (
-        <div className="dl-v"><small>{fitPendingWord(phase, report !== undefined)} at {k(numCtx)}</small></div>
+        <div className="dl-v" data-wait=""><small>{fitPendingWord(phase, report !== undefined)} at {k(numCtx)}</small></div>
       )}
       <div className="dl-a">{action}</div>
       {dling ? <Progress p={p} name={c.label} /> : null}
@@ -176,14 +180,9 @@ function CustomPull({ actions }: { actions: DownloadActions }) {
       err={actions.error(name)}
       label="Any model from the Ollama library"
       desc={
-        <>
-          Type its name as it appears in the library.
-          <span className="d" style={{ display: "block" }}>
-            <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
-              Browse the Ollama library ↗
-            </a>
-          </span>
-        </>
+        <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
+          Browse the Ollama library ↗
+        </a>
       }
     >
       <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -205,6 +204,36 @@ function CustomPull({ actions }: { actions: DownloadActions }) {
 const installation = (s: State, key: string) => (s.models ?? []).find(m => downloadKey(m.name) === key) ??
   (s.catalog !== NA && s.catalog?.some(c => c.installed && downloadKey(c.name) === key) ? true : undefined);
 
+/**
+ * While the groups wait for fit answers: one placeholder over the place both
+ * groups will take, split as the server recommends, with rows shaped like
+ * DlRow, so the groups land inside it and what is below stays put.
+ */
+function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
+  const sizes = [first, rows - first].filter(n => n > 0);
+  return (
+    <div className="grp-skel" aria-busy="true">
+      <div data-skel="" aria-hidden="true">
+        {sizes.map((n, g) => (
+          <div className="grp" key={g}>
+            <div className="grp-h"><div className="grp-l"><div className="grp-t"><Skel w={g === 0 ? "7em" : "8em"} /></div></div></div>
+            <div className="box">
+              {Array.from({ length: n }, (_, i) => (
+                <div className="dlrow" key={i}>
+                  <span className="maker-mark" />
+                  <div className="sl"><b><Skel w="8em" /></b><span className="d"><Skel w="12em" /></span><div className="prog-l dl-status"><Skel w="7em" /></div></div>
+                  <div className="dl-v"><small><Skel w="8em" /></small></div>
+                  <div className="dl-a"><Skel w="88px" /></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** The Download tab. */
 export function DownloadTab() {
   const [attempts, setAttempts] = useState<Record<string, { error: ActionResult | undefined; pulls: State["pulls"]; installed: ReturnType<typeof installation>; start: boolean }>>({});
@@ -223,7 +252,6 @@ export function DownloadTab() {
   const numCtx = useStore((s) => s.numCtx);
   const gpu = useStore((s) => s.gpu);
   const fits = useStore((s) => s.fits);
-  const fitStatus = useStore(s => s.fitStatus);
   const gpuName = gpu === NA || gpu === undefined || gpu.vendor !== "nvidia" ? "computer" : shortGpu(gpu.name);
   const list = catalog === NA || catalog === undefined ? [] : catalog;
   // Only a changed installation or successful progress confirms a start.
@@ -245,11 +273,9 @@ export function DownloadTab() {
   const actions: DownloadActions = {
     start: name => {
       const tag = list.find(c => downloadKey(c.name) === downloadKey(name))?.name ?? name.trim();
-      freezeGroups();
       return run(tag, pull(tag), true);
     },
     cancel: name => {
-      freezeGroups();
       void run(name, cancelPull(name));
     },
     error: name => {
@@ -261,27 +287,44 @@ export function DownloadTab() {
     const r = fits[fitKey(c.name, numCtx)];
     return r === "error" ? undefined : r ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
   };
-  const phase = (c: CatalogEntry) => fitReading({ fits, fitStatus, catalog }, c.name, numCtx).phase;
   useEffect(() => {
     for (const c of list) ensureFit(c.name, numCtx);
   }, [catalog, numCtx, fits]);
-  const group = () => {
-    const rec = list.filter(c => phase(c) === "fresh" && c.recommended && (report(c)?.verdict === "fits" || (noGpu(gpu) && report(c)?.verdict === "spills")));
-    const more = list.filter(c => !rec.includes(c));
-    return {
-      context: numCtx,
-      recommended: rec.map(c => c.name),
-      other: more.map(c => c.name),
-      allSpill: more.length > 0 && more.every(c => phase(c) === "fresh" && report(c)?.verdict === "spills"),
-    };
+  const fitStatus = useStore(s => s.fitStatus), staleFits = useStore(s => s.staleFits);
+  // What this context has answered for a row: a report that is not waiting on
+  // changed memory (the catalog's own estimate counts when it was made at this
+  // context), "none" when the check failed, undefined while nothing has.
+  const answer = (c: CatalogEntry): FitReport | "none" | undefined => {
+    const key = fitKey(c.name, numCtx), raw = fits[key], phase = fitStatus?.[key];
+    if (raw === "error" || phase === "error") return "none";
+    if (phase === "stale" || staleFits?.[key]) return undefined;
+    return raw ?? (c.fit?.numCtx === numCtx ? c.fit : undefined);
   };
-  // Initial fit replies may regroup rows until the first Download or Cancel.
-  // Freeze the displayed groups before that action publishes any state change.
-  // A new visit or context resets the hold; row details always stay live.
+  const verdict = (c: CatalogEntry) => { const a = answer(c); return a === "none" ? undefined : a?.verdict; };
+  // Grouped once per visit and context, when every row has an answer at this
+  // context or a second has passed (a row with none is then not recommended).
+  // After that only one move happens: a row whose verdict becomes "does not
+  // fit" leaves Recommended for the rest of the visit (docs/design.md). Each
+  // row's verdict stays live.
+  const group = () => {
+    const rec = list.filter(c => c.recommended && (verdict(c) === "fits" || (noGpu(gpu) && verdict(c) === "spills")));
+    const more = list.filter(c => !rec.includes(c));
+    return { context: numCtx, recommended: rec.map(c => c.name), other: more.map(c => c.name) };
+  };
   const [savedGroups, setGroups] = useState<ReturnType<typeof group>>();
-  const groups = savedGroups?.context === numCtx ? savedGroups : group();
-  if (savedGroups && savedGroups.context !== numCtx) setGroups(undefined);
-  const freezeGroups = () => setGroups(current => current?.context === numCtx ? current : groups);
+  const [waited, setWaited] = useState<number>();
+  const settled = list.every(c => answer(c) !== undefined);
+  useEffect(() => {
+    if (settled || list.length === 0) return;
+    const t = setTimeout(() => setWaited(numCtx), 1000);
+    return () => clearTimeout(t);
+  }, [settled, numCtx, list.length]);
+  const saved = savedGroups?.context === numCtx ? savedGroups : group();
+  const fresh = saved !== savedGroups;
+  const holding = fresh && list.length > 0 && !settled && waited !== numCtx;
+  const refused = saved.recommended.filter(name => { const c = list.find(e => e.name === name); return c !== undefined && verdict(c) === "refuse"; });
+  const groups = refused.length === 0 ? saved : { ...saved, recommended: saved.recommended.filter(n => !refused.includes(n)), other: [...refused, ...saved.other] };
+  if (list.length > 0 && !holding && (fresh || groups !== saved)) setGroups(groups);
   const entries = new Map(list.map(c => [c.name, c]));
   const rows = (names: string[]) => names.flatMap(name => {
     const entry = entries.get(name);
@@ -289,25 +332,33 @@ export function DownloadTab() {
   });
   const known = new Set([...groups.recommended, ...groups.other]);
   const rec = rows(groups.recommended);
+  // Recommended had a place this visit (the placeholder drew its header, or it showed):
+  // once empty it keeps that header's height, hidden, so what is below stays put
+  const [slot, setSlot] = useState<number>();
+  const drewTwo = holding && list.some(c => c.recommended) && list.some(c => !c.recommended);
+  if ((drewTwo || (!holding && rec.length > 0)) && slot !== numCtx) setSlot(numCtx);
+  const keep = !holding && rec.length === 0 && slot === numCtx;
   // A newly discovered model appears at the end without moving existing rows.
   const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name))];
-  const allSpill = groups.allSpill;
+  // the title is worked out from the rows' live verdicts: its words change in place, the rows stay
+  const allSpill = more.length > 0 && more.every(c => verdict(c) === "spills");
   return (
     <>
-      <p className="mp-quiet">
-        Picked for your {gpuName}. Memory at your current context, {k(numCtx)}.
-      </p>
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
       ) : null}
-      {rec.length > 0 ? (
-        <Grp title="Recommended">
+      {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} /> : null}
+      {keep ? (
+        <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div className="grp-l"><div className="grp-t">{" "}</div></div></div></div>
+      ) : null}
+      {!holding && rec.length > 0 ? (
+        <Grp title="Recommended" tip={`Picked for your ${gpuName}. Memory is shown at your current context, ${k(numCtx)}.`}>
           {rec.map((c) => (
             <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
-      {more.length > 0 ? (
+      {!holding && more.length > 0 ? (
         <Grp title={allSpill ? "Also available · uses system memory" : "Also available"}>
           {more.map((c) => (
             <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />

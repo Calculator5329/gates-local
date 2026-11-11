@@ -382,7 +382,9 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
       const lefts = await page.locator(".fr-m > *").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
       expect(new Set(lefts).size, "the card is one left-aligned column").toBe(1);
       await expect(page.locator(".fr-m .rec"), "no separator left leading its own line").toHaveText("Recommended", { useInnerText: true });
-      await expect(page.locator(".fr-foot")).toContainText("Runs on your computer. Nothing leaves your own network.");
+      // said once, under the new-chat heading, not on first run
+      await expect(page.locator(".fr-foot")).toHaveCount(0);
+      await expect(page.locator(".fr")).not.toContainText("Nothing leaves your own network");
     });
   });
 }

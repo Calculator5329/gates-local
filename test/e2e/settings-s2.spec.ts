@@ -377,7 +377,7 @@ test("a Library folder shows its path on one line, with nothing that looks like 
   const [box, style] = await line.evaluate((el) => [el.getBoundingClientRect().height, parseFloat(getComputedStyle(el).lineHeight)] as const);
   expect(box).toBeLessThan(style * 1.5);
   await expect(page.locator(".grp", { hasText: "Files and folders" })).toContainText("The model always sees the latest version.");
-  await expect(page.locator(".grp", { hasText: "SQLite databases" })).toContainText("Later changes show up after you refresh it.");
+  await expect(page.locator(".grp", { hasText: "SQLite databases" })).toContainText("The model reads a snapshot; refresh it to see later changes.");
 });
 
 test.describe("copying from Runtime", () => {
@@ -516,7 +516,7 @@ test("Image generation teaches before the switch, and says Not connected after i
   const set = page.locator(".set");
   const setup = set.getByRole("link", { name: "How to set up" });
   await expect(setup).toHaveAttribute("href", /github\.com.*image-generation-with-comfyui/);
-  await expect(set).toContainText("Install ComfyUI first");
+  await expect(set).toContainText("A separate free program you install yourself.");
   await page.getByRole("switch", { name: "Generate images" }).click();
   await expect(set.locator(".srow", { hasText: "Not connected" })).toBeVisible();
   await expect(set).not.toContainText("Not found");
@@ -576,8 +576,11 @@ test("the small things line up", async ({ page, open }) => {
   expect(knob).toBe("rgb(255, 255, 255)");
 
   await section(page, "Advanced");
-  await expect(page.locator(".set-h p")).toBeVisible();
+  // a page heading line only where it says what the section is for
+  await expect(page.locator(".set-h p")).toHaveCount(0);
   await expect(page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).locator("use")).toHaveAttribute("href", "#i-sliders");
   await section(page, "Shortcuts");
-  await expect(page.locator(".set-h p")).toContainText("fixed for now");
+  await expect(page.locator(".set-h p")).toHaveCount(0);
+  await section(page, "Library");
+  await expect(page.locator(".set-h p")).toBeVisible();
 });

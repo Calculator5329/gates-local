@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-11: Every screen is whole on its first frame
+
+- Settings opens with its data already read (at most a second later), so no
+  card arrives late or pushes another down. Voice and Instructions ship with
+  it. A group is a title and a card; each row's grey line says one new thing,
+  and how a setting works sits in a tooltip on its label.
+- Before the app has read anything it claims nothing: no "Reconnecting"
+  banner, no greyed Send, no word about Ollama on the footer gear. A first
+  read that has not come in two seconds says "Connecting…", once.
+- First run shows once it knows what to say and never goes back to
+  placeholders. A sentence under the title stays only when it is needed to
+  act, and the model card is the name, Recommended and the verdict.
+- Models: maker marks in both tabs, and the fit word waits in a slot of fixed
+  size. The Download tab groups its rows once per visit, after every row has
+  an answer or a second has passed. A model that does not fit never sits
+  under Recommended.
+- A thread opens on turn-shaped placeholders, not a "Loading conversation…"
+  line. Instructions uses the app's own dropdowns, not the browser's.
+- The rules are written down in `docs/design.md`, and a browser check watches
+  each surface frame by frame on a slow link for anything that arrives late,
+  moves, or flashes words.
+
 ## 2026-11-11: Tests that press the buttons
 
 - A test audit broke 50 lines of the app and ran the gates: typecheck, lint

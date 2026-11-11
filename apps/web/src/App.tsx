@@ -5,8 +5,8 @@
 // Global keys follow the design's Escape order: popover, drawer, the
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
-import { useEffect, useLayoutEffect, useRef } from "react";
-import { Banner, type Rt, rtOf } from "./Banner.tsx";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Banner, type Rt, booting, rtOf } from "./Banner.tsx";
 import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
@@ -23,7 +23,7 @@ import { NA, type Section, type State, getState, setState, useStore } from "./st
 import { replaceDraft, useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
-import { PHONE, POP_EL, SheetHead, Tip, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
+import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
 interface Card {
   readonly icon: IconId;
@@ -33,18 +33,49 @@ interface Card {
   readonly img?: boolean;
 }
 
-const hasSources = (s: State) => Array.isArray(s.sources) && s.sources.length > 0;
-const noSources = (s: State) => Array.isArray(s.sources) && s.sources.length === 0;
-const imageGenOf = (s: State) => s.settings !== NA && s.settings?.imageGen === true;
-const imageSetupOf = (s: State) => s.settings !== NA && s.settings !== undefined && !s.settings.imageGen;
+/** Which starter cards and set-up links show: the library's and image generation's, each a card once set up, a link before. */
+interface CardShape { readonly lib: boolean; readonly libLink: boolean; readonly img: boolean; readonly imgLink: boolean }
+
+/** This browser's last known shape, so the first frame has the cards before the reads land (docs/design.md). */
+const SHAPE_KEY = "gates-local:card-shape";
+/** No shape seen yet: a new install has neither set up, so both links. */
+const NEW_SHAPE: CardShape = { lib: false, libLink: true, img: false, imgLink: true };
+
+function savedShape(): CardShape {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null") as Partial<CardShape> | null;
+    return v !== null && typeof v === "object" ? { ...NEW_SHAPE, ...v } : NEW_SHAPE;
+  } catch {
+    return NEW_SHAPE;
+  }
+}
+
+/** The shape from the reads that have landed, the saved one for the rest; `known` once both have. */
+function cardShape(s: State, saved: CardShape): CardShape & { readonly known: boolean } {
+  const lib = s.sources === undefined ? { lib: saved.lib, libLink: saved.libLink } : { lib: Array.isArray(s.sources) && s.sources.length > 0, libLink: Array.isArray(s.sources) && s.sources.length === 0 };
+  const img = s.settings === undefined ? { img: saved.img, imgLink: saved.imgLink } : { img: s.settings !== NA && s.settings.imageGen, imgLink: s.settings !== NA && !s.settings.imageGen };
+  return { ...lib, ...img, known: s.sources !== undefined && s.settings !== undefined };
+}
 
 /** Starter cards under the new-thread composer (F43): inert while chat is blocked. */
 function Cards() {
-  const lib = useStore(hasSources);
-  const libLink = useStore(noSources);
-  const img = useStore(imageGenOf);
-  const imgLink = useStore(imageSetupOf);
+  const [saved] = useState(savedShape);
+  const lib = useStore((s) => cardShape(s, saved).lib);
+  const libLink = useStore((s) => cardShape(s, saved).libLink);
+  const img = useStore((s) => cardShape(s, saved).img);
+  const imgLink = useStore((s) => cardShape(s, saved).imgLink);
+  const known = useStore((s) => cardShape(s, saved).known);
+  useEffect(() => {
+    if (!known) return;
+    try {
+      localStorage.setItem(SHAPE_KEY, JSON.stringify({ lib, libLink, img, imgLink }));
+    } catch {
+      // no storage here: the next start shows the new-install shape until the reads land
+    }
+  }, [known, lib, libLink, img, imgLink]);
+  // dimmed only once a problem is known; before the first read the cards look as they will
   const blocked = useStore((s) => rtOf(s) !== "ready");
+  const dim = useStore((s) => rtOf(s) !== "ready" && !booting(s));
   const phone = useMedia(PHONE);
   const cards: Card[] = [
     { icon: "chat", t: "Explain something", d: "Plain answers, step by step.", q: "Explain how cron decides which programs it can find." },
@@ -57,7 +88,7 @@ function Cards() {
   if (imgLink) links.push(["images", "Set up image generation…"]);
   return (
     <>
-      <div className={`cards${cards.length === 3 ? " c3" : ""}${blocked ? " off" : ""}`} inert={blocked}>
+      <div className={`cards${cards.length === 3 ? " c3" : ""}${dim ? " off" : ""}`} inert={blocked}>
         {cards.map((c) => (
           <button
             key={c.t}
@@ -547,7 +578,7 @@ export function App() {
                     <ErrorBoundary key={threadId} scope="thread">
                     {thread.kind === "ready" ? <thread.value.Timeline threadId={threadId} /> : (
                       <div className="tl" aria-busy={thread.kind === "pending" || undefined}>
-                        {thread.kind === "error" ? <ScreenError /> : <div className="col"><p className="na" role="status" data-thread-loading>Loading conversation…</p></div>}
+                        {thread.kind === "error" ? <ScreenError /> : <div className="col"><TurnSkel /></div>}
                       </div>
                     )}
                     </ErrorBoundary>

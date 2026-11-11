@@ -1,119 +1,130 @@
 /// <reference lib="dom" />
-// Broad diagnostic survey. Purposeful navigation, disclosure and streaming
-// changes are reported for review rather than called flicker by a text diff.
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+// Every surface is whole on its first frame (docs/design.md). Each journey
+// slows the link so every answer, push and code chunk arrives late, watches
+// every animation frame from the action until the page is quiet, and fails on
+// anything that arrives after the surface's first frame, moves, changes its
+// words outside a placeholder, or is still a placeholder at the end. The same
+// watch runs in the desktop app in settings-cards-desktop.spec.ts, where code
+// chunks come through the app's own protocol.
 import type { Page } from "@playwright/test";
-import { CHECKOUT_CACHE } from "./env.ts";
-import { burst, delayedMemory, transitionMetrics } from "./flicker-probe.ts";
+import { type Delay, type WholeFinding, type WholeFrame, type WholeOptions, collectWhole, delayEverything, settled, watchFromLoad, watchWhole, wholeFindings } from "./flicker-probe.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 
-test.skip(!process.env["GL_FLICKER_MEASURE"], "set GL_FLICKER_MEASURE=1 for diagnostic recordings");
+/** Long enough that every loading state shows on a fast machine. */
+const DELAY_MS = 600;
 
-test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
+test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
-for (const delay of [0, 150, 600]) {
-  test(`flicker audit Settings at ${delay} ms`, async ({ page, open }) => {
-    test.setTimeout(240_000);
-    await delayedMemory(page, delay);
-    await open();
-    await waitReady(page);
-    const measure = survey(page, delay);
-    await measure("settings-open", ".set", () => page.keyboard.press("Control+Comma"));
-    const section = async (name: string) => measure(`section-${name}`, ".set", () => page.locator(".snav").getByRole("button", { name, exact: true }).click());
-    await section("General");
-    for (const name of ["Light", "System", "Dark"]) await measure(`theme-${name}`, ".set", () => page.getByRole("group", { name: "Theme" }).getByRole("button", { name, exact: true }).click());
-    for (const name of ["Large", "Small", "Default"]) await measure(`text-${name}`, ".set", () => page.getByRole("group", { name: "Text size" }).getByRole("button", { name, exact: true }).click());
-    const updates = page.getByRole("button", { name: "Check for updates", exact: true });
-    if (await updates.count()) await measure("updates-check", ".set", () => updates.click());
-    const every = page.getByRole("switch", { name: "Get every change, not only releases" });
-    if (await every.count()) for (const name of ["on", "off"]) await measure(`updates-every-${name}`, ".set", () => every.click());
-    await section("Tools");
-    for (const name of ["off", "on"]) await measure(`tools-${name}`, ".set", () => page.getByRole("switch", { name: "Let the model use tools" }).click());
-    await section("Image generation");
-    await measure("images-on", ".set", () => page.getByRole("switch", { name: "Generate images" }).click());
-    // A deliberately unavailable test endpoint, outside every real service port.
-    const address = page.getByRole("textbox", { name: "ComfyUI address" });
-    await measure("image-address", ".set", async () => { await address.fill("http://127.0.0.1:1"); await address.press("Tab"); });
-    await measure("image-test", ".set", () => page.getByRole("button", { name: "Test", exact: true }).click());
-    await measure("images-off", ".set", () => page.getByRole("switch", { name: "Generate images" }).click());
-    await section("Library");
-    const folder = path.join(CHECKOUT_CACHE, "flicker-library");
-    mkdirSync(folder, { recursive: true });
-    await measure("library-add-open", ".set", () => page.getByRole("button", { name: "Add folder…" }).click());
-    await page.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
-    await measure("library-add", ".set", () => page.getByRole("button", { name: "Add", exact: true }).click());
-    await measure("library-menu", ".set", () => page.getByRole("button", { name: "More for flicker-library" }).click());
-    await page.keyboard.press("Escape");
-    await section("Runtime");
-    const change = page.getByRole("button", { name: /Use .*Ollama…/ });
-    if (await change.count()) {
-      await measure("runtime-confirm", ".set", () => change.click());
-      await measure("runtime-cancel", ".set", () => page.getByRole("button", { name: "Cancel", exact: true }).click());
-    }
-    await section("Advanced");
-    await expect(page.locator("#gpuMemory .fp-v:visible")).toBeVisible();
-    await measure("gpu-details", "#gpuMemory", () => page.locator("#gpuMemory summary").click());
-    for (const ctx of [8192, 16384, 32768, 65536]) {
-      await measure(`gpu-pick-${ctx}`, "#gpuMemory", () => page.locator(`#gpuMemory [data-ctx="${ctx}"]`).click());
-    }
-    await page.locator('#gpuMemory [data-ctx="16384"]').click();
-    await measure("reset-open", ".set", () => page.getByRole("button", { name: "Reset…" }).click());
-    await measure("reset-cancel", ".set", () => page.getByRole("button", { name: "Cancel", exact: true }).click());
-    await section("Shortcuts");
-    await section("Models");
-    await expect(page.locator(".mp-row").first()).toBeVisible();
-    await measure("models-download", ".set", () => page.getByRole("tab", { name: /Download/ }).click());
-    await measure("models-installed", ".set", () => page.getByRole("tab", { name: /Installed/ }).click());
-    const filter = page.getByRole("textbox", { name: "Filter installed models" });
-    if (await filter.count()) {
-      await measure("models-filter", ".set", () => filter.fill("gemma"));
-      await filter.fill("");
-    }
-    await measure("default-open", ".set", () => page.getByRole("button", { name: /^Default for new chats:/ }).click());
-    await measure("default-pick", ".set", () => page.getByRole("listbox", { name: "Installed chat models" }).getByRole("option").filter({ hasText: "Gemma" }).click());
-    await measure("models-menu", ".set", () => page.getByRole("button", { name: /^More for / }).first().click());
-  });
-
-  test(`flicker audit chat and popovers at ${delay} ms`, async ({ page, open, seededThread }) => {
-    test.setTimeout(180_000);
-    await delayedMemory(page, delay);
-    await open(`#thread=${seededThread ?? ""}`);
-    await waitReady(page);
-    const measure = survey(page, delay);
-    await measure("picker-open", "#picker", () => page.locator("#modelBtn").click());
-    await measure("picker-search", "#picker", () => page.locator("#pkSearch").fill("gemma"));
-    await measure("picker-search-clear", "#picker", () => page.locator("#pkSearch").fill(""));
-    for (const ctx of [8192, 16384, 32768]) {
-      await measure(`picker-context-${ctx}`, "#picker", () => page.locator(`#picker [data-ctx="${ctx}"]`).click());
-      await expect(page.locator("#picker")).toBeHidden();
-      await measure(`picker-reopen-${ctx}`, "#picker", () => page.locator("#modelBtn").click());
-    }
-    await measure("composer-model-load", ".composer", () => page.locator('#picker .pk-r[data-m="gemma4:12b"]').click());
-    await measure("picker-reopen", "#picker", () => page.locator("#modelBtn").click());
-    await measure("picker-close", "#picker", () => page.keyboard.press("Escape"));
-    await page.locator("#modelBtn").click();
-    await page.locator('#picker .pk-r[data-m="qwen3.5:9b"]').click();
-    for (const [name, opener, target] of [["plus", "#plusBtn", "#plusMenu"], ["options", "#optBtn", "#optsMenu"]] as const) {
-      if (!(await page.locator(opener).isVisible())) continue;
-      await measure(`popover-${name}`, target, () => page.locator(opener).click());
-      await page.keyboard.press("Escape");
-    }
-    await measure("sidebar-thread", ".stage", () => page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click());
-    const row = page.locator(".sb-row").filter({ hasText: "Whisper latency check" });
-    await row.hover();
-    await measure("sidebar-thread-menu", "#threadMenu", () => row.locator(".sb-menu").click());
-    await page.keyboard.press("Escape");
-    await measure("sidebar-context-menu", "#threadMenu", () => row.click({ button: "right" }));
-    await page.keyboard.press("Escape");
-    await measure("new-thread", ".stage", () => page.keyboard.press("Control+n"));
-  });
-}
-
-function survey(page: Page, delay: number) {
-  return async (name: string, selector: string, action: () => Promise<unknown>) => {
-    const frames = await burst(page, `audit-${delay}/${name}`, selector, action);
-    console.log(`FLICKER_AUDIT ${delay} ${name} ${JSON.stringify(transitionMetrics(frames))}`);
-    expect(frames.length, "animation-frame probe is live").toBeGreaterThan(10);
+/** Collect, print and keep each step's findings, so one run lists everything. */
+function recorder() {
+  const all: WholeFinding[] = [];
+  return {
+    all,
+    check(step: string, frames: readonly WholeFrame[]) {
+      const found = wholeFindings(step, frames);
+      const from = frames.findIndex((f) => f.arrived);
+      console.log(`WHOLE ${step}: ${frames.length} frames, first shown at frame ${from}, ${found.length} findings`);
+      for (const f of found) console.log(`WHOLE FINDING ${JSON.stringify(f)}`);
+      all.push(...found);
+    },
   };
 }
+
+async function ready(page: Page, delay: Delay): Promise<void> {
+  await waitReady(page);
+  await settled(delay);
+}
+
+const section = (name: string): WholeOptions => ({ root: ".set", arrive: { selector: ".set-h h1, .mp-head h1", text: name } });
+
+test("every Settings section is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(120_000);
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await ready(page, delay);
+  const r = recorder();
+  r.check("open Settings", await watchWhole(page, section("General"), () => page.keyboard.press("Control+Comma"), delay));
+  const names = (await page.locator(".snav button:not(.back)").allInnerTexts()).map((t) => t.trim()).filter((t) => t !== "" && t !== "General");
+  expect(names, "the sections this journey visits").toContain("Models");
+  for (const name of names) {
+    await settled(delay, 3000);
+    const button = page.locator(".snav").getByRole("button", { name, exact: true });
+    r.check(`first visit to ${name}`, await watchWhole(page, section(name), () => button.click(), delay));
+    if (name === "Models") {
+      await settled(delay, 3000);
+      r.check("Models, Download tab", await watchWhole(page, { root: ".set", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
+      await settled(delay, 3000);
+      r.check("Models, back to Installed", await watchWhole(page, { root: ".set", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByRole("tab", { name: /Installed/ }).click(), delay));
+    }
+  }
+  await settled(delay, 3000);
+  r.check("General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+  expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
+});
+
+test("app start is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(60_000);
+  await watchFromLoad(page, { root: "#app" });
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await waitReady(page);
+  const r = recorder();
+  r.check("app start", await collectWhole(page, delay, 1500, 10_000));
+  expect(r.all, "app start: what arrived late, moved or changed its words").toEqual([]);
+});
+
+test("opening a thread is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(60_000);
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await ready(page, delay);
+  const r = recorder();
+  const title = "Fix the backup cron";
+  r.check("open a thread", await watchWhole(page, { root: ".main", arrive: { selector: ".hdr h2", text: title } }, () => page.locator(".sb-row").filter({ hasText: title }).click(), delay));
+  await settled(delay, 3000);
+  const other = "Whisper latency check";
+  r.check("switch thread", await watchWhole(page, { root: ".main", arrive: { selector: ".hdr h2", text: other } }, () => page.locator(".sb-row").filter({ hasText: other }).click(), delay));
+  expect(r.all, "thread: what arrived late, moved or changed its words").toEqual([]);
+});
+
+test("the model picker is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(60_000);
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await ready(page, delay);
+  const r = recorder();
+  r.check("open the picker", await watchWhole(page, { root: "#picker", arrive: { selector: "#picker.open" } }, () => page.locator("#modelBtn").click(), delay));
+  expect(r.all, "picker: what arrived late, moved or changed its words").toEqual([]);
+});
+
+test("the fit panel is whole on its first frame", async ({ page, open }) => {
+  test.setTimeout(60_000);
+  const delay = await delayEverything(page, DELAY_MS);
+  await open();
+  await ready(page, delay);
+  const r = recorder();
+  // The composer and the picker open memory details through openFit, onto Settings › Advanced.
+  await page.locator("#modelBtn").click();
+  await expect(page.locator("#picker.open")).toBeVisible();
+  await settled(delay, 3000);
+  const big = page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"]');
+  await big.hover();
+  const details = page.locator("#picker").getByRole("button", { name: "Memory details", exact: true });
+  const action = await details.isVisible() ? () => details.click() : async () => { await page.keyboard.press("Escape"); await page.keyboard.press("Control+Comma"); await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click(); };
+  r.check("open the fit panel", await watchWhole(page, { root: ".set", arrive: { selector: ".set-h h1", text: "Advanced" } }, action, delay));
+  expect(r.all, "fit panel: what arrived late, moved or changed its words").toEqual([]);
+});
+
+test.describe("first run", () => {
+  test.use({ skipFirstRun: false, seed: 0 });
+  test("first run is whole on its first frame", async ({ page, open }) => {
+    test.setTimeout(60_000);
+    await watchFromLoad(page, { root: ".first" });
+    const delay = await delayEverything(page, DELAY_MS);
+    await open();
+    await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible({ timeout: 15_000 });
+    const r = recorder();
+    r.check("first run", await collectWhole(page, delay, 1500, 10_000));
+    expect(r.all, "first run: what arrived late, moved or changed its words").toEqual([]);
+  });
+});

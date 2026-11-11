@@ -9,6 +9,30 @@ import { NA, type State, useStore } from "./store.ts";
 
 export type Rt = "ready" | "installing" | "starting" | "missing" | "wrong" | "stopped" | "error" | "offline";
 
+/**
+ * The app's first read since it opened has not landed. Nothing is known yet,
+ * so nothing claims a problem: no banner, no runtime row, no greyed controls,
+ * and what depends on the data holds a placeholder (docs/design.md). A
+ * connection that drops later is "down", never this, and says Reconnecting.
+ * Two seconds without a first read end it, and the connection words show.
+ */
+export function booting(s: Pick<State, "conn" | "runtime" | "hydrationSettled"> & Partial<Pick<State, "bootWaited">>): boolean {
+  return s.runtime === undefined && !s.hydrationSettled && !s.bootWaited && (s.conn.kind === "connecting" || s.conn.kind === "open");
+}
+
+/**
+ * The runtime has not answered once since the app opened, past the boot
+ * bound too. Nothing about Ollama is known, so the words say only that the
+ * app is connecting; the Ollama sentences wait for a real "starting" or
+ * "stopped".
+ */
+export function unread(s: Pick<State, "runtime">): boolean {
+  return s.runtime === undefined;
+}
+
+/** The composer's one word while nothing is read. */
+export const CONNECTING = "Connecting…";
+
 /** settings, when given, lets the words say Gates Local runs its own copy. */
 type RtSource = Pick<State, "conn" | "runtime"> & Partial<Pick<State, "settings">>;
 
@@ -109,8 +133,11 @@ export function Banner() {
   const own = useStore(ownCopyNote);
   // first run tells the runtime story itself; the banner under it stays quiet
   const firstRun = useStore((s) => s.view === "firstrun");
+  const boot = useStore(booting);
+  // nothing read yet: the composer says Connecting, once
+  const none = useStore(unread);
   const port = portOf(baseUrl);
-  if (firstRun) return null;
+  if (firstRun || boot || none) return null;
   switch (rt) {
     case "ready":
       return null;

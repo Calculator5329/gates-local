@@ -30,8 +30,9 @@ The sample database and Git repository are prepared once per backend, while
 application data, import failures and retries still start fresh for every
 journey. Performance and native clipboard tests remain serial.
 
-Set `GL_FLICKER_MEASURE=1` to include the six broad flicker recordings and
-two state-swap surveys. Their probe-liveness checks are diagnostic; ordinary
+`GL_FLICKER_MEASURE=1` adds only the six broad flicker recordings and two
+state-swap surveys in `flicker-swaps.spec.ts`; the audit below always runs
+and asserts. Their probe-liveness checks are diagnostic; ordinary
 journeys retain Library mutation, refresh/error/cancel geometry, restored
 focus and queued-editor geometry. All dedicated zero-Checking-frame,
 zero-layout-shift, tooltip-overlap and native-control hit-target checks stay.
@@ -45,6 +46,33 @@ six minutes including build and teardown. Logs separate backend reset,
 page load, ready and teardown steps; the remainder includes actions,
 framework and browser setup. Explicit diagnostic recordings are excluded
 from journey warnings.
+
+## Whole on the first frame
+
+`flicker-audit.spec.ts` checks the rule in `docs/design.md`: a surface
+shows its full shape on its first frame. It slows every WebSocket answer,
+push and code chunk by 600 ms, does one thing (opens Settings and each
+section, opens a thread, opens the picker or the fit panel, or loads
+first run), and records every animation frame until the page is quiet.
+It fails on anything that arrives after the first frame, moves, blinks,
+is gone, or changes its words, and on a placeholder still there at the
+end. `settings-cards-desktop.spec.ts` runs the same watch in the desktop
+app (needs `--display`).
+
+The probe is `test/e2e/flicker-probe.ts`. Two marks tell it what is
+allowed:
+
+- `data-skel`: a placeholder. It reads as a wildcard, so whatever replaces
+  it is not a changed word, and anything that appears inside its box is
+  not late. It must sit inside an `aria-busy` container and be
+  `aria-hidden`, or the run says "loose placeholder".
+- `data-wait`: a fixed-size slot for a wait that is long by nature (a fit
+  check, a download). Its words may change; its box may not.
+
+A finding names the step, the kind, the element and when, for example
+`late .turn Your message arrived 625 ms and 37 frames after the first
+frame`. Fix the surface, not the probe; widen the probe only when it
+missed something real.
 
 ## Test trim coverage ledger
 

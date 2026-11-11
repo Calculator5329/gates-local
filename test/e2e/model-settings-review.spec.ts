@@ -26,7 +26,7 @@ async function savePrompt(page: Page, text: string) {
   await expect(page.locator(".inst-prompt [role=status]")).toHaveText("Saved");
 }
 async function custom(page: Page, label: string, value: string) {
-  await page.getByRole("combobox", { name: `${label} mode`, exact: true }).selectOption("custom");
+  await page.getByRole("group", { name: `${label} mode`, exact: true }).getByRole("button", { name: "Custom", exact: true }).click();
   await page.getByRole("spinbutton", { name: label, exact: true }).fill(value);
 }
 
