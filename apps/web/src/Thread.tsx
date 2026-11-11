@@ -723,21 +723,30 @@ const LONG_THREAD = 50;
  * thread that is 2% of the rows.
  */
 const FIRST_TURNS = 40;
-/** Turns added per idle slice, or per step while the reader scrolls up: no more than the first commit mounts. */
+/** Turns added per step while the reader scrolls up: no more than the first commit mounts. */
 const SLICE_TURNS = 40;
+/**
+ * Turns added per idle slice after the first. Each slice costs a render of every
+ * mounted row, a layout and a frame that grow with the turns already in, on top
+ * of the new turns themselves: in a 2,000-turn thread on the test machine,
+ * 40-turn slices took 1.2 s to mount the rest, 120-turn slices 0.6 s, each still
+ * about 20 ms. The first idle slice can run before the frame that shows the
+ * opened thread, so it adds SLICE_TURNS, no more than the first commit.
+ */
+const FILL_TURNS = 120;
 
 /** The longest a slice waits for an idle moment before it mounts anyway. */
 const IDLE_WAIT_MS = 100;
-/** Idle time a further slice in the same callback needs: about what mounting 40 turns takes. */
-const SLICE_MS = 16;
+/** Idle time a further slice in the same callback needs: about what mounting FILL_TURNS turns takes. */
+const SLICE_MS = 20;
 
 /**
  * Runs `fn` once the browser is idle, or after IDLE_WAIT_MS at most, with how
  * much of the idle period is left; a 50 ms timer with none left where there is
  * no requestIdleCallback (Safari). On an idle page a callback mounts slices
  * while the deadline has room. On a page that is never idle (a reply
- * streaming), each slice waits the full 100 ms: 2,000 turns are 49 slices, so
- * the thread is fully mounted about 5 s after it opens, plus the time the
+ * streaming), each slice waits the full 100 ms: 2,000 turns are 17 slices, so
+ * the thread is fully mounted about 1.7 s after it opens, plus the time the
  * slices take. A hidden tab runs neither idle callbacks nor these timers on
  * time, so nothing more mounts until the tab is seen again; nobody is reading
  * it meanwhile.
@@ -822,9 +831,9 @@ export function Timeline({ threadId }: { threadId: string }) {
     const view = tl.current;
     anchor.current = top === null || view === null ? null : { el: top, off: top.getBoundingClientRect().top - view.getBoundingClientRect().top };
   }, []);
-  const grow = useCallback(() => {
+  const grow = useCallback((count: number) => {
     if (skipNow.current === 0) return;
-    const key = turnsNow.current[Math.max(0, skipNow.current - SLICE_TURNS)]?.key;
+    const key = turnsNow.current[Math.max(0, skipNow.current - count)]?.key;
     if (key === undefined) return;
     note();
     flushSync(() => setFirst(key));
@@ -853,7 +862,7 @@ export function Timeline({ threadId }: { threadId: string }) {
 
   // the rest of the thread mounts in idle time, so find-in-page and select-all see all of it
   useEffect(() => (first === null || skip === 0 ? undefined : whenIdle((timeLeft) => {
-    do grow(); while (skipNow.current > 0 && timeLeft() > SLICE_MS);
+    do grow(turnsNow.current.length - skipNow.current <= FIRST_TURNS ? SLICE_TURNS : FILL_TURNS); while (skipNow.current > 0 && timeLeft() > SLICE_MS);
   })), [first, skip, grow]);
 
   // a newly opened thread starts at its end
@@ -882,7 +891,7 @@ export function Timeline({ threadId }: { threadId: string }) {
       stick.current = atEnd();
       note();
       // within a screen of the turns not mounted yet: mount them now, not when idle
-      if (el.scrollTop < el.clientHeight) grow();
+      if (el.scrollTop < el.clientHeight) grow(SLICE_TURNS);
     };
     // a disclosure the reader opens or closes stays where it was through its ease: no following, no anchoring shift
     let held: { at: Element; top: number; until: number } | null = null;

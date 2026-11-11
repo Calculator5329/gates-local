@@ -537,6 +537,17 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:d12d9455-b436-59b5-9ad5-d86cc83ba737 --> The owner's calls on the chip: the stop square keeps its seconds whenever the reply has calls (built); a reply that thinks and calls nothing keeps the old thought line, not a bulb-only chip (built).
       *Accept:* the owner picks, or leaves both as built.
 
+*Thread fill, follow-ups:*
+
+- [x] <!-- workspace:id=work:180d1664-abdf-5468-84b9-816cc3c56a56 --> A 2,000-turn thread takes over a second to finish mounting after it opens (cold click 1083 ms on the perf night of 2026-11-11; the owner: anything over 1000 ms is a problem).
+      *Done 2026-11-11:* "A 2,000-turn thread finishes mounting in about half the time"; all four mounted readings under 1000 ms in a same-run compare.
+- [ ] <!-- workspace:id=work:ecb32772-69cd-550b-b556-e4f4a3f445c3 --> The 120-turn idle slice was measured on one machine at full speed. On a much slower one a slice could take long enough to be felt while the reader types or scrolls during the fill.
+      *Accept:* the fill's longest gap between frames and typing during the fill, measured with the CPU slowed four times, for 40 and 120; the slice size follows the reading.
+- [ ] <!-- workspace:id=work:f35a34b1-23cf-51c9-9f27-11adc14eecbf --> The first idle callback can mount a second, 120-turn slice before the frame that shows the thread when the browser gives it more than 20 ms.
+      *Accept:* a reading of the readable time on a machine that gives long idle deadlines, or the first callback stops after its first slice.
+- [ ] <!-- workspace:id=work:b20cbda0-157a-5a5f-8f2e-4b5284aa54e9 --> The fill's timer path (browsers without idle callbacks) has no browser run.
+      *Accept:* the long-thread journey passes with `requestIdleCallback` removed, or the path is dropped for the browsers the app ships in.
+
 ## Next: slices 2 to 4
 
 - [ ] <!-- workspace:id=work:f1f9169a-4f22-5deb-93c4-018289b0be13 --> GPU lease: one app-owned heavy job at a time; chat, image, bench and

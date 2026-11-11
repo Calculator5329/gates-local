@@ -10,9 +10,10 @@ import { expect, test, waitReady } from "./fixtures.ts";
 const TURNS = 2000;
 test.use({ seed: TURNS });
 
-/** Thread.tsx FIRST_TURNS and SLICE_TURNS. */
+/** Thread.tsx FIRST_TURNS, SLICE_TURNS and FILL_TURNS. */
 const FIRST = 40;
 const SLICE = 40;
+const FILL = 120;
 
 interface LongProbe {
   /** Turns in the first commit that mounted any. */
@@ -27,6 +28,8 @@ interface LongProbe {
   /** Largest distance the turn in view moved from its place, sampled after each slice and in the frame after it. */
   drift: number;
   samples: number;
+  /** Times the turn count grew after the scroll: the idle slices that mounted the rest. */
+  steps: number;
 }
 
 declare global {
@@ -38,7 +41,7 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
   // journey checks counts and positions, never speed.
   test.setTimeout(90_000);
   await page.addInitScript(({ total, timeline }) => {
-    const probe: LongProbe = { first: 0, firstAt: 0, fullAt: 0, idleRuns: 0, scroll: null, drift: 0, samples: 0 };
+    const probe: LongProbe = { first: 0, firstAt: 0, fullAt: 0, idleRuns: 0, scroll: null, drift: 0, samples: 0, steps: 0 };
     window.longProbe = probe;
     // Idle callbacks wait until the scroll below has been handled, so no slice can land between the
     // scroll and the app's handler; after that they go to the browser, which runs them at its pace.
@@ -90,9 +93,12 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
       });
       tl.scrollTop = 0;
     };
+    let seen = 0;
     const watch = new MutationObserver(() => {
       const n = count();
       if (n === 0) return;
+      if (watched !== null && n > seen) probe.steps++;
+      seen = n;
       if (probe.first === 0) {
         probe.first = n;
         probe.firstAt = performance.now();
@@ -119,7 +125,7 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
   await expect.poll(() => page.evaluate(() => window.longProbe?.fullAt ?? 0), { message: "the probe saw every turn mount" }).toBeGreaterThan(0);
   const probe = await page.evaluate(() => window.longProbe);
   if (probe === undefined || probe.scroll === null) throw new Error(`the probe did not see the scroll: ${JSON.stringify(probe)}`);
-  console.info(`LONG_THREAD ${JSON.stringify({ firstCommitTurns: probe.first, firstTurnsMs: Math.round(probe.firstAt), fullyMountedMs: Math.round(probe.fullAt), idleRuns: probe.idleRuns, samples: probe.samples, driftPx: probe.drift, scroll: probe.scroll })}`);
+  console.info(`LONG_THREAD ${JSON.stringify({ firstCommitTurns: probe.first, firstTurnsMs: Math.round(probe.firstAt), fullyMountedMs: Math.round(probe.fullAt), idleRuns: probe.idleRuns, samples: probe.samples, steps: probe.steps, driftPx: probe.drift, scroll: probe.scroll })}`);
 
   expect(probe.first, "turns in the first commit").toBeGreaterThan(0);
   expect(probe.first, "turns in the first commit").toBeLessThanOrEqual(FIRST);
@@ -128,6 +134,8 @@ test("a 2,000-message thread opens at its end, keeps the turn in view still, and
   expect(Math.abs(probe.scroll.moved), "the turn at the top stayed there").toBeLessThanOrEqual(1);
   expect(probe.samples, "slices watched during the backfill").toBeGreaterThan(0);
   expect(probe.drift, "the turn in view moved while older turns mounted").toBeLessThanOrEqual(1);
+  // each slice renders every mounted row and lays out the column again, so the rest goes in few large slices
+  expect(probe.steps, "idle slices that mounted the rest").toBeLessThanOrEqual(Math.ceil((TURNS - FIRST - SLICE) / FILL));
   await expect(turns.first()).toContainText("Question 1:");
   await expect(turns.last()).toHaveAttribute("aria-label", /reply/i);
 });

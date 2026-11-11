@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-11: A 2,000-turn thread finishes mounting in about half the time
+
+- After a long thread opens, the turns above the screen mount in idle
+  moments. They now go in 120 at a time instead of 40. On the test
+  machine a 2,000-turn thread is fully mounted in about 0.46 to 0.61 s
+  where it took about 0.98 to 1.08 s, in a same-run compare with the
+  commit before (8 samples each, the compare's scored values: cold
+  click 1076 to 608 ms, warm click 1023 to 558, cold hover 994 to 556,
+  warm hover 977 to 460).
+- The first idle slice is still 40 turns, since it can run before the
+  frame that shows the thread. The time until the thread is readable
+  (about 110 ms) and typing in it (44 ms) did not change.
+- Why slices cost what they do: each one renders, lays out and paints
+  against everything already mounted, so fewer slices is less work in
+  all, not the same work in bigger pieces.
+- The long-thread journey now counts the idle slices and holds them to
+  16 for 2,000 turns. It was seen red with 40-turn slices (35).
+- Not measured: a much slower machine, where one 120-turn slice (20 to
+  30 ms here) could be felt, and the timer path browsers without idle
+  callbacks take.
+
 ## 2026-11-11: A reply's thinking and tool calls fold into one chip
 
 - A reply that calls tools shows one chip: a bulb with the seconds it

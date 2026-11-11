@@ -291,14 +291,15 @@ it("keeps one reduced-motion listener for the module, however many replies were 
 
 it("mounts further slices in one idle callback while its deadline has room", async () => {
   const { Timeline } = await import("../src/Thread.tsx");
-  act(() => store.setState({ messages: { roomy: longThread("roomy", 400) }, turns: {} }));
+  act(() => store.setState({ messages: { roomy: longThread("roomy", 600) }, turns: {} }));
   idle.length = 0;
   act(() => root.render(createElement(Timeline, { threadId: "roomy", key: "roomy" })));
   expect(turns()).toHaveLength(40);
-  // room after the first slice, room after the second, then too little for a fourth
-  idleLeft = [40, 20, 10];
+  // the first slice adds 40, as many as the first commit, and the ones after it 120:
+  // room after the first, room after the second, then too little for a fourth
+  idleLeft = [40, 30, 10];
   act(() => idle.shift()?.());
-  expect(turns()).toHaveLength(160);
+  expect(turns()).toHaveLength(320);
   idleLeft = [];
   idle.length = 0;
 });
