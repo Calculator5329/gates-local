@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-11: Speed comparisons inside a smaller machine
+
+- The speed comparison only measured the app with the whole test machine
+  to itself, so nothing showed how it holds up on fewer cores or little
+  memory. `--limit 2c-2g` on `test/perf/next-compare.ts` now runs an arm's
+  browser, server, fake model service and test driver pinned to two cores
+  with 2 GB and no swap, and records peak memory and memory kills per run
+  (`docs/perf-method.md`).
+- First reading, one build against itself, 4 rounds of 2 on the six-core
+  test machine: inside two cores and 2 GB, cold start to a ready composer
+  went from 273 to 366 ms, send to first visible words from 312 to 474 ms,
+  and starting two replies from 611 to 773 ms. Opening threads and typing
+  in a 2,000-turn thread stayed within noise or a few percent. Peak memory
+  for everything in the box was 1,362 to 1,456 MB, with nothing killed.
+
 ## 2026-11-11: Composer polish: the model picker, Dictate, thoughts, and attaching files
 
 - The model picker opens over the conversation with its right edge on the

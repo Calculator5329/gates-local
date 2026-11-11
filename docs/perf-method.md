@@ -50,6 +50,19 @@ itself. `--throttle N` slows the page's CPU N times; no job has measured whether
 that helps. The job stops starting rounds when the next would pass
 `--budget-seconds` (780 by default), so it ends inside a 15-minute runner limit.
 
+`--limit 2c-2g` runs each arm's journeys in a smaller machine: the browser, the
+server, the fake model service and the test driver are pinned to the first two
+cores and share 2 GB with no swap (`test/perf/limits.ts`; Linux with a user
+systemd). `1c-512m` and the like work the same way, and `2c` pins cores and
+only measures memory. `--limit-base` and `--limit-candidate` set one arm, so
+`--self --limit-candidate 2c-2g` shows what the limit alone costs one build.
+Each run prints its peak memory and how many processes were killed for
+memory, and `scored.json` keeps both. Setup (install, build, fixtures) stays
+outside the limit. Fewer cores are still this machine's cores, so the numbers
+compare with other limited runs here, not with a real two-core laptop. Give a
+limited job a larger `--budget-seconds` and runner timeout; it stops early
+otherwise.
+
 It writes `scored.json` and `scored.md`. `node test/perf/replay-next.ts RESULTS`
 rescores recorded results without a browser and, for a same-build job, prints
 what change each row can see.
