@@ -294,7 +294,8 @@ describe("a database's tables", () => {
     const s = setup();
     const file = path.join(s.root, "wide.db");
     const db = new DatabaseSync(file);
-    db.exec(Array.from({ length: 501 }, (_, i) => `CREATE TABLE t${String(i).padStart(3, "0")} (a);`).join(""));
+    // One transaction: 501 separate commits are 501 waits on the disk, which a busy machine turned into a timeout.
+    db.exec(`BEGIN;${Array.from({ length: 501 }, (_, i) => `CREATE TABLE t${String(i).padStart(3, "0")} (a);`).join("")}COMMIT;`);
     db.close();
     const source = await s.sources.add({ kind: "sqlite", path: file });
     expect(source.tables).toHaveLength(500);

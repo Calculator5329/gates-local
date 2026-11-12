@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-11: Two tests that failed the release check without a product fault
+
+- The release check on a fresh public clone failed in four unit tests.
+  Three were the process-tree tests added the same day: they asked
+  whether a process still takes a signal, and an ended process whose
+  adopting parent never collects it still does. Under the release
+  runner every runner process had ended and the tests said it had not.
+  They now read the process state on Linux as well. Seen red under a
+  parent that never collects, green after, and still red when the
+  runtime stops only the one process instead of its group.
+- The fourth made 501 tables in 501 separate commits and ran out of
+  its 16 s on a busy machine. It makes them in one transaction now:
+  about 2 s to 0.1 s here.
+- No product code changed.
+
 ## 2026-11-11: The Windows installer and the Linux AppImage, checked end to end from one commit
 
 - The unsigned Windows installer was built on Windows and run through its

@@ -286,12 +286,22 @@ describe("wrong service on the port", () => {
   });
 });
 
+/** Whether a process is still running. One that has ended but whose parent has
+ *  not collected it yet still takes a signal, so on Linux its state is read
+ *  too: an orphan adopted by a parent that never collects stays that way. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
+  }
+  try {
+    // "pid (name) state ...": the state letter follows the last ")".
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.charAt(stat.lastIndexOf(")") + 2) !== "Z";
+  } catch {
+    // No /proc here, or the process went between the two reads: the next look settles it.
+    return true;
   }
 }
 
