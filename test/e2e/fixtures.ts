@@ -195,10 +195,30 @@ export async function openGpuMemory(page: Page): Promise<Locator> {
   return gpu;
 }
 
-/** The composer is unblocked: connected, and Ollama answers (a healthy runtime has no sidebar row). */
+/**
+ * The app has its data and the composer is unblocked. Since the first frame
+ * shows the whole app, an unblocked composer alone is true at boot, before
+ * any read; #app[data-ready] is set once this connection's first reads have
+ * settled, loaded or not (session.ts hydrate). It does not cover the open
+ * thread's threads.get, and a failed read sets it too.
+ */
 export async function waitReady(page: Page): Promise<void> {
   await test.step("page ready", async () => {
+  await expect(page.locator("#app[data-ready]")).toBeAttached();
+  await composerOpen(page);
+  });
+}
+
+/**
+ * Only the composer unblocked, true from the first frame. For a spec that
+ * holds the first reads on purpose and acts before they land; anything else
+ * uses waitReady.
+ */
+export async function waitComposer(page: Page): Promise<void> {
+  await test.step("composer ready", () => composerOpen(page));
+}
+
+async function composerOpen(page: Page): Promise<void> {
   await expect(page.locator(".composer:not(.blocked)")).toBeVisible();
   await expect(page.locator("#ta")).toBeEnabled();
-  });
 }

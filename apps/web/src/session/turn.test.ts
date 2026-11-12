@@ -55,10 +55,13 @@ describe("reduceTurn", () => {
     expect(reduceTurn(turn(), { type: "error", code: "cancelled", message: "c" }, at(7))?.end).toEqual({ kind: "stopped", secs: 7 });
   });
 
-  it("a reply stopped here stays stopped when the server ends it with an error, as a cancel during a model load does", () => {
-    const stopped = reduceTurn(turn(), { type: "stop" }, at(4));
-    expect(reduceTurn(stopped!, { type: "error", code: "runtime_error", message: "This operation was aborted" }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
-    expect(reduceTurn(turn(), { type: "error", code: "runtime_error", message: "m" }, at(9))?.end).toMatchObject({ kind: "error" });
+  it("a reply stopped here stays stopped when the server's end is an abort, and ends as the failure when it is not", () => {
+    const stopped = reduceTurn(turn(), { type: "stop" }, at(4))!;
+    for (const code of ["cancelled", "preempted", "runtime-changed"]) {
+      expect(reduceTurn(stopped, { type: "error", code, message: "m" }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
+    }
+    expect(reduceTurn(stopped, { type: "error", code: "model-not-found", message: "HTTP 404" }, at(9))).toMatchObject({ end: { kind: "error", code: "model-not-found", message: "HTTP 404" }, ending: undefined });
+    expect(reduceTurn(turn(), { type: "error", code: "stream-error", message: "m" }, at(9))?.end).toMatchObject({ kind: "error" });
   });
 
   it("Stop on an ended turn changes nothing", () => {

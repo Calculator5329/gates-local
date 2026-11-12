@@ -22,7 +22,7 @@ class ElementFixture {
   classList = { add: (c: string) => void this.classes.add(c), remove: (c: string) => void this.classes.delete(c), contains: (c: string) => this.classes.has(c) };
   getAttribute(name: string) { return name === "data-tip" ? this.text : null; }
   closest(selector: string) { return selector === "[data-tip],[data-tipt]" ? this : null; }
-  querySelector() { return null; }
+  querySelector(_selector: string): { scrollWidth: number; clientWidth: number } | null { return null; }
   contains(target: ElementFixture) { return target === this; }
   width = 120;
   getBoundingClientRect() { return { x: 10, y: this.top, left: 10, top: this.top, right: 10 + this.width, bottom: this.top + 20, width: this.width, height: this.width === 0 ? 0 : 20 }; }
@@ -106,4 +106,22 @@ it("words removed while a tooltip waits cancel the wait, even if they come back 
   anchor.text = "Back again";
   await vi.advanceTimersByTimeAsync(400);
   expect(tip.classes.has("open")).toBe(false);
+});
+
+/** A name in a row: data-tipt holds the full name, its `.pk-nm` (or `.t`) the text the row may cut. */
+class CutName extends ElementFixture {
+  name = "Qwen 3.5 <9B> Instruct";
+  shown = { scrollWidth: 180, clientWidth: 180 };
+  override getAttribute(name: string) { return name === "data-tipt" ? this.name : null; }
+  override querySelector(selector: string) { return selector === ".t, .pk-nm" ? this.shown : null; }
+}
+
+it.each([["cut by its row", 260, true], ["shown whole", 180, false]] as const)("a name %s: the cut-name tip opens only when the row cuts it", async (_, width, opens) => {
+  const name = new CutName();
+  name.shown.scrollWidth = width;
+  listeners.get("mouseover")!({ target: name });
+  await vi.advanceTimersByTimeAsync(400);
+  expect(tip.classes.has("open")).toBe(opens);
+  // the full name, as text: never markup from the model's name
+  if (opens) expect(tip.innerHTML).toBe("Qwen 3.5 &lt;9B&gt; Instruct");
 });

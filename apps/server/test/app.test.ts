@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { type App, createApp } from "../src/app.ts";
+import { type App, type AppDeps, createApp } from "../src/app.ts";
 import * as imageFiles from "../src/chat/image-lifecycle.ts";
 import { saveAttachments } from "../src/chat/attachments.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
@@ -23,6 +23,7 @@ import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts"
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
 import { createRuntimeSwitch } from "../src/runtime/switch.ts";
+import { defaultSettings } from "../src/settings/store.ts";
 import { installedBinary } from "../src/runtime/paths.ts";
 import { FAKE_RELEASE_FORMAT, freePort, startFakeOllama, startReleaseServer, writeFakeBinary } from "../src/runtime/test-fakes.ts";
 import { openThreadStore, type ThreadStore } from "../src/threads/store.ts";
@@ -110,7 +111,7 @@ interface Rig {
 }
 
 /** `image` builds an image module over the rig's GPU lease; only then does the app get a lease. */
-async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number } = {}): Promise<Rig> {
+async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: ThreadStore, dir: string) => ImageModule; show?: unknown; admit?: () => void; onTerminal?: () => void; onDelta?: (turnId: string) => void; log?: (line: string) => void; dbPath?: string; draftEveryMs?: number; settings?: AppDeps["settings"] } = {}): Promise<Rig> {
   const ollamaUp = opts.ollamaUp ?? true;
   let chat: ChatRoute = quickReply;
   let show: ChatRoute = (res) => json(res, 200, opts.show ?? SHOW);
@@ -161,6 +162,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     catalog,
     ...(opts.admit ? { admit: opts.admit } : {}),
     ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
+    ...(opts.settings === undefined ? {} : { settings: opts.settings }),
     // Tools › Make images on: a send with tools: true offers the chat model the image tool.
     ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir), imageTool: () => ({ preset: "sdxl-lightning-pixel", width: 768, height: 512 }) } : {}),
     push: (c, p) => {
@@ -719,6 +721,15 @@ describe("chat.send and the think flag", () => {
     expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
   });
 
+  it("cancel during the installed system prompt's read ends the turn as cancelled, not as a failure", async () => {
+    const { r, sent } = await stalledThinkTurn({ settings: { get: () => defaultSettings("system") } }, undefined);
+    expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error", 1000);
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
+    expect(r.app.activeTurns()).toBe(0);
+    expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toEqual([]);
+  });
+
   it("thread delete and shutdown do not wait on a stalled think probe", async () => {
     const a = await stalledThinkTurn();
     expect(await within(1000, a.r.client.call("threads.delete", { threadId: a.t.id }), "threads.delete")).toEqual({ threadId: a.t.id });
@@ -759,8 +770,9 @@ async function fitSettled(r: Rig): Promise<void> {
   }
 }
 
-async function stalledThinkTurn() {
-  const r = await rig({ image: idleComfy("external", () => undefined).build });
+/** With `settings` and no think asked, the stalled show is the one that reads the installed system prompt. */
+async function stalledThinkTurn(more: Pick<Parameters<typeof rig>[0] & object, "settings"> = {}, think: boolean | undefined = true) {
+  const r = await rig({ image: idleComfy("external", () => undefined).build, ...more });
   // The catalog reads each model's capabilities with /api/show too (runtime/models.ts), on the
   // runtime's ready event. Wait until it lists the model: its capabilities are then cached by
   // digest, so the stall below meets only the turn's own calls (fit check, then think probe).
@@ -775,7 +787,7 @@ async function stalledThinkTurn() {
     if (shows === 1) json(res, 200, SHOW);
   });
   const t = await r.client.call("threads.create", {});
-  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think: true });
+  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, ...(think === undefined ? {} : { think }) });
   // The fit check, then the turn's start builds a fit table (its /api/show stalls too) beside the think probe.
   await until(() => shows === 3);
   expect(r.app.activeTurns()).toBe(1);

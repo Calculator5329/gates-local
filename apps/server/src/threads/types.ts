@@ -28,6 +28,8 @@ export interface ToolStepRecord {
   callId: string;
   name: string;
   state: "running" | "done" | "error";
+  /** With "error": a Stop or a halt cut the call short. Rows saved before it say plain "error" for those. */
+  stopped?: true;
   summary: string;
   detail?: string;
   durationMs?: number;

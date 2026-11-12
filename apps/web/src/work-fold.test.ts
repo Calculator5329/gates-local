@@ -284,4 +284,17 @@ describe("the red mark", () => {
     expect(marked).toContain("ch-p bad");
     expect(chipName(marked)).toBe("Thinking 1 second, 2 tool calls, last call failed");
   });
+
+  it("is not on a call the person stopped: the saved step says stopped after a reload, and a step that failed still says failed", async () => {
+    const saved = (tools: ToolStep[]): Message => ({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "", thinking: "Hm.", tools, interrupted: true });
+    const stopped = await render(9000, { messages: { [T]: [user, saved([step("a", "done", 10), { ...step("b", "error", 900), stopped: true }])] }, stopNotes: { s: { kind: "stopped", secs: 3 } } });
+    expect(stopped).not.toContain("ch-p bad");
+    expect(chipName(stopped)).toBe("Thinking, 2 tool calls");
+    // the tool's label stays, as on a failed step
+    expect(stopped).toContain('<span class="wr-m">Shell · stopped</span>');
+    expect(stopped).not.toContain("failed");
+    const failed = await render(9000, { messages: { [T]: [user, saved([step("a", "done", 10), step("b", "error", 900)])] } });
+    expect(failed).toContain("ch-p bad");
+    expect(failed).toMatch(/failed/);
+  });
 });

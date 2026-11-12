@@ -7,7 +7,7 @@ import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
-import { type ChatEvent, type TurnEvent, type WorkClock, leaveThinking, reduceTurn, startClock, stopThinking, unfinished, withTurn } from "./turn.ts";
+import { type ChatEvent, type TurnEvent, type WorkClock, aborted, leaveThinking, reduceTurn, startClock, stopThinking, stoppedBy, unfinished, withTurn } from "./turn.ts";
 
 declare global {
   interface Window {
@@ -132,9 +132,9 @@ function stopReason(event: { readonly code: string; readonly neededBy?: string |
   return `Stopped so ${by} could load.`;
 }
 
-/** Why a reply the server saved unfinished stopped. `end` is how this client saw it stop; none: the row's stop square alone marks it, because this client cannot say why. */
+/** Why a reply the server saved unfinished stopped. `end` is how this client saw it stop (the person's Stop counts only when the server's end is an abort); none: the row's stop square alone marks it, because this client cannot say why. */
 function savedNote(event: Extract<ChatEvent, { type: "error" }>, end: LiveTurn["end"]): StopNote | undefined {
-  if (end?.kind === "stopped") return { kind: "stopped", secs: end.secs };
+  if (stoppedBy(end, event.code)) return { kind: "stopped", secs: end.secs };
   if (event.code === "cancelled") return undefined;
   return { kind: "said", words: stopReason(event) ?? `The reply didn't finish.${asSentence(event.message)}` };
 }
@@ -258,9 +258,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    * Ids of turns this client stopped or replaced, until their terminal event.
    * A replaced turn is no longer in the map, so this is what keeps its late
    * events off the turn that took its chat's place while that one waits for
-   * its own id (W-02, WF-01).
+   * its own id (W-02, WF-01). A turn the person stopped that left the map
+   * keeps its question: a failure that ends it anyway is said under it.
    */
-  const oldTurns = new Set<string>();
+  const oldTurns = new Map<string, string | undefined>();
 
   /** Apply one event to a thread's turn, if that turn is still the one numbered `gen`. */
   function update(threadId: string, gen: number, event: TurnEvent): void {
@@ -279,7 +280,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   function retire(turn: LiveTurn | undefined, keepWords = true): void {
     // a listed turn has shown nothing, and its events, if they come, start it afresh
     if (turn === undefined || turn.listed === true) return;
-    if (turn.turnId !== null) oldTurns.add(turn.turnId);
+    // a Retry replaces what it stopped: nothing is said under its question
+    if (turn.turnId !== null) oldTurns.set(turn.turnId, keepWords && turn.end?.kind === "stopped" ? turn.userMessageId : undefined);
     if (keepWords) keepStoppedWords(turn);
   }
 
@@ -407,7 +409,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   function keepStoppedWords(l: LiveTurn): void {
     if (l.end === undefined || l.ending === true || (l.end.kind === "error" && l.end.code === "closed") || (l.text === "" && l.thinking === "" && l.tools.length === 0)) return;
     const { threadId } = l;
-    const tools = l.tools.map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
+    // a call the person's Stop cut short is kept as stopped, one that a failure cut as failed
+    const stopped = l.end.kind === "stopped";
+    const tools = l.tools.map((t) => t.state === "running" ? { ...t, state: "error" as const, ...(stopped ? { stopped: true as const } : {}) } : t);
     const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), ...(tools.length === 0 ? {} : { tools }), ...(l.contextNotice ? { contextNotice: l.contextNotice } : {}), model: l.model, createdAt: Date.now() };
     const note: StopNote = l.end.kind === "stopped" ? { kind: "stopped", secs: l.end.secs } : { kind: "said", words: "The reply didn't finish." };
     // A partial is not the whole history of a chat this client never opened.
@@ -469,7 +473,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       update(threadId, gen, { type: "sent", turnId: r.turnId, userMessageId: r.userMessage.id });
       // stopped before its id was known, or replaced by a newer turn: end it on the server too
       if (!mine || now.end !== undefined) {
-        oldTurns.add(r.turnId);
+        oldTurns.set(r.turnId, undefined);
         void call("chat.cancel", { turnId: r.turnId }).catch(() => undefined);
       }
       if (mine) {
@@ -542,7 +546,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     flushWords(turn.threadId);
     update(turn.threadId, turn.gen, { type: "stop" });
     if (turn.turnId !== null) {
-      oldTurns.add(turn.turnId);
+      oldTurns.set(turn.turnId, undefined);
       void call("chat.cancel", { turnId: turn.turnId }).catch(() => undefined);
       return;
     }
@@ -632,6 +636,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
 
   function queueWords(turn: LiveTurn, kind: "text" | "thinking", t: string): void {
     perf.deltas++;
+    // words after the person's Stop are dropped (W-05), and so is their time: the seconds Stop showed stay the only ones
+    if (turn.end?.kind === "stopped") return;
     let w = waiting.get(turn.threadId);
     if (w === undefined || w.gen !== turn.gen) waiting.set(turn.threadId, (w = { gen: turn.gen, text: "", thinking: "" }));
     if (kind === "text" && w.textAt === undefined) w.textAt = Date.now();
@@ -667,8 +673,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       if (event.type === "start" || event.type === "done" || event.type === "error") update(threadId, turn.gen, { type: "early", turnId, ended: event.type !== "start" });
       return;
     }
+    const question = oldTurns.get(turnId);
     if (event.type === "done" || event.type === "error") oldTurns.delete(turnId);
-    if (turn === undefined || turn.turnId !== turnId) return otherTurn(p);
+    if (turn === undefined || turn.turnId !== turnId) return otherTurn(p, question);
     const open = getState().threadId === threadId;
     switch (event.type) {
       case "thinking":
@@ -774,10 +781,12 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
    * chat's turn here too and streams (PH-02); a joining client gets the same
    * start with a snapshot of words already sent.
    */
-  function otherTurn({ turnId, threadId, event }: Payload<"chat.event">): void {
+  function otherTurn({ turnId, threadId, event }: Payload<"chat.event">, question?: string): void {
     if (event.type === "done") return untrackedDone(threadId, event.message);
     // a partial saved by a turn stopped elsewhere; a turn this client stopped itself reloads on its next visit
     if (event.type === "error" && event.partial !== undefined) return keepStopped(threadId, undefined, event);
+    // a turn the person stopped, gone from the screen, that failed anyway: the failure is said under its question
+    if (event.type === "error" && question !== undefined && !aborted(event.code)) return keepStopped(threadId, question, event);
     if (event.type !== "start" || oldTurns.has(turnId)) return;
     noteMessage(threadId, event.userMessage);
     retire(getState().turns[threadId]);

@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-12: Stop follow-ups, and browser tests that wait for the app's data
+
+- A failure that arrives after a Stop is shown. Only an abort counts
+  as the Stop; a later real error (a model that is gone, for example)
+  is said once under the stopped reply. Before, it left no note
+  anywhere.
+- Words that arrive after Stop are dropped, so the time on a stopped
+  reply shows once and does not change.
+- A tool call cut short by Stop is saved and shown as stopped, live
+  and after a reload: the chip is not red and the row reads
+  "Shell · stopped". On disk and on the wire the step stays `"error"`
+  with an optional `stopped: true`, because a build that knows only
+  three states could not open a thread holding a fourth. An older
+  build (after an update goes back, or an old phone tab) shows such a
+  step as failed, as it did before. A test holds the old shape and
+  decodes what this build sends; the same was run against the real
+  release commit's contracts with a row this build saved.
+- The model picker closes a keyboard tip when typing in the search
+  clears the highlight. The Usage cells' tips open (they carried the
+  tip attribute with nothing inside to show).
+- Tests: the cut-name tip has a unit test. `waitReady` in the browser
+  fixtures waits for `#app[data-ready]`, set once the first reads have
+  settled (loaded or not), instead of an unblocked composer, which has
+  been true from the first frame. Four specs that read state once
+  right after it no longer race; `waitComposer` keeps the old meaning
+  for a spec that acts before the first reads land.
+- Not in this batch: where Stop sits while a queued message is edited.
+  The first try held an empty slot, which moved the 38 px shift from
+  the pencil click to the moment a message is queued. It was taken
+  out; the layout is the owner's pick.
+
 ## 2026-11-12: A process-tree test's cleanup no longer fails on a runner that just ended
 
 - The cleanup of the process-tree tests looked whether the runner was

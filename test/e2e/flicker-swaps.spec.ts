@@ -6,7 +6,7 @@ import type { Locator, Page } from "@playwright/test";
 import { decodeRequest } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, type Frame, transitionMetrics } from "./flicker-probe.ts";
-import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, sendMessage, stack, test, waitComposer, waitReady } from "./fixtures.ts";
 
 test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
@@ -287,7 +287,8 @@ for (const width of [1440, 360]) {
         });
       });
       await open();
-      await waitReady(page);
+      // the catalog is held, so the first reads have not landed: act on the composer's readiness alone
+      await waitComposer(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
       await stack.scenario("models", { pullTickMs: 250, pullChunkBytes: 256 * 1024 * 1024 });

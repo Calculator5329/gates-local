@@ -144,17 +144,18 @@ describe("turn loop", () => {
     expect(stream).toHaveBeenCalledTimes(3);
     expect(events.at(-1)).toMatchObject({ type: "complete", content: expect.stringContaining("three invalid tool calls") });
   });
-  it("closes a running tool step with an error when cancelled", async () => {
+  it("closes a running tool step as stopped, not failed, when cancelled", async () => {
     const controller = new AbortController();
     const states: string[] = [];
     const consume = async () => {
       for await (const event of runLoop({ messages: [], native: true, signal: controller.signal,
         stream: async function* () { yield { type: "complete", content: "", calls: [{ name: "read", arguments: { path: "x" } }], stopReason: "stop" }; },
         execute: async () => { controller.abort(); throw new Error("cancelled"); },
-      })) if (event.type === "tool") states.push(event.step.state);
+      })) if (event.type === "tool") states.push(event.step.stopped === true ? `${event.step.state}, stopped` : event.step.state);
     };
     await expect(consume()).rejects.toThrow();
-    expect(states).toEqual(["running", "error"]);
+    // "error" for an older build, which knows three states; marked stopped for this one
+    expect(states).toEqual(["running", "error, stopped"]);
   });
   it("resets the format budget in transcript order after a valid call", async () => {
     const stream = vi.fn(async function* () {

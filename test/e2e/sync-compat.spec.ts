@@ -52,8 +52,7 @@ test.describe("process negotiation", () => {
       });
     });
     await open(); await waitReady(page);
-    // a booting composer takes typing before the negotiation has its answer
-    await expect.poll(() => epochs.length).toBe(1);
+    expect(epochs).toHaveLength(1);
     // This peer implements the old envelopes only and never negotiates.
     const legacy = await page.evaluate(socketUrl => new Promise<unknown>((resolve, reject) => {
       const socket = new WebSocket(socketUrl);

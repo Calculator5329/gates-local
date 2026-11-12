@@ -139,7 +139,12 @@ test.describe("a week of three models", () => {
     for (const d of paths) expect(d, "no point sits on the zero line").not.toMatch(/ 160\.0/);
     const speeds = await rows.locator("td:nth-child(4)").allInnerTexts();
     for (const s of speeds) expect(s).toMatch(/^\d+$/);
-    await expect(rows.first().locator("td:nth-child(4)")).toHaveAttribute("data-tipt", /^Reads prompts at [\d,]+ tok\/s$/);
+    await expect(rows.first().locator("td:nth-child(4)")).toHaveAttribute("data-tip", /^Reads prompts at [\d,]+ tok\/s$/);
+    // the tip opens: a data-tipt with no cut text in it never did
+    await rows.first().locator("td:nth-child(4)").hover();
+    await expect(page.locator("#tip")).toHaveClass(/\bopen\b/);
+    await expect(page.locator("#tip")).toContainText(/^Reads prompts at [\d,]+ tok\/s$/);
+    await page.mouse.move(1, 1);
     await page.screenshot({ path: shot("usage-screen-speed.png") });
     await metric(page, "Tokens").click();
 
@@ -164,7 +169,7 @@ test.describe("a week of three models", () => {
     await usageIcon(page).click();
     await expect(dialog(page)).toBeVisible();
     const total = page.locator(".us-num").first();
-    const before = await total.getAttribute("data-tipt");
+    const before = await total.getAttribute("data-tip");
     const boxes = async () => Promise.all([".panel", ".us-nums", ".us-chart", ".us-rows thead"].map((s) => page.locator(s).boundingBox()));
     const at = await boxes();
     const other = await page.context().newPage();
@@ -172,7 +177,7 @@ test.describe("a week of three models", () => {
     await waitReady(other);
     await sendMessage(other, "One more question");
     await expect(other.locator(".turn.a").last()).toHaveClass(/done/, { timeout: 15_000 });
-    await expect(total).not.toHaveAttribute("data-tipt", before ?? "");
+    await expect(total).not.toHaveAttribute("data-tip", before ?? "");
     expect(await boxes(), "nothing moved").toEqual(at);
     await other.close();
   });

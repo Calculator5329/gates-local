@@ -298,8 +298,8 @@ describe("tool chat transport", () => {
         await vi.waitFor(() => expect(t.lease.status()).toEqual({ holder: null, holders: 0, waiting: [] }));
         expect(t.fake.cancel).toHaveBeenCalledWith("job-1");
         expect(t.fake.ran).toEqual([]);
-        // the tool step is what the person saw, so it stays, marked, with no image behind it
-        expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: "", interrupted: true, tools: [{ name: "image", state: "error" }] }]);
+        // the tool step is what the person saw, so it stays, marked stopped, with no image behind it
+        expect(t.store.getThread(thread.id).messages).toMatchObject([{ role: "user" }, { role: "assistant", content: "", interrupted: true, tools: [{ name: "image", state: "error", stopped: true }] }]);
       } finally { await t.close(); }
     });
     it("Stop while the reply is held as a possible call keeps the held text: shown, and saved on the stopped reply", async () => {

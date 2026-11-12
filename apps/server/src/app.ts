@@ -386,8 +386,13 @@ export function createApp(deps: AppDeps): App {
     };
     const nothingYet = () => turn.text === "" && turn.thinking === "" && turn.steps.size === 0;
     const replacingDraft = () => (turn.draftId === undefined ? [] : [turn.draftId]);
-    const unfinishedRow = (): NewMessage => {
-      const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const } : t);
+    /**
+     * A call still running is saved as "error", marked stopped when a halt (a runtime switch, a load that
+     * needed the GPU, the app closing) ended the turn. A cancel needs no mark here: the harness has already
+     * closed its running call as stopped (loop.ts) before the turn ends.
+     */
+    const unfinishedRow = (halted = false): NewMessage => {
+      const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const, ...(halted ? { stopped: true as const } : {}) } : t);
       return { threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) };
     };
     let drafted = false;
@@ -419,7 +424,7 @@ export function createApp(deps: AppDeps): App {
           return failure;
         }
         if (nothingYet()) return failure;
-        return { ...failure, partial: store.appendMessage(unfinishedRow(), replacingDraft()) };
+        return { ...failure, partial: store.appendMessage(unfinishedRow(turn.halted !== undefined), replacingDraft()) };
       } catch (e) {
         log(`turn ${turnId}: stopped reply not saved: ${(e as Error).message}`);
         return failure;
@@ -522,6 +527,8 @@ export function createApp(deps: AppDeps): App {
       }
     } catch (e) {
       if (turn.halted) finish(haltedEnd(turn.halted));
+      // chat.cancel aborted a wait before the chat request (the system prompt's /api/show): the person's cancel, not a failure
+      else if (controller.signal.aborted) finish({ type: "error", code: "cancelled", message: "cancelled before the reply started" });
       else {
         log(`turn ${turnId} failed: ${(e as Error).message}`);
         finish({ type: "error", code: "internal", message: (e as Error).message });

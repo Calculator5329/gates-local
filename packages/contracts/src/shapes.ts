@@ -36,6 +36,11 @@ export const ToolStep = S.Struct({
   /** The tool: "read", "sql", "shell", "note" or "image". */
   name: S.String,
   state: S.Literals(["running", "done", "error"]),
+  /**
+   * With state "error": the person's Stop (or a halt) cut the call short, it did not fail. A field, not a
+   * fourth state, so a build that knows three states still reads the step (as failed). Never false.
+   */
+  stopped: S.optional(S.Literal(true)),
   /** Plain words: "Searched your library". */
   summary: S.String,
   /** The call and its trimmed output, for the expanded row. */

@@ -425,6 +425,8 @@ describe("tool steps and images (schema step 2)", () => {
     const tools = [
       { callId: "c1", name: "sql", state: "done" as const, summary: "Read 12 rows from Notes", detail: "SELECT 1", durationMs: 41.5 },
       { callId: "c2", name: "read", state: "error" as const, summary: "Could not read the file" },
+      // a call the person's Stop cut short: "error" for an older build, marked stopped for this one
+      { callId: "c3", name: "shell", state: "error" as const, stopped: true as const, summary: "Searching your library", durationMs: 900 },
     ];
     const m = s.appendMessage({ threadId: t.id, role: "assistant", content: "done", tools, images: ["images/a.png"] });
     const back = s.getThread(t.id).messages[0]!;
@@ -438,6 +440,11 @@ describe("tool steps and images (schema step 2)", () => {
 
     const bad = (patch: Record<string, unknown>) => () => s.appendMessage({ threadId: t.id, role: "assistant", content: "x", ...patch } as never);
     expect(bad({ tools: [{ callId: "c", name: "sql", state: "maybe", summary: "s" }] })).toThrow(InvalidInputError);
+    // an older build knows three states: a cut call is never saved as a fourth
+    expect(bad({ tools: [{ callId: "c", name: "sql", state: "stopped", summary: "s" }] })).toThrow(InvalidInputError);
+    expect(bad({ tools: [{ callId: "c", name: "sql", state: "error", stopped: false, summary: "s" }] })).toThrow(InvalidInputError);
+    // the mark belongs to a step that ended as error; a finished one cannot carry it
+    expect(bad({ tools: [{ callId: "c", name: "sql", state: "done", stopped: true, summary: "s" }] })).toThrow(InvalidInputError);
     expect(bad({ tools: [{ callId: "", name: "sql", state: "done", summary: "s" }] })).toThrow(InvalidInputError);
     expect(bad({ tools: "nope" })).toThrow(InvalidInputError);
     expect(bad({ images: [""] })).toThrow(InvalidInputError);

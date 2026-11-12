@@ -32,6 +32,18 @@ const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code =
 const secsSince =(turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
 
 /**
+ * The server ended the turn on purpose: a cancel, or a halt to make way for
+ * another model or runtime. After the person's Stop, such an end is the Stop;
+ * any other code is a failure that happened anyway, and is said as one.
+ */
+const ABORTS: ReadonlySet<string> = new Set(["cancelled", "preempted", "runtime-changed"]);
+export const aborted = (code: string): boolean => ABORTS.has(code);
+
+/** The person's Stop is how the turn ended only when the server's end `code` has an abort's shape. */
+export const stoppedBy = (end: LiveTurn["end"], code: string): end is Extract<NonNullable<LiveTurn["end"]>, { kind: "stopped" }> =>
+  end?.kind === "stopped" && aborted(code);
+
+/**
  * How long a reply thought, kept as its events arrive, so every screen that
  * shows it reads the same number and a remount rebuilds nothing. A span of
  * thinking opens with its first words and closes when a call, the answer or
@@ -147,8 +159,9 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
     case "error": {
       if (event.partial !== undefined) return null;
       const ended = { ...turn, ending: undefined, ...(event.contextNotice ? { contextNotice: event.contextNotice } : {}) };
-      // the person's Stop is why it ended, whatever the server calls it (a cancel during a model load comes back as an error)
-      if (event.code !== "cancelled" && turn.end?.kind !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
+      // the person's Stop is why it ended when the server's end is an abort; a failure that came anyway is said
+      if (stoppedBy(turn.end, event.code)) return { ...ended, end: turn.end };
+      if (event.code !== "cancelled") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
       return { ...ended, end: turn.end ?? { kind: "stopped", secs: secsSince(turn, now) } };
     }
     case "sent":

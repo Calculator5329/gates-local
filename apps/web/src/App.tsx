@@ -505,6 +505,9 @@ export function App() {
   const view = useStore((s) => s.view);
   const threadId = useStore((s) => s.threadId);
   const noServer = useStore((s) => s.conn.kind === "no-server");
+  // this connection's first reads settled, loaded or not (session.ts hydrate; not the open thread's
+  // threads.get); the browser tests wait for it
+  const hydrated = useStore((s) => s.hydrationSettled);
   const drawer = useStore((s) => s.drawer);
   const setList = useStore((s) => s.setList);
   const popId = useStore((s) => s.pop?.id ?? null);
@@ -557,7 +560,7 @@ export function App() {
   return (
     <>
       <Sprite />
-      <div className={`app${drawer ? " drawer" : ""}`} id="app" inert={popOpen && phone}>
+      <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={popOpen && phone}>
         <div style={{ display: "contents" }} inert={covered}>
           <Sidebar />
         </div>

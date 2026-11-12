@@ -313,7 +313,8 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
           step = { callId, name: item.name, state: "done", summary: result.summary, durationMs: Date.now() - started, links };
         } catch (e) {
           if (input.signal.aborted) {
-            const cancelled: ToolStep = { ...running, state: "error", summary: "Tool was cancelled", durationMs: Date.now() - started };
+            // the turn's cancel cut the call short: stopped, not failed
+            const cancelled: ToolStep = { ...running, state: "error", stopped: true, durationMs: Date.now() - started };
             tools.push(cancelled); yield { type: "tool", step: cancelled };
             input.signal.throwIfAborted();
           }

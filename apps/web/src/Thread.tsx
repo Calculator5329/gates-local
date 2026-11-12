@@ -273,6 +273,17 @@ function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stop
   );
 }
 
+/** A call the person's Stop (or a halt) cut short: saved as "error", which a build before the mark reads as failed, and marked stopped. */
+function cutByStop(step: ToolStep): boolean {
+  return step.state === "error" && step.stopped === true;
+}
+
+/** The last call failed: it ended as "error" and no Stop cut it. */
+function lastFailed(tools: readonly ToolStep[]): boolean {
+  const last = tools.at(-1);
+  return last !== undefined && last.state === "error" && !cutByStop(last);
+}
+
 /**
  * The chip's state. Thinking seconds are the turn's clock, never rebuilt here:
  * a reply the clock did not watch shows the bulb with no number. The red mark
@@ -285,7 +296,7 @@ export function chipStep(thinking: string, tools: readonly ToolStep[], clock: Wo
     think: thinking === "" ? null : clock === undefined ? undefined : thoughtSecs(clock, now),
     calls: tools.length,
     lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : null,
-    failed: !busy && tools[tools.length - 1]?.state === "error",
+    failed: !busy && lastFailed(tools),
     words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : answering ? "" : "Working",
   };
 }
@@ -383,7 +394,9 @@ function callLine(line: string): { cmd: string; shell: boolean } {
 /** A tool step row; `stopped` marks a step that was running when the user pressed Stop. */
 function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const [open, setOpen] = useState(false);
-  const st = stopped && step.state === "running" ? "rej" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
+  // cut short by Stop: live (a running step in a stopped turn) or saved (an "error" marked stopped)
+  const cut = cutByStop(step) || (stopped === true && step.state === "running");
+  const st = cut ? "rej" : step.state === "running" ? "run" : step.state === "error" ? "rej" : "done";
   const label = toolLabel(step.name);
   // the contract has no read-only flag yet; a `-readonly` flag in the call is the evidence the design's word rests on
   const ro = /(^|\s)-readonly(\s|$)/.test(step.detail ?? "") ? "read-only" : "";
@@ -391,7 +404,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   const dur = duration(step.durationMs);
   // the summary is said once: "Read notes.md" needs no "Read ·" after it
   const named = step.summary.toLowerCase().startsWith(label.toLowerCase());
-  const meta = st === "run" ? (named ? "running" : `${label} · running`) : stopped && step.state === "running" ? "stopped" : step.state === "error" ? (named ? "failed" : `${label} · failed`) : dur === "" ? lead : null;
+  const meta = st === "run" ? (named ? "running" : `${label} · running`) : cut ? (named ? "stopped" : `${label} · stopped`) : step.state === "error" ? (named ? "failed" : `${label} · failed`) : dur === "" ? lead : null;
   const [line = "", ...rest] = (step.detail ?? "").split("\n");
   const { cmd, shell } = callLine(line);
   const out = rest.join("\n").trim();

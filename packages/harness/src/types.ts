@@ -11,6 +11,8 @@ export interface ToolStep {
   callId: string;
   name: string;
   state: "running" | "done" | "error";
+  /** With "error": the turn's cancel cut the call short, it did not fail (contracts ToolStep.stopped). */
+  stopped?: true;
   summary: string;
   detail?: string;
   durationMs?: number;

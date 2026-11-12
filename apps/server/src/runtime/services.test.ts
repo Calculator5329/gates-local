@@ -448,7 +448,8 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expectRuntimeChangedEnd(r.events);
     const kept = r.store.getThread(r.thread.id).messages;
     expect(kept.map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(kept[1]).toMatchObject({ content: "", tools: [{ name: "image", state: "error" }] });
+    // the switch cut the call short: stopped, not failed
+    expect(kept[1]).toMatchObject({ content: "", tools: [{ name: "image", state: "error", stopped: true }] });
     await r.done();
   });
 
@@ -492,7 +493,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
     expect(lease.status()).toEqual({ holder: null, holders: 0, waiting: [] });
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toHaveLength(1);
     expectRuntimeChangedEnd(r.events);
-    expect(r.store.getThread(r.thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "", tools: [{ name: "image", state: "error" }] });
+    expect(r.store.getThread(r.thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "", tools: [{ name: "image", state: "error", stopped: true }] });
     const seen = r.events.length;
     // The stuck operation finishes in the background: its result is dropped, its job taken back.
     tool.resolve();

@@ -441,20 +441,20 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 *Chat window trim, review follow-ups:*
 
-- [ ] <!-- workspace:id=work:2f2898c8-a1d5-5fe8-a0b0-fa79e8a129a3 --> A Stop hides a real failure that arrives after it: stop, leave the chat, and a later `model-not-found` leaves no note and no message anywhere (`session/turn.ts`, `settle` in `session/chat.ts`); the `settle` guard has no test.
-      *Accept:* only an abort-shaped error counts as the Stop, or the server's message stays on the square's tip; a unit test fails when the guard is removed.
-- [ ] <!-- workspace:id=work:426a78ac-aafe-5fcc-9fc1-ec23c705527d --> A first answer word that arrives between Stop and the server's cancel sets `textAt`: the saved pill's seconds differ from the live pill's and the square can gain seconds too (`session/chat.ts`; by reading, not reproduced).
-      *Accept:* `textAt` is ignored once the turn has ended stopped; the time shows once and does not change.
-- [ ] <!-- workspace:id=work:63e1916b-623f-5c9a-b313-8f1fe368237a --> A tool step the person stopped reads "stopped" live and is saved and shown as "failed" (`Thread.tsx`, `app.ts`, `keepStoppedWords`).
-      *Accept:* the saved row says stopped, and a step that really failed still says failed.
+- [x] <!-- workspace:id=work:2f2898c8-a1d5-5fe8-a0b0-fa79e8a129a3 --> A Stop hides a real failure that arrives after it: stop, leave the chat, and a later `model-not-found` leaves no note and no message anywhere (`session/turn.ts`, `settle` in `session/chat.ts`); the `settle` guard has no test.
+      *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; only an abort counts as the Stop, the later failure is said once under the reply; the guard's test goes red without it.
+- [x] <!-- workspace:id=work:426a78ac-aafe-5fcc-9fc1-ec23c705527d --> A first answer word that arrives between Stop and the server's cancel sets `textAt`: the saved pill's seconds differ from the live pill's and the square can gain seconds too (`session/chat.ts`; by reading, not reproduced).
+      *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; words after Stop are dropped.
+- [x] <!-- workspace:id=work:63e1916b-623f-5c9a-b313-8f1fe368237a --> A tool step the person stopped reads "stopped" live and is saved and shown as "failed" (`Thread.tsx`, `app.ts`, `keepStoppedWords`).
+      *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; saved as `"error"` with `stopped: true`, shown as stopped.
 - [ ] <!-- workspace:id=work:25fd9761-b8ac-5db9-b616-a53122419763 --> On desktop, clicking the pencil on a queued message while a reply runs shifts Dictate and the model button 38 px; they shift back when the reply ends.
-      *Accept:* the Stop slot is held while a queued message is edited, as on touch, and a browser check reads equal left edges.
+      *Accept:* the owner picks where Stop sits while a queued message is edited (holding an empty slot from the moment a message is queued was tried on 2026-11-11 and taken out: it moved the same shift to every queued message); nothing in the row moves on the pencil click or on Enter, and a browser check reads equal left edges at both moments.
 - [ ] <!-- workspace:id=work:bb688358-2d42-5866-9c6c-1deaca30c0fc --> A stopped reply that is only an image shows no stop square.
       *Accept:* the square leads that row too, with the same tooltip.
-- [ ] <!-- workspace:id=work:0a7960eb-4f24-5510-9751-35814ba811a3 --> Model picker: the cut point of a long name moves when "Checking…" becomes a size; the disk size and the tag are shown nowhere; a keyboard tip stays open after typing in the search clears the highlight (`Picker.tsx`).
-      *Accept:* the name's room is fixed before the size arrives, the tag and disk size have one place, and typing closes the tip.
-- [ ] <!-- workspace:id=work:328ba710-331e-5b4d-8477-7312d1035483 --> Tests held too thinly: the cut-name tip by one browser journey only; `screen-overlay.test.ts` no longer states that Search opened, and Usage at a narrow width is uncovered; `Usage.tsx` puts `data-tipt` on cells with no `.t` inside, so those tips never open.
-      *Accept:* a unit test per rule that fails when the rule is removed, and the Usage cells either open their tip or drop the attribute.
+- [ ] <!-- workspace:id=work:0a7960eb-4f24-5510-9751-35814ba811a3 --> Model picker: the cut point of a long name moves when "Checking…" becomes a size; the disk size and the tag are shown nowhere (`Picker.tsx`). The keyboard tip that stayed open after typing was fixed on 2026-11-11.
+      *Accept:* the name's room is fixed before the size arrives, and the tag and disk size have one place.
+- [ ] <!-- workspace:id=work:328ba710-331e-5b4d-8477-7312d1035483 --> Tests held too thinly: `screen-overlay.test.ts` no longer states that Search opened, and Usage at a narrow width is uncovered. (The cut-name tip's unit test and the Usage cells' tips were done on 2026-11-11.)
+      *Accept:* a unit test per rule that fails when the rule is removed.
 
 *Library databases list, review follow-ups:*
 
@@ -518,8 +518,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 
 *Work chip, review follow-ups:*
 
-- [ ] <!-- workspace:id=work:d686ec35-610b-5fa8-b37a-de1789e93542 --> A tool call cut short by Stop shows "stopped" while the reply is live and is saved as failed, so after a reload its chip is red.
-      *Accept:* a call the person stopped is saved and shown as stopped, live and after a reload.
+- [x] <!-- workspace:id=work:d686ec35-610b-5fa8-b37a-de1789e93542 --> A tool call cut short by Stop shows "stopped" while the reply is live and is saved as failed, so after a reload its chip is red.
+      *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; one fix with the trim follow-up above.
 - [ ] <!-- workspace:id=work:cc76f951-d121-550c-9cfe-2adc58fabbcd --> A reload loses the order of thinking and calls inside the chip and the thinking seconds, because neither is saved with the message.
       *Accept:* the saved message carries the times; a reloaded reply opens to the same list and the same number.
 - [ ] <!-- workspace:id=work:5e30a5dc-d7fb-53f6-a7b2-1372ab0384d2 --> A finished image step counts as a call in the chip; before the chip it was hidden once the image card showed.
@@ -536,8 +536,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* a unit test for the count and default, and one journey with a long call before Stop.
 - [ ] <!-- workspace:id=work:7d7a0fb4-8099-51bd-a145-a2b931b6130c --> After a toggle the page follows the end only from within 2 px in a finished reply but from 120 px in a reply still being written. The second rule is reasoned, not measured.
       *Accept:* a journey opens a chip in a live reply 100 px from the end and shows what the reader sees.
-- [ ] <!-- workspace:id=work:efbf4018-f971-5e1a-b85a-11f500f40dda --> `waitReady` in the browser fixtures returns while the app is still booting, since the composer is no longer blocked then. Specs that read state once right after it race under load; two were patched one line at a time.
-      *Accept:* it waits for a signal that means the app has its data, with one full suite before and after.
+- [x] <!-- workspace:id=work:efbf4018-f971-5e1a-b85a-11f500f40dda --> `waitReady` in the browser fixtures returns while the app is still booting, since the composer is no longer blocked then. Specs that read state once right after it race under load; two were patched one line at a time.
+      *Done 2026-11-11:* "Stop follow-ups, and browser tests that wait for the app's data"; `#app[data-ready]`; the lane's full suite after: 551 ran, 1 failed (a clipboard read, listed below).
 - [ ] <!-- workspace:id=work:d12d9455-b436-59b5-9ad5-d86cc83ba737 --> The owner's calls on the chip: the stop square keeps its seconds whenever the reply has calls (built); a reply that thinks and calls nothing keeps the old thought line, not a bulb-only chip (built).
       *Accept:* the owner picks, or leaves both as built.
 
@@ -562,6 +562,21 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* one double-click or plain command-line launch recorded on a machine with FUSE 2.
 - [ ] <!-- workspace:id=work:1b35f6d5-6547-5d51-bf5b-46a164b89c94 --> The plain-build update check cannot check the release page link while nothing is published, so that check was taken out.
       *Accept:* after the first release, the plain-build check requires the link to be the real release page.
+
+*Stop follow-ups, review follow-ups:*
+
+- [ ] <!-- workspace:id=work:60838ab3-b463-5a24-8fd5-e6d32db812b0 --> `test/e2e/paste-desktop.spec.ts` reads the clipboard right after the native Copy without waiting: red once in a full suite, 15 of 15 alone.
+      *Accept:* the read is polled, and the spec is green in three full suites.
+- [ ] <!-- workspace:id=work:7bf0f0fa-c356-5f6c-93ef-ece6c0a692d3 --> `apps/server/test/app.test.ts` (Retry) failed once in a full verify and passed 3 of 3 alone.
+      *Accept:* what it races is named and fixed, or the test is shown not to guard anything and removed.
+- [ ] <!-- workspace:id=work:cf50e6fa-95e5-5a0d-bce7-6fcbc8d96df4 --> A turn ended by another load that needed the GPU marks its running call stopped through the same path as a runtime switch, but no test drives that case itself.
+      *Accept:* one server test preempts a turn with a running call and reads the saved step.
+- [ ] <!-- workspace:id=work:5ed487ed-ecf9-5321-9712-dc662fd276c8 --> A tool that fails on its own in the same instant a turn is halted is saved as stopped, since the halt drops the failure event (by reading, not reproduced; the same before this batch).
+      *Accept:* reproduced in a test, then the failure wins; or shown unreachable.
+- [ ] <!-- workspace:id=work:21127a45-c8f2-5850-a920-8d9072a2cdb1 --> After a Stop the server's saved reply can hold words that were dropped on screen, so a reload shows a few more words than the person saw (older than this batch).
+      *Accept:* the saved reply ends where the screen did, or the difference is measured and accepted.
+- [ ] <!-- workspace:id=work:63010974-f6f0-5a94-8bd5-c84eed47a226 --> A saved stopped step keeps its summary in the "-ing" form ("Searching your library · stopped").
+      *Accept:* the owner picks the words for a call that was cut.
 
 ## Next: slices 2 to 4
 

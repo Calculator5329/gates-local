@@ -446,6 +446,10 @@ function checkTools(value: unknown): ToolStepRecord[] | undefined {
     const summary = t["summary"];
     if (typeof summary !== "string") throw new InvalidInputError(`${at}.summary`, "expected a string");
     const step: ToolStepRecord = { callId: t["callId"], name: t["name"], state: state as ToolStepRecord["state"], summary };
+    if (t["stopped"] !== undefined) {
+      if (t["stopped"] !== true || state !== "error") throw new InvalidInputError(`${at}.stopped`, "only a step that ended as error can be marked stopped, and only true");
+      step.stopped = true;
+    }
     const detail = checkOptionalString(`${at}.detail`, t["detail"]);
     if (detail !== undefined) step.detail = detail;
     const durationMs = checkCount(`${at}.durationMs`, t["durationMs"], false);

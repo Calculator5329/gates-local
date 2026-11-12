@@ -7,6 +7,7 @@ import { PanelClose } from "./Panel.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { closeUsage, usageData } from "./session.ts";
 import { NA, useStore } from "./store.ts";
+import { esc } from "./ui.tsx";
 import {
   METRICS, RANGES, type UsageLine, type UsageMetric, type UsagePrefs, type UsageRange, type UsageView,
   compact, duration, figuresAt, readPrefs, usageView, writePrefs,
@@ -88,9 +89,10 @@ function Seg<T extends string>({ value, options, onPick, label }: { value: T; op
   );
 }
 
+/** A total, with its exact figure as a tip when the face rounds it ("19.1k" is 19,134; "3" replies is said once). */
 function Num({ value, label, tip, ph }: { value: string; label: string; tip: string; ph: boolean }) {
   return (
-    <div className="us-num" data-tipt={ph ? undefined : tip}>
+    <div className="us-num" data-tip={ph || tip === `${value} ${label}` ? undefined : esc(tip)}>
       <b>{ph ? <span className="us-ph" /> : value}</b>
       <span>{label}</span>
     </div>
@@ -202,15 +204,16 @@ export function Usage() {
             return (
               <tr key={l.model ?? "other"}>
                 <th scope="row">
-                  <span className="us-name">
+                  {/* a name cut by its row reads in full in a tip, and only then (data-tipt measures the .t) */}
+                  <span className="us-name" data-tipt={name}>
                     <i className="us-key" style={{ background: l.colour === "other" ? "var(--muted-foreground)" : `var(--u${l.colour})` }} />
-                    <span className="us-label" data-tipt={l.model ?? undefined}>{name}</span>
+                    <span className="us-label t">{name}</span>
                   </span>
                   <span className="us-share" aria-hidden="true"><i style={{ width: `${(share * 100).toFixed(1)}%` }} /></span>
                 </th>
-                <td data-tipt={`${exact(f.prompt)} tokens in`}>{compact(f.prompt)}</td>
-                <td data-tipt={`${exact(f.completion)} tokens out`}>{compact(f.completion)}</td>
-                <td data-tipt={f.readSpeed === null ? undefined : `Reads prompts at ${exact(f.readSpeed)} tok/s`}>{speedText(f.speed)}</td>
+                <td data-tip={esc(`${exact(f.prompt)} tokens in`)}>{compact(f.prompt)}</td>
+                <td data-tip={esc(`${exact(f.completion)} tokens out`)}>{compact(f.completion)}</td>
+                <td data-tip={f.readSpeed === null ? undefined : esc(`Reads prompts at ${exact(f.readSpeed)} tok/s`)}>{speedText(f.speed)}</td>
                 <td>{exact(f.replies)}</td>
               </tr>
             );

@@ -213,6 +213,17 @@ it.each(["1", "Enter"])("keyboard %s picks from the table, and nothing without a
   expect(probe.pick).toHaveBeenCalledExactlyOnceWith(tag);
 });
 
+it("typing in the search clears the keyboard's highlight and closes the tip the highlight opened", async () => {
+  const { closeTip } = await import("./ui.tsx");
+  vi.stubGlobal("requestAnimationFrame", (f: () => void) => { f(); return 0; });
+  call(find(render(), p => p.id === "pkSearch"), "onKeyDown", { key: "ArrowDown", preventDefault: vi.fn() });
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"], "the arrow highlighted a row").toBe("pk-opt-0");
+  vi.mocked(closeTip).mockClear();
+  call(find(render(), p => p.id === "pkSearch"), "onChange", { target: { value: "c" } });
+  expect(find(render(), p => p.id === "pkSearch").props["aria-activedescendant"]).toBeUndefined();
+  expect(closeTip).toHaveBeenCalled();
+});
+
 it.each([false, true])("Use at on a sub-8k cap picks from the table's row at the cap on phone %s", phone => {
   probe.phone = phone;
   vi.stubGlobal("requestAnimationFrame", (cb: () => void) => cb());

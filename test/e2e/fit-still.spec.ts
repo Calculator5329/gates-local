@@ -81,6 +81,9 @@ test("the picker's fit values fill and change in place: first table, then two pu
   holding = false;
   for (const release of held.splice(0)) release();
   await expect(picker.locator(".fit-skel, .pk-cost.skel")).toHaveCount(0);
+  // The samples run on animation frames, so the last one can still hold the skeleton's empty footer:
+  // read the first table's footer from a sample that has it, or the first poll passes on the table itself.
+  await expect.poll(async () => (await frames()).at(-1)?.skeletons, "a sampled frame with the first table").toBe(0);
   const first = await footer();
   // Two new GPU readings; the server pushes a table after each.
   await stack.gpu(1024);
