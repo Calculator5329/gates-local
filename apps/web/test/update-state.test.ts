@@ -2,7 +2,7 @@
 // kind of copy (a git clone, an installed copy, a copy that is neither).
 import { describe, expect, it } from "vitest";
 import { UpdateBlocked, type UpdateCheck, type UpdateStatus } from "@gates-local/contracts";
-import { updateIcon, type UpdateInput } from "../src/update-state.ts";
+import { restartable, updateIcon, type UpdateInput } from "../src/update-state.ts";
 
 const clock = (ms: number) => `T${ms}`;
 const clone: UpdateStatus = { version: { kind: "commit", commit: "abc1234" }, result: null, lastCheck: null };
@@ -90,12 +90,36 @@ describe("ready", () => {
   it("a clone never shows it", () => {
     expect(icon(withCheck(clone, available), { canRestart: true })?.state).toBe("available");
   });
+  it("UW-01 an installed copy can restart only when the server says it can and approves this version, in the desktop app", () => {
+    const ready = { ...withCheck(installed, newer({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked."] })), approval: "a1" };
+    expect(restartable(ready, true)).toBe(true);
+    expect(icon(ready, { canRestart: restartable(ready, true) })).toMatchObject({ state: "ready", click: "restart" });
+    expect(restartable(ready, false)).toBe(false);
+    expect(restartable({ ...ready, approval: undefined }, true)).toBe(false);
+    expect(restartable(withCheck(installed, newer({ download: "ready", lines: ["Gates Local cannot replace its own file because its folder is read-only."] })), true)).toBe(false);
+    expect(restartable({ ...fresh }, true)).toBe(false);
+  });
 });
 
 describe("updating", () => {
   it("this window's click or the server's word: a spinner, no click", () => {
     expect(icon(withCheck(clone, available), { installing: true })).toMatchObject({ state: "updating", click: null, busy: true, label: "Closing to update…" });
     expect(icon({ ...withCheck(clone, available), installing: true })?.state).toBe("updating");
+  });
+  it("UW-02 an installed copy says it closes, updates and reopens, never that dependencies install", () => {
+    const i = icon(withCheck(installed, newer({ download: "ready", restart: true })), { installing: true });
+    expect(i?.tip).toContain("Gates Local will close, update and reopen.");
+    expect(i?.tip).not.toContain("dependencies");
+  });
+  it("UW-03 after a restart click failed, an installed copy that can still restart offers Restart again", () => {
+    const ready = { ...withCheck(installed, newer({ download: "ready", restart: true })), approval: "a1" };
+    expect(icon(ready, { canRestart: true, error: "The update approval expired or changed." })).toMatchObject({ state: "failed", click: "restart" });
+  });
+  it("UW-04 a rolled-back update says so and the click dismisses the note", () => {
+    const back = { ...withCheck(installed, newer()), result: { at: 1, outcome: "rolled-back" as const, line: "Version 1.3.0 did not start, so Gates Local went back to 1.2.3. Your chats are as they were when you clicked Restart." } };
+    const i = icon(back);
+    expect(i).toMatchObject({ state: "failed", dismiss: true });
+    expect(i?.tip).toContain("went back to 1.2.3");
   });
 });
 

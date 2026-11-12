@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { launchMode } from "../src/launch.ts";
 import { createUpdateAdmission } from "../../server/src/update/admission.ts";
 import { RUNNING_FILE, clearRunning, readRunning, writeRunning } from "../src/running.ts";
-import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
+import { APPROVAL_DEADLINE_ENV, approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, nodeCommand, onceUntilFailed, relaunchEnv, targetKind, updaterLaunch, validUpdateRequest, type UpdateControl } from "../src/update-launch.ts";
 
 const REPO = path.resolve("/srv/gates-local");
 const DATA = path.resolve("/srv/data");
@@ -21,7 +21,7 @@ describe("the updater launch", () => {
     expect(relaunchEnv(env)).toEqual({ PATH: "/bin" });
   });
   it("AU-01 main cannot spawn without a live server reservation and releases failed handoffs", async () => {
-    const request = { reservation: "lease", targetCommit: "a".repeat(40) };
+    const request = { reservation: "lease", target: "a".repeat(40) };
     const start = vi.fn(async () => ({ ok: true as const }));
     const cancel = vi.fn<UpdateControl["cancel"]>(async () => undefined);
     const control = { commit: vi.fn<UpdateControl["commit"]>(async () => ({ accepted: false })), cancel };
@@ -34,7 +34,7 @@ describe("the updater launch", () => {
     expect(cancel).toHaveBeenCalledTimes(4);
     expect(cancel.mock.calls[2]?.[0]).toBe(control.commit.mock.calls[1]?.[0].release);
     expect(await launchApprovedUpdate(request, control, start)).toEqual({ ok: true });
-    expect(start).toHaveBeenCalledWith(request.targetCommit);
+    expect(start).toHaveBeenCalledWith(request.target);
     expect(cancel).toHaveBeenCalledTimes(4);
   });
   it("AU-01 a lost commit acknowledgement cannot strand the server pause", async () => {
@@ -43,18 +43,30 @@ describe("the updater launch", () => {
     const reservation = admission.reserve(targetCommit);
     const start = vi.fn(async () => ({ ok: true as const }));
     const control: UpdateControl = {
-      commit: async (input) => { admission.commit(input.reservation, input.targetCommit, input.release); throw new Error("reply lost"); },
+      commit: async (input) => { admission.commit(input.reservation, input.target, input.release); throw new Error("reply lost"); },
       cancel: async (token) => admission.cancel(token),
     };
-    expect((await launchApprovedUpdate({ reservation, targetCommit }, control, start)).ok).toBe(false);
+    expect((await launchApprovedUpdate({ reservation, target: targetCommit }, control, start)).ok).toBe(false);
     expect(start).not.toHaveBeenCalled();
     expect(admission.installing()).toBe(false);
     expect(() => admission.admit()).not.toThrow();
   });
   it("AU-02 the bridge requires a full target and a reservation, not a short label", () => {
-    expect(validUpdateRequest({ reservation: "lease", targetCommit: "a".repeat(40) })).toBe(true);
-    expect(validUpdateRequest({ reservation: "lease", targetCommit: "aaaaaaa" })).toBe(false);
-    expect(validUpdateRequest({ targetCommit: "a".repeat(40) })).toBe(false);
+    expect(validUpdateRequest({ reservation: "lease", target: "a".repeat(40) })).toBe(true);
+    expect(validUpdateRequest({ reservation: "lease", target: "aaaaaaa" })).toBe(false);
+    expect(validUpdateRequest({ target: "a".repeat(40) })).toBe(false);
+    // The old field name is not a target.
+    expect(validUpdateRequest({ reservation: "lease", targetCommit: "a".repeat(40) })).toBe(false);
+  });
+  it("AU-02 an installed copy's target is its version and the SHA-512 of the signed list, and each kind of copy takes only its own", () => {
+    const installed = `1.3.0:${"c".repeat(128)}`;
+    expect(validUpdateRequest({ reservation: "lease", target: installed })).toBe(true);
+    expect(targetKind(installed)).toBe("installed");
+    expect(targetKind("a".repeat(40))).toBe("commit");
+    for (const bad of [`1.3.0:${"c".repeat(127)}`, `1.3:${"c".repeat(128)}`, `../1.3.0:${"c".repeat(128)}`, `1.3.0:${"C".repeat(128)}`, ""]) {
+      expect(validUpdateRequest({ reservation: "lease", target: bad })).toBe(false);
+      expect(targetKind(bad)).toBeNull();
+    }
   });
   it("AU-02 carries the full approved commit into the detached updater", () => {
     const approvedCommit = "a".repeat(40);

@@ -64,6 +64,8 @@ export interface WatcherEffects {
   readonly bootId: () => string;
   /** Open a window with this page; needs no server. */
   readonly showPage: (words: Words) => void;
+  /** Write one line to update.log. */
+  readonly log?: (line: string) => void;
   readonly freeBytes: (dir: string) => number;
   /** The built-in release keys. */
   readonly trustedKeys: readonly string[];
@@ -451,7 +453,15 @@ async function closeOldApp(r: Run): Promise<Finished | undefined> {
   await fx.waitForExit(tx.processes.main, leftMs());
   await fx.waitForExit(tx.processes.server, leftMs());
   const gone = fx.treeGone(tx.processes.main) && fx.treeGone(tx.processes.server);
-  if (!gone || !sameBoot() || fx.uptime() >= tx.deadline.uptime) return stop(r, words.didNotClose(), false);
+  // Why W1 stopped goes to update.log; "did not close" only when the old app really had not.
+  const why = !gone ? "the old app was still running at the approval deadline"
+    : !sameBoot() ? "the computer restarted after the approval"
+    : fx.uptime() >= tx.deadline.uptime ? "the approval deadline passed after the old app closed"
+    : null;
+  if (why !== null) {
+    fx.log?.(`W1 stopped: ${why}`);
+    return stop(r, gone ? words.startedTooLate() : words.didNotClose(), false);
+  }
   at(r, "W1.after");
   return beforeReplace(r, tx.copy.dataDir, () => {
     const old = identify(r.p.program);

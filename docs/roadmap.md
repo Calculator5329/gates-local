@@ -563,6 +563,33 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:1b35f6d5-6547-5d51-bf5b-46a164b89c94 --> The plain-build update check cannot check the release page link while nothing is published, so that check was taken out.
       *Accept:* after the first release, the plain-build check requires the link to be the real release page.
 
+*Installed update, follow-ups:*
+
+- [ ] <!-- workspace:id=work:c7b8d073-9353-562b-a7e8-c6cd907ffd27 --> A token launch that the watcher kills when it stops the update before the swap (a group kill, so the AppImage runtime never cleans up) leaves its extraction, about 130 MB, in the temporary folder. Nothing sweeps it later: the sweep removes only empty folders.
+      *Accept:* a packaged run that stops a token launch at that point, then shows the extraction removed by the stop or by the next start.
+- [ ] <!-- workspace:id=work:63eba894-da8d-5dc3-b33e-1f2fa109ac35 --> A result can be shown twice: the watcher dies after the new version is accepted but before it writes the cleanup step; the person dismisses the result in the new version, which deletes the record; the next launch resumes the watcher, finds no result and writes it again, and the start after shows it again as new.
+      *Accept:* a routing test that kills the watcher at that point, dismisses, and expects no second showing.
+- [ ] <!-- workspace:id=work:1b9406ba-efee-5fc8-b594-eb38acc7cc79 --> A dismiss from the phone can race `tokenWait`: if the person dismisses the result on the phone before the token launch's 500 ms poll sees it, the launch finds no result carrying its token and says the watcher died, though the update finished.
+      *Accept:* a routing test that dismisses at that moment and expects the launch to open, with the fix that makes it pass.
+- [ ] <!-- workspace:id=work:ac372022-b5ab-5bbe-8659-7dc43445d95a --> A renamed program file or a lowercase `.appimage` is not itself replaceable: such a launch reads the update and defers to the copy the transaction names, and never offers Restart to update.
+      *Accept:* the owner decides whether these copies update themselves; if yes, a packaged run that updates a renamed file.
+- [ ] <!-- workspace:id=work:49a34201-96ed-560d-a83b-eb29a54077db --> In the earlier-failure state, Settings still shows "Open the release page" under the dismiss sentence. The web hides it today only by its own rule, so it would have to match words to hide it here.
+      *Accept:* the server sends an explicit field for the release page link, the web reads it, and the row shows the sentence alone.
+- [ ] <!-- workspace:id=work:400a8bcc-3704-5d8e-a185-f1ff65146b15 --> Reading the transaction at start throws on any error other than a missing file (a permission error, for one), which crashes the launch before any window.
+      *Accept:* a routing test with an unreadable-by-permission transaction file that expects a page naming the file, not a crash.
+- [ ] <!-- workspace:id=work:0400c398-7c7a-5784-90bd-08bcbaadb8bc --> A version that was just gone back from is downloaded and offered again at the next check.
+      *Accept:* the owner picks A (hold that version until a newer one), B (offer it again with a note) or C (offer it again as now); A is the default if no pick comes, with a unit test for the hold.
+- [ ] <!-- workspace:id=work:46e430a7-ea5f-53f5-8fea-76f62253efa9 --> `apps/server/src/update/run.test.ts:187`, the Ctrl+C test, failed once on timing and passed on rerun.
+      *Accept:* the cause named from a red run, or 50 runs under load green.
+- [ ] <!-- workspace:id=work:9c537b71-9c6c-555d-ad07-dfa3d5f71ce7 --> The packaged probe's dist folder keeps rigs from earlier runs, so a result folder can show old `-try2` rigs that did not happen in that run.
+      *Accept:* each run starts with an empty rigs folder or names its own, and a result folder lists only its run's rigs.
+- [ ] <!-- workspace:id=work:edcfc193-c426-5d2b-acef-b61f7dec20f6 --> The reboot path of W1 (the computer restarted after the approval) runs only in unit tests.
+      *Accept:* one packaged or VM run that restarts between the approval and the replace, and shows the "did not start in time" note.
+- [ ] <!-- workspace:id=work:f59e73fb-9283-527c-b190-79923dc64c95 --> A cleanup record that names another data folder (the folder moved or restored elsewhere) now lets the app start, but Restart to update then fails with "Could not validate the update with the app server", and the record and download are never removed. A record from a copy that is gone, read only by copies that cannot replace themselves, also stays until a copy in that data folder updates.
+      *Accept:* such a record is finished or set aside by the next update, with a test, and Restart to update works.
+- [ ] <!-- workspace:id=work:eae59795-6d08-5153-b2f3-6c8e6352b6ba --> A copy started while another copy's update is mid-way (before cleanup) says to start that copy, and names its old path; if that file was deleted, the only way in is deleting `updates/installed-update.json` by hand, and no page says so. A routed copy also checks for another copy before the update lock, so while copy A updates, copy B says "start that copy" instead of "updating".
+      *Accept:* the page names the file to move back or the record to set aside, and the routed launch reads the lock first.
+
 *Stop follow-ups, review follow-ups:*
 
 - [ ] <!-- workspace:id=work:60838ab3-b463-5a24-8fd5-e6d32db812b0 --> `test/e2e/paste-desktop.spec.ts` reads the clipboard right after the native Copy without waiting: red once in a full suite, 15 of 15 alone.

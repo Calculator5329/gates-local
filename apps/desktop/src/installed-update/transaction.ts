@@ -13,7 +13,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { HANDOFF_GRACE_MS } from "../../../server/src/update/admission.ts";
 import type { ProcessRecord } from "../../../server/src/update/identity.ts";
 import { validateReleaseVersion, type ReleaseArtifact } from "../../../server/src/update/release-manifest.ts";
 import { ioCode, realFileOps, type FileOps, type Identity } from "./files.ts";
@@ -84,11 +83,18 @@ export interface Approval {
   readonly server: ProcessRecord;
 }
 
-/** Row H's transaction: the intent `approved`, with the deadline the clone uses (uptime + the handoff grace). */
+/**
+ * How long after the approval W1 may still start the update: the old app's
+ * close, the watcher's own start from the AppImage and its first reads all
+ * fall inside it. The clone updater keeps its own 5 s grace (admission.ts).
+ */
+export const INSTALLED_APPROVAL_MS = 30_000;
+
+/** Row H's transaction: the intent `approved`, with the deadline uptime + INSTALLED_APPROVAL_MS on this boot. */
 export function approve(a: Approval): InstalledTransaction {
   return {
     version: 1, id: a.id ?? randomUUID(), copy: a.copy, from: a.from, to: a.to, listDigest: a.listDigest, artifact: a.artifact,
-    deadline: { uptime: a.uptime + HANDOFF_GRACE_MS / 1000, boot: a.boot },
+    deadline: { uptime: a.uptime + INSTALLED_APPROVAL_MS / 1000, boot: a.boot },
     processes: { main: a.main, server: a.server }, intent: "approved",
   };
 }

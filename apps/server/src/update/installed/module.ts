@@ -7,14 +7,30 @@
 // words whether a newer version exists. When the list holds a file for this
 // copy, it is downloaded into <data dir>/updates/<version>/ and checked
 // (download.ts): by itself while the automatic switch is on (owner decision
-// D1), on the Download click (update.download) while it is off. Nothing is
-// installed: the words still send the person to the release page.
+// D1), on the Download click (update.download) while it is off.
+//
+// A Linux AppImage that can replace its own file (the desktop app says so in
+// GATES_LOCAL_INSTALLED_RESTART) offers "Restart to update" once the download
+// is checked: the status carries an approval pinned to the version and the
+// SHA-512 of the signed list, and the click reserves and commits admission
+// with that identity as its target (docs/design/installed-updates.md, 1).
+// The desktop app does the rest (apps/desktop/src/installed-update/). Any
+// other copy says why it cannot and sends the person to the release page.
+//
+// Results: the watcher leaves one in update-result.json. A token launch
+// (GATES_LOCAL_UPDATE_STARTUP_TOKEN) keeps admission closed until it reads a
+// result carrying its token and never removes the file; an ordinary start
+// takes the file, except a rollback-failed note, which stays until dismissed.
 // The automatic timer (automatic.ts) and the updateAutomatic switch are shared
 // with the clone updater unchanged; its hourly check is also the download's
 // retry. Settings reads the switch itself for the bracketed sentences.
-import type { UpdateCheck, UpdateDownload, UpdateStatus } from "@gates-local/contracts";
+import type { UpdateCheck, UpdateCommitRequest, UpdateDownload, UpdatePreparation, UpdateResult, UpdateStatus } from "@gates-local/contracts";
+import { randomUUID } from "node:crypto";
+import { cannotReplace, type CannotReplace, earlierFailure, pinnedDataFolder } from "../../../../desktop/src/installed-update/words.ts";
+import { createUpdateAdmission, FINISHING, UPDATE_PAUSED, type UpdateAdmission } from "../admission.ts";
 import { REPO_URL } from "../cli.ts";
 import type { UpdateModule } from "../module.ts";
+import { readRecord, removeRecord, takeRecord, type UpdateRecord, writeRecord } from "../record.ts";
 import { parseReleaseKey, type ReleaseArtifact, TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
 import { checkInstalled, type InstalledOutcome } from "./check.ts";
 import { type DownloadOutcome, downloadRelease, listHash, preparedRelease, removeVersions, type Space } from "./download.ts";
@@ -72,6 +88,28 @@ export function chooseUpdateModule(env: NodeJS.ProcessEnv, build: { readonly ins
 
 export const INSTALL_REFUSAL = "This installed copy of Gates Local cannot update itself yet. Download the new version from the release page.";
 
+export const RESTART_ENV = "GATES_LOCAL_INSTALLED_RESTART";
+/**
+ * Whether this copy can replace its own file, as the desktop app found it at
+ * startup (section 2, "Who may update"): yes, one of the refusal cases, or
+ * none, for a copy with no installer step yet (Windows), which keeps the old
+ * words.
+ */
+export type Restart = "yes" | "none" | "pinned" | CannotReplace;
+const RESTARTS: readonly Restart[] = ["yes", "none", "pinned", "read-only", "no-permission", "not-appimage"];
+export const parseRestart = (value: string | undefined): Restart => RESTARTS.find((r) => r === value) ?? "none";
+
+/** The admission target of an installed copy: the version and the SHA-512 of the exact signed list bytes. */
+export const installedTarget = (version: string, listDigest: string) => `${version}:${listDigest}`;
+
+const blocked = (message: string) => ({ state: "blocked" as const, message });
+
+/** Why the click is refused, for a copy that cannot replace its file. */
+function refusal(restart: Exclude<Restart, "yes">, target: string): string {
+  if (restart === "none") return INSTALL_REFUSAL;
+  return restart === "pinned" ? pinnedDataFolder(target).text : cannotReplace(restart, target).text;
+}
+
 /** The words Settings shows for each outcome; page is where they send the person.
  *  "Gates Local will try again in an hour." is not here: Settings adds it to
  *  unreachable and no-list from the live switch, so it stays true after a toggle. */
@@ -114,8 +152,9 @@ function mb(bytes: number, round: (n: number) => number = Math.round): string {
   return value < 10 ? (round(value * 10) / 10).toFixed(1) : String(round(value));
 }
 
-/** The download's words, in place of "Version <new> is available.". Settings adds the bracketed sentence while the switch is on. */
-export function downloadLines(target: string, fetch: Fetch): string[] {
+/** The download's words, in place of "Version <new> is available.". Settings adds the bracketed sentence while the switch is on.
+ *  Ready: a copy that can restart into it says so beside its Restart button; any other says why not. */
+export function downloadLines(target: string, fetch: Fetch, restart: Restart = "none"): string[] {
   switch (fetch.state) {
     case "downloading":
       return [`Downloading version ${target} (${mb(fetch.received, Math.floor)} of ${mb(fetch.total)} MB). You can keep chatting.`];
@@ -127,6 +166,8 @@ export function downloadLines(target: string, fetch: Fetch): string[] {
       // Needed rounds up and free rounds down, so the two never read equal when the space is short.
       return [`Not enough free space on ${fetch.volume} for version ${target} (needs ${mb(fetch.needed, Math.ceil)} MB, ${mb(fetch.free, Math.floor)} MB free). Free some space, then use Check for updates.`];
     case "ready":
+      if (restart === "yes") return [`Version ${target} is downloaded and checked.`];
+      if (restart !== "none") return [refusal(restart, target)];
       return [`Version ${target} is downloaded and checked. This copy cannot install it by itself yet. To update now, download it from the release page.`];
   }
 }
@@ -151,11 +192,22 @@ export interface InstalledModuleDeps {
   /** Settings' "Check for updates automatically": on, a newer version downloads by itself; turned off, downloads stop and are deleted. */
   readonly automatic: { readonly enabled: () => boolean; readonly onChange: (listener: () => void) => () => void };
   /**
-   * Versions whose folders cleanup and the switch never delete. The next
-   * step returns the one an unfinished update or an undismissed failure
-   * names; until it exists, main.ts passes a function that returns none.
+   * Versions whose folders cleanup and the switch never delete: main.ts
+   * returns the one an unfinished update names. The module adds the one an
+   * undismissed rollback-failed note names, and the one being installed.
    */
   readonly keep: () => readonly string[];
+  /** Whether this copy can replace its own file; default none. */
+  readonly restart?: Restart;
+  /** Shared with every producer of work, as for the clone updater. */
+  readonly admission?: UpdateAdmission;
+  readonly activity?: () => readonly string[];
+  /** Work that must finish, rather than being interrupted by an install. */
+  readonly uninterruptible?: () => readonly string[];
+  /** A token launch: the result carrying this token opens admission. */
+  readonly startupToken?: string;
+  /** How often a token launch looks for its result; default 200 ms. */
+  readonly resultPollMs?: number;
   /** Tests pass a fake; the real one is boundedGet. */
   readonly get?: Get;
   /** The artifact's read; the real one is streamGet with the feed's rules. */
@@ -205,13 +257,88 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     return next;
   };
 
+  const restart = deps.restart ?? "none";
+  const admission = deps.admission ?? createUpdateAdmission({ finishing: deps.startupToken !== undefined });
+
+  // The last run's note. failed: an undismissed rollback-failed note, which
+  // stays on disk, keeps the folders it names and refuses a new update.
+  const toResult = (r: UpdateRecord): UpdateResult | null => {
+    const own = r.installed;
+    if (own === undefined) return null;
+    return { at: r.at, outcome: r.outcome, line: own.detail === undefined ? own.text : `${own.text} ${own.detail}`, ...(own.link === true ? { page: deps.feed.page } : {}) };
+  };
+  let result: UpdateResult | null = null;
+  let failed: UpdateRecord | undefined;
+  let looking: ReturnType<typeof setInterval> | undefined;
+  const lookForOwn = (token: string) => {
+    let r: UpdateRecord | undefined;
+    try { r = readRecord(deps.dataDir); } catch (error) { log(`could not read the update result: ${(error as Error).message}`); }
+    if (r?.installed?.token !== token) return;
+    clearInterval(looking);
+    looking = undefined;
+    result = toResult(r);
+    if (r.outcome === "rollback-failed") failed = r;
+    // This launch says it; the next ordinary start does not say it again.
+    else if (r.installed.shown !== true) {
+      try { writeRecord(deps.dataDir, { ...r, installed: { ...r.installed, shown: true } }); } catch (error) { log(`could not mark the update result shown: ${(error as Error).message}`); }
+    }
+    // Opening notifies, which pushes the status with the result.
+    admission.open();
+  };
+  try {
+    if (deps.startupToken === undefined) {
+      const left = readRecord(deps.dataDir);
+      if (left?.outcome === "rollback-failed" && left.installed !== undefined) { failed = left; result = toResult(left); }
+      else {
+        const taken = takeRecord(deps.dataDir);
+        if (taken !== undefined && taken.installed?.shown !== true) result = toResult(taken);
+      }
+    }
+  } catch (error) {
+    log(`could not read the last update result: ${(error as Error).message}`);
+  }
+
   /** The last check, with the download's words in place of "is available." for this copy. */
   const shown = (c: UpdateCheck | null): UpdateCheck | null => {
     if (c?.state !== "newer" || !c.forThisCopy || fetch?.target !== c.target) return c;
-    return { ...c, lines: downloadLines(c.target, fetch.fetch), download: fetch.fetch.state };
+    const checked = fetch.fetch.state === "ready" && restart === "yes";
+    // An undismissed rollback-failed note refuses the update: no button, and the row says why.
+    const ready = checked && failed === undefined;
+    const lines = checked && !ready ? [earlierFailure().text] : downloadLines(c.target, fetch.fetch, restart);
+    return { ...c, lines, download: fetch.fetch.state, ...(ready ? { restart: true } : {}) };
   };
-  const status = (): UpdateStatus => ({ version: { kind: "installed", version: deps.version }, result: null, lastCheck: shown(lastCheck), activity: [], installing: false });
+  let offer: { readonly token: string; readonly fingerprint: string } | undefined;
+  /** The admission target of the found version, when it is the checked, ready one Restart would install. */
+  const readyTarget = (c: UpdateCheck | null): string | undefined => {
+    if (restart !== "yes" || found === undefined || failed !== undefined || c?.state !== "newer" || c.target !== found.target || c.download !== "ready") return undefined;
+    return installedTarget(found.target, listHash(found.list));
+  };
+  const status = (): UpdateStatus => {
+    const activity = deps.activity?.() ?? [];
+    const installing = admission.installing();
+    const c = shown(lastCheck);
+    const target = installing || admission.finishing() ? undefined : readyTarget(c);
+    if (target === undefined) offer = undefined;
+    else {
+      const fingerprint = JSON.stringify([target, admission.revision(), activity]);
+      if (offer?.fingerprint !== fingerprint) offer = { token: randomUUID(), fingerprint };
+    }
+    return { version: { kind: "installed", version: deps.version }, result, lastCheck: c, activity, installing, ...(offer ? { approval: offer.token } : {}) };
+  };
   const push = () => { if (!closed) deps.changed?.(status()); };
+  const offAdmission = admission.onChange(push);
+  /** Folders no cleanup deletes: the caller's, an undismissed failure's, and the one being installed. */
+  const kept = (): string[] => [
+    ...deps.keep(),
+    ...(failed?.installed === undefined ? [] : [failed.installed.to]),
+    ...(admission.installing() && found !== undefined ? [found.target] : []),
+  ];
+  if (deps.startupToken !== undefined) {
+    const token = deps.startupToken;
+    looking = setInterval(() => lookForOwn(token), deps.resultPollMs ?? 200);
+    looking.unref?.();
+    lookForOwn(token);
+  }
   const closingCheck = (): UpdateCheck => ({ state: "cannot-check", checkedAt: now(), reason: "error", lines: ["Gates Local is closing, so it did not check for updates."] });
 
   const cancelActive = async (why: string) => {
@@ -270,7 +397,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     if (active !== undefined && active.target !== f.target) await cancelActive(`version ${f.target} replaced version ${active.target}`);
     else if (active !== undefined && active.list !== list) await cancelActive(`a new signed list for version ${f.target} replaced the one being downloaded`);
     if (refused !== list) refused = undefined;
-    await removeVersions(deps.dataDir, [f.target, ...deps.keep()]).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
+    await removeVersions(deps.dataDir, [f.target, ...kept()]).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
     if (active !== undefined) return;
     // A folder left by an earlier start is ready only after it checks out again, holding this very list.
     const prepared = await preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null);
@@ -291,7 +418,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
 
   const switchedOff = () => serial(async () => {
     await cancelActive("automatic checks were turned off");
-    await removeVersions(deps.dataDir, deps.keep()).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
+    await removeVersions(deps.dataDir, kept()).catch((error: unknown) => log(`update cleanup: ${error instanceof Error ? error.message : String(error)}`));
     fetch = undefined;
     push();
   });
@@ -309,6 +436,8 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
   const check = async (background = false): Promise<UpdateCheck> => {
     // "error", not "unreachable": Settings promises a retry for an unreachable page, and a closing app will not retry.
     if (closed) return closingCheck();
+    // Closing to update: nothing is read or deleted, as for clones.
+    if (admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
     running ??= runCheck().finally(() => { running = undefined; });
     const c = await running;
     // Also when this click joined a background check already in flight.
@@ -320,7 +449,7 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     return shown(c) ?? c;
   };
 
-  return {
+  const update: UpdateModule = {
     status,
     // Two clicks (or two windows) share one read; a background failure stays silent, as for clones.
     check,
@@ -337,15 +466,56 @@ export function createInstalledUpdateModule(deps: InstalledModuleDeps): UpdateMo
     close: async () => {
       closed = true;
       offSwitch();
+      offAdmission();
+      clearInterval(looking);
       controller.abort(new Error("Gates Local is closing"));
       await running;
       await active?.done;
       await queue;
     },
-    // Nothing installs here yet: the next lanes add the download and the install.
-    prepare: () => Promise.resolve({ state: "blocked", message: INSTALL_REFUSAL }),
-    commit: () => ({ accepted: false }),
-    cancel: () => ({ cancelled: false }),
-    dismissResult: () => ({ dismissed: false }),
+    prepare,
+    commit: ({ reservation, target, release: requested }: UpdateCommitRequest, disconnected?: AbortSignal) => {
+      const release = admission.commit(reservation, target, requested, disconnected);
+      return release === null ? { accepted: false } : { accepted: true, release };
+    },
+    cancel: (reservation: string) => ({ cancelled: admission.cancel(reservation) }),
+    dismissResult: () => {
+      const dismissed = result !== null;
+      // The note on disk goes with it: a rollback-failed note stays only until now, and any other was already shown.
+      if (dismissed) {
+        try { removeRecord(deps.dataDir); } catch (error) { log(`could not remove the update result: ${(error as Error).message}`); }
+      }
+      result = null;
+      failed = undefined;
+      push();
+      return { dismissed };
+    },
   };
+
+  /** The click, after the person confirmed: re-check the prepared folder, then reserve admission for its identity. */
+  async function prepare(approval: string): Promise<UpdatePreparation> {
+    if (closed || admission.installing()) return blocked(UPDATE_PAUSED);
+    if (admission.finishing()) return blocked(FINISHING);
+    if (restart !== "yes") return blocked(refusal(restart, found?.target ?? ""));
+    if (failed !== undefined) return blocked(earlierFailure().text);
+    const busy = deps.uninterruptible?.() ?? [];
+    if (busy.length > 0) return blocked(`Wait for ${busy.join(", ")} to finish before updating.`);
+    const changed = () => ({ state: "changed" as const, status: status() });
+    const f = found;
+    if (f === undefined || status().approval !== approval) return changed();
+    // The folder is checked again as it is now: its list, signature and file.
+    const prepared = await serial(() => preparedRelease({ ...identity, version: f.target, list: f.list }).catch(() => null));
+    if (prepared?.ok !== true) {
+      if (fetch?.target === f.target) fetch = undefined;
+      push();
+      return changed();
+    }
+    // Compare and reserve in this same synchronous continuation, as for clones.
+    const still = deps.uninterruptible?.() ?? [];
+    if (still.length > 0) return blocked(`Wait for ${still.join(", ")} to finish before updating.`);
+    if (closed || found !== f || status().approval !== approval) return changed();
+    const target = installedTarget(f.target, listHash(f.list));
+    return { state: "ready", reservation: admission.reserve(target), target };
+  }
+  return update;
 }

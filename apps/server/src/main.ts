@@ -27,6 +27,15 @@
 //   GATES_LOCAL_UPDATE_FEED      an https release page base in place of the public one
 //   GATES_LOCAL_UPDATE_TEST_KEYS test builds only (resources/test-build.json): extra release keys,
 //                                and the feed may be loopback http
+//   GATES_LOCAL_INSTALLED_RESTART set by the desktop app: whether this installed copy can replace
+//                                its own file (yes), or why not (installed/module.ts parseRestart)
+//   GATES_LOCAL_UPDATE_STARTUP_TOKEN set on an installed copy's update start: admission stays
+//                                closed until the watcher's result carries this token
+//   GATES_LOCAL_UPDATE_TEST_FAULT test builds only: "server-never-ready@<version>" keeps that
+//                                version's server from printing ready, so an update to it goes back;
+//                                first it raises the store's version by one, after the pre-migration
+//                                copy, so going back has a store to restore, and adds a settings key
+//                                the older version does not know
 //
 // The phone listener (off unless GATES_LOCAL_WEB_LISTEN is set; src/web/):
 //   GATES_LOCAL_WEB_LISTEN       unix:<absolute path> for a second listener Tailscale Serve proxies
@@ -44,7 +53,7 @@
 // always refused. PEERS also covers what that check cannot see, such as a
 // userspace-networking tailscaled where no interface carries the address.
 // With LISTEN set, a missing or malformed other knob stops the start (exit 2).
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +64,10 @@ import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
 import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
 import { createLibraryImports, type ImportsDeps } from "./sources/imports.ts";
+import { DatabaseSync } from "node:sqlite";
 import { openThreadStore, type ThreadStore } from "./threads/store.ts";
+import { copyBeforeMigration } from "./threads/copies.ts";
+import { SETTINGS_FILE_NAME } from "./settings/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
@@ -63,9 +75,11 @@ import { createImageModule } from "./image/module.ts";
 import { imageToolChoice } from "./image/presets.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
-import { chooseUpdateModule, createInstalledUpdateModule, installedFeed } from "./update/installed/module.ts";
+import { chooseUpdateModule, createInstalledUpdateModule, INSTALLED_VERSION_ENV, installedFeed, parseRestart, RESTART_ENV } from "./update/installed/module.ts";
 import { automaticChecks } from "./update/automatic.ts";
 import { createUpdateAdmission } from "./update/admission.ts";
+import { STARTUP_TOKEN_ENV } from "./update/startup.ts";
+import { readTransaction, transactionFile } from "../../desktop/src/installed-update/transaction.ts";
 import { realRunner } from "./update/run.ts";
 import { createUsage } from "./usage/index.ts";
 import { createVoiceModule } from "./voice/module.ts";
@@ -171,7 +185,11 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   };
 
   let server: WsServer | undefined;
-  const admission = createUpdateAdmission();
+  const installedVersion = process.env[INSTALLED_VERSION_ENV] ?? "";
+  const testBuild = existsSync(TEST_BUILD_MARKER);
+  // An installed copy's update start: every write waits for the watcher's result (design section 2, "Update startup").
+  const startupToken = installedVersion === "" ? "" : process.env[STARTUP_TOKEN_ENV] ?? "";
+  const admission = createUpdateAdmission({ finishing: startupToken !== "" });
   // One lease for the process: chat turns and loads share it, image jobs hold it alone.
   const gpuLease = createGpuLease();
   let services: ModelServices;
@@ -217,6 +235,15 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const imports = createImportActivity(admission);
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
   const libraryImports = createLibraryImports({ ...options.imports, sources, activity: imports });
+  // What an update would interrupt, for the approval; imports cannot be interrupted at all.
+  const activity = () => [
+    ...imports.activity(),
+    ...libraryImports.activity(),
+    ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
+    ...services.pulls.pending().map((p) => `model download: ${p.name}`),
+    ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
+  ];
+  const uninterruptible = () => [...imports.activity(), ...libraryImports.activity()];
   // One automatic checker for the supervised desktop server; browser-only servers never fetch on a timer.
   // An installed copy (the desktop app says its version) checks the signed release list instead.
   const update = chooseUpdateModule(process.env, {
@@ -224,7 +251,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       version,
       platform: process.platform,
       arch: process.arch,
-      feed: installedFeed(process.env, { testBuild: existsSync(TEST_BUILD_MARKER), log: (line) => log(`update ${line}`) }),
+      feed: installedFeed(process.env, { testBuild, log: (line) => log(`update ${line}`) }),
       dataDir,
       automatic: {
         enabled: () => services.settings.get().updateAutomatic !== false,
@@ -232,8 +259,20 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
           if (next.updateAutomatic !== previous.updateAutomatic) listener();
         }),
       },
-      // Nothing to keep yet: the install step will name its unfinished update or failure note here.
-      keep: () => [],
+      // An unfinished update's download stays: the watcher proves and moves it.
+      keep: () => {
+        try {
+          const tx = readTransaction(transactionFile(dataDir));
+          return tx === null ? [] : [tx.to];
+        } catch {
+          return [];
+        }
+      },
+      restart: parseRestart(process.env[RESTART_ENV]),
+      admission,
+      activity,
+      uninterruptible,
+      ...(startupToken === "" ? {} : { startupToken }),
       changed: (status) => server?.push("update.changed", status),
       log: (line) => log(`update ${line}`),
     }),
@@ -244,14 +283,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       runner: realRunner,
       everyChange: () => services.settings.get().updateEveryChange === true,
       changed: (status) => server?.push("update.changed", status),
-      activity: () => [
-        ...imports.activity(),
-        ...libraryImports.activity(),
-        ...(app.activeTurns() === 0 ? [] : [`${app.activeTurns()} running ${app.activeTurns() === 1 ? "reply" : "replies"} (including other windows)`]),
-        ...services.pulls.pending().map((p) => `model download: ${p.name}`),
-        ...((image.activeJobs?.() ?? 0) > 0 ? [`${image.activeJobs?.()} image generation jobs (queued or running)`] : []),
-      ],
-      uninterruptible: () => [...imports.activity(), ...libraryImports.activity()],
+      activity,
+      uninterruptible,
       log: (line) => log(`update ${line}`),
     }),
   });
@@ -329,6 +362,27 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     die(`cannot listen on ${where}: ${(e as Error).message}`, 1);
   }
   if (shutdown.stopping()) return;
+  // A test build's broken version: it migrates the store the way a real
+  // migration does (the copy first, then the version), and never says it is ready.
+  if (testBuild && installedVersion !== "" && process.env["GATES_LOCAL_UPDATE_TEST_FAULT"] === `server-never-ready@${installedVersion}`) {
+    const file = path.join(dataDir, "threads.sqlite");
+    const db = new DatabaseSync(file);
+    try {
+      const version = Number(db.prepare("PRAGMA user_version").get()?.["user_version"]);
+      copyBeforeMigration(db, file, version + 1);
+      db.exec(`PRAGMA user_version = ${version + 1}`);
+    } finally {
+      db.close();
+    }
+    // And a settings key the older version does not know (design U6).
+    const settingsFile = path.join(dataDir, SETTINGS_FILE_NAME);
+    if (existsSync(settingsFile)) {
+      const saved = JSON.parse(readFileSync(settingsFile, "utf8")) as { settings: Record<string, unknown> };
+      writeFileSync(settingsFile, `${JSON.stringify({ ...saved, settings: { ...saved.settings, testFaultNewerKey: true } }, null, 2)}\n`);
+    }
+    log("test fault: server-never-ready");
+    return;
+  }
   process.stdout.write(`${JSON.stringify({ ready: true, port: server.port })}\n`);
   log(`listening on 127.0.0.1:${server.port}; data in ${dataDir}; runtime ${discoverOnly ? "discover-only" : "managed"}`);
   if (phone !== null) log(`phone listener on unix:${String(server.phoneSocket)} for ${phone.origin}, serving ${phone.webRoot}`);

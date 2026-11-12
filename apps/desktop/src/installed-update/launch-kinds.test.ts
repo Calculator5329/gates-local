@@ -2,7 +2,7 @@
 // launch, one lock rule each") and each refusal.
 import { expect, it } from "vitest";
 import { STARTUP_TOKEN_ENV } from "../../../server/src/update/startup.ts";
-import { decideLaunch, WATCH_FLAG, type LaunchFacts, type LaunchKind } from "./launch-kinds.ts";
+import { decideLaunch, decideUnrouted, WATCH_FLAG, type LaunchFacts, type LaunchKind, type UnroutedFacts } from "./launch-kinds.ts";
 import { approve, transactionFile, type InstalledTransaction } from "./transaction.ts";
 import * as words from "./words.ts";
 
@@ -41,6 +41,10 @@ const rows: readonly [string, Partial<LaunchFacts>, LaunchKind][] = [
   ["ordinary, no transaction", {}, { kind: "ordinary" }],
   ["ordinary, no transaction, an undismissed rollback-failed result", { rollbackFailed: true }, { kind: "show-earlier-failure", words: words.earlierFailure() }],
   ["ordinary, transaction of another copy", { transaction: elsewhere }, { kind: "say-and-exit", why: "other-copy", words: words.otherCopy("/other/Gates-Local.AppImage") }],
+  // A moved file: the transaction names the old path. At cleanup with the lock free it starts, leaving row C's leftovers alone.
+  ["ordinary, another copy's transaction at cleanup, update.lock free: starts", { transaction: { ...elsewhere, intent: "cleanup", ending: "updated" } }, { kind: "ordinary" }],
+  ["ordinary, another copy's transaction at cleanup, an undismissed rollback-failed result", { transaction: { ...elsewhere, intent: "cleanup", ending: "updated" }, rollbackFailed: true }, { kind: "show-earlier-failure", words: words.earlierFailure() }],
+  ["ordinary, another copy's transaction at cleanup, update.lock held", { transaction: { ...elsewhere, intent: "cleanup", ending: "updated" }, updateLock: "held" }, { kind: "say-and-exit", why: "other-copy", words: words.otherCopy("/other/Gates-Local.AppImage") }],
   ["ordinary, update.lock held by a live owner", { transaction: launchNew, updateLock: "held" }, { kind: "say-and-exit", why: "updating", words: words.secondLaunch() }],
   ["ordinary, update.lock free or its owner dead", { transaction: launchNew }, { kind: "become-watcher", transactionFile: file }],
   ["ordinary, this copy's transaction at cleanup, update.lock free: retry row C, then start", { transaction: at("cleanup", { ending: "updated" }) }, { kind: "ordinary-after-cleanup", transactionFile: file }],
@@ -51,4 +55,27 @@ const rows: readonly [string, Partial<LaunchFacts>, LaunchKind][] = [
 
 it.each(rows)("%s", (_name, f, expected) => {
   expect(decideLaunch(facts(f))).toEqual(expected);
+});
+
+// A packaged Linux launch with no program file to replace (a renamed file, a
+// lowercase .appimage, AppRun with APPIMAGE unset) shares the data folder, so
+// it reads the same transaction and lock before it opens anything.
+const unrouted = (f: Partial<UnroutedFacts>): UnroutedFacts => ({ dataDir: here.dataDir, transaction: null, updateLock: "free", rollbackFailed: false, ...f });
+const unroutedRows: readonly [string, Partial<UnroutedFacts>, LaunchKind][] = [
+  ["no program, nothing there: starts as before", {}, { kind: "ordinary" }],
+  ["no program, an undismissed rollback-failed result", { rollbackFailed: true }, { kind: "show-earlier-failure", words: words.earlierFailure() }],
+  ["no program, a go-back paused between B2a and B2b", { transaction: at("restore-install") }, { kind: "say-and-exit", why: "other-copy", words: words.otherCopy(here.program) }],
+  // The lock first: a watcher holding it reopens the app by itself, so "start that copy" would not be true.
+  ["no program, an update in flight with the lock held", { transaction: launchNew, updateLock: "held" }, { kind: "say-and-exit", why: "updating", words: words.secondLaunch() }],
+  ["no program, a transaction that does not decode with the lock held", { transaction: "unreadable", updateLock: "held" }, { kind: "say-and-exit", why: "updating", words: words.secondLaunch() }],
+  // At cleanup the store is final; only row C's leftovers remain, and they stay for the copy that owns them.
+  ["no program, a transaction at cleanup with the lock free: starts", { transaction: at("cleanup", { ending: "updated" }) }, { kind: "ordinary" }],
+  ["no program, at cleanup with an undismissed rollback-failed result", { transaction: at("cleanup", { ending: "updated" }), rollbackFailed: true }, { kind: "show-earlier-failure", words: words.earlierFailure() }],
+  ["no program, at cleanup with the lock held", { transaction: at("cleanup", { ending: "updated" }), updateLock: "held" }, { kind: "say-and-exit", why: "updating", words: words.secondLaunch() }],
+  ["no program, the lock held with no transaction", { updateLock: "held" }, { kind: "say-and-exit", why: "updating", words: words.secondLaunch() }],
+  ["no program, a transaction that does not decode", { transaction: "unreadable" }, { kind: "transaction-unreadable", transactionFile: file, words: words.transactionUnreadable(file) }],
+];
+
+it.each(unroutedRows)("%s", (_name, f, expected) => {
+  expect(decideUnrouted(unrouted(f))).toEqual(expected);
 });

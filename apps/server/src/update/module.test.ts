@@ -206,7 +206,7 @@ describe("automatic checks share the updater engine", () => {
     if (ready.state !== "ready") throw new Error("fixture not reserved");
     expect(() => admission.admit()).toThrow("closing to update");
     expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ installing: true }));
-    const committed = update.commit({ reservation: ready.reservation, targetCommit: ready.targetCommit, release: "main-release" });
+    const committed = update.commit({ reservation: ready.reservation, target: ready.target, release: "main-release" });
     expect(committed.accepted).toBe(true);
     if (!committed.accepted) throw new Error("fixture not committed");
     expect(update.cancel(ready.reservation)).toEqual({ cancelled: false });

@@ -70,6 +70,8 @@ export interface RunLog {
   readonly ops: string[];
   readonly violations: string[];
   readonly pages: Words[];
+  /** The lines the watcher wrote to update.log. */
+  readonly logged: string[];
   ordinary: number;
 }
 
@@ -304,6 +306,7 @@ export class World {
       uptime: () => this.uptime,
       bootId: () => this.boot,
       showPage: words => { log.pages.push(words); },
+      log: line => { log.logged.push(line); },
       freeBytes: () => this.free,
       trustedKeys: this.trustedKeys,
       automaticChecks: true,
@@ -349,7 +352,7 @@ function fail(what: string): never {
   throw new Error(`fixture: no ${what}`);
 }
 
-export const newLog = (): RunLog => ({ points: [], spawns: [], stops: [], deleted: [], ops: [], violations: [], pages: [], ordinary: 0 });
+export const newLog = (): RunLog => ({ points: [], spawns: [], stops: [], deleted: [], ops: [], violations: [], pages: [], logged: [], ordinary: 0 });
 
 export type RunEnd = WatchOutcome | { readonly outcome: "crashed"; readonly point: StopPoint };
 

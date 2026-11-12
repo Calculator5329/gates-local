@@ -85,7 +85,7 @@ try {
   const dataFolder = await page.evaluate(() => (globalThis as unknown as { gatesLocal: GatesLocalBridge }).gatesLocal.dataFolder());
   expect(dataFolder).toBe(path.join(profile, "server-data"));
   expect(existsSync(path.join(dataFolder, "threads.sqlite"))).toBe(true);
-  const update = await page.evaluate(() => (globalThis as unknown as { gatesLocal: GatesLocalBridge }).gatesLocal.updateAndRestart({ reservation: "packaged-smoke", targetCommit: "0".repeat(40) }));
+  const update = await page.evaluate(() => (globalThis as unknown as { gatesLocal: GatesLocalBridge }).gatesLocal.updateAndRestart({ reservation: "packaged-smoke", target: "0".repeat(40) }));
   expect(update).toEqual({ ok: false, message: "This installed copy of Gates Local cannot update itself yet. Download the new version from the release page." });
   await page.screenshot({ path: path.join(output, "first-run.png") });
   const firstRun = await page.locator(".fr h1").innerText();

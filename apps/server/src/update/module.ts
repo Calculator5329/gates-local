@@ -66,6 +66,9 @@ export function resultLine(r: UpdateRecord): string {
         : `The update to ${to} stopped at ${r.step === undefined ? "a step" : STEP_WORDS[r.step]}: ${r.reason ?? "no reason was given"}, and going back to ${from} did not finish. Run the commands below in the Gates Local folder.`;
     case "refused":
       return `The update stopped: ${r.reason ?? "no reason was given"}`;
+    case "rolled-back":
+      // Written only by an installed copy's watcher, whose own words the installed module shows.
+      return `The update to ${to} did not start, so Gates Local went back to ${from}.`;
   }
 }
 
@@ -183,12 +186,12 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
       const latest = status();
       if (busy().length > 0) return waiting();
       if (latest.approval !== approval || latest.lastCheck?.state !== "available" || latest.lastCheck.targetCommit === undefined) return { state: "changed", status: latest };
-      const targetCommit = latest.lastCheck.targetCommit;
-      const reservation = admission.reserve(targetCommit);
-      return { state: "ready", reservation, targetCommit };
+      const target = latest.lastCheck.targetCommit;
+      const reservation = admission.reserve(target);
+      return { state: "ready", reservation, target };
     },
-    commit: ({ reservation, targetCommit, release: requestedRelease }, disconnected) => {
-      const release = admission.commit(reservation, targetCommit, requestedRelease, disconnected);
+    commit: ({ reservation, target, release: requestedRelease }, disconnected) => {
+      const release = admission.commit(reservation, target, requestedRelease, disconnected);
       return release === null ? { accepted: false } : { accepted: true, release };
     },
     cancel: (reservation) => ({ cancelled: admission.cancel(reservation) }),

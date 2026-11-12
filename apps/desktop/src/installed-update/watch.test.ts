@@ -467,24 +467,42 @@ describe("one mover", () => {
 });
 
 describe("endings outside the matrix", () => {
-  it("H: the deadline passed before the watcher ran: stopped, did not close, nothing changed", async () => {
+  it("H: the deadline passed before the watcher ran, the old app closed: stopped too late, never 'did not close', nothing changed", async () => {
     const w = new World();
     const log = newLog();
     beginUpdate(w.approval, { spawnWatcher: () => undefined, fs: w.effects(log).fs, earlierFailure: false });
     w.uptime += 60;
-    const { end } = await resume(w);
-    expect(end).toMatchObject({ outcome: "stopped", words: words.didNotClose() });
+    const { end, log: ran } = await resume(w);
+    expect(end).toMatchObject({ outcome: "stopped", words: words.startedTooLate() });
+    expect(ran.logged).toEqual(["W1 stopped: the approval deadline passed after the old app closed"]);
     expect(holds(w.program, w.old, w.new)).toBe("old");
     expect(contents(w.live)).toEqual({ version: STORE_BEFORE, ids: BEFORE });
   });
 
-  it("W1: the old app does not close in time: did not close, nothing moved, no relaunch", async () => {
+  it("H: the computer restarted before the watcher ran: stopped too late, logged as another boot", async () => {
+    const w = new World();
+    const log = newLog();
+    beginUpdate(w.approval, { spawnWatcher: () => undefined, fs: w.effects(log).fs, earlierFailure: false });
+    w.reboot();
+    const { end, log: ran } = await resume(w);
+    expect(end).toMatchObject({ outcome: "stopped", words: words.startedTooLate() });
+    expect(ran.logged).toEqual(["W1 stopped: the computer restarted after the approval"]);
+    expect(holds(w.program, w.old, w.new)).toBe("old");
+  });
+
+  it("W1: the old app does not close in time: did not close, logged why, nothing moved, no relaunch", async () => {
     const w = new World();
     w.hangOldApp();
     const { end, log } = await update(w);
     expect(end).toEqual({ outcome: "stopped", words: words.didNotClose(), cleaned: true, startApp: false });
+    expect(log.logged).toEqual(["W1 stopped: the old app was still running at the approval deadline"]);
     expect(log.spawns).toEqual([]);
     expect(holds(w.program, w.old, w.new)).toBe("old");
+  });
+
+  it("W1: an update that reaches the replace logs no stop", async () => {
+    const { log } = await update(new World());
+    expect(log.logged.filter(line => line.startsWith("W1"))).toEqual([]);
   });
 
   // At W2 every failed check of the cached files is the bad-download sentence without its bracket part.

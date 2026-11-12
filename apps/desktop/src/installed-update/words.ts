@@ -85,6 +85,8 @@ export function unknownFile(programPath: string, old: Saved | null, next: Saved 
   return withLink(`${found} Download Gates Local from the release page and put it at ${programPath}.`);
 }
 export const didNotClose = (): Words => say("The update did not start because Gates Local did not close in time. Nothing was changed. Try Restart to update again.");
+/** Gates Local closed, but the update was not started in time after the click (a slow start, or a restart of the computer). */
+export const startedTooLate = (): Words => say("The update did not start in time after Gates Local closed. Nothing was changed. Try Restart to update again.");
 export const couldNotStartUpdate = (file: string): Words =>
   say(`Gates Local could not start the update because it cannot change ${file}. Nothing was changed. Fix that, then try Restart to update again.`);
 export const cleanupPending = (folder: string): Words =>

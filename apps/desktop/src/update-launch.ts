@@ -115,19 +115,28 @@ export interface UpdateControl {
   cancel(reservation: string): Promise<unknown>;
 }
 
-export function validUpdateRequest(value: unknown): value is UpdateInstallRequest {
-  return typeof value === "object" && value !== null && "reservation" in value && typeof value.reservation === "string" && value.reservation !== "" && "targetCommit" in value && typeof value.targetCommit === "string" && /^[a-f0-9]{40}$/.test(value.targetCommit);
+/**
+ * What an approved target names: a clone's full commit, or an installed
+ * copy's `<version>:<SHA-512 of the signed list>` (apps/server/src/update/installed/module.ts).
+ */
+export function targetKind(target: string): "commit" | "installed" | null {
+  if (/^[a-f0-9]{40}$/.test(target)) return "commit";
+  return /^\d+\.\d+\.\d+:[a-f0-9]{128}$/.test(target) ? "installed" : null;
 }
 
-/** Main validates the server reservation before spawning; every failed handoff releases it. */
-export async function launchApprovedUpdate(request: UpdateInstallRequest, control: UpdateControl, start: (approvedCommit: string) => Promise<UpdateAndRestartResult>): Promise<UpdateAndRestartResult> {
+export function validUpdateRequest(value: unknown): value is UpdateInstallRequest {
+  return typeof value === "object" && value !== null && "reservation" in value && typeof value.reservation === "string" && value.reservation !== "" && "target" in value && typeof value.target === "string" && targetKind(value.target) !== null;
+}
+
+/** Main validates the server reservation before spawning; every failed handoff releases it. start gets the approved target. */
+export async function launchApprovedUpdate(request: UpdateInstallRequest, control: UpdateControl, start: (approvedTarget: string) => Promise<UpdateAndRestartResult>): Promise<UpdateAndRestartResult> {
   let started = false;
   const release = randomUUID();
   let result: UpdateAndRestartResult;
   try {
     const committed = await control.commit({ ...request, release });
     if (!committed.accepted || committed.release !== release) result = { ok: false, message: "The update approval expired or changed. Check for updates again and review the target." };
-    else { result = await start(request.targetCommit); started = result.ok; }
+    else { result = await start(request.target); started = result.ok; }
   } catch {
     result = { ok: false, message: "Could not start the approved update. Gates Local is staying open; check for updates again to retry." };
   }

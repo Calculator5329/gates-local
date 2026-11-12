@@ -34,7 +34,7 @@ export async function desktopBridge(page: Page): Promise<void> {
   await page.addInitScript(() => {
     Object.assign(window, {
       gatesLocal: {
-        updateApprovalVersion: 1 as const,
+        updateApprovalVersion: 2 as const,
         getServerUrl: async () => new URLSearchParams(location.search).get("server"),
         onState: () => () => undefined,
         updateAndRestart: async () => {
@@ -75,7 +75,7 @@ export async function footerSocket(page: Page) {
         socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { dismissed: true } }));
       } else if (message.method === "update.prepare") {
         const check = update.lastCheck;
-        const result = check?.state === "available" && check.targetCommit !== undefined ? { state: "ready", reservation: "fixture-reservation", targetCommit: check.targetCommit } : { state: "changed", status: update };
+        const result = check?.state === "available" && check.targetCommit !== undefined ? { state: "ready", reservation: "fixture-reservation", target: check.targetCommit } : { state: "changed", status: update };
         socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
       } else if (message.method === "update.cancel") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { cancelled: true } }));
       else server.send(raw);

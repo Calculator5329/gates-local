@@ -56,6 +56,43 @@ export type LaunchKind =
   /** A transaction file is there and does not decode: show this page and start no server. */
   | { readonly kind: "transaction-unreadable"; readonly transactionFile: string; readonly words: Words };
 
+/**
+ * A packaged Linux launch with no program file to replace (replaceable.ts
+ * found none: a renamed file, a lowercase .appimage, AppRun with APPIMAGE
+ * unset). It shares the data folder, so it reads the same transaction and
+ * lock, holding the profile lock as an ordinary launch does.
+ */
+export interface UnroutedFacts {
+  readonly dataDir: string;
+  readonly transaction: InstalledTransaction | "unreadable" | null;
+  /** Probed whether or not there is a transaction: a watcher holds it from row H on. */
+  readonly updateLock: "free" | "held";
+  readonly rollbackFailed: boolean;
+}
+
+/**
+ * It never becomes the watcher and never opens the store while a transaction
+ * is there: a go-back paused between B2a and B2b has no threads.sqlite, and
+ * a server started here would make an empty one. The copy the transaction
+ * names finishes it. The lock is read first: a watcher holding it reopens the
+ * app by itself. A transaction at `cleanup` with the lock free starts like no
+ * transaction: the store is final, row C only removes leftovers, and those
+ * stay for the copy that owns them, so a moved file is never stranded.
+ */
+export function decideUnrouted(f: UnroutedFacts): Extract<LaunchKind, { kind: "ordinary" | "show-earlier-failure" | "say-and-exit" | "transaction-unreadable" }> {
+  if (f.updateLock === "held") return { kind: "say-and-exit", why: "updating", words: words.secondLaunch() };
+  const tx = f.transaction;
+  if (tx === "unreadable") {
+    const file = transactionFile(f.dataDir);
+    return { kind: "transaction-unreadable", transactionFile: file, words: words.transactionUnreadable(file) };
+  }
+  if (tx !== null && tx.intent !== "cleanup") return { kind: "say-and-exit", why: "other-copy", words: words.otherCopy(tx.copy.program) };
+  return startOrEarlierFailure(f.rollbackFailed);
+}
+
+const startOrEarlierFailure = (rollbackFailed: boolean): Extract<LaunchKind, { kind: "ordinary" | "show-earlier-failure" }> =>
+  rollbackFailed ? { kind: "show-earlier-failure", words: words.earlierFailure() } : { kind: "ordinary" };
+
 const sameCopy = (a: LaunchFacts["copy"], b: LaunchFacts["copy"]): boolean => a.program === b.program && a.dataDir === b.dataDir;
 
 function watchTarget(argv: readonly string[]): string | null {
@@ -88,9 +125,13 @@ export function decideLaunch(f: LaunchFacts): LaunchKind {
   }
 
   const tx = f.transaction;
-  if (tx === null) return f.rollbackFailed ? { kind: "show-earlier-failure", words: words.earlierFailure() } : { kind: "ordinary" };
+  if (tx === null) return startOrEarlierFailure(f.rollbackFailed);
   if (tx === "unreadable") return { kind: "transaction-unreadable", transactionFile: ours, words: words.transactionUnreadable(ours) };
-  if (!sameCopy(tx.copy, f.copy)) return { kind: "say-and-exit", why: "other-copy", words: words.otherCopy(tx.copy.program) };
+  if (!sameCopy(tx.copy, f.copy)) {
+    // A moved file finds the old path's transaction: at cleanup with the lock free it starts, leaving row C's leftovers alone.
+    if (tx.intent === "cleanup" && f.updateLock === "free") return startOrEarlierFailure(f.rollbackFailed);
+    return { kind: "say-and-exit", why: "other-copy", words: words.otherCopy(tx.copy.program) };
+  }
   if (f.updateLock === "held") return { kind: "say-and-exit", why: "updating", words: words.secondLaunch() };
   if (tx.intent === "cleanup") return { kind: "ordinary-after-cleanup", transactionFile: ours };
   return { kind: "become-watcher", transactionFile: ours };

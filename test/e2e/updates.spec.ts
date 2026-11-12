@@ -9,7 +9,7 @@ async function updates(page: Page, desktop = true) {
   const fixture = updateFixtureState();
   if (desktop) await page.addInitScript(() => {
     const bridge = {
-      updateApprovalVersion: 1 as const,
+      updateApprovalVersion: 2 as const,
       getServerUrl: async () => new URLSearchParams(location.search).get("server"),
       onState: () => () => undefined,
       updateAndRestart: async () => { document.documentElement.dataset["updateStarted"] = "yes"; return { ok: true as const }; },

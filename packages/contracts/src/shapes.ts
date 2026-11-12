@@ -647,16 +647,23 @@ export const UpdateCheck = S.Union([
    * holds an installer for this platform. download: where fetching that
    * installer stands; lines already say it in words, progress included.
    */
-  S.Struct({ state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String, download: S.optional(UpdateDownload) }),
+  S.Struct({
+    state: S.Literal("newer"), checkedAt: Millis, current: S.String, target: S.String, forThisCopy: S.Boolean, lines: S.Array(S.String), page: S.String, download: S.optional(UpdateDownload),
+    /** The download is ready and this copy can replace its own file: Restart to update. */
+    restart: S.optional(S.Boolean),
+  }),
 ]);
 export type UpdateCheck = typeof UpdateCheck.Type;
 
 /** The last update run, shown once on the next start. */
 export const UpdateResult = S.Struct({
   at: Millis,
-  outcome: S.Literals(["updated", "stopped", "rollback-failed", "refused"]),
+  /** rolled-back: an installed copy's new version did not start and it went back. */
+  outcome: S.Literals(["updated", "rolled-back", "stopped", "rollback-failed", "refused"]),
   /** "Updated to v0.2.0, 12 changes." or the stopped-at line. */
   line: S.String,
+  /** The line ends by sending the person to the release page (an installed copy's failure notes). */
+  page: S.optional(S.String),
   logPath: S.optional(S.String),
   /** rollback-failed: the commands that finish going back, run in the clone. */
   commands: S.optional(S.Array(S.String)),
@@ -679,9 +686,14 @@ export const UpdateStatus = S.Struct({
 });
 export type UpdateStatus = typeof UpdateStatus.Type;
 
-export const UpdateInstallRequest = S.Struct({ reservation: S.String, targetCommit: S.String });
+/**
+ * target: what the reservation is pinned to. A clone's checked commit; an
+ * installed copy's pinned artifact, `<version>:<SHA-512 of the signed list>`
+ * (docs/design/installed-updates.md, section 1 step 4).
+ */
+export const UpdateInstallRequest = S.Struct({ reservation: S.String, target: S.String });
 export type UpdateInstallRequest = typeof UpdateInstallRequest.Type;
-export const UpdateCommitRequest = S.Struct({ reservation: S.String, targetCommit: S.String, release: S.String });
+export const UpdateCommitRequest = S.Struct({ reservation: S.String, target: S.String, release: S.String });
 export type UpdateCommitRequest = typeof UpdateCommitRequest.Type;
 
 export const UpdateCommitResult = S.Union([
@@ -691,7 +703,7 @@ export const UpdateCommitResult = S.Union([
 export type UpdateCommitResult = typeof UpdateCommitResult.Type;
 
 export const UpdatePreparation = S.Union([
-  S.Struct({ state: S.Literal("ready"), reservation: S.String, targetCommit: S.String }),
+  S.Struct({ state: S.Literal("ready"), reservation: S.String, target: S.String }),
   S.Struct({ state: S.Literal("changed"), status: UpdateStatus }),
   S.Struct({ state: S.Literal("blocked"), message: S.String }),
 ]);

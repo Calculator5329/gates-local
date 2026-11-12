@@ -216,6 +216,24 @@ describe("the Updates group of an installed copy", () => {
     expect(plain).not.toMatch(/git|pnpm/i);
   });
 
+  it("UW-06 downloaded on a copy that can replace its file: Restart to update in the desktop app, no release page", () => {
+    const ready = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is downloaded and checked."], page: PAGE, download: "ready", restart: true });
+    const html = view({ canUpdate: true, ...ready });
+    const plain = text(html);
+    expect(plain).toContain("Version 1.3.0 is downloaded and checked.");
+    expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
+    expect(plain).toContain("Gates Local will close, update and reopen.");
+    expect(html.includes(link)).toBe(false);
+    expect(text(view({ canUpdate: true, updating: true, ...ready }))).toContain("Closing to update…");
+    // A browser tab or the phone never gets the button.
+    expect(text(view({ canUpdate: false, ...ready }))).not.toContain("Restart to update");
+    // A copy that cannot replace its file says why and links the release page.
+    const refused = installedWith({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Gates Local cannot replace its own file because its folder is read-only. Download version 1.3.0 from the release page and replace the file yourself."], page: PAGE, download: "ready" });
+    const no = view({ canUpdate: true, ...refused });
+    expect(no.includes(link)).toBe(true);
+    expect(text(no)).not.toContain("Restart to update");
+  });
+
   it.each([
     ["could not reach", "unreachable", "Could not reach the update server. Check your connection."],
     ["no list", "no-list", "No release list was found on the release page."],
@@ -321,7 +339,7 @@ describe("the check runs only on a click", () => {
     const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
     const confirm = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false);
     vi.stubGlobal("confirm", confirm);
-    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => ({ ...OFFERED, activity: ["1 running reply"] }));
     b.server.answer("update.prepare", () => ({ state: "changed", status: { ...OFFERED, approval: "approval-new-work", activity: ["1 running reply", "model download: new-model"] } }));
     disconnect = session.connect();
@@ -337,7 +355,7 @@ describe("the check runs only on a click", () => {
     const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => OFFERED);
     const newer = { ...OFFERED, approval: "approval-c", lastCheck: { state: "available" as const, checkedAt: 2, channel: "main" as const, current: "abc1234", target: "ccccccc", targetCommit: "c".repeat(40), total: 2, changes: ["Unapproved C", "Approved B"] } };
     b.server.answer("update.prepare", () => ({ state: "changed", status: newer }));
@@ -423,7 +441,7 @@ describe("the check runs only on a click", () => {
 
   it("the desktop bridge's Update and restart is used when it is there", async () => {
     const updateAndRestart = vi.fn(async () => ({ ok: false as const, message: "This folder is not a git clone of Gates Local, so it cannot update itself." }));
-    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => OFFERED);
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
@@ -436,7 +454,7 @@ describe("the check runs only on a click", () => {
     const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => ({ ...OFFERED, activity: ["2 running replies (including other windows)", "model download: alpha:7b", "1 image generation job"] }));
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
@@ -456,7 +474,7 @@ describe("the check runs only on a click", () => {
     const updateAndRestart = vi.fn(async () => ({ ok: true as const }));
     const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
-    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 1, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
+    vi.stubGlobal("gatesLocal", { updateApprovalVersion: 2, getServerUrl: async () => "ws://127.0.0.1:1/?token=t", updateAndRestart });
     b.server.answer("update.status", () => OFFERED);
     disconnect = session.connect();
     await until(hydrated, 2000, "hydration");
@@ -465,7 +483,7 @@ describe("the check runs only on a click", () => {
     expect(await Promise.all([first, second])).toEqual([null, null]);
     expect(updateAndRestart).toHaveBeenCalledTimes(1);
     expect(confirm).not.toHaveBeenCalled();
-    expect(updateAndRestart).toHaveBeenCalledWith({ reservation: "reservation-1", targetCommit: "b".repeat(40) });
+    expect(updateAndRestart).toHaveBeenCalledWith({ reservation: "reservation-1", target: "b".repeat(40) });
     expect(store.getState().updateInstalling).toBe(true);
     const count = b.server.calls("update.check").length;
     await session.checkForUpdates();

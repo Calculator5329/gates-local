@@ -32,7 +32,8 @@ const rows: Record<Exclude<keyof GatesLocalBridge, "updateApprovalVersion" | "on
 
 it("covers every method the bridge exposes", () => {
   expect(Object.keys(bridge).toSorted()).toEqual([...Object.keys(rows), "onState", "updateApprovalVersion"].toSorted());
-  expect(bridge.updateApprovalVersion).toBe(1);
+  // 2: the request names `target` (a commit or an installed copy's version and list), not `targetCommit`.
+  expect(bridge.updateApprovalVersion).toBe(2);
 });
 
 it.each(Object.entries(rows))("%s invokes its IPC channel", async (_name, [call, channel, args]) => {

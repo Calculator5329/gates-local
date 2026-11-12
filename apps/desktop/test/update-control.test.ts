@@ -11,12 +11,12 @@ it("AU-01 main validates over the real authenticated wire and releases only its 
     "update.cancel": ({ reservation }) => { seen.push(reservation); return { cancelled: true }; },
   } });
   try {
-    const result = await withUpdateControl(`ws://127.0.0.1:${server.port}/?token=test-update-control`, (control) => launchApprovedUpdate({ reservation: "renderer-reservation", targetCommit }, control, async (approved) => {
+    const result = await withUpdateControl(`ws://127.0.0.1:${server.port}/?token=test-update-control`, (control) => launchApprovedUpdate({ reservation: "renderer-reservation", target: targetCommit }, control, async (approved) => {
       expect(approved).toBe(targetCommit);
       return { ok: false, message: "Simulated spawn failure" };
     }));
     expect(result).toEqual({ ok: false, message: "Simulated spawn failure" });
-    expect(seen).toEqual([{ reservation: "renderer-reservation", targetCommit, release: expect.any(String) }, expect.any(String), "renderer-reservation"]);
+    expect(seen).toEqual([{ reservation: "renderer-reservation", target: targetCommit, release: expect.any(String) }, expect.any(String), "renderer-reservation"]);
     expect(seen[1]).not.toBe("renderer-reservation");
   } finally { await server.close(); }
 });

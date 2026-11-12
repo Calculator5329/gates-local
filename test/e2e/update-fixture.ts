@@ -19,7 +19,7 @@ export function updateFixtureState() {
     prepare: (approval: string): UpdatePreparation => {
       const latest = status();
       if (latest.approval !== approval || latest.lastCheck?.state !== "available" || latest.lastCheck.targetCommit === undefined) return { state: "changed", status: latest };
-      return { state: "ready", reservation: "fixture-reservation", targetCommit: latest.lastCheck.targetCommit };
+      return { state: "ready", reservation: "fixture-reservation", target: latest.lastCheck.targetCommit };
     },
   };
 }

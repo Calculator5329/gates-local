@@ -59,7 +59,8 @@ export type UpdateAndRestartResult = { readonly ok: true } | { readonly ok: fals
 
 /** `window.gatesLocal` in the renderer. */
 export interface GatesLocalBridge {
-  readonly updateApprovalVersion: 1;
+  /** 2: updateAndRestart takes `{reservation, target}`, a clone's commit or an installed copy's `<version>:<list SHA-512>`. */
+  readonly updateApprovalVersion: 2;
   /** Match native window controls to the renderer's resolved theme tokens. */
   syncTitleBar(colors: { color: string; symbolColor: string }): Promise<void>;
   /** Current state; resolves immediately. */

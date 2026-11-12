@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-11-12: Installed Linux copies update themselves with Restart to update
+
+- On a Linux AppImage, once a newer version is downloaded and checked
+  against the signed release list, Settings and the footer offer
+  "Restart to update". After a confirm, Gates Local closes, swaps the
+  program file, and opens the new version, which says "Updated to version X."
+  While it works, a second start says "Gates Local is updating. It will
+  reopen by itself." and the reopened app shows "Gates Local is
+  finishing an update." until it is ready.
+- If the new version does not start, Gates Local goes back to the old
+  one by itself and says so: "Your chats are as they were when you
+  clicked Restart." The chats are copied before the swap and put back
+  on a go-back. If the update stops before anything moved (the old app
+  did not close in time, no permission, no space), nothing changes and
+  the note says why. If going back itself fails, no file is deleted:
+  the old program, the new one, the download and the chat copy all stay
+  until the person reads the note and dismisses it, and no new update
+  is offered, with no Restart button, until then.
+- A copy started from a renamed file, or one Gates Local cannot replace,
+  reads the update first: while another copy's update is unfinished it
+  says so and starts nothing, so it can never open an empty chat store.
+  Once only leftover files remain, it starts normally and leaves them
+  for the copy that owns them.
+- The update must start within 30 seconds of the approval. If it does
+  not, the note says whether the old app was still running, and the
+  update log says why it stopped.
+- Checked on two test builds in packaged runs on the Linux test
+  machine: every stop point, the go-back, and the earlier-failure page.
+  Not verified: Windows, which this does not cover; a normal FUSE launch
+  of the AppImage, since the test machine runs it another way; and the
+  path where the computer restarts between the click and the swap,
+  which runs only in unit tests.
+
 ## 2026-11-12: Stop follow-ups, and browser tests that wait for the app's data
 
 - A failure that arrives after a Stop is shown. Only an abort counts

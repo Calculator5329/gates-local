@@ -246,8 +246,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       lastCheck: null,
     },
   },
-  "update.prepare": { params: { approval: "approval-1" }, result: { state: "ready", reservation: "reservation-1", targetCommit: "b".repeat(40) } },
-  "update.commit": { params: { reservation: "reservation-1", targetCommit: "b".repeat(40), release: "main-release-1" }, result: { accepted: true, release: "main-release-1" } },
+  "update.prepare": { params: { approval: "approval-1" }, result: { state: "ready", reservation: "reservation-1", target: "b".repeat(40) } },
+  "update.commit": { params: { reservation: "reservation-1", target: "b".repeat(40), release: "main-release-1" }, result: { accepted: true, release: "main-release-1" } },
   "update.cancel": { params: { reservation: "reservation-1" }, result: { cancelled: true } },
   "update.check": {
     params: {},

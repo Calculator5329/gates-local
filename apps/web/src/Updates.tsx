@@ -5,7 +5,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, dismissUpdateResult, downloadUpdate, openSettings, readUpdateStatus, updateAndRestart } from "./session.ts";
 import { NA, getState, useStore } from "./store.ts";
 import { closeTip } from "./ui.tsx";
-import { type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon } from "./update-state.ts";
+import { restartable, type UpdateClick, type UpdateIcon, type UpdateInput, outdated, updateIcon } from "./update-state.ts";
 import { updateWork, workLines } from "./update-work.ts";
 
 /** A progress ring around a footer icon: a share from 0 to 1, or null for a turning arc. It sits inside the box and never changes it. */
@@ -79,8 +79,11 @@ const BRIGHT = { color: "var(--foreground)" } as const;
  * window's queue or drafts, read again at Go) the new ones show brighter, a
  * screen reader hears "Changed", and Go waits a moment; nothing installs on
  * that press. before: the lines shown when it last closed for that reason.
+ * An installed copy's Restart asks the same way; it goes back by itself when
+ * the new version does not start (docs/design/installed-updates.md, 2).
  */
-function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
+function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStatus; check: Extract<UpdateCheck, { state: "available" | "newer" }>; before: readonly string[] | null; onCancel: () => void; onGo: (shown: readonly string[]) => void }) {
+  const installed = check.state === "newer";
   const cancel = useRef<HTMLButtonElement>(null);
   const goButton = useRef<HTMLButtonElement>(null);
   const lines = () => workLines(updateWork(status.activity));
@@ -133,7 +136,7 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
             {w}
           </li>
         ))}
-        <li>Falls back to {check.current} if a step fails.</li>
+        <li>{installed ? `Goes back to ${check.current} if ${check.target} does not start.` : `Falls back to ${check.current} if a step fails.`}</li>
       </ul>
       <span role="status" style={UNSEEN}>
         {wait && prev !== null ? ["Changed:", ...fresh].join(" ") : ""}
@@ -148,7 +151,7 @@ function Confirm({ status, check, before, onCancel, onGo }: { status: UpdateStat
           Cancel
         </button>
         <button ref={goButton} type="button" className="btn primary" disabled={read !== null || wait} onClick={press}>
-          Update and restart
+          {installed ? "Restart to update" : "Update and restart"}
         </button>
       </div>
     </div>
@@ -169,11 +172,12 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const [downloading, setDownloading] = useState(false);
   const button = useRef<HTMLSpanElement>(null);
   const known = status === NA || status === undefined ? null : status;
-  const u = updateIcon({ status: known, desktop: canUpdateHere(), checking, installing, error, clickError, downloading });
+  const desktop = canUpdateHere();
+  const u = updateIcon({ status: known, desktop, checking, installing, error, clickError, downloading, canRestart: restartable(known, desktop) });
   const click = u?.click ?? null;
-  // The ask belongs to an Update click: it closes when the click stops being one, and with the drawer.
+  // The ask belongs to an Update or Restart click: it closes when the click stops being one, and with the drawer.
   useEffect(() => {
-    if (click !== "update") setAsking(false);
+    if (click !== "update" && click !== "restart") setAsking(false);
   }, [click]);
   useEffect(() => {
     if (!drawer) setAsking(false);
@@ -220,6 +224,12 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
       setBefore(null);
       setAsking(!asking);
     },
+    // An installed copy that can replace its file: the same one ask, then it closes, updates and reopens.
+    restart: () => {
+      closeTip();
+      setBefore(null);
+      setAsking(!asking);
+    },
     download: () => {
       setClickError(null);
       setDownloading(true);
@@ -228,8 +238,6 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
         if (message !== null) setClickError({ click: "download", message, since });
       });
     },
-    // No copy restarts into a downloaded version yet (update-state.ts canRestart); the desktop's restart goes here.
-    restart: () => via(() => openSettings("general")),
     page: () => {
       if (u.page !== undefined) window.open(u.page, "_blank", "noopener,noreferrer");
     },
@@ -244,7 +252,8 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
     // Nothing installed and nothing failed: the server's approval moved on, so the one ask shows its new words.
     const s = getState();
     const now = s.update === NA ? undefined : s.update;
-    if (!s.updateInstalling && s.updateError === null && now?.approval !== undefined && now.approval !== shown && now.lastCheck?.state === "available") {
+    const again = now?.lastCheck?.state === "available" || (now?.lastCheck?.state === "newer" && now.lastCheck.restart === true);
+    if (!s.updateInstalling && s.updateError === null && now?.approval !== undefined && now.approval !== shown && again) {
       setBefore(lines);
       setAsking(true);
     }
@@ -252,7 +261,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
   const look = LOOK[u.state];
   return (
     <>
-      {asking && u.click === "update" && known !== null && check?.state === "available" && approval !== undefined ? (
+      {asking && known !== null && approval !== undefined && ((u.click === "update" && check?.state === "available") || (u.click === "restart" && check?.state === "newer")) ? (
         <Confirm
           status={known}
           check={check}
@@ -278,7 +287,7 @@ export function SidebarUpdate({ via }: { via: (then: () => void) => void }) {
           onClick={() => {
             if (u.click === null) return;
             // a shown result goes once the click acts on it; an Update click only asks, so its Go dismisses it
-            if (u.dismiss === true && u.click !== "update") void dismissUpdateResult();
+            if (u.dismiss === true && u.click !== "update" && u.click !== "restart") void dismissUpdateResult();
             run[u.click]();
           }}
         />

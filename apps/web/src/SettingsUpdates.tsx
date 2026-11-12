@@ -7,7 +7,8 @@
 // a computer browser may check but installs from the desktop app. An
 // installed copy (AppImage or installer) reads the signed release list and
 // downloads a newer version for itself (Download while automatic checks are
-// off); it never shows an install control yet.
+// off). A Linux AppImage that can replace its own file then shows Restart to
+// update; any other copy says why not and links the release page.
 import type { Settings, UpdateCheck, UpdateStatus, UpdateVersion } from "@gates-local/contracts";
 import { Icon } from "./icons.tsx";
 import { canUpdateHere, checkForUpdates, downloadUpdate, updateAndRestart, updateSettings } from "./session.ts";
@@ -48,11 +49,11 @@ function retryLine(check: UpdateCheck): string | undefined {
   return check.download === "failed" ? AGAIN : undefined;
 }
 
-/** The words send the person to the release page: a version this copy cannot use, or one it downloaded but cannot install yet. */
+/** The words send the person to the release page: a version this copy cannot use, or one it downloaded but cannot install. */
 function linksPage(check: UpdateCheck): string | undefined {
   if (check.state === "cannot-check") return check.page;
   if (check.state !== "newer") return undefined;
-  return !check.forThisCopy || check.download === "ready" ? check.page : undefined;
+  return !check.forThisCopy || (check.download === "ready" && check.restart !== true) ? check.page : undefined;
 }
 
 interface InstalledResultProps {
@@ -61,13 +62,18 @@ interface InstalledResultProps {
   /** The Download control; absent where this window cannot control updates. */
   readonly onDownload?: () => void;
   readonly downloadErr?: string | null;
+  /** Restart to update; absent outside the desktop app and on the phone. */
+  readonly onRestart?: () => void;
+  readonly updating?: boolean;
+  readonly updateErr?: string | null;
 }
 
 /** An installed copy reads the signed release list and downloads a newer
  *  version for itself: the server's own words, a release-page link when
  *  they send the person there, the Download control while automatic checks
- *  are off, and never an install control. */
-function InstalledResult({ check, automatic, onDownload, downloadErr = null }: InstalledResultProps) {
+ *  are off, and Restart to update once a copy that can replace its own file
+ *  has the download checked. */
+function InstalledResult({ check, automatic, onDownload, downloadErr = null, onRestart, updating = false, updateErr = null }: InstalledResultProps) {
   if (check.state === "up-to-date") {
     return (
       <div className="upd-res" role="status">
@@ -95,6 +101,15 @@ function InstalledResult({ check, automatic, onDownload, downloadErr = null }: I
         <div className="upd-act">
           <button type="button" className="btn outline" onClick={onDownload}>Download</button>
           <Fail err={downloadErr} />
+        </div>
+      ) : null}
+      {check.state === "newer" && check.restart === true && onRestart !== undefined ? (
+        <div className="upd-act">
+          <button type="button" className="btn primary" disabled={updating} onClick={onRestart}>
+            {updating ? "Closing to update…" : "Restart to update"}
+          </button>
+          <span className="d">Gates Local will close, update and reopen.</span>
+          <Fail err={updateErr} />
         </div>
       ) : null}
       {page === undefined ? null : (
@@ -244,6 +259,9 @@ export function UpdatesView(p: UpdatesViewProps) {
               automatic={settings !== undefined && settings.updateAutomatic !== false}
               {...(canControl && p.onDownload !== undefined ? { onDownload: p.onDownload } : {})}
               downloadErr={p.downloadErr ?? null}
+              {...(canControl && p.canUpdate ? { onRestart: p.onUpdate } : {})}
+              updating={p.updating === true}
+              updateErr={p.updateErr ?? null}
             />
           ) : (
             <CheckResult check={check} canUpdate={p.canUpdate && canControl} onUpdate={p.onUpdate} updateErr={p.updateErr ?? null} updating={p.updating === true} />

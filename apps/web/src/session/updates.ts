@@ -77,14 +77,16 @@ export function createUpdates({ applyServerEvent, act }: { readonly applyServerE
   async function updateAndRestart(approved?: string): Promise<ActionResult> {
     const bridge = window.gatesLocal;
     if (bridge?.updateAndRestart === undefined) return "Updating from here needs the desktop app. Run pnpm run app-update in the Gates Local folder instead.";
-    if (bridge.updateApprovalVersion !== 1) return "Close and reopen Gates Local before using this update button, or run pnpm run app-update in its folder.";
+    if (bridge.updateApprovalVersion !== 2) return "Close and reopen Gates Local before using this update button, or run pnpm run app-update in its folder.";
     if (getState().updateInstalling) return null;
     const before = getState().update;
-    const priorCommit = before !== NA && before?.lastCheck?.state === "available" ? before.lastCheck.targetCommit : undefined;
+    const check = before === NA ? undefined : before?.lastCheck;
+    // What the person last saw: a clone's commit, or an installed copy's version.
+    const prior = check?.state === "available" ? check.targetCommit : check?.state === "newer" ? check.target : undefined;
     setState({ updateInstalling: true, updateError: null });
     try {
       const { installUpdate } = await import("../update-install.ts");
-      return await installUpdate(act, bridge.updateAndRestart, priorCommit, applyServerEvent, approved);
+      return await installUpdate(act, bridge.updateAndRestart, prior, applyServerEvent, approved);
     } catch (error) {
       const message = `Couldn't load the update action (${error instanceof Error ? error.message : String(error)}). Reload Gates Local and try again.`;
       applyServerEvent({ updateInstalling: false, updateError: message });

@@ -18,9 +18,9 @@ function approved(dir: string): InstalledTransaction {
   return approve({ id: "t-1", copy: { program: "/apps/Gates-Local.AppImage", dataDir: dir }, from: "1.4.0", to: "1.5.0", listDigest: "b".repeat(128), artifact, uptime: 1000, boot: "boot-a", main: record(10), server: record(11) });
 }
 
-it("H: the approval carries the copy, versions, pins, deadline as uptime + 5 s with the boot id, and both process records", () => {
+it("H: the approval carries the copy, versions, pins, deadline as uptime + 30 s with the boot id, and both process records", () => {
   const tx = approved("/d");
-  expect(tx).toMatchObject({ version: 1, id: "t-1", intent: "approved", deadline: { uptime: 1005, boot: "boot-a" }, processes: { main: record(10), server: record(11) }, artifact, listDigest: "b".repeat(128) });
+  expect(tx).toMatchObject({ version: 1, id: "t-1", intent: "approved", deadline: { uptime: 1030, boot: "boot-a" }, processes: { main: record(10), server: record(11) }, artifact, listDigest: "b".repeat(128) });
 });
 
 it("an intent reads back as written, including the later rows' fields", () => {

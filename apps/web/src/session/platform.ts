@@ -9,7 +9,7 @@ type BridgeState =
   | { readonly status: "idle" | "starting" | "restarting" | "crashed" | "stopping" | "stopped" };
 
 interface DesktopBridge {
-  readonly updateApprovalVersion?: 1;
+  readonly updateApprovalVersion?: 2;
   /** Native control colours, resolved from the page's theme tokens. */
   syncTitleBar?(colors: { color: string; symbolColor: string }): Promise<void>;
   getServerUrl(): Promise<string | null>;
@@ -95,5 +95,5 @@ export const canOpenFolder = (): boolean => window.gatesLocal?.modelsFolder !== 
 
 /** True in the desktop app, which can quit, update and open again; phones and browsers only check. */
 export function canUpdateHere(): boolean {
-  return window.gatesLocal?.updateApprovalVersion === 1 && typeof window.gatesLocal.updateAndRestart === "function";
+  return window.gatesLocal?.updateApprovalVersion === 2 && typeof window.gatesLocal.updateAndRestart === "function";
 }

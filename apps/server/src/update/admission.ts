@@ -4,10 +4,20 @@ export const HANDOFF_GRACE_MS = 5_000;
 
 export const UPDATE_PAUSED = "Gates Local is closing to update. New replies, image jobs, model downloads and imports are paused. Try again after it reopens.";
 
-export function createUpdateAdmission() {
+/** An installed copy's update startup (docs/design/installed-updates.md, "Update startup"): every write waits for the result. */
+export const FINISHING = "Gates Local is finishing an update. Try again in a moment.";
+
+/**
+ * `finishing`: this server is a token launch of an installed update. Admission
+ * stays closed, with its own sentence, until `open()`, which the caller calls
+ * once it reads a result carrying its token.
+ */
+export function createUpdateAdmission(o: { readonly finishing?: boolean } = {}) {
   let revision = 0;
   let closed = false;
-  let lease: { token: string; targetCommit: string; committed: boolean; detach?: () => void } | undefined;
+  let finishing = o.finishing === true;
+  // target: a clone's commit, or an installed copy's pinned artifact identity.
+  let lease: { token: string; target: string; committed: boolean; detach?: () => void } | undefined;
   let expiry: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const notify = () => { for (const listener of listeners) listener(); };
@@ -27,22 +37,31 @@ export function createUpdateAdmission() {
   return {
     /** Called synchronously before a producer registers work or reaches its first await. */
     admit() {
+      if (finishing && !closed) throw Object.assign(new Error(FINISHING), { code: "update-finishing" });
       if (closed || lease !== undefined) throw Object.assign(new Error(UPDATE_PAUSED), { code: "update-installing" });
       revision++;
     },
     revision: () => revision,
     installing: () => lease !== undefined,
-    reserve(targetCommit: string) {
+    finishing: () => finishing,
+    /** The update startup's result carried this launch's token: writes go through from now on. */
+    open() {
+      if (!finishing) return;
+      finishing = false;
+      notify();
+    },
+    reserve(target: string) {
+      if (finishing && !closed) throw new Error(FINISHING);
       if (closed || lease !== undefined) throw new Error(UPDATE_PAUSED);
       const token = randomUUID();
-      lease = { token, targetCommit, committed: false };
+      lease = { token, target, committed: false };
       // A renderer that disappears before handing off cannot strand admission.
       expire(token);
       notify();
       return token;
     },
-    commit(token: string, targetCommit: string, release: string, disconnected?: AbortSignal) {
-      if (lease?.token !== token || lease.targetCommit !== targetCommit || lease.committed || release === "" || release === token) return null;
+    commit(token: string, target: string, release: string, disconnected?: AbortSignal) {
+      if (lease?.token !== token || lease.target !== target || lease.committed || release === "" || release === token) return null;
       // Transfer cancellation authority to main. A late renderer cancellation
       // must not reopen admission after main has started the detached updater.
       lease.token = release;

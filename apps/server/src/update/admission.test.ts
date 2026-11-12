@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createUpdateAdmission } from "./admission.ts";
+import { createUpdateAdmission, FINISHING } from "./admission.ts";
 
 afterEach(() => vi.useRealTimers());
 it("AV-01 a committed handoff expires after its desktop connection disappears without quitting", async () => {
@@ -43,4 +43,23 @@ it("AU-01 an abandoned handoff expires, but a committed install never reopens on
   admission.reserve("b".repeat(40));
   await vi.advanceTimersByTimeAsync(30_000);
   expect(admission.installing()).toBe(false);
+});
+it("AU-02 an update startup holds every write with its own sentence until the result carrying its token opens it", () => {
+  const admission = createUpdateAdmission({ finishing: true });
+  const changes: number[] = [];
+  admission.onChange(() => changes.push(admission.revision()));
+  expect(() => admission.admit()).toThrow(FINISHING);
+  expect(() => admission.admit()).toThrow(expect.objectContaining({ code: "update-finishing" }));
+  // No new update while the last one finishes.
+  expect(() => admission.reserve("a".repeat(40))).toThrow(FINISHING);
+  expect(admission.finishing()).toBe(true);
+  admission.open();
+  expect(admission.finishing()).toBe(false);
+  expect(changes).toHaveLength(1);
+  expect(() => admission.admit()).not.toThrow();
+  // Opening twice changes nothing.
+  admission.open();
+  expect(changes).toHaveLength(1);
+  // An ordinary start is never held.
+  expect(createUpdateAdmission().finishing()).toBe(false);
 });

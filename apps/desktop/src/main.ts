@@ -20,10 +20,25 @@ import { hidesMenu, installWindowKeys } from "./keys.ts";
 import { launchMode, quitOnAllClosed, secondInstanceAction, serverEnv, windowAtStart } from "./launch.ts";
 import { guardNavigation } from "./links.ts";
 import { clearRunning, writeRunning } from "./running.ts";
-import { approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, onceUntilFailed, updaterLaunch, validUpdateRequest, type UpdaterLaunch } from "./update-launch.ts";
+import { approvedHandoffEnv, cannotUpdate, launchApprovedUpdate, onceUntilFailed, targetKind, updaterLaunch, validUpdateRequest, type UpdaterLaunch } from "./update-launch.ts";
 import { withUpdateControl } from "./update-control.ts";
 import type { UpdateInstallRequest } from "@gates-local/contracts";
 import { acknowledgeStartup, reportStartupFailure, STARTUP_TOKEN_ENV } from "../../server/src/update/startup.ts";
+import { verifyPrepared } from "../../server/src/update/installed/download.ts";
+import { installedFeed, RESTART_ENV } from "../../server/src/update/installed/module.ts";
+import { processRecord } from "../../server/src/update/identity.ts";
+import { uptime } from "node:os";
+import { writeAck } from "./installed-update/ack.ts";
+import { startInstalledUpdate } from "./installed-update/click.ts";
+import { routeInstalled, routeUnreplaceable, updatePageUrl, type StartApp } from "./installed-update/desktop.ts";
+import { bootId, loggedStopAt, logLine, spawnWatcher } from "./installed-update/handoff.ts";
+import { pageAction, type PageAction } from "./installed-update/page.ts";
+import { replaceability } from "./installed-update/replaceable.ts";
+import { hasEarlierFailure } from "./installed-update/results.ts";
+import { copyOf, tokenWait } from "./installed-update/routing.ts";
+import { beginUpdate } from "./installed-update/watch.ts";
+import * as updateWords from "./installed-update/words.ts";
+import type { Words } from "./installed-update/words.ts";
 import { dataUrl, renderStatusPage, type StatusView } from "./status-page.ts";
 import { Supervisor, type SupervisorState } from "./supervisor.ts";
 import { iconFile, windowOptions } from "./window.ts";
@@ -77,10 +92,37 @@ function isClientUrl(url: string): boolean {
 
 const mode = launchMode(process.argv, process.env);
 
-// A second launch reaches this instance through the lock; it says whether it
-// was itself a background launch (systemd starting it again wants no window).
-if (!app.requestSingleInstanceLock({ background: mode.background })) {
+/** A test build (resources/test-build.json) reads test keys, a loopback feed and stop points; a release never does. */
+function isTestBuild(): boolean {
+  if (!app.isPackaged) return false;
+  try {
+    return statSync(path.join(process.resourcesPath, "test-build.json")).isFile();
+  } catch {
+    return false;
+  }
+}
+const testBuild = isTestBuild();
+// Read before the routing below can move a page-only process to its own profile folder.
+const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
+// Whether this copy can replace its own file (an AppImage on Linux), and the file.
+const replace = replaceability({ platform: process.platform, packaged: app.isPackaged, env: process.env, testBuild });
+const installedCopy = replace.program === null ? null : copyOf(replace.program, dataDir);
+const feed = installedFeed(process.env, { testBuild });
+const appWindow = () => windowOptions({
+  icon: iconFile({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, desktopDir }),
+  preload: path.join(__dirname, "preload.cjs"),
+});
+
+if (installedCopy !== null) {
+  // An AppImage: an update may be in flight, so the launch is routed first (installed-update/desktop.ts).
+  routeInstalled({ copy: installedCopy, testBuild, trustedKeys: feed.keys, releasePage: feed.page, window: appWindow, background: mode.background }, run);
+} else if (!app.requestSingleInstanceLock({ background: mode.background })) {
+  // A second launch reaches this instance through the lock; it says whether it
+  // was itself a background launch (systemd starting it again wants no window).
   app.quit();
+} else if (process.platform === "linux" && app.isPackaged) {
+  // Packaged Linux with no program to replace (a renamed file, AppRun alone): it shares the data folder, so it reads the update first.
+  routeUnreplaceable({ window: appWindow, releasePage: feed.page }, dataDir, run);
 } else {
   run();
 }
@@ -99,8 +141,7 @@ function startDetached(plan: UpdaterLaunch, env: NodeJS.ProcessEnv): Promise<Upd
   });
 }
 
-function run(): void {
-  const dataDir = serverDataDir({ platform: process.platform, env: process.env, home: app.getPath("home"), userData: app.getPath("userData"), packaged: app.isPackaged });
+function run(start: StartApp = {}): void {
   // pnpm run app-update reads this to refuse while the app is open.
   try {
     writeRunning(dataDir, process.pid, Date.now());
@@ -110,14 +151,58 @@ function run(): void {
   process.on("exit", () => clearRunning(dataDir, process.pid));
   // The server allows the client's WebSocket Origin; a file: client gets none, so it cannot connect.
   const env = serverEnv({ env: process.env, clientOrigin: originOf(clientUrl()), webRoot: webRoot(), installedVersion: app.isPackaged ? app.getVersion() : null });
+  // The server offers "Restart to update" only when this copy can replace its file, and says why not otherwise.
+  if (app.isPackaged) env[RESTART_ENV] = replace.restart;
   const supervisor = new Supervisor({ entry: serverEntry(), dataDir, env });
   const modelFolders = modelFolderActions({ ownership: () => checkOwnership(ownedStateFile(dataDir)), isFolder, openPath: folder => shell.openPath(folder) });
   let win: BrowserWindow | null = null;
   /** The client URL (with its route) to restore after a restart. */
   let lastClientUrl: string | null = null;
   let showingClient = false;
+  /** An update page shown in place of the client: a token launch's "finishing" page, the earlier failure, the watcher's death. */
+  let held: { readonly words: Words; readonly actions: readonly PageAction[] } | null =
+    start.page === undefined ? null : { words: start.page, actions: start.hold === true ? ["continue"] : [] };
 
   const bridgeState = (): BridgeState => toBridgeState(supervisor.state);
+
+  function showHeld(): boolean {
+    if (held === null) return false;
+    if (win !== null && !win.isDestroyed()) {
+      showingClient = false;
+      void win.loadURL(updatePageUrl(held.words, feed.page, held.actions));
+    }
+    return true;
+  }
+
+  // The earlier failure page's one button carries on with a normal start.
+  let serverWaits = start.hold === true;
+  function carryOn(): void {
+    if (!serverWaits) return;
+    serverWaits = false;
+    held = null;
+    void supervisor.start();
+  }
+
+  // A token launch acks on ready, then waits for a result carrying its token
+  // (the server opens admission on the same result). If the watcher dies
+  // first, it stops its server and says so; the next launch finishes the update.
+  let acked = false;
+  if (start.token !== undefined) {
+    const token = start.token;
+    const timer = setInterval(() => {
+      const now = tokenWait(dataDir, token);
+      if (now === "waiting") return;
+      clearInterval(timer);
+      logLine(dataDir, `token launch: ${now}`);
+      if (now === "released") {
+        held = null;
+        route(supervisor.state);
+        return;
+      }
+      held = { words: updateWords.watcherDied(), actions: [] };
+      void supervisor.stop().finally(() => showHeld());
+    }, 500);
+  }
 
   function showStatus(view: StatusView): void {
     if (win === null || win.isDestroyed()) return;
@@ -135,14 +220,23 @@ function run(): void {
 
   function route(state: SupervisorState): void {
     try {
-      if (state.status === "ready") acknowledgeStartup(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV]);
-      if (state.status === "crashed") reportStartupFailure(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV], "The new version failed before its server became ready.");
+      if (start.token !== undefined) {
+        // The ack is a request, not a decision: the watcher decides, and a crash is seen as no ack.
+        if (state.status === "ready" && !acked) {
+          writeAck(dataDir, start.token);
+          acked = true;
+          logLine(dataDir, "token launch: server ready, ack written");
+        }
+      } else {
+        if (state.status === "ready") acknowledgeStartup(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV]);
+        if (state.status === "crashed") reportStartupFailure(repoRoot, dataDir, process.env[STARTUP_TOKEN_ENV], "The new version failed before its server became ready.");
+      }
     } catch (error) { console.error(`[desktop] could not acknowledge update startup: ${(error as Error).message}`); }
     if (win === null || win.isDestroyed()) return;
     win.webContents.send(IPC.state, toBridgeState(state));
     switch (state.status) {
       case "ready":
-        showClient();
+        if (!showHeld()) showClient();
         break;
       case "crashed": {
         const current = win.webContents.getURL();
@@ -153,9 +247,12 @@ function run(): void {
       }
       case "starting":
       case "restarting":
-        showStatus({ kind: "server", state: toBridgeState(state) });
+        if (!showHeld()) showStatus({ kind: "server", state: toBridgeState(state) });
         break;
       case "idle":
+        // The earlier failure page waits for its button before the server starts.
+        showHeld();
+        break;
       case "stopping":
       case "stopped":
         break;
@@ -205,7 +302,33 @@ function run(): void {
     const failed = await shell.openPath(dataDir);
     return failed === "" ? null : `Couldn't open the folder: ${failed}`;
   });
+  // Row H for an installed copy: after the server commits the approval, re-verify, write `approved`, start the watcher, quit.
+  const startInstalled = (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
+    const state = supervisor.state;
+    if (state.status !== "ready") return Promise.resolve({ ok: false, message: "The app server is not ready to approve an update. Try again after it reconnects." });
+    const stopAt = loggedStopAt(dataDir, process.env, testBuild);
+    return withUpdateControl(state.url, (control) => launchApprovedUpdate(request, control, (target) => startInstalledUpdate(target, {
+      restart: replace.restart,
+      copy: installedCopy,
+      running: app.getVersion(),
+      serverPid: supervisor.pid,
+      verify: (version) => verifyPrepared({ dataDir, running: app.getVersion(), keys: feed.keys, platform: process.platform, arch: process.arch, version }),
+      begin: (approval) => beginUpdate(approval, {
+        spawnWatcher: spawnWatcher({ program: approval.copy.program, dataDir, env: process.env, argv: process.argv, testBuild, trustedKeys: feed.keys, showPage: () => undefined }),
+        earlierFailure: hasEarlierFailure(dataDir),
+        ...(stopAt === undefined ? {} : { stopAt }),
+      }),
+      record: (pid) => processRecord(pid),
+      uptime,
+      bootId,
+      quit: () => {
+        console.error("[desktop] update watcher started; quitting so it can replace the program file");
+        setTimeout(() => app.quit(), 200);
+      },
+    }))).catch(() => ({ ok: false, message: "Could not validate the update with the app server. Check for updates again to retry." }));
+  };
   const startUpdate = onceUntilFailed(async (request: UpdateInstallRequest): Promise<UpdateAndRestartResult> => {
+    if (targetKind(request.target) === "installed") return startInstalled(request);
     const refused = cannotUpdate({ packaged: app.isPackaged, repoRoot, exists: existsSync });
     if (refused !== null) return { ok: false, message: refused };
     const state = supervisor.state;
@@ -278,6 +401,10 @@ function run(): void {
         { type: "separator" },
       );
       if (template.length) Menu.buildFromTemplate(template).popup({ window });
+    });
+    // An update page's one button is a link only main acts on; the guard below still refuses to navigate.
+    contents.on("will-navigate", (_event, url) => {
+      if (pageAction(url) === "continue") carryOn();
     });
     // The window never opens another window or leaves the client. A web
     // link (the Ollama library, a link in a reply) opens in the system browser.
@@ -354,10 +481,11 @@ function run(): void {
       allowsMicrophone(contents?.getURL() ?? "", permission, origin, [details.mediaType ?? "unknown"], details.isMainFrame));
     const root = webRoot();
     protocol.handle(CLIENT_SCHEME, (request) => clientResponse(root, request.url, (fileUrl) => net.fetch(fileUrl)));
-    if (windowAtStart(mode) && win === null) {
+    // The earlier failure page shows even on a background start: it comes before the server.
+    if ((windowAtStart(mode) || serverWaits) && win === null) {
       win = createWindow();
       route(supervisor.state);
     }
-    void supervisor.start();
+    if (!serverWaits) void supervisor.start();
   });
 }

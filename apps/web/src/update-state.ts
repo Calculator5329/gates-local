@@ -54,9 +54,9 @@ export interface UpdateInput {
   /** A download was just clicked and the server has not said where it is yet. */
   readonly downloading?: boolean;
   /**
-   * An installed copy that can restart into a downloaded version. No copy can
-   * yet (apps/desktop/src/installed-update/watch.ts is not called by the app),
-   * so nothing passes true and a downloaded version shows as external.
+   * An installed copy that can restart into a downloaded version (canRestart
+   * below): a Linux AppImage that can replace its own file. Elsewhere the
+   * server's lines say why not, and a downloaded version shows as external.
    */
   readonly canRestart?: boolean;
   readonly clock?: (ms: number) => string;
@@ -91,6 +91,12 @@ function icon(state: UpdateIconState, label: string, tip: string, click: UpdateC
 
 /** A clone's target this window can install now: a checked commit and the server's approval for it. Without one, a click checks first. */
 const fresh = (status: UpdateStatus | null) => status?.approval !== undefined && status.lastCheck?.state === "available" && status.lastCheck.targetCommit !== undefined;
+
+/** An installed copy this window can restart into its downloaded version: the desktop app, the server's restart flag and its approval. */
+export function restartable(status: UpdateStatus | null, desktop: boolean): boolean {
+  const check = status?.lastCheck;
+  return desktop && status?.approval !== undefined && check?.state === "newer" && check.download === "ready" && check.restart === true;
+}
 
 /** Whether a new check can change why a check could not say. Exhaustive, so a new reason fails the build until it is placed. */
 function retryable(reason: UpdateBlocked): boolean {
@@ -145,12 +151,17 @@ function installedIcon(check: Extract<UpdateCheck, { state: "newer" }>, canResta
 export function updateIcon({ status, desktop, checking = false, installing = false, error = null, clickError = null, downloading = false, canRestart = false, clock = time }: UpdateInput): UpdateIcon | null {
   if (!desktop) return null;
   if (installing || status?.installing === true) {
-    return icon("updating", "Closing to update…", lines("<b>Closing to update…</b>", "Gates Local closes while dependencies install and the app builds, then opens again."), null);
+    const how = status?.version.kind === "installed" ? "Gates Local will close, update and reopen." : "Gates Local closes while dependencies install and the app builds, then opens again.";
+    return icon("updating", "Closing to update…", lines("<b>Closing to update…</b>", how), null);
   }
   if (checking) return icon("checking", "Checking for updates…", "<b>Checking for updates…</b>", null);
   if (clickError !== null && !outdated(clickError, status?.lastCheck)) return icon("failed", clickError.click === "check" ? NOT_CHECKED : "Download failed", lines(`<b>${esc(clickError.message)}</b>`, AGAIN), "check");
   // A retry installs only a fresh target; without one the click checks first.
-  const retry = fresh(status) ? { click: "update" as const, words: "Click to try again." } : { click: "check" as const, words: AGAIN };
+  const retry = fresh(status)
+    ? { click: "update" as const, words: "Click to try again." }
+    : canRestart && status?.lastCheck?.state === "newer" && status.lastCheck.restart === true
+      ? { click: "restart" as const, words: "Click to try again." }
+      : { click: "check" as const, words: AGAIN };
   if (error !== null) return icon("failed", FAILED, lines(`<b>${esc(error)}</b>`, retry.words), retry.click);
   const result = status?.result;
   if (result && result.outcome !== "updated") {

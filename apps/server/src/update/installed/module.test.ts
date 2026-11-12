@@ -10,7 +10,10 @@ import { decodeResult, type UpdateCheck, type UpdateStatus } from "@gates-local/
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateModule } from "../module.ts";
 import { TRUSTED_RELEASE_KEYS } from "../release-manifest.ts";
+import { createUpdateAdmission, FINISHING, UPDATE_PAUSED } from "../admission.ts";
+import { readRecord, RECORD_FILE, writeRecord } from "../record.ts";
 import { LIST_FILE, SIGNATURE_FILE } from "./download.ts";
+import { type Stream, streamGet } from "./feed.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, DEFAULT_FEED, downloadLines, INSTALL_REFUSAL, type InstalledModuleDeps, installedFeed, type InstalledFeed } from "./module.ts";
 import { artifactFile, BASE, LIST_URL, listFor, memoryFeed, releaseKey, releasePage, type ReleasePage, sha512, SIG_URL, signedList } from "./testing.ts";
 
@@ -72,7 +75,7 @@ describe("Settings' words for an installed copy", () => {
     expect(module.status()).toEqual({ version: { kind: "installed", version: "1.2.3" }, result: null, lastCheck: null, activity: [], installing: false });
     expect(decodeResult("update.status", module.status()).ok).toBe(true);
     expect(await module.prepare("anything")).toEqual({ state: "blocked", message: INSTALL_REFUSAL });
-    expect(module.commit({ reservation: "r", targetCommit: "0".repeat(40), release: "x" })).toEqual({ accepted: false });
+    expect(module.commit({ reservation: "r", target: "0".repeat(40), release: "x" })).toEqual({ accepted: false });
   });
 
   it("development build", async () => {
@@ -363,9 +366,9 @@ describe("downloading a newer version", () => {
     return { files, wrong, fixFile: () => { broken = false; } };
   }
   /** A bad download from a background check with the switch on. */
-  async function badOnce() {
+  async function badOnce(over: Partial<InstalledModuleDeps> = {}) {
     const release = serveWrongFile();
-    const made = installed(true);
+    const made = installed(true, over);
     await made.module.check(true);
     await settled(made.module);
     expect(shown(made.module)).toMatchObject({ download: "bad", lines: ["The download of version 1.3.0 did not match the signed release list, so it was deleted."] });
@@ -449,11 +452,19 @@ describe("downloading a newer version", () => {
   });
 
   it("after a bad download, a retry the switch ended leaves the list still not fetched by a background check", async () => {
-    const { module, sw, fixFile } = await badOnce();
+    // The .part file is made before the request leaves (download.ts fetchInto).
+    // A slow start holds that gap open, as a busy machine can.
+    const real = streamGet({ allowLoopbackHttp: true });
+    const slowStart: Stream = async (url, body, signal) => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return real(url, body, signal);
+    };
+    const { module, sw, fixFile } = await badOnce({ stream: slowStart });
     fixFile();
     hold();
     await module.check();
-    await vi.waitFor(() => expect(fs.existsSync(path.join(folder(), `${FILE}.part`))).toBe(true));
+    // The retry's request has reached the page (a .part file alone does not say so), so hangUps[1] is its socket.
+    await vi.waitFor(() => expect(artifactRequests()).toBe(2));
     sw.set(false);
     await page.hangUps[1];
     await vi.waitFor(() => expect(fs.existsSync(folder())).toBe(false));
@@ -664,5 +675,143 @@ describe("downloading a newer version", () => {
     expect(lines.length).toBeGreaterThanOrEqual(4);
     expect(lines).toContain("Downloading version 1.3.0 (0.1 of 0.3 MB). You can keep chatting.");
     await eager.module.close();
+  });
+
+  const identityOf = (files: { list: Buffer }) => `${VERSION}:${sha512(files.list)}`;
+  describe("Restart to update", () => {
+
+    it("IM-01 a copy that can replace its file offers Restart once the download is checked, pinned to the version and the exact list", async () => {
+      const files = serveGood();
+      const admission = createUpdateAdmission();
+      const { module } = installed(true, { restart: "yes", admission });
+      await module.check();
+      // While it downloads there is nothing to approve.
+      expect(module.status()).not.toHaveProperty("approval");
+      await settled(module);
+      const check = shown(module);
+      expect(check).toMatchObject({ download: "ready", restart: true, lines: ["Version 1.3.0 is downloaded and checked."] });
+      const approval = module.status().approval;
+      expect(typeof approval).toBe("string");
+      expect(await module.prepare("an older approval")).toMatchObject({ state: "changed" });
+      const prepared = await module.prepare(approval!);
+      expect(prepared).toEqual({ state: "ready", reservation: expect.any(String), target: identityOf(files) });
+      if (prepared.state !== "ready") throw new Error("not ready");
+      expect(admission.installing()).toBe(true);
+      expect(module.status()).toMatchObject({ installing: true });
+      expect(module.status()).not.toHaveProperty("approval");
+      // Another list's identity, or the clone's commit, is not this reservation.
+      expect(module.commit({ reservation: prepared.reservation, target: `${VERSION}:${"0".repeat(128)}`, release: "main" })).toEqual({ accepted: false });
+      expect(module.commit({ reservation: prepared.reservation, target: prepared.target, release: "main" })).toEqual({ accepted: true, release: "main" });
+      // A check while it closes to update reads nothing and deletes nothing.
+      expect(await module.check()).toMatchObject({ state: "cannot-check", lines: [UPDATE_PAUSED] });
+      expect(fs.readdirSync(folder()).toSorted()).toEqual([FILE, LIST_FILE, SIGNATURE_FILE]);
+      expect(module.cancel("main")).toEqual({ cancelled: true });
+      expect(admission.installing()).toBe(false);
+      await module.close();
+    });
+
+    it("IM-02 a copy that cannot replace its file names why, links the release page, and offers no approval", async () => {
+      const cases = [
+        ["read-only", "Gates Local cannot replace its own file because its folder is read-only. Download version 1.3.0 from the release page and replace the file yourself."],
+        ["no-permission", "Gates Local cannot replace its own file because you do not have permission to change its folder. Download version 1.3.0 from the release page and replace the file yourself."],
+        ["not-appimage", "Gates Local cannot replace its own file because it was not started from an AppImage file. Download version 1.3.0 from the release page and replace the file yourself."],
+        ["pinned", "This copy keeps its data in a folder set by GATES_LOCAL_DATA_DIR, so it cannot update itself. Download version 1.3.0 from the release page."],
+      ] as const;
+      serveGood();
+      for (const [restart, sentence] of cases) {
+        const { module } = installed(true, { restart });
+        await module.check();
+        await settled(module);
+        const check = shown(module);
+        expect(check).toMatchObject({ download: "ready", lines: [sentence], page: `${page.base.href}/latest` });
+        expect(check).not.toHaveProperty("restart");
+        expect(module.status()).not.toHaveProperty("approval");
+        expect(await module.prepare("anything")).toEqual({ state: "blocked", message: sentence });
+        await module.close();
+      }
+    });
+
+    it("IM-03 a reply that must finish blocks the click, and new work changes the approval", async () => {
+      serveGood();
+      let busy: string[] = ["an image job"];
+      let activity: string[] = [];
+      const { module } = installed(true, { restart: "yes", uninterruptible: () => busy, activity: () => activity });
+      await module.check();
+      await settled(module);
+      const first = module.status().approval!;
+      expect(await module.prepare(first)).toEqual({ state: "blocked", message: "Wait for an image job to finish before updating." });
+      busy = [];
+      activity = ["a reply"];
+      expect(module.status().approval).not.toBe(first);
+      expect(await module.prepare(first)).toMatchObject({ state: "changed" });
+      await module.close();
+    });
+
+    it("IM-04 an update startup holds every write until the result carrying its own token, and never removes the result", async () => {
+      serveGood();
+      const admission = createUpdateAdmission({ finishing: true });
+      // The previous launch's note, for another token: not this launch's result.
+      writeRecord(dataDir, { at: 1, outcome: "updated", installed: { id: "tx-0", from: "1.2.2", to: "1.2.3", text: "Updated to version 1.2.3.", token: "earlier" } });
+      const { module } = installed(true, { restart: "yes", admission, startupToken: "t1" });
+      expect(module.status().result).toBeNull();
+      expect(admission.finishing()).toBe(true);
+      await module.check();
+      await settled(module);
+      // Nothing to approve while the last update finishes.
+      expect(module.status()).not.toHaveProperty("approval");
+      expect(await module.prepare("anything")).toEqual({ state: "blocked", message: FINISHING });
+      writeRecord(dataDir, { at: 2, outcome: "updated", installed: { id: "tx-1", from: "1.2.2", to: "1.2.3", text: "Updated to version 1.2.3.", token: "t1" } });
+      await vi.waitFor(() => expect(admission.finishing()).toBe(false), { timeout: 3_000 });
+      expect(module.status().result).toEqual({ at: 2, outcome: "updated", line: "Updated to version 1.2.3." });
+      expect(fs.existsSync(path.join(dataDir, RECORD_FILE))).toBe(true);
+      // This launch said it, so the next ordinary start does not say it again.
+      expect(readRecord(dataDir)?.installed).toMatchObject({ token: "t1", shown: true });
+      const next = installed(true, { restart: "yes" });
+      expect(next.module.status().result).toBeNull();
+      await next.module.close();
+      writeRecord(dataDir, { at: 2, outcome: "updated", installed: { id: "tx-1", from: "1.2.2", to: "1.2.3", text: "Updated to version 1.2.3.", token: "t1", shown: true } });
+      expect(typeof module.status().approval).toBe("string");
+      // Dismissing it ends the note on disk too.
+      expect(module.dismissResult()).toEqual({ dismissed: true });
+      expect(fs.existsSync(path.join(dataDir, RECORD_FILE))).toBe(false);
+      await module.close();
+    });
+
+    it("IM-05 an ordinary start shows a result once, keeps a rollback-failed note and its folders until dismissed, and offers nothing until then", async () => {
+      fs.mkdirSync(folder("1.2.9"), { recursive: true });
+      const failed = { at: 3, outcome: "rollback-failed" as const, installed: { id: "tx-2", from: "1.2.3", to: "1.2.9", text: "Version 1.2.9 did not start, and Gates Local could not go back.", link: true as const, keeps: ["/p/.previous"] } };
+      writeRecord(dataDir, failed);
+      serveGood();
+      const first = installed(true, { restart: "yes" });
+      const note = { at: 3, outcome: "rollback-failed", line: failed.installed.text, page: `${page.base.href}/latest` };
+      expect(first.module.status().result).toEqual(note);
+      await first.module.check();
+      await settled(first.module);
+      // The cleanup a newer list starts keeps the failed version's folder, and no new update is offered.
+      expect(fs.readdirSync(path.join(dataDir, "updates")).toSorted()).toEqual(["1.2.9", "1.3.0"]);
+      // The row offers no Restart button while the note is undismissed.
+      expect(shown(first.module)).not.toHaveProperty("restart");
+      // And says why, once, instead of "downloaded and checked".
+      expect(shown(first.module)).toMatchObject({ download: "ready", lines: ["An earlier update did not finish. Read that note and dismiss it before updating again."] });
+      expect(first.module.status()).not.toHaveProperty("approval");
+      expect(await first.module.prepare("anything")).toEqual({ state: "blocked", message: "An earlier update did not finish. Read that note and dismiss it before updating again." });
+      await first.module.close();
+      // Still there for the next start.
+      const second = installed(true, { restart: "yes" });
+      expect(second.module.status().result).toEqual(note);
+      expect(second.module.dismissResult()).toEqual({ dismissed: true });
+      expect(readRecord(dataDir)).toBeUndefined();
+      expect(typeof second.module.status().approval).toBe("undefined");
+      await second.module.check();
+      expect(typeof second.module.status().approval).toBe("string");
+      await second.module.close();
+      // A result its token launch already showed is not shown again; any other is shown once.
+      writeRecord(dataDir, { at: 4, outcome: "updated", installed: { id: "tx-3", from: "1.2.2", to: "1.2.3", text: "Updated to version 1.2.3.", token: "t1", shown: true } });
+      expect(installed(false).module.status().result).toBeNull();
+      expect(readRecord(dataDir)).toBeUndefined();
+      writeRecord(dataDir, { at: 5, outcome: "rolled-back", installed: { id: "tx-4", from: "1.2.3", to: "1.2.4", text: "Version 1.2.4 did not start, so Gates Local went back to 1.2.3.", token: "t2" } });
+      expect(installed(false).module.status().result).toMatchObject({ outcome: "rolled-back", line: "Version 1.2.4 did not start, so Gates Local went back to 1.2.3." });
+      expect(installed(false).module.status().result).toBeNull();
+    });
   });
 });
