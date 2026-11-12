@@ -64,6 +64,9 @@ const gpuState = path.join(runDir, "gpu-state.json");
 mkdirSync(runDir, { recursive: true });
 let resets = 0;
 let dataDir = "";
+/** Port 9 (discard) has no server on a test machine: a download there fails at once, on this computer. */
+const NO_DOWNLOADS = "http://127.0.0.1:9";
+let downloadOrigin = NO_DOWNLOADS;
 
 const log = (line: string) => process.stderr.write(`[stack] ${line}\n`);
 
@@ -85,11 +88,11 @@ function start(name: string, args: string[], env: NodeJS.ProcessEnv, ready: RegE
   });
 }
 
-function stopChild(child: ChildProcess | null): Promise<void> {
+function stopChild(child: ChildProcess | null, signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): Promise<void> {
   if (child === null || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
     child.once("exit", () => resolve());
-    child.kill("SIGTERM");
+    child.kill(signal);
   });
 }
 
@@ -193,6 +196,9 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN,
     GATES_LOCAL_RUNTIME: "discover-only",
     GATES_LOCAL_OLLAMA_BINARY: "none",
+    // Image model downloads come from the test's fake ComfyUI (it serves the files too), never
+    // Hugging Face; with no fake, from a port nothing listens on.
+    GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN: downloadOrigin,
     XDG_DATA_HOME: path.join(runDir, "xdg"),
     // The server runs from this checkout; with the root here, a Check for
     // updates in a test is refused before any git command runs on it.
@@ -218,6 +224,7 @@ type Seed =
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
 async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string, imageTool = false): Promise<string | null> {
   await stopChild(server);
+  downloadOrigin = comfyUrl ?? NO_DOWNLOADS;
   resets += 1;
   dataDir = path.join(runDir, `data-${resets}`);
   mkdirSync(dataDir, { recursive: true });
@@ -296,7 +303,8 @@ const control = createServer((req, res) => {
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ system: controlledRuntime.system, app: controlledRuntime.app }));
       } else if (route === "POST /restart") {
         const body = await readJson(req);
-        await stopChild(server);
+        // crash: SIGKILL, so the server says nothing on its way out (no push ends what it was doing)
+        await stopChild(server, body["crash"] === true ? "SIGKILL" : "SIGTERM");
         await new Promise((r) => setTimeout(r, typeof body["downMs"] === "number" ? body["downMs"] : 0));
         await startServer();
         res.writeHead(200).end("ok");

@@ -3,11 +3,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { CHECKPOINT, LORA } from "../apps/server/src/image/workflow.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
 import { advise, formatReport, type GpuReading, type MachineReadings, readGpuReading } from "../scripts/machine-advice.ts";
 
 const GIB = 1024 ** 3;
+const CHECKPOINT = "sdxl_lightning_4step.safetensors";
+const LORA = "RW_pixelart_XL_v1.safetensors";
 const root = path.resolve(import.meta.dirname, "..");
 
 const machine = (gpu: GpuReading, ramAvailable = 16 * GIB, diskFree = 200 * GIB): MachineReadings => ({

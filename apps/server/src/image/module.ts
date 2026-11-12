@@ -6,7 +6,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { imageFitVerdict, type ImageChoice, type ImageEvent, type ImagePresets, type ImageStatus, type Params } from "@gates-local/contracts";
+import { imageFitVerdict, type ImageChoice, type ImageDownload, type ImageEvent, type ImagePresets, type ImageStatus, type Params, type PullProgress } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 import type { Push } from "../app.ts";
 import { readGpu, untilAborted } from "../fit/gpu.ts";
@@ -15,12 +15,21 @@ import type { GpuLease } from "../gpu/lease.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
-import { availablePresets, defaultChoice, describeChoice, isDefaultChoice, resolveChoice, smallerFit, type LoaderFiles } from "./presets.ts";
+import { downloadFile, type DownloadOptions } from "./download.ts";
+import { isLocalComfy } from "./installed.ts";
+import { defaultChoice, describeChoice, isDefaultChoice, listPresets, PRESETS, resolveChoice, smallerFit, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
 
-/** ComfyUI's last file list, kept in the data dir so the picker lists presets while ComfyUI is stopped. */
+/**
+ * ComfyUI's last file lists and node classes, and the workflows it had (its templates and the
+ * person's saved ones, as API graphs: sources.ts), kept in the data dir so the picker lists setups
+ * while ComfyUI is stopped. A record from before the classes were kept has none: every class then
+ * counts as listed until ComfyUI is read again.
+ */
 const FILES_NAME = "image-files.json";
-const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)) });
+const Source = S.Struct({ directory: S.optional(S.String), url: S.optional(S.String), bytes: S.optional(S.Finite), sha256: S.optional(S.String) });
+const Workflow = S.Struct({ id: S.String, name: S.String, group: S.String, graph: S.optional(S.Unknown), why: S.optional(S.String), sources: S.optional(S.Record(S.String, Source)), family: S.optional(S.String) });
+const KnownFiles = S.Struct({ baseUrl: S.String, readAt: S.Finite, files: S.Record(S.String, S.Array(S.String)), classes: S.optional(S.Array(S.String)), workflows: S.optional(S.Array(Workflow)) });
 type KnownFiles = typeof KnownFiles.Type;
 
 export interface ImageDeps extends ComfyClientDeps {
@@ -54,6 +63,13 @@ export interface ImageDeps extends ComfyClientDeps {
   localAddresses?(): readonly string[];
   /** Every address a host name resolves to; tests inject it. */
   lookupHost?(name: string): Promise<readonly string[]>;
+  /**
+   * Model downloads' fetch, allowed hosts and free-space reading; tests point them at a fake file
+   * server. `records: false` (tests only, with that fake) uses neither the app's records' sha256
+   * nor their sizes, as the fake's bytes are not the files they name: files are checked against
+   * their pins alone, and each counts at the size its download says.
+   */
+  download?: Pick<DownloadOptions, "fetch" | "allow" | "freeBytes" | "intervalMs"> & { readonly records?: false };
   log?(line: string): void;
 }
 
@@ -72,6 +88,16 @@ export interface ImageModule {
   /** A job runs `choice`, else Settings' imageChoice, else defaultChoice(); a retry runs its failed job's. */
   generate(params: Params<"image.generate">): Promise<{ jobId: string }>;
   cancel(jobId: string): { cancelled: boolean };
+  /**
+   * Fetch the files a setup needs, one after another, into a `gates-local/` folder inside each of
+   * the local ComfyUI's own model folders (download.ts); progress goes out on image.download. Answers
+   * with the files it will fetch once each has an address and a folder; refuses while another runs.
+   */
+  download(preset: string): Promise<{ files: string[] }>;
+  /** Stop `preset`'s download if it is the one running; its part file stays for the next download to resume. */
+  stopDownload(preset: string): { stopped: boolean };
+  /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer presets(); no job runs, so the idle stop applies. */
+  start(): Promise<ImagePresets>;
   /** Test/CLI completion seam; errors are reported on image.event. */
   wait(jobId: string): Promise<void>;
   /**
@@ -228,8 +254,12 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   let known: KnownFiles | undefined;
   try { known = S.decodeUnknownSync(KnownFiles)(JSON.parse(readFileSync(filesPath, "utf8"))); }
   catch { known = undefined; /* absent or unreadable: read again from ComfyUI */ }
-  const remember = (baseUrl: string, files: LoaderFiles) => {
-    known = { baseUrl, readAt: Date.now(), files };
+  /** Workflows from a source that was not read this time are kept from the last read at this address. */
+  const remember = (baseUrl: string, lists: ComfyLists, read: { templates?: readonly KnownWorkflow[]; saved?: readonly KnownWorkflow[]; installed?: readonly KnownWorkflow[] } = {}) => {
+    const before = known?.baseUrl === baseUrl ? known.workflows ?? [] : [];
+    const kept = (prefix: string, fresh: readonly KnownWorkflow[] | undefined) => fresh ?? before.filter((w) => w.id.startsWith(prefix));
+    const workflows = [...kept("template:", read.templates), ...kept("saved:", read.saved), ...kept("file:", read.installed)];
+    known = { baseUrl, readAt: Date.now(), files: lists.files, ...lists.classes === undefined ? {} : { classes: lists.classes }, ...workflows.length > 0 ? { workflows } : {} };
     try {
       const tmp = `${filesPath}.${process.pid}.tmp`;
       writeFileSync(tmp, JSON.stringify(known));
@@ -240,6 +270,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const knownFiles = (): KnownFiles | undefined => {
     try { return known?.baseUrl === config().baseUrl ? known : undefined; }
     catch { return undefined; }
+  };
+  let extraFor: { record: KnownFiles; presets: readonly Preset[] } | undefined;
+  /** The kept workflows as setups (empty before ComfyUI was read at this address), worked out once per read. */
+  const extras = (): readonly Preset[] => {
+    const record = knownFiles();
+    if (record === undefined) return [];
+    if (extraFor?.record !== record) extraFor = { record, presets: (record.workflows ?? []).map(workflowPreset) };
+    return extraFor.presets;
   };
   const clearIdle = () => { clearTimeout(idleTimer); idleTimer = undefined; };
   const armIdle = () => {
@@ -343,7 +381,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const others = (gpu.tenants ?? []).filter((tenant) => !(unit && unit.pid > 0 && tenant.pid === unit.pid)); // ComfyUI's own memory is credited
       // this app's only while Ollama still lists it: an unloaded model that is gone holds nothing
       const ours = await stillListed([...new Set([...models, ...await deps.imageMayUnload()])], signal);
-      const smaller = smallerFit(knownFiles()?.files, estimate, gpu.freeBytes + credited);
+      const smaller = smallerFit(knownFiles(), estimate, gpu.freeBytes + credited, extras());
       throw imageFitError(estimate, credited, gpu.freeBytes, gpu.holders, fitSentence(need, gpu.freeBytes, others, ours, smaller));
     }
   };
@@ -390,9 +428,23 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     signal.throwIfAborted();
     return comfy;
   };
-  const chooseDefault = () => defaultChoice(knownFiles()?.files);
+  /** A file's sha256 from its first download, by its address: a later download that differs is not put in place. */
+  const pinsPath = path.join(deps.dataDir, "image-pins.json");
+  const readPins = (): Record<string, string> => {
+    try { return S.decodeUnknownSync(S.Record(S.String, S.String))(JSON.parse(readFileSync(pinsPath, "utf8"))); }
+    catch { return {}; }
+  };
+  const writePins = (pins: Record<string, string>) => {
+    try { const tmp = `${pinsPath}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify(pins)); renameSync(tmp, pinsPath); }
+    catch (error) { log(`image download pins not kept: ${detail(error)}`); }
+  };
+  let downloading: Promise<void> | undefined, downloads: AbortController | undefined;
+  /** The running download: its setup, and its last push until that push ends it. */
+  let downloadOf: string | undefined, lastDownload: ImageDownload | undefined;
+  const say = (p: ImageDownload) => { lastDownload = p; emit("image.download", p); };
+  const chooseDefault = () => defaultChoice(knownFiles(), extras());
   /** What a send runs now: the saved choice, or the default for the files last read. */
-  const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault());
+  const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault(), extras());
   const module: ImageModule = {
     current: () => status,
     activeJobs: () => jobs.size,
@@ -403,24 +455,40 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!cfg.enabled) return { presets: [], current: currentChoice() };
       const comfy = client(cfg.baseUrl);
       if (await comfy.healthy()) {
-        try { remember(cfg.baseUrl, await comfy.files()); }
+        try { const { lists, ...read } = await comfy.catalog(); remember(cfg.baseUrl, lists, read); }
         catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
       }
       const last = knownFiles();
-      return last === undefined ? { presets: [], current: currentChoice() } : { presets: availablePresets(last.files), readAt: last.readAt, current: currentChoice() };
+      if (last === undefined) return { presets: [], current: currentChoice() };
+      const { ready, others } = listPresets(last, extras());
+      const download = lastDownload?.ended === true ? undefined : lastDownload;
+      return { presets: ready, ...others.length > 0 ? { others } : {}, readAt: last.readAt, current: currentChoice(), ...download === undefined ? {} : { download } };
+    },
+    async start() {
+      if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
+      const cfg = config();
+      if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
+      // A job starts it anyway, and owns the status while it runs.
+      if (jobs.size === 0) {
+        await ensure(cfg.baseUrl, cfg.managed, AbortSignal.timeout((deps.startupTimeoutMs ?? 60_000) + 5_000));
+        if (jobs.size === 0) update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
+        armIdle();
+      }
+      return module.presets();
     },
     async generate(params) {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
       deps.admit?.();
       let cfg = { enabled: false, baseUrl: "", managed: false, hostname: "" };
-      if (params.threadId) deps.store.getThread(params.threadId);
+      // The thread's own choice (its last pick or send), else Settings' (the last pick anywhere).
+      const kept = params.threadId ? deps.store.imageChoiceOf(params.threadId) : undefined;
       const jobId = randomUUID();
       let prompt = params.prompt;
-      // Unset: nothing saved in Settings, and the choice sent (or a retry's stored one) is absent
-      // or one of the defaults. The picker saves every pick, so with nothing saved a default is all
-      // a send can carry (the composer and the image tool send the one they show). The job settles
-      // it again from ComfyUI's own list, so a default whose files went missing is passed over.
-      const saved = deps.settings().imageChoice;
+      // Unset: nothing saved in the thread or Settings, and the choice sent (or a retry's stored one)
+      // is absent or one of the defaults. The picker saves every pick, so with nothing saved a default
+      // is all a send can carry (the composer and the image tool send the one they show). The job
+      // settles it again from ComfyUI's own list, so a default whose files went missing is passed over.
+      const saved = kept ?? deps.settings().imageChoice;
       let choice = params.choice ?? saved ?? chooseDefault();
       let unset = saved === undefined && isDefaultChoice(params.choice);
       if (params.retryOf !== undefined) {
@@ -430,9 +498,20 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         prompt = retry.prompt;
         choice = retry.choice;
         unset = saved === undefined && isDefaultChoice(retry.choice);
-      } else resolveChoice(choice); // an unknown preset or size is refused before any card
+      } else resolveChoice(choice, extras()); // an unknown preset or size is refused before any card
       if (!prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
       const sent = choice; // the card's box keeps this shape whatever the job settles to
+      // The thread sends with this from now on, whatever another thread picks. A choice someone made is
+      // kept at send. An unset default is kept only once it has made a picture, as settled from ComfyUI's
+      // files, and only while the thread still has none: a pick or a send since then stays. A failed
+      // default keeps nothing, so the next send settles again. A retry leaves the thread's alone.
+      const pinIn = params.retryOf === undefined ? params.threadId : undefined;
+      if (pinIn !== undefined && !unset && (kept === undefined || !same(choice, kept))) {
+        try {
+          deps.store.setImageChoice(pinIn, choice);
+          emit("threads.changed", { threadId: pinIn });
+        } catch { /* a thread deleted meanwhile */ }
+      }
       clearIdle();
       const controller = new AbortController();
       const deadline = new AbortController();
@@ -463,7 +542,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             event("running", { progress: 0 });
             update({ state: "busy", owner: owned ? "app" : "none", baseUrl: cfg.baseUrl });
             // Inside the job: a retry's stored choice a newer table no longer has fails its card in words.
-            let { size } = resolveChoice(choice);
+            let { size } = resolveChoice(choice, extras());
             const freeing = (on: boolean) => event("running", on ? { progress: 0, phase: "freeing" } : { progress: 0 });
             // An unset default settles to the files ComfyUI lists, so the fit and any unload judge the
             // setup that will really run. A default whose files ComfyUI does not list is passed over without a word.
@@ -475,7 +554,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               const settled = chooseDefault();
               if (same(settled, choice)) return;
               choice = settled;
-              ({ size } = resolveChoice(choice));
+              ({ size } = resolveChoice(choice, extras()));
               event("running", { progress: 0 });
             };
             // Never read: ComfyUI is started (or found) and its list read before the first fit.
@@ -503,13 +582,15 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
-            }, choice);
+            }, choice, extras());
             const imagePath = `images/${jobId}.png`;
             stage = "image-save";
             await mkdir(path.join(deps.dataDir, "images"), { recursive: true });
             const pendingPath = path.join(deps.dataDir, "images", `${jobId}.pending`);
             await writeFile(pendingPath, bytes, { flag: "wx" });
             await rename(pendingPath, path.join(deps.dataDir, imagePath));
+            // a default is kept as settled once it has made a picture; the threads.changed below says so
+            if (unset && pinIn !== undefined) deps.store.fillImageChoice(pinIn, choice);
             event("done", { progress: 1, imagePath });
             if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
@@ -602,13 +683,82 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       owned = undefined;
       service.killRuntimeNow?.(pid);
     },
+    async download(id) {
+      const cfg = config();
+      if (!cfg.enabled) throw imageError("image-off", "Image generation is off. Turn it on in Settings first.");
+      if (downloads !== undefined) throw imageError("image-download", "A model download is already running; it finishes first.");
+      const controller = new AbortController();
+      // set before the plan is made, so a Stop pressed while it is made stops it
+      downloads = controller; downloadOf = id; lastDownload = undefined;
+      try { return await startDownload(id, cfg.baseUrl, controller); }
+      catch (error) { if (downloading === undefined) { downloads = undefined; downloadOf = undefined; } throw error; }
+    },
+    stopDownload(id) {
+      if (downloads === undefined || downloadOf !== id || downloads.signal.aborted) return { stopped: false };
+      downloads.abort(new Error("Download stopped.")); return { stopped: true };
+    },
     async close() {
       closed = true; clearIdle();
+      downloads?.abort(new Error("Image generation is shutting down."));
+      await downloading;
       const pending = [...jobs.values()];
       for (const job of pending) if (!job.committing) job.controller.abort(new Error("Image generation is shutting down."));
       await Promise.all(pending.map((job) => job.ended));
       await module.stopIdle();
     },
   };
+  /** Plans the files to fetch, then fetches them in the background (module.download). */
+  async function startDownload(id: string, baseUrl: string, controller: AbortController): Promise<{ files: string[] }> {
+    const comfy = client(baseUrl);
+    if (!isLocalComfy(baseUrl) || !await comfy.healthy()) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
+    await module.presets();
+    const last = knownFiles();
+    const row = last && listPresets(last, extras()).others.find((p) => p.id === id);
+    const preset = [...PRESETS, ...extras()].find((p) => p.id === id);
+    if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
+    if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);
+    const folders = await comfy.folders();
+    const plan = (row?.needs?.files ?? []).map((name) => {
+      const source = preset.sources?.[name];
+      if (source?.url === undefined) throw imageError("image-download", `${preset.name}: ${name} has no download address. Install it in ComfyUI's model folders yourself.`);
+      const folder = source.directory === undefined ? undefined : folders?.[source.directory]?.[0];
+      if (folder === undefined) throw imageError("image-download", `${preset.name}: ComfyUI did not say which folder ${name} goes in.`);
+      return { name: path.basename(name), url: source.url, dir: path.join(folder, "gates-local"), sha256: source.sha256, bytes: source.bytes };
+    });
+    if (plan.length === 0) { downloads = undefined; downloadOf = undefined; return { files: [] }; }
+    // each file's size: the record's, then the file's own once its download says it; the setup's bar needs them all
+    const { records, ...fetching } = deps.download ?? {};
+    const sizes = plan.map((f) => records === false ? undefined : f.bytes);
+    downloading = (async () => {
+      const pins = readPins();
+      for (const [i, file] of plan.entries()) {
+        const place = { preset: id, file: i + 1, files: plan.length };
+        try {
+          const pinned = (records === false ? undefined : file.sha256) ?? pins[file.url];
+          // The last file's done is the download's last word; the list is read again after it.
+          const progress = (p: PullProgress) => {
+            if (p.totalBytes !== undefined) sizes[i] = p.totalBytes;
+            const all = sizes.every((b) => b !== undefined) ? sizes as number[] : undefined;
+            const setup = all === undefined ? {} : { setupCompletedBytes: all.slice(0, i).reduce((a, b) => a + b, 0) + p.completedBytes, setupTotalBytes: all.reduce((a, b) => a + b, 0) };
+            say({ ...p, ...place, ...setup, ...p.state === "done" && i === plan.length - 1 ? { ended: true } : {} });
+          };
+          controller.signal.throwIfAborted(); // stopped while the plan was made
+          const got = await downloadFile({ ...fetching, name: file.name, url: file.url, dir: file.dir, ...pinned === undefined ? {} : { sha256: pinned }, signal: controller.signal, progress });
+          if (pinned === undefined) { pins[file.url] = got.sha256; writePins(pins); }
+        } catch (error) {
+          const cancelled = controller.signal.aborted;
+          // say() set it since; TypeScript still sees the undefined from before the loop
+          const said = lastDownload as ImageDownload | undefined;
+          const completedBytes = said?.file === place.file ? said.completedBytes : 0;
+          const totalBytes = said?.file === place.file ? said.totalBytes : undefined;
+          say({ name: file.name, ...place, state: cancelled ? "cancelled" : "error", completedBytes, ...totalBytes === undefined ? {} : { totalBytes }, message: cancelled ? "Download stopped; the part already downloaded is kept." : detail(error), ended: true });
+          log(`image download ${file.name}: ${detail(error)}`);
+          break;
+        }
+      }
+      await module.presets().catch(() => undefined);
+    })().finally(() => { downloading = undefined; downloads = undefined; downloadOf = undefined; });
+    return { files: plan.map((f) => f.name) };
+  }
   return module;
 }

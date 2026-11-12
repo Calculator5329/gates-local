@@ -4,14 +4,52 @@
 // gpu(): /system_stats names a CUDA device, so the image fit runs. Use it only
 // with the e2e stack, whose server reads the fake nvidia-smi
 // (GATES_LOCAL_NVIDIA_SMI), never the real one.
+// withFolders(): it names model folders of its own (under ~/.cache, never a real ComfyUI's) and
+// lists what a download put in their gates-local/ folders. It also serves every Hugging Face
+// path the app downloads from (the e2e stack points GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN here):
+// a few MiB per file, with Range, trickled and never finished while slowDownloads(true).
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
+import { homedir } from "node:os";
+import path from "node:path";
 import type { Duplex } from "node:stream";
+import { comfyInfo, KLEIN_FILES, SDXL_FILES, type FakeFiles } from "../../apps/server/test/comfy/info.ts";
+
+const KINDS = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"] as const;
+/** Each served file's size: enough for a progress bar to move. */
+const FILE_BYTES = 4 * 1024 * 1024;
 
 export async function fakeComfy() {
-  let complete = false, missingModel = false, flux = false, cuda = false, unlisted = false;
+  let complete = false, missingModel = false, flux = false, cuda = false, unlisted = false, down = false;
+  let folders: string | undefined, slow = false, slowFile: string | undefined;
+  /** Held downloads: each ends its response when released. */
+  const held = new Set<() => void>();
+  /** A held GET trickles 16 KiB every 100 ms, never the last piece, until released or the app stops it. */
+  const serveFile = (method: string, range: string | undefined, name: string, res: ServerResponse) => {
+    const body = Buffer.alloc(FILE_BYTES, name);
+    const from = Number(/^bytes=(\d+)-$/.exec(range ?? "")?.[1] ?? 0);
+    const part = body.subarray(from);
+    res.writeHead(from > 0 ? 206 : 200, { "content-length": String(method === "HEAD" ? body.length : part.length), ...from > 0 ? { "content-range": `bytes ${from}-${body.length - 1}/${body.length}` } : {} });
+    if (method === "HEAD") { res.end(); return; }
+    if (!slow || (slowFile !== undefined && name !== slowFile)) { res.end(part); return; }
+    let sent = 0;
+    const tick = setInterval(() => {
+      const next = Math.min(sent + 16 * 1024, part.length - 1);
+      if (next > sent) { res.write(part.subarray(sent, next)); sent = next; }
+    }, 100);
+    const release = () => { clearInterval(tick); held.delete(release); res.end(part.subarray(sent)); };
+    held.add(release);
+    res.on("close", () => { clearInterval(tick); held.delete(release); });
+  };
+  /** What a download put in the gates-local/ folders, as ComfyUI lists it. */
+  const downloaded = (): FakeFiles => folders === undefined ? {} : Object.fromEntries(KINDS.map((kind) => {
+    const dir = path.join(folders!, kind, "gates-local");
+    return [kind, existsSync(dir) ? readdirSync(dir).filter((f) => !f.endsWith(".part")).map((f) => `gates-local/${f}`) : []];
+  }));
   let n = 0;
   const active = new Set<string>();
+  const completed = new Set<string>();
   const runs: { id: string; startedAt: number; endedAt?: number }[] = [];
   /** Each /prompt body as sent: the graph the server built for a job. */
   const prompts: { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }[] = [];
@@ -20,18 +58,13 @@ export async function fakeComfy() {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const url = new URL(req.url ?? "/", "http://fake");
+    if (url.pathname.includes("/resolve/")) { serveFile(req.method ?? "GET", req.headers.range, path.basename(url.pathname), res); return; }
+    if (down) { res.writeHead(503); res.end("{}"); return; }
     let body: unknown = {};
     switch (url.pathname) {
       case "/system_stats": body = { system: {}, devices: [cuda ? { type: "cuda", torch_vram_total: 0 } : { type: "cpu" }] }; break;
-      case "/object_info": if (unlisted) { res.writeHead(500); res.end("{}"); return; } body = {
-        CheckpointLoaderSimple: { input: { required: { ckpt_name: [missingModel ? [] : ["sdxl_lightning_4step.safetensors"]] } } },
-        LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
-        ...(flux ? {
-          UNETLoader: { input: { required: { unet_name: [["flux-2-klein-4b-fp8.safetensors"]] } } },
-          CLIPLoader: { input: { required: { clip_name: [["qwen_3_4b.safetensors"]] } } },
-          VAELoader: { input: { required: { vae_name: [["flux2-vae.safetensors"]] } } },
-        } : {}),
-      }; break;
+      case "/object_info": if (unlisted) { res.writeHead(500); res.end("{}"); return; } body = comfyInfo({ checkpoints: missingModel ? [] : SDXL_FILES.checkpoints, loras: SDXL_FILES.loras }, flux ? KLEIN_FILES : {}, downloaded()); break;
+      case "/internal/folder_paths": body = folders === undefined ? {} : Object.fromEntries(KINDS.map((kind) => [kind, [path.join(folders!, kind)]])); break;
       case "/prompt": {
         const id = `p${++n}`; active.add(id); runs.push({ id, startedAt: Date.now() });
         prompts.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
@@ -43,7 +76,7 @@ export async function fakeComfy() {
         res.writeHead(200, { "content-type": "image/png" });
         res.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")); return;
       default:
-        if (url.pathname.startsWith("/history/") && complete) {
+        if (url.pathname.startsWith("/history/") && (complete || completed.has(url.pathname.slice("/history/".length)))) {
           const id = url.pathname.slice("/history/".length); active.delete(id);
           const run = runs.find((entry) => entry.id === id);
           if (run) run.endedAt ??= Date.now();
@@ -86,11 +119,23 @@ export async function fakeComfy() {
     },
     /** Fail /object_info (on) or answer it again (off): the app then has never read the file list. */
     unlisted: (on: boolean) => { unlisted = on; },
-    finish: () => { complete = true; },
+    /** Answer nothing but 503 (on), as a ComfyUI that is not running; downloads are still served. */
+    down: (on: boolean) => { down = on; },
+    /** Name model folders of its own, empty, and list what downloads put there. */
+    withFolders: () => {
+      const root = path.join(homedir(), ".cache", "gates-local-e2e");
+      mkdirSync(root, { recursive: true });
+      folders = mkdtempSync(path.join(root, "comfy-models-"));
+    },
+    /** Trickle every download, or only `file`'s, and never finish it (on); off sends the rest of the held ones. */
+    slowDownloads: (on: boolean, file?: string) => { slow = on; slowFile = file; if (!on) for (const release of held) release(); },
+    /** With an id, finish only that prompt so a queued successor stays held. */
+    finish: (id?: string) => { if (id === undefined) complete = true; else completed.add(id); },
     missing: () => { missingModel = true; },
     restore: (finish = true) => { missingModel = false; complete = finish; },
     close: () => new Promise<void>((resolve, reject) => {
       for (const socket of sockets) socket.destroy();
+      if (folders !== undefined) rmSync(folders, { recursive: true, force: true });
       server.close(error => error ? reject(error) : resolve());
       server.closeAllConnections();
     }),

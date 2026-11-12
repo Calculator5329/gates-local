@@ -19,6 +19,7 @@ import * as imageFiles from "../src/chat/image-lifecycle.ts";
 import { saveAttachments } from "../src/chat/attachments.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
 import { createImageModule, type ImageModule } from "../src/image/module.ts";
+import { comfyInfo, SDXL_FILES } from "./comfy/info.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
@@ -898,10 +899,7 @@ function fakeComfyImage() {
         const { pathname } = new URL(String(input));
         comfyCalls.push(pathname);
         if (pathname === "/system_stats") return Response.json({ system: {}, devices: [] });
-        if (pathname === "/object_info") return Response.json({
-          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
-          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
-        });
+        if (pathname === "/object_info") return Response.json(comfyInfo(SDXL_FILES));
         if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
         if (pathname === "/prompt") {
           queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })));
@@ -966,10 +964,7 @@ function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {})
           if (ctl.health) await ctl.health;
           return up ? Response.json({ system: {}, devices: [] }) : new Response("down", { status: 503 });
         }
-        if (pathname === "/object_info") return Response.json({
-          CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
-          LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
-        });
+        if (pathname === "/object_info") return Response.json(comfyInfo(SDXL_FILES));
         if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.busy ? [[0, "someone-else"]] : [] });
         if (pathname === "/prompt") {
           prompts += 1;

@@ -6,11 +6,21 @@ const Millis = S.Finite;
 const Count = S.Int.check(S.isGreaterThanOrEqualTo(0));
 const PositiveInt = S.Int.check(S.isGreaterThan(0));
 
+/** An image preset (the server's table, image.presets) and one of its sizes: what an image job runs. */
+export const ImageChoice = S.Struct({
+  preset: S.String.check(S.isMaxLength(100)),
+  width: S.Int.check(S.isGreaterThan(0)),
+  height: S.Int.check(S.isGreaterThan(0)),
+});
+export type ImageChoice = typeof ImageChoice.Type;
+
 export const Thread = S.Struct({
   id: S.String,
   title: S.String,
   createdAt: Millis,
   updatedAt: Millis,
+  /** The image model and size this thread sends with (threads.setImageChoice, or its last image send); absent follows Settings' imageChoice. */
+  imageChoice: S.optional(ImageChoice),
 });
 export type Thread = typeof Thread.Type;
 
@@ -50,14 +60,6 @@ export const ToolStep = S.Struct({
   links: S.optional(S.Array(S.String)),
 });
 export type ToolStep = typeof ToolStep.Type;
-
-/** An image preset (the server's table, image.presets) and one of its sizes: what an image job runs. */
-export const ImageChoice = S.Struct({
-  preset: S.String.check(S.isMaxLength(100)),
-  width: S.Int.check(S.isGreaterThan(0)),
-  height: S.Int.check(S.isGreaterThan(0)),
-});
-export type ImageChoice = typeof ImageChoice.Type;
 
 /** Image jobs are durable messages; events carry the same state as the saved card. */
 export const ImageEvent = S.Struct({
@@ -504,19 +506,45 @@ export type ImageSize = typeof ImageSize.Type;
 export const ImagePreset = S.Struct({
   id: S.String,
   name: S.String,
-  /** The composer button's name beside the family mark; no two presets share its first letter. Absent: `name`. */
+  /** The composer button's name beside the family mark; no two of the app's own share its first letter. Absent: `name`. */
   short: S.optional(S.String),
   /** The model family the graph is built for (one rail icon per family). */
   family: S.String,
+  /** The picker's group: a theme (General, Pixel art…) for the app's own setups, where it came from for ComfyUI's. Absent from older servers. */
+  group: S.optional(S.String),
   sizes: S.Array(ImageSize),
   /** False: the bytes are an estimate, not a measured peak. */
   measured: S.Boolean,
+  /**
+   * Not ready: the files ComfyUI does not list (names as the workflow gives them), once known their
+   * total size, and `download` when every one has an address image.download fetches from.
+   */
+  needs: S.optional(S.Struct({ files: S.Array(S.String), bytes: S.optional(Count), download: S.optional(S.Boolean) })),
+  /** Not runnable here, in words: a node class ComfyUI lacks, or no single prompt, size, seed or output. */
+  why: S.optional(S.String),
 });
 export type ImagePreset = typeof ImagePreset.Type;
 
+/** One file of a setup's download (image.download): which setup, which file of how many, and its PullProgress. */
+export const ImageDownload = S.Struct({
+  ...PullProgress.fields,
+  preset: S.String,
+  /** This file's place in the setup's list, from 1, and the list's length. */
+  file: S.Int,
+  files: S.Int,
+  /** The whole setup's bytes, every file's fetched so far and in all; only when every file's size is known. */
+  setupCompletedBytes: S.optional(Count),
+  setupTotalBytes: S.optional(Count),
+  /** The download's last word: every file is in, or it stopped or failed on this one. */
+  ended: S.optional(S.Boolean),
+});
+export type ImageDownload = typeof ImageDownload.Type;
+
 export const ImagePresets = S.Struct({
-  /** Only the presets whose every file ComfyUI listed. */
+  /** Only the presets whose every node class and file ComfyUI listed. */
   presets: S.Array(ImagePreset),
+  /** The rest, each with `needs` or `why`; the picker lists them greyed out. */
+  others: S.optional(S.Array(ImagePreset)),
   /** When ComfyUI's file list was last read; absent means never (presets is then empty). */
   readAt: S.optional(Millis),
   /**
@@ -524,6 +552,8 @@ export const ImagePresets = S.Struct({
    * server knows, so the composer can say it before ComfyUI has listed its files.
    */
   current: S.Struct({ preset: ImagePreset, width: S.Int, height: S.Int }),
+  /** The download running now, as its last image.download push said. */
+  download: S.optional(ImageDownload),
 });
 export type ImagePresets = typeof ImagePresets.Type;
 

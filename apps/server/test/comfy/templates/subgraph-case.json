@@ -1,0 +1,107 @@
+{
+  "id": "0d6f3c1e-5b2a-4c7e-9f10-subgraph-case",
+  "revision": 0,
+  "last_node_id": 34,
+  "last_link_id": 14,
+  "nodes": [
+    { "id": 1, "type": "CheckpointLoaderSimple", "mode": 0, "inputs": [], "outputs": [{ "name": "MODEL", "type": "MODEL", "links": [1] }, { "name": "CLIP", "type": "CLIP", "links": [2, 3] }, { "name": "VAE", "type": "VAE", "links": [4, 12] }], "properties": { "models": [{ "name": "sdxl_case.safetensors", "url": "https://huggingface.co/example/case/resolve/main/sdxl_case.safetensors", "directory": "checkpoints" }] }, "widgets_values": ["sdxl_case.safetensors"] },
+    { "id": 2, "type": "LoraLoaderModelOnly", "mode": 4, "inputs": [{ "name": "model", "type": "MODEL", "link": 1 }], "outputs": [{ "name": "MODEL", "type": "MODEL", "links": [5] }], "properties": {}, "widgets_values": ["case_lora.safetensors", 0.8] },
+    { "id": 3, "type": "Reroute", "mode": 0, "inputs": [{ "name": "", "type": "*", "link": 5 }], "outputs": [{ "name": "", "type": "MODEL", "links": [6, 9] }], "properties": { "showOutputText": false, "horizontal": false } },
+    { "id": 4, "type": "PrimitiveStringMultiline", "mode": 0, "inputs": [], "outputs": [{ "name": "STRING", "type": "STRING", "links": [7] }], "properties": {}, "widgets_values": ["a red fox"] },
+    { "id": 5, "type": "Note", "mode": 0, "inputs": [], "outputs": [], "properties": {}, "widgets_values": ["read me"] },
+    { "id": 20, "type": "5ee1-sample", "mode": 0, "inputs": [{ "name": "model", "type": "MODEL", "link": 6 }, { "name": "clip", "type": "CLIP", "link": 2 }, { "name": "text", "type": "STRING", "link": 7, "widget": { "name": "text" } }], "outputs": [{ "name": "LATENT", "type": "LATENT", "links": [8] }], "properties": { "proxyWidgets": [["-1", "text"], ["-1", "steps"]] }, "widgets_values": [] },
+    { "id": 21, "type": "5ee1-sample", "mode": 0, "inputs": [{ "name": "model", "type": "MODEL", "link": 9 }, { "name": "clip", "type": "CLIP", "link": 3 }, { "name": "text", "type": "STRING", "link": null, "widget": { "name": "text" } }], "outputs": [{ "name": "LATENT", "type": "LATENT", "links": [10] }], "properties": { "proxyWidgets": [["-1", "text"], ["-1", "steps"]] }, "widgets_values": ["a blue bird", 12] },
+    { "id": 30, "type": "VAEDecode", "mode": 0, "inputs": [{ "name": "samples", "type": "LATENT", "link": 8 }, { "name": "vae", "type": "VAE", "link": 4 }], "outputs": [{ "name": "IMAGE", "type": "IMAGE", "links": [11, 14] }], "properties": {} },
+    { "id": 31, "type": "SaveImage", "mode": 0, "inputs": [{ "name": "images", "type": "IMAGE", "link": 11 }], "outputs": [], "properties": {}, "widgets_values": ["case"] },
+    { "id": 32, "type": "VAEDecode", "mode": 0, "inputs": [{ "name": "samples", "type": "LATENT", "link": 10 }, { "name": "vae", "type": "VAE", "link": 12 }], "outputs": [{ "name": "IMAGE", "type": "IMAGE", "links": [13] }], "properties": {} },
+    { "id": 33, "type": "SaveImage", "mode": 0, "inputs": [{ "name": "images", "type": "IMAGE", "link": 13 }], "outputs": [], "properties": {}, "widgets_values": ["case-b"] },
+    { "id": 34, "type": "PreviewImage", "mode": 2, "inputs": [{ "name": "images", "type": "IMAGE", "link": 14 }], "outputs": [], "properties": {} }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "MODEL"],
+    [2, 1, 1, 20, 1, "CLIP"],
+    [3, 1, 1, 21, 1, "CLIP"],
+    [4, 1, 2, 30, 1, "VAE"],
+    [5, 2, 0, 3, 0, "MODEL"],
+    [6, 3, 0, 20, 0, "MODEL"],
+    [7, 4, 0, 20, 2, "STRING"],
+    [8, 20, 0, 30, 0, "LATENT"],
+    [9, 3, 0, 21, 0, "MODEL"],
+    [10, 21, 0, 32, 0, "LATENT"],
+    [11, 30, 0, 31, 0, "IMAGE"],
+    [12, 1, 2, 32, 1, "VAE"],
+    [13, 32, 0, 33, 0, "IMAGE"],
+    [14, 30, 0, 34, 0, "IMAGE"]
+  ],
+  "groups": [],
+  "definitions": {
+    "subgraphs": [
+      {
+        "id": "5ee1-sample",
+        "version": 1,
+        "name": "Sample",
+        "inputNode": { "id": -10, "bounding": [0, 0, 120, 160] },
+        "outputNode": { "id": -20, "bounding": [900, 0, 120, 60] },
+        "inputs": [
+          { "id": "i-model", "name": "model", "type": "MODEL", "linkIds": [101] },
+          { "id": "i-clip", "name": "clip", "type": "CLIP", "linkIds": [102, 103] },
+          { "id": "i-text", "name": "text", "type": "STRING", "linkIds": [104] },
+          { "id": "i-steps", "name": "steps", "type": "INT", "linkIds": [105] }
+        ],
+        "outputs": [{ "id": "o-latent", "name": "LATENT", "type": "LATENT", "linkIds": [110] }],
+        "widgets": [],
+        "nodes": [
+          { "id": 1, "type": "CLIPTextEncode", "mode": 0, "inputs": [{ "name": "clip", "type": "CLIP", "link": 102 }, { "name": "text", "type": "STRING", "link": 104, "widget": { "name": "text" } }], "outputs": [{ "name": "CONDITIONING", "type": "CONDITIONING", "links": [106] }], "properties": {}, "widgets_values": ["inner default text"] },
+          { "id": 2, "type": "CLIPTextEncode", "mode": 0, "inputs": [{ "name": "clip", "type": "CLIP", "link": 103 }], "outputs": [{ "name": "CONDITIONING", "type": "CONDITIONING", "links": [107] }], "properties": {}, "widgets_values": ["blurry"] },
+          { "id": 3, "type": "EmptyLatentImage", "mode": 0, "inputs": [], "outputs": [{ "name": "LATENT", "type": "LATENT", "links": [108] }], "properties": {}, "widgets_values": [512, 768, 1] },
+          { "id": 4, "type": "7ab2-seeded", "mode": 0, "inputs": [{ "name": "model", "type": "MODEL", "link": 101 }, { "name": "positive", "type": "CONDITIONING", "link": 106 }, { "name": "negative", "type": "CONDITIONING", "link": 107 }, { "name": "latent_image", "type": "LATENT", "link": 108 }, { "name": "steps", "type": "INT", "link": 105, "widget": { "name": "steps" } }], "outputs": [{ "name": "LATENT", "type": "LATENT", "links": [110] }], "properties": {}, "widgets_values": [] }
+        ],
+        "links": [
+          { "id": 101, "origin_id": -10, "origin_slot": 0, "target_id": 4, "target_slot": 0, "type": "MODEL" },
+          { "id": 102, "origin_id": -10, "origin_slot": 1, "target_id": 1, "target_slot": 0, "type": "CLIP" },
+          { "id": 103, "origin_id": -10, "origin_slot": 1, "target_id": 2, "target_slot": 0, "type": "CLIP" },
+          { "id": 104, "origin_id": -10, "origin_slot": 2, "target_id": 1, "target_slot": 1, "type": "STRING" },
+          { "id": 105, "origin_id": -10, "origin_slot": 3, "target_id": 4, "target_slot": 4, "type": "INT" },
+          { "id": 106, "origin_id": 1, "origin_slot": 0, "target_id": 4, "target_slot": 1, "type": "CONDITIONING" },
+          { "id": 107, "origin_id": 2, "origin_slot": 0, "target_id": 4, "target_slot": 2, "type": "CONDITIONING" },
+          { "id": 108, "origin_id": 3, "origin_slot": 0, "target_id": 4, "target_slot": 3, "type": "LATENT" },
+          { "id": 110, "origin_id": 4, "origin_slot": 0, "target_id": -20, "target_slot": 0, "type": "LATENT" }
+        ],
+        "groups": [],
+        "extra": {}
+      },
+      {
+        "id": "7ab2-seeded",
+        "version": 1,
+        "name": "Seeded",
+        "inputNode": { "id": -10, "bounding": [0, 0, 120, 160] },
+        "outputNode": { "id": -20, "bounding": [600, 0, 120, 60] },
+        "inputs": [
+          { "id": "s-model", "name": "model", "type": "MODEL", "linkIds": [201] },
+          { "id": "s-positive", "name": "positive", "type": "CONDITIONING", "linkIds": [202] },
+          { "id": "s-negative", "name": "negative", "type": "CONDITIONING", "linkIds": [203] },
+          { "id": "s-latent", "name": "latent_image", "type": "LATENT", "linkIds": [204] },
+          { "id": "s-steps", "name": "steps", "type": "INT", "linkIds": [205] }
+        ],
+        "outputs": [{ "id": "s-out", "name": "LATENT", "type": "LATENT", "linkIds": [206] }],
+        "widgets": [],
+        "nodes": [
+          { "id": 9, "type": "KSampler", "mode": 0, "inputs": [{ "name": "model", "type": "MODEL", "link": 201 }, { "name": "positive", "type": "CONDITIONING", "link": 202 }, { "name": "negative", "type": "CONDITIONING", "link": 203 }, { "name": "latent_image", "type": "LATENT", "link": 204 }, { "name": "steps", "type": "INT", "link": 205, "widget": { "name": "steps" } }], "outputs": [{ "name": "LATENT", "type": "LATENT", "links": [206] }], "properties": {}, "widgets_values": [7, "fixed", 20, 6.5, "euler", "normal", 1] }
+        ],
+        "links": [
+          { "id": 201, "origin_id": -10, "origin_slot": 0, "target_id": 9, "target_slot": 0, "type": "MODEL" },
+          { "id": 202, "origin_id": -10, "origin_slot": 1, "target_id": 9, "target_slot": 1, "type": "CONDITIONING" },
+          { "id": 203, "origin_id": -10, "origin_slot": 2, "target_id": 9, "target_slot": 2, "type": "CONDITIONING" },
+          { "id": 204, "origin_id": -10, "origin_slot": 3, "target_id": 9, "target_slot": 3, "type": "LATENT" },
+          { "id": 205, "origin_id": -10, "origin_slot": 4, "target_id": 9, "target_slot": 4, "type": "INT" },
+          { "id": 206, "origin_id": 9, "origin_slot": 0, "target_id": -20, "target_slot": 0, "type": "LATENT" }
+        ],
+        "groups": [],
+        "extra": {}
+      }
+    ]
+  },
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

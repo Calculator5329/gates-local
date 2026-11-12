@@ -6,6 +6,7 @@ import {
   type Channel,
   type Client,
   type BlockingTurn,
+  type ImageChoice,
   type Payload,
 } from "@gates-local/contracts";
 import { modelChoice as pickChoice, newestOnly } from "./pick.ts";
@@ -156,6 +157,11 @@ async function hydrateWith(
     // the job settled to other files than the button names: the server read ComfyUI's list again
     if (e.sent !== undefined && !settledJobs.has(e.jobId)) { settledJobs.add(e.jobId); void loadImagePresets(); }
   });
+  // a setup's download: its last word reads the list again, so a row whose files are all in turns ready
+  on("image.download", (imageDownload) => {
+    applyServerEvent({ imageDownload });
+    if (imageDownload.ended === true) void loadImagePresets();
+  });
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
@@ -216,7 +222,9 @@ async function hydrateWith(
     probe("models.speed", {}),
     probe("image.presets", {}),
   ]);
-  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...(presetsOrder.current(presetsTicket) ? { imagePresets } : {}), ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
+  // A download push from before the reconnect may be stale (its server restarted, or its end missed): the list says what runs now.
+  const presetsRead = presetsOrder.current(presetsTicket) ? { imagePresets, ...imagePresets === undefined || imagePresets === NA ? {} : { imageDownload: imagePresets.download } } : {};
+  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...presetsRead, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
   release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.
@@ -309,6 +317,67 @@ export async function retryImage(threadId: string, prompt: string, retryOf: stri
 export async function cancelImage(jobId: string): Promise<ActionResult> {
   const result = await act("image.cancel", { jobId }, "cancel the image");
   return result.ok ? null : result.message;
+}
+
+/**
+ * The picker's pick: the open thread sends with it from now on (other threads keep theirs), and it
+ * is the app's last pick, which a new thread starts from and its first send carries.
+ */
+export async function pickImage(choice: ImageChoice): Promise<ActionResult> {
+  const s = getState();
+  const threadId = s.view === "thread" ? s.threadId : null;
+  if (threadId !== null) {
+    const r = await act("threads.setImageChoice", { threadId, choice }, "save the image model");
+    if (!r.ok) return r.message;
+    applyServerEvent((st) => ({ threads: st.threads.map((t) => (t.id === r.value.id ? r.value : t)) }));
+  }
+  // the phone cannot write Settings: its pick is the thread's alone, or the new thread's until its first send
+  if (getState().unavailable["settings.update"] === true) {
+    if (threadId === null) applyServerEvent({ imagePick: choice });
+    return null;
+  }
+  return updateSettings({ imageChoice: choice });
+}
+
+/** The picker's image actions say the server's own words (they are written to be shown), the connection's when it failed. */
+async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
+  try { return { ok: true, value: await run() }; }
+  catch (e) {
+    const code = codeOf(e);
+    return { ok: false, message: code.startsWith("image") && e instanceof Error ? e.message : failure(what, e) };
+  }
+}
+
+/** Fetch the files a setup needs into ComfyUI's folders; its row shows the download at once, then each image.download push. */
+export async function downloadImageSetup(preset: string): Promise<ActionResult> {
+  const placeholder = { name: preset, preset, file: 1, files: 1, state: "queued" as const, completedBytes: 0 };
+  applyServerEvent({ imageDownload: placeholder });
+  const r = await imageAct("download the image setup", () => call("image.download", { preset }));
+  // a push since has the say; the placeholder alone goes when the download did not start
+  if (!r.ok || r.value.files.length === 0) applyServerEvent((s) => s.imageDownload === placeholder ? { imageDownload: undefined } : {});
+  if (!r.ok) return r.message;
+  if (r.value.files.length === 0) void loadImagePresets();
+  return null;
+}
+
+export async function stopImageDownload(preset: string): Promise<ActionResult> {
+  const r = await imageAct("stop the download", () => call("image.stopDownload", { preset }));
+  if (!r.ok) return r.message;
+  // nothing of this setup's runs (it ended, or the server restarted): its bar goes and the list says what is there
+  if (!r.value.stopped) {
+    applyServerEvent((s) => s.imageDownload?.preset === preset ? { imageDownload: undefined } : {});
+    void loadImagePresets();
+  }
+  return null;
+}
+
+/** The empty picker's Start ComfyUI (or Check again): starts the app's ComfyUI if it has one, then reads its list. */
+export async function startImage(): Promise<ActionResult> {
+  const ticket = presetsOrder.next();
+  const r = await imageAct("start ComfyUI", () => call("image.start", {}));
+  if (!r.ok) return r.message;
+  if (presetsOrder.current(ticket)) applyServerEvent({ imagePresets: r.value });
+  return null;
 }
 
 const SOURCE_WORDS = { folder: "folder", file: "file", sqlite: "database" } as const;

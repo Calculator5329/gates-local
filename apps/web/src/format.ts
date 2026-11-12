@@ -227,7 +227,7 @@ export function titleFrom(text: string): string {
 }
 
 /** Seconds rounded up to 5 under a minute ("about 25 s"), whole minutes from there. */
-function timeLeft(seconds: number): string {
+export function timeLeft(seconds: number): string {
   const whole = Math.max(1, Math.round(seconds));
   const s = whole < 10 ? whole : Math.ceil(whole / 5) * 5;
   return s < 60 ? `${s} s` : `${Math.ceil(seconds / 60)} min`;

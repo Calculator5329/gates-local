@@ -4,6 +4,7 @@
 // and after a reload. Settings › Tools › Make images starts off.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
+import { CONTROL_URL } from "./env.ts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { state } from "./threads-support.ts";
@@ -56,10 +57,10 @@ test("Image on: the button names the image model and size where the chat model w
   await button.click();
   const picker = page.locator("#imagePicker");
   await expect(picker).toBeVisible();
-  await expect(picker.locator(".pk-r")).toHaveCount(3);
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "sdxl-lightning", "sdxl-lightning-pixel"]);
+  await expect(picker.locator(".pk-r")).toHaveCount(7);
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "sdxl-lightning", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "sdxl-lightning-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
   await expect(picker.locator(".pk-rail"), "two families: the rail shows").toBeVisible();
-  await expect(picker.locator("input"), "three rows need no search box").toHaveCount(0);
+  await expect(picker.locator("input"), "the image picker has no search box").toHaveCount(0);
   await expect(picker.locator(".pk-r[data-tip], .pk-r [data-tip]"), "no row tooltips").toHaveCount(0);
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
   await shot(page, "image-after-picker.png", info);
@@ -97,9 +98,191 @@ test("the picker lists only presets whose files ComfyUI reports", async ({ page,
   await expect(page.locator("#modelBtn")).not.toContainText("Klein");
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
-  await expect(picker.locator(".pk-r")).toHaveCount(2);
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["sdxl-lightning", "sdxl-lightning-pixel"]);
-  await expect(picker.locator(".pk-rail"), "one family: no rail").toHaveCount(0);
+  // the rest are listed greyed out, each with its reason: a pick only for what ComfyUI has
+  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(2);
+  expect(await picker.locator(".pk-r:not(.off)").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["sdxl-lightning", "sdxl-lightning-pixel"]);
+  await expect(picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select')).toHaveAttribute("aria-disabled", "true");
+  // its Download button stays a button: the row itself is not marked disabled, only its pick
+  await expect(picker.locator('.pk-r.off[aria-disabled]')).toHaveCount(0);
+  await picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select').click({ force: true });
+  await expect(picker, "a greyed row picks nothing").toBeVisible();
+  await expect(page.locator("#modelBtn")).toContainText("Lightning768×512");
+  await expect(picker.locator(".pk-ctx-row:enabled"), "its sizes show, not pickable").toHaveCount(0);
+});
+
+/** Each group's name and its rows in order, ready rows first. */
+const groups = (page: Page) => page.locator("#imagePicker [role=group]").evaluateAll((list) => list.map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))]));
+
+test("the picker groups setups by theme, greys what ComfyUI lacks with the reason, and downloads one with progress and Stop", async ({ page, open }, info) => {
+  await comfy.close();
+  comfy = await fakeComfy(); // the SDXL files only: every FLUX setup needs files
+  comfy.withFolders();
+  comfy.slowDownloads(true);
+  await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
+  await open(); await waitReady(page);
+  await imageGenOn(page);
+  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.locator("#modelBtn").click();
+  const picker = page.locator("#imagePicker");
+  await expect(picker.locator(".pk-r").first()).toBeVisible();
+  await page.mouse.move(5, 5);
+  await shot(page, "image-picker-groups.png", info);
+  expect(await groups(page)).toEqual([
+    ["General", "sdxl-lightning", "flux2-klein-4b"],
+    ["Portraits and people", "flux2-klein-4b-portraits"],
+    ["Pixel art", "sdxl-lightning-pixel", "flux2-klein-4b-pixel"],
+    ["Game sprites", "flux2-klein-4b-sprites"],
+    ["Backgrounds", "flux2-klein-4b-backgrounds"],
+  ]);
+  await expect(picker.locator(".pk-title"), "no heading saying the button's name again").toHaveCount(0);
+  await expect(picker).not.toContainText("Image model");
+  const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
+  await expect(klein).toHaveClass(/\boff\b/);
+  await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+  await expect(picker.locator('.pk-r[data-preset="sdxl-lightning"]')).not.toHaveClass(/\boff\b/);
+
+  // refused (ComfyUI is not answering): the row says why, and no bar is left from the press
+  comfy.down(true);
+  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await expect(klein.locator(".pk-why")).toHaveText("Start ComfyUI on this computer first: downloads go into its model folders.");
+  await expect(klein.getByRole("progressbar")).toHaveCount(0);
+  comfy.down(false);
+
+  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await expect(klein.getByRole("progressbar")).toBeVisible();
+  await expect(klein.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
+  // the setups that load the same files show that download, said once: no "Needs 3 files" and no button to press
+  const portraits = picker.locator('.pk-r[data-preset="flux2-klein-4b-portraits"]');
+  await expect(portraits.getByRole("progressbar")).toBeVisible();
+  await expect(portraits.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
+  await expect(portraits.getByRole("button", { name: /^(Download|Stop)/ })).toHaveCount(0);
+  await expect.poll(async () => Number(await klein.getByRole("progressbar").getAttribute("aria-valuenow")), "the bar moves").toBeGreaterThan(0);
+  await page.mouse.move(5, 5);
+  await shot(page, "image-picker-downloading.png", info);
+
+  await klein.getByRole("button", { name: "Stop downloading FLUX.2 Klein 4B" }).click();
+  await expect(klein.locator(".pk-why")).toHaveText("Download stopped; the part already downloaded is kept.");
+  await expect(klein.getByRole("progressbar")).toHaveCount(0);
+  await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B portraits" })).toBeEnabled();
+
+  // again, unheld: it carries on from the part and the row turns ready, with the setups sharing its files
+  comfy.slowDownloads(false);
+  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
+  await expect(picker.locator(".pk-r.off"), "every FLUX setup loads the same three files").toHaveCount(0);
+  await klein.locator(".pk-select").click();
+  await expect(picker).toBeHidden();
+  await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
+});
+
+/** The SDXL files only, model folders of its own: every FLUX setup offers its download. */
+async function downloadable(page: Page, open: () => Promise<void>) {
+  await comfy.close();
+  comfy = await fakeComfy();
+  comfy.withFolders();
+  await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
+  await open(); await waitReady(page);
+  await imageGenOn(page);
+  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.locator("#modelBtn").click();
+  const picker = page.locator("#imagePicker");
+  return { picker, klein: picker.locator('.pk-r[data-preset="flux2-klein-4b"]') };
+}
+
+test("a setup's download is one bar for all its files: on the last of three it is past two thirds", async ({ page, open }, info) => {
+  const { klein } = await downloadable(page, open);
+  comfy.slowDownloads(true, "flux2-vae.safetensors"); // the first two arrive at once, the third trickles
+  await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+  await expect(klein.locator(".pk-why")).toContainText(/File 3\/3 · \d+%/);
+  await page.mouse.move(5, 5);
+  await shot(page, "image-picker-downloading-setup.png", info);
+  const pct = Number(await klein.getByRole("progressbar").getAttribute("aria-valuenow"));
+  expect(pct, "two of three equal files are in").toBeGreaterThanOrEqual(66);
+  await expect(klein.locator(".pk-why")).toContainText(`File 3/3 · ${pct}%`);
+  comfy.slowDownloads(false);
+  await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
+});
+
+test.describe("across a server restart", () => {
+  // the browser logs each refused WebSocket attempt while the server is down
+  test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
+
+  test("a download the restart ended leaves no frozen bar: the row offers Download again", async ({ page, open }) => {
+    test.setTimeout(60_000);
+    const { picker, klein } = await downloadable(page, open);
+    comfy.slowDownloads(true);
+    await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
+    await expect(klein.getByRole("progressbar")).toBeVisible();
+    // a crash, so no push ends the download: a SIGTERM's close() would send that push and hide the bug
+    await stack.restart(500, true);
+    await waitReady(page);
+    if (!await picker.isVisible()) await page.locator("#modelBtn").click();
+    await expect(klein.getByRole("progressbar")).toHaveCount(0);
+    await expect(klein.getByRole("button", { name: "Stop downloading FLUX.2 Klein 4B" })).toHaveCount(0);
+    await expect(klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" })).toBeEnabled();
+    await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B portraits" })).toBeEnabled();
+  });
+});
+
+test.describe("on the phone", () => {
+  test.use({ viewport: { width: 412, height: 915 } });
+
+  test("the picker offers no Download, Stop or Start the phone cannot do, and a pick saves the thread's choice alone with no error", async ({ page }, info) => {
+    await comfy.close();
+    comfy = await fakeComfy(); // the SDXL files only: every FLUX setup needs files
+    comfy.withFolders();
+    const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true, seed: "design", comfyUrl: comfy.url, imageTool: true }) });
+    expect(r.ok, await r.clone().text()).toBe(true);
+    const { phonePort } = (await r.json()) as { phonePort: number };
+    await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
+    await page.goto(`http://127.0.0.1:${phonePort}/`);
+    await expect(page.locator(".composer:not(.blocked)")).toBeAttached({ timeout: 10_000 });
+    // at phone width Image is in the composer's options, not a pill
+    await page.locator("#optBtn").click();
+    await page.getByRole("menuitemcheckbox", { name: "Image" }).click();
+    await page.keyboard.press("Escape");
+    await page.locator("#modelBtn").click();
+    const picker = page.locator("#imagePicker");
+    const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
+    await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+    await page.mouse.move(5, 5);
+    await shot(page, "image-picker-phone.png", info);
+    await expect(picker.getByRole("button", { name: /^(Download|Stop downloading)/ })).toHaveCount(0);
+    // a ready row, then its size: the thread keeps it; Settings is the computer's, so it is not written
+    await picker.locator('.pk-r[data-preset="sdxl-lightning-pixel"] .pk-select').click();
+    await picker.locator(".pk-ctx-row").first().click();
+    await expect(picker).toBeHidden();
+    await expect(page.locator("#modelBtn")).toContainText("Pixel art");
+  });
+});
+
+test("ComfyUI not answering and never listed: one full-width row says so with Check again, and there is no Size pane", async ({ page, open }, info) => {
+  await comfy.close();
+  comfy = await fakeComfy(); // the SDXL files only
+  comfy.down(true);
+  await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
+  await open(); await waitReady(page);
+  await imageGenOn(page);
+  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.locator("#modelBtn").click();
+  const picker = page.locator("#imagePicker");
+  await expect(picker).toContainText("Image models show here once ComfyUI has run.");
+  await page.mouse.move(5, 5);
+  await shot(page, "image-picker-empty.png", info);
+  await expect(picker.locator(".pk-context"), "no Size pane before a model row").toHaveCount(0);
+  await expect(picker.locator(".pk-title")).toHaveCount(0);
+  const blank = picker.locator(".pk-blank");
+  const [row, all] = await Promise.all([blank.boundingBox(), picker.boundingBox()]);
+  expect(row && all && row.width, "the row takes the picker's width").toBeGreaterThan((all?.width ?? 0) - 40);
+  // explicit, never on open: nothing was started, and the button says what it does
+  const check = blank.getByRole("button", { name: "Check again" });
+  await check.click();
+  await expect(blank).toContainText("ComfyUI did not answer.");
+  comfy.down(false);
+  await check.click();
+  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(2);
+  await expect(picker.locator(".pk-blank")).toHaveCount(0);
+  await expect(picker.locator(".pk-context")).toBeVisible();
 });
 
 test("a first send whose default settles to other files: the card keeps the box it was first drawn with, and the button names what ran", async ({ page, open }) => {

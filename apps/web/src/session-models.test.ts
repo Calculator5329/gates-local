@@ -48,7 +48,7 @@ class FakeSocket extends EventTarget {
 }
 
 /** Boots session.ts against a client whose answers the test may hold; returns the session, the store and a push. */
-async function boot(answers: Record<string, () => Promise<unknown>> = {}, connections: Promise<void>[] = []) {
+async function boot(answers: Record<string, (params?: unknown) => Promise<unknown>> = {}, connections: Promise<void>[] = []) {
   const subs = new Map<string, (p: unknown) => void>();
   const calls: string[] = [];
   fake.client = {
@@ -60,9 +60,9 @@ async function boot(answers: Record<string, () => Promise<unknown>> = {}, connec
       subs.set(channel, handler);
       return noop;
     },
-    call: (method: string) => {
+    call: (method: string, params?: unknown) => {
       calls.push(method);
-      return answers[method]?.() ?? Promise.resolve(defaults[method]);
+      return answers[method]?.(params) ?? Promise.resolve(defaults[method]);
     },
   };
   vi.stubGlobal("window", {});
@@ -513,5 +513,71 @@ describe("Thinking at the start", () => {
     await vi.waitFor(() => expect(calls.filter((m) => m === "gpu.status")).toHaveLength(2), { timeout: 3000 });
     await settled();
     expect(store.getState().think).toBe(true);
+  });
+});
+
+describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)", () => {
+  const pixelPreset = methodSamples["image.presets"].result.presets[0]!;
+  const sdxlPreset = { id: "sdxl-lightning", name: "SDXL Lightning", family: "sdxl", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 9_663_676_416 }] };
+  const presets = { presets: [pixelPreset, sdxlPreset], readAt: 1, current: { preset: pixelPreset, width: 768, height: 512 } };
+  const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+  const imageAnswers = {
+    "settings.get": async () => ({ ...(defaults["settings.get"] as object), imageGen: true }),
+    "image.presets": async () => presets,
+    "image.status": async () => methodSamples["image.status"].result,
+  };
+  const onPhone = async (answers: Record<string, (params?: unknown) => Promise<unknown>> = {}) => {
+    const booted = await boot({ ...imageAnswers, ...answers });
+    await booted.hydrated();
+    await vi.waitFor(() => expect(booted.store.getState().imagePresets).toEqual(presets));
+    booted.store.setState({ unavailable: phoneUnavailable() });
+    return booted;
+  };
+
+  it("a pick in a new chat is that chat's alone: no Settings write, and its first send carries it", async () => {
+    const { session, store, calls } = await onPhone();
+    expect(await session.pickImage(sdxl)).toBeNull();
+    expect(store.getState().imagePick).toEqual(sdxl);
+    expect(calls).not.toContain("settings.update");
+    expect(calls).not.toContain("threads.setImageChoice");
+  });
+
+  it("a pick in an open chat is saved in that thread only", async () => {
+    const { session, store, calls } = await onPhone({ "threads.setImageChoice": async () => ({ ...methodSamples["threads.setImageChoice"].result, id: "A" }) });
+    session.openThread("A");
+    expect(await session.pickImage(sdxl)).toBeNull();
+    expect(calls).toContain("threads.setImageChoice");
+    expect(calls).not.toContain("settings.update");
+    expect(store.getState().imagePick).toBeUndefined();
+  });
+
+  it("a new chat's first Image send carries the pick, then the next new chat starts from Settings again", async () => {
+    const sent = defer<unknown>();
+    const draws: unknown[] = [];
+    const { session, store } = await onPhone({
+      "threads.create": async () => methodSamples["threads.create"].result,
+      "chat.send": (params) => { draws.push((params as { draw?: unknown }).draw); return sent.promise; },
+    });
+    store.setState({ image: true });
+    await session.pickImage(sdxl);
+    void session.send("a lighthouse").catch(noop);
+    await vi.waitFor(() => expect(draws).toEqual([sdxl]));
+    sent.resolve(methodSamples["chat.send"].result);
+    await vi.waitFor(() => expect(store.getState().imagePick).toBeUndefined());
+    session.newThread();
+    expect(store.getState().imagePick).toBeUndefined();
+  });
+
+  it("a refused first send leaves the pick for the next try", async () => {
+    const { session, store, calls } = await onPhone({
+      "threads.create": async () => methodSamples["threads.create"].result,
+      "chat.send": async () => { throw new Error("refused"); },
+    });
+    store.setState({ image: true });
+    await session.pickImage(sdxl);
+    void session.send("a lighthouse").catch(noop);
+    await vi.waitFor(() => expect(calls).toContain("chat.send"));
+    await settled();
+    expect(store.getState().imagePick).toEqual(sdxl);
   });
 });

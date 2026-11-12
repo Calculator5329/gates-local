@@ -19,6 +19,10 @@
 //                                test/fake-ollama/nvidia-smi.ts; on Windows a .ts/.js script
 //                                runs through this Node or Electron); default "nvidia-smi"
 //   GATES_LOCAL_MEMINFO          the meminfo file the fit check reads; default /proc/meminfo
+//   GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN tests: image model downloads fetch from this http origin on
+//                                this computer, never Hugging Face (image/download.ts fetchFrom),
+//                                and are checked against their pins only, not the app's records
+//                                of each file's sha256; the e2e stack always sets it
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
 //   GATES_LOCAL_INSTALLED_VERSION the packaged desktop app's version; set, Settings › Updates
@@ -72,6 +76,7 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
+import { fetchFrom } from "./image/download.ts";
 import { imageToolChoice } from "./image/presets.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
@@ -171,6 +176,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
 
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
+  const downloadOrigin = process.env["GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN"];
   // Windows runs no #! line: a script there (the tests' fake) goes through this runtime.
   const [smiFile, smiPre] =
     smiCommand !== undefined && process.platform === "win32" && /\.[cm]?[jt]s$/.test(smiCommand) ? [process.execPath, [smiCommand]] : [smiCommand, []];
@@ -231,6 +237,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ollamaUrl: () => runtime.baseUrl(),
     // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
     ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),
+    ...(downloadOrigin ? { download: { fetch: fetchFrom(downloadOrigin), records: false } } : {}),
   });
   const imports = createImportActivity(admission);
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);

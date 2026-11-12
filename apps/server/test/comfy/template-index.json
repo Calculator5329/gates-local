@@ -1,0 +1,33 @@
+[
+  {
+    "moduleName": "default",
+    "category": "Foundation",
+    "title": "Image",
+    "type": "image",
+    "templates": [
+      { "name": "image_flux2_klein_text_to_image", "title": "FLUX.2 [Klein] 4B: Text to Image", "mediaType": "image", "openSource": true, "io": { "outputs": [{ "nodeId": 78, "nodeType": "SaveImage" }] } },
+      { "name": "image_sdxl_simple", "title": "SDXL Simple", "mediaType": "image", "io": { "outputs": [{ "nodeId": 7, "nodeType": "SaveImage" }] } },
+      { "name": "image_edit_example", "title": "An edit", "mediaType": "image", "openSource": true, "io": { "inputs": [{ "nodeId": 1, "nodeType": "LoadImage" }] } },
+      { "name": "api_cloud_example", "title": "A paid cloud model", "mediaType": "image", "openSource": false },
+      { "name": "image_gone", "title": "Listed but not there", "mediaType": "image", "openSource": true }
+    ]
+  },
+  {
+    "moduleName": "default",
+    "category": "Foundation",
+    "title": "Video",
+    "type": "video",
+    "templates": [
+      { "name": "video_example", "title": "A video", "mediaType": "video", "openSource": true }
+    ]
+  },
+  {
+    "moduleName": "default",
+    "category": "Applied",
+    "title": "Character & Fashion",
+    "type": "image",
+    "templates": [
+      { "name": "image_flux2_klein_text_to_image", "title": "FLUX.2 [Klein] 4B: Text to Image", "mediaType": "image", "openSource": true }
+    ]
+  }
+]

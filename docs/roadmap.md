@@ -497,6 +497,45 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:2642d7c2-779f-5e7a-ba98-f487cee0c551 --> One chunk rule decides which screens preload the picker's files, held by `chunks.spec.ts` in a browser only; a new import from `Picker.tsx` in a Settings file puts the picker back into Settings' preload with no unit check.
       *Accept:* a build check fails when the Settings chunk's preload list names the picker chunk or its CSS.
 
+*Image setups (batch 3), review follow-ups:*
+
+- [ ] <!-- workspace:id=work:f0448ec5-60b7-5cde-abdf-a3074eca7330 --> `SaveImageAdvanced` and the other dynamic-combo widgets are refused (14 of ComfyUI's templates, among them plain Z-Image).
+      *Accept:* a dynamic combo is read from `/object_info`, and `image_z_image` converts and fills.
+- [ ] <!-- workspace:id=work:0be787cf-d31d-5d32-a131-8aa42b7098ef --> The converter's expected graphs are hand-written; none was compared with ComfyUI's own "Export (API)".
+      *Accept:* the Klein, SDXL and Z-Image fixtures each match a graph exported from a real ComfyUI.
+- [ ] <!-- workspace:id=work:16582237-693e-56c3-a76c-241912f0bb6f --> The default ignores fit: a 6 GiB card with Klein installed defaults to Klein, which every send refuses.
+      *Accept:* the default is the best setup that fits this machine's free memory.
+- [ ] <!-- workspace:id=work:db9ff7d6-f6c4-56dd-83f2-a7cdab53bcf1 --> Setup memory estimates are padded guesses (Klein 10 GiB, SDXL 9 GiB) while the overnight GPU matrix ran Klein under an 8 GiB cap and SDXL Lightning at 4 GiB with offload.
+      *Accept:* each estimate comes from the matrix, and cards with 6 to 10 GiB free get a setup.
+- [ ] <!-- workspace:id=work:aec90311-7093-5141-8b0f-fef677d0950d --> No setup for cards under 8 GiB: Klein needs the FP4 text encoder there, and the app has no SD 1.5 fallback.
+      *Accept:* a 4 GiB and a 6 GiB fake card each get a runnable default.
+- [ ] <!-- workspace:id=work:0090fa59-7645-50b8-82e0-8a5089cda0f2 --> MOSS-Image (Apache-2.0) is the only new model whose licence allows it as a default; it is not offered.
+      *Accept:* the owner picks in the GPU-matrix gallery, and the pick is a setup.
+- [ ] <!-- workspace:id=work:cf59726c-1d1e-5e17-83e6-a0dcb56d5316 --> A final file that already exists is downloaded again, and any ComfyUI folder kind is accepted as a download directory (IR3-05).
+      *Accept:* an existing file with the right size and sha is skipped, and only model folder kinds are allowed.
+- [ ] <!-- workspace:id=work:ab35b87d-deb9-56c0-ad6c-d89d55054cfe --> The size control changes every node whose width and height equal the latent's, including a deliberate fixed upscale (IR3-10).
+      *Accept:* only nodes fed by the latent's size, or the latent itself, change.
+- [ ] <!-- workspace:id=work:80df94ad-aee3-59b4-ade2-0f7c29dff427 --> A Klein all-in-one file in `checkpoints/` says "no Klein setup" instead of where it belongs; few-step models are found by file name only.
+      *Accept:* the reason names `diffusion_models`, and a merged Lightning file with a plain name gets few-step settings from its header or is marked unknown.
+- [ ] <!-- workspace:id=work:d2bf7cae-4d37-5487-b65a-a269e930b9c7 --> Free space is checked before a range mismatch resets the download to zero, so a full disk fails mid-file with a raw error (IR3-45).
+      *Accept:* the check runs after the reset, and a full disk gives a sentence.
+- [ ] <!-- workspace:id=work:6cd5f667-747e-5fdb-8717-83c502a738d6 --> A first download with no recorded sha is pinned as whatever arrived; Hugging Face's `x-linked-etag` is the sha256 for large files (IR3-46).
+      *Accept:* a first download is checked against `x-linked-etag` when it is a sha256.
+- [ ] <!-- workspace:id=work:e2473e59-0f5a-5e5c-818f-ea84f76cecb8 --> Listing setups from files on disk while ComfyUI is stopped and was never read is not done; only the last read list is kept.
+      *Accept:* with ComfyUI stopped and never read, the picker lists setups whose files are in the model folders.
+- [ ] <!-- workspace:id=work:1018bb42-a7af-5ac7-8ff3-7fe0ba1c8eb1 --> A download that ends with a checksum warning shows nothing on its row; the "Start ComfyUI" press has no browser test with a managed fake.
+      *Accept:* the warning shows on the row, and a journey starts a fake managed service from the empty picker.
+- [ ] <!-- workspace:id=work:b3b368c9-d82f-5b76-a183-203f9f28258e --> A thread whose first default picture fails or is stopped has no image model of its own, so it follows the latest pick from any thread until its first picture finishes (IR3-61; pinning at send stuck such threads on files that were not installed, IR3-80). Picking the default exactly while it renders is replaced by what it settles to (IR3-82).
+      *Accept:* a pending default is told apart from a pick, a failed first default keeps the thread on its own choice, and a later send still settles.
+- [ ] <!-- workspace:id=work:32b63544-ea5c-5943-9ddd-ae18e06d4f6c --> A default cancelled or failed before it settled keeps unsettled Klein on its card; once another thread picks, its Retry runs Klein as sent and fails for missing files the person never chose (IR3-90). One test passes through the last-picture fallback instead of the fill (IR3-92).
+      *Accept:* Retry of such a card settles again, and the fill has a test of its own.
+- [ ] <!-- workspace:id=work:715ac08c-0134-58a7-94c5-2182460dbb3c --> `listThreads` runs a correlated subquery for every thread with no image choice of its own: 27 ms against 0.3 ms at 300 threads of 400 messages (IR3-64).
+      *Accept:* a one-off fill of old threads' choice from their last picture, and the subquery gone.
+- [ ] <!-- workspace:id=work:0e939612-9434-5885-9f0a-d571f4eb64c3 --> The picker's group order is a copy of the server's list; a renamed group sorts last without a word. A LoRA is its own row, not a switch on its base.
+      *Accept:* one shared order constant; one row per base with its LoRAs to switch on.
+- [ ] <!-- workspace:id=work:fb6e20f5-5b13-5feb-b698-4a02201a9782 --> Three picker behaviours are guarded by browser journeys only (stale download after a reconnect, the placeholder cleared after a refusal, a phone pick that skips Settings has a unit test now); the `stopped:false` path of Stop has none.
+      *Accept:* each has a unit test seen red against its mutant.
+
 *Image batch 2, review follow-ups:*
 
 - [ ] <!-- workspace:id=work:d745eb0d-63dd-564b-bb41-1cdeb24b3e6e --> The image picker and the server still differ in four cases, none new: ComfyUI on a port other than 8188 (the picker credits only a python process on 8188, the server credits ComfyUI's own memory at any address); a remote ComfyUI (the server skips the fit, the picker marks against the local GPU); how much an unload frees (the picker estimates from a `size_vram` split, the server measures after); and Ollama not ready (the picker can say it stops the chat model while the server can unload nothing).
@@ -648,7 +687,8 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
 - [ ] <!-- workspace:id=work:bbb27b74-f736-50f7-9038-ef22971aedcd --> After an image wait that times out or is cancelled the chat model stays unloaded and nothing says the next reply loads it again. With no setup listed Send is still allowed. A saved setup id that no longer exists throws on the tool path. Hidden retry rows still reach the chat model's context as "Image job" rows.
 - [x] <!-- workspace:id=work:3bb9e774-1ee2-5909-94f1-1248928a4a8b --> Image picker look: the button cuts the setup name ("FLU… 1024×1024") with room to spare and two SDXL rows can cut to the same text; the same GB number is on every model row and again on every size row, and "Fits" shows three times; the composer button changes width on a thread switch with Image on.
       *Done 2026-11-11:* "An image takes the memory a loaded chat model holds, and the picker says so first"; short names on the button, the GB once per size row with a bar as the mark, a steady width on a thread switch.
-- [ ] <!-- workspace:id=work:6d0fa9f5-cc7e-5965-b5cf-36e40cb9ed16 --> Image setups as data files, one or two per hardware level, and the app fetches the missing model files into a known folder with progress and resume (today nothing is downloaded and the three setups are constants in `image/presets.ts`).
+- [x] <!-- workspace:id=work:6d0fa9f5-cc7e-5965-b5cf-36e40cb9ed16 --> Image setups as data files, one or two per hardware level, and the app fetches the missing model files into a known folder with progress and resume (today nothing is downloaded and the three setups are constants in `image/presets.ts`).
+      *Done 2026-11-12:* "Image setups are ComfyUI workflows, with your own models listed and downloads in the picker"; the owner's direction changed the data files to ComfyUI workflows.
 - [ ] <!-- workspace:id=work:34d1f23b-6d57-5ca2-ace4-e54040c89f17 --> `real-check.ts` keeps its database and image under a fixed folder name in the shared temp folder; give each run its own folder.
 - [ ] <!-- workspace:id=work:d69f75c9-1b4a-5781-a36c-dd4bb9a21052 --> Turn loop in `packages/harness` (D3): pi's loop shape, a length stop
       fails every pending call, format-error budget, head/tail elision.

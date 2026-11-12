@@ -458,6 +458,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
       });
       confirmCopy(r.userMessage);
+      // the phone's pick for a new chat went with its first send, which the thread keeps; the next new chat starts from Settings
+      if (draw !== undefined && opts.out?.threadId === null) {
+        applyServerEvent((st) => st.imagePick?.preset === draw.preset && st.imagePick.width === draw.width && st.imagePick.height === draw.height ? { imagePick: undefined } : {});
+      }
       if (r.replayed) {
         noteMessage(threadId, r.userMessage);
         applyServerEvent(st => ({ messages: withMessage(st, threadId, r.userMessage), notice: "Your message was already sent. It was not sent again.", ...(st.turns[threadId]?.gen === gen ? { turns: withTurn(st.turns, threadId, null) } : {}) }));

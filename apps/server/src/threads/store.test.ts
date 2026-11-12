@@ -237,6 +237,28 @@ describe("threads", () => {
     expect(s.getThread(t.id).thread).toEqual(renamed);
   });
 
+  it("keeps each thread's image choice, without moving it up the list", () => {
+    const path = join(dir, "threads.db");
+    const s = store(path);
+    const a = s.createThread({ title: "a" });
+    const b = s.createThread({ title: "b" });
+    expect(s.imageChoiceOf(a.id)).toBeUndefined();
+    const x = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+    const set = s.setImageChoice(a.id, x);
+    expect(set).toEqual({ ...a, imageChoice: x });
+    s.setImageChoice(b.id, { preset: "flux2-klein-4b", width: 768, height: 1024 });
+    expect(s.imageChoiceOf(a.id)).toEqual(x);
+    expect(s.getThread(a.id).thread).toEqual(set);
+    expect(s.listThreads().map((t) => [t.id, t.imageChoice?.preset])).toEqual([[b.id, "flux2-klein-4b"], [a.id, "sdxl-lightning"]]);
+    expect(() => s.setImageChoice("00000000-0000-4000-8000-000000000000", x)).toThrow(ThreadNotFoundError);
+    // a file from before the column: the next open adds it
+    s.close();
+    const db = raw(path);
+    db.exec("ALTER TABLE threads DROP COLUMN image_choice_json");
+    db.close();
+    expect(store(path).getThread(a.id).thread).toEqual(a);
+  });
+
   it("deletes a thread and cascades its messages, leaving other threads alone", () => {
     const path = join(dir, "threads.db");
     const s = store(path);

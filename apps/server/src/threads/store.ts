@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
-import { ImageEvent, type ImageChoice } from "@gates-local/contracts";
+import { ImageChoice, ImageEvent } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 
 import {
@@ -39,6 +39,15 @@ export interface ThreadStore {
   createThread(input?: { title?: string }): Thread;
   getThread(threadId: string): ThreadWithMessages;
   renameThread(threadId: string, title: string): Thread;
+  /** Keep the image model and size this thread sends with; the list order stays (it is not an edit). */
+  setImageChoice(threadId: string, choice: ImageChoice): Thread;
+  /**
+   * Keep `choice` only while the thread has no saved choice of its own (the last-image fallback does not
+   * count), in one write. False when it had one (a pick or a send since) or there is no such thread.
+   */
+  fillImageChoice(threadId: string, choice: ImageChoice): boolean;
+  /** The thread's own image choice, or undefined while it has none. Throws for an unknown thread. */
+  imageChoiceOf(threadId: string): ImageChoice | undefined;
   deleteThread(threadId: string): void;
   /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
@@ -108,11 +117,18 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     throw err;
   }
 
+  // A thread's image choice: its own, else (a thread from before threads kept one) what its last
+  // finished image ran. A failed card is passed over: its default may never have been settled.
+  const choiceColumn = `COALESCE(image_choice_json, (SELECT json_extract(m.image_job_json, '$.choice') FROM messages m
+    WHERE m.thread_id = threads.id AND json_extract(m.image_job_json, '$.state') = 'done'
+    ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1)) AS image_choice_json`;
   const stmt = {
-    listThreads: db.prepare("SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC, id"),
-    getThread: db.prepare("SELECT id, title, created_at, updated_at FROM threads WHERE id = ?"),
+    listThreads: db.prepare(`SELECT id, title, created_at, updated_at, ${choiceColumn} FROM threads ORDER BY updated_at DESC, id`),
+    getThread: db.prepare(`SELECT id, title, created_at, updated_at, ${choiceColumn} FROM threads WHERE id = ?`),
     insertThread: db.prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"),
     renameThread: db.prepare("UPDATE threads SET title = ?, updated_at = MAX(updated_at, ?) WHERE id = ?"),
+    setImageChoice: db.prepare("UPDATE threads SET image_choice_json = ? WHERE id = ?"),
+    fillImageChoice: db.prepare("UPDATE threads SET image_choice_json = ? WHERE id = ? AND image_choice_json IS NULL"),
     deleteThread: db.prepare("DELETE FROM threads WHERE id = ?"),
     touchThread: db.prepare("UPDATE threads SET updated_at = MAX(updated_at, ?) WHERE id = ?"),
     messageExists: db.prepare("SELECT 1 AS hit FROM messages WHERE id = ?"),
@@ -240,6 +256,29 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
         return loadThread(threadId);
       });
+    },
+
+    setImageChoice(threadId, choice) {
+      guard();
+      checkId("threadId", threadId);
+      const clean = S.decodeUnknownSync(ImageChoice)(choice);
+      return transaction(() => {
+        const res = stmt.setImageChoice.run(JSON.stringify(clean), threadId);
+        if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
+        return loadThread(threadId);
+      });
+    },
+
+    fillImageChoice(threadId, choice) {
+      guard();
+      checkId("threadId", threadId);
+      return Number(stmt.fillImageChoice.run(JSON.stringify(S.decodeUnknownSync(ImageChoice)(choice)), threadId).changes) > 0;
+    },
+
+    imageChoiceOf(threadId) {
+      guard();
+      checkId("threadId", threadId);
+      return loadThread(threadId).imageChoice;
     },
 
     deleteThread(threadId) {
@@ -494,7 +533,13 @@ function optStr(row: Row, key: string): string | undefined {
 }
 
 function threadFromRow(row: Row): Thread {
-  return { id: str(row, "id"), title: str(row, "title"), createdAt: num(row, "created_at"), updatedAt: num(row, "updated_at") };
+  const thread: Thread = { id: str(row, "id"), title: str(row, "title"), createdAt: num(row, "created_at"), updatedAt: num(row, "updated_at") };
+  const choice = optStr(row, "image_choice_json");
+  if (choice !== undefined) {
+    // A choice this build cannot read is dropped: the thread then follows the app's last pick.
+    try { thread.imageChoice = S.decodeUnknownSync(ImageChoice)(JSON.parse(choice)); } catch { /* left out */ }
+  }
+  return thread;
 }
 
 function compactStats(s: MessageStats): MessageStats | undefined {

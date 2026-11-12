@@ -8,6 +8,7 @@ import type { ImageEvent } from "@gates-local/contracts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { createImageModule } from "./module.ts";
+import { comfyInfo, SDXL_FILES } from "../../test/comfy/info.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -23,11 +24,7 @@ it("renders over fake HTTP and real WebSocket frames, ignoring unrelated object_
     calls.push(url.pathname);
     res.setHeader("Content-Type", "application/json");
     if (url.pathname === "/system_stats") return res.end(JSON.stringify({ system: {}, devices: [] }));
-    if (url.pathname === "/object_info") return res.end(JSON.stringify({
-      UnrelatedOptionalNode: { input: { optional: {} } },
-      CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sdxl_lightning_4step.safetensors"]] } } },
-      LoraLoader: { input: { required: { lora_name: [["RW_pixelart_XL_v1.safetensors"]] } } },
-    }));
+    if (url.pathname === "/object_info") return res.end(JSON.stringify({ UnrelatedOptionalNode: { input: { optional: {} } }, ...comfyInfo(SDXL_FILES) }));
     if (url.pathname === "/queue") return res.end(JSON.stringify({ queue_running: [], queue_pending: [] }));
     if (url.pathname === "/api/generate") {
       let text = ""; for await (const chunk of req) text += String(chunk);

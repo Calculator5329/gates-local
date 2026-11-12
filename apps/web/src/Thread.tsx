@@ -11,6 +11,7 @@ import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { imageTurnLinks } from "./image-links.ts";
+import { sizeLabel } from "./image-choice.ts";
 import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -515,6 +516,12 @@ function jobWords(job: ImageEvent): string {
   return pct > 0 ? `Making image · ${pct}%` : "Making image";
 }
 
+/** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
+function presetName(s: State, id: string): string {
+  const listed = s.imagePresets === undefined || s.imagePresets === NA ? undefined : s.imagePresets;
+  return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id)?.name ?? id;
+}
+
 function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -527,6 +534,9 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
   // settles to another size keeps the shape it was first drawn with (`sent`) the same way.
   const choice = msg.imageJob!.sent ?? msg.imageJob!.choice ?? job.choice;
   const size = choice ? { aspectRatio: `${choice.width} / ${choice.height}`, width: `${choice.width}px` } : undefined;
+  // what the job runs (or ran): the end of its retry chain, after any settling
+  const ran = job.choice ?? msg.imageJob!.choice;
+  const model = useStore((s) => (ran === undefined ? undefined : presetName(s, ran.preset)));
   const action = async () => {
     setBusy(true);
     if (pending) setError(await cancelImage(job.jobId));
@@ -538,6 +548,7 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
     setBusy(false);
   };
   return <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
+    {ran === undefined ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status">
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
       <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>

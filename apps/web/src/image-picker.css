@@ -1,17 +1,41 @@
 /* ImagePicker-only rules over picker.css: a few presets, so the popover is as tall as its rows. */
 .image-picker{height:auto}
-.image-picker .pk-layout{grid-template-columns:44px 280px minmax(0,1fr)}
-.image-picker .pk-layout.no-rail{grid-template-columns:316px minmax(0,1fr)}
+.image-picker .pk-layout{grid-template-columns:44px 336px minmax(0,1fr)}
+.image-picker .pk-layout.no-rail{grid-template-columns:380px minmax(0,1fr)}
 .image-picker .pk-list-scroll{min-height:136px}
-.image-picker .pk-search{justify-content:space-between}
-.image-picker .pk-title,.image-picker .pk-context-head>span{font-size:14px;color:var(--muted-foreground)}
+/* the button that opened the picker names it: no heading above the list, only a phone's Close */
+.image-picker .pk-search{display:none}
+.image-picker .pk-context-head>span{font-size:14px;color:var(--muted-foreground)}
 .image-picker .pk-ctx-row{grid-template-columns:72px minmax(0,1fr) 12px;font-variant-numeric:tabular-nums}
 .image-picker .maker-mark{font-size:9px;font-weight:600;letter-spacing:0}
 /* the size row's number takes its mark's colour: amber stops the chat model first, red is too big */
 .image-picker .pk-cost.spill .pk-cost-caption{color:var(--amber-fg)}
 .image-picker .pk-cost.no .pk-cost-caption{color:var(--red-fg)}
+.image-picker .pk-ctx-row:disabled .pk-cost{opacity:.5}
+/* groups: a theme's name over its rows */
+.image-picker .pk-group{height:28px;display:flex;align-items:flex-end;padding:0 8px 6px;font-size:12px;color:var(--muted-foreground)}
+.image-picker [role=group]+[role=group]{margin-top:4px}
+/* a row ComfyUI cannot run yet: greyed, its reason or its download under the name, the action at the right */
+.image-picker .pk-r.off{height:auto;min-height:52px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.image-picker .pk-r.off .pk-select{grid-column:1;grid-row:1;height:30px;cursor:default}
+.image-picker .pk-r.off .pk-nm{color:var(--muted-foreground)}
+.image-picker .pk-r.off .pk-select>*:first-child{opacity:.55}
+.image-picker .pk-why{grid-column:1;grid-row:2;min-width:0;display:flex;flex-direction:column;gap:4px;padding:0 8px 8px 32px;font-size:12px;line-height:16px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.image-picker .pk-why-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.image-picker .pk-why .prog{display:block;height:4px;margin:2px 0 0}
+.image-picker .pk-act{grid-column:2;grid-row:1/3;width:28px;height:28px;margin-right:4px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-picker);color:var(--muted-foreground)}
+.image-picker .pk-act:hover:enabled{background:var(--hover);color:var(--foreground)}
+.image-picker .pk-act:disabled{color:var(--faint);cursor:default}
+/* nothing to list: one row across the whole picker, what it is waiting for and the one thing to do */
+.image-picker .pk-blank{display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px}
+.image-picker .pk-blank p{flex:1;min-width:0;margin:0;display:flex;flex-direction:column;gap:4px;font-size:14px;line-height:20px;color:var(--muted-foreground)}
+.image-picker .pk-blank-error{font-size:12px;line-height:16px;color:var(--red-fg)}
+.image-picker .pk-blank .btn{flex:none}
+@media(min-width:641px){.image-picker{width:min(680px,calc(100vw - 16px))}}
 @media(max-width:640px){
 .image-picker .pk-layout,.image-picker .pk-layout.no-rail{grid-template-columns:minmax(0,1fr)}
 .image-picker .pk-layout:not(.no-rail){grid-template-columns:44px minmax(0,1fr)}
 .image-picker .pk-list-scroll{min-height:180px}
+.image-picker .pk-search{display:flex;justify-content:flex-end}
+.image-picker .pk-blank{flex-wrap:wrap}
 }

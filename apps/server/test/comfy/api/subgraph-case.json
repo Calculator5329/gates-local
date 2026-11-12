@@ -1,0 +1,15 @@
+{
+  "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "sdxl_case.safetensors" } },
+  "20:1": { "class_type": "CLIPTextEncode", "inputs": { "text": "a red fox", "clip": ["1", 1] } },
+  "20:2": { "class_type": "CLIPTextEncode", "inputs": { "text": "blurry", "clip": ["1", 1] } },
+  "20:3": { "class_type": "EmptyLatentImage", "inputs": { "width": 512, "height": 768, "batch_size": 1 } },
+  "20:4:9": { "class_type": "KSampler", "inputs": { "seed": 7, "steps": 20, "cfg": 6.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["1", 0], "positive": ["20:1", 0], "negative": ["20:2", 0], "latent_image": ["20:3", 0] } },
+  "21:1": { "class_type": "CLIPTextEncode", "inputs": { "text": "a blue bird", "clip": ["1", 1] } },
+  "21:2": { "class_type": "CLIPTextEncode", "inputs": { "text": "blurry", "clip": ["1", 1] } },
+  "21:3": { "class_type": "EmptyLatentImage", "inputs": { "width": 512, "height": 768, "batch_size": 1 } },
+  "21:4:9": { "class_type": "KSampler", "inputs": { "seed": 7, "steps": 12, "cfg": 6.5, "sampler_name": "euler", "scheduler": "normal", "denoise": 1, "model": ["1", 0], "positive": ["21:1", 0], "negative": ["21:2", 0], "latent_image": ["21:3", 0] } },
+  "30": { "class_type": "VAEDecode", "inputs": { "samples": ["20:4:9", 0], "vae": ["1", 2] } },
+  "31": { "class_type": "SaveImage", "inputs": { "filename_prefix": "case", "images": ["30", 0] } },
+  "32": { "class_type": "VAEDecode", "inputs": { "samples": ["21:4:9", 0], "vae": ["1", 2] } },
+  "33": { "class_type": "SaveImage", "inputs": { "filename_prefix": "case-b", "images": ["32", 0] } }
+}

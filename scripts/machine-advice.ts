@@ -5,10 +5,15 @@ import type { CatalogEntry } from "@gates-local/contracts";
 import { estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
 import { defaultNvidiaSmi, readGpu } from "../apps/server/src/fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
-import { CHECKPOINT, IMAGE_ESTIMATED_BYTES, LORA } from "../apps/server/src/image/workflow.ts";
+import { presetFiles, resolveChoice } from "../apps/server/src/image/presets.ts";
 import { markRecommended } from "../apps/server/src/runtime/catalog.ts";
 import { CURATED_MODELS } from "../apps/server/src/runtime/recommended.ts";
 import { defaultSettings } from "../apps/server/src/settings/store.ts";
+
+/** The SDXL pixel-art setup: its checkpoint and LoRA, read from its workflow, and its estimate at 768x512. */
+const PIXEL = resolveChoice({ preset: "sdxl-lightning-pixel", width: 768, height: 512 });
+const [CHECKPOINT, LORA] = presetFiles(PIXEL.preset) as [string, string];
+const IMAGE_ESTIMATED_BYTES = PIXEL.size.bytes;
 
 /** ByteDance/SDXL-Lightning's file size, from docs/research/setup-tiers-2026-11.md. */
 const CHECKPOINT_DOWNLOAD_BYTES = 6_938_000_000;

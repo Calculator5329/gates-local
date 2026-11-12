@@ -103,6 +103,42 @@ describe("a retry takes over its failed card's box", () => {
   });
 });
 
+// IPT-02: each card names the model and size its job ran, inside its box, whatever the composer shows now.
+describe("a card names its model", () => {
+  const GIB = 1024 ** 3;
+  const sdxl = { id: "sdxl-lightning", name: "SDXL Lightning", short: "Lightning", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9 * GIB }] };
+  const klein = { id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", family: "flux", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10 * GIB }] };
+  async function card(job: Partial<NonNullable<Message["imageJob"]>>, listed: boolean) {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const { Timeline } = await import("./Thread.tsx");
+    setState({ threadId: "thread", serverOrigin: "http://server", imagePresets: listed ? { presets: [sdxl], others: [klein], current: { preset: sdxl, width: 768, height: 512 } } : undefined, messages: { thread: [
+      { id: "user", threadId: "thread", role: "user", createdAt: 1, content: "a tree" },
+      { id: "job", threadId: "thread", role: "assistant", createdAt: 2, content: "a tree", imageJob: { jobId: "job", threadId: "thread", state: "queued", ...job } },
+    ] } });
+    const html = renderToStaticMarkup(createElement(Timeline, { threadId: "thread" }));
+    return { html, box: html.match(/<div class="image-job"[^>]*>/)?.[0] ?? "" };
+  }
+  afterEach(() => setState({ imagePresets: undefined }));
+
+  it.each([{ state: "queued" }, { state: "running", progress: 0.4 }, { state: "done", imagePath: "images/tree.png" }, { state: "error", message: "ComfyUI stopped." }] as const)("by its full name and size while %o, and the box keeps its size", async (state) => {
+    const { html, box } = await card({ ...state, choice: { preset: "sdxl-lightning", width: 768, height: 512 } }, true);
+    expect(html).toContain(">SDXL Lightning · 768×512</span>");
+    expect(box).toContain('style="aspect-ratio:768 / 512;width:768px"');
+  });
+
+  it("a job that settled to another setup names the one that ran; a setup ComfyUI no longer lists by its id", async () => {
+    const settled = await card({ state: "done", imagePath: "images/tree.png", choice: { preset: "sdxl-lightning", width: 768, height: 512 }, sent: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }, true);
+    expect(settled.html).toContain(">SDXL Lightning · 768×512</span>");
+    expect((await card({ choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }, true)).html).toContain(">FLUX.2 Klein 4B · 1024×1024</span>");
+    expect((await card({ choice: { preset: "template:gone", width: 512, height: 512 } }, false)).html).toContain(">template:gone · 512×512</span>");
+  });
+
+  it("a card from before choices were saved names nothing", async () => {
+    expect((await card({}, true)).html).not.toContain("image-job-model");
+  });
+});
+
 // A card sent with the square default whose job settled to SDXL 768×512 (Klein's files absent):
 // the box is the shape first drawn, waiting, running and done, the picture fitted inside.
 it.each([{ state: "queued" }, { state: "running", progress: 0.4 }, { state: "done", imagePath: "images/tree.png" }] as const)("a card whose job settles to another shape keeps its first box (%o)", async (state) => {

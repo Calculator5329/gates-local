@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-12: Image setups are ComfyUI workflows, with your own models listed and downloads in the picker
+
+- Image setups are now ComfyUI workflow files. Gates Local reads
+  ComfyUI's own picture templates and the person's saved workflows,
+  turns each into the graph ComfyUI's API runs with its own converter
+  (none of ComfyUI's GPL editor code), and finds the prompt, size and
+  seed from how the graph is wired. A workflow it cannot fill is listed
+  greyed out with the true reason, for example "has a setting this app
+  cannot read yet: format".
+- The picker groups setups by theme (General, Portraits and people,
+  Pixel art, Game sprites, Backgrounds) and adds "Your models": SDXL,
+  SD 1.5 and FLUX.2 Klein checkpoints and LoRAs already in ComfyUI's
+  folders, read from each file's header only. Linked files count.
+- A setup that needs files shows "Needs 3 files · 11.6 GB" and a
+  Download button. One bar covers the whole setup, with Stop; a stopped
+  or cut download resumes only against the same file online, and a file
+  whose sha256 is wrong never reaches the model folder. Files go to a
+  `gates-local/` folder inside ComfyUI's own model folders, from Hugging
+  Face only.
+- With nothing listed the picker is one row with Check again, or Start
+  ComfyUI when it is stopped. Opening the picker never starts it.
+- Each thread keeps its own image model, including a thread that only
+  ever sent the default and threads from before this change (they take
+  their last picture's model). A pick made while a picture renders is
+  kept. Each picture names the model and size it ran.
+- On the phone, Download and Start are not shown, since the phone may
+  not use them.
+- Not verified: a real ComfyUI, a real download or a GPU (every run used
+  a fake ComfyUI and a local file server); the converter's output was
+  compared with hand-written graphs, not with ComfyUI's own export.
+
 ## 2026-11-12: Installed Linux copies update themselves with Restart to update
 
 - On a Linux AppImage, once a newer version is downloaded and checked

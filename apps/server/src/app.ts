@@ -460,8 +460,10 @@ export function createApp(deps: AppDeps): App {
     try {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
       const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
-      // The image tool is offered only while Tools › Make images is on, with the app's chosen preset and size.
-      const imageChoice = wantsTools && deps.image !== undefined ? deps.imageTool?.() : undefined;
+      // The image tool is offered only while Tools › Make images is on, with this thread's preset and
+      // size, else the app's last pick.
+      const toolChoice = wantsTools && deps.image !== undefined ? deps.imageTool?.() : undefined;
+      const imageChoice = toolChoice === undefined ? undefined : store.imageChoiceOf(threadId) ?? toolChoice;
       const image = imageChoice !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
@@ -664,6 +666,11 @@ export function createApp(deps: AppDeps): App {
     },
     "threads.rename": ({ threadId, title }) => {
       const thread = store.renameThread(threadId, title);
+      push("threads.changed", { threadId });
+      return thread;
+    },
+    "threads.setImageChoice": ({ threadId, choice }) => {
+      const thread = store.setImageChoice(threadId, choice);
       push("threads.changed", { threadId });
       return thread;
     },

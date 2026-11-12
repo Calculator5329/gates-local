@@ -24,7 +24,10 @@ import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createImageModule } from "./module.ts";
-import { IMAGE_ESTIMATED_BYTES } from "./workflow.ts";
+import { DEFAULT_CHOICE, resolveChoice } from "./presets.ts";
+
+/** The first default's estimate; the job settles to the first default ComfyUI has, which may be the next one. */
+const IMAGE_ESTIMATED_BYTES = resolveChoice(DEFAULT_CHOICE).size.bytes;
 
 export interface SwapOptions {
   /**

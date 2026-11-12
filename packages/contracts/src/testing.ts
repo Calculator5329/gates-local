@@ -168,6 +168,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "threads.create": { params: { title: "First" }, result: thread },
   "threads.get": { params: { threadId: "t1" }, result: { thread, messages: [userMessage, assistantMessage] } },
   "threads.rename": { params: { threadId: "t1", title: "Renamed" }, result: { ...thread, title: "Renamed" } },
+  "threads.setImageChoice": { params: { threadId: "t1", choice: { preset: "sdxl-lightning", width: 1024, height: 1024 } }, result: { ...thread, imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 } } },
   "threads.delete": { params: { threadId: "t1" }, result: { threadId: "t1" } },
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
@@ -228,6 +229,18 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   },
   "image.generate": { params: { prompt: "a gate at dusk", threadId: "t1" }, result: { jobId: "j1" } },
   "image.cancel": { params: { jobId: "j1" }, result: { cancelled: true } },
+  "image.download": { params: { preset: "flux2-klein-4b" }, result: { files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"] } },
+  "image.stopDownload": { params: { preset: "flux2-klein-4b" }, result: { stopped: true } },
+  "image.start": {
+    params: {},
+    result: {
+      presets: [],
+      others: [{ id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", family: "flux", group: "General", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10_737_418_240 }], needs: { files: ["qwen_3_4b.safetensors"], bytes: 8_044_982_048, download: true } }],
+      readAt: 1_762_500_006_000,
+      current: { preset: { id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", family: "flux", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10_737_418_240 }] }, width: 1024, height: 1024 },
+      download: { preset: "flux2-klein-4b", file: 1, files: 1, name: "qwen_3_4b.safetensors", state: "downloading", completedBytes: 1_000_000, totalBytes: 8_044_982_048 },
+    },
+  },
   "setup.probe": { params: {}, result: probe },
   "setup.plan": {
     params: { images: false },
@@ -320,6 +333,10 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "image.event": [
     { jobId: "j1", threadId: "t1", state: "running", progress: 0.4 },
     { jobId: "j1", state: "done", imagePath: "images/j1.png" },
+  ],
+  "image.download": [
+    { preset: "flux2-klein-4b", file: 2, files: 2, name: "qwen_3_4b.safetensors", state: "downloading", completedBytes: 1_000_000, totalBytes: 8_044_982_048, bytesPerSecond: 50_000_000 },
+    { preset: "flux2-klein-4b", file: 2, files: 2, name: "qwen_3_4b.safetensors", state: "error", completedBytes: 0, message: "Not enough disk space for qwen_3_4b.safetensors: it needs 8.0 GB more, and 2.1 GB is free.", ended: true },
   ],
   "usage.changed": [{}],
 };

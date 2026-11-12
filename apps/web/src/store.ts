@@ -11,6 +11,7 @@ import type {
   FitTable,
   GpuStatus,
   ImageChoice,
+  ImageDownload,
   ImagePresets,
   ImageStatus,
   Message,
@@ -195,6 +196,10 @@ export interface State {
   readonly imageStatus: Maybe<ImageStatus>;
   /** The image models ComfyUI has every file for, and what an Image send runs now. */
   readonly imagePresets: Maybe<ImagePresets>;
+  /** A setup's download: the last image.download push, kept after it ends so its row can say how. */
+  readonly imageDownload: ImageDownload | undefined;
+  /** A new thread's pick where Settings cannot be written (the phone): its first send carries it, the computer's Settings keep theirs. */
+  readonly imagePick: ImageChoice | undefined;
   /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
   readonly update: Maybe<UpdateStatus>;
   /** A "Check for updates" click waiting for its answer. */
@@ -256,6 +261,8 @@ const initial: State = {
   sources: undefined,
   imageStatus: undefined,
   imagePresets: undefined,
+  imageDownload: undefined,
+  imagePick: undefined,
   update: undefined,
   updateChecking: false,
   updateInstalling: false,

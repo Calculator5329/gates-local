@@ -66,17 +66,21 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean } = {}) {
     return ndjson([{ message: { content: "done" }, done: true }]);
   }));
   const events: { type: string }[] = [];
-  const ready = { state: "ready" as const, owner: "external" as const, baseUrl: "http://fake" };
+  const changed: string[] = [];
+  const ready ={ state: "ready" as const, owner: "external" as const, baseUrl: "http://fake" };
   const app = createApp({
     store, sources, image, lease, toolsEnabled: () => true, imageTool: () => options.imageTool,
     runtime: { status: () => ready, baseUrl: () => "http://fake", onChange: () => () => {}, ensure: async () => ready, lookIfDown: async () => ready },
     catalog: { current: () => [], refresh: async () => ({ models: [], changed: false }), onChange: () => () => {}, stop: () => {} },
-    push: (channel, payload) => { if (channel === "chat.event") events.push((payload as { event: { type: string } }).event); },
+    push: (channel, payload) => {
+      if (channel === "chat.event") events.push((payload as { event: { type: string } }).event);
+      if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
+    },
     fit: { runNvidiaSmi: async (args) => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   const thread = store.createThread();
   const send = (extra: Record<string, unknown> = {}) => app.handlers["chat.send"]({ threadId: thread.id, content: "a lighthouse at dusk", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
-  return { app, store, lease, thread, send, generate, cancel, requests, chatBodies, events, release, close: async () => { await app.shutdown(); store.close(); } };
+  return { app, store, lease, thread, send, generate, cancel, requests, chatBodies, events, changed, release, close: async () => { await app.shutdown(); store.close(); } };
 }
 
 describe("Tools › Make images decides whether a chat model is offered the image tool", () => {
@@ -100,6 +104,30 @@ describe("Tools › Make images decides whether a chat model is offered the imag
       expect(t.chatBodies[0]!.tools!.map((tool) => tool.function.name)).toContain("image");
       expect(t.generate).toHaveBeenCalledOnce();
       expect(t.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: t.thread.id, choice: CHOSEN });
+    } finally { await t.close(); }
+  });
+
+  it("on, in a thread with its own image choice: the tool's job runs that one, not the app's last pick", async () => {
+    const t = await rig({ imageTool: CHOSEN });
+    try {
+      t.store.setImageChoice(t.thread.id, DRAWN);
+      await t.send();
+      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      expect(t.generate).toHaveBeenCalledWith({ prompt: "a cat", threadId: t.thread.id, choice: DRAWN });
+    } finally { await t.close(); }
+  });
+});
+
+describe("threads.setImageChoice", () => {
+  it("keeps the pick on that thread only, tells clients, and refuses an unknown thread", async () => {
+    const t = await rig();
+    try {
+      const other = t.store.createThread();
+      expect(await t.app.handlers["threads.setImageChoice"]!({ threadId: t.thread.id, choice: DRAWN }, { clientId: 1 })).toMatchObject({ id: t.thread.id, imageChoice: DRAWN });
+      expect(t.store.imageChoiceOf(t.thread.id)).toEqual(DRAWN);
+      expect(t.store.imageChoiceOf(other.id)).toBeUndefined();
+      expect(t.changed).toEqual([t.thread.id]);
+      expect(() => t.app.handlers["threads.setImageChoice"]!({ threadId: "00000000-0000-4000-8000-000000000000", choice: DRAWN }, { clientId: 1 })).toThrow(/thread/i);
     } finally { await t.close(); }
   });
 });

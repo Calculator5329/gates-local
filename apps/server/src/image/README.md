@@ -48,9 +48,18 @@ to release an idle app-owned ComfyUI immediately; the default image idle
 timeout otherwise stops it after five minutes. External ComfyUI is never
 stopped. A busy external ComfyUI refuses the image without interruption.
 
+Each thread keeps its own choice (`Thread.imageChoice`): the picker's pick in
+an open thread (`threads.setImageChoice`), else what its last image send ran.
+A job with no choice of its own, the image tool's included, runs the
+thread's, else Settings' `imageChoice` (the last pick anywhere, which a new
+thread starts from). A retry runs its card's choice and leaves the thread's
+alone. An unset default is not kept at send; once its picture is done,
+the thread keeps what it settled to, unless the thread took a choice of
+its own meanwhile.
+
 The presets are in `presets.ts`. With no choice saved, a job runs the
 first of `DEFAULT_ORDER` whose files ComfyUI's own `/object_info` list
-names: FLUX.2 Klein 4B at 1024x1024 (`flux-workflow.ts`, eight steps),
+names: FLUX.2 Klein 4B at 1024x1024 (eight steps),
 then SDXL Lightning without the LoRA at 768x512. The default settles before
 the first fit, so the fit and any unload judge the setup that will run; when
 the list has never been read, the job starts (or finds) ComfyUI and reads it
@@ -58,10 +67,9 @@ first. The job reads the list again before it renders, so a default whose
 files went missing is passed over without a word; a saved choice is never
 swapped. A job that settles to another choice keeps the one it was sent with
 as `sent`, and the card's box keeps that shape. The pixel-art row
-(SDXL with the LoRA) runs only when picked. The SDXL graph is copied from
-`ai/local-ai-lab/workflows/sdxl-lightning.json` at
-`c092f4d2bba88c4c76b37e34c31f9c2e28643c9c` (origin and adaptations in
-`workflow.ts`), four steps. Missing files produce an install-and-retry
+(SDXL with the LoRA) runs only when picked. Each setup is a
+ComfyUI workflow file in `setups/` (origins and adaptations in its README),
+filled in by graph shape (see "Workflows" below). Missing files produce an install-and-retry
 message naming the file. No models are downloaded. The **9 GiB image
 budget is an estimate**, conservatively above the lab's 7.86 GiB warm
 reading at 768x512. It is not a measured peak; the coordinator must measure
@@ -153,3 +161,79 @@ freeing step, or when the model is still resident afterwards, and prints
 how long the unload and the wait took. `--ollama-url` defaults to the
 external Ollama address. It has not been run. Real cancel, lazy chat reload and Windows
 remain coordinator integration checks.
+
+## Workflows
+
+Every setup, built in or not, is a ComfyUI workflow file. `convert.ts` turns
+the file ComfyUI saves (the UI format, subgraphs included) into the API graph
+ComfyUI runs; an API-format file passes through. It was written from the file
+format and ComfyUI's `/object_info` answer, not from ComfyUI's frontend code.
+Every node class must be one `/object_info` lists, or the setup is refused
+naming it.
+
+`controls.ts` then finds what Image mode fills in, by the graph's shape: the
+one Save Image or Preview Image node, the one text that reaches a sampler's
+positive input, the one empty-latent node's width and height (and any node
+that repeats them, like Flux2Scheduler), and the one seed. A workflow with
+none or several of one, a Load Image node, or a value worked out by another
+node is refused with that reason, and the picker lists it greyed out. The
+batch size is always one.
+
+`presets.ts` matches each loader's file against the list ComfyUI gives for
+that input (exact name, then the same name in a subfolder). A setup whose
+files are all listed is ready; one missing files lists them as `needs`.
+
+The app's own setups come first, grouped by theme (General, Portraits and
+people, Pixel art, Game sprites, Backgrounds); a theme writes its words
+around the person's prompt. After them come the workflows ComfyUI has
+(`sources.ts`): its template list (`/templates/index.json`, picture
+templates that start from words and do not use a paid cloud node) and the
+person's saved workflows (`/userdata?dir=workflows`). They are read when the
+picker asks and ComfyUI is running, converted with its `/object_info`, and
+kept in `image-files.json` beside the file lists, so they stay listed while
+ComfyUI is stopped. A list that cannot be read keeps the last one. Such a
+workflow runs at the size it was saved with; its memory is an estimate (the
+largest file it loads plus 1.5 GiB, or 10 GiB when no file's size is known).
+A loader's `properties.models` says where each missing file comes from.
+
+Last come the model files already in the folders of a ComfyUI on this
+computer (`installed.ts`, group "Your models"). For each checkpoint and LoRA
+ComfyUI lists, only the safetensors header is read, inside the folders its
+`/internal/folder_paths` names. The family comes from the header's metadata,
+else from its tensor names and shapes. An SDXL or SD 1.5 checkpoint becomes a
+setup with its family's plain settings. A LoRA becomes a style at 0.8 on its
+family's base, which may need that base's files. A file of a family with no
+setup is listed with that reason. Inpainting and audio files are left out.
+
+## Downloads
+
+`image.download` fetches the files a setup needs (`download.ts`), one after
+another. They go into a `gates-local/` folder inside the local ComfyUI's
+first folder of each kind, which ComfyUI lists as `gates-local/<file>`.
+
+- An address must be Hugging Face's, and may redirect once, to its own file
+  hosts.
+- The size comes from a HEAD request. The free space is checked first.
+- The bytes go to `<file>.part`, and the file is renamed once complete. A part
+  already there resumes with a Range request on a fresh link.
+- The sha256 is checked against the app's record (`setups/files.json`). For a
+  file with no record, the first download pins it in `image-pins.json`, and a
+  later download that differs ends with a warning.
+- Progress goes out on the `image.download` push: the `PullProgress` shape the
+  chat-model downloads use, plus the setup, the file's place in its list, and
+  `ended` on the last word (every file in, or stopped or failed on this one).
+  `image.presets` carries the running download, so a picker opened later shows
+  it.
+- A row in `others` has `needs.download` only when every missing file has a
+  Hugging Face address and a folder kind; the picker shows Download then.
+- `image.stopDownload` stops that setup's download. The part is kept, and the
+  next download carries on from it.
+- `image.start` is the empty picker's Start ComfyUI (or Check again): it
+  starts the app's ComfyUI with no job, the idle stop still applies, and
+  answers `image.presets`. Nothing starts when the picker opens.
+
+Browser tests download from the fake ComfyUI, never Hugging Face: the e2e stack
+always sets `GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN` (`fetchFrom`), to the fake's
+address or to a closed port. The address is still checked as Hugging Face's
+first; only the origin is swapped, and only for an http address on this
+computer.

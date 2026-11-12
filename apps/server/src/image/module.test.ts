@@ -1,15 +1,17 @@
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile, mkdir } from "node:fs/promises";
 import * as files from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FitReport, ImageChoice, ImageEvent, ModelLoad } from "@gates-local/contracts";
+import type { FitReport, ImageChoice, ImageDownload, ImageEvent, ModelLoad, Params } from "@gates-local/contracts";
 import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
 import { createModelLoader } from "../runtime/load.ts";
 import { listLoaded } from "../runtime/models.ts";
 import { DEFAULT_CHOICE, PRESETS, resolveChoice } from "./presets.ts";
+import { comfyInfo, KLEIN_FILES, SDXL_FILES } from "../../test/comfy/info.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
@@ -55,6 +57,9 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
   dirs.push(dataDir);
   const lease = createGpuLease();
   const events: ImageEvent[] = [];
+  const downloads: ImageDownload[] = [];
+  /** threads.changed pushes, by thread id. */
+  const changed: string[] = [];
   const calls: string[] = [];
   let enabled = true, answering = true, present = true, pid = 42, freeBytes = 20_000;
   let hold = false, missingModel = false, die = false;
@@ -68,6 +73,9 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
   let comfyUrl: string | undefined, cpu = false, gpuError = false, stuck = false, queueErrors = 0;
   let measurements = 0;
   let choice: ImageChoice | undefined, missingLora = false, flux = false;
+  // ComfyUI's template, saved-workflow and folder routes (path and query): what each answers; any other is a 404
+  let workflowRoutes: Record<string, unknown> = {};
+  let moreLoras: string[] = []; // LoRAs /object_info lists besides the app's own
   // Ollama's /api/ps (undefined: it answers 500), and the app's loaded models, pruned on unload as main.ts does
   let listed: string[] | undefined = ["foreign-chat", "app-chat"];
   let appLoaded = ["app-chat"];
@@ -110,16 +118,15 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
         freeBytes += 6000; return Response.json({});
       }
       if (!answering) throw new Error("offline");
+      if (url.pathname.startsWith("/templates/") || url.pathname.startsWith("/userdata") || url.pathname.startsWith("/internal/")) {
+        const route = `${url.pathname}${url.search}`;
+        return route in workflowRoutes ? Response.json(workflowRoutes[route]) : new Response("not found", { status: 404 });
+      }
       if (url.pathname === "/system_stats") return Response.json({ system: { comfyui_version: "fake" }, devices: [{ type: cpu ? "cpu" : "cuda", torch_vram_total: resident }] });
-      if (url.pathname === "/object_info") return Response.json({
-        CheckpointLoaderSimple: { input: { required: { ckpt_name: [missingModel ? [] : ["sdxl_lightning_4step.safetensors"]] } } },
-        LoraLoader: { input: { required: { lora_name: [missingLora ? [] : ["RW_pixelart_XL_v1.safetensors"]] } } },
-        ...(flux ? {
-          UNETLoader: { input: { required: { unet_name: [["flux-2-klein-4b-fp8.safetensors"]] } } },
-          CLIPLoader: { input: { required: { clip_name: [["qwen_3_4b.safetensors"]] } } },
-          VAELoader: { input: { required: { vae_name: [["flux2-vae.safetensors"]] } } },
-        } : {}),
-      });
+      if (url.pathname === "/object_info") return Response.json(comfyInfo(
+        { checkpoints: missingModel ? [] : SDXL_FILES.checkpoints, loras: [...missingLora ? [] : SDXL_FILES.loras ?? [], ...moreLoras] },
+        flux ? KLEIN_FILES : {},
+      ));
       if (url.pathname === "/queue") { if (queueErrors-- > 0) throw new Error("queue temporarily unavailable"); if (swapPidOnQueue) pid = 99; return Response.json({ queue_running: busy ? [[1, "foreign"]] : running.has(url.host) ? [[1, "p1"]] : [], queue_pending: [] }); }
       if (url.pathname === "/prompt") {
         running.add(url.host);
@@ -138,16 +145,21 @@ async function fixture(options: Partial<ImageDeps> = {}, realOllama?: string) {
       if (url.pathname === "/interrupt") { if (!stuck) running.delete(url.host); return Response.json({}); }
       throw new Error(`unexpected ${url.pathname}`);
     },
-    push: (channel, payload) => { if (channel === "image.event") events.push(payload as ImageEvent); },
+    push: (channel, payload) => {
+      if (channel === "image.event") events.push(payload as ImageEvent);
+      if (channel === "image.download") downloads.push(payload as ImageDownload);
+      if (channel === "threads.changed") changed.push((payload as { threadId: string }).threadId);
+    },
     swapWaitMs: 50, swapPollMs: 5,
     ...options,
     onModelUnloaded: (model) => { appLoaded = appLoaded.filter((m) => m !== model); options.onModelUnloaded?.(model); },
   });
   instances.push(module);
   const handlers = createImageHandlers({ image: module });
-  return { module, handlers, lease, store, events, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
+  return { module, handlers, lease, store, events, downloads, changed, calls, dataDir, ollamaPosts, graphs, ps: () => fakeFetch("http://fake-ollama/api/ps"), measurements: () => measurements,
     choose: (next: ImageChoice | undefined) => { choice = next; },
-    files: (v: { missingLora?: boolean; flux?: boolean }) => { missingLora = v.missingLora ?? missingLora; flux = v.flux ?? flux; },
+    files: (v: { missingLora?: boolean; flux?: boolean; loras?: string[] }) => { missingLora = v.missingLora ?? missingLora; flux = v.flux ?? flux; moreLoras = v.loras ?? moreLoras; },
+    workflows: (routes: Record<string, unknown>) => { workflowRoutes = routes; },
     ollamaLists: (models: string[] | undefined) => { listed = models; },
     configure: (v: { enabled?: boolean; answering?: boolean; present?: boolean; pid?: number; freeBytes?: number; hold?: boolean; missingModel?: boolean; die?: boolean; swapPidOnQueue?: boolean; freeAfterStart?: number; activeOverride?: boolean; activeState?: string; resident?: number; comfyUrl?: string; cpu?: boolean; gpuError?: boolean; stuck?: boolean; queueErrors?: number; busy?: boolean; noImage?: boolean; invalidPng?: boolean }) => {
       enabled = v.enabled ?? enabled; answering = v.answering ?? answering; present = v.present ?? present;
@@ -479,7 +491,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       const f = await fixture({ requiredBytes: undefined, imageMayUnload: () => [],
         readGpu: async () => ({ freeBytes, holders: "steam", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 5 * gib }] }) });
       f.files({ flux: true }); f.choose(choice);
-      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual(["flux2-klein-4b", "sdxl-lightning", "sdxl-lightning-pixel"]);
+      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual(["flux2-klein-4b", "sdxl-lightning", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "sdxl-lightning-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
       return f.events.at(-1)?.message;
@@ -976,6 +988,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
   });
 });
 
+const comfyFile = (name: string): unknown => JSON.parse(readFileSync(new URL(`../../test/comfy/${name}`, import.meta.url), "utf8"));
 const presetIds = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.module.presets()).presets.map((p) => p.id);
 /** The Ollama runner's row as nvidia-smi lists it, holding a chat model. */
 const chat = (usedBytes: number) => ({ pid: 8, label: "ollama", role: "ollama", usedBytes });
@@ -993,7 +1006,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     const f = await fixture();
     f.files({ flux: true });
     const shorts = (await f.module.presets()).presets.map((p) => p.short ?? "");
-    expect(shorts).toEqual(["Klein 4B", "Lightning", "Pixel art"]);
+    expect(shorts).toEqual(["Klein 4B", "Lightning", "Faces", "Retro pixel", "Pixel art", "Sprites", "Backgrounds"]);
     expect(new Set(shorts.map((s) => s.slice(0, 1).toLowerCase())).size).toBe(PRESETS.length);
   });
 
@@ -1010,7 +1023,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(await ids(f)).toEqual([]);
     f.configure({ missingModel: false }); f.files({ missingLora: false, flux: true });
     // the picker's rows in the default order, then the row only used when picked
-    expect(await ids(f)).toEqual(["flux2-klein-4b", "sdxl-lightning", "sdxl-lightning-pixel"]);
+    expect(await ids(f)).toEqual(["flux2-klein-4b", "sdxl-lightning", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "sdxl-lightning-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
     // Off is off: nothing is read from ComfyUI.
     f.configure({ enabled: false }); f.calls.length = 0;
     expect(await f.module.presets()).toMatchObject({ presets: [], current: { preset: { id: "flux2-klein-4b" } } });
@@ -1047,6 +1060,242 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect((await fresh.module.presets()).readAt).toBeUndefined();
   });
 
+  it("Start ComfyUI starts the unit with no job, answers what it lists, and the idle stop still stops it", async () => {
+    const f = await fixture();
+    f.configure({ answering: false });
+    expect((await f.module.presets()).readAt).toBeUndefined();
+    const started = await f.handlers["image.start"]();
+    expect(f.calls).toContain("start");
+    expect(started.readAt).toEqual(expect.any(Number));
+    expect(started.presets.map((p) => p.id)).toContain("sdxl-lightning");
+    expect(f.module.current()).toMatchObject({ state: "ready", owner: "app" });
+    await vi.waitFor(() => expect(f.calls).toContain("stop"));
+    expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
+  });
+
+  it("Start ComfyUI says why when there is nothing to start", async () => {
+    const f = await fixture();
+    f.configure({ answering: false, present: false });
+    await expect(f.module.start()).rejects.toThrow("ComfyUI did not answer. Install comfyui.service or set a running ComfyUI address in Settings.");
+    f.configure({ enabled: false });
+    await expect(f.module.start()).rejects.toThrow("Image generation is off. Turn it on in Settings first.");
+    expect(f.calls).not.toContain("start");
+  });
+
+  describe("the workflows ComfyUI has", () => {
+    const list = "/userdata?dir=workflows&recurse=true&split=false&full_info=false";
+    // a saved copy of the app's own SDXL graph, saving under another name
+    const mine = structuredClone(PRESETS.find((p) => p.id === "sdxl-lightning")!.workflow) as Record<string, { inputs: Record<string, unknown> }>;
+    mine["8"]!.inputs["filename_prefix"] = "mine";
+    const routes = {
+      "/templates/index.json": comfyFile("template-index.json"),
+      "/templates/image_sdxl_simple.json": comfyFile("templates/image_sdxl_simple.json"),
+      [list]: ["mine.json"],
+      "/userdata/workflows%2Fmine.json": mine,
+    };
+
+    it("are listed after the app's own, kept while ComfyUI is stopped and after a restart", async () => {
+      const f = await fixture();
+      f.workflows(routes);
+      const first = await f.module.presets();
+      expect(first.presets.map((p) => p.id)).toEqual(["sdxl-lightning", "sdxl-lightning-pixel", "saved:mine.json"]);
+      expect(first.presets.at(-1)).toMatchObject({ name: "mine", group: "Your workflows", family: "sdxl", sizes: [{ width: 768, height: 512 }] });
+      expect(first.others?.at(-1)).toMatchObject({ id: "template:image_sdxl_simple", group: "ComfyUI templates", needs: { files: ["sd_xl_base_1.0.safetensors"] } });
+      f.configure({ answering: false });
+      expect(await f.module.presets()).toEqual(first);
+      const restarted = await fixture({ dataDir: f.dataDir });
+      restarted.configure({ answering: false });
+      expect(await restarted.module.presets()).toEqual(first);
+    });
+
+    it("a list that cannot be read this time keeps the last one read; one that reads empty empties it", async () => {
+      const f = await fixture();
+      f.workflows(routes);
+      await f.module.presets();
+      f.workflows({});
+      const kept = async () => { const listed = await f.module.presets(); return [...listed.presets, ...listed.others ?? []].map((p) => p.id).filter((id) => id.includes(":")); };
+      expect(await kept()).toEqual(["saved:mine.json", "template:image_sdxl_simple"]);
+      f.workflows({ ...routes, [list]: [] });
+      expect(await kept()).toEqual(["template:image_sdxl_simple"]);
+    });
+
+    it("the files in its folders are listed in Your models, read from their headers, and kept like the rest", async () => {
+      const folder = path.join(await mkdtemp(path.join(tmpdir(), "gates-image-loras-")), "loras");
+      await mkdir(folder);
+      // an SDXL LoRA's header (its second text encoder), and no weights
+      const json = Buffer.from(JSON.stringify({ "lora_te2_text_model_encoder_layers_0_mlp_fc1.lora_down.weight": { dtype: "F16", shape: [16, 1280], data_offsets: [0, 0] } }));
+      const length = Buffer.alloc(8); length.writeBigUInt64LE(BigInt(json.length));
+      await writeFile(path.join(folder, "ink.safetensors"), Buffer.concat([length, json]));
+      // a LoRA for a family Image mode has no setup for, named by its metadata
+      const zi = Buffer.from(JSON.stringify({ __metadata__: { "modelspec.architecture": "z-image-turbo/lora" } }));
+      const ziLength = Buffer.alloc(8); ziLength.writeBigUInt64LE(BigInt(zi.length));
+      await writeFile(path.join(folder, "zi.safetensors"), Buffer.concat([ziLength, zi]));
+      const f = await fixture();
+      f.files({ loras: ["ink.safetensors", "zi.safetensors"] });
+      f.workflows({ "/internal/folder_paths": { loras: [folder], checkpoints: [] } });
+      const first = await f.module.presets();
+      expect(first.presets.at(-1)).toMatchObject({ id: "file:loras/ink.safetensors", name: "ink style", group: "Your models", family: "sdxl" });
+      expect(first.others?.at(-1)).toMatchObject({ id: "file:loras/zi.safetensors", family: "zimage", why: expect.stringContaining("no Z-Image Turbo setup") });
+      f.workflows({});
+      expect(await f.module.presets()).toEqual({ ...first, readAt: expect.any(Number) });
+      f.configure({ answering: false });
+      const restarted = await fixture({ dataDir: f.dataDir });
+      restarted.configure({ answering: false });
+      const again = await restarted.module.presets();
+      expect([again.presets.at(-1), again.others?.at(-1)]).toEqual([first.presets.at(-1), first.others?.at(-1)]);
+      await rm(path.dirname(folder), { recursive: true, force: true });
+    });
+
+    describe("downloading the files a setup needs", () => {
+      // a fake file server in this process: any address answers with a few bytes named after its file
+      let version = 1;
+      /** Set: a GET sends this many bytes, then waits until its request is aborted, as a real fetch's body does. */
+      let holdAfter: number | undefined;
+      const served: string[] = [];
+      const fileServer: typeof fetch = async (input, init) => {
+        const url = new URL(String(input)), name = path.basename(url.pathname);
+        served.push(`${init?.method ?? "GET"} ${url.host}${url.pathname}`);
+        const body = Buffer.from(`${name} v${version}`);
+        const headers = { "content-length": String(body.length) };
+        if (init?.method === "HEAD") return new Response(null, { headers });
+        if (holdAfter === undefined) return new Response(body, { headers });
+        const sent = body.subarray(0, holdAfter), signal = init?.signal;
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(sent));
+            signal?.addEventListener("abort", () => controller.error(signal.reason));
+          },
+        }), { headers });
+      };
+      // these fake bytes are not the files the app's records name, so most tests check pins alone
+      const download = { fetch: fileServer, allow: () => true, freeBytes: async () => 10 ** 12, intervalMs: 0 };
+      const setup = async (records: "checked" | "pins only" = "pins only") => {
+        const root = await mkdtemp(path.join(tmpdir(), "gates-image-models-"));
+        const kinds = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"];
+        const f = await fixture({ download: records === "checked" ? download : { ...download, records: false } });
+        f.workflows({ ...routes, "/internal/folder_paths": Object.fromEntries(kinds.map((k) => [k, [path.join(root, k), "/elsewhere/" + k]])) });
+        served.length = 0; version = 1; holdAfter = undefined;
+        return { f, root, done: (n: number) => vi.waitFor(() => expect(f.downloads.filter((p) => p.state !== "downloading" && p.state !== "verifying")).toHaveLength(n)) };
+      };
+
+      it("fetches each missing file into a gates-local folder inside ComfyUI's first folder of its kind", async () => {
+        const { f, root, done } = await setup();
+        expect(await f.module.download("flux2-klein-4b")).toEqual({ files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"] });
+        await done(3);
+        expect(await readFile(path.join(root, "diffusion_models", "gates-local", "flux-2-klein-4b-fp8.safetensors"), "utf8")).toBe("flux-2-klein-4b-fp8.safetensors v1");
+        expect(await readFile(path.join(root, "text_encoders", "gates-local", "qwen_3_4b.safetensors"), "utf8")).toBe("qwen_3_4b.safetensors v1");
+        expect(await readdir(path.join(root, "vae", "gates-local"))).toEqual(["flux2-vae.safetensors"]);
+        const finished = f.downloads.filter((p) => p.state === "done");
+        expect(finished.map((p) => p.name)).toEqual(["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"]);
+        for (const p of finished) expect(p.message).toBeUndefined();
+        expect(served[0]).toBe("HEAD huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/" + served[0]!.split("/resolve/")[1]);
+      });
+
+      it("a file that is not the one the app's record names is not put with ComfyUI's models, and the download stops there", async () => {
+        const { f, root, done } = await setup("checked");
+        await f.module.download("flux2-klein-4b");
+        await done(1);
+        expect(f.downloads.at(-1)).toMatchObject({ name: "flux-2-klein-4b-fp8.safetensors", state: "error", ended: true });
+        expect(f.downloads.at(-1)?.message).toMatch(/^flux-2-klein-4b-fp8\.safetensors is not the file expected: its sha256 is [0-9a-f]{64}, not [0-9a-f]{64}\. It was not put with ComfyUI's models; the bytes stay in flux-2-klein-4b-fp8\.safetensors\.part\.$/);
+        expect((await readdir(path.join(root, "diffusion_models", "gates-local"))).toSorted()).toEqual(["flux-2-klein-4b-fp8.safetensors.part"]);
+        expect(served.filter((s) => s.includes("qwen_3_4b"))).toEqual([]);
+      });
+
+      it("pins a file's sha256 on its first download; a later one that differs is not put in place", async () => {
+        const { f, root, done } = await setup();
+        await f.module.download("template:image_sdxl_simple");
+        await done(1);
+        expect(f.downloads.at(-1)).toEqual({ preset: "template:image_sdxl_simple", file: 1, files: 1, name: "sd_xl_base_1.0.safetensors", state: "done", completedBytes: 29, totalBytes: 29, setupCompletedBytes: 29, setupTotalBytes: 29, ended: true });
+        await rm(path.join(root, "checkpoints", "gates-local"), { recursive: true });
+        version = 2;
+        await f.module.download("template:image_sdxl_simple");
+        await done(2);
+        expect(f.downloads.at(-1)).toMatchObject({ state: "error", message: expect.stringMatching(/^sd_xl_base_1.0.safetensors is not the file expected: its sha256 is [0-9a-f]{64}, not [0-9a-f]{64}\./) });
+        expect(await readdir(path.join(root, "checkpoints", "gates-local"))).not.toContain("sd_xl_base_1.0.safetensors");
+      });
+
+      it("refuses one ComfyUI on another computer, a file with no address, and a second download while one runs", async () => {
+        const { f } = await setup();
+        f.configure({ missingModel: true }); f.files({ missingLora: true });
+        await expect(f.module.download("sdxl-lightning-pixel")).rejects.toThrow("SDXL Lightning pixel art: RW_pixelart_XL_v1.safetensors has no download address. Install it in ComfyUI's model folders yourself.");
+        const first = f.module.download("sdxl-lightning");
+        await expect(f.module.download("flux2-klein-4b")).rejects.toThrow("A model download is already running; it finishes first.");
+        await first;
+        await vi.waitFor(() => expect(f.downloads.filter((p) => p.state === "done")).toHaveLength(1));
+        f.configure({ comfyUrl: "http://192.0.2.5:8188" }); served.length = 0;
+        await expect(f.module.download("flux2-klein-4b")).rejects.toThrow("Start ComfyUI on this computer first: downloads go into its model folders.");
+        expect(served).toEqual([]);
+      });
+
+      it("says which setups it can fetch, and each push names the setup and the file's place; the last says it ended", async () => {
+        const { f, done } = await setup();
+        f.files({ missingLora: true });
+        const listed = await f.module.presets();
+        const needs = (id: string) => listed.others?.find((p) => p.id === id)?.needs;
+        expect(needs("flux2-klein-4b")).toMatchObject({ download: true });
+        // the pixel-art LoRA has no address: there is nothing to press
+        expect(needs("sdxl-lightning-pixel")).toEqual({ files: ["RW_pixelart_XL_v1.safetensors"] });
+        await f.module.download("flux2-klein-4b");
+        await done(3);
+        expect(f.downloads.filter((p) => p.state === "done").map((p) => [p.preset, p.file, p.files, p.ended ?? false]))
+          .toEqual([["flux2-klein-4b", 1, 3, false], ["flux2-klein-4b", 2, 3, false], ["flux2-klein-4b", 3, 3, true]]);
+        await vi.waitFor(async () => expect((await f.module.presets()).download).toBeUndefined());
+      });
+
+      it("each push counts the whole setup's bytes: the files before this one, this one's so far, and every file's size", async () => {
+        // the fake's files are their names and " v1"
+        const [a, b, c] = ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"].map((n) => `${n} v1`.length) as [number, number, number];
+        // with the app's records, a file not yet fetched counts at its recorded size (these fake bytes then fail its sha256)
+        const checked = await setup("checked");
+        await checked.f.module.download("flux2-klein-4b");
+        await checked.done(1);
+        expect(checked.f.downloads.find((p) => p.state === "downloading")).toMatchObject({ setupCompletedBytes: 0, setupTotalBytes: a + 8_044_982_048 + 336_211_292 });
+        // with no records (the fake's own files) a size is known once its download says it: the setup's when every one is
+        const { f, done } = await setup();
+        await f.module.download("flux2-klein-4b");
+        await done(3);
+        const finished = f.downloads.filter((p) => p.state === "done");
+        expect(finished.map((p) => p.setupCompletedBytes)).toEqual([undefined, undefined, a + b + c]);
+        expect(finished.at(-1)!.setupTotalBytes).toBe(a + b + c);
+      });
+
+      it("a Stop pressed while the download is still being planned stops it before any file is fetched", async () => {
+        const { f, done } = await setup();
+        const started = f.module.download("template:image_sdxl_simple");
+        expect(await f.handlers["image.stopDownload"]({ preset: "template:image_sdxl_simple" })).toEqual({ stopped: true });
+        expect(await started).toEqual({ files: ["sd_xl_base_1.0.safetensors"] });
+        await done(1);
+        expect(f.downloads.at(-1)).toMatchObject({ state: "cancelled", ended: true, completedBytes: 0 });
+        expect(served.filter((s) => s.includes("sd_xl_base"))).toEqual([]);
+      });
+
+      it("Stop ends that setup's download and keeps the part; while it runs the list carries its progress", async () => {
+        const { f, root } = await setup();
+        holdAfter = 5;
+        await f.module.download("template:image_sdxl_simple");
+        await vi.waitFor(() => expect(f.downloads.at(-1)).toMatchObject({ state: "downloading", completedBytes: 5 }));
+        expect((await f.module.presets()).download).toMatchObject({ preset: "template:image_sdxl_simple", name: "sd_xl_base_1.0.safetensors", file: 1, files: 1, completedBytes: 5 });
+        expect(await f.handlers["image.stopDownload"]({ preset: "flux2-klein-4b" })).toEqual({ stopped: false });
+        expect(await f.handlers["image.stopDownload"]({ preset: "template:image_sdxl_simple" })).toEqual({ stopped: true });
+        await vi.waitFor(() => expect(f.downloads.at(-1)).toMatchObject({ state: "cancelled", completedBytes: 5, ended: true }));
+        expect(await readFile(path.join(root, "checkpoints", "gates-local", "sd_xl_base_1.0.safetensors.part"), "utf8")).toBe("sd_xl");
+        await vi.waitFor(async () => expect((await f.module.presets()).download).toBeUndefined());
+        holdAfter = undefined;
+        expect(await f.module.download("template:image_sdxl_simple")).toEqual({ files: ["sd_xl_base_1.0.safetensors"] });
+        await vi.waitFor(() => expect(f.downloads.at(-1)).toMatchObject({ state: "done", ended: true }));
+      });
+    });
+
+    it("a send that names one runs its graph", async () => {
+      const f = await fixture();
+      f.workflows(routes);
+      await f.module.presets();
+      const job = await f.module.generate({ prompt: "a tree", choice: { preset: "saved:mine.json", width: 768, height: 512 } }); await f.module.wait(job.jobId);
+      expect(f.events.at(-1)).toMatchObject({ state: "done", choice: { preset: "saved:mine.json" } });
+      expect(f.graphs[0]!["8"]!.inputs["filename_prefix"]).toBe("mine");
+    });
+  });
+
   it("runs the chosen preset and size: Settings' choice, or the one a call names", async () => {
     const f = await fixture();
     f.choose({ preset: "sdxl-lightning", width: 1024, height: 1024 });
@@ -1060,6 +1309,159 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(f.graphs[1]!["1"]).toMatchObject({ class_type: "UNETLoader", inputs: { unet_name: "flux-2-klein-4b-fp8.safetensors" } });
     expect(f.graphs[1]!["9"]!.inputs).toMatchObject({ steps: 8, width: 1024, height: 768 });
     expect(f.graphs[1]!["4"]!.inputs).toMatchObject({ text: "a tree" });
+  });
+
+  it("each thread keeps the choice it sent with, a default once it has made a picture; one with none follows Settings; a retry changes nothing", async () => {
+    const f = await fixture(); f.files({ flux: true });
+    const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 }, klein = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    const a = f.store.createThread(), b = f.store.createThread(), c = f.store.createThread();
+    const send = async (params: Params<"image.generate">) => { const job = await f.module.generate(params); await f.module.wait(job.jobId); return f.events.at(-1)!; };
+    // A sends SDXL: A keeps it, and the thread list hears at once (not only when the image is done)
+    const first = await f.module.generate({ prompt: "a", threadId: a.id, choice: sdxl });
+    expect(f.changed).toEqual([a.id]);
+    await f.module.wait(first.jobId);
+    expect(f.store.imageChoiceOf(a.id)).toEqual(sdxl);
+    // the last pick anywhere is Klein (Settings); A's send that names nothing (the image tool's) still runs SDXL
+    f.choose(klein);
+    expect(await send({ prompt: "a again", threadId: a.id })).toMatchObject({ state: "done", choice: sdxl });
+    expect(f.graphs.at(-1)!["1"]).toMatchObject({ class_type: "CheckpointLoaderSimple" });
+    // B has none of its own: it follows Settings, and keeps what it ran
+    expect(await send({ prompt: "b", threadId: b.id })).toMatchObject({ state: "done", choice: klein });
+    expect(f.store.imageChoiceOf(b.id)).toEqual(klein);
+    // A retry runs its card's choice and leaves the thread's alone
+    f.configure({ missingModel: true });
+    const failed = await send({ prompt: "a fails", threadId: a.id, choice: sdxl });
+    expect(failed).toMatchObject({ state: "error" });
+    f.configure({ missingModel: false });
+    await send({ prompt: "a picks Klein", threadId: a.id, choice: klein });
+    expect(f.store.imageChoiceOf(a.id)).toEqual(klein);
+    expect(await send({ prompt: "", threadId: a.id, retryOf: failed.jobId })).toMatchObject({ state: "done", choice: sdxl });
+    expect(f.store.imageChoiceOf(a.id)).toEqual(klein);
+    // nothing saved anywhere and a default sent: C keeps the default once it has made a picture
+    f.choose(undefined);
+    expect(await send({ prompt: "c", threadId: c.id, choice: klein })).toMatchObject({ state: "done", choice: klein });
+    expect(f.store.imageChoiceOf(c.id)).toEqual(klein);
+  });
+
+  it("A sends the default without a pick, then B picks: A's next send runs what A ran", async () => {
+    const f = await fixture(); f.files({ flux: true });
+    const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 }, klein = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    const a = f.store.createThread(), b = f.store.createThread();
+    const send = async (params: Params<"image.generate">) => { const job = await f.module.generate(params); await f.module.wait(job.jobId); return f.events.at(-1)!; };
+    // the composer sends the default it shows, with nothing picked anywhere
+    expect(await send({ prompt: "a", threadId: a.id, choice: klein })).toMatchObject({ state: "done", choice: klein });
+    // B picks SDXL: the picker saves B's choice and the app's last pick
+    f.store.setImageChoice(b.id, sdxl); f.choose(sdxl);
+    expect(await send({ prompt: "b", threadId: b.id, choice: sdxl })).toMatchObject({ state: "done", choice: sdxl });
+    // A's next send, from the image tool, names nothing: still Klein
+    expect(await send({ prompt: "a again", threadId: a.id })).toMatchObject({ state: "done", choice: klein });
+    expect(f.store.listThreads().find((t) => t.id === a.id)?.imageChoice).toEqual(klein);
+    // a retry in A of an older SDXL card makes the last picture there SDXL; A still sends Klein
+    f.store.saveImageJob({ jobId: "00000000-0000-4000-8000-0000000000b1", threadId: a.id, state: "error", choice: sdxl }, "older");
+    expect(await send({ prompt: "", threadId: a.id, retryOf: "00000000-0000-4000-8000-0000000000b1" })).toMatchObject({ state: "done", choice: sdxl });
+    expect(await send({ prompt: "a once more", threadId: a.id })).toMatchObject({ state: "done", choice: klein });
+  });
+
+  describe("a default is kept once it has made a picture, only if the thread took nothing since (IR3-60, 80)", () => {
+    const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 }, klein = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    const pixel = { preset: "sdxl-lightning-pixel", width: 768, height: 512 };
+
+    it("a pick in A while A's first default send waits survives that send's picture", async () => {
+      const f = await fixture(); f.files({ flux: true });
+      const a = f.store.createThread();
+      const release = await f.lease.acquire("chat");
+      const job = await f.module.generate({ prompt: "a", threadId: a.id, choice: klein });
+      // the user picks SDXL in A while the first picture waits: the picker saves A's choice and Settings
+      f.store.setImageChoice(a.id, sdxl); f.choose(sdxl);
+      release(); await f.module.wait(job.jobId);
+      expect(f.events.at(-1)).toMatchObject({ state: "done", choice: klein });
+      expect(f.store.imageChoiceOf(a.id), "A's pick kept").toEqual(sdxl);
+    });
+
+    it("an explicit send in A while A's first default waits keeps its pin when the default settles to other files", async () => {
+      const f = await fixture(); // SDXL and the pixel LoRA only: Klein, sent, settles to plain SDXL
+      const a = f.store.createThread();
+      const release = await f.lease.acquire("chat");
+      const first = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: klein });
+      // the explicit send pins at send; its own job is called off, so the fake renders one picture
+      const second = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: pixel });
+      f.module.cancel(second.jobId); await f.module.wait(second.jobId);
+      expect(f.store.imageChoiceOf(a.id)).toEqual(pixel);
+      release(); await f.module.wait(first.jobId);
+      expect(f.events.find((e) => e.jobId === first.jobId && e.state === "done")).toMatchObject({ choice: { preset: "sdxl-lightning", width: 768, height: 512 } });
+      expect(f.store.imageChoiceOf(a.id), "the later explicit send's pin").toEqual(pixel);
+    });
+
+    // IR3-61 is on the roadmap: a failed first default keeps nothing, so A follows the app's last pick
+    it("A's default send fails, B picks: A keeps nothing, so its next send settles again", async () => {
+      const f = await fixture(); f.files({ flux: true });
+      const a = f.store.createThread(), b = f.store.createThread();
+      f.configure({ noImage: true });
+      const j = await f.module.generate({ prompt: "a", threadId: a.id, choice: klein }); await f.module.wait(j.jobId);
+      expect(f.events.at(-1)).toMatchObject({ state: "error" });
+      f.configure({ noImage: false });
+      f.store.setImageChoice(b.id, sdxl); f.choose(sdxl);
+      expect(f.store.imageChoiceOf(a.id), "A after failed default").toBeUndefined();
+    });
+
+    it("a default is not kept at send; its picture keeps what it settled to and says threads.changed once", async () => {
+      const f = await fixture(); // SDXL and the pixel LoRA only: Klein, sent, settles to plain SDXL
+      const a = f.store.createThread();
+      const job = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: klein });
+      expect(f.store.imageChoiceOf(a.id), "nothing kept at send").toBeUndefined();
+      const before = f.changed.length;
+      await f.module.wait(job.jobId);
+      const settled = { preset: "sdxl-lightning", width: 768, height: 512 };
+      expect(f.events.at(-1)).toMatchObject({ state: "done", choice: settled });
+      expect(f.store.imageChoiceOf(a.id), "kept as settled").toEqual(settled);
+      expect(f.changed.slice(before), "one threads.changed when the default finishes").toEqual([a.id]);
+    });
+
+    it("a failed default retried to a picture: the thread's next plain send makes one (IR3-80)", async () => {
+      const f = await fixture(); // SDXL and the pixel LoRA only: Klein, sent, settles to plain SDXL
+      const a = f.store.createThread();
+      f.configure({ noImage: true });
+      const j = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: klein }); await f.module.wait(j.jobId);
+      f.configure({ noImage: false });
+      const r = await f.module.generate({ prompt: "x", threadId: a.id, retryOf: j.jobId }); await f.module.wait(r.jobId);
+      expect(f.events.at(-1)).toMatchObject({ jobId: r.jobId, state: "done" });
+      const n = await f.module.generate({ prompt: "a tree", threadId: a.id }); await f.module.wait(n.jobId);
+      expect(f.events.at(-1), "next plain send").toMatchObject({ jobId: n.jobId, state: "done" });
+    });
+
+    it("two default sends in a fresh thread before the first settles: both make a picture (IR3-80)", async () => {
+      const f = await fixture();
+      const a = f.store.createThread();
+      const release = await f.lease.acquire("chat");
+      const j1 = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: klein });
+      const j2 = await f.module.generate({ prompt: "a tree", threadId: a.id, choice: klein });
+      release(); await f.module.wait(j1.jobId); await f.module.wait(j2.jobId);
+      expect(f.events.filter((e) => e.jobId === j2.jobId).at(-1), "second send").toMatchObject({ state: "done" });
+      expect(f.store.imageChoiceOf(a.id), "the first settled picture's choice").toEqual({ preset: "sdxl-lightning", width: 768, height: 512 });
+    });
+
+    it("a retry of a failed Klein the thread picked is never settled to other files: its card names the file", async () => {
+      const f = await fixture(); const thread = f.store.createThread();
+      f.store.setImageChoice(thread.id, klein);
+      const failed = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(failed.jobId);
+      expect(f.events.at(-1)).toMatchObject({ state: "error", choice: klein });
+      const retry = await f.module.generate({ prompt: "ignored", threadId: thread.id, retryOf: failed.jobId }); await f.module.wait(retry.jobId);
+      expect(f.events.at(-1)).toMatchObject({ jobId: retry.jobId, state: "error", errorKind: "image-model", choice: klein });
+    });
+  });
+
+  it("a thread from before this build (no saved choice) sends with its last image's model, not the app's last pick", async () => {
+    const f = await fixture(); f.files({ flux: true });
+    const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 }, klein = { preset: "flux2-klein-4b", width: 768, height: 1024 };
+    const old = f.store.createThread();
+    // its last image ran Klein before threads kept a choice; an older one ran SDXL
+    f.store.saveImageJob({ jobId: "00000000-0000-4000-8000-0000000000a1", threadId: old.id, state: "done", choice: sdxl }, "older");
+    f.store.saveImageJob({ jobId: "00000000-0000-4000-8000-0000000000a2", threadId: old.id, state: "done", choice: klein }, "last");
+    f.choose(sdxl);
+    expect(f.store.imageChoiceOf(old.id)).toEqual(klein);
+    expect(f.store.listThreads().find((t) => t.id === old.id)?.imageChoice).toEqual(klein);
+    const job = await f.module.generate({ prompt: "again", threadId: old.id }); await f.module.wait(job.jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: klein });
   });
 
   describe("an unset choice runs the first default ComfyUI has every file for", () => {

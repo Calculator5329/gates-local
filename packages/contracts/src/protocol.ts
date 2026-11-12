@@ -12,6 +12,7 @@ import {
   GpuStatus,
   ImageChoice,
   ImageEvent,
+  ImageDownload,
   ImagePresets,
   ImageStatus,
   Message,
@@ -123,6 +124,8 @@ export const methods = {
   "threads.create": { params: S.Struct({ title: S.optional(S.String) }), result: Thread, phone: "allow" },
   "threads.get": { params: ThreadRef, result: S.Struct({ thread: Thread, messages: S.Array(Message) }), phone: "allow" },
   "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
+  /** The picker's pick in an open thread: that thread sends with it from now on; other threads keep theirs. */
+  "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow" },
   "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny" },
   "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
   "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
@@ -234,6 +237,12 @@ export const methods = {
     phone: "allow",
   },
   "image.cancel": { params: S.Struct({ jobId: S.String }), result: S.Struct({ cancelled: S.Boolean }), phone: "allow" },
+  /** Download the files a setup needs into ComfyUI's model folders; progress on the image.download push. */
+  "image.download": { params: S.Struct({ preset: S.String }), result: S.Struct({ files: S.Array(S.String) }), phone: "deny" },
+  /** Stop that setup's download; the part already fetched is kept, and the next image.download resumes it. */
+  "image.stopDownload": { params: S.Struct({ preset: S.String }), result: S.Struct({ stopped: S.Boolean }), phone: "deny" },
+  /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer what it has; the idle stop still applies. */
+  "image.start": { params: NoParams, result: ImagePresets, phone: "deny" },
   // ---- setup (2026-11-07): read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe, phone: "deny" },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan, phone: "deny" },
@@ -273,6 +282,8 @@ export const pushes = {
   "sources.imports": { payload: SourceImports },
   "image.status": { payload: ImageStatus },
   "image.event": { payload: ImageEvent },
+  /** A model file image.download is fetching: its setup, its place in the list, its progress. */
+  "image.download": { payload: ImageDownload },
   /** A model request finished and was counted; usage.read has the new numbers. */
   "usage.changed": { payload: S.Struct({}) },
 } as const;

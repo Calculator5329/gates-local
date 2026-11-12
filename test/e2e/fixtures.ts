@@ -78,9 +78,9 @@ export const stack = {
     if (typeof system !== "number" || typeof app !== "number" || !Number.isInteger(system) || system < 20000 || app !== system + 1 || app > 65535) throw new Error("The stack did not return controlled runtime ports");
     return { system, app };
   },
-  /** Stop the server, wait downMs, then require an answer from its replacement. */
-  async restart(downMs = 0) {
-    const result = await control("/restart", { downMs });
+  /** Stop the server (crash: SIGKILL, no goodbye pushes), wait downMs, then require an answer from its replacement. */
+  async restart(downMs = 0, crash = false) {
+    const result = await control("/restart", { downMs, crash });
     // /restart joins the old child and starts a new one. Probe over a fresh
     // connection as well, so neither a disconnect nor a log line proves ready.
     const client = createClient(new WebSocket(`ws://127.0.0.1:${SERVER_PORT}/?token=${TOKEN}`));

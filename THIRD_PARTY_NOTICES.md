@@ -66,11 +66,24 @@ saved beside that sample's downloaded database as
 
 ## Image workflow
 
-`apps/server/src/image/workflow.ts` is ported from the SDXL Lightning
-workflow in local-ai-lab, Ethan Gates's own repository (written in commit
-`d2e58f5` there). Same author, so it is covered by this repository's MIT
-license. The checkpoint and LoRA it names are not included: model weights
-are downloaded separately and come under their own licenses.
+The built-in setups in `apps/server/src/image/setups/` are ported from the
+SDXL Lightning and FLUX.2 Klein workflows in local-ai-lab, Ethan Gates's own
+repository (commits `d2e58f5` and `fd7abb65` there; details in that folder's
+README). Same author, so they are covered by this repository's MIT license.
+The model files they name are not included: model weights are downloaded
+separately and come under their own licenses.
+
+## ComfyUI workflow templates (test fixtures)
+
+`apps/server/test/comfy/templates/` holds four of ComfyUI's workflow
+templates from the `comfyui-workflow-templates` package 0.11.106: MIT,
+Copyright (c) 2023-present Comfy Org, full text beside them in `LICENSE`.
+Three are copied unchanged; the MiniMax H3 one has its editor-only fields
+taken out. They are test inputs and are not shipped in the app.
+`apps/server/src/image/convert.ts`, which turns such files into the graphs
+ComfyUI runs, was written for this repository from the file format and
+ComfyUI's `/object_info` answer; no code from ComfyUI's GPL-3.0 frontend was
+read or copied.
 
 ## MPL-2.0 build dependencies
 

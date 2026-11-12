@@ -1,6 +1,8 @@
-// The app's one image choice (Settings.imageChoice) as the composer shows and sends it. The
-// server's image.presets lists the presets ComfyUI has every file for and names what a send
-// runs now; a choice saved since that read wins, so the button follows a pick at once.
+// The image choice as the composer shows and sends it: the open thread's own (Thread.imageChoice,
+// its last pick or image send), else the app's last pick anywhere (Settings.imageChoice), which a
+// new thread starts from; on the phone, which cannot write Settings, a new thread's own pick first. The server's image.presets lists the presets ComfyUI has every file for
+// and names what a send runs now; a choice saved since that read wins, so the button follows a
+// pick at once.
 import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImagePreset, type ImagePresets } from "@gates-local/contracts";
 import type { Verdict } from "./format.ts";
 import { type Maybe, NA, type State } from "./store.ts";
@@ -23,7 +25,8 @@ let lastView: { presets: ImagePresets; saved: ImageChoice | undefined; view: Ima
 export function chosenImage(s: State): ImageView | undefined {
   const presets = s.imagePresets;
   if (presets === undefined || presets === NA) return undefined;
-  const saved = s.settings === NA ? undefined : s.settings?.imageChoice;
+  const open = s.view === "thread" && s.threadId !== null ? s.threads.find((t) => t.id === s.threadId) : undefined;
+  const saved = open?.imageChoice ?? (open === undefined ? s.imagePick : undefined) ?? (s.settings === NA ? undefined : s.settings?.imageChoice);
   if (lastView?.presets === presets && lastView.saved === saved) return lastView.view;
   const preset = saved === undefined ? undefined : [...presets.presets, presets.current.preset].find((p) => p.id === saved.preset);
   const fits = saved !== undefined && preset !== undefined && preset.sizes.some((z) => z.width === saved.width && z.height === saved.height);

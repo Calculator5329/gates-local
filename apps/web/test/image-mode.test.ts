@@ -1,9 +1,9 @@
 // Image on in the composer, against the in-memory server: Send goes to the image model with
 // the app's one image choice, no chat model has to be ready or fit, a message queued with
-// Image on keeps going to the image model, and the choice is the saved setting, the same in
-// every thread and after a reload.
+// Image on keeps going to the image model, and the choice is the open thread's own, else the
+// app's last pick (the saved setting), which a new thread starts from and a reload reads back.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ImagePreset, ImagePresets, Message, Settings } from "@gates-local/contracts";
+import type { ImageChoice, ImagePreset, ImagePresets, Message, Settings } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, installBrowser, tick, until } from "./harness.ts";
 
@@ -117,6 +117,42 @@ it("the saved choice is what the button names and the send carries, in every thr
   await until(() => sends().length === 2, 2000, "second send");
   expect(sends().map((p) => p.draw)).toEqual([{ preset: FLUX.id, width: 1024, height: 768 }, { preset: FLUX.id, width: 1024, height: 768 }]);
   expect(sends().map((p) => p.threadId)).toEqual(["A", "B"]);
+});
+
+const listedThread = (id: string, imageChoice?: ImageChoice) => ({ id, title: id, createdAt: 1, updatedAt: 1, ...imageChoice ? { imageChoice } : {} });
+
+it("each thread keeps its own choice: a pick in B leaves A's, and a new thread starts from the last pick", async () => {
+  const kept: Record<string, ImageChoice> = { A: { preset: FLUX.id, width: 1024, height: 768 } };
+  let saved = SETTINGS;
+  b.server.answer("threads.list", () => ["A", "B"].map((id) => listedThread(id, kept[id])));
+  b.server.answer("threads.setImageChoice", ({ threadId, choice: picked }) => { kept[threadId] = picked; return listedThread(threadId, picked); });
+  b.server.answer("settings.update", (patch) => (saved = { ...saved, ...patch as Partial<Settings> }));
+  b.server.push("threads.changed", { threadId: "A" });
+  await until(() => st().threads.length === 2, 2000, "the thread list");
+  session.openThread("A");
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: FLUX.id }, width: 1024, height: 768 });
+  session.openThread("B");
+  // B has none of its own: it shows the app's last pick (Settings)
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: PIXEL.id }, width: 768, height: 512 });
+  expect(await session.pickImage({ preset: PIXEL.id, width: 1024, height: 1024 })).toBeNull();
+  expect(b.server.calls("threads.setImageChoice").map((r) => r.params)).toEqual([{ threadId: "B", choice: { preset: PIXEL.id, width: 1024, height: 1024 } }]);
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: PIXEL.id }, width: 1024, height: 1024 });
+  session.openThread("A");
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: FLUX.id }, width: 1024, height: 768 });
+  store.setState({ image: true });
+  type("A again");
+  await session.send("A again");
+  await until(() => sends().length === 1, 2000, "A's send");
+  expect(sends()[0]).toMatchObject({ threadId: "A", draw: { preset: FLUX.id, width: 1024, height: 768 } });
+  // a new thread has no thread to keep it on: the pick is the app's, and its first send carries it
+  session.newThread();
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: PIXEL.id }, width: 1024, height: 1024 });
+  expect(await session.pickImage({ preset: FLUX.id, width: 1024, height: 1024 })).toBeNull();
+  expect(b.server.calls("threads.setImageChoice")).toHaveLength(1);
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: FLUX.id }, width: 1024, height: 1024 });
+  // B kept its pick although the app's last pick moved on
+  session.openThread("B");
+  expect(choice.chosenImage(st())).toMatchObject({ preset: { id: PIXEL.id }, width: 1024, height: 1024 });
 });
 
 it("the chosen image is the same object until the presets or the saved choice change (a store selector must not loop)", async () => {
