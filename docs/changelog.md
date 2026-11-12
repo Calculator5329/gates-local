@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-12: A process-tree test's cleanup no longer fails on a runner that just ended
+
+- The cleanup of the process-tree tests looked whether the runner was
+  still running, then stopped it. A runner that ended between the look
+  and the stop made the stop fail, and the test with it (seen once in
+  a landing verify). A runner already gone is now what the cleanup
+  wants; any other failure to stop still fails the test.
+
 ## 2026-11-12: Two browser tests that failed the release check without a product fault
 
 - "Retry after returning to a stopped thread" failed because the test

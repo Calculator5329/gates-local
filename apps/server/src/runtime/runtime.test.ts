@@ -327,7 +327,12 @@ async function startTree(o: { readonly listen: boolean; readonly startTimeoutMs?
   const pid = Number(readFileSync(pidFile, "utf8"));
   // A runner left behind by a red run must not outlive the test.
   cleanups.push(() => {
-    if (alive(pid)) process.kill(pid);
+    // it may end between the look and the kill: a runner already gone is what this wants
+    try {
+      if (alive(pid)) process.kill(pid);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ESRCH") throw e;
+    }
   });
   expect(alive(pid)).toBe(true);
   return { ...made, status: await ensured, pid };
