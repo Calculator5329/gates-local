@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-12: Windows and Linux downloads are available
+
+- Published 0.2.1 from `655e45eb` with the latest chat, image-model and Linux
+  update changes, both native installers, and signed update metadata.
+- The fresh public-clone release check passed 3,865 unit and 550 browser
+  tests (30 unit and 8 browser skips), plus web and Electron builds. Native
+  Linux packaged checks and the Windows 0.2.0 to 0.2.1 upgrade passed.
+- The README links the downloads and distinguishes installed requirements
+  from running from source. Windows updates use the installer manually;
+  real-runtime and interactive-launch limits remain in the release notes.
+
 ## 2026-11-12: Image setups are ComfyUI workflows, with your own models listed and downloads in the picker
 
 - Image setups are now ComfyUI workflow files. Gates Local reads

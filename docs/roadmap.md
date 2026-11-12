@@ -991,8 +991,14 @@ RS-03 remains dropped.
       and keep the scratch directory if shutdown stays unconfirmed.
       *Accept:* a step that leaves a same-group process behind gets it stopped.
 - [ ] <!-- workspace:id=work:83589d17-fd67-55b2-b660-ed14c924768c --> Packaged releases (AppImage, Windows installer, auto-update) once
-      Ethan picks that path. `pnpm run app-update` covers git clones only;
-      a packaged copy says it cannot update itself.
+      all platform update paths are complete. `pnpm run app-update` covers
+      git clones; Windows installed copies still update manually.
+      *Delivered 2026-11-12:* 0.2.1 is public with native Windows/Linux
+      downloads and signed update metadata. The fresh public-clone check,
+      Linux packaged checks and Windows 0.2.0 to 0.2.1 upgrade passed.
+      Linux AppImage self-update is included; Windows self-installing
+      updates and the real-runtime/interactive launch checks remain open.
+      See the current release and its measured limits in `docs/releasing.md`.
       *Startup diagnostics 2026-11-09:* failed launches now keep the child exit,
       stderr and a token-redacted report after quit. The smoke retains those
       details on failure. Offline candidates were recorded before the one

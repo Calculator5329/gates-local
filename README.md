@@ -5,6 +5,19 @@ Ollama, for people who want local models without guessing whether they fit.
 
 ![A chat thread in the dark theme, with the thread list on the left and a code answer open](docs/screenshots/chat.png)
 
+## Download
+
+Get the [latest release](https://github.com/Calculator5329/gates-local/releases/latest):
+
+- [Windows 11 x64 installer (0.2.1)](https://github.com/Calculator5329/gates-local/releases/download/v0.2.1/Gates-Local-0.2.1-Setup-x64.exe): run the installer. It has no Windows code-signing certificate; Windows may show an unknown-publisher warning. Run a newer installer over the old copy to update while keeping chats and settings.
+- [Linux x64 AppImage (0.2.1)](https://github.com/Calculator5329/gates-local/releases/download/v0.2.1/Gates-Local-0.2.1-x86_64.AppImage): mark it executable in file properties and open it. If FUSE is unavailable, launch it with `--appimage-extract-and-run`. Your distribution may need a FUSE 2 compatibility package.
+
+The installed app includes Node and needs neither pnpm nor Git. Ollama runs
+the models; you can use your existing installation or try the app-owned setup.
+ComfyUI is separate and optional. The release notes describe the measured
+install checks and remaining limits. Source/developer and installed copies
+keep separate data; installation does not automatically import source chats.
+
 ## What it does
 
 - Uses the Ollama you already run. If none answers, it starts its own copy
@@ -54,8 +67,8 @@ Ollama, for people who want local models without guessing whether they fit.
 - **OS:** Linux on x64, in a graphical desktop session (X11 or Wayland),
   or Windows 11 on x64. Windows has been tested on one machine without an
   NVIDIA GPU; see [docs/setup/windows.md](docs/setup/windows.md).
-- **Node.js** 24 or newer.
-- **pnpm** 11.10.0. Corepack picks this version from `package.json`. On
+- **Node.js** 24 or newer, when running from source only.
+- **pnpm** 11.10.0, when running from source only. Corepack picks this version from `package.json`. On
   Windows, install it with `npm install -g pnpm@11.10.0` instead.
 - **Ollama.** Install it from <https://ollama.com/download>. If Ollama is
   not on your machine, the app tries to download a pinned Ollama release
@@ -352,8 +365,10 @@ and what each part owns.
 ## Status
 
 Early. The chat, fit check, model downloads, library and tools work, and
-are tested against fakes. Packaging, benchmarks and guided setup inside the
-app are not built yet. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
+are tested against fakes. Windows and Linux packages are available in
+[releases](https://github.com/Calculator5329/gates-local/releases/latest).
+Benchmark-driven defaults and several planned memory features remain
+unfinished. See [docs/roadmap.md](docs/roadmap.md) for what comes next.
 
 ## License
 
