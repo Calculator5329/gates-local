@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-12: Two browser tests that failed the release check without a product fault
+
+- "Retry after returning to a stopped thread" failed because the test
+  machine's Wi-Fi reconnected during the page load. The browser saw the
+  network change and dropped the app's script and stylesheet with
+  `ERR_NETWORK_CHANGED`, so the app never started. The same thing failed
+  two other test runs on 2026-11-09. Now, when a page load loses requests
+  to that one error, the test setup loads the page once more and notes it
+  on the test. Any other load failure, or a second cut, still fails the
+  test, and so does every other console error.
+- "The opened list eases open over several frames" failed because the
+  machine was busy and skipped frames: one long frame showed 62% of a
+  correct 0.18 s opening. The test now checks each frame against the time
+  that has passed: no frame may show more of the list than the ease could
+  have by then. With frames held at 70 ms, the old check failed 22 of 22
+  runs and the new one passes 10 of 10. With the ease removed so the list
+  opens in one jump, the new check still fails every run.
+- No product code changed.
+
 ## 2026-11-11: Two tests that failed the release check without a product fault
 
 - The release check on a fresh public clone failed in four unit tests.

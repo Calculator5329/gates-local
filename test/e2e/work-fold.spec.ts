@@ -9,6 +9,7 @@
 import { writeFile } from "node:fs/promises";
 import { createClient } from "@gates-local/contracts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import { readOpening, sampleHeights } from "./eased.ts";
 import { appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { LONG_COMMAND } from "./seed.ts";
@@ -256,22 +257,13 @@ test.describe("saved", () => {
   test("the opened list eases open over several frames, never in one jump", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
     const reply = page.locator(".turn.a").first();
-    const heights = reply.locator(".fold-body").evaluate((n) => new Promise<number[]>((done) => {
-      const seen: number[] = [];
-      const start = performance.now();
-      const look = () => {
-        seen.push(n.getBoundingClientRect().height);
-        if (performance.now() - start < 500) requestAnimationFrame(look); else done(seen);
-      };
-      requestAnimationFrame(look);
-    }));
-    await reply.locator("button.think.fold").click();
-    const seen = await heights;
-    const full = seen.at(-1)!;
-    const steps = seen.slice(1).map((h, i) => h - seen[i]!);
-    expect(full, "the list opened").toBeGreaterThan(40);
-    expect(Math.max(...steps), "no single frame carries most of the opening").toBeLessThan(full * 0.5);
-    expect(steps.filter((s) => s > 0.5).length, "the opening spans several frames").toBeGreaterThanOrEqual(4);
+    const seen = await sampleHeights(reply.locator(".fold-body"), () => reply.locator("button.think.fold").click());
+    // .fold-body's height transition in styles.css: .18s ease. Judged against time, so a frame the
+    // machine skipped is not a jump, and a list that opens in one normal frame still is.
+    const opening = readOpening(seen, 180);
+    expect(opening.full, "the list opened").toBeGreaterThan(40);
+    expect(opening.closedFirst, "sampling began with the list closed").toBe(true);
+    expect(opening.ahead, "no frame shows more of the list than a 180 ms ease could by then").toEqual([]);
   });
 
   test("an opened call shows all of it: a long output scrolls in a box up to 360 px, a short one has no scrollbar, the command is whole", async ({ page, open, seededThread }) => {

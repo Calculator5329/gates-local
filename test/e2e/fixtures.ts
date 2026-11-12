@@ -1,7 +1,7 @@
 // Shared journey fixtures: every test starts on a fresh server data dir with
 // a chosen fake scenario, and fails if the page logs a console error or an
 // uncaught exception (a spec that expects some, like reconnect, lists them).
-import { test as base, expect, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL, SERVER_PORT, TOKEN, appUrl } from "./env.ts";
 
@@ -10,6 +10,44 @@ export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream
 export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL; "usage" adds a week of three models' usage), the README's demo threads, saved tool turns ("work-fold"), or 0 for none. */
 export type Seed = number | "design" | "design-code" | "readme" | "usage" | "work-fold";
+
+/** What Chromium fails an in-flight request with when the host's addresses change under it. */
+const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
+
+/** What a page load fetches to start the app. */
+const LOAD_TYPES = new Set(["document", "script", "stylesheet", "font"]);
+
+/**
+ * Load `url`; the requests a network change cut short (the document's own among them), or null
+ * when none was. A chunk the page asks for as it finishes loading can fail just after the load
+ * event, so the load's own requests still in flight are waited for (5 s at most) before deciding.
+ */
+async function loadPage(page: Page, url: string): Promise<Set<string> | null> {
+  const cut = new Set<string>();
+  const inFlight = new Set<Request>();
+  let loading = true, settled: (() => void) | undefined;
+  const started = (r: Request) => { if (loading && LOAD_TYPES.has(r.resourceType())) inFlight.add(r); };
+  const ended = (r: Request) => { if (inFlight.delete(r) && inFlight.size === 0) settled?.(); };
+  const failed = (r: Request) => { if (r.failure()?.errorText === NETWORK_CHANGED) cut.add(r.url()); ended(r); };
+  page.on("request", started);
+  page.on("requestfinished", ended);
+  page.on("requestfailed", failed);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await page.goto(url);
+    loading = false;
+    if (inFlight.size > 0) await new Promise<void>((done) => { settled = done; timer = setTimeout(done, 5_000); });
+  } catch (e) {
+    if (!(e instanceof Error && e.message.includes(NETWORK_CHANGED))) throw e;
+    cut.add(url);
+  } finally {
+    clearTimeout(timer);
+    page.off("request", started);
+    page.off("requestfinished", ended);
+    page.off("requestfailed", failed);
+  }
+  return cut.size > 0 ? cut : null;
+}
 
 async function control(route: string, body: unknown = {}): Promise<unknown> {
   const r = await fetch(`${CONTROL_URL}${route}`, { method: "POST", body: JSON.stringify(body) });
@@ -104,15 +142,37 @@ export const test = base.extend<Fixtures>({
   },
   open: async ({ page, allowedErrors, skipFirstRun, seededThread }, use) => {
     void seededThread; // the stack resets before the page opens
-    const errors: string[] = [];
+    const logged: { text: string; url: string }[] = [];
+    // resources of a page load that the host's network change cut short and that was loaded again:
+    // one console line each is that cut's, any further one is an error
+    const reloaded = new Map<string, number>();
     page.on("console", (m) => {
-      if (m.type() === "error" && !allowedErrors.some((re) => re.test(m.text()))) errors.push(m.text());
+      if (m.type() === "error" && !allowedErrors.some((re) => re.test(m.text()))) logged.push({ text: m.text(), url: m.location().url });
     });
-    page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+    page.on("pageerror", (e) => logged.push({ text: `pageerror: ${e.message}`, url: "" }));
     if (skipFirstRun) await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));
     await use(async (hash = "") => {
-      await test.step("page load", () => page.goto(appUrl(hash)));
+      await test.step("page load", async () => {
+        const target = appUrl(hash);
+        const cut = await loadPage(page, target);
+        if (cut === null) return;
+        // Not the app: the host's network changed during the load (a Wi-Fi link reconnecting reaches
+        // the browser as an address change), and Chromium failed the requests then in flight.
+        // Load once more; that cause and no other is retried, and only its own lines are dropped.
+        test.info().annotations.push({ type: "page load retried", description: `${NETWORK_CHANGED} during the load: ${[...cut].join(", ")}` });
+        for (const url of cut) reloaded.set(url, 1);
+        // the document itself was cut: load it again; else reload, since a goto to the same URL
+        // with a hash only scrolls
+        if (cut.has(target)) await page.goto(target);
+        else await page.reload();
+      });
     });
+    const errors = logged.filter((e) => {
+      const owed = reloaded.get(e.url) ?? 0;
+      if (e.text !== `Failed to load resource: ${NETWORK_CHANGED}` || owed === 0) return true;
+      reloaded.set(e.url, owed - 1);
+      return false;
+    }).map((e) => e.text);
     await test.step("teardown", async () => { expect(errors, "console errors").toEqual([]); });
   },
 });
