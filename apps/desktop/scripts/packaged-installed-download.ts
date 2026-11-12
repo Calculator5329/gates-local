@@ -2,9 +2,11 @@
 // checks it against the signed release list. Run only on the test machine,
 // with a display:
 //
-//   node apps/desktop/scripts/packaged-installed-download.ts <test-build AppImage> [output]
+//   node apps/desktop/scripts/packaged-installed-download.ts <test build> [output]
 //
-// The AppImage is version N, packaged with GATES_LOCAL_TEST_BUILD=1 so it
+// Linux takes the AppImage, Windows the installed Gates Local.exe
+// (packaged-copy.ts); the lists name this platform's artifact.
+// The build is version N, packaged with GATES_LOCAL_TEST_BUILD=1 so it
 // trusts the key and the loopback feed served here. One copy, launched with
 // "Check for updates automatically" on in its settings file, then:
 //   1. the start-up check finds N+1 and downloads it by itself (the read is
@@ -19,24 +21,22 @@
 // Every request reaches the fixture server below and is counted there. The
 // test key exists only in this process; the work folder is removed at the
 // end; screenshots and report.json go to output.
-import { _electron, expect, type ElectronApplication, type Locator, type Page } from "@playwright/test";
+import { expect, type ElectronApplication, type Locator, type Page } from "@playwright/test";
 import { createHash, generateKeyPairSync, randomBytes, type KeyObject } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { homedir } from "node:os";
 import path from "node:path";
 import { defaultSettings, SETTINGS_FILE_NAME, SETTINGS_FILE_VERSION } from "../../server/src/settings/store.ts";
 import { encodeManifest, signManifest } from "../../server/src/update/release-manifest.ts";
 import type { GatesLocalBridge } from "../src/bridge.ts";
+import { artifactFor, cleanEnv, dataFolderIn, launchCopy, ownPlatform, watchGit, workFolder } from "./packaged-copy.ts";
 
 const [testBuild] = process.argv.slice(2);
-if (!testBuild) throw new Error("Pass the test-build AppImage.");
+if (!testBuild) throw new Error("Pass the test build.");
 const output = path.resolve(process.argv[3] ?? "dist/installed-download");
 mkdirSync(output, { recursive: true });
-const cache = path.join(homedir(), ".cache", "gates-local-installed-download");
-mkdirSync(cache, { recursive: true });
-const work = mkdtempSync(path.join(cache, "run-"));
+const work = workFolder("gates-local-installed-download");
 // Ports the runtime and ComfyUI own on a real machine; the feed never uses them.
 const FORBIDDEN_PORTS = new Set([8188, ...Array.from({ length: 11 }, (_, i) => 11434 + i)]);
 
@@ -44,22 +44,14 @@ const testKey = generateKeyPairSync("ed25519");
 const publicBase64 = (key: KeyObject) => key.export({ type: "spki", format: "der" }).toString("base64");
 const sha512 = (bytes: Uint8Array) => createHash("sha512").update(bytes).digest("hex");
 
-/** A fake git first on PATH: any call is recorded, so "started no git" is checked, not assumed. */
-const bin = path.join(work, "bin");
-const gitCalls = path.join(work, "git-calls.log");
-mkdirSync(bin);
-writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho "$@" >> '${gitCalls}'\nexit 1\n`);
-chmodSync(path.join(bin, "git"), 0o755);
-
-const baseEnv: Record<string, string> = {};
-for (const [key, value] of Object.entries(process.env)) {
-  if (value !== undefined && !key.startsWith("GATES_LOCAL_") && !key.startsWith("APPIMAGE") && key !== "ELECTRON_RUN_AS_NODE") baseEnv[key] = value;
-}
+const baseEnv = cleanEnv();
+/** "Started no git" is checked, not assumed: a fake git records calls, or (Windows) none is on PATH. */
+const git = watchGit(work, baseEnv);
 
 const SIZE = 3_000_000;
 const HELD_FIRST = 1_000_000;
 const OFFERED = 64 * 1024 * 1024;
-const fileFor = (version: string) => `Gates-Local-${version}-x86_64.AppImage`;
+const fileFor = (version: string) => artifactFor(ownPlatform, version).file;
 
 /** How the server sends one version's artifact. */
 type Plan =
@@ -156,7 +148,7 @@ async function startFeed(): Promise<Feed> {
 }
 
 function signedList(version: string, o: { readonly size: number; readonly sha512: string }): { readonly list: Buffer; readonly sig: Buffer } {
-  const list = encodeManifest({ schema: 1, version, commit: "a".repeat(40), artifacts: [{ platform: "linux", arch: "x64", kind: "appimage", file: fileFor(version), size: o.size, sha512: o.sha512 }] });
+  const list = encodeManifest({ schema: 1, version, commit: "a".repeat(40), artifacts: [{ ...artifactFor(ownPlatform, version), size: o.size, sha512: o.sha512 }] });
   return { list, sig: signManifest(list, testKey.privateKey) };
 }
 
@@ -170,7 +162,7 @@ interface Copy {
 /** Before launch: a settings file in the copy's own data folder, in the
  *  server store's own format, as if the person had turned the switch. */
 function seedAutomatic(home: string, on: boolean): string {
-  const dataFolder = path.join(home, "data", "gates-local-installed");
+  const dataFolder = dataFolderIn(home);
   mkdirSync(dataFolder, { recursive: true });
   writeFileSync(path.join(dataFolder, SETTINGS_FILE_NAME), `${JSON.stringify({ version: SETTINGS_FILE_VERSION, settings: { ...defaultSettings("app"), updateAutomatic: on } }, null, 2)}\n`);
   return dataFolder;
@@ -178,24 +170,13 @@ function seedAutomatic(home: string, on: boolean): string {
 
 async function open(artifact: string, name: string, feed: Feed, automatic: boolean): Promise<Copy> {
   const home = path.join(work, name);
-  const installed = path.join(home, "Gates-Local.AppImage");
   mkdirSync(home);
   const seeded = seedAutomatic(home, automatic);
-  writeFileSync(installed, readFileSync(artifact));
-  chmodSync(installed, 0o755);
-  const app = await _electron.launch({
-    executablePath: installed,
-    args: ["--no-sandbox", "--disable-gpu"],
-    env: {
-      ...baseEnv, APPIMAGE_EXTRACT_AND_RUN: "1", TMPDIR: home,
-      PATH: `${bin}:${baseEnv["PATH"] ?? "/usr/bin:/bin"}`,
-      XDG_DATA_HOME: path.join(home, "data"), XDG_CONFIG_HOME: path.join(home, "config"),
-      GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-      GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
-      GATES_LOCAL_UPDATE_FEED: feed.url,
-      GATES_LOCAL_UPDATE_TEST_KEYS: publicBase64(testKey.publicKey),
-    },
-    timeout: 30_000,
+  const app = await launchCopy(artifact, home, baseEnv, git, {
+    GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
+    GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+    GATES_LOCAL_UPDATE_FEED: feed.url,
+    GATES_LOCAL_UPDATE_TEST_KEYS: publicBase64(testKey.publicKey),
   });
   expect(await app.evaluate(({ app: electron }) => electron.isPackaged)).toBe(true);
   const page = await app.firstWindow();
@@ -383,8 +364,8 @@ try {
   await probe.app.close();
   current = undefined;
 
-  expect(existsSync(gitCalls) ? readFileSync(gitCalls, "utf8") : "").toBe("");
-  report["gitCalls"] = 0;
+  expect(git.calls()).toBe("");
+  report["git"] = git.how === "recorded" ? { calls: 0 } : { onPath: false };
   report["screenshots"] = shots.map((file) => path.relative(output, file));
   writeFileSync(path.join(output, "report.json"), JSON.stringify({ passed: true, ...report }, null, 2) + "\n");
   console.log(`Installed-download probe passed: version ${version}, ${shots.length} screenshots in ${output}.`);

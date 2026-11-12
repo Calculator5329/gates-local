@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpGet } from "./http.ts";
@@ -11,6 +11,7 @@ import type { InstallManifest } from "./schemas.ts";
 import {
   FAKE_RELEASE_FORMAT,
   buildFakeRelease,
+  fakeOllamaScript,
   freePort,
   removeDir,
   startFakeOllama,
@@ -282,6 +283,73 @@ describe("wrong service on the port", () => {
     const wrong = await probe(other.baseUrl);
     expect(wrong).toMatchObject({ kind: "wrong-service", port: String(other.port) });
     expect(wrong.kind === "wrong-service" ? wrong.detail : "").toContain(`port ${other.port} (${other.baseUrl})`);
+  });
+});
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function until(check: () => boolean, ms: number): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (check()) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return check();
+}
+
+/** The fake serve starts a runner child and writes its pid; with listen false it never answers.
+ *  The runner stays in serve's process group, as an Ollama runner does. */
+async function startTree(o: { readonly listen: boolean; readonly startTimeoutMs?: number }) {
+  const pidFile = path.join(work, "runner.pid");
+  const runner = `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }).pid));\n`;
+  const base = fakeOllamaScript();
+  writeFakeBinary(installedBinary(appDataDir, VERSION), (o.listen ? base : base.replace(/^server\.listen\(.*$/m, "setInterval(() => {}, 1000);")) + runner);
+  const made = await makeRuntime({ externalBaseUrl: await nothingAt(), ...(o.startTimeoutMs ? { startTimeoutMs: o.startTimeoutMs } : {}) });
+  const ensured = made.rt.ensure();
+  expect(await until(() => existsSync(pidFile) && readFileSync(pidFile, "utf8") !== "", 10_000)).toBe(true);
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  // A runner left behind by a red run must not outlive the test.
+  cleanups.push(() => {
+    if (alive(pid)) process.kill(pid);
+  });
+  expect(alive(pid)).toBe(true);
+  return { ...made, status: await ensured, pid };
+}
+
+// Ollama serves from one process and runs each model in a child process. On
+// Linux and macOS the runtime ends the app-owned serve's whole process group,
+// and these tests fail if it ends only the handle it holds.
+// Skipped on Windows: there the runners end with serve because the pinned
+// Ollama puts each runner in a kill-on-close job object of its own, which the
+// runtime neither creates nor touches. A fake runner here would only show
+// Node's job object (a non-detached child dies with its parent) or, detached,
+// a tree no real Ollama makes; neither is the runtime's doing.
+describe.skipIf(process.platform === "win32")("process tree: the app-owned Ollama's runners end with it", () => {
+  it("stop ends the runner too", async () => {
+    const { rt, status, pid } = await startTree({ listen: true });
+    expect(status.state).toBe("ready");
+    expect((await rt.stop()).stopped).toBe(true);
+    expect(await until(() => !alive(pid), 3000)).toBe(true);
+  });
+
+  it("killNow (a shutdown out of time) ends the runner too", async () => {
+    const { rt, status, pid } = await startTree({ listen: true });
+    expect(status.state).toBe("ready");
+    rt.killNow();
+    expect(await until(() => !alive(pid), 3000)).toBe(true);
+  });
+
+  it("a start that never answers ends the runner too", async () => {
+    const { status, pid } = await startTree({ listen: false, startTimeoutMs: 3000 });
+    expect(status.state).toBe("error");
+    expect(await until(() => !alive(pid), 3000)).toBe(true);
   });
 });
 

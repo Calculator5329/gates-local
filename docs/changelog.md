@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-11: The Windows installer and the Linux AppImage, checked end to end from one commit
+
+- The unsigned Windows installer was built on Windows and run through its
+  whole life on a real Windows machine: a silent per-user install with no
+  admin prompt (21 s), first run, close, a newer build installed over the
+  top with chats and settings kept, the update check, and uninstall.
+  Every step exited 0. The Linux AppImage from the same commit passed its
+  packaged checks on the Linux test machine. `docs/releasing.md` has the
+  record, with sizes, hashes and times.
+- An installed copy that checks for updates before any release exists
+  says "No release list was found on the release page."
+- The packaged update checks share one launch helper for both systems.
+  The check on a plain build no longer depends on what the real release
+  page answers: it requires that the plain build sends nothing to the
+  test feed and carries a release key of its own. It was seen failing
+  with a build that obeys the test feed.
+- Nothing changed in how the app stops its own Ollama. A change that
+  ended the whole process tree on Windows was written and then taken out
+  in review: the pinned Ollama build already ties its runner processes
+  to the one the app starts, and the change could have ended an
+  unrelated program. The three process-tree tests stay for Linux and
+  macOS and are skipped on Windows, with the reason in the file.
+- Not observed, and needing a person: the SmartScreen warning, a
+  double-click launch on a logged-in desktop, a first chat with a real
+  model on Windows, and a normal AppImage launch on a machine with FUSE.
+
 ## 2026-11-11: A 2,000-turn thread finishes mounting in about half the time
 
 - After a long thread opens, the turns above the screen mount in idle

@@ -849,3 +849,97 @@ recorded-new data/profile folders, confirmed all nine tracked objects absent,
 and removed the lane cache. The persistent unit completed with exit 0 without
 an interruption or app retry. Packaged self-update still refused with the
 expected standalone-copy message.
+
+### Windows installer and Linux AppImage from one commit, 2026-11-11
+
+Every build below came from committed source `0e3b5c11`, which contains main
+at `4d135b23`. The Windows half used the same method as the round above:
+`git archive` and `scp` into a new lane-owned cache folder, script files with
+real exit codes over non-interactive PowerShell SSH, one persistent systemd
+user unit for the whole round, and the real per-user install, profile and
+data locations, each recorded absent first. Unlike the earlier rounds, this
+round held one exclusive place in the shared test-machine queue for its
+duration and released it afterwards; waiting on other runs without a place
+had left an earlier attempt behind a full queue for over an hour.
+
+#### Native Windows round
+
+| Installer | Kind | Bytes | Native build | Authenticode |
+| --- | --- | ---: | ---: | --- |
+| `Gates-Local-0.1.90-Setup-x64.exe` | plain | 128,940,582 | 67.0 s | NotSigned; no signer |
+| `Gates-Local-0.1.91-Setup-x64.exe` | plain | 128,940,508 | 55.7 s | NotSigned; no signer |
+| `Gates-Local-0.1.91-Setup-x64.exe` | test build | 128,940,651 | 56.2 s | NotSigned; no signer |
+
+SHA-512 of the two plain installers, from Windows:
+
+```text
+0.1.90 60fe654ffce90f7666ef5931a82d2755bdc2f5b4b7d488967f5d20c3fb656dd7e476762e2653f187679b02105699993ba44be8d1585caa725571f547793c8f98
+0.1.91 dd9c1df993599533c4b9be9a8626e574a36d4cb633a98d848e7e0e727b7e1f61d8f9eb20e7f10efdac3cd6b5ea57e4a11b932fcf1dac49eb4d444cee793dc1a8
+```
+
+Node `v24.18.0` and pnpm `11.10.0` passed their transport checks, then
+`pnpm install --frozen-lockfile` (12 s) and each `pnpm package:win` exited 0.
+The app and its driver ran with `%SystemRoot%\System32;%SystemRoot%` as PATH;
+no Node, pnpm or Git resolved on it, and no data or profile override was set.
+
+| Check, in execution order | Observation |
+| --- | --- |
+| Silent install | `0.1.90` with `/S --no-desktop-shortcut` exited 0 in 21 s, at `%LOCALAPPDATA%\Programs\gates-local`. |
+| First launch | The packaged server reached `ready` and SQLite was created. The renderer painted **Ollama isn't answering** with Retry 17.4 s after launch. |
+| Origin admission | `gates-local://app` got WebSocket 101; `file://`, `null`, `http://evil.example` and `gates-local://other` each got 403. |
+| Closing | Main exited 0, 136 ms after close, with no app or Ollama process left. |
+| Upgrade over the top | `0.1.91` installed over `0.1.90` with the same arguments: exit 0 in 25 s, same path, no uninstall between. Settings, an RPC-created thread, a completed-message fixture, profile localStorage and a model-file fixture all survived. Closing took 90 ms, with nothing left running. |
+| Plain update check | The installed plain `0.1.91` trusts the shipped release key and, against the real release page, said "No release list was found on the release page." (nothing is published yet). |
+| Test-build journeys | With the `0.1.91` test build installed: the installed-check journey passed in 43 s and the installed-download journey in 26 s. |
+| Uninstall | The installed uninstaller exited 0 and removed the app folder, Start Menu shortcut and both HKCU keys. Data and profile stayed, as `deleteAppDataOnUninstall: false` says. |
+
+The first-run probe held the app's whole port range with lane-owned HTTP 404
+endpoints, so the screen also said that something else holds the port. A
+computer with no Ollama and free ports shows a different first-run screen;
+that was not observed on Windows. No real Ollama or model was started or
+contacted. Electron stderr again recorded one GPU-process `exit_code=34`
+warning; rendering and captures worked.
+
+After the reports and images were copied, cleanup removed the two data and
+profile folders that had been absent before the round, confirmed all nine
+tracked objects absent, and removed the lane cache.
+
+**The runtime's Windows stop is unchanged.** The round on `0e3b5c11` ran with
+a runtime change that ended the app's Ollama with `taskkill /T /F`; review
+took it out afterwards, so the runtime again ends only the `ollama serve`
+process it started. The packaged steps above did not start an Ollama, so
+that change played no part in them. On Windows the runners end with serve
+because the pinned Ollama build puts each runner in a kill-on-close job
+object of its own. That was read in Ollama's source at the pinned tag, not
+observed with a real Ollama; observing it is still open. The three
+process-tree tests cover the Linux and macOS group stop and are skipped on
+Windows.
+
+The runtime test file on native Windows, at the branch head after that change:
+12 passed, 4 failed, 3 skipped (the process-tree tests). Three of the failures
+expect an `ollama` found on PATH to be used; on Windows the runtime only ever
+runs its pinned copy, so they cannot pass there. The fourth, which starts the
+app's copy and stops it, passed alone in 8.4 s with a 60 s limit: it is slower
+than the 5 s test limit on that machine, not stuck.
+
+#### Linux AppImage probes
+
+Built on the Linux test machine at `0.1.91`: a test build and a plain build,
+each 135,889,525 bytes, 33 s and 30 s. The plain AppImage's SHA-512:
+
+```text
+9fcb3008e04fbb6033701f8edf37689ca279e828493317b741fde1e64529a0ccb2a5831fe55b22c58c4b62e6decc24f3ae3eedc25adc384deb29aae1c1cb3985
+```
+
+| Probe | Result |
+| --- | --- |
+| `packaged-smoke.ts` | Passed in 5 s: first-run screen, renderer Origin 101, four foreign Origins 403. |
+| `packaged-normal.ts` | Exit 0 as a diagnostic: the test machine has no FUSE, so a normal AppImage launch was not observed. |
+| `packaged-installed-check.ts` | Passed in 50 s, test-build and plain halves. |
+| `packaged-installed-download.ts` | Passed in 29 s. |
+
+#### Not observed
+
+SmartScreen, Defender, a double-click launch, the logged-in Windows desktop, a
+real Ollama or model on either system, a first-run screen with free ports on
+Windows, a normal (FUSE) AppImage launch, signing and "Restart to update".

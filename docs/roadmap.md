@@ -233,9 +233,13 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       job holds no claim yet, and Stop only aborts once the claim lands.
       *Accept:* a test queues a turn behind a held image claim, presses
       Stop, and the turn ends cancelled with the image job untouched.
-- [ ] <!-- workspace:id=work:8775fff1-7abd-5633-b650-d73e80993fc9 --> Windows process trees: `child.kill()` leaves Ollama's runner
-      children alive on Windows. Kill the tree (`taskkill /T`) through the
-      runtime's spawn seam. *Accept:* on the Windows test machine, stopping the app-owned
+- [ ] <!-- workspace:id=work:8775fff1-7abd-5633-b650-d73e80993fc9 --> Windows process trees: nobody has watched a real Ollama's
+      runner processes end when the app stops it on Windows. The pinned build
+      puts each runner in a kill-on-close job object (read in its source at
+      the pinned tag), so `child.kill()` should be enough. Do not add
+      `taskkill /T` without a measured leak: it follows recorded parent
+      process numbers, which Windows does not clear, so it can end an
+      unrelated program (review of the Windows pass, 2026-11-11). *Accept:* on a Windows machine with a model loaded, stopping the app-owned
       Ollama leaves no `ollama*.exe` process.
 - [ ] <!-- workspace:id=work:559de703-5cf5-5bec-948c-b3ebdfb333ba --> Thinking pill follows the model: add `ModelInfo.capabilities` from
       `/api/show` and grey the pill out for a model without "thinking"
@@ -547,6 +551,17 @@ are covered in `composer-action.spec.ts` and `composer-press.spec.ts`.
       *Accept:* a reading of the readable time on a machine that gives long idle deadlines, or the first callback stops after its first slice.
 - [ ] <!-- workspace:id=work:b20cbda0-157a-5a5f-8f2e-4b5284aa54e9 --> The fill's timer path (browsers without idle callbacks) has no browser run.
       *Accept:* the long-thread journey passes with `requestIdleCallback` removed, or the path is dropped for the browsers the app ships in.
+
+*Windows pass, follow-ups:*
+
+- [ ] <!-- workspace:id=work:6583b646-957d-5858-baaf-1507d0a36b30 --> Four tests in `apps/server/src/runtime/runtime.test.ts` fail on native Windows. Three expect an `ollama` found on PATH to be used, which the Windows runtime never does, so they cannot pass there. The fourth starts the app's copy and stops it; it passed alone in 8.4 s but times out at the 5 s limit in a whole-file run.
+      *Accept:* the three are skipped on Windows with the reason or given a Windows expectation, and the fourth has a limit that fits or its slow step is named and fixed; the file is green on native Windows.
+- [ ] <!-- workspace:id=work:c6c1c7fa-e5ce-56c3-87b2-a6b043710bab --> A first-time person's run on Windows has not been observed with a real runtime: install, the first-run screen, the app installing its own Ollama, a model pull and a first chat, on a machine with a discrete GPU.
+      *Accept:* one such run recorded in `docs/releasing.md`, with what the person saw at each step, the SmartScreen warning included.
+- [ ] <!-- workspace:id=work:bb8d45d4-fad9-50a9-835b-6ed3c478940d --> A normal launch of the AppImage (mounted through FUSE) has not been observed on the Linux test machine, which has no FUSE 2 library; the packaged checks run it another way.
+      *Accept:* one double-click or plain command-line launch recorded on a machine with FUSE 2.
+- [ ] <!-- workspace:id=work:1b35f6d5-6547-5d51-bf5b-46a164b89c94 --> The plain-build update check cannot check the release page link while nothing is published, so that check was taken out.
+      *Accept:* after the first release, the plain-build check requires the link to be the real release page.
 
 ## Next: slices 2 to 4
 
