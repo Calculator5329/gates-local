@@ -728,7 +728,6 @@ for (const width of [1440, 360]) {
       await expect(group.getByRole("button", { name: "Add folder…", exact: true })).toBeFocused();
       await section(page, "General");
       for (const name of ["Light", "System", "Dark"]) await measure(`theme-${name}`, ".set", () => page.getByRole("group", { name: "Theme" }).getByRole("button", { name, exact: true }).click());
-      for (const name of ["Large", "Default"]) await measure(`text-${name}`, ".set", () => page.getByRole("group", { name: "Text size" }).getByRole("button", { name, exact: true }).click());
       await section(page, "Tools");
       await measure("tools-off", ".set", () => page.getByRole("switch", { name: "Let the model use tools" }).click());
       await measure("tools-on", ".set", () => page.getByRole("switch", { name: "Let the model use tools" }).click());

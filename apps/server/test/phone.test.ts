@@ -196,7 +196,7 @@ it("UB-01 the phone cannot write settings, Reset included, while the computer ca
   const saved = readFileSync(file, "utf8");
   const preferences = { updateAutomatic: true, updateEveryChange: false };
   // The same fields sent by Advanced > Reset, including its non-update settings.
-  const reset = { defaultModel: null, defaultNumCtx: 16384, thinking: true, theme: "dark", tools: true, imageGen: false, comfyUrl: null, whisperUrl: null, ...preferences, textSize: "default", systemPrompt: null, modelSettings: null } as const;
+  const reset = { defaultModel: null, defaultNumCtx: 16384, thinking: true, theme: "dark", tools: true, imageGen: false, comfyUrl: null, whisperUrl: null, ...preferences, systemPrompt: null, modelSettings: null } as const;
 
   for (const patch of [preferences, { systemPrompt: "from the phone" }, { comfyUrl: "http://192.0.2.1:8188" }, reset]) {
     await expect(phone.call("settings.update", patch)).rejects.toMatchObject({ code: "forbidden" });

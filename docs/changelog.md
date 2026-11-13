@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: Text size is gone from Settings, and so is the ? beside Instructions
+
+- Settings no longer offers Small, Medium and Large text. The setting did not
+  work well, so it is out until it is thought through. A saved choice is
+  ignored, and the rest of the saved settings still load.
+- The ? beside the Instructions scope tabs is gone.
+
 ## 2026-11-12: Successful updates stay silent
 
 - Successful updates no longer leave a message to dismiss at startup or in

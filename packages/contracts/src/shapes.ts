@@ -285,10 +285,6 @@ export type Theme = typeof Theme.Type;
 export const RuntimeMode = S.Literals(["system", "app"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
-/** How large messages and the message box are drawn. */
-export const TextSize = S.Literals(["small", "default", "large"]);
-export type TextSize = typeof TextSize.Type;
-
 /** Product limits, shared by update validation, numeric inputs and legacy-value normalization. */
 export const MODEL_CONTROL_BOUNDS = {
   temperature: { min: 0, max: 5, integer: false },
@@ -361,8 +357,7 @@ export const Settings = S.Struct({
   updateEveryChange: S.optional(S.Boolean),
   /** Desktop-only automatic git checks. Unset means on. Never installs automatically. */
   updateAutomatic: S.optional(S.Boolean),
-  /** Unset means "default". */
-  textSize: S.optional(TextSize),
+  // textSize was removed 2026-11-13: a stored value is dropped on decode, so old files still load.
   /** Unset uses the installed model's system prompt. */
   systemPrompt: S.optional(S.String),
   modelSettings: S.optional(S.Record(S.String, ModelSettings)),
@@ -383,7 +378,7 @@ export const SettingsPatch = S.Struct({
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
-  textSize: S.optional(TextSize),
+  // An older app still sends textSize; unknown keys are dropped on decode, so that is no error.
   systemPrompt: S.optional(S.NullOr(S.String)),
   /** Reset all model overrides in one atomic settings update. Individual edits use settings.model.update. */
   modelSettings: S.optional(S.Null),

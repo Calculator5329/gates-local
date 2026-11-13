@@ -9,7 +9,6 @@ import { Grp, Head, Row, Seg2, useOutside, walk } from "./settings-ui.tsx";
 import { closeTip, esc } from "./ui.tsx";
 import { controlPatch, controlValues, editControl, type ControlDraft, type ControlKey } from "./instruction-draft.ts";
 
-const WHEN = "Saved changes apply to your next message, including in existing chats. A reply already running keeps its settings.";
 const PROMPT_TIP = "Instructions for how the model should answer. They use part of its context window. Gates Local's tool instructions stay in place. An empty custom prompt uses no user or model instructions.";
 
 /** A fixed-height status slot and constant button labels keep save/error states from moving controls. */
@@ -158,7 +157,7 @@ export default function Instructions() {
     <div className="inst-top"><div className="mp-tabs" role="group" aria-label="Instruction scope">
       <button type="button" className={`mp-tab${scope === "all" ? " on" : ""}`} aria-pressed={scope === "all"} onClick={() => setScope("all")}>All chats</button>
       <button type="button" className={`mp-tab${scope === "model" ? " on" : ""}`} aria-pressed={scope === "model"} onClick={() => { setPicked(model ?? null); setScope("model"); }}>Per model</button>
-    </div><span tabIndex={0} role="note" className="btn ghost" aria-label="When changes apply" aria-description={WHEN} data-tip={esc(WHEN)}>?</span></div>
+    </div></div>
     {scope === "all" ? <PromptEditor value={current?.systemPrompt} inherited="" locked={locked} /> : <>
       <Grp><Row label="Installed model"><ModelMenu value={model} onPick={setPicked} models={installed.map(m => ({ name: m.name, text: describeModel(m.name, catalog === NA ? undefined : catalog).name }))} /></Row></Grp>
       {model === undefined ? null : <ModelEditors key={model} model={model} name={name} saved={current?.modelSettings?.[model] ?? {}} shared={current?.systemPrompt} locked={locked} />}

@@ -66,13 +66,6 @@ export function fileUrl(origin: string, token: string | null, path: string): str
   return `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
 
-/** "small" or "large" on the root; the default has no attribute (styles.css --chat-fs). */
-export function applyTextSize(size: Settings["textSize"]): void {
-  const root = document.documentElement;
-  if (size === undefined || size === "default") root.removeAttribute("data-text");
-  else root.setAttribute("data-text", size);
-}
-
 /** Dark or light on the root; "system" removes the attribute so the OS decides (styles.css). */
 export function applyTheme(theme: Settings["theme"]): void {
   const root = document.documentElement;

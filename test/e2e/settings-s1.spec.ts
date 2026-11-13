@@ -1,10 +1,11 @@
 /// <reference lib="dom" />
 // Journeys: the Settings sections the S1 council asked for. The Tools switch
 // really changes what a chat is offered, the Shortcuts page lists bindings
-// that work, Text size and Theme apply at once and persist, Reset puts the
+// that work, Theme applies at once and persists (Text size is gone), Reset puts the
 // settings back, and no section scrolls sideways at 1280 or 360 px.
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { type Params, createClient } from "@gates-local/contracts";
 import type { Page } from "@playwright/test";
 import { CHECKOUT_CACHE, FAKE_URL } from "./env.ts";
 import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
@@ -123,8 +124,16 @@ test("the Shortcuts page lists the bindings that work, and nothing else", async 
   await expect(page.locator("#threadMenu")).toBeVisible();
 });
 
-test("Text size changes messages and the message box at once, and survives a reload", async ({ page, open }) => {
+test("there is no Text size: messages and the message box are 15 px, even after an older app saved Large", async ({ page, open }) => {
   await open();
+  await waitReady(page);
+  // what an app from before the removal sends; it must not fail, and it changes nothing
+  const server = new URL(page.url()).searchParams.get("server");
+  if (!server) throw new Error("No test server URL");
+  const old = createClient(new WebSocket(server));
+  await old.call("settings.update", { textSize: "large" } as Params<"settings.update">);
+  old.close();
+  await page.reload();
   await waitReady(page);
   await sendMessage(page, "How big is this text?");
   await replied(page, 1);
@@ -132,28 +141,15 @@ test("Text size changes messages and the message box at once, and survives a rel
   expect(await fontSize(".md")).toBe("15px");
   expect(await fontSize("#ta")).toBe("15px");
   expect(await fontSize(".bubble")).toBe("15px");
-
-  await section(page, "General");
-  const size = page.getByRole("group", { name: "Text size" });
-  await expect(size.getByRole("button")).toHaveText(["Small", "Default", "Large"]);
-  await expect(size.getByRole("button", { name: "Default" })).toHaveAttribute("aria-pressed", "true");
-  await size.getByRole("button", { name: "Large" }).click();
-  await expect(size.getByRole("button", { name: "Large" })).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Escape");
-  await waitReady(page);
-  expect(await fontSize(".md")).toBe("17px");
-  expect(await fontSize("#ta")).toBe("17px");
-  expect(await fontSize(".bubble")).toBe("17px");
-
-  await page.reload();
-  await waitReady(page);
-  expect(await fontSize("#ta")).toBe("17px");
-  await section(page, "General");
-  await expect(page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Large" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Small" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-text", "small");
-  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Default" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-text", /./);
+
+  await section(page, "General");
+  await expect(page.getByRole("group", { name: "Theme" })).toBeVisible();
+  await expect(page.getByText("Text size", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Text size" })).toHaveCount(0);
+  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByRole("button", { name: "Reset…" }).click();
+  await expect(page.getByRole("group", { name: "Confirm reset" })).not.toContainText("text size");
 });
 
 test("Theme applies the moment it is picked, and says only what the choice does", async ({ page, open }) => {
@@ -189,8 +185,7 @@ test("Reset settings asks first, then puts the settings back and leaves who runs
   await waitReady(page);
   await section(page, "General");
   await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
-  await page.getByRole("group", { name: "Text size" }).getByRole("button", { name: "Large" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-text", "large");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("button", { name: "Reset…" }).click();
@@ -202,7 +197,6 @@ test("Reset settings asks first, then puts the settings back and leaves who runs
   await page.getByRole("button", { name: "Reset…" }).click();
   await page.getByRole("group", { name: "Confirm reset" }).getByRole("button", { name: "Reset", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator("html")).not.toHaveAttribute("data-text", /./);
   await expect(page.getByRole("group", { name: "Confirm reset" })).toHaveCount(0);
 });
 

@@ -17,7 +17,7 @@ import { createSettings } from "./session/settings.ts";
 import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
 import { newerTable } from "./fit-table.ts";
 import { createThreads, sortThreads, withMessage } from "./session/threads.ts";
-import { applyTextSize, applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
+import { applyTheme, dataFolder, serverUrl, webServerUrl } from "./session/platform.ts";
 import { createSettingsReads } from "./session/settings-reads.ts";
 import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./session/navigation.ts";
 import { createUpdates } from "./session/updates.ts";
@@ -87,7 +87,7 @@ const modelsSession = createModels({ applyServerEvent,
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
 
-const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyTextSize, refreshImageStatus: probeImageStatus });
+const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, refreshImageStatus: probeImageStatus });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
@@ -201,7 +201,6 @@ async function hydrateWith(
   if (settings !== NA && settings !== undefined) settingsSession.seedContext();
   restoreSaved();
   applyTheme(settings === NA || settings === undefined ? "system" : settings.theme);
-  applyTextSize(settings === NA || settings === undefined ? undefined : settings.textSize);
   // the pushes that came during the first batch, in order, in this same task
   release(SECOND_BATCH);
 

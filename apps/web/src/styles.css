@@ -25,7 +25,7 @@
   --r-sm:6px; --r-md:6px; --r-lg:10px; --r-xl:10px;
   --r-ctl:6px; --r-composer:10px; --r-bubble:10px;
   --header-h:52px; --row-h:30px; --sb-w:256px;
-  --chat-fs:15px;                           /* Settings › General › Text size */
+  --chat-fs:15px;                           /* messages and the message box */
   --col:720px;                              /* prose column (F04) */
   --composer-w:calc(var(--col) + 32px);     /* composer text lines up with the prose edge */
 
@@ -228,8 +228,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .turn{animation:fadein .18s ease-out}
 /* A long thread (Timeline's LONG_THREAD): the timeline mounts its last turns first and the rest in
    idle slices, so the whole thread ends up in the DOM. Turns out of view skip style, layout and
-   paint until they scroll near it, so each slice and any later relayout (a resize, a text size
-   change) costs what is on screen, not the whole thread (the 400-message perf spec measured 57-91
+   paint until they scroll near it, so each slice and any later relayout (a window
+   resize) costs what is on screen, not the whole thread (the 400-message perf spec measured 57-91
    ms of style and layout in one task without this). The remembered size (auto) keeps the scrollbar
    steady once a turn has been seen. Short threads skip it: containment snaps each turn's fractional line
    positions to whole pixels, which moves text by a pixel against the design. */
@@ -249,8 +249,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .col>.turn.u{--turn-after:calc(var(--turn-gap) + 12px - var(--u-act-h,24px))}
 .col>.turn:last-child,.col>.turn.noted{--turn-after:0px;--turn-after-done:0px}
 .u-row{display:flex;flex-direction:column;align-items:flex-end}
-[data-text=small]{--chat-fs:14px}
-[data-text=large]{--chat-fs:17px}
 .bubble{max-width:85%;border-radius:var(--r-bubble);background:var(--message-surface);color:var(--foreground);padding:10px 16px;font-size:var(--chat-fs);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
 .u-act{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .15s}
 .u-act .tm{font-size:12px;color:var(--muted-foreground);margin-right:4px;font-variant-numeric:tabular-nums}

@@ -159,8 +159,9 @@ test.describe("Instructions on a phone", () => {
     await mode(page, "Temperature", "Custom").tap();
     const row = page.locator(".inst-controls .srow").first();
     expect((await row.boundingBox())?.height, "one label and one control line, without an inherited flex gap").toBeLessThanOrEqual(128);
-    await page.getByLabel("When changes apply", { exact: true }).tap();
-    await expect(page.locator("#tip")).toContainText("next message");
+    // The owner took out the "?" beside the scope tabs (2026-11-13); its sentence is not moved anywhere.
+    await expect(page.locator(".inst-top")).not.toContainText("?");
+    await expect(page.getByLabel("When changes apply", { exact: true })).toHaveCount(0);
     await page.locator(".set").evaluate(el => { el.scrollTop = 1; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
     expect(await page.locator(".set").evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);

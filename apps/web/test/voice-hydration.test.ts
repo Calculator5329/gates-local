@@ -98,7 +98,7 @@ it.each([false, true].flatMap((speech) => [false, true].map((tagged) => ({ speec
   hydration.respond(methodSamples["models.list"].result); await tick();
   // Hydration's older snapshot and the buffered settings must leave the
   // received baseline at the last push, not the old connected snapshot.
-  b.server.push("settings.changed", { ...second, textSize: "large" });
+  b.server.push("settings.changed", { ...second, tools: !second.tools });
   expect(store.getState().voiceConnectionVersion).toBe(version + Number(speech));
   health.respond(methodSamples["voice.check"].result); await tick();
   expect(b.server.calls("settings.update")).toHaveLength(speech ? 0 : 1);

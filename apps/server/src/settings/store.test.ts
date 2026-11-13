@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { decodeRequest } from "@gates-local/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { imageToolChoice } from "../image/presets.ts";
 import { createSettingsHandlers } from "./handlers.ts";
@@ -63,6 +64,22 @@ describe("settings store", () => {
     expect(third.get()).not.toHaveProperty("whisperUrl");
     // No temp file left behind by the atomic write.
     expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
+  });
+
+  it("a file from when Text size existed loads at the default size, and an old client's text size is ignored without an error", async () => {
+    const dir = dataDir();
+    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "light", runtimeMode: "system", tools: true, imageGen: false, textSize: "large" } }));
+    const s = await open(dir);
+    expect(s.loadNote).toBeUndefined();
+    expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
+    expect(s.get()).toEqual({ defaultNumCtx: 16384, thinking: true, theme: "light", runtimeMode: "system", tools: true, imageGen: false });
+    // an app from before the removal still sends it with Reset: the request decodes, without it
+    const old = decodeRequest(JSON.stringify({ type: "request", id: "old", method: "settings.update", params: { textSize: "large", thinking: false } }));
+    expect(old.ok && old.value.params).toEqual({ thinking: false });
+    expect(() => s.update({ textSize: "large", thinking: false } as Parameters<typeof s.update>[0])).not.toThrow();
+    expect(s.get()).not.toHaveProperty("textSize");
+    expect(s.get().thinking).toBe(false);
+    expect(JSON.parse(readFileSync(fileIn(dir), "utf8")).settings).not.toHaveProperty("textSize");
   });
 
   it("a corrupt file is kept aside and defaults load", async () => {
