@@ -2,14 +2,14 @@
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
 import { booting, rtInfo, rtOf, unread } from "./Banner.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import { cancelPendingSettings, closeSettings, closeUsage, leaveSettings, newThread, openSettings, openThread, preloadThread, spareScreenEntry, toggleModels, toggleUsage } from "./session.ts";
 import { NA, type Section, getState, runningThreads, setState, useStore } from "./store.ts";
-import { closePop, closeTip, isTouch, useMedia } from "./ui.tsx";
+import { PHONE, closePop, closeTip, isTouch, useMedia } from "./ui.tsx";
 import { FootButton, SidebarUpdate } from "./Updates.tsx";
 
 export const SECTIONS: readonly (readonly [Section, string, IconId])[] = [
@@ -336,7 +336,8 @@ function ChatNav() {
   );
 }
 
-function SettingsNav() {
+/** Settings' sections. Wider than a phone Models is a pop-up of its own (the footer's bot), so it is not among them there. */
+function SettingsNav({ phone }: { phone: boolean }) {
   const section = useStore((s) => s.section);
   return (
     <nav className="sb-body">
@@ -345,7 +346,7 @@ function SettingsNav() {
           <Icon id="left" />
           <span className="grow">Back to chat</span>
         </button>
-        {SECTIONS.map(([id, label, icon]) => (
+        {SECTIONS.filter(([id]) => phone || id !== "models").map(([id, label, icon]) => (
           <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
             <Icon id={icon} />
             <span className="grow">{label}</span>
@@ -371,7 +372,8 @@ function plain(n: ReactNode): string {
 
 /** The gear. While the runtime is not ready it carries what the runtime row said, and a click opens Settings › Runtime as the row did. */
 function SettingsButton() {
-  const inSettings = useStore((s) => s.view === "settings");
+  // Models is a pop-up of its own: the bot is lit for it, not the gear
+  const inSettings = useStore((s) => s.view === "settings" && s.section !== "models");
   const conn = useStore((s) => s.conn);
   const runtime = useStore((s) => s.runtime);
   const settings = useStore((s) => s.settings);
@@ -381,12 +383,12 @@ function SettingsButton() {
   const info = boot || none || rtOf({ conn, runtime, settings }) === "ready" ? null : rtInfo({ conn, runtime, settings });
   const g = settingsIcon(info && { text: plain(info.text), tip: info.tip, dot: info.dot });
   return (
-    <Pressed on={inSettings}>
     <FootButton
       icon="gear"
       label={g.label}
       tip={g.tip}
       {...(inSettings ? { tone: "on" as const } : {})}
+      pressed={inSettings}
       dot={g.dot}
       onClick={() =>
         closeDrawer(() => {
@@ -398,7 +400,6 @@ function SettingsButton() {
         }, true)
       }
     />
-    </Pressed>
   );
 }
 
@@ -424,16 +425,15 @@ function ModelsButton() {
   burst.current = finishedInBurst(burst.current, all);
   const m = modelsIcon(all.filter((p) => p.state !== "error" || !seenFailures.has(p)), (tag) => describeModel(tag, catalog).name, burst.current);
   return (
-    <Pressed on={inModels}>
     <FootButton
       icon="bot"
       label={m.label}
       tip={m.tip}
       {...(m.state === "failed" ? { tone: "red" as const } : m.state === "downloading" ? { tone: "fg" as const, ring: m.progress } : {})}
+      pressed={inModels}
       dot={m.failed ? "red" : null}
       onClick={() => closeDrawer(() => toggleModels(all.some(running)), true)}
     />
-    </Pressed>
   );
 }
 
@@ -441,30 +441,22 @@ function ModelsButton() {
 function UsageButton() {
   const open = useStore((s) => s.panel === "usage");
   return (
-    <Pressed on={open}>
     <FootButton
       icon="bars"
       label="Usage"
       tip="Usage"
       cls="usage"
       {...(open ? { tone: "on" as const } : {})}
+      pressed={open}
       onClick={() => closeDrawer(toggleUsage, true)}
     />
-    </Pressed>
   );
 }
 
-/** The footer icons open and close what they name, so assistive tech hears each as a toggle: aria-pressed on the button inside (FootButton takes no such prop yet). */
-function Pressed({ on, children }: { on: boolean; children: ReactNode }) {
-  const box = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    box.current?.firstElementChild?.setAttribute("aria-pressed", String(on));
-  });
-  return <span ref={box} style={{ display: "contents" }}>{children}</span>;
-}
-
 export function Sidebar() {
-  const inSettings = useStore((s) => s.view === "settings");
+  // under the Models pop-up (wider than a phone) the sidebar keeps its threads
+  const phone = useMedia(PHONE);
+  const inSettings = useStore((s) => s.view === "settings" && (phone || s.section !== "models"));
   return (
     <aside className="sb">
       {/* the same head in chat and Settings, so the first row below it never moves between the two */}
@@ -477,7 +469,7 @@ export function Sidebar() {
           <Icon id="x" />
         </button>
       </div>
-      {inSettings ? <SettingsNav /> : <ChatNav />}
+      {inSettings ? <SettingsNav phone={phone} /> : <ChatNav />}
       <div className="sb-foot">
         <SettingsButton />
         <ModelsButton />

@@ -45,20 +45,20 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   const r = recorder();
   r.check("open Settings", await watchWhole(page, section("General"), () => page.keyboard.press("Control+Comma"), delay));
   const names = (await page.locator(".snav button:not(.back)").allInnerTexts()).map((t) => t.trim()).filter((t) => t !== "" && t !== "General");
-  expect(names, "the sections this journey visits").toContain("Models");
+  expect(names, "Models is the footer's own pop-up, not a section (settings row 6)").not.toContain("Models");
   for (const name of names) {
     await settled(delay, 3000);
     const button = page.locator(".snav").getByRole("button", { name, exact: true });
     r.check(`first visit to ${name}`, await watchWhole(page, section(name), () => button.click(), delay));
-    if (name === "Models") {
-      await settled(delay, 3000);
-      r.check("Models, Download tab", await watchWhole(page, { root: ".set", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
-      await settled(delay, 3000);
-      r.check("Models, back to Installed", await watchWhole(page, { root: ".set", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByRole("tab", { name: /Installed/ }).click(), delay));
-    }
   }
   await settled(delay, 3000);
   r.check("General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+  await settled(delay, 3000);
+  r.check("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click(), delay));
+  await settled(delay, 3000);
+  r.check("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
+  await settled(delay, 3000);
+  r.check("Models, back to Installed", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Installed" } }, () => page.getByRole("tab", { name: /Installed/ }).click(), delay));
   expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
 });
 

@@ -125,7 +125,8 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     const show = () => {
       if (nav !== navGen) return;
       pendingSettings = null;
-      setState((s) => ({ view: "settings", section: section ?? s.section, addPage, ownerConfirm: false, panel: null }));
+      // Settings on its own (the gear, Ctrl+,) never reopens on Models, which is its own pop-up
+      setState((s) => ({ view: "settings", section: section ?? (s.section === "models" ? "general" : s.section), addPage, ownerConfirm: false, panel: null }));
       enterScreen();
     };
     // The visible composer must still send into its visible thread while a chunk

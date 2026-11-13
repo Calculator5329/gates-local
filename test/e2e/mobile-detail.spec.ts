@@ -3,7 +3,7 @@
 // targets by width, code and table overflow, first run, the empty thread and
 // Settings' navigation. mobile.spec.ts has the whole journeys.
 import type { Page } from "@playwright/test";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -751,8 +751,7 @@ test.describe("the desktop's model rows", () => {
   test("Remove is in the row's ⋯ menu and nowhere under the row", async ({ page, open }) => {
     await open();
     await waitReady(page);
-    await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+    await openModels(page);
     const row = page.locator('.mp-row[data-dm="gemma4:12b"]');
     await expect(row).toBeVisible();
     await expect(page.locator(".mp")).not.toContainText("Remove");

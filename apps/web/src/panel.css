@@ -1,5 +1,31 @@
-/* The footer's pop-up over the chat area (Panel.tsx). Flat: no shadow, no
-   gradient, no motion. */
+/* Pop-ups over the app (Panel.tsx). */
+
+/* No -webkit- twin beside backdrop-filter: the minifier folds the pair into the prefixed one
+   alone, which Chromium leaves unblurred. */
+/* Dialog, after T3's: the backdrop is t3code's .dialog-backdrop (the background at 60 % in
+   light, 64 % in dark, blurred 4 px, fading in over 200 ms) over the whole window; the box
+   is opaque and flat, its top fixed, so a change of content moves only its bottom edge. */
+:root{--dlg-veil:color-mix(in srgb,var(--background) 60%,transparent)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--dlg-veil:color-mix(in srgb,var(--background) 64%,transparent)}
+}
+:root[data-theme="dark"]{--dlg-veil:color-mix(in srgb,var(--background) 64%,transparent)}
+@keyframes dlg-fade{from{opacity:0}}
+.dlg-dim{position:fixed;inset:0;z-index:55;background:var(--dlg-veil);backdrop-filter:blur(4px);animation:dlg-fade .2s ease-out}
+@media (prefers-reduced-motion:reduce){.dlg-dim{animation:none}}
+/* centred with margins, not a transform: a transform would hold the fixed layers inside (the Remove confirm) */
+.dlg{position:fixed;z-index:56;top:56px;left:0;right:0;margin:0 auto;width:min(calc(100vw - 32px),max(720px,66.667vw));max-height:calc(100dvh - 112px);display:flex;flex-direction:column;overflow:hidden;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-lg);outline:none}
+.dlg-head{flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;min-height:52px;padding:8px 12px 8px 20px;border-bottom:1px solid var(--border)}
+.dlg-head h2{margin:0 auto 0 0;font-size:14px;font-weight:600;line-height:30px}
+.dlg-body{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:20px 24px 24px}
+/* Models: the tabs are the header's controls, their underline on its rule; the list is centred below */
+.dlg-head:has(.mp-tabs){padding-top:0;padding-bottom:0}
+.dlg-head .mp-tabs{align-self:stretch;height:auto;margin:0 0 -1px;border:0}
+.dlg-body>.mp{max-width:1040px;margin:0 auto}
+/* Models' body keeps Settings' .set for its controls' look; as tall as its content, and no empty gutter when it does not scroll */
+.dlg-body.set{flex:0 1 auto;scrollbar-gutter:auto}
+
+/* The footer's Usage pop-up over the chat area. Flat: no shadow, no gradient, no motion. */
 .panel-dim{position:absolute;inset:0;z-index:20;background:var(--scrim)}
 .panel{position:absolute;z-index:21;top:24px;bottom:24px;left:50%;transform:translateX(-50%);width:min(960px,calc(100% - 48px));overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-lg);padding:20px 24px;outline:none}
 /* .panel raises these over .ibtn's own size and display in styles.css */
@@ -13,4 +39,7 @@
 @media (max-width:640px){
   .panel{top:12px;bottom:12px;width:calc(100% - 24px);padding:14px 12px}
   .panel .panel-x{display:inline-flex;width:44px;height:44px;margin:-8px -6px -8px 0}
+  .dlg{top:12px;width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}
+  .dlg-head{padding:4px 4px 4px 14px}
+  .dlg-x{width:44px;height:44px}
 }

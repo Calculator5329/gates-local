@@ -6,9 +6,10 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { CHECKOUT_CACHE } from "./env.ts";
-import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
 
 const section = async (page: Page, label: string) => {
+  if (label === "Models") return openModels(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
 };
@@ -68,7 +69,7 @@ test.describe("while the server is down", () => {
     calm(await saved.textContent());
     await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
 
-    await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+    await openModels(page);
     // Gemma: a tag without dots, so calm() can count one sentence
     const more = page.getByRole("button", { name: "More for Gemma 4 12B" });
     const label = (await more.getAttribute("aria-label")) ?? "";

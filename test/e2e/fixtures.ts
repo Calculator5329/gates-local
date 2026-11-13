@@ -215,6 +215,21 @@ export async function waitReady(page: Page): Promise<void> {
 }
 
 /**
+ * Models: on a desktop width the footer bot's own pop-up (settings row 6); on a phone,
+ * a section of Settings, reached from its list.
+ */
+export async function openModels(page: Page): Promise<void> {
+  if ((page.viewportSize()?.width ?? 1440) <= 640) {
+    await page.keyboard.press("Control+Comma");
+    await page.getByRole("button", { name: "Back to Settings" }).click();
+    await page.locator(".set-list").getByRole("button", { name: "Models" }).click();
+    return;
+  }
+  await page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click();
+  await expect(page.getByRole("dialog", { name: "Models" }).locator(".mp")).toBeVisible();
+}
+
+/**
  * Only the composer unblocked, true from the first frame. For a spec that
  * holds the first reads on purpose and acts before they land; anything else
  * uses waitReady.

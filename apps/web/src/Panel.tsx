@@ -1,9 +1,39 @@
-// The footer's pop-up: one box centred over the chat area (never the
-// sidebar) on a flat dim layer, with its own scroll. A click on the dim layer
-// closes it; App's Escape and Tab rules close it and hold focus inside.
+// Pop-ups over the app. Dialog is T3's: a box centred on the window, about two-thirds of
+// its width and as tall as what is in it, over a backdrop that blurs the whole window; its
+// content brings the header row (DialogHead) and a body that scrolls (.dlg-body). PopPanel
+// is the footer's older pop-up centred over the chat area (Usage, until it moves to Dialog).
+// A click on the dim layer closes either; App's Escape and Tab rules close them and hold
+// focus inside.
 import { type ReactNode, useLayoutEffect, useRef } from "react";
 import { Icon } from "./icons.tsx";
 import "./panel.css";
+
+export function Dialog({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  // focus moves in with the first paint, so a key pressed next lands here
+  useLayoutEffect(() => box.current?.focus({ preventScroll: true }), []);
+  return (
+    <>
+      <div className="dlg-dim" aria-hidden="true" onClick={onClose} />
+      <div ref={box} className="dlg" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+        {children}
+      </div>
+    </>
+  );
+}
+
+/** A Dialog's header row: the title at the left, the controls and Close at the right. */
+export function DialogHead({ title, onClose, children }: { title: string; onClose: () => void; children?: ReactNode }) {
+  return (
+    <div className="dlg-head">
+      <h2>{title}</h2>
+      {children}
+      <button type="button" className="ibtn dlg-x" aria-label="Close" data-tip="Close · Esc" onClick={onClose}>
+        <Icon id="x" />
+      </button>
+    </div>
+  );
+}
 
 export function PopPanel({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);

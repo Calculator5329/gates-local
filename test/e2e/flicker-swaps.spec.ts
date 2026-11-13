@@ -6,12 +6,15 @@ import type { Locator, Page } from "@playwright/test";
 import { decodeRequest } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
 import { burst, delayedMemory, type Frame, transitionMetrics } from "./flicker-probe.ts";
-import { expect, sendMessage, stack, test, waitComposer, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitComposer, waitReady } from "./fixtures.ts";
 
 test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
 async function section(page: Page, name: string, first = false) {
-  if (first) await page.keyboard.press("Control+Comma");
+  const phone = (page.viewportSize()?.width ?? 1440) <= 640;
+  // on a desktop width Models is the footer bot's pop-up; Settings' nav lies under it, so Ctrl+, first
+  if (!phone && name === "Models") return openModels(page);
+  if (first || (!phone && await page.getByRole("dialog", { name: "Models" }).count())) await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
     await page.getByRole("button", { name: "Back to Settings" }).click();
     await page.locator(".set-list").getByRole("button", { name }).click();

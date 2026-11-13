@@ -76,13 +76,14 @@ test("every Settings section is whole on its first frame", async ({ seededThread
       if (delay) await settled(delay, 3000);
       const button = page.locator(".snav").getByRole("button", { name, exact: true });
       report(`first visit to ${name}`, await watchWhole(page, section(name), () => button.click(), delay));
-      if (name === "Models") {
-        if (delay) await settled(delay, 3000);
-        report("Models, Download tab", await watchWhole(page, { root: ".set", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
-      }
     }
     if (delay) await settled(delay, 3000);
     report("back to General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+    // Models is the footer bot's own pop-up (settings row 6), not a section
+    if (delay) await settled(delay, 3000);
+    report("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click(), delay));
+    if (delay) await settled(delay, 3000);
+    report("Models, Download tab", await watchWhole(page, { root: ".dlg", arrive: { selector: ".mp-tab[aria-selected=true] .mp-lbl", text: "Download" } }, () => page.getByRole("tab", { name: /Download/ }).click(), delay));
   } finally { await app.close(); }
   // Findings can carry a test-owned temporary path; they stay in the run's output, not in a file here.
   expect(all, "what arrived late, moved or changed its words").toEqual([]);

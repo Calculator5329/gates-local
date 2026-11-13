@@ -2,7 +2,7 @@
 // Controlled failures at the same wire boundaries used by the real session.
 import type { CatalogEntry, GpuOccupant, GpuStatus, ModelInfo } from "@gates-local/contracts";
 import type { Page } from "@playwright/test";
-import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, openModels, test, waitReady } from "./fixtures.ts";
 
 test.use({ seed: "design", video: "on" });
 const soft = expect.configure({ soft: true });
@@ -72,8 +72,7 @@ for (const missing of ["gpu.status", "models.list"]) {
 }
 
 async function downloads(page: Page) {
-  await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await openModels(page);
   await page.getByRole("tab", { name: /Download/ }).click();
 }
 

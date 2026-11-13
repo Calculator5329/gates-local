@@ -10,7 +10,7 @@
 // the image module), which the e2e stack must never touch.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
-import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { release, state } from "./threads-support.ts";
 
 const DEAD_COMFY = "http://127.0.0.1:9";
@@ -19,6 +19,7 @@ const OTHER_DEAD_COMFY = "http://127.0.0.1:7";
 test.use({ comfyUrl: DEAD_COMFY });
 
 const section = async (page: Page, label: string) => {
+  if (label === "Models") return openModels(page);
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
 };

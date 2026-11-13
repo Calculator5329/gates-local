@@ -4,20 +4,9 @@
 // Installed when it is done, and the model then listed under Installed.
 // Everything a row owns stays inside that row, at desktop and phone width.
 import type { Page } from "@playwright/test";
-import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
-
-const openModels = async (page: Page) => {
-  await page.keyboard.press("Control+Comma");
-  if ((page.viewportSize()?.width ?? 1440) <= 640) {
-    // a phone has no section nav: back to the list, then the section
-    await page.getByRole("button", { name: "Back to Settings" }).click();
-    await page.locator(".set-list").getByRole("button", { name: "Models" }).click();
-    return;
-  }
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
-};
 
 test("set a default from the row menu, then download a model into the list", async ({ page, open }) => {
   await open();
@@ -71,7 +60,8 @@ test("a note about a default that was since saved does not come back with a late
   await waitReady(page);
   await openModels(page);
 
-  const dialog = page.getByRole("dialog");
+  // the Remove confirm, inside the Models pop-up (itself a dialog)
+  const dialog = page.getByRole("dialog", { name: /^Remove / });
   const note = page.locator(".mp").getByRole("alert");
   await page.getByRole("button", { name: "More for Qwen 3.5 9B" }).click();
   await page.getByRole("menuitem", { name: /^Remove…/ }).click();
@@ -111,7 +101,7 @@ test("the remove dialog stays until its removal has finished", async ({ page, op
 
   await page.getByRole("button", { name: "More for Qwen 3.5 9B" }).click();
   await page.getByRole("menuitem", { name: /^Remove…/ }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: /^Remove / });
   await dialog.getByRole("button", { name: "Remove", exact: true }).click();
   await expect.poll(() => held !== undefined).toBe(true);
 
@@ -136,7 +126,7 @@ test("a removal that worked stays done when the new default cannot be saved", as
   await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
 
   // the dialog is finished, the row is gone, and the page says what is left to do
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: /^Remove / })).toHaveCount(0);
   await expect(page.locator('.mp-row[data-dm="qwen3.5:9b"]')).toHaveCount(0);
   const note = page.locator(".mp").getByRole("alert");
   await expect(note).toContainText("Qwen 3.5 9B was removed");

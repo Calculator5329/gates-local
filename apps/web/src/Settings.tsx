@@ -678,7 +678,7 @@ function ResetSettings() {
         <div className="cfm" role="group" aria-label="Confirm reset">
           <b>Reset every setting?</b>
           <ul>
-            <li>Theme, accent, text size, default model, context, tools and image generation go back to how they started.</li>
+            <li>Theme, accent, default model, context, tools and image generation go back to how they started.</li>
             <li>Shared instructions, model instructions and reply controls are cleared.</li>
             <li>Your chats, Library and downloaded models stay.</li>
             <li>Which Ollama Gates Local uses stays as it is.</li>

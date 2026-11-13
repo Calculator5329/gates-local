@@ -8,12 +8,13 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import type { FitTable } from "@gates-local/contracts";
 import { CHECKOUT_CACHE } from "./env.ts";
-import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, openModels, test, waitReady } from "./fixtures.ts";
 
 test.use({ comfyUrl: "http://127.0.0.1:9" });
 
 /** Open a Settings section, by the nav on a desktop width and the list on a phone. */
 const section = async (page: Page, label: string) => {
+  if (label === "Models" && (page.viewportSize()?.width ?? 0) > 640) return openModels(page);
   await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 0) <= 640) {
     await page.getByRole("button", { name: "Back to Settings" }).click();
@@ -549,7 +550,8 @@ test("the small things line up", async ({ page, open }) => {
     await section(page, label);
     return (await page.locator(".set h1").first().boundingBox())?.y;
   };
-  expect(await top("Models")).toBe(await top("General"));
+  // Models is its own pop-up now (settings row 6): its title sits in the dialog's header, not on Settings' line
+  expect(await top("Tools")).toBe(await top("General"));
   await section(page, "Models");
   const sizes = await page.locator(".mp-th > span").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize));
   expect(new Set(sizes).size).toBe(1);

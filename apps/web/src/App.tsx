@@ -16,7 +16,7 @@ import { imageMode } from "./image-choice.ts";
 import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
-import { PopPanel } from "./Panel.tsx";
+import { Dialog, DialogHead, PopPanel } from "./Panel.tsx";
 import { usageScreen } from "./screen-loaders.ts";
 import { call, cancelPendingSettings, closeUsage, deleteThread, leaveSettings, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
@@ -354,10 +354,14 @@ function ThreadMenu() {
   );
 }
 
-/** What Tab must stay inside right now: a phone's sheet or the drawer. */
+/** Wider than a phone, Settings › Models is a pop-up of its own over the chat. */
+export const modelsDialog = (s: Pick<State, "view" | "section">, phone: boolean) => s.view === "settings" && s.section === "models" && !phone;
+
+/** What Tab must stay inside right now: a phone's sheet, a pop-up (Usage, Models) or the drawer. */
 function modalBox(s: State): HTMLElement | null {
   if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
   if (s.panel !== null) return document.querySelector<HTMLElement>(".panel");
+  if (modelsDialog(s, isPhone())) return document.querySelector<HTMLElement>(".dlg");
   if (s.drawer) return document.querySelector<HTMLElement>(".sb");
   return null;
 }
@@ -511,7 +515,9 @@ export function App() {
     };
   }, []);
   // A cold click keeps the existing chat layout until the whole screen is ready.
-  const isSet = view === "settings";
+  const models = useStore((s) => modelsDialog(s, phone));
+  // Settings as a page over the chat; Models, wider than a phone, is a pop-up and leaves the chat in view
+  const isSet = view === "settings" && !models;
   // the section list is a phone's Settings home; leaving Settings forgets it
   useEffect(() => {
     if (view !== "settings" && getState().setList) setState({ setList: false });
@@ -522,7 +528,8 @@ export function App() {
   return (
     <>
       <Sprite />
-      <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={popOpen && phone}>
+      {/* under the Models pop-up the whole window stays mounted and takes no focus, keys or clicks */}
+      <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={(popOpen && phone) || models}>
         <div style={{ display: "contents" }} inert={covered}>
           <Sidebar />
         </div>
@@ -533,7 +540,7 @@ export function App() {
           {isSet ? <SettingsBar /> : <Header isNew={isNew} />}
           <div className="work">
             {/* Settings lies over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
-            <div className={`stage${isSet ? " under" : ""}`} inert={isSet}>
+            <div className={`stage${isSet ? " under" : ""}`} inert={isSet || models}>
                 {isNew || threadId === null ? (
                   <Draft under={isSet} />
                 ) : (
@@ -578,6 +585,12 @@ export function App() {
           </div>
         ) : null}
       </div>
+      {models ? (
+        <Dialog label="Models" onClose={leaveSettings}>
+          {/* Models brings its own header row: its tabs are the header's controls */}
+          {settings.kind === "ready" ? <settings.value.SettingsView /> : <><DialogHead title="Models" onClose={leaveSettings} /><ScreenError /></>}
+        </Dialog>
+      ) : null}
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}
       {popOpen ? <div className="scrim pop-scrim" aria-hidden="true" onClick={() => closePop(true)} /> : null}
       {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}

@@ -216,6 +216,9 @@ for (const width of [1440, 390]) {
           if (width <= 640) {
             await page.getByRole("button", { name: "Back to Settings" }).click();
             await page.locator(".set-list").getByRole("button", { name: label }).click();
+          } else if (section === "models") {
+            // on a desktop width Models is the footer bot's own pop-up (settings row 6)
+            await page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click();
           } else await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
           const content = section === "models" ? page.locator(".mp") : section === "advanced" ? page.locator("#gpuMemory") : page.getByRole("group", { name: "Theme", exact: true });
           await expect(content).toBeVisible();

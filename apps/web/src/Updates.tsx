@@ -30,11 +30,13 @@ export interface FootProps {
   readonly busy?: boolean;
   readonly cls?: string;
   readonly current?: boolean;
+  /** A toggle (Settings, Models, Usage open and close what they name): aria-pressed, true while that is open. */
+  readonly pressed?: boolean;
   readonly onClick: () => void;
 }
 
 /** One 32 px footer button: the icon, an optional ring and an optional dot, words only in data-tip and aria-label. */
-export function FootButton({ icon, label, tip, tone, dot = null, ring, spin = false, busy = false, cls, current = false, onClick }: FootProps) {
+export function FootButton({ icon, label, tip, tone, dot = null, ring, spin = false, busy = false, cls, current = false, pressed, onClick }: FootProps) {
   const ringed = ring !== undefined;
   return (
     <button
@@ -44,6 +46,7 @@ export function FootButton({ icon, label, tip, tone, dot = null, ring, spin = fa
       data-tip={tip}
       aria-disabled={busy || undefined}
       aria-current={current ? "page" : undefined}
+      aria-pressed={pressed}
       onClick={busy ? undefined : onClick}
     >
       {ringed ? <Ring progress={ring} /> : null}

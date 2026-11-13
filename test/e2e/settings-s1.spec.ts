@@ -245,6 +245,8 @@ for (const width of [1280, 360] as const) {
       await waitReady(page);
       await page.keyboard.press("Control+Comma");
       for (const label of SECTIONS) {
+        // on a desktop width Models is the footer bot's own pop-up, not a section (settings row 6)
+        if (width !== 360 && label === "Models") continue;
         if (width === 360) {
           // a phone has no section nav: back to the list, then the section
           await page.getByRole("button", { name: "Back to Settings" }).click();

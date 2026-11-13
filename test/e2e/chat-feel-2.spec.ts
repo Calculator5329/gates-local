@@ -6,7 +6,7 @@ import type { Locator, Page } from "@playwright/test";
 import { decodePayload, decodeRequest, decodeResult, decodeServerMessage } from "@gates-local/contracts";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { FAKE_URL } from "./env.ts";
-import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 interface Box {
   readonly l: number;
@@ -228,11 +228,11 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
 test("Settings > Advanced has one default-context control with 8k on it, and Settings > Models has none", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await openModels(page);
   await expect(page.locator(".mp-row").first()).toBeVisible();
   await expect(page.locator(".set [data-ctx]")).toHaveCount(0);
   await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(0);
+  await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   // one control: the row inside GPU memory, nothing else on the page sets the default
   const seg = page.locator("#gpuMemory").getByRole("group", { name: "Default context" });

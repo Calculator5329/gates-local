@@ -3,7 +3,7 @@
 // offers the embedding model, and the Thinking pill follows the model's
 // capabilities. The picker is a combobox a screen reader can follow.
 import type { Page } from "@playwright/test";
-import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "embed-smallest" });
 
@@ -179,8 +179,7 @@ test("one Ctrl+N after saving a default starts the new chat on the new pick, eve
   // Hold every /api/show, so the pick that follows the new default lands only after the new chat
   // exists. A Qwen load that lands after this call stays resident, and must not keep the pick on it.
   await stack.scenario("embed-smallest", { showDelayMs: 1500 });
-  await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await openModels(page);
   const gemma = page.locator(`.mp-row[data-dm="gemma4:12b"]`);
   await gemma.getByRole("button", { name: /^More for / }).click();
   await page.getByRole("menuitem", { name: "Use as default" }).click();
@@ -194,8 +193,7 @@ test("one Ctrl+N after saving a default starts the new chat on the new pick, eve
 test("Settings lists the embedding model as not for chat, with Remove and no default choice", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+  await openModels(page);
   const row = page.locator(`.mp-row.emb[data-em="${EMBED}"]`);
   await expect(row).toBeVisible();
   await expect(row.locator(".mp-fitc")).toContainText("Embedding model, not for chat");

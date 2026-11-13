@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-13: Models is its own pop-up
+
+- The bot in the sidebar footer opens Models in the middle of the window,
+  over the chat, which stays in view under a light blur. The chat and the
+  thread list are still there when it closes.
+- The pop-up is two-thirds of the window wide and only as tall as the list
+  in it. Its title, the Installed and Download tabs and Close share one row
+  at the top.
+- Esc goes back from Download to Installed, then closes Models and puts the
+  caret back in the message box.
+- Settings no longer lists Models on a computer. On a phone, Models is
+  still a page inside Settings.
+
 ## 2026-11-13: Image mode's new setups, picked by the card's memory
 
 - SDXL Lightning and its pixel-art setup are gone. Image mode runs FLUX.2

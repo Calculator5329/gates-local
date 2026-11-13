@@ -3,7 +3,7 @@
 // reports. One that reports no maximum runs at the safe fallback.
 import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
-import { expect, openGpuMemory, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openGpuMemory, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 const stopButton = (page: Page) => page.getByRole("button", { name: "Stop" });
 
@@ -19,8 +19,7 @@ test.describe("a model with a 2,048 context window", () => {
     await open();
     await waitReady(page);
     await test.step("show the usable model and default fallback", async () => {
-    await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+    await openModels(page);
     const row = page.locator('.mp-row[data-dm="tiny-chat:2k"]');
     await expect(row.locator(".mp-fitc")).toHaveText("Should run well");
     await expect(row).not.toHaveClass(/\bcant\b/);

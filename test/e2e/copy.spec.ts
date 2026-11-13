@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import type { Page } from "@playwright/test";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, test, waitReady } from "./fixtures.ts";
 
 interface ClipboardProbe {
   read: () => Promise<string>;
@@ -86,8 +86,7 @@ for (const fallback of ["false", "throw"] as const) {
       await expect(copy).not.toHaveAttribute("data-tip", "Copied");
       await expect(copy).not.toHaveText("Copied");
     }
-    await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Models", exact: true }).click();
+    await openModels(page);
     await page.locator(".mp-kebab").first().click();
     await page.getByRole("menuitem", { name: /Copy Ollama name/ }).click();
     await expect(page.getByRole("menuitem", { name: /Couldn't copy/ })).toBeVisible();

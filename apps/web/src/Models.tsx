@@ -33,11 +33,12 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { pull } from "./session.ts";
+import { DialogHead } from "./Panel.tsx";
+import { leaveSettings, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
 import { COMPUTER_ONLY, Fail, Tipped, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, setState, useStore } from "./store.ts";
-import { FitSkel, closeTip, esc } from "./ui.tsx";
+import { FitSkel, PHONE, closeTip, esc, useMedia } from "./ui.tsx";
 
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const cannotSaveDefault = (s: State) => s.settings === NA || s.unavailable["settings.update"] === true;
@@ -87,6 +88,7 @@ export function ModelsPage() {
   const addPage = useStore((s) => s.addPage) && canDownload;
   const count = useStore((s) => s.models?.length);
   const tab = addPage ? "download" : "installed";
+  const phone = useMedia(PHONE);
   const tabs = [useRef<HTMLButtonElement>(null), useRef<HTMLButtonElement>(null)] as const;
   const go = (download: boolean, focus = false) => {
     closeTip();
@@ -99,10 +101,7 @@ export function ModelsPage() {
       go(e.key === "End" || (e.key !== "Home" && !addPage), true);
     }
   };
-  return (
-    <div className="mp">
-      <div className="mp-head">
-        <h1>Models</h1>
+  const tablist = (
         <div className="mp-tabs" role="tablist" aria-label="Models" onKeyDown={onKey}>
           <button
             ref={tabs[0]}
@@ -138,10 +137,30 @@ export function ModelsPage() {
             </button>
           ) : null}
         </div>
+  );
+  const panel = (
+    <div role="tabpanel" id="mp-panel" aria-labelledby={tab === "installed" ? "mp-tab-installed" : "mp-tab-download"}>
+      {tab === "installed" ? <Installed /> : <DownloadTab />}
+    </div>
+  );
+  // Wider than a phone Models is its own pop-up (App.tsx): the tabs are its header's controls, the list scrolls below.
+  if (!phone) {
+    return (
+      <>
+        <DialogHead title="Models" onClose={leaveSettings}>{tablist}</DialogHead>
+        <div className="dlg-body set">
+          <div className="mp">{panel}</div>
+        </div>
+      </>
+    );
+  }
+  return (
+    <div className="mp">
+      <div className="mp-head">
+        <h1>Models</h1>
+        {tablist}
       </div>
-      <div role="tabpanel" id="mp-panel" aria-labelledby={tab === "installed" ? "mp-tab-installed" : "mp-tab-download"}>
-        {tab === "installed" ? <Installed /> : <DownloadTab />}
-      </div>
+      {panel}
     </div>
   );
 }
