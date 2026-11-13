@@ -132,7 +132,8 @@ describe("killed again during the recovery, at each point of rows B1 to C", () =
       if (path === "forward") expectForwardEnd(w, recovery.outcome);
       else expectGoBackEnd(w, recovery.outcome);
     }
-  });
+    // One case walks every second crash point, so its time is the whole loop's, not one recovery's.
+  }, 120_000);
 
   it("every point of rows B1 to C on each path was reached by some second crash", () => {
     expect([...hit.forward].toSorted()).toEqual(second(FORWARD).toSorted());
