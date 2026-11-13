@@ -37,6 +37,22 @@ function fakeState(): { runner: number; other: number; total: number } {
   }
 }
 
+/** The state file says the computer has no NVIDIA GPU: answer as nvidia-smi does on one. */
+function noGpu(): boolean {
+  const file = process.env["GATES_LOCAL_FAKE_GPU_STATE"];
+  if (!file) return false;
+  try {
+    const state: unknown = JSON.parse(readFileSync(file, "utf8"));
+    return typeof state === "object" && state !== null && (state as { absent?: unknown }).absent === true;
+  } catch {
+    return false;
+  }
+}
+if (noGpu()) {
+  process.stdout.write("No devices were found\n");
+  process.exit(6);
+}
+
 const query = process.argv.slice(2).find((a) => a.startsWith("--query-"));
 const { runner, other, total } = fakeState();
 const apps = [

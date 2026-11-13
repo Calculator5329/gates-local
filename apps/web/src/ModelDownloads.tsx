@@ -2,18 +2,18 @@
 // their fit and Download or Cancel download, and any other name typed in. The
 // Models page's Download tab shows these as they are, and first run and the
 // Installed tab share the progress bar and timing words.
-import { useEffect, useState } from "react";
-import type { CatalogEntry, FitReport, PullProgress } from "@gates-local/contracts";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
 import { shortGpu } from "./FitPanel.tsx";
-import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
+import { type Verdict, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { answers, rowOf } from "./fit-table.ts";
 import { nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
-import { type ActionResult, cancelPull, pull } from "./session.ts";
+import { type ActionResult, cancelPull, estimateModel, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
-import { Fail, Grp, Row, useAct } from "./settings-ui.tsx";
+import { Grp, Row, useAct, useOutside, walk } from "./settings-ui.tsx";
 import { NA, type State, getState, useStore } from "./store.ts";
 import { Skel, VLabel, closeTip, esc } from "./ui.tsx";
 
@@ -23,33 +23,6 @@ function Progress({ p, name }: { p: PullProgress; name: string }) {
     <div className="prog" role="progressbar" aria-label={`${name} download`} aria-valuenow={pct}>
       <i style={{ width: `${pct}%` }} />
     </div>
-  );
-}
-
-/** First-run detail: bar, bytes, speed, time left, Cancel download. */
-export function DlDetail({ p, name, cancel = true }: { p: PullProgress; name: string; cancel?: boolean }) {
-  const [err, run] = useAct();
-  const canCancel = useStore(canCancelPull);
-  return (
-    <>
-      <Progress p={p} name={name} />
-      <div className="prog-l">
-        <span>{etaText(p)}</span>
-        {cancel && canCancel ? (
-          <button
-            type="button"
-            className="qa"
-            onClick={() => {
-              closeTip();
-              void run(cancelPull(p.name));
-            }}
-          >
-            Cancel download
-          </button>
-        ) : null}
-      </div>
-      <Fail err={err} />
-    </>
   );
 }
 
@@ -124,80 +97,217 @@ interface DownloadActions {
   error(name: string): ActionResult;
 }
 
-function DlRow({ c, numCtx, report, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; actions: DownloadActions }) {
-  const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
-  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
-  const tabled = useStore((s) => s.fitTable !== undefined);
-  const v = report ? verdictOf(report) : undefined;
-  const context = report?.numCtx ?? numCtx;
-  const basis = v?.measured ? "Measured" : "Estimated";
-  const note = v?.measured ? "From the current load." : "Measured after the first load.";
-  const cpu = useStore((s) => noGpu(s.gpu));
-  const dling = p !== undefined && awaitingInstall(p) && !installed;
-  const err = installed ? null : actions.error(c.name);
-  const action = installed ? (
-    <span className="badge">Installed</span>
-  ) : dling ? (
-    <button type="button" className="qa" disabled={p.state === "done"} onClick={() => actions.cancel(p.name)}>
-      Cancel download
-    </button>
-  ) : (
-    <button type="button" className="qa" disabled={v?.k === "no"} onClick={() => void actions.start(c.name)}>
-      Download
-    </button>
-  );
+/** A download's percent, 0 until Ollama has named a size. */
+const pctOf = (p: PullProgress) => (p.totalBytes ? Math.min(100, Math.round((p.completedBytes / p.totalBytes) * 100)) : 0);
+
+/**
+ * The download button every model row shares, and first run (row 18, layout A): idle, its label is
+ * the download's size; running, the same box fills with the percent and the × beside it cancels.
+ * Both boxes keep their size in every state, so nothing beside them moves.
+ */
+export function DlButton({ size, label, p, installed = false, disabled = false, onStart, onCancel, side }: {
+  /** The download's size as it is shown ("6.1 GB"); undefined while it is not known. */
+  size: string | undefined;
+  label: string;
+  p?: PullProgress | undefined;
+  installed?: boolean;
+  disabled?: boolean;
+  onStart?: () => void;
+  onCancel?: (() => void) | undefined;
+  /** What takes the × box while nothing downloads (a row menu); empty by default. */
+  side?: ReactNode;
+}) {
+  const pct = p ? pctOf(p) : 0;
+  const finishing = p !== undefined && (p.state === "done" || p.state === "verifying" || (p.totalBytes !== undefined && p.completedBytes >= p.totalBytes));
   return (
-    <div className="dlrow" data-cat={c.name}>
-      <MakerMark tag={c.name} />
-      <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>`}>
-        <b>{c.label}</b>
-        <span className="d">{c.purpose}</span>
-        <div className="prog-l dl-status" data-tip={err ? esc(err) : dling ? esc(etaText(p)) : undefined}>
-          <span role={err ? "alert" : undefined} className={err ? "dl-error" : undefined}>{err ?? (dling ? etaText(p) : `${gb(c.downloadBytes)} download`)}</span>
-        </div>
-      </div>
-      {/* A fit check is long by nature: the slot keeps its box while its words change (docs/design.md). */}
-      {v ? (
-        <div className="dl-v" data-wait="" data-tip={cpu ? `${basis} ${gb(v.need)} at ${k(context)}, all in system memory (no supported GPU). ${note}` : `${basis} ${gb(v.need)} at ${k(context)}, of ${gb(v.avail)} available on the GPU. ${note}`}>
-          <VLabel v={v} />
-          <small>
-            {v.measured ? "measured" : "est."} {gb(v.need)} at {k(context)}
-          </small>
-        </div>
+    <div className="dl-a">
+      {installed ? (
+        <span className="dl-btn dl-done">Installed</span>
+      ) : p ? (
+        <span className="dl-btn dl-run" role="progressbar" aria-label={`${label} download`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <i style={{ width: `${finishing ? 100 : pct}%` }} />
+          <span>{finishing ? "Finishing" : p.totalBytes ? `${pct}%` : "…"}</span>
+        </span>
       ) : (
-        // the table has no reading for this row: a dash; before the table, the check's word
-        <div className="dl-v" data-wait=""><small>{tabled ? "–" : `Checking… at ${k(numCtx)}`}</small></div>
+        <button type="button" className="dl-btn" aria-label={size === undefined ? "Download" : `Download ${size}`} disabled={disabled} onClick={onStart}>
+          <Icon id="download" />
+          {size ?? "Download"}
+        </button>
       )}
-      <div className="dl-a">{action}</div>
-      {dling ? <Progress p={p} name={c.label} /> : null}
+      {p && onCancel && !installed ? (
+        <button
+          type="button"
+          className="dl-x"
+          aria-label="Cancel download"
+          data-tip="Cancel download"
+          disabled={p.state === "done"}
+          onClick={() => {
+            closeTip();
+            onCancel();
+          }}
+        >
+          <Icon id="x" />
+        </button>
+      ) : side !== undefined && !p ? (
+        <span className="dl-side">{side}</span>
+      ) : (
+        <span className="dl-x off" aria-hidden="true" />
+      )}
     </div>
   );
 }
 
-function CustomPull({ actions }: { actions: DownloadActions }) {
+/** The row's tooltip: the memory it takes and the context it is judged at, said in words. */
+function memoryTip(v: Verdict, context: number, cpu: boolean): string {
+  const basis = v.measured ? "Measured" : "Estimated";
+  const where = cpu ? "all in system memory (no supported GPU)" : `with ${gb(v.avail)} on the GPU`;
+  return `${basis} ${gb(v.need)} of memory with ${k(context)} of context, ${where}.`;
+}
+
+function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx: number; report: FitReport | undefined; mark: boolean; actions: DownloadActions }) {
+  const p = useStore(s => Object.values(s.pulls).findLast(progress => downloadKey(progress.name) === downloadKey(c.name) && awaitingInstall(progress)));
+  const installed = useStore((s) => c.installed || (s.models ?? []).some((m) => downloadKey(m.name) === downloadKey(c.name)));
+  const canCancel = useStore(canCancelPull);
+  const cpu = useStore((s) => noGpu(s.gpu));
+  const v = report ? verdictOf(report) : undefined;
+  const dling = p !== undefined && awaitingInstall(p) && !installed;
+  const err = installed ? null : actions.error(c.name);
+  const tip = `<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span>${v ? `<br>${esc(memoryTip(v, report?.numCtx ?? numCtx, cpu))}` : ""}`;
+  return (
+    <div className="dlrow" data-cat={c.name} data-verdict={report?.verdict}>
+      <MakerMark tag={c.name} />
+      <div className="sl" data-tip={tip}>
+        <b>{c.label}</b>
+        <span className="d dl-status">
+          {err ? (
+            <span role="alert" className="dl-error">{err}</span>
+          ) : dling ? (
+            etaText(p, { speed: false })
+          ) : (
+            <>
+              {c.purpose}
+              {/* only an exception to the line above the list (row 18) */}
+              {mark && v ? <> · <VLabel v={v} /></> : null}
+            </>
+          )}
+        </span>
+      </div>
+      <DlButton
+        size={gb(c.downloadBytes)}
+        label={c.label}
+        p={dling ? p : undefined}
+        installed={installed}
+        onStart={() => void actions.start(c.name)}
+        onCancel={dling && canCancel ? () => actions.cancel(p.name) : undefined}
+      />
+    </div>
+  );
+}
+
+/** A row that cannot run here: what it needs, and no button (row 18). */
+function BigRow({ c, report, numCtx }: { c: CatalogEntry; report: FitReport; numCtx: number }) {
+  const v = verdictOf(report);
+  const cpu = useStore((s) => noGpu(s.gpu));
+  return (
+    <div className="dlrow dl-big" data-cat={c.name} data-verdict={report.verdict}>
+      <MakerMark tag={c.name} />
+      <div className="sl" data-tip={`<b>${esc(c.label)}</b> · <span class="mono">${esc(c.name)}</span><br>${esc(memoryTip(v, report.numCtx || numCtx, cpu))}`}>
+        <b>{c.label}</b>
+        <span className="d">{c.purpose}</span>
+      </div>
+      <span className="dl-need">needs {gb(v.need)} of memory</span>
+    </div>
+  );
+}
+
+/** How long typing rests before a typed name is looked up. */
+const TYPED_DEBOUNCE_MS = 400;
+
+/** The typed name's answer: what the server said for which name, at which context. */
+type Typed = { key: string; numCtx: number; estimate: ModelEstimate | undefined };
+
+function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: number }) {
   const [name, setName] = useState("");
+  const [typed, setTyped] = useState<Typed>();
+  const [menu, setMenu] = useState(false);
+  const cpu = useStore((s) => noGpu(s.gpu));
+  const box = useRef<HTMLDivElement>(null);
+  useOutside(box, menu, () => setMenu(false));
+  // the row menu keys as the Installed menu's do: focus goes in, Escape closes the menu and not the pop-up
+  useEffect(() => {
+    if (menu) box.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [menu]);
+  const closeMenu = () => {
+    setMenu(false);
+    box.current?.querySelector<HTMLElement>(".dl-x")?.focus();
+  };
+  const tag = pullName(name);
+  const key = downloadKey(tag);
+  useEffect(() => {
+    if (tag === "") return;
+    let live = true;
+    const t = setTimeout(() => {
+      void estimateModel(tag, numCtx).then((estimate) => {
+        if (live) setTyped({ key, numCtx, estimate });
+      });
+    }, TYPED_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [tag, key, numCtx]);
+  const answer = typed?.key === key && typed.numCtx === numCtx && tag !== "" ? typed.estimate : undefined;
+  const v = answer?.fit ? verdictOf(answer.fit) : undefined;
+  const big = v?.k === "no";
+  const start = () => {
+    setMenu(false);
+    // the typed name stays until the download starts (W-07)
+    void actions.start(tag).then(ok => { if (ok) setName(current => current === name ? "" : current); });
+  };
+  // the line under the field: the typed name's verdict, said once, before any download
+  const said = tag === "" || answer === undefined ? undefined
+    : answer.found === "no" ? "Not in the Ollama library. Check the name."
+    : answer.found === "unknown" ? "Couldn't read this model's size, so it is not checked."
+    : big ? `Too big for this computer · needs ${gb(v.need)}`
+    : v?.k === "spill" && !cpu ? v.word
+    : undefined;
   return (
     <Row
-      err={actions.error(pullName(name))}
+      err={actions.error(tag)}
       label="Any model from the Ollama library"
       desc={
-        <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
-          Browse the Ollama library ↗
-        </a>
+        said === undefined ? (
+          <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
+            Browse the Ollama library ↗
+          </a>
+        ) : (
+          <span className={big || answer?.found === "no" ? "dl-typed no" : "dl-typed"} role="status" data-tip={v && answer?.fit ? esc(memoryTip(v, answer.fit.numCtx, cpu)) : undefined}>{said}</span>
+        )
       }
     >
       <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
-      <button
-        type="button"
-        className="qa"
-        disabled={pullName(name) === ""}
-        onClick={() => {
-          // the typed name stays until the download starts (W-07)
-          void actions.start(pullName(name)).then(ok => { if (ok) setName(current => current === name ? "" : current); });
-        }}
-      >
-        Download
-      </button>
+      <div className="dl-typed-a" ref={box} onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
+        <DlButton
+          size={answer?.downloadBytes === undefined ? undefined : gb(answer.downloadBytes)}
+          label={tag}
+          disabled={tag === "" || big || answer?.found === "no"}
+          onStart={start}
+          side={big ? (
+            <button type="button" className={`dl-x${menu ? " on" : ""}`} aria-label={`More for ${tag}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(m => !m)}>
+              <Icon id="more" />
+            </button>
+          ) : undefined}
+        />
+        {big && menu ? (
+          <div className="mp-menu dl-menu" role="menu" aria-label={tag}>
+            <button type="button" role="menuitem" className="mp-mi" onClick={start}>
+              <Icon id="download" />
+              Download anyway
+              <span className="mp-k">{answer?.downloadBytes === undefined ? "" : gb(answer.downloadBytes)}</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
     </Row>
   );
 }
@@ -222,9 +332,8 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
               {Array.from({ length: n }, (_, i) => (
                 <div className="dlrow" key={i}>
                   <span className="maker-mark" />
-                  <div className="sl"><b><Skel w="8em" /></b><span className="d"><Skel w="12em" /></span><div className="prog-l dl-status"><Skel w="7em" /></div></div>
-                  <div className="dl-v"><small><Skel w="8em" /></small></div>
-                  <div className="dl-a"><Skel w="88px" /></div>
+                  <div className="sl"><b><Skel w="8em" /></b><span className="d"><Skel w="12em" /></span></div>
+                  <div className="dl-a"><span className="dl-btn dl-skel"><Skel w="64px" /></span><span className="dl-x off" /></div>
                 </div>
               ))}
             </div>
@@ -233,6 +342,16 @@ function GroupsPlaceholder({ rows, first }: { rows: number; first: number }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Who holds GPU memory above the card's steady baseline right now, said once above the list. It is
+ * information: the rows are judged against the card's own memory, and a send still judges right now.
+ */
+export function othersLine(others: { programs: readonly string[]; bytes: number }): string {
+  const [first, second] = others.programs;
+  const who = first === undefined ? "Other programs" : others.programs.length === 1 ? first : others.programs.length === 2 ? `${first} and ${second}` : `${first} and ${others.programs.length - 1} other programs`;
+  return `${who} ${others.programs.length === 1 ? "is" : "are"} using ${gb(others.bytes)} of GPU memory right now.`;
 }
 
 /** The Download tab. */
@@ -284,7 +403,8 @@ export function DownloadTab() {
       return attempt && !retired(key, attempt) ? attempt.error ?? null : null;
     },
   };
-  // the table's row at this context: the one source, never the catalog's own fit
+  // the table's row at this context: the one source, never the catalog's own fit; judged against
+  // the card's own memory (rowOf), whatever the line above the groups says is in use
   const report = (c: CatalogEntry) => rowOf({ fitTable: table, models, numCtx }, c.name);
   // What this context has answered for a row: the table's row, "none" when the
   // table is in without one, undefined until a table that answers comes (an
@@ -296,8 +416,10 @@ export function DownloadTab() {
   // After that only one move happens: a row whose verdict becomes "does not
   // fit" leaves Recommended for the rest of the visit (docs/design.md). Each
   // row's verdict stays live.
+  const runs = (c: CatalogEntry) => verdict(c) === "fits" || verdict(c) === "spills";
   const group = () => {
-    const rec = list.filter(c => c.recommended && (verdict(c) === "fits" || (noGpu(gpu) && verdict(c) === "spills")));
+    // the server's picks for this computer's tier, in the tier's order (row 21)
+    const rec = list.filter(c => c.recommended && runs(c)).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
     const more = list.filter(c => !rec.includes(c));
     return { context: numCtx, recommended: rec.map(c => c.name), other: more.map(c => c.name) };
   };
@@ -312,13 +434,16 @@ export function DownloadTab() {
   const saved = savedGroups?.context === numCtx ? savedGroups : group();
   const fresh = saved !== savedGroups;
   const holding = fresh && list.length > 0 && !settled && waited !== numCtx;
-  const refused = saved.recommended.filter(name => { const c = list.find(e => e.name === name); return c !== undefined && verdict(c) === "refuse"; });
+  const entries = new Map(list.map(c => [c.name, c]));
+  // A row that cannot run here shows in the last group, Too big for this computer (row 18). One
+  // that leaves Recommended so never comes back this visit: should it run again, it is with the rest.
+  const refuses = (c: CatalogEntry) => verdict(c) === "refuse";
+  const refused = saved.recommended.filter(name => { const c = entries.get(name); return c !== undefined && refuses(c); });
   const groups = refused.length === 0 ? saved : { ...saved, recommended: saved.recommended.filter(n => !refused.includes(n)), other: [...refused, ...saved.other] };
   if (list.length > 0 && !holding && (fresh || groups !== saved)) setGroups(groups);
-  const entries = new Map(list.map(c => [c.name, c]));
   const rows = (names: string[]) => names.flatMap(name => {
     const entry = entries.get(name);
-    return entry ? [entry] : [];
+    return entry && !refuses(entry) ? [entry] : [];
   });
   const known = new Set([...groups.recommended, ...groups.other]);
   const rec = rows(groups.recommended);
@@ -329,33 +454,67 @@ export function DownloadTab() {
   if ((drewTwo || (!holding && rec.length > 0)) && slot !== numCtx) setSlot(numCtx);
   const keep = !holding && rec.length === 0 && slot === numCtx;
   // A newly discovered model appears at the end without moving existing rows.
-  const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name))];
-  // the title is worked out from the rows' live verdicts: its words change in place, the rows stay
-  const allSpill = more.length > 0 && more.every(c => verdict(c) === "spills");
+  const more = [...rows(groups.other), ...list.filter(c => !known.has(c.name) && !refuses(c))];
+  const big = holding ? [] : list.filter(refuses);
+  // Said once above the list when every row that runs here runs the same way; then rows carry only
+  // an exception. Worked out from the live verdicts: its words change in place, the rows stay.
+  const runnable = [...rec, ...more];
+  const first = runnable[0] === undefined ? undefined : verdict(runnable[0]);
+  const shared = !holding && runnable.every(c => runs(c) && verdict(c) === first) ? first : undefined;
+  // Rows split between the GPU and slower: the line says the GPU and points at the marked rows, so
+  // its box is never empty once the verdicts are in.
+  const split = !holding && shared === undefined && runnable.some(c => verdict(c) === "fits") && runnable.every(runs);
+  const gpuWord = gpuName === "computer" ? "GPU" : gpuName;
+  const once = shared === "fits" ? `These run on your ${gpuWord}.`
+    : shared === "spills" ? (noGpu(gpu) ? "No supported GPU, so these run in system memory and replies are slower." : "These are bigger than your GPU's memory, so replies are slower.")
+    : split ? `These run on your ${gpuWord}, except the ones marked slower.`
+    : undefined;
+  const mark = (c: CatalogEntry) => shared === undefined && verdict(c) === "spills";
+  const others = table?.memory.kind === "gpu" ? table.memory.others : undefined;
   return (
     <>
       {catalog === NA ? (
         <p className="na">The model list is not available in this build. You can still type a model name below.</p>
+      ) : null}
+      {others && list.length > 0 ? <p className="na dl-others">{othersLine(others)}</p> : null}
+      {/* the line's box stays while its words come and go, so the groups below never move */}
+      {list.length > 0 ? (
+        <p className="dl-once" data-wait="">
+          {once === undefined ? null : <><span className={`vd ${shared === "spills" ? "spill" : "gpu"}`} />{once}</>}
+        </p>
       ) : null}
       {holding ? <GroupsPlaceholder rows={list.length} first={list.filter(c => c.recommended).length} /> : null}
       {keep ? (
         <div className="grp grp-keep" aria-hidden="true"><div className="grp-h"><div className="grp-l"><div className="grp-t">{" "}</div></div></div></div>
       ) : null}
       {!holding && rec.length > 0 ? (
-        <Grp title="Recommended" tip={`Picked for your ${gpuName}. Memory is shown at your current context, ${k(numCtx)}.`}>
+        <Grp title="Recommended" tip={`Picked for your ${gpuName}. `}>
           {rec.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} mark={mark(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
       {!holding && more.length > 0 ? (
-        <Grp title={allSpill ? "Also available · uses system memory" : "Also available"}>
+        <Grp title="Also available">
           {more.map((c) => (
-            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} actions={actions} />
+            <DlRow key={c.name} c={c} numCtx={numCtx} report={report(c)} mark={mark(c)} actions={actions} />
           ))}
         </Grp>
       ) : null}
-      <Grp title="Something else"><CustomPull actions={actions} /></Grp>
+      <Grp title="Something else"><CustomPull actions={actions} numCtx={numCtx} /></Grp>
+      {big.length > 0 ? (
+        <details className="grp dl-bigs">
+          <summary className="grp-h">
+            <div className="grp-l"><div className="grp-t">Too big for this computer<span className="grp-n">{big.length}</span><Icon id="down" cls="dl-chev" /></div></div>
+          </summary>
+          <div className="box">
+            {big.map((c) => {
+              const r = report(c);
+              return r ? <BigRow key={c.name} c={c} report={r} numCtx={numCtx} /> : null;
+            })}
+          </div>
+        </details>
+      ) : null}
     </>
   );
 }

@@ -19,6 +19,14 @@ export const VRAM_SAFETY_MARGIN_BYTES = 512 * MIB;
 /** RAM kept back from MemAvailable before any spill is allowed. */
 export const RAM_SAFETY_MARGIN_BYTES = 2 * GIB;
 
+/**
+ * The system's own share of the memory a computer has (the OS, this app, a browser), held back
+ * when a model is judged against MemTotal rather than what is free right now (the owner's ruling,
+ * 2026-11-13). With RAM_SAFETY_MARGIN_BYTES that is 3 GiB in all, which leaves an 8 GB laptop
+ * room for the smallest curated model. A round figure, not a measurement.
+ */
+export const SYSTEM_RAM_RESERVE_BYTES = 1 * GIB;
+
 /** CUDA context, compute graph scratch and runner buffers beyond weights and KV. */
 export const RUNTIME_OVERHEAD_BYTES = 1 * GIB;
 

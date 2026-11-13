@@ -3,7 +3,14 @@
 // offers the embedding model, and the Thinking pill follows the model's
 // capabilities. The picker is a combobox a screen reader can follow.
 import type { Page } from "@playwright/test";
-import { expect, openModels, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+
+/**
+ * A computer where the 27B cannot load: the 16 GB card and 8 GB of memory. On the stack's 32 GB a
+ * model is judged by the memory the computer has (the owner's ruling, 2026-11-13), and there the 27B
+ * runs, slower.
+ */
+const no27b = () => stack.computer(8);
 
 test.use({ scenario: "embed-smallest" });
 
@@ -57,6 +64,7 @@ test.describe("first run", () => {
 
 // Guards the owner's ruling: the picker never offers an embedding model for chat.
 test("the picker never lists the embedding model and is a connected combobox and listbox", async ({ page, open }) => {
+  await no27b();
   await open();
   await waitReady(page);
   await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
@@ -147,6 +155,7 @@ test.describe("first download", () => {
 
 // Guards the owner's rulings: embedding models are not for chat, and Remove lives in the row's ⋯ menu.
 test("Settings lists the embedding model as not for chat, with Remove and no default choice", async ({ page, open }) => {
+  await no27b();
   await open();
   await waitReady(page);
   await openModels(page);

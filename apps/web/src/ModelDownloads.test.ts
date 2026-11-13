@@ -41,7 +41,7 @@ vi.mock("./store.ts", () => ({
   getState: () => h.state,
   setState: () => undefined,
 }));
-vi.mock("./session.ts", () => Object.fromEntries(["pull", "cancelPull"].map((name) => [name, () => undefined])));
+vi.mock("./session.ts", () => Object.fromEntries(["pull", "cancelPull", "estimateModel"].map((name) => [name, () => undefined])));
 vi.mock("./FitPanel.tsx", () => ({ shortGpu: (name: string) => name }));
 
 const { DownloadTab } = await import("./ModelDownloads.tsx");
@@ -96,7 +96,7 @@ it("F2: a recommended download waits on placeholders for the table, never on the
   expect(first).toContain("data-skel");
   const later = render({ ...state, fitTable: table(fit("qwen3.5:9b", "refuse", 65536)) });
   expect(groups(later)["Recommended"] ?? []).not.toContain("qwen3.5:9b");
-  expect(groups(later)["Also available"]).toEqual(["qwen3.5:9b"]);
+  expect(groups(later)["Too big for this computer"]).toEqual(["qwen3.5:9b"]);
 });
 
 it("F2: at the one-second bound with no table, a row with no answer is not recommended", () => {
@@ -122,17 +122,20 @@ for (const [what, memory] of [["an empty", { kind: "gpu", freeBytes: 16 * GIB, u
     const shown = render(state);
     expect(shown).not.toContain("data-skel");
     expect(groups(shown)).toEqual({ "Also available": ["a:1", "b:1"], "Something else": [] });
-    expect(shown).toMatch(/data-cat="b:1"[\s\S]*?<div class="dl-v" data-wait=""><small>–<\/small>/);
+    // a row with no reading states no verdict
+    expect(shown).toContain('data-cat="b:1">');
   });
 }
 
-it("F2: a table that has no reading for a row answers it: grouped at once, that row not recommended and shown as a dash", () => {
+it("F2: a table that has no reading for a row answers it: grouped at once, that row not recommended and with no verdict", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", true, "fits");
   const shown = render(base({ catalog: [a, b], numCtx: 65536, fitTable: table(fit("a:1", "fits", 65536)) }));
   expect(shown).not.toContain("data-skel");
   expect(groups(shown)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  expect(shown).toMatch(/data-cat="b:1"[\s\S]*?<div class="dl-v" data-wait=""><small>–<\/small>/);
+  expect(shown).toContain('data-cat="b:1">');
+  // with one row unanswered, no verdict is said for all of them
+  expect(shown).toContain('<p class="dl-once" data-wait=""></p>');
 });
 
 it("F2: once grouped, the groups stay put, except that a row whose verdict becomes does-not-fit leaves Recommended once and never comes back", () => {
@@ -141,16 +144,35 @@ it("F2: once grouped, the groups stay put, except that a row whose verdict becom
   const c = entry("c:1", "C", false, "spills");
   const state = base({ catalog: [a, b, c], fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
   const first = render(state);
-  expect(groups(first)).toEqual({ Recommended: ["a:1", "b:1"], "Also available · uses system memory": ["c:1"], "Something else": [] });
+  expect(groups(first)).toEqual({ Recommended: ["a:1", "b:1"], "Also available": ["c:1"], "Something else": [] });
   // a spill reading does not move a row
   const spills = render({ ...state, fitTable: table(fit("a:1", "spills"), fit("b:1", "fits"), fit("c:1", "spills")) });
   expect(groups(spills)["Recommended"]).toEqual(["a:1", "b:1"]);
-  // a refusal moves it, and the other group no longer only spills
+  // a refusal moves it to the last group, closed, with what it needs and no button
   const refused = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "refuse"), fit("c:1", "spills")) });
-  expect(groups(refused)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1", "c:1"], "Something else": [] });
-  // it fits again: it stays where it went for this visit
+  expect(groups(refused)).toEqual({ Recommended: ["a:1"], "Also available": ["c:1"], "Something else": [], "Too big for this computer": ["b:1"] });
+  expect(refused).toMatch(/<details class="grp dl-bigs">/);
+  expect(refused).toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*needs 6\.0 GB of memory/);
+  expect(refused).not.toMatch(/data-cat="b:1" data-verdict="refuse">(?:(?!data-cat)[\s\S])*<button/);
+  // it runs again: it never goes back to Recommended this visit, it is with the rest
   const back = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits"), fit("c:1", "spills")) });
   expect(groups(back)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1", "c:1"], "Something else": [] });
+});
+
+it("the download's size is its button, and a running download fills that button with an × beside it (row 18)", () => {
+  const a = entry("a:1", "A", true, "fits");
+  const idle = render(base({ catalog: [a], fitTable: table(fit("a:1", "fits")) }));
+  expect(idle).toMatch(/<button type="button" class="dl-btn" aria-label="Download 5\.0 GB">/);
+  // the × box is there, hidden, before any download
+  expect(idle).toContain('<span class="dl-x off" aria-hidden="true"></span>');
+  const p = { name: "a:1", state: "downloading", completedBytes: 2 * GIB, totalBytes: 5 * GIB, bytesPerSecond: 50e6 };
+  const running = render(base({ catalog: [a], fitTable: table(fit("a:1", "fits")), pulls: { "a:1": p } }));
+  expect(running).toMatch(/class="dl-btn dl-run" role="progressbar"[^>]*aria-valuenow="40"><i style="width:40%"><\/i><span>40%<\/span>/);
+  expect(running).toContain('aria-label="Cancel download"');
+  // bytes and time left on the row's second line; no speed, no full-row bar
+  expect(running).toMatch(/2\.0 of 5\.0 GB · about [^<]+ left/);
+  expect(running).not.toContain("MB/s");
+  expect(running).not.toContain('class="prog"');
 });
 
 it("an empty Recommended keeps its header slot for the visit when the placeholder drew one, so what is below stays put", () => {
@@ -176,15 +198,24 @@ it("no slot is kept where the placeholder drew one header", () => {
   expect(render(state)).not.toContain("grp-keep");
 });
 
-it("the uses-system-memory title follows the rows' live verdicts, and its rows stay where they are", () => {
+it("a verdict every row shares is said once above the list, a row carries only an exception, and the rows stay where they are (row 18)", () => {
   const a = entry("a:1", "A", true, "fits");
   const b = entry("b:1", "B", false, "spills");
   const state = base({ catalog: [a, b], fitTable: table(fit("a:1", "fits"), fit("b:1", "spills")) });
-  expect(groups(render(state))).toEqual({ Recommended: ["a:1"], "Also available · uses system memory": ["b:1"], "Something else": [] });
-  // the next table says b now fits: the title no longer says it uses system memory
+  const mixed = render(state);
+  expect(groups(mixed)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
+  // mixed: the line above says what most rows do and points at the exception, which only its row says
+  expect(mixed).toMatch(/<p class="dl-once" data-wait=""><span class="vd gpu"><\/span>These run on your RTX, except the ones marked slower\.<\/p>/);
+  expect(mixed.match(/class="vl /g)).toHaveLength(1);
+  expect(mixed).toMatch(/data-cat="b:1"[\s\S]*?class="vl spill"/);
+  // the next table says b now fits too: said once, and no row repeats it
   const fits = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "fits")) });
   expect(groups(fits)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
-  // and back to spilling: the words come back
-  const spills = render({ ...state, fitTable: table(fit("a:1", "fits"), fit("b:1", "spills")) });
-  expect(groups(spills)).toEqual({ Recommended: ["a:1"], "Also available · uses system memory": ["b:1"], "Something else": [] });
+  expect(fits).toMatch(/<p class="dl-once" data-wait=""><span class="vd gpu"><\/span>These run on your RTX\.<\/p>/);
+  expect(fits).not.toContain('class="vl ');
+  // every row spills: said once, the slower words
+  const spills = render({ ...state, fitTable: table(fit("a:1", "spills"), fit("b:1", "spills")) });
+  expect(groups(spills)).toEqual({ Recommended: ["a:1"], "Also available": ["b:1"], "Something else": [] });
+  expect(spills).toContain("These are bigger than your GPU&#x27;s memory, so replies are slower.");
+  expect(spills).not.toContain('class="vl ');
 });

@@ -14,7 +14,8 @@
 // (qwen3.5:14b) is Qwen 3 14B (qwen3:14b) and "Qwen 3.5 VL 9B"
 // (qwen3.5-vl:9b) is Qwen 3 VL 8B (qwen3-vl:8b). Two phrases were five
 // words and are cut to four: "Stronger answers on GPU", "Reads images you
-// attach".
+// attach". The first became "Stronger all-round answers" on 2026-11-13: a
+// phrase about the GPU must not show on a computer without one (row 21).
 
 export interface CuratedModel {
   /** The Ollama tag. */
@@ -30,7 +31,7 @@ export const CURATED_MODELS: readonly CuratedModel[] = [
   { name: "qwen3.5:9b", label: "Qwen 3.5 9B", purpose: "Fast everyday answers", downloadBytes: 6_550_825_550, pullable: true },
   { name: "gemma4:12b", label: "Gemma 4 12B", purpose: "Careful longer answers", downloadBytes: 8_021_618_941, pullable: true },
   { name: "gpt-oss:20b", label: "gpt-oss 20B", purpose: "Step-by-step reasoning", downloadBytes: 13_793_441_566, pullable: true },
-  { name: "qwen3:14b", label: "Qwen 3 14B", purpose: "Stronger answers on GPU", downloadBytes: 9_276_198_565, pullable: true },
+  { name: "qwen3:14b", label: "Qwen 3 14B", purpose: "Stronger all-round answers", downloadBytes: 9_276_198_565, pullable: true },
   { name: "qwen3.5:4b", label: "Qwen 3.5 4B", purpose: "Fastest replies, lighter answers", downloadBytes: 3_324_173_934, pullable: true },
   { name: "qwen3-vl:8b", label: "Qwen 3 VL 8B", purpose: "Reads images you attach", downloadBytes: 6_190_971_699, pullable: true },
   { name: "mistral-small3.2:24b", label: "Mistral Small 3.2 24B", purpose: "Careful writer", downloadBytes: 15_177_384_862, pullable: true },

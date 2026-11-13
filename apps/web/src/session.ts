@@ -87,6 +87,8 @@ const modelsSession = createModels({ applyServerEvent,
 });
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
+/** A typed name's size and fit before its download (row 22); undefined when the server cannot say. */
+export const estimateModel = (name: string, numCtx: number) => call("models.estimate", { name, numCtx }).catch(() => undefined);
 
 // Image generation turning on (or a new address) reads the file list too: Make images left unset is
 // on once a setup there can run, and the server learns that from the same read.

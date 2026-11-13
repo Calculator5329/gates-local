@@ -240,13 +240,37 @@ const { measuredAt: _rowsShareTheTableReading, ...fitRowFields } = FitReport.fie
  * One model at one context in the fit table. needVramBytes is always the total the model needs
  * there (GPU plus system memory). A row has no reading of its own: the table's is the only one.
  * stops: the models whose chats a send stops first, set only when stopping them is what makes it fit.
+ * card: an installed model's verdict against the GPU's own memory, whatever other programs hold
+ * right now (the owner's ruling, 2026-11-13); the row itself is planned right now, as a send loads
+ * it. Every list and Settings show the card; only the composer and a send read right now. A row
+ * offered for download is judged against the card already and has none.
  */
-export const FitRow = S.Struct({ ...fitRowFields, stops: S.Array(S.String) });
+export const FitRow = S.Struct({
+  ...fitRowFields,
+  stops: S.Array(S.String),
+  card: S.optional(
+    S.Struct({
+      verdict: fitRowFields.verdict,
+      freeVramBytes: fitRowFields.freeVramBytes,
+      spillRamBytes: fitRowFields.spillRamBytes,
+      shortfallBytes: fitRowFields.shortfallBytes,
+    }),
+  ),
+});
 export type FitRow = typeof FitRow.Type;
 
-/** The memory line the picker's footer shows, from the table's reading. */
+/**
+ * The memory line the picker's footer shows, from the table's reading. others: the programs holding
+ * GPU memory above the card's steady baseline right now and how much they hold (programs empty when
+ * no listed process explains it), shown as information beside verdicts that judge the card.
+ */
 export const FitMemory = S.Union([
-  S.Struct({ kind: S.Literal("gpu"), freeBytes: Count, usableBytes: Count }),
+  S.Struct({
+    kind: S.Literal("gpu"),
+    freeBytes: Count,
+    usableBytes: Count,
+    others: S.optional(S.Struct({ programs: S.Array(S.String), bytes: Count })),
+  }),
   S.Struct({ kind: S.Literal("cpu") }),
   S.Struct({ kind: S.Literal("unreadable"), detail: S.String }),
 ]);
@@ -485,9 +509,25 @@ export const CatalogEntry = S.Struct({
   downloadBytes: Count,
   installed: S.Boolean,
   recommended: S.Boolean,
+  /** A recommended model's place in its tier: 0 the first pick, then the alternates (runtime/tiers.ts). */
+  rank: S.optional(S.Number),
   fit: S.optional(FitReport),
 });
 export type CatalogEntry = typeof CatalogEntry.Type;
+
+/**
+ * A typed model name before its download: its size from the curated list or the registry, and its
+ * fit against the card and the system memory the computer has. `found` is "no" when the registry
+ * has no such model and "unknown" when it could not be asked (offline, or turned off).
+ */
+export const ModelEstimate = S.Struct({
+  /** The Ollama tag asked about, with ":latest" when the name had no tag. */
+  name: S.String,
+  found: S.Literals(["yes", "no", "unknown"]),
+  downloadBytes: S.optional(Count),
+  fit: S.optional(FitReport),
+});
+export type ModelEstimate = typeof ModelEstimate.Type;
 
 export const SourceKind = S.Literals(["folder", "file", "sqlite"]);
 export type SourceKind = typeof SourceKind.Type;

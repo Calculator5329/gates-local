@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { ContextSize, FitReport, GpuOccupant, GpuStatus } from "@gates-local/contracts";
 import { CONTEXT_SIZES, NO_GPU_TEXT, type Verdict, decodeSpeed, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
-import { fitFor } from "./fit-table.ts";
+import { cardFit, fitFor } from "./fit-table.ts";
 import { setContext, updateSettings } from "./session.ts";
 import { NA, type State, chatReady, setState, useStore } from "./store.ts";
 import { Status } from "./settings-controls.tsx";
@@ -54,25 +54,11 @@ function occName(o: GpuOccupant): { nm: string; small: string; tip: string } {
   }
 }
 
-function andList(xs: readonly string[]): string {
-  return xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1) ?? ""}`;
-}
-
-/** Who holds memory a chat model cannot use, in the design's sentence (F63). */
-function holders(occ: readonly GpuOccupant[]): string | null {
-  const held = occ.filter((o) => o.protected && o.kind !== "chat-model");
-  if (held.length === 0) return null;
-  const names = held.map((o) => occName(o).nm);
-  const total = held.reduce((a, o) => a + r1(o.bytes), 0).toFixed(1);
-  if (held.length === 1) return `${names[0] ?? ""} holds ${total} GB. Closing it makes room; Gates Local never stops it.`;
-  return `${andList(names)} hold ${total} GB. Closing ${held.length === 2 ? "both" : "them"} makes room; Gates Local never stops them.`;
-}
-
 /** A bar segment and its legend swatch: Whisper's gray, and two more so neighbours differ. */
 const swOf = (o: GpuOccupant, i: number) => (o.kind === "whisper" ? "sw-whisper" : i % 2 === 0 ? "sw-occ" : "sw-other");
 const occupantKey = (o: GpuOccupant) => JSON.stringify([o.kind, o.label, o.protected]);
 
-function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: string; v: Verdict; loaded: boolean; numCtx: number }) {
+function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: Verdict; loaded: boolean }) {
   const tot = r1(gpu.totalBytes ?? 0);
   if (tot <= 0) return null;
   const occ = gpu.occupants.filter((o) => o.kind !== "chat-model");
@@ -83,7 +69,8 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
     return { o, gb: r1(o.bytes), key: `${identity}:${n}` };
   });
   const used = parts.reduce((a, p) => a + p.gb, 0);
-  const ch = v.k === "no" ? 0 : Math.min(r1(v.need), Math.max(0, Math.round((tot - used) * 10) / 10));
+  // Right now only: the model is drawn while it is loaded, never an estimate cut to what is free.
+  const ch = !loaded || v.k === "no" ? 0 : Math.min(r1(v.need), Math.max(0, Math.round((tot - used) * 10) / 10));
   const un = Math.max(0, Math.round((tot - used - ch) * 10) / 10);
   const w = (x: number) => `${((x / tot) * 100).toFixed(2)}%`;
   return (
@@ -119,17 +106,14 @@ function MemoryBar({ gpu, name, v, loaded, numCtx }: { gpu: GpuStatus; name: str
             <span className="chip sw-chat" />
             <span className="nm">
               {name}
-              <small>{loaded ? "loaded" : `estimated at ${k(numCtx)}`}</small>
+              <small>loaded</small>
             </span>
             <span className="v">{ch.toFixed(1)} GB</span>
           </div>
         ) : null}
         <div className="lg-r">
           <span className="chip sw-free" />
-          <span className="nm">
-            {loaded ? "Currently free" : "Free after loading"}
-            {loaded ? null : <small>estimated</small>}
-          </span>
+          <span className="nm">Currently free</span>
           <span className="v">{un.toFixed(1)} GB</span>
         </div>
       </div>
@@ -184,23 +168,21 @@ function Speed({ model, name, numCtx, loaded }: { model: string; name: string; n
   );
 }
 
+// The verdict is against the card's own memory (fit-table cardFit); what other programs hold right
+// now is the bar below, never a reason the model won't fit.
 function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: string; gpu: GpuStatus | undefined; loaded: boolean }) {
   const ctx = k(r.numCtx);
   if (v.k === "no") {
     const sys = gpu ? ` plus ${gb(gpu.systemMemoryAvailableBytes)} of system memory` : "";
-    const who = gpu && gpu.vendor === "nvidia" ? holders(gpu.occupants) : null;
     return (
-      <>
-        <div className="fp-n fp-numbers">
-          <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. {gb(r.freeVramBytes)} of GPU memory is available to this model{sys}.
-        </div>
-        {who ? <div className="fp-n">{who}</div> : null}
-      </>
+      <div className="fp-n fp-numbers">
+        <span className="fp-who">{name}</span> needs an estimated {gb(r.needVramBytes)}. The GPU has {gb(r.freeVramBytes)} for a model{sys}.
+      </div>
     );
   }
   return (
     <div className="fp-n fp-numbers">
-      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? gpu?.detail ? gpuHead(gpu) : "no supported GPU" : `${gb(r.freeVramBytes)} available on GPU`}.
+      Estimated {gb(r.needVramBytes)}; {noGpu(gpu) ? gpu?.detail ? gpuHead(gpu) : "no supported GPU" : `${gb(r.freeVramBytes)} on the GPU`}.
       <br />
       {v.k === "spill" ? `${gb(v.amt)} in system memory; slower replies.` : "Runs entirely on the GPU."}
       <br />
@@ -209,7 +191,7 @@ function Numbers({ r, v, name, gpu, loaded }: { r: FitReport; v: Verdict; name: 
   );
 }
 
-/** Where the memory goes, folded under Details in Settings. */
+/** What holds the GPU right now, folded under Details in Settings: information, not the verdict. */
 function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: string; name: string; numCtx: number; gpuRaw: GpuStatus | "na" | undefined; report: FitReport; loaded: boolean }) {
   const gpu = gpuRaw === NA ? undefined : gpuRaw;
   const v = verdictOf(report);
@@ -218,11 +200,11 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
   return (
     <>
       <div className="fp-sep" />
-      <div className="fp-mt">Where the memory goes</div>
+      <div className="fp-mt">In use right now</div>
       {gpu === undefined ? (
         <div className="na">Gates Local couldn't read the GPU just now.</div>
       ) : (
-        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} numCtx={numCtx} />
+        <MemoryBar gpu={gpu} name={name} v={v} loaded={loaded} />
       )}
       {v.k === "no" ? null : <Speed model={model} name={name} numCtx={numCtx} loaded={loaded} />}
     </>
@@ -265,9 +247,9 @@ function useFitModel(model: string, chosen?: ContextSize) {
 }
 
 /**
- * The one default-context control (S1-06) as a normal row, with one live line
- * for the size chosen and each segment's fit in its tooltip; the model's status
- * in its own row beneath, and the GB numbers one step away under Details.
+ * The one default-context control (S1-06) as a normal row with one short line,
+ * each segment's fit in its tooltip; the model's status in its own row beneath,
+ * the one place the fit is said, and the GB numbers one step away under Details.
  */
 function SettingsBody({ model, title, head, action }: { model: string; title: string; head: string; action: ReactNode }) {
   // the control shows the saved default; this model may run below it
@@ -288,7 +270,8 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   const memory = cpu ? "memory" : "GPU memory";
   // the table's row at the size this model runs at; it says estimate until the model has really run there.
   // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
-  const fit = gpuRaw === undefined ? undefined : fitFor(table, model, ctx);
+  // Judged against the card's own memory (cardFit), whatever other programs hold right now.
+  const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
   const defaultSize = saved ?? numCtx;
   // The row below carries the verdict; this line is only for a model that cannot take the saved default.
   const limited = max !== undefined && max < CONTEXT_SIZES[CONTEXT_SIZES.length - 1]!;
@@ -301,7 +284,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
           <div className="ctx-c">
             <span className="mini-seg" role="group" aria-label="Default context">
               {CONTEXT_SIZES.map((c) => {
-                const f = ctxFit(c, max, fitFor(table, model, c), cpu);
+                const f = ctxFit(c, max, cardFit(fitFor(table, model, c)), cpu);
                 return (
                   <button
                     key={c}

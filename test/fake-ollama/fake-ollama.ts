@@ -300,10 +300,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
 
   /** Another program's GPU memory and the card's size (0: nvidia-smi.ts's own), set by POST /__fake/gpu: moves the GPU reading without touching the runtime. */
   let otherMib = 0, totalMib = 0;
+  /** No NVIDIA GPU at all (POST /__fake/gpu {none: true}): the fake nvidia-smi finds no devices. */
+  let absent = false;
   const onGpu = (l: LoadedEntry): number => (options.vramCapBytes > 0 ? Math.min(l.sizeBytes, options.vramCapBytes) : l.sizeBytes);
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
-    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling].map((l) => ({ ...l, sizeBytes: onGpu(l) })), otherMib, ...totalMib > 0 ? { totalMib } : {} }));
+    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling].map((l) => ({ ...l, sizeBytes: onGpu(l) })), otherMib, ...totalMib > 0 ? { totalMib } : {}, ...absent ? { absent } : {} }));
   };
   writeGpu();
 
@@ -320,7 +322,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     turns.length = 0;
     loads.length = 0;
     released.clear();
-    otherMib = 0; totalMib = 0;
+    otherMib = 0; totalMib = 0; absent = false;
     writeGpu();
   };
   if (scenario === "slow-first-token" || scenario === "slow-drip" || scenario === "threads") setScenario(scenario, start.options);
@@ -588,6 +590,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
         if (total !== undefined && (typeof total !== "number" || !Number.isInteger(total) || total < 1)) return json(res, 400, { error: "totalMib must be a whole number of MiB, 1 or more" });
         otherMib = mib;
         if (typeof total === "number") totalMib = total;
+        absent = field(body, "none") === true;
         writeGpu();
         return json(res, 200, { otherMib, ...totalMib > 0 ? { totalMib } : {} });
       }

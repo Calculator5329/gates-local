@@ -26,20 +26,23 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(picker).toBeHidden();
   await expect(modelBtn).toContainText("Gemma 4 12B");
 
-  // GPU memory lives in Settings › Advanced and changes context; 32k spills for the 12B
+  // GPU memory lives in Settings › Advanced and changes context; judged against the card's own
+  // memory (the owner's ruling, 2026-11-13), 32k runs on the GPU for the 12B and 64k spills
   const panel = await openGpuMemory(page);
   await expect(panel).toContainText("Gemma 4 12B");
   await panel.getByRole("button", { name: "32k" }).click();
+  await expect(panel).toContainText("Should run well");
+  await panel.getByRole("button", { name: "64k" }).click();
   await expect(panel).toContainText("Should run slower");
 
   // the per-app breakdown reads gpu.status (the fake nvidia-smi)
-  await expect(panel).toContainText("Where the memory goes");
+  await expect(panel).toContainText("In use right now");
   await expect(panel).not.toContainText("not available in this build");
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await modelBtn.click();
-  await expect(ctx.getByRole("radio", { name: "32k" })).toHaveAttribute("aria-checked", "true");
-  const spills = ctx.getByRole("radio", { name: "32k" }).locator(".pk-cost.spill");
+  await expect(ctx.getByRole("radio", { name: "64k" })).toHaveAttribute("aria-checked", "true");
+  const spills = ctx.getByRole("radio", { name: "64k" }).locator(".pk-cost.spill");
   await expect(spills).toHaveCount(1);
   await expect(spills.locator("small")).toHaveText("Slower");
   await expect(spills).toHaveAttribute("aria-label", /GB (measured|estimated); Slower$/);
@@ -50,7 +53,7 @@ test("the panel's memory bar names whisper and the other resident app", async ({
   await open();
   await waitReady(page);
   const panel = await openGpuMemory(page);
-  await expect(panel).toContainText("Where the memory goes");
+  await expect(panel).toContainText("In use right now");
   await expect(panel.locator(".sw-whisper")).toHaveCount(2);
   const whisper = panel.locator(".lg-r").filter({ hasText: "Whisper" });
   await expect(whisper).toContainText("speech-to-text");

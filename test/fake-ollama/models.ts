@@ -2,6 +2,9 @@
 // chosen so the server's fit check gives every verdict on the fixture GPU
 // (16303 MiB, whisper and one other app resident): the 9B runs on the GPU at
 // 16k and 32k and spills at 64k, the 12B spills at 32k, the 27B never fits.
+// (Those are send-time answers, from what is free. The lists judge by what the
+// computer has: there the 27B runs slower on the stack's 32 GB, and cannot load
+// with 8 GB, stack.computer(8).)
 
 const GIB = 1024 ** 3;
 

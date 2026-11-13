@@ -5,8 +5,8 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { CatalogEntry } from "@gates-local/contracts";
 import { CONNECTING, booting, ownCopyNote, portOf, rtOf, unread } from "./Banner.tsx";
-import { DlDetail, canCancelPull } from "./ModelDownloads.tsx";
-import { ctxFor, describeModel, gb, k, noGpu, verdictOf } from "./format.ts";
+import { DlButton, canCancelPull } from "./ModelDownloads.tsx";
+import { ctxFor, describeModel, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { type RowPhase, phaseOf, rowOf } from "./fit-table.ts";
 import { finishFirstRun, firstPull, openSettings, pull, cancelPull, recheckRuntime } from "./session.ts";
@@ -113,7 +113,7 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
             {fit ? (
               <tr>
                 <td>{cpu ? "Memory" : "GPU memory"}</td>
-                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} available to this model`}</td>
+                <td>{cpu ? `Estimated ${gb(fit.needVramBytes)}, all in system memory (no supported GPU)` : `Estimated ${gb(fit.needVramBytes)} of ${gb(fit.freeVramBytes)} on the GPU`}</td>
               </tr>
             ) : null}
           </tbody>
@@ -126,10 +126,11 @@ function RecCard({ tag, have, entry, children }: { tag: string; have: boolean; e
 
 const rtOfState = (s: State) => rtOf(s);
 
-/** The model to recommend when none is installed: the catalog's first recommended entry. */
+/** The model to recommend when none is installed: the first pick of the computer's tier (row 21) that runs here. */
 function recommendedEntry(s: State): CatalogEntry | undefined {
   if (s.catalog === NA || s.catalog === undefined) return undefined;
-  return s.catalog.find((c) => c.recommended && rowOf(s, c.name)?.verdict !== "refuse") ?? s.catalog.find((c) => c.recommended);
+  const picks = s.catalog.filter((c) => c.recommended).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+  return picks.find((c) => rowOf(s, c.name)?.verdict !== "refuse") ?? picks[0];
 }
 
 function NoModels() {
@@ -162,22 +163,19 @@ function NoModels() {
     return (
       <Shell st={st} title="Downloading your first model" sub={sub}>
         <RecCard tag={active} have={false} entry={entry?.name === active ? entry : undefined}>
-          <DlDetail p={p} name={describeModel(active, undefined).name} cancel={false} />
-          {canCancel ? (
-            <div className="prog-l">
-              <span />
-              <button
-                type="button"
-                className="qa"
-                onClick={() => {
-                  setCancelled(true);
-                  void cancelPull(active);
-                }}
-              >
-                Cancel download
-              </button>
-            </div>
-          ) : null}
+          {/* the Download tab's own button: the percent fills it, the × beside it cancels (row 18) */}
+          <div className="fr-dl">
+            <span className="fr-dl-l">{etaText(p, { speed: false })}</span>
+            <DlButton
+              size={p.totalBytes === undefined ? undefined : gb(p.totalBytes)}
+              label={describeModel(active, undefined).name}
+              p={p}
+              onCancel={canCancel ? () => {
+                setCancelled(true);
+                void cancelPull(active);
+              } : undefined}
+            />
+          </div>
         </RecCard>
         <Cta label="Start chatting" onGo={startChat} />
         <p className="fr-note">You can type now; replies start when the download finishes.</p>

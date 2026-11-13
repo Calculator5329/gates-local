@@ -21,7 +21,7 @@ import { canChat, pickChatModel } from "./pick.ts";
 import { probe } from "./probe.ts";
 import { createPullManager, type PullManager } from "./pull.ts";
 import { canonicalTag, curated, modelLabel } from "./recommended.ts";
-import { registrySize } from "./registry-size.ts";
+import { registryLookup, registrySize } from "./registry-size.ts";
 import { createOllamaRuntime, DEFAULT_EXTERNAL_BASE_URL, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch, type RuntimeSwitch } from "./switch.ts";
 
@@ -57,8 +57,8 @@ export interface ModelServicesOptions {
   /** Extra runtime options (external URL, allowInstall). */
   readonly runtime?: Omit<RuntimeOptions, "mode">;
   readonly log?: (line: string) => void;
-  /** The nvidia-smi runner and meminfo reader for the GPU status and every fit check (tests inject fakes). */
-  readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
+  /** The nvidia-smi runner and meminfo reader for the GPU status and every fit check (tests inject fakes), and the card's baseline for the catalog's download estimates. */
+  readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo" | "baseline">;
   /** The app's one GPU lease: models.load takes a shared chat claim on it. */
   readonly lease?: GpuLease;
   /**
@@ -221,7 +221,16 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     ...createSettingsHandlers({ settings, push: options.push, baseUrl: () => runtime.baseUrl() }),
     ...createGpuHandlers({ gpu }),
     // The catalog's fit survey reads the same injected GPU and memory as every other fit.
-    ...createRuntimeHandlers({ baseUrl: () => runtime.baseUrl(), catalog, settings, pulls, loader, log, ...(options.fit ? { fit: options.fit } : {}) }),
+    ...createRuntimeHandlers({
+      baseUrl: () => runtime.baseUrl(),
+      catalog,
+      settings,
+      pulls,
+      loader,
+      log,
+      ...(options.fit ? { fit: options.fit } : {}),
+      ...(options.modelRegistry === undefined ? {} : { lookup: (name: string, signal: AbortSignal) => registryLookup(name, signal, { registry: options.modelRegistry }) }),
+    }),
   } satisfies Partial<Handlers>;
 
   return {

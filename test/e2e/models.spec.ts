@@ -26,8 +26,9 @@ test("set a default from the row menu, then download a model into the list", asy
   // download one from the Download tab
   await page.getByRole("tab", { name: /^Download/ }).click();
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
-  await row.getByRole("button", { name: "Download", exact: true }).click();
-  await expect(row.locator(".badge")).toHaveText("Installed", { timeout: 20_000 });
+  // the button is labelled with the download's size (row 18)
+  await row.getByRole("button", { name: /^Download \d/ }).click();
+  await expect(row.locator(".dl-done")).toHaveText("Installed", { timeout: 20_000 });
 
   await expect(installedTab).toContainText("4");
   await installedTab.click();
@@ -43,22 +44,23 @@ test("a running download shows its detail in the row and on Installed, and Cance
   await page.getByRole("tab", { name: /^Download/ }).click();
 
   const row = page.locator('.dlrow[data-cat="qwen3.5:4b"]');
-  await row.getByRole("button", { name: "Download", exact: true }).click();
-  // \s: a number stays on the line with its unit (a no-break space)
-  const line = /^[\d.]+ of [\d.]+\sGB · \d+\sMB\/s · about .+ left$/;
-  await expect(row.locator(".prog-l span")).toHaveText(line, { timeout: 15_000 });
-  await expect(row.getByRole("progressbar", { name: "Qwen 3.5 4B download" })).toBeVisible();
+  await row.getByRole("button", { name: /^Download \d/ }).click();
+  // \s: a number stays on the line with its unit (a no-break space). The Download row's
+  // second line has bytes and time left; its button fills with the percent (row 18).
+  const line = /^[\d.]+ of [\d.]+\sGB · about .+ left$/;
+  await expect(row.locator(".dl-status")).toHaveText(line, { timeout: 15_000 });
+  await expect(row.getByRole("progressbar", { name: "Qwen 3.5 4B download" })).toHaveText(/^\d+%$/);
 
   // Installed keeps showing it with its own Cancel download
   await page.getByRole("tab", { name: /^Installed/ }).click();
   const running = page.locator('.mp-row.mp-dling[data-pull="qwen3.5:4b"]');
-  await expect(running.locator(".prog-l span")).toHaveText(line);
+  await expect(running.locator(".prog-l span")).toHaveText(/^[\d.]+ of [\d.]+\sGB · \d+\sMB\/s · about .+ left$/);
   await expect(running.getByRole("button", { name: "Cancel download" })).toBeVisible();
 
   await page.getByRole("tab", { name: /^Download/ }).click();
   await row.getByRole("button", { name: "Cancel download" }).click();
-  await expect(row.getByRole("button", { name: "Download", exact: true })).toBeVisible();
-  await expect(row.locator(".prog")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /^Download \d/ })).toBeVisible();
+  await expect(row.getByRole("progressbar")).toHaveCount(0);
 });
 
 // Guards the owner's 2026-11-13 note on the model name field ("ew double border"): one ring when focused,
@@ -80,6 +82,6 @@ test("the model name field has one focus ring and takes a pasted ollama command"
   expect(ring.shadow).not.toBe("none");
   await field.locator("xpath=ancestor::*[contains(@class,'srow')][1]").screenshot({ path: testInfo.outputPath("model-name-focus.png") });
 
-  await page.getByRole("button", { name: "Download", exact: true }).last().click();
-  await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"] .badge')).toHaveText("Installed", { timeout: 20_000 });
+  await page.getByRole("button", { name: /^Download/ }).last().click();
+  await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"] .dl-done')).toHaveText("Installed", { timeout: 20_000 });
 });

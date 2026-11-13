@@ -2,12 +2,13 @@
 // The text pick is the app's own Recommended rule (the catalog for a machine
 // with nothing installed yet), imported so the two cannot disagree. Reads only.
 import type { CatalogEntry } from "@gates-local/contracts";
-import { estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
+import { cardRamBytes, estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
 import { defaultNvidiaSmi, readGpu } from "../apps/server/src/fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
 import { cardBytes, NO_GPU, presetFiles, PRESETS, tiersFor } from "../apps/server/src/image/presets.ts";
 import { markRecommended } from "../apps/server/src/runtime/catalog.ts";
 import { CURATED_MODELS } from "../apps/server/src/runtime/recommended.ts";
+import { tierFor } from "../apps/server/src/runtime/tiers.ts";
 import { defaultSettings } from "../apps/server/src/settings/store.ts";
 
 const GPU_NAME_ARGS = ["--query-gpu=name", "--format=csv,noheader"] as const;
@@ -44,8 +45,9 @@ const memory = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 /** Downloads in decimal GB, as Ollama and download pages show them. */
 const download = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
+/** Judged as the app judges: against the GPU's memory and the system memory the machine has, by its tier. */
 function catalog(machine: MachineReadings, numCtx: number): CatalogEntry[] {
-  const freeVramBytes = machine.gpu.kind === "nvidia" ? machine.gpu.freeBytes : 0;
+  const gpuTotalBytes = machine.gpu.kind === "nvidia" ? machine.gpu.totalBytes : 0;
   const entries = CURATED_MODELS.filter((c) => c.pullable).map((c) => ({
     name: c.name,
     label: c.label,
@@ -53,18 +55,19 @@ function catalog(machine: MachineReadings, numCtx: number): CatalogEntry[] {
     downloadBytes: c.downloadBytes,
     installed: false,
     recommended: false,
-    fit: estimateBeforeDownload({ model: c.name, numCtx, downloadBytes: c.downloadBytes, freeVramBytes, memAvailableBytes: machine.ramAvailableBytes, measuredAt: machine.measuredAt }),
+    fit: estimateBeforeDownload({ model: c.name, numCtx, downloadBytes: c.downloadBytes, freeVramBytes: gpuTotalBytes, memAvailableBytes: cardRamBytes(machine.ramTotalBytes), measuredAt: machine.measuredAt }),
   }));
-  return markRecommended(entries, numCtx);
+  const tier = tierFor({ gpuCount: machine.gpu.kind === "nvidia" ? 1 : 0, gpuTotalBytes, systemTotalBytes: machine.ramTotalBytes });
+  return markRecommended(entries, numCtx, tier);
 }
 
 function textAdvice(machine: MachineReadings, entries: readonly CatalogEntry[]): TextAdvice {
-  const recommended = entries.filter((e) => e.recommended);
+  const recommended = entries.filter((e) => e.recommended).toSorted((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
   const best = recommended[0];
   if (best?.fit === undefined || best.fit.verdict === "refuse") {
     const lightest = entries.toSorted((a, b) => (a.fit?.needVramBytes ?? 0) - (b.fit?.needVramBytes ?? 0))[0];
-    const gpu = machine.gpu.kind === "nvidia" ? `${memory(machine.gpu.freeBytes)} of GPU memory free and ` : "";
-    return { use: false, why: `The lightest model, ${lightest?.name}, needs about ${memory(lightest?.fit?.needVramBytes ?? 0)}. This machine has ${gpu}${memory(machine.ramAvailableBytes)} of system memory available.` };
+    const gpu = machine.gpu.kind === "nvidia" ? `${memory(machine.gpu.totalBytes)} of GPU memory and ` : "";
+    return { use: false, why: `The lightest model, ${lightest?.name}, needs about ${memory(lightest?.fit?.needVramBytes ?? 0)}. This machine has ${gpu}${memory(machine.ramTotalBytes)} of system memory.` };
   }
   return {
     use: true,

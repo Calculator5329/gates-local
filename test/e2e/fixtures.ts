@@ -99,6 +99,8 @@ export const stack = {
   scenario: (scenario: Scenario, options: Record<string, number | readonly string[]> = {}) => control("/scenario", { scenario, ...options }),
   /** Put another program's MiB on the fake GPU, and give the card `totalMib` (16303 until a reset): a new GPU reading, with the runtime and its loaded models untouched. */
   gpu: (otherMib: number, totalMib?: number) => control("/gpu", { otherMib, ...totalMib === undefined ? {} : { totalMib } }),
+  /** A computer with `memGib` of system memory (32 GB until a reset), and with no NVIDIA GPU at all when `gpu` is "none", else the 16 GB card. */
+  computer: (memGib: number, gpu: "none" | "card" = "card") => control("/gpu", { otherMib: 0, memGib, ...gpu === "none" ? { none: true } : {} }),
 };
 
 interface Fixtures {

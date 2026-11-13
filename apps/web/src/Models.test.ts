@@ -65,7 +65,7 @@ const render = (state: object) => {
 const RECOMMENDED = /class="grp-t">(?:<span[^>]*>)?Recommended</;
 /** An installed row's Fit cell: a placeholder inside it, or a word. */
 const fitCell = (html: string) => html.match(/<span class="mp-fit(?: [^"]*)?"[^>]*>[\s\S]*?<\/span><\/span>|<span class="mp-fit(?: [^"]*)?"[^>]*>[^<]*<\/span>/)?.[0] ?? "";
-const gpuPromises =(html: string) => html.replaceAll("no supported GPU", "").match(/.{0,40}GPU.{0,40}/g) ?? [];
+const gpuPromises =(html: string) => html.replace(/no supported GPU/gi, "").match(/.{0,40}GPU.{0,40}/g) ?? [];
 
 describe("Models on a computer with no supported GPU", () => {
   it("PL-01: catalog-only downloads wait for the fit table, never grouped or worded from the catalog's own estimate", () => {
@@ -81,7 +81,9 @@ describe("Models on a computer with no supported GPU", () => {
     const refused = render(noGpuComputer({ models: [], addPage: true, catalog: [entry("huge:1t", "Huge", "refuse", 900)] }));
     expect(refused).not.toMatch(RECOMMENDED);
     const checked = render(noGpuComputer({ models: [], addPage: true, catalog: [offered] }));
-    expect(checked).toContain('class="vl spill"');
+    // every row spills here: said once above the list (row 18), not on the row
+    expect(checked).toContain('<span class="vd spill"></span>No supported GPU, so these run in system memory and replies are slower.');
+    expect(checked).not.toContain('class="vl spill"');
     expect(checked).toMatch(RECOMMENDED);
     expect(checked).not.toContain("data-skel");
   });
@@ -121,7 +123,8 @@ describe("Models on a computer with no supported GPU", () => {
     const measured = { ...fit(name, "spills", 9), source: "measured", numCtx: 65536 };
     const html = render(noGpuComputer({ addPage: true, numCtx: 65536,
       catalog: [entry(name, "Qwen 3 14B", "spills", 10)], fitTable: tableOf(measured) }));
-    expect(html).toMatch(/measured 9\.0(?:&#160;| | )GB at 64k/);
+    // the row's tooltip says it (row 18)
+    expect(html).toMatch(/Measured 9\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Measured after the first load");
   });
   it("PK-02: Download uses the viewed 64k fit instead of the saved-default 16k estimate", () => {
@@ -131,8 +134,9 @@ describe("Models on a computer with no supported GPU", () => {
     const html = render(noGpuComputer({ addPage: true, gpu: { vendor: "nvidia", name: "Test GPU" }, numCtx: 65536,
       catalog: [{ ...entry(name, "Qwen 3 14B", "spills", 10), fit: at16 }],
       fitTable: tableOf(at64) }));
-    expect(html).toContain("Uses system memory · slower");
-    expect(html).toMatch(/est\. 15\.0(?:&#160;| | )GB at 64k/);
+    // the only row spills: said once above the list (row 18), its need in the row's tooltip
+    expect(html).toContain("These are bigger than your GPU&#x27;s memory, so replies are slower.");
+    expect(html).toMatch(/Estimated 15\.0(?:&#160;| | )GB of memory with 64k of context/);
     expect(html).not.toContain("Runs on GPU");
   });
   it("promises no GPU on either tab or with no models, and says system memory instead", () => {

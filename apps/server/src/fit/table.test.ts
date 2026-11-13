@@ -7,6 +7,8 @@ import type { FitTable } from "@gates-local/contracts";
 import { afterEach, expect, it } from "vitest";
 import { MIB } from "./constants.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
+import { createGpuBaseline } from "./baseline.ts";
+import { planLoad } from "./fit.ts";
 import { createFitTable, TABLE_CONTEXTS, type FitTableDeps, type TableModel } from "./table.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 
@@ -223,6 +225,62 @@ it("a row names the busy chat a send stops first only when stopping it makes roo
   expect(busy.rows.some((r) => r.stops.includes(OTHER)), JSON.stringify(busy.rows.map((r) => [r.numCtx, r.verdict, r.stops]))).toBe(true);
   expect(busy.rows.every((r) => r.stops.length === 0 || r.stops.join() === OTHER)).toBe(true);
   expect(idle.rows.every((r) => r.stops.length === 0)).toBe(true);
+});
+
+const at8k = (x: FitTable, model: string) => x.rows.find((r) => r.model === model && r.numCtx === 8192);
+
+// Settings row 10 and its addendum, 2026-11-13: another program holding 9.7 GB made every model
+// look worse. The owner's ruling: a model is measured against the card's own memory; what other
+// programs hold right now is shown, never the verdict. Only a send (and the composer) judge right now.
+it("a model is judged against the card's own memory; a send is judged right now", async () => {
+  const blenderMib = Math.round(9.7 * 1024);
+  /** The card as card(0), plus `/usr/bin/blender` holding blenderMib when it is running. */
+  const smi = (blender: boolean): NvidiaSmiRunner => async (args) => {
+    const used = 2202 + 1822 + 300 + (blender ? blenderMib : 0);
+    if (args[0]?.startsWith("--query-gpu")) return `16303, ${used}, ${16303 - used}\n`;
+    return `5100, /usr/bin/whisper-server, 2202\n5400, /opt/media-vault/vision-runtime/bin/python, 1822\n${blender ? `6100, /usr/bin/blender, ${blenderMib}\n` : ""}`;
+  };
+  // The same 8 GB of weights twice: installed, and offered for download under another name.
+  const OFFERED = "gemma4:26b-offered";
+  server = await startFakeServer({
+    "GET /api/tags": (_b, res) => json(res, 200, { models: [{ name: GEMMA, size: 8e9, digest: "b" }] }),
+    "GET /api/ps": (_b, res) => json(res, 200, { models: [] }),
+    "POST /api/show": (_b, res) => json(res, 200, SHOW),
+  });
+  const s = server;
+  const baseline = createGpuBaseline();
+  let blender = false;
+  const run: NvidiaSmiRunner = (args, signal) => smi(blender)(args, signal);
+  const fit = { runNvidiaSmi: run, readMeminfo: MEMINFO, baseline };
+  const models = async (): Promise<TableModel[]> => [
+    { name: GEMMA, downloadBytes: 8e9, installed: true },
+    { name: OFFERED, downloadBytes: 8e9, installed: false },
+  ];
+  const t = createFitTable({ baseUrl: () => s.baseUrl, fit, models, busy: () => [], comfyPid: () => undefined, push: () => {}, boot: "b" });
+  const send = async () => (await planLoad({ ...fit, baseUrl: s.baseUrl, model: GEMMA, numCtx: 8192, busy: [] })).report;
+
+  const idle = await t.get();
+  const idleSend = await send();
+  expect([at8k(idle, GEMMA)?.verdict, at8k(idle, OFFERED)?.verdict, idleSend.verdict], "with the card idle all three fit").toEqual(["fits", "fits", "fits"]);
+  expect(idle.memory).not.toHaveProperty("others");
+
+  blender = true;
+  t.changed();
+  await settled();
+  const busy = await t.get();
+  const busySend = await send();
+  // The card's own memory, whisper and the other always-on programs included: a download row and an
+  // installed row's card verdict read it, loaded or not; the installed row itself is a send's plan.
+  const onCard = { verdict: "fits", freeVramBytes: 16303 * MIB };
+  expect(at8k(idle, OFFERED)).toMatchObject(onCard);
+  expect(at8k(busy, OFFERED)).toMatchObject(onCard);
+  expect(at8k(idle, GEMMA)?.card).toMatchObject(onCard);
+  expect(at8k(busy, GEMMA)?.card).toMatchObject(onCard);
+  expect(at8k(busy, GEMMA)?.verdict, "an installed model's plan right now").not.toBe("fits");
+  expect(busySend.verdict, "a send").not.toBe("fits");
+  expect(busySend.freeVramBytes).toBe((16303 - 2202 - 1822 - 300 - blenderMib) * MIB);
+  // The list's one line names who holds the memory, and how much.
+  expect(busy.memory).toMatchObject({ kind: "gpu", freeBytes: busySend.freeVramBytes, others: { programs: ["blender"], bytes: blenderMib * MIB } });
 });
 
 it("with no runtime there are no rows, and the footer's line still reads the GPU", async () => {

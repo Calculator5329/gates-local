@@ -29,13 +29,13 @@ export const createNvidiaSmiRunner = (file = "nvidia-smi", leadingArgs: readonly
 export const defaultNvidiaSmi = createNvidiaSmiRunner();
 
 /**
- * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.freemem()
- * rendered as a MemAvailable line, so one parser serves every platform.
+ * /proc/meminfo on Linux. Elsewhere (Windows has no /proc) os.totalmem() and os.freemem()
+ * rendered as MemTotal and MemAvailable lines, so one parser serves every platform.
  */
 export const defaultMeminfo: MeminfoReader = (signal) =>
   process.platform === "linux"
     ? readFile("/proc/meminfo", { encoding: "utf8", ...(signal ? { signal } : {}) })
-    : Promise.resolve(`MemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
+    : Promise.resolve(`MemTotal: ${Math.floor(os.totalmem() / 1024)} kB\nMemAvailable: ${Math.floor(os.freemem() / 1024)} kB\n`);
 
 /** `work`'s result, or the signal's reason as soon as it aborts (a runner that ignores the signal still lets go). */
 export function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
@@ -227,7 +227,17 @@ export function parseMemTotal(text: string): number | undefined {
   return match?.[1] ? Number(match[1]) * 1024 : undefined;
 }
 
-export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<number> {
+/**
+ * The system memory free right now and the memory the computer has, from one reading. A model is
+ * judged against the total (the owner's ruling, 2026-11-13); a reading with no MemTotal line
+ * takes MemAvailable for it.
+ */
+export interface MemoryReading {
+  readonly availableBytes: number;
+  readonly totalBytes: number;
+}
+
+export async function readMemory(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<MemoryReading> {
   signal?.throwIfAborted();
   let text: string;
   try {
@@ -236,5 +246,10 @@ export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, sig
     if (signal?.aborted) throw signal.reason;
     throw new FitError("meminfo-unreadable", `cannot read /proc/meminfo: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return parseMemAvailable(text);
+  const availableBytes = parseMemAvailable(text);
+  return { availableBytes, totalBytes: parseMemTotal(text) ?? availableBytes };
+}
+
+export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<number> {
+  return (await readMemory(read, signal)).availableBytes;
 }

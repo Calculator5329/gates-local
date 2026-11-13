@@ -8,6 +8,7 @@ import {
   AttachedFile,
   BlockingTurn,
   CatalogEntry,
+  ModelEstimate,
   ChatEvent,
   FitTable,
   GpuStatus,
@@ -237,6 +238,8 @@ export const methods = {
   "settings.modelDefaults": { params: S.Struct({ model: S.String.check(S.isMinLength(1)) }), result: ModelDefaults, phone: "allow" },
   "gpu.status": { params: NoParams, result: GpuStatus, phone: "allow" },
   "models.catalog": { params: NoParams, result: S.Array(CatalogEntry), phone: "allow" },
+  /** A typed name's size and fit before any download (Models › Download, "Something else"). */
+  "models.estimate": { params: S.Struct({ name: S.String.check(S.isMinLength(1)), numCtx: NumCtx }), result: ModelEstimate, phone: "allow" },
   /** Download jobs still known to the server; reconnect reconciles missed terminal pushes. */
   "models.pulls": { params: NoParams, result: S.Array(PullProgress), phone: "allow" },
   "models.pull": { params: ModelRef, result: PullProgress, phone: "deny" },

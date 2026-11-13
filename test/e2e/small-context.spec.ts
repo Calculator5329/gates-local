@@ -50,7 +50,8 @@ test.describe("a model with a 2,048 context window", () => {
     const saved = gpu.getByRole("group", { name: "Default context" }).getByRole("button", { name: "16k" });
     await expect(saved).toHaveAttribute("aria-pressed", "true");
     await expect(saved).toBeDisabled();
-    await expect(gpu.locator(".ctx-line")).toContainText("Runs at 2k, the most this model takes.");
+    // the size it runs at is said once, in the status; the saved size's tooltip says why
+    await expect(saved).toHaveAttribute("data-tip", "This model takes at most 2k.");
     await expect(gpu.locator(".fp-v:visible")).toContainText("at 2k");
     });
     await page.keyboard.press("Escape");

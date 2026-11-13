@@ -5,7 +5,26 @@ import type { FitReport, FitRow, FitTable } from "@gates-local/contracts";
 import { ctxFor } from "./format.ts";
 
 /** A row read as a report: its reading is the table's. */
-export type TableFit = FitReport & { readonly stops: readonly string[] };
+export type TableFit = FitReport & Pick<FitRow, "stops" | "card">;
+
+/**
+ * What every list and Settings show for a row: an installed model's verdict against the card's own
+ * memory (the row's card), whatever other programs hold right now; the row itself otherwise. A send
+ * reads the row as it is, right now.
+ */
+export function cardFit(fit: TableFit | undefined): TableFit | undefined {
+  if (fit?.card === undefined) return fit;
+  let report = cards.get(fit);
+  if (report === undefined) {
+    const { shortfallBytes: _rightNow, card, ...rest } = fit;
+    report = { ...rest, ...card };
+    cards.set(fit, report);
+  }
+  return report;
+}
+
+// One card reading per report, so a selector that returns it keeps its identity until the next table.
+const cards = new WeakMap<TableFit, TableFit>();
 
 /** A table replaces the last one only when it is from a newer reading: a restarted server, or a later build. */
 export const newerTable = (next: FitTable, last: FitTable | undefined): boolean =>
@@ -28,11 +47,12 @@ export function fitFor(table: FitTable | undefined, model: string | undefined, n
 }
 
 /**
- * The one way a screen reads a model's row: the table at the app's context, capped to the model's own
- * limit as the server caps it. Never the catalog's own fit, never an uncapped context.
+ * The one way a list reads a model's row: the table at the app's context, capped to the model's own
+ * limit as the server caps it, judged against the card (cardFit). Never the catalog's own fit, never
+ * an uncapped context.
  */
 export function rowOf(s: { readonly fitTable: FitTable | undefined; readonly models: readonly { readonly name: string; readonly maxContext?: number }[] | undefined; readonly numCtx: number }, model: string | undefined, numCtx = s.numCtx): TableFit | undefined {
-  return fitFor(s.fitTable, model, ctxFor(numCtx, s.models, model));
+  return cardFit(fitFor(s.fitTable, model, ctxFor(numCtx, s.models, model)));
 }
 
 /**

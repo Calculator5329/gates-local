@@ -8,8 +8,9 @@
 // from it, so a table that mixes two cannot be built.
 import { randomUUID } from "node:crypto";
 import type { CatalogEntry, ContextSize, FitMemory, FitRow, FitTable, ModelLoad } from "@gates-local/contracts";
+import type { GpuBaseline } from "./baseline.ts";
 import { VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
-import { estimateBeforeDownload, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
+import { cardRamBytes, decideFit, estimateBeforeDownload, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
 import { defaultNvidiaSmi, readGpu } from "./gpu.ts";
 import { FitError, type GpuSnapshot } from "./types.ts";
 
@@ -47,31 +48,59 @@ export interface FitTableSource {
   load(load: ModelLoad): void;
 }
 
-function memoryOf(gpu: GpuSnapshot, margin: number): FitMemory {
+/** The footer's line right now, and the programs holding memory above the card's baseline (the download list names them). */
+function memoryOf(gpu: GpuSnapshot, margin: number, baseline: GpuBaseline | undefined, own: readonly number[]): FitMemory {
   if (gpu.gpuCount === 0) return { kind: "cpu" };
-  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, gpu.freeBytes - margin) };
+  const others = baseline?.others(gpu, own);
+  return { kind: "gpu", freeBytes: gpu.freeBytes, usableBytes: Math.max(0, gpu.freeBytes - margin), ...(others ? { others } : {}) };
 }
 
-/** Every row from the one reading `r`. A model whose check fails gets no row; the others still do. */
-async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[]): Promise<TableRow[]> {
+/**
+ * Every row from the one reading `r`. A model whose check fails gets no row; the others still do.
+ * An installed model is planned right now, as a send would load it, and also carries its verdict
+ * against the card (`card`: the GPU's memory and the system memory the computer has), which every
+ * list and Settings show; one offered for download is judged against the card.
+ */
+async function rowsFrom(deps: FitTableDeps, baseUrl: string, r: Readings, models: readonly TableModel[], comfyPid: number | undefined): Promise<TableRow[]> {
   const rows: TableRow[] = [];
   const busy = deps.busy();
-  const comfyPid = deps.comfyPid();
+  const baseline = deps.fit?.baseline;
+  const cardFree = baseline?.cardFree(r.gpu) ?? r.gpu.freeBytes;
+  // the system memory side of the card: what the computer has, never what is free right now
+  const cardRam = cardRamBytes(r.memTotalBytes);
+  const margins = deps.fit?.margins ? { margins: deps.fit.margins } : {};
+  const cardOf = (row: TableRow): TableRow => {
+    const { verdict, freeVramBytes, spillRamBytes, shortfallBytes } = decideFit({
+      model: row.model,
+      numCtx: row.numCtx,
+      needBytes: row.needVramBytes,
+      freeVramBytes: Math.max(cardFree, row.freeVramBytes),
+      memAvailableBytes: cardRam,
+      measuredAt: r.gpu.measuredAt,
+      ...margins,
+    });
+    return { ...row, card: { verdict, freeVramBytes, spillRamBytes, ...(shortfallBytes === undefined ? {} : { shortfallBytes }) } };
+  };
+  // With no GPU the card is the computer's own memory, judged the same way.
+  const onCard = baseline !== undefined;
   for (const entry of models) {
     const sizes = new Set<number>();
     for (const numCtx of TABLE_CONTEXTS) {
       try {
         const row = entry.installed
-          ? await planWith({ ...deps.fit, baseUrl, model: entry.name, numCtx, busy, ...(comfyPid === undefined ? {} : { comfyPid }) }, r).then((plan) => rowOf(plan.report, plan.stop))
+          ? await planWith({ ...deps.fit, baseUrl, model: entry.name, numCtx, busy, ...(comfyPid === undefined ? {} : { comfyPid }) }, r).then((plan) => {
+              const planned = rowOf(plan.report, plan.stop);
+              return onCard ? cardOf(planned) : planned;
+            })
           : rowOf(
               estimateBeforeDownload({
                 model: entry.name,
                 numCtx,
                 downloadBytes: entry.downloadBytes,
-                freeVramBytes: r.gpu.freeBytes,
-                memAvailableBytes: r.memAvailableBytes,
+                freeVramBytes: cardFree,
+                memAvailableBytes: cardRam,
                 measuredAt: r.gpu.measuredAt,
-                ...(deps.fit?.margins ? { margins: deps.fit.margins } : {}),
+                ...margins,
               }),
               [],
             );
@@ -106,8 +135,12 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
     try {
       if (baseUrl === undefined) throw new Error("the model runtime is not running");
       const r = await takeReadings({ ...deps.fit, baseUrl });
-      const rows = await rowsFrom(deps, baseUrl, r, await deps.models());
-      return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory: memoryOf(r.gpu, margin), rows };
+      const comfyPid = deps.comfyPid();
+      const own = comfyPid === undefined ? [] : [comfyPid];
+      deps.fit?.baseline?.observe(r.gpu, own);
+      const memory = memoryOf(r.gpu, margin, deps.fit?.baseline, own);
+      const rows = await rowsFrom(deps, baseUrl, r, await deps.models(), comfyPid);
+      return { reading: { boot, seq: at, measuredAt: r.gpu.measuredAt }, memory, rows };
     } catch (e) {
       deps.log?.(`fit table: ${(e as Error).message}`);
       // nvidia-smi and the runtime disagree: neither line can be trusted.
@@ -115,7 +148,7 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       // No runtime to ask: no rows, and the footer's line from the GPU alone.
       try {
         const gpu = await readGpu(deps.fit?.runNvidiaSmi ?? defaultNvidiaSmi, now);
-        return { reading: { boot, seq: at, measuredAt: gpu.measuredAt }, memory: memoryOf(gpu, margin), rows: [] };
+        return { reading: { boot, seq: at, measuredAt: gpu.measuredAt }, memory: memoryOf(gpu, margin, undefined, []), rows: [] };
       } catch (gpuError) {
         return unreadable(at, (gpuError as Error).message);
       }

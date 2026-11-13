@@ -32,7 +32,9 @@
 //                           (the stand-in's) and phoneSocket
 //   POST /restart {downMs?} stop the server, wait, start it on the same data dir
 //   POST /scenario {...}    forward to the fake's /__fake/scenario
-//   POST /gpu {otherMib, totalMib?} forward to the fake's /__fake/gpu: another program's GPU memory, the card's size
+//   POST /gpu {otherMib, totalMib?, none?, memGib?} forward to the fake's /__fake/gpu: another program's GPU memory,
+//                           the card's size, or no NVIDIA GPU at all; memGib rewrites the server's meminfo
+//                           (system memory) until the next reset
 //
 // The server exits on stdin EOF, so each child keeps a stdin pipe open for
 // its whole life. Nothing here talks to a real Ollama, GPU or nvidia-smi, and
@@ -41,7 +43,7 @@
 // states are the same on every machine.
 import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, request, type IncomingMessage } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -65,6 +67,10 @@ const phoneDir = path.join(homedir(), ".cache", "gates-local-e2e", `phone-${crea
 const phoneSocket = path.join(phoneDir, "phone.sock");
 const gpuState = path.join(runDir, "gpu-state.json");
 mkdirSync(runDir, { recursive: true });
+/** The server's /proc/meminfo: the fixture's 32 GB until POST /gpu gives a memGib, and again at each reset. */
+const meminfo = path.join(runDir, "meminfo.txt");
+const MEMINFO_FIXTURE = readFileSync(path.join(ROOT, "test/fake-ollama/meminfo.txt"), "utf8");
+writeFileSync(meminfo, MEMINFO_FIXTURE);
 let resets = 0;
 let dataDir = "";
 /** Port 9 (discard) has no server on a test machine: a download there fails at once, on this computer. */
@@ -200,10 +206,12 @@ function serverEnv(): NodeJS.ProcessEnv {
     ...process.env,
     ...phoneEnv(),
     GATES_LOCAL_OLLAMA_URL: controlledRuntime?.url ?? FAKE_URL,
+    // A typed model name is looked up here, never ollama.com: the fake answers 404, "not in the library".
+    GATES_LOCAL_OLLAMA_REGISTRY: FAKE_URL,
     GL_E2E_LIBRARY_FIXTURE: libraryFixture,
     GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
-    GATES_LOCAL_MEMINFO: path.join(ROOT, "test/fake-ollama/meminfo.txt"),
+    GATES_LOCAL_MEMINFO: meminfo,
     // The shell sandbox's probe sees a stand-in machine, never the runner's own bwrap.
     GATES_LOCAL_SYSTEMD_RUN: path.join(ROOT, "test/fake-ollama/systemd-run.ts"),
     GL_FAKE_SANDBOX: sandbox,
@@ -307,6 +315,7 @@ const control = createServer((req, res) => {
         const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, imageTool, phone, controlledRuntimePorts, sandbox: sandboxState, engine, ...fakeBody } = body;
         const fakeEngine = typeof engine === "object" && engine !== null && typeof (engine as { address?: unknown }).address === "string" ? engine as { address: string } : undefined;
         sandbox = sandboxState === "off" ? "off" : "ready";
+        writeFileSync(meminfo, MEMINFO_FIXTURE);
         await stopChild(server);
         server = null;
         await controlledRuntime?.close();
@@ -334,7 +343,13 @@ const control = createServer((req, res) => {
         await fakeScenario(await readJson(req));
         res.writeHead(200).end("ok");
       } else if (route === "POST /gpu") {
-        const r = await fetch(`${FAKE_URL}/__fake/gpu`, { method: "POST", body: JSON.stringify(await readJson(req)) });
+        const { memGib, ...gpu } = await readJson(req);
+        if (memGib !== undefined) {
+          if (typeof memGib !== "number" || !(memGib > 0)) throw new Error("memGib must be a number of GiB above 0");
+          const kb = Math.round(memGib * 1024 * 1024);
+          writeFileSync(meminfo, `MemTotal: ${kb} kB\nMemAvailable: ${Math.round(kb / 2)} kB\n`);
+        }
+        const r = await fetch(`${FAKE_URL}/__fake/gpu`, { method: "POST", body: JSON.stringify(gpu) });
         if (!r.ok) throw new Error(`fake gpu: ${r.status} ${await r.text()}`);
         res.writeHead(200).end("ok");
       } else {

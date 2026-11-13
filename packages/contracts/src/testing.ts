@@ -205,6 +205,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       },
     ],
   },
+  "models.estimate": { params: { name: "gemma4:26b", numCtx: 16384 }, result: { name: "gemma4:26b", found: "yes", downloadBytes: 17_400_000_000 } },
   "models.pull": { params: { name: "qwen3.5:14b" }, result: { ...pull, state: "queued", completedBytes: 0 } },
   "models.cancelPull": { params: { name: "qwen3.5:14b" }, result: { cancelled: true } },
   "models.pulls": { params: {}, result: [] },

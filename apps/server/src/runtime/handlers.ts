@@ -3,7 +3,8 @@
 import type { FitDeps } from "../fit/fit.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import type { Handlers } from "../ws/server.ts";
-import { buildCatalog } from "./catalog.ts";
+import { buildCatalog, estimateTyped } from "./catalog.ts";
+import type { RegistryLookup } from "./registry-size.ts";
 import { ModelActionError, type ModelLoader } from "./load.ts";
 import type { ModelCatalog } from "./models.ts";
 import type { PullManager } from "./pull.ts";
@@ -15,6 +16,8 @@ export interface RuntimeHandlerDeps {
   readonly pulls: PullManager;
   readonly loader: ModelLoader;
   readonly fit?: Omit<FitDeps, "baseUrl">;
+  /** The registry's answer for a typed name (models.estimate); absent when the registry is off. */
+  readonly lookup?: (name: string, signal: AbortSignal) => Promise<RegistryLookup>;
   readonly log?: (line: string) => void;
 }
 
@@ -55,6 +58,8 @@ export function createRuntimeHandlers(deps: RuntimeHandlerDeps) {
         ...(deps.fit ? { fit: deps.fit } : {}),
         ...(deps.log ? { log: deps.log } : {}),
       }),
+    "models.estimate": ({ name, numCtx }) =>
+      estimateTyped({ ...(deps.lookup ? { lookup: deps.lookup } : {}), ...(deps.fit ? { fit: deps.fit } : {}) }, name, numCtx, AbortSignal.timeout(10_000)),
     "models.pulls": () => deps.pulls.pending(),
     // Refused while no runtime is ready, a switch included: never queued against the old one.
     "models.pull": ({ name }) => {

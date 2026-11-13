@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-11-13: Models › Download recommends for your computer and says each thing once
+
+- Recommended lists the picks for your computer's memory: a set per GPU
+  size (4, 6, 8, 12, 16 and 24 GB), and without a GPU a set per amount of
+  system memory (8, 16 and 32 GB), first pick first. Everything else that
+  runs is under Also available.
+- Models that can't run here are in a last group, "Too big for this
+  computer", closed until you open it. Each says how much memory it needs
+  and has no download button.
+- When every model in the list runs the same way, one line above the list
+  says so ("These run on your GPU"). When some run slower, it says "These
+  run on your GPU, except the ones marked slower" and only those rows are
+  marked. The line keeps its place while the list loads, so nothing below
+  it moves.
+- The download button shows the size ("6.1 GB"). While it downloads the
+  same button fills with the percent, with a × beside it to cancel, and the
+  line under the name says "2.0 of 3.1 GB · about 2 min left". The memory
+  estimate is in the row's tooltip.
+- A name you type in the Model name field is checked before you download:
+  its size goes on the button, or it says "Too big for this computer ·
+  needs N GB" with the button off and "Download anyway" in the row's menu.
+  A name the Ollama library doesn't have says so.
+- First run's download uses the same button.
+- Without a GPU, a model is judged by the memory the computer has, less
+  3 GB kept for the system, not by what is free this minute. An 8 GB
+  laptop gets the smallest model recommended.
+
+## 2026-11-13: A model is judged by your GPU's memory, not by what is free this minute
+
+- Models, the model picker, first run and Settings › Advanced judge each
+  model against the memory on your GPU. A game or a render holding memory
+  no longer makes a model say "Needs 2.9 GB more" on a card it fits.
+- While another program holds GPU memory, one line above the Download list
+  names it: "blender is using 9.7 GB of GPU memory right now." It goes
+  when the program lets go.
+- Settings › Advanced › Details shows what holds the GPU under "In use
+  right now", as information. It no longer tells you to close programs to
+  make room, and it draws a model only while it is loaded, never an
+  estimate cut down to what happens to be free.
+- Sending still checks the memory free right now, so a send that will not
+  fit at that moment still says so.
 ## 2026-11-13: Image engine pinned, Set up images held back
 
 - The engine downloads are now pinned in full: the Windows ComfyUI

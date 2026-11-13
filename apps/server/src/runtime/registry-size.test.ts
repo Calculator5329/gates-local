@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { json, startFakeServer, type FakeServer } from "../fit/fake-http.ts";
-import { manifestBytes, manifestUrl, registrySize } from "./registry-size.ts";
+import { manifestBytes, manifestUrl, registryLookup, registrySize } from "./registry-size.ts";
 
 let server: FakeServer | undefined;
 afterEach(async () => {
@@ -33,5 +33,20 @@ describe("a model's whole download size", () => {
     expect(await registrySize("gemma4:26b", signal, { registry: server.baseUrl })).toBe(1010);
     expect(await registrySize("gone", signal, { registry: server.baseUrl })).toBeUndefined();
     expect(await registrySize("gemma4:26b", signal, { registry: "http://127.0.0.1:9" })).toBeUndefined();
+  });
+
+  it("tells a name the registry does not have from a registry that did not answer (row 22)", async () => {
+    server = await startFakeServer({
+      "GET /v2/library/gemma4/manifests/26b": (_b, res) => json(res, 200, { config: { size: 10 }, layers: [{ size: 100 }] }),
+      "GET /v2/library/gone/manifests/latest": (_b, res) => json(res, 404, { errors: [{ code: "MANIFEST_UNKNOWN" }] }),
+      "GET /v2/library/busy/manifests/latest": (_b, res) => json(res, 503, {}),
+    });
+    const signal = new AbortController().signal;
+    const registry = { registry: server.baseUrl };
+    expect(await registryLookup("gemma4:26b", signal, registry)).toEqual({ kind: "size", bytes: 110 });
+    expect(await registryLookup("gone", signal, registry)).toEqual({ kind: "missing" });
+    expect(await registryLookup("ollama run gemma4", signal, registry)).toEqual({ kind: "missing" });
+    expect(await registryLookup("busy", signal, registry)).toEqual({ kind: "unreadable" });
+    expect(await registryLookup("gemma4:26b", signal, { registry: "http://127.0.0.1:9" })).toEqual({ kind: "unreadable" });
   });
 });

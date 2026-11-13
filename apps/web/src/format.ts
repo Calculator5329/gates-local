@@ -238,14 +238,15 @@ export function timeLeft(seconds: number): string {
  * is in, Ollama is verifying or writing the model, so the line names that
  * phase instead of a time worked out from download speed (G7-03).
  */
-export function etaText(p: PullProgress): string {
+/** `speed: false` leaves out MB/s: a download row's second line says only bytes and time left. */
+export function etaText(p: PullProgress, { speed = true }: { speed?: boolean } = {}): string {
   if (p.state === "verifying") return "Verifying the download";
   const total = p.totalBytes;
   if (total && p.completedBytes >= total) return "Finishing the download";
   // no total: Ollama has not named every file yet and the registry gave no size, so only what arrived is true
   const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : p.completedBytes > 0 ? `${gb(p.completedBytes)} so far` : "Starting"];
   if (p.bytesPerSecond) {
-    parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
+    if (speed) parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
     if (total) parts.push(`about ${timeLeft((total - p.completedBytes) / p.bytesPerSecond)} left`);
   }
   return parts.join(" · ");

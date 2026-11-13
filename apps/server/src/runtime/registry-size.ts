@@ -41,18 +41,32 @@ export interface RegistrySizeOptions {
   readonly timeoutMs?: number;
 }
 
-/** The download size of `name` from its registry manifest; undefined when it cannot be read. Never throws. */
-export async function registrySize(name: string, signal: AbortSignal, options: RegistrySizeOptions = {}): Promise<number | undefined> {
+/**
+ * What the registry says of a name: its size, that it has no such model (a 404, or a name with no
+ * registry form), or nothing readable (offline, a timeout, another error, a manifest without sizes).
+ */
+export type RegistryLookup = { readonly kind: "size"; readonly bytes: number } | { readonly kind: "missing" } | { readonly kind: "unreadable" };
+
+/** Looks `name` up in its registry. Never throws. */
+export async function registryLookup(name: string, signal: AbortSignal, options: RegistrySizeOptions = {}): Promise<RegistryLookup> {
   const url = manifestUrl(name, options.registry);
-  if (url === undefined) return undefined;
+  if (url === undefined) return { kind: "missing" };
   try {
     const res = await (options.fetch ?? fetch)(url, {
       headers: { accept: MANIFEST_TYPES },
       signal: AbortSignal.any([signal, AbortSignal.timeout(options.timeoutMs ?? 5000)]),
     });
-    if (!res.ok) return undefined;
-    return manifestBytes(await res.json());
+    if (res.status === 404) return { kind: "missing" };
+    if (!res.ok) return { kind: "unreadable" };
+    const bytes = manifestBytes(await res.json());
+    return bytes === undefined ? { kind: "unreadable" } : { kind: "size", bytes };
   } catch {
-    return undefined;
+    return { kind: "unreadable" };
   }
+}
+
+/** The download size of `name` from its registry manifest; undefined when it cannot be read. Never throws. */
+export async function registrySize(name: string, signal: AbortSignal, options: RegistrySizeOptions = {}): Promise<number | undefined> {
+  const found = await registryLookup(name, signal, options);
+  return found.kind === "size" ? found.bytes : undefined;
 }

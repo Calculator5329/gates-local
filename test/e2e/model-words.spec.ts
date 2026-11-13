@@ -99,8 +99,10 @@ test("GPU memory distinguishes available from free memory and leaves context fit
   await expect(panel.locator(".fp-v")).not.toContainText("16k");
   await expect(panel).not.toContainText("16k context");
   await panel.locator("summary", { hasText: "Details" }).click();
-  await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB; [\d.]+\sGB available on GPU\./);
-  await expect(panel.locator(".legend")).toContainText("Free after loading");
+  await expect(panel.locator(".fp-n").filter({ hasText: /^Estimated/ })).toContainText(/Estimated [\d.]+\sGB; [\d.]+\sGB on the GPU\./);
+  // the bar is what holds the GPU right now: a model that is not loaded is not drawn on it
+  await expect(panel.locator(".legend")).toContainText("Currently free");
+  await expect(panel.locator(".legend .sw-chat")).toHaveCount(0);
   await expect(panel.locator(".legend")).not.toContainText("Unused");
 
   // F76: the definition once; the other size's result is apart from it, in that size's tooltip (S1)

@@ -820,12 +820,16 @@ a.btn{text-decoration:none}
 .fr-cta{display:flex;align-items:center;gap:16px;margin-top:24px}
 .fr-cta .btn{gap:8px}
 .fr-sub{font-size:13.5px;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
+.fr-dl{display:flex;align-items:center;gap:16px;margin-top:12px}
+.fr-dl-l{flex:1;min-width:0;font-size:13.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fr-note{font-size:13.5px;color:var(--muted-foreground);margin-top:12px}
 .fr .sub .link,.fr-note .link{font-size:inherit}
 
 /* ---------- client additions (not in shell.html) ---------- */
 /* a calm line where a feature is not in this build yet (graceful degradation) */
 .na{font-size:13px;color:var(--muted-foreground)}
+/* the Download tab's one line naming who holds GPU memory right now, above the groups */
+.dl-others{margin:0 0 12px}
 .render-error{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 /* Settings › Updates: the check's answer sits between rows of the same box */
 .upd-res{border-top:1px solid var(--border);padding:12px 16px;font-size:13px;color:var(--muted-foreground);text-wrap:pretty}
@@ -1016,7 +1020,7 @@ a.btn{text-decoration:none}
 .fr-m .v{flex:none;align-self:stretch;justify-content:flex-start}
 /* one secondary grey, nothing under 14 px */
 .af-t b,.af-t small{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */
@@ -1159,12 +1163,44 @@ a.btn{text-decoration:none}
 .dlrow+.dlrow{border-top:1px solid var(--border)}
 /* the maker mark sits 8 px before the name, as in the picker */
 .dlrow>.maker-mark{margin-right:-8px}
-/* Keep both verdict lines' space before the first table too, including the scroll anchor. */
-.dl-v{flex:none;width:196px;min-height:44px;display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:13px;font-variant-numeric:tabular-nums}
-.dl-v small{font-size:12.5px;color:var(--muted-foreground)}
-.dl-a{flex:none;width:140px;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+/* Row 18, layout A: the size is the button, a running download fills that same box, and the ×
+   beside it keeps its box in every state, so nothing on the row moves. */
+.dl-a{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.dl-btn{position:relative;box-sizing:border-box;width:104px;height:32px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;overflow:hidden;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--foreground)}
+.dl-btn .ic{width:14px;height:14px;color:var(--muted-foreground)}
+button.dl-btn:hover{background:var(--hover)}
+button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allowed;background:transparent}
+.dl-run i{position:absolute;inset:0 auto 0 0;background:var(--selected);transition:width .4s ease-out}
+.dl-run span{position:relative}
+.dl-done{color:var(--muted-foreground)}
+.dl-skel{box-shadow:none}
+.dl-x{box-sizing:border-box;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;flex:none;border-radius:var(--r-ctl);box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--muted-foreground)}
+.dl-x:hover,.dl-x.on{background:var(--hover);color:var(--foreground)}
+.dl-x:disabled{opacity:.45;cursor:default}
+.dl-x.off{visibility:hidden}
+.dl-side{display:contents}
 .dl-status,.mp-dling .prog-l{display:block;margin-top:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl-status .vl{display:inline-flex;gap:6px}
 .dl-error{color:var(--red-fg)}
+/* the verdict every row shares, said once above the list; its box is one fixed size, words or none,
+   so the groups below never move: one line, two on a phone where the longer sentences wrap */
+.dl-once{display:flex;align-items:flex-start;gap:8px;height:20px;line-height:20px;overflow:hidden;margin:0 0 14px;font-size:13.5px;color:var(--muted-foreground)}
+@media(max-width:640px){.dl-once{height:40px}}
+.dl-once .vd{width:7px;height:7px;margin-top:6.5px;border-radius:50%;flex:none}
+/* Too big for this computer: the last group, closed */
+.dl-bigs>summary{list-style:none;cursor:pointer}
+.dl-bigs>summary::-webkit-details-marker{display:none}
+.dl-bigs .grp-t{display:inline-flex;align-items:center;gap:8px}
+.dl-chev{width:14px;height:14px;color:var(--muted-foreground);transform:rotate(-90deg);transition:transform .12s}
+.dl-bigs[open] .dl-chev{transform:none}
+.grp-n{font-size:12.5px;font-weight:500;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.dl-big .sl{opacity:.6}
+.dl-need{flex:none;width:144px;text-align:right;font-size:13px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+/* the typed name: its verdict under the field, and the menu that holds Download anyway */
+.dl-typed-a{position:relative;display:flex}
+.dl-typed{font-size:13px;color:var(--muted-foreground)}.dl-typed.no{color:var(--red-fg)}
+/* as wide as its words: "Download anyway" and the whole size, never cut */
+.dl-menu{width:max-content;min-width:240px}
 .dlrow>.prog,.mp-dling>.prog{position:absolute;left:16px;right:16px;bottom:4px;height:4px;margin:0}
 
 /* zero models */
@@ -1232,8 +1268,8 @@ a.btn{text-decoration:none}
   /* the download rows and the typed name, stacked to fit: layout only */
   .mp .dlrow{flex-wrap:wrap;gap:8px 16px}
   .mp .dlrow .sl{flex:1 1 calc(100% - 24px)}
-  .mp .dl-v{flex:1;width:auto;min-width:0;align-items:flex-start}
-  .mp .dl-a{width:auto;min-height:44px}
+  .mp .dl-a{min-height:44px}
+  .mp .dl-btn,.mp .dl-x{height:44px}.mp .dl-x{width:44px}
   .mp .dlrow .qa,.mp .srow .qa{min-height:44px}
   .mp .srow{flex-wrap:wrap}
   .mp .srow .sl{flex:1 1 100%}

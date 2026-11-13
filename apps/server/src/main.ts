@@ -76,6 +76,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
+import { createGpuBaseline } from "./fit/baseline.ts";
 import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
 import { createNvidiaSmiRunner, parseMemTotal } from "./fit/gpu.ts";
@@ -225,6 +226,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
         }
       : {}),
     ...(meminfoPath ? { readMeminfo: (signal?: AbortSignal) => readFile(meminfoPath, { encoding: "utf8", ...(signal ? { signal } : {}) }) } : {}),
+    // One for the process: the fit table and the catalog judge downloads against the same card.
+    baseline: createGpuBaseline(),
   };
 
   let server: WsServer | undefined;

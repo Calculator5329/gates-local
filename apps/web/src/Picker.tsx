@@ -5,7 +5,7 @@ import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ContextSize, FitTable, ModelInfo } from "@gates-local/contracts";
 import { CONTEXT_SIZES, type Verdict, ctxFor, gb, k, noGpu, verdictOf } from "./format.ts";
 import { openFit } from "./fit-actions.ts";
-import { answers, canPick, fitFor, stopsChat } from "./fit-table.ts";
+import { answers, canPick, cardFit, fitFor, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { Icon } from "./icons.tsx";
 import { activeEntry, contextRuler, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
@@ -67,7 +67,8 @@ export function Picker() {
   const [step, setStep] = useState<"models" | "context">("models");
   const [favorites, setFavorites] = useState(savedFavorites);
   const ref = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
-  const fitOf = (tag: string, c = numCtx) => fitFor(table, tag, ctxFor(c, models, tag));
+  // judged against the card's own memory, as every list is; the send judges right now
+  const fitOf = (tag: string, c = numCtx) => cardFit(fitFor(table, tag, ctxFor(c, models, tag)));
   const report = (tag: string, c = numCtx) => {
     const r = fitOf(tag, c);
     return r ? verdictOf(r) : undefined;
@@ -117,7 +118,7 @@ export function Picker() {
     const chosenCtx = c ?? CONTEXT_SIZES.find(n => n === ctxFor(numCtx, models, row.tag)) ?? numCtx;
     // The newest table at click time, not the one this handler was rendered with.
     const now = getState();
-    if (row.downloading !== undefined || !canPick(fitFor(now.fitTable, row.tag, ctxFor(chosenCtx, now.models, row.tag)))) return;
+    if (row.downloading !== undefined || !canPick(cardFit(fitFor(now.fitTable, row.tag, ctxFor(chosenCtx, now.models, row.tag))))) return;
     closeTip(); setContext(chosenCtx); pickModel(row.tag); closePop();
     focusComposer();
   }

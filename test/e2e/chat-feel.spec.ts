@@ -227,7 +227,7 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await expect(set.getByRole("heading", { name: "Advanced" })).toBeVisible();
   await expect(set.locator(".grp").first()).toContainText("GPU memory");
   await set.getByText("Details", { exact: true }).click();
-  await expect(set.getByText("Where the memory goes")).toBeVisible();
+  await expect(set.getByText("In use right now")).toBeVisible();
   await expect(set).toContainText("Qwen 3.5 9B");
   // live: a context change elsewhere shows here
   await set.getByRole("button", { name: "32k" }).first().click();
@@ -255,7 +255,8 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.locator(".set").getByRole("button", { name: "64k" }).first().click();
-  await expect(page.locator(".set")).toContainText("Needs ");
+  // Settings judges the card's own memory, where it spills; Send judges right now, where it won't fit
+  await expect(page.locator(".set .fp-v")).toContainText("Should run slower");
   await page.keyboard.press("Escape");
   await page.locator("#ta").fill("Too big?");
   const sendBtn = page.getByRole("button", { name: "Send message" });

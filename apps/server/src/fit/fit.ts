@@ -12,11 +12,13 @@ import {
   PREDOWNLOAD_KV_FRACTION_PER_16K,
   RAM_SAFETY_MARGIN_BYTES,
   RUNTIME_OVERHEAD_BYTES,
+  SYSTEM_RAM_RESERVE_BYTES,
   VRAM_SAFETY_MARGIN_BYTES,
 } from "./constants.ts";
+import type { GpuBaseline } from "./baseline.ts";
 import { effectiveNumCtx, estimateNeed, parseArchInfo, reportedContextLength, type EstimateOptions } from "./estimate.ts";
 import { formatBytes, formatGb } from "./format.ts";
-import { defaultMeminfo, defaultNvidiaSmi, gpuReadingConflict, readGpu, readMemAvailable, untilAborted } from "./gpu.ts";
+import { defaultMeminfo, defaultNvidiaSmi, gpuReadingConflict, readGpu, readMemory, untilAborted } from "./gpu.ts";
 import { fetchPs, fetchShow, fetchTags, findLoaded, isCopyOf, sameModel, type PsEntry, type PsResponse, type ShowResponse, type TagsResponse } from "./ollama.ts";
 import {
   FitError,
@@ -174,6 +176,11 @@ export interface FitDeps {
    * Ollama may be using one, and Ollama then queues the load until it is done.
    */
   reclaim?: readonly string[];
+  /**
+   * The card's own memory, and who uses it right now (baseline.ts): every list judges against
+   * it. A send never reads it; absent, the lists judge right now too.
+   */
+  baseline?: GpuBaseline;
 }
 
 export interface FitCheck {
@@ -189,7 +196,10 @@ export interface FitCheck {
 /** One GPU, memory and runtime reading. Every fit computed from it shares its /api/show answers. */
 export interface Readings {
   gpu: GpuSnapshot;
+  /** System memory free right now: what a send judges by. */
   memAvailableBytes: number;
+  /** The system memory this computer has: what every list judges a model against. */
+  memTotalBytes: number;
   ps: PsResponse;
   tags: TagsResponse;
   shows: Map<string, Promise<ShowResponse>>;
@@ -198,10 +208,10 @@ export interface Readings {
 export async function takeReadings(deps: FitDeps): Promise<Readings> {
   const now = deps.now ?? Date.now;
   const { signal } = deps;
-  const [gpu, memAvailableBytes, ps, tags] = await untilAborted(
+  const [gpu, { availableBytes: memAvailableBytes, totalBytes: memTotalBytes }, ps, tags] = await untilAborted(
     Promise.all([
       readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, now, signal),
-      readMemAvailable(deps.readMeminfo ?? defaultMeminfo, signal),
+      readMemory(deps.readMeminfo ?? defaultMeminfo, signal),
       fetchPs(deps.baseUrl, signal),
       fetchTags(deps.baseUrl, signal),
     ]),
@@ -209,7 +219,7 @@ export async function takeReadings(deps: FitDeps): Promise<Readings> {
   );
   const conflict = gpuReadingConflict(gpu.unavailableDetail, ps.models.map(model => model.size_vram));
   if (conflict !== undefined) throw new FitError("gpu-unreadable", conflict);
-  return { gpu, memAvailableBytes, ps, tags, shows: new Map() };
+  return { gpu, memAvailableBytes, memTotalBytes, ps, tags, shows: new Map() };
 }
 
 /** /api/show for `model`, asked once per reading. A failed answer is not kept. */
@@ -468,9 +478,16 @@ export async function fitEach(deps: FitDeps & { numCtx: number }): Promise<(mode
 export interface FitSurvey {
   gpu: GpuSnapshot;
   memAvailableBytes: number;
+  memTotalBytes: number;
   /** One report per model whose check ran; a model whose check failed (no /api/show geometry, say) is absent. */
   reports: Map<string, FitReport>;
 }
+
+/**
+ * The system memory a model is judged against: what the computer has, less the system's own share
+ * (SYSTEM_RAM_RESERVE_BYTES). decideFit then keeps its usual RAM margin back from it as well.
+ */
+export const cardRamBytes = (memTotalBytes: number): number => Math.max(0, memTotalBytes - SYSTEM_RAM_RESERVE_BYTES);
 
 /** Fits each named installed model at one num_ctx from a single GPU and RAM reading, skipping failures. */
 export async function surveyFit(deps: FitDeps & { numCtx: number; models: readonly string[] }): Promise<FitSurvey> {
@@ -483,7 +500,7 @@ export async function surveyFit(deps: FitDeps & { numCtx: number; models: readon
       // This model gets no verdict; the others still do.
     }
   }
-  return { gpu: readings.gpu, memAvailableBytes: readings.memAvailableBytes, reports };
+  return { gpu: readings.gpu, memAvailableBytes: readings.memAvailableBytes, memTotalBytes: readings.memTotalBytes, reports };
 }
 
 /**
