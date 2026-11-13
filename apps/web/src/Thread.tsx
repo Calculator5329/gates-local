@@ -727,7 +727,9 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const secs = live === null
     ? savedThoughtSecs(tt, ft, note, text, msg?.thinking ?? "")
     // set at the first word or at Stop; until then the time so far, from the model being ready
-    : live.thinkingSecs ?? thoughtSecsAt(live, live.firstTokenAt ?? Date.now());
+    // stopped while thinking with no thought time kept: the thought lasted until Stop, not until this render
+    : live.thinkingSecs ?? (live.firstTokenAt === undefined && live.end?.kind === "stopped" ? Math.max(1, live.end.secs)
+      : thoughtSecsAt(live, live.firstTokenAt ?? Date.now()));
   const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:

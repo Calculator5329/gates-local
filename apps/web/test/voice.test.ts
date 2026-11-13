@@ -37,6 +37,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../src/store.ts", () => ({
   NA: "na", getState: () => h.state,
+  overChat: (view: string) => view === "settings" || view === "pictures",
   useStore: (select: (state: typeof h.state) => unknown) => select(h.state),
   setState: (patch: Partial<typeof h.state> | ((state: typeof h.state) => Partial<typeof h.state>)) => Object.assign(h.state, typeof patch === "function" ? patch(h.state) : patch),
 }));
