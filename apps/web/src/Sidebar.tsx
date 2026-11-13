@@ -2,7 +2,7 @@
 // The sidebar (shell.md F05, F33): thread list grouped by day with search, or
 // the Settings section nav, and the footer's row of icons (Settings, Models, Usage, the update icon).
 import type { PullProgress } from "@gates-local/contracts";
-import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useRef, useState } from "react";
+import { Fragment, type KeyboardEvent, type MouseEvent, type ReactNode, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { booting, rtInfo, rtOf, unread } from "./Banner.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "./format.ts";
