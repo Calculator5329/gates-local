@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: A download shows its size when the registry cannot say
+
+- When the model's whole size cannot be looked up (offline, a private
+  Hugging Face repo, a slow registry), the download row shows the size of
+  the files Ollama has named so far, and it grows as each new file starts.
+  Before, the whole download showed no size and no percentage.
+- While the lookup is still running, no size shows, so the row never starts
+  with a smaller number that then jumps.
+
 ## 2026-11-13: Chat and composer controls carry stable test names
 
 - The composer, its menus, the queue tray, the stop warning, a reply's

@@ -268,6 +268,24 @@ test.describe("one shell for Models, Usage and Settings", () => {
     await expect(page.locator(".dlg-dim")).toHaveCount(0);
   });
 
+  // Settings row 27 (release read 2026-11-13): Ctrl+, over Usage opened Settings with Usage still up.
+  test("Ctrl+, over Usage swaps it for Settings: one pop-up, and Esc leaves none", async ({ page, open, seededThread }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const usage = page.getByRole("dialog", { name: "Usage" });
+    const set = page.getByRole("dialog", { name: "Settings" });
+    await page.locator(".sb-foot .usage").click();
+    await expect(usage).toBeVisible();
+    await page.keyboard.press("Control+Comma");
+    await expect(set).toBeVisible();
+    await expect(usage, "opening one pop-up closes the other").toHaveCount(0);
+    await expect(page.locator(".dlg")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".dlg")).toHaveCount(0);
+    await expect(page.locator(".dlg-dim")).toHaveCount(0);
+  });
+
   test("a narrow window: the box 24 px in, Usage's header still one row, Settings' sections an icon rail named in tips", async ({ page, open, seededThread }, info) => {
     await page.setViewportSize({ width: 720, height: 700 });
     await open(`#thread=${seededThread ?? ""}`);

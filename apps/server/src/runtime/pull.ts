@@ -32,7 +32,8 @@ export interface PullManagerOptions {
   /**
    * The whole download's size, from the curated list at once or from the registry a moment later.
    * Ollama names one file at a time, so the sum of what it has named is not the model's size until
-   * the last file starts. With this set, no total goes out until the whole size is known.
+   * the last file starts. With this set, no total goes out while the size is being asked for; once
+   * it answers with nothing (or fails), the total is the sum of the files Ollama has named so far.
    */
   sizeOf?: (name: string, signal: AbortSignal) => number | undefined | Promise<number | undefined>;
   now?: () => number;
@@ -47,6 +48,8 @@ interface Job {
   layers: Map<string, { total: number; completed: number }>;
   /** The whole download, when sizeOf knew it. */
   size?: number;
+  /** sizeOf has answered with nothing (offline, a private repo, a timeout, no registry): the total is what Ollama has named. */
+  unsized?: boolean;
   lastPushAt: number;
   /** A held-back progress push, sent when the interval is up if no newer line comes first. */
   trailing?: ReturnType<typeof setTimeout>;
@@ -109,15 +112,17 @@ export function createPullManager(options: PullManagerOptions): PullManager {
   };
 
   const sized = (job: Job, size: number | undefined) => {
-    if (size === undefined || !Number.isFinite(size) || size <= 0 || running !== job) return;
-    job.size = Math.round(size);
+    if (running !== job) return;
+    if (size === undefined || !Number.isFinite(size) || size <= 0) job.unsized = true;
+    else job.size = Math.round(size);
     if (job.progress.state === "downloading" && job.layers.size > 0) progressed(job);
   };
 
   const progressed = (job: Job, flush = false) => {
     const { listed, completed } = sums(job);
-    // what Ollama has named so far is a floor, never the answer, until the whole size is known
-    const total = options.sizeOf === undefined ? listed : job.size === undefined ? 0 : Math.max(job.size, listed);
+    // What Ollama has named so far is a floor, never the answer, while the whole size is being
+    // asked for. With no answer to come, it is the best total there is (settings row 27).
+    const total = options.sizeOf === undefined || job.unsized === true ? listed : job.size === undefined ? 0 : Math.max(job.size, listed);
     const t = now();
     if (!flush && t - job.lastPushAt < interval && job.progress.state === "downloading") {
       const { totalBytes: _total, ...held } = job.progress;
@@ -171,9 +176,9 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     try {
       const size = options.sizeOf?.(job.name, job.controller.signal);
       if (typeof size === "number" || size === undefined) sized(job, size);
-      else size.then((n) => sized(job, n)).catch(() => undefined);
+      else size.then((n) => sized(job, n)).catch(() => sized(job, undefined));
     } catch {
-      // no size: the row shows what has arrived, without a total
+      sized(job, undefined);
     }
     const res = await fetch(new URL("/api/pull", baseUrl), {
       method: "POST",

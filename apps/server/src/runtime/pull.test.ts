@@ -107,11 +107,27 @@ describe("models.pull", () => {
     expect(pushes.find((p) => p.completedBytes > 0)?.totalBytes).toBe(1000);
   });
 
-  it("gives no total while the whole size is unknown, then the true one when done", async () => {
-    const pushes = await severalFiles(async () => undefined);
+  it("gives no total while the registry is still being asked, then the true one when done", async () => {
+    const pushes = await severalFiles(() => new Promise<undefined>(() => undefined));
     expect(pushes.filter((p) => p.state === "downloading").map((p) => p.totalBytes)).toEqual(pushes.filter((p) => p.state === "downloading").map(() => undefined));
     expect(pushes.at(-1)).toEqual({ name: "gemma4:26b", state: "done", completedBytes: 1000, totalBytes: 1000 });
   });
+
+  // Settings row 27 (release read 2026-11-13): offline, a private hf.co repo, a timeout or no registry
+  // left the whole run without a total; 0.2.2 showed the running sum.
+  for (const [how, sizeOf] of [
+    ["the registry has no answer", async () => undefined],
+    ["there is no registry to ask", () => undefined],
+    ["the registry lookup fails", () => Promise.reject(new Error("offline"))],
+  ] as const) {
+    it(`when ${how}, the total is the running sum of the files Ollama has named`, async () => {
+      const pushes = await severalFiles(sizeOf);
+      const downloading = pushes.filter((p) => p.state === "downloading" && p.completedBytes > 0);
+      expect(downloading.every((p) => p.totalBytes !== undefined), "a total on every push").toBe(true);
+      expect(new Set(downloading.map((p) => p.totalBytes))).toEqual(new Set([100, 1000]));
+      expect(pushes.at(-1)).toEqual({ name: "gemma4:26b", state: "done", completedBytes: 1000, totalBytes: 1000 });
+    });
+  }
 
   it("never shows less than Ollama has already listed when the known size is too small", async () => {
     const pushes = await severalFiles(() => 500);
