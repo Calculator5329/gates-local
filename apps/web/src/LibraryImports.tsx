@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SampleDatabase, Source, SourceImport, SourceImports } from "@gates-local/contracts";
 import { rtOf } from "./Banner.tsx";
 import { count, fileSize } from "./format.ts";
+import { handleKey } from "./handles.ts";
 import { Icon } from "./icons.tsx";
 import { askWhy, databaseRows, type DbRow } from "./library-rows.ts";
 import { chatModels } from "./pick.ts";
@@ -157,6 +158,7 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
       <button
         type="button"
         className={`btn outline import-action fill-btn${running ? " running" : ""}${done ? " done" : ""}`}
+        data-testid={`settings.database.download-${handleKey(sample.id)}`}
         style={{ "--f": frac } as React.CSSProperties}
         aria-label={done ? `${sample.label} downloaded` : running ? `Cancel download, ${pct}% done` : `${label} ${sample.label}`}
         data-tip={running && !done ? "Cancel download" : undefined}
@@ -187,17 +189,17 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
           <>
             <div className="db-qs">
               {why === null ? null : <span className="d db-why">{why}</span>}
-              {row.sample.questions.map(q => (
-                <button key={q} type="button" className="db-q" disabled={why !== null} onClick={() => { if (why === null) askWith(`In ${row.sample!.label}: ${q}`); }}>
+              {row.sample.questions.map((q, i) => (
+                <button key={q} type="button" className="db-q" data-testid={`settings.database.ask-${handleKey(row.key)}-${i + 1}`} disabled={why !== null} onClick={() => { if (why === null) askWith(`In ${row.sample!.label}: ${q}`); }}>
                   <span>{q}</span>
                   <Icon id="arrow" cls="s14" />
                 </button>
               ))}
             </div>
             <span className="d db-lic">
-              <a className="link" href={row.sample.licenseUrl} target="_blank" rel="noreferrer noopener">{row.sample.license}</a>
+              <a className="link" href={row.sample.licenseUrl} data-testid={`settings.database.license-${handleKey(row.key)}`} target="_blank" rel="noreferrer noopener">{row.sample.license}</a>
               {" · "}
-              <a className="link" href={repoOf(row.sample.url)} target="_blank" rel="noreferrer noopener">Source</a>
+              <a className="link" href={repoOf(row.sample.url)} data-testid={`settings.database.source-${handleKey(row.key)}`} target="_blank" rel="noreferrer noopener">Source</a>
             </span>
           </>
         ) : null}
@@ -214,7 +216,7 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
     const copied = source?.snapshotAt === undefined ? "" : ` from ${new Date(source.snapshotAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
     return (
       <div className={`srow db-row${open ? " open" : ""}`} key={row.key} data-db={row.key}>
-        <button type="button" className="db-open" aria-expanded={open} onClick={() => toggle(row.key)}>
+        <button type="button" className="db-open" data-testid={`settings.database.open-${handleKey(row.key)}`} aria-expanded={open} onClick={() => toggle(row.key)}>
           <Icon id="right" cls="db-caret s14" />
           <Icon id="db" cls="src-ic" />
           <span className="sl">
@@ -226,11 +228,11 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
           {sample && (!source || done) ? (download ? fillButton(row, sample, done) : null) : source && edit ? (
             <>
               {own || source.state === "error" ? (
-                <button type="button" className="ibtn" aria-label={`Refresh ${name}`} data-tip={own ? esc(`Refresh. The model reads a copy${copied}; refresh it to see later changes.`) : "Refresh"} onClick={() => void act(row.key, refreshSource(source.id))}>
+                <button type="button" className="ibtn" data-testid={`settings.database.refresh-${handleKey(row.key)}`} aria-label={`Refresh ${name}`} data-tip={own ? esc(`Refresh. The model reads a copy${copied}; refresh it to see later changes.`) : "Refresh"} onClick={() => void act(row.key, refreshSource(source.id))}>
                   <Icon id="refresh" />
                 </button>
               ) : null}
-              <button type="button" className="ibtn" aria-label={`Remove ${name}`} data-tip={own ? "Remove from Library. The file stays where it is." : "Remove from Library"} onClick={() => void act(row.key, removeSource(source.id))}>
+              <button type="button" className="ibtn" data-testid={`settings.database.remove-${handleKey(row.key)}`} aria-label={`Remove ${name}`} data-tip={own ? "Remove from Library. The file stays where it is." : "Remove from Library"} onClick={() => void act(row.key, removeSource(source.id))}>
                 <Icon id="trash" />
               </button>
             </>
@@ -273,8 +275,8 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
           <div className="srow">
             <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", repoJob, repoAdded, repoJob ? `${repoJob.label} · ` : "")}</div>
             <div className="sv">
-              <input className="inp import-url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
-              <button type="button" className="btn outline import-action" disabled={cloneAdded || pending !== undefined} onClick={() => repoJob && busy(repoJob) ? void cancel(repoJob) : (setUrl(repoUrl), void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })))}>
+              <input className="inp import-url" data-testid="settings.clone.url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
+              <button type="button" className="btn outline import-action" data-testid="settings.clone.start" disabled={cloneAdded || pending !== undefined} onClick={() => repoJob && busy(repoJob) ? void cancel(repoJob) : (setUrl(repoUrl), void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })))}>
                 {cloneAdded ? "Added" : busy(repoJob) ? "Cancel" : pending === "repository" ? "Starting…" : repoJob?.state === "error" || repoJob?.state === "cancelled" ? "Retry" : "Clone"}
               </button>
             </div>

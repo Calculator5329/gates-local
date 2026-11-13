@@ -31,14 +31,14 @@ test("a dropped text file is read by the model by its name, survives a reload, a
   try {
     await rpc.call("settings.update", { tools: true });
     await drop(page, "notes.txt", WORDS);
-    const chip = page.locator(".composer [data-testid=attached-file]");
+    const chip = page.getByTestId("chat.composer.form").getByTestId("chat.attachment.file");
     await expect(chip).toContainText("notes.txt");
     await expect(chip).toContainText(`${WORDS.length} B`);
 
     await sendMessage(page, "What does it say?");
     await expect(chip).toHaveCount(0);
-    const reply = page.locator(".turn.a").last();
-    const fold = reply.locator("button.think.fold");
+    const reply = page.getByTestId("chat.reply.turn").last();
+    const fold = reply.getByTestId("chat.fold.toggle");
     await expect(fold).toHaveAttribute("aria-label", /\b1 tool call\b/);
     await fold.click();
     const call = reply.locator("[data-tool-row]").first();
@@ -52,7 +52,7 @@ test("a dropped text file is read by the model by its name, survives a reload, a
     if (!file) throw new Error("The message did not keep its file");
 
     await page.reload(); await waitReady(page);
-    await expect(page.locator(".turn.u [data-testid=attached-file]")).toContainText("notes.txt");
+    await expect(page.getByTestId("chat.user-message.turn").getByTestId("chat.attachment.file")).toContainText("notes.txt");
 
     await page.locator(".sb-row.on").click({ button: "right" });
     await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();

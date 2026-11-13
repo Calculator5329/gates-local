@@ -155,23 +155,23 @@ interface StateProps {
 function StateAction({ check, automatic, canUpdate, checking, updating, onCheck, onUpdate, onDownload }: StateProps) {
   if (check?.state === "available" && canUpdate) {
     return (
-      <button type="button" className="btn primary" disabled={updating} onClick={onUpdate}>
+      <button type="button" className="btn primary" data-testid="settings.updates.update" disabled={updating} onClick={onUpdate}>
         {updating ? "Closing to update…" : "Update and restart"}
       </button>
     );
   }
   if (check?.state === "newer" && check.restart === true && canUpdate) {
     return (
-      <button type="button" className="btn primary" disabled={updating} onClick={onUpdate}>
+      <button type="button" className="btn primary" data-testid="settings.updates.restart" disabled={updating} onClick={onUpdate}>
         {updating ? "Closing to update…" : "Restart to update"}
       </button>
     );
   }
   if (check?.state === "newer" && check.forThisCopy && check.download === undefined && !automatic && onDownload !== undefined) {
-    return <button type="button" className="btn outline" onClick={onDownload}>Download</button>;
+    return <button type="button" className="btn outline" data-testid="settings.updates.download" onClick={onDownload}>Download</button>;
   }
   return (
-    <button type="button" className="btn outline" disabled={checking || updating} onClick={onCheck}>
+    <button type="button" className="btn outline" data-testid="settings.updates.check" disabled={checking || updating} onClick={onCheck}>
       Check for updates
     </button>
   );
@@ -180,7 +180,7 @@ function StateAction({ check, automatic, canUpdate, checking, updating, onCheck,
 /** Beside the control, on the row's own line: the release page, when the words send the person there. */
 function PageLink({ check }: { check: UpdateCheck | null }) {
   const page = check === null ? undefined : linksPage(check);
-  return page === undefined ? null : <a className="link" href={page} target="_blank" rel="noreferrer noopener">Open the release page</a>;
+  return page === undefined ? null : <a className="link" href={page} data-testid="settings.updates.release-page" target="_blank" rel="noreferrer noopener">Open the release page</a>;
 }
 
 export interface UpdatesViewProps {
@@ -275,10 +275,10 @@ export function UpdatesView(p: UpdatesViewProps) {
                 ? "Desktop app only: reads the release page's list 15 seconds after startup, then hourly, and downloads a newer version for this copy. Default on. Off stops automatic requests, stops a download in progress and deletes downloaded versions; a check in progress finishes. Manual checks still work."
                 : "Desktop app only: asks this clone's git remote 15 seconds after startup, then hourly. Default on. Off prevents future automatic git processes and network requests; a check in progress finishes. Manual checks still work."}
               err={p.switchErr ?? null}>
-              <button type="button" className="switch" role="switch" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
+              <button type="button" className="switch" role="switch" data-testid="settings.updates.automatic" aria-checked={settings.updateAutomatic !== false} aria-label="Check for updates automatically" onClick={() => p.onAutomatic?.(settings.updateAutomatic === false)} />
             </Row>
             {installed ? null : <Row label="Get every change, not only releases" tip="Off: only releases, once there are any. On: every change on the main branch as soon as it lands." err={p.switchErr ?? null}>
-              <button type="button" className="switch" role="switch" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
+              <button type="button" className="switch" role="switch" data-testid="settings.updates.every-change" aria-checked={every} aria-label="Get every change, not only releases" onClick={() => p.onEveryChange(!every)} />
             </Row>}
             </>
           )}

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MODEL_CONTROL_BOUNDS, type ModelDefaults, type ModelSettings, type ModelSettingsPatch } from "@gates-local/contracts";
 import { describeModel } from "./format.ts";
+import { handleKey } from "./handles.ts";
 import { Icon } from "./icons.tsx";
 import { applyServerEvent, call, updateModelSettings, updateSettings } from "./session.ts";
 import { NA, useStore } from "./store.ts";
@@ -33,14 +34,14 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   return <Grp title="System prompt">
     <div className="inst-prompt" aria-busy={busy}>
       <label className="inst-check" data-tip={esc(PROMPT_TIP)}>
-        <input type="checkbox" checked={custom} disabled={busy || locked} onChange={e => { setDraft({ custom: e.target.checked, text }); setStatus({ text: "", error: false }); }} />
+        <input type="checkbox" data-testid="settings.instructions.custom" checked={custom} disabled={busy || locked} onChange={e => { setDraft({ custom: e.target.checked, text }); setStatus({ text: "", error: false }); }} />
         {model === undefined ? "Use custom instructions for all chats" : "Override all-chat instructions for this model"}
       </label>
-      <textarea aria-label="System prompt" className="inp inst-text" value={custom ? text : inherited} placeholder={custom ? "Leave empty for no user or model prompt" : model === undefined ? "Use each model's own instructions" : "Use all-chat instructions, or the model's own"} disabled={!custom || busy || locked} onChange={e => { setDraft({ custom: true, text: e.target.value }); setStatus({ text: "", error: false }); }} />
+      <textarea aria-label="System prompt" className="inp inst-text" data-testid="settings.instructions.prompt" value={custom ? text : inherited} placeholder={custom ? "Leave empty for no user or model prompt" : model === undefined ? "Use each model's own instructions" : "Use all-chat instructions, or the model's own"} disabled={!custom || busy || locked} onChange={e => { setDraft({ custom: true, text: e.target.value }); setStatus({ text: "", error: false }); }} />
       <div className="inst-actions">
         <Status {...status} />
-        <button type="button" className="btn ghost" disabled={busy || locked} data-tip="Restore inherited instructions." onClick={() => void save(true)}>Reset</button>
-        <button type="button" className="btn outline" disabled={busy || locked || draft === null} onClick={() => void save()}>Save instructions</button>
+        <button type="button" className="btn ghost" data-testid="settings.instructions.reset" disabled={busy || locked} data-tip="Restore inherited instructions." onClick={() => void save(true)}>Reset</button>
+        <button type="button" className="btn outline" data-testid="settings.instructions.save" disabled={busy || locked || draft === null} onClick={() => void save()}>Save instructions</button>
       </div>
     </div>
   </Grp>;
@@ -68,13 +69,13 @@ function ModelMenu({ models, value, onPick }: { models: readonly { name: string;
   }, [open]);
   const current = models.find(m => m.name === value);
   const choose = (name: string) => { onPick(name); close(); };
-  return <div className="inst-pick" ref={box} onKeyDown={e => open && walk(e, box.current, "[role=option]", close)}>
-    <button ref={btn} type="button" className={`mp-select${open ? " on" : ""}`} aria-haspopup="listbox" aria-expanded={open} aria-label={`Installed model: ${current?.text ?? "none"}`} disabled={!models.length} onClick={() => { closeTip(); setOpen(o => !o); }}>
+  return <div className="inst-pick" data-testid="settings.instructions.model-menu" ref={box} onKeyDown={e => open && walk(e, box.current, "[role=option]", close)}>
+    <button ref={btn} type="button" className={`mp-select${open ? " on" : ""}`} data-testid="settings.instructions.model" aria-haspopup="listbox" aria-expanded={open} aria-label={`Installed model: ${current?.text ?? "none"}`} disabled={!models.length} onClick={() => { closeTip(); setOpen(o => !o); }}>
       <span className="mp-sv"><span className="mp-nmn">{current?.text ?? "No installed chat models"}</span></span>
       <Icon id="down" cls="s14" />
     </button>
     {open ? <div className="mp-dd" role="listbox" aria-label="Installed chat models">
-      {models.map(m => <div key={m.name} role="option" tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} data-tip={esc(m.name)} className="mp-opt" onClick={() => choose(m.name)}
+      {models.map(m => <div key={m.name} role="option" data-testid={`settings.instructions.model-${handleKey(m.name)}`} tabIndex={-1} aria-selected={m.name === value} aria-label={m.text} data-tip={esc(m.name)} className="mp-opt" onClick={() => choose(m.name)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(m.name); } }}>
         {m.name === value ? <Icon id="check" cls="s14 mp-ck" /> : <span />}
         <span className="mp-nmx"><span className="mp-nmn">{m.text}</span></span>
@@ -104,7 +105,7 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
     if (error === null) { setDraft(null); setStatus({ text: "Saved", error: false }); }
     else setStatus({ text: error, error: true });
   };
-  return <form className="inst-controls" aria-label="Reply controls" aria-busy={busy} onSubmit={e => { e.preventDefault(); void save(); }}>
+  return <form className="inst-controls" data-testid="settings.reply-controls.form" aria-label="Reply controls" aria-busy={busy} onSubmit={e => { e.preventDefault(); void save(); }}>
     <Grp title="Reply controls">
       {CONTROLS.map(control => {
         const key = control.key, custom = values[key] !== null;
@@ -112,14 +113,14 @@ function ReplyControls({ model, saved, defaults, locked }: { model: string; save
         const shipped = key === "keep_alive" ? undefined : defaults?.parameters.split("\n").find(line => line.trim().startsWith(`${key} `))?.trim().split(/\s+/)[1];
         const owner = key === "keep_alive" ? "Ollama's" : "the model's";
         return <Row key={key} label={control.label} tip={`${control.hint} Default uses ${owner} own value. Range: ${bounds.min} to ${bounds.max}.`}>
-          <Seg2 label={`${control.label} mode`} disabled={busy || locked} value={custom ? "custom" : "default"} options={MODES}
+          <Seg2 label={`${control.label} mode`} handle={`reply-${handleKey(key)}`} disabled={busy || locked} value={custom ? "custom" : "default"} options={MODES}
             onPick={mode => { if (mode !== (custom ? "custom" : "default")) change(key, mode === "default" ? null : (shipped ?? (key === "num_predict" ? "2048" : key === "keep_alive" ? "300" : key === "repeat_penalty" ? "1" : "0"))); }} />
-          <input className="inp inst-number" type="number" aria-label={control.label} value={values[key] ?? ""} placeholder={shipped ?? ""} min={key === "num_predict" ? -2 : key === "keep_alive" ? -1 : bounds.min} max={bounds.max} step={bounds.integer ? 1 : "any"} required={custom} disabled={!custom || busy || locked} onChange={e => change(key, e.target.value)} />
-          <button type="button" className="btn ghost inst-reset" aria-label={`Reset ${control.label}`} data-tip="Use the default after saving controls." disabled={!custom || busy || locked} onClick={() => change(key, null)}>Reset</button>
+          <input className="inp inst-number" type="number" data-testid={`settings.reply-controls.value-${handleKey(key)}`} aria-label={control.label} value={values[key] ?? ""} placeholder={shipped ?? ""} min={key === "num_predict" ? -2 : key === "keep_alive" ? -1 : bounds.min} max={bounds.max} step={bounds.integer ? 1 : "any"} required={custom} disabled={!custom || busy || locked} onChange={e => change(key, e.target.value)} />
+          <button type="button" className="btn ghost inst-reset" data-testid={`settings.reply-controls.reset-${handleKey(key)}`} aria-label={`Reset ${control.label}`} data-tip="Use the default after saving controls." disabled={!custom || busy || locked} onClick={() => change(key, null)}>Reset</button>
         </Row>;
       })}
     </Grp>
-    <div className="inst-actions"><Status {...status} /><button type="button" className="btn ghost" disabled={busy || locked} onClick={() => void save(true)}>Reset controls</button><button type="submit" className="btn outline" disabled={busy || locked || draft === null}>Save controls</button></div>
+    <div className="inst-actions"><Status {...status} /><button type="button" className="btn ghost" data-testid="settings.reply-controls.reset-all" disabled={busy || locked} onClick={() => void save(true)}>Reset controls</button><button type="submit" className="btn outline" data-testid="settings.reply-controls.save" disabled={busy || locked || draft === null}>Save controls</button></div>
   </form>;
 }
 
@@ -134,8 +135,8 @@ function ModelEditors({ model, name, saved, shared, locked }: { model: string; n
   return <>
     <PromptEditor value={saved.systemPrompt} inherited={shared ?? read.value?.system ?? ""} model={model} locked={locked} />
     <ReplyControls model={model} saved={saved} defaults={read.value} locked={locked} />
-    <div className="grp box inst-defaults"><details><summary>What {name} ships with</summary>
-      <div className="inst-actions"><Status text={read.error ?? (read.value ? "Read only" : "Loading…")} error={read.error !== undefined} /><button type="button" className="btn ghost" disabled={!read.error} onClick={() => { setRead({}); setRetry(n => n + 1); }}>Retry</button></div>
+    <div className="grp box inst-defaults"><details><summary data-testid="settings.model-defaults.toggle">What {name} ships with</summary>
+      <div className="inst-actions"><Status text={read.error ?? (read.value ? "Read only" : "Loading…")} error={read.error !== undefined} /><button type="button" className="btn ghost" data-testid="settings.model-defaults.retry" disabled={!read.error} onClick={() => { setRead({}); setRetry(n => n + 1); }}>Retry</button></div>
       <b>System prompt</b><pre className="inst-shipped" aria-label="Model system prompt">{read.value?.system || (read.value ? "No system prompt reported." : "")}</pre>
       <b>Parameters</b><pre className="inst-shipped" aria-label="Model parameters">{read.value?.parameters || (read.value ? "No parameters reported. Ollama defaults apply." : "")}</pre>
     </details></div>
@@ -155,8 +156,8 @@ export default function Instructions() {
   return <div className="instructions">
     <Head title="Instructions" />
     <div className="inst-top"><div className="mp-tabs" role="group" aria-label="Instruction scope">
-      <button type="button" className={`mp-tab${scope === "all" ? " on" : ""}`} aria-pressed={scope === "all"} onClick={() => setScope("all")}>All chats</button>
-      <button type="button" className={`mp-tab${scope === "model" ? " on" : ""}`} aria-pressed={scope === "model"} onClick={() => { setPicked(model ?? null); setScope("model"); }}>Per model</button>
+      <button type="button" className={`mp-tab${scope === "all" ? " on" : ""}`} data-testid="settings.instructions.scope-all" aria-pressed={scope === "all"} onClick={() => setScope("all")}>All chats</button>
+      <button type="button" className={`mp-tab${scope === "model" ? " on" : ""}`} data-testid="settings.instructions.scope-model" aria-pressed={scope === "model"} onClick={() => { setPicked(model ?? null); setScope("model"); }}>Per model</button>
     </div></div>
     {scope === "all" ? <PromptEditor value={current?.systemPrompt} inherited="" locked={locked} /> : <>
       <Grp><Row label="Installed model"><ModelMenu value={model} onPick={setPicked} models={installed.map(m => ({ name: m.name, text: describeModel(m.name, catalog === NA ? undefined : catalog).name }))} /></Row></Grp>

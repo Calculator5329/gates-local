@@ -50,8 +50,8 @@ it.each([
 ] as const)("when %s, the reason goes to Image generation and the switch cannot be turned on", async (_why, imageGen, image, words) => {
   const row = await makeImagesRow(false, false, imageGen, image);
   expect(row).toContain(words);
-  expect(row).toMatch(/<button type="button" class="link" data-go="images">Image generation<\/button>/);
-  expect(row).toMatch(/role="switch" aria-checked="false" aria-label="Make images" disabled=""/);
+  expect(row).toMatch(/<button type="button" class="link" data-go="images" data-testid="settings.tools.image-setup">Image generation<\/button>/);
+  expect(row).toMatch(/role="switch" data-testid="settings.tools.make-images" aria-checked="false" aria-label="Make images" disabled=""/);
   expect(row).toContain('class="srow tool dim"');
 });
 
@@ -59,7 +59,7 @@ it("with the master switch off the hidden reason holds the same link box, out of
   const { SettingsView } = await import("../src/Settings.tsx");
   setState({ ...initial, conn: { kind: "open" }, view: "settings", section: "tools", settings: { ...settings(false, false), tools: false }, sources: [], imageStatus: { state: "off", owner: "external" }, unavailable: {} });
   const html = renderToStaticMarkup(createElement(SettingsView));
-  expect(html).toContain('<span aria-hidden="true">Needs Generate images, in <button type="button" class="link" data-go="images" tabindex="-1">Image generation</button>.</span>');
+  expect(html).toContain('<span aria-hidden="true">Needs Generate images, in <button type="button" class="link" data-go="images" data-testid="settings.tools.image-setup" tabindex="-1">Image generation</button>.</span>');
 });
 
 it.each<[string, { imageGen?: boolean; image?: "missing"; tools?: boolean }]>([

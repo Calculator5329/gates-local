@@ -80,7 +80,7 @@ test.describe("the start screen", () => {
     await expect(page.locator(".snav .sb-act.on")).toHaveText("Library");
     await page.keyboard.press("Escape");
     await waitReady(page);
-    await page.locator(".setup-row .setup-ic").nth(1).click();
+    await page.getByTestId("chat.setup.open-images").click();
     await expect(page.locator(".snav .sb-act.on")).toHaveText("Image generation");
   });
 

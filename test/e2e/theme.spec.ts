@@ -16,11 +16,10 @@ test("with no saved theme the app is dark whatever the OS says, and System follo
 
   await page.keyboard.press("Control+,");
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-  const theme = page.getByRole("group", { name: "Theme" });
-  await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("settings.segment.theme-dark")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".set")).not.toContainText("not available in this build");
 
-  await theme.getByRole("button", { name: "System" }).click();
+  await page.getByTestId("settings.segment.theme-system").click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /./);
   const light = await page.evaluate(bodyBg);
   expect(light).not.toBe(dark);
@@ -34,7 +33,7 @@ test("with no saved theme the app is dark whatever the OS says, and System follo
   expect(await page.evaluate(bodyBg)).toBe(light);
   await test.step("a picked theme survives reload over the OS setting", async () => {
     await page.keyboard.press("Control+,");
-    await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+    await page.getByTestId("settings.segment.theme-light").click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await page.emulateMedia({ colorScheme: "dark" });
     await page.reload();

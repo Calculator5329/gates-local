@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Chat and composer controls carry stable test names
+
+- The composer, its menus, the queue tray, the stop warning, a reply's
+  and a sent message's actions, attachments, code blocks, the banner's
+  Retry and the error card carry `data-testid` names such as
+  `chat.composer.send` and `chat.stop-warning.confirm`. The browser tests
+  click these by name. Checks that read a control's state from its label
+  (Stop, Try again, Stop dictation) still find it by that label. The
+  attached-file chip's old `attached-file` name is now
+  `chat.attachment.file`, recorded as a rename in
+  `apps/web/agent-handles.json`. Nothing changes on screen.
+
+## 2026-11-13: Settings controls carry stable test names
+
+- Every Settings control carries a `data-testid` in the form
+  `area.component.element` (for example `settings.nav.open-advanced`),
+  listed in `apps/web/testid-registry.json` with a coverage floor in
+  `apps/web/testid-ratchet.json`. The browser tests find Settings
+  sections, switches and buttons by these names, so rewording a label
+  no longer breaks them. Nothing changes on screen.
+
 ## 2026-11-13: Trying the real image setup before a release offers it
 
 - Set up images stays off in releases until the real install has run

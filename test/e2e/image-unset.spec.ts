@@ -45,7 +45,7 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     const card = page.locator("[data-image-job]");
     await expect(card).toHaveAttribute("data-image-job", "error");
     await shot(page, "[data-image-job]", "[data-image-job]", info.outputPath("unset-card.png"));
-    const imageBtn = page.getByRole("button", { name: "Image", exact: true });
+    const imageBtn = page.getByTestId("chat.composer.image");
     await imageBtn.click();
     await page.waitForTimeout(300);
     await shot(page, ".composer, #imageUnset.open", "#imageUnset.open, .composer .pill.gate[aria-label=Image]", info.outputPath("unset-composer.png"));

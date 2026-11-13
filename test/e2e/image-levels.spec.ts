@@ -63,7 +63,7 @@ for (const level of LEVELS) {
     if (!server) throw new Error("No test server URL");
     const client = createClient(new WebSocket(server));
     try { await client.call("settings.update", { imageGen: true }); } finally { client.close(); }
-    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.getByTestId("chat.composer.image").click();
     const button = page.locator("#modelBtn");
     if (level.button === undefined) await expect(button).toContainText("Image model");
     else await expect(button).toContainText(level.button);

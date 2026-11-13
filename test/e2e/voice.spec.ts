@@ -22,9 +22,9 @@ test.afterEach(async () => { await whisper.close(); });
 
 async function connect(page: import("@playwright/test").Page) {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "General", exact: true }).click();
-  await page.getByRole("textbox", { name: "whisper.cpp address" }).fill(whisper.url);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByTestId("settings.nav.open-general").click();
+  await page.getByTestId("settings.voice.address").fill(whisper.url);
+  await page.getByTestId("settings.voice.connect").click();
   await expect(page.getByText("Connected for dictation.", { exact: false })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".voice")).toBeVisible();
@@ -55,7 +55,7 @@ test("voice: local microphone transcript stays in the draft at the cursor; cance
   await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(7, 7));
   const box = await page.locator(".composer").boundingBox();
   const model = await page.locator("#modelBtn").boundingBox();
-  await page.getByRole("button", { name: "Dictate", exact: true }).click();
+  await page.getByTestId("chat.composer.dictate").click();
   await expect(page.getByRole("button", { name: "Stop dictation" })).toHaveClass(/\blistening\b/);
   await expect(page.locator(".voice")).toHaveAttribute("data-elapsed", /^[1-9]\d*$/);
   await expectIconOnly(page, "listening");
@@ -80,7 +80,7 @@ test("voice: local microphone transcript stays in the draft at the cursor; cance
   await page.keyboard.press("Control+Shift+Space");
   await expect(ta).toHaveValue("before spoken words after");
   await expect(page.locator(".turn.u")).toHaveCount(0);
-  await page.getByRole("button", { name: "Dictate", exact: true }).click();
+  await page.getByTestId("chat.composer.dictate").click();
   await expect(page.locator(".voice")).toHaveClass(/\blistening\b/);
   await page.keyboard.press("Escape");
   await expect(page.locator(".voice")).toHaveClass(/\bidle\b/);

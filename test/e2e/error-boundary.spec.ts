@@ -47,7 +47,7 @@ test("render recovery keeps the draft and escalates a failed app retry to Reload
   await expect(page.getByRole("banner")).toHaveText("Thread title");
   await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");
   await page.getByRole("textbox").fill("Keep editing after the error");
-  await page.getByRole("button", { name: "Copy error" }).click();
+  await page.getByTestId("ui.error.copy").click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("Saved message could not render");
   expect(errors).toHaveLength(1);
   await page.getByRole("button", { name: "Try again", exact: true }).click();
@@ -66,6 +66,6 @@ test("render recovery keeps the draft and escalates a failed app retry to Reload
   await page.evaluate("window.failInEffect()");
   await page.getByRole("button", { name: "Try again", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reload window", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Copy error", exact: true }).click();
+  await page.getByTestId("ui.error.copy").click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("Shell effect failed");
 });

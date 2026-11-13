@@ -238,7 +238,7 @@ test("Settings > Advanced has one default-context control with 8k on it, and Set
   await expect(page.locator(".set [data-ctx]")).toHaveCount(0);
   await expect(page.locator(".set").getByRole("group", { name: /context/i })).toHaveCount(0);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
   // one control: the row inside GPU memory, nothing else on the page sets the default
   const seg = page.locator("#gpuMemory").getByRole("group", { name: "Default context" });
   await expect(seg.getByRole("button")).toHaveText(["8k", "16k", "32k", "64k"]);
@@ -249,7 +249,7 @@ test("Settings > Advanced has one default-context control with 8k on it, and Set
   await page.reload();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
   await expect(page.locator("#gpuMemory").getByRole("group", { name: "Default context" }).getByRole("button", { name: "8k" })).toHaveAttribute("aria-pressed", "true");
 });
 

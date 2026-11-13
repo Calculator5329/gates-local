@@ -35,14 +35,14 @@ test("two tabs keep the last writer's complete draft after another tab replaces 
   try {
     await other.goto(page.url()); await waitReady(other);
     await expect(other.locator(".att img")).toHaveCount(2);
-    for (let i = 0; i < 2; i++) await other.getByRole("button", { name: "Remove image 1", exact: true }).click();
+    for (let i = 0; i < 2; i++) await other.getByTestId("chat.attachment.remove-image-1").click();
     await addImages(other, 1);
     await other.locator("#ta").fill("B words"); await saved(other, "B words");
     await page.locator("#ta").fill("A final words"); await saved(page, "A final words");
     await page.reload(); await waitReady(page);
     await expect(page.locator("#ta")).toHaveValue("A final words");
     await expect(page.locator(".att img")).toHaveCount(2);
-    await other.getByRole("button", { name: "Remove image 1", exact: true }).click();
+    await other.getByTestId("chat.attachment.remove-image-1").click();
     await other.locator("#ta").fill("B cleared"); await saved(other, "B cleared");
     await page.locator("#ta").fill("A words after B cleared"); await saved(page, "A words after B cleared");
     await page.reload(); await waitReady(page);

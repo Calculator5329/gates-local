@@ -19,10 +19,10 @@ async function imageMode(page: Page, open: () => Promise<void>) {
   await stack.reset("image-turn", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
 }
 
 /** `around` with 16 px to spare, `marked` outlined in amber: the part this change touched. */
@@ -41,20 +41,20 @@ async function shot(page: Page, around: string, marked: string, path: string) {
 }
 
 const countBtn = (page: Page) => page.locator("#countBtn");
-const menu = (page: Page) => page.getByRole("menu", { name: "Pictures per send" });
+const menu = (page: Page) => page.getByTestId("chat.count-menu.menu");
 
 // Guards the owner's ask: the count takes the Thinking circle's place in Image mode, and only there.
 test("in Image mode the Thinking circle is the picture count; its menu picks by click or key, and Image off brings the bulb back", async ({ page, open }, info) => {
   await imageMode(page, open);
   await shot(page, ".composer", ".composer .pill.thinking", info.outputPath("count-1-composer.png"));
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 1");
-  await expect(page.getByRole("button", { name: "Thinking" })).toHaveCount(0);
+  await expect(page.getByTestId("chat.composer.thinking")).toHaveCount(0);
   await countBtn(page).click();
   await expect(menu(page).getByRole("menuitemradio")).toHaveText(["1 image", "2 images", "3 images", "4 images"]);
-  await expect(menu(page).getByRole("menuitemradio", { name: "1 image" })).toHaveAttribute("aria-checked", "true");
+  await expect(menu(page).getByTestId("chat.count-menu.pick-1")).toHaveAttribute("aria-checked", "true");
   // nothing made on this computer yet: no times
   await expect(menu(page).locator("small")).toHaveCount(0);
-  await menu(page).getByRole("menuitemradio", { name: "2 images" }).click();
+  await menu(page).getByTestId("chat.count-menu.pick-2").click();
   await expect(menu(page)).toBeHidden();
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 2");
   // keys 1 to 4 pick while it is open
@@ -65,10 +65,10 @@ test("in Image mode the Thinking circle is the picture count; its menu picks by 
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 4");
   await shot(page, ".composer", "#countBtn", info.outputPath("count-1-composer-after.png"));
   // Image off: the bulb is back; on again: the pick is still there
-  await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Thinking" })).toBeVisible();
+  await page.getByTestId("chat.composer.image").click();
+  await expect(page.getByTestId("chat.composer.thinking")).toBeVisible();
   await expect(countBtn(page)).toHaveCount(0);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 4");
 });
 
@@ -76,7 +76,7 @@ test("in Image mode the Thinking circle is the picture count; its menu picks by 
 test("each thread keeps its own count, after a reload too, and the menu shows this computer's time once one exists", async ({ page, open }, info) => {
   await imageMode(page, open);
   await countBtn(page).click();
-  await menu(page).getByRole("menuitemradio", { name: "3 images" }).click();
+  await menu(page).getByTestId("chat.count-menu.pick-3").click();
   await sendMessage(page, "three lighthouses");
   const group = page.locator("[data-image-group]");
   await expect(group).toHaveCount(1);
@@ -100,7 +100,7 @@ test("each thread keeps its own count, after a reload too, and the menu shows th
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 3");
   // a reload starts with Image off, as before; switched on, the thread's 3 is back
   await page.reload(); await waitReady(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(countBtn(page)).toHaveAccessibleName("Pictures per send: 3");
   // a picture of this setup exists now: each row has a time
   await countBtn(page).click();
@@ -121,7 +121,7 @@ test("a send of two is one card of two tiles in a row; Stop keeps the finished o
   await shot(page, "[data-image-job]", "[data-image-job]", info.outputPath("count-3-one.png"));
   await expect(page.locator("[data-image-group]")).toHaveCount(0);
   await countBtn(page).click();
-  await menu(page).getByRole("menuitemradio", { name: "2 images" }).click();
+  await menu(page).getByTestId("chat.count-menu.pick-2").click();
   await sendMessage(page, "two lighthouses");
   const group = page.locator("[data-image-group]");
   const head = group.locator(".image-group-head");

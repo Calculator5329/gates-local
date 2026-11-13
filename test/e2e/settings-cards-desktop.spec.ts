@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { _electron, type TestInfo } from "@playwright/test";
 import { FAKE_URL, ROOT } from "./env.ts";
 import { type Delay, type WholeFinding, type WholeOptions, delayEverything, settled, watchWhole, wholeFindings } from "./flicker-probe.ts";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, navButton, test, waitReady } from "./fixtures.ts";
 
 test.beforeAll(async () => {
   await promisify(execFile)("pnpm", ["--filter", "@gates-local/desktop", "build"], { cwd: ROOT });
@@ -76,11 +76,11 @@ test("every Settings section is whole on its first frame", async ({ seededThread
     console.log(`SETTINGS_CARDS sections: ${JSON.stringify(sections)}`);
     for (const name of sections) {
       if (delay) await settled(delay, 3000);
-      const button = page.locator(".snav").getByRole("button", { name, exact: true });
+      const button = navButton(page, name);
       report(`first visit to ${name}`, await watchWhole(page, section(name), () => button.click(), delay));
     }
     if (delay) await settled(delay, 3000);
-    report("back to General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+    report("back to General, second visit", await watchWhole(page, section("General"), () => page.getByTestId("settings.nav.open-general").click(), delay));
     // Models is the footer bot's own pop-up (settings row 6), not a section; the footer is under the Settings pop-up's blur
     await page.keyboard.press("Escape");
     await page.locator(".dlg").waitFor({ state: "detached" });

@@ -20,12 +20,12 @@ const connect = (page: Page) => {
 
 async function imageOn(page: Page) {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
-  await expect(page.getByRole("switch", { name: "Generate images" })).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
+  await expect(page.getByTestId("settings.images.enable")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await waitReady(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
 }
 
 /** Every text box inside the button that its own width cuts. */
@@ -108,10 +108,10 @@ for (const viewport of [360, 1280]) {
       try { await client.call("settings.update", { imageGen: true }); } finally { client.close(); }
       if (touch) {
         await page.locator("#optBtn").click();
-        await page.getByRole("menuitemcheckbox", { name: "Image" }).click();
+        await page.getByTestId("chat.options-menu.image").click();
         await page.keyboard.press("Escape");
       } else {
-        await page.getByRole("button", { name: "Image", exact: true }).click();
+        await page.getByTestId("chat.composer.image").click();
       }
       const button = page.locator("#modelBtn");
       await expect(button).toContainText("1024×1024");
@@ -145,7 +145,7 @@ test("the button keeps its width on a thread switch with Image on", async ({ pag
       threads.push(id);
     }
   } finally { client.close(); }
-  const image = page.getByRole("button", { name: "Image", exact: true });
+  const image = page.getByTestId("chat.composer.image");
   await page.locator(`[data-thread="${threads[0]}"]`).click();
   await waitReady(page);
   await imageOn(page);

@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 import type { Locator, Page } from "@playwright/test";
 import { burst, type Frame } from "./flicker-probe.ts";
-import { expect, openModels, stack, test, waitComposer, waitReady } from "./fixtures.ts";
+import { expect, listButton, navButton, openModels, stack, test, waitComposer, waitReady } from "./fixtures.ts";
 
 test.use({ seed: "design", video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", comfyUrl: "http://127.0.0.1:1" });
 
@@ -11,9 +11,9 @@ async function section(page: Page, name: string, first = false) {
   if (!phone && name === "Models") return openModels(page);
   if (first || (!phone && await page.getByRole("dialog", { name: "Models" }).count())) await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
-    await page.getByRole("button", { name: "Back to Settings" }).click();
-    await page.locator(".set-list").getByRole("button", { name }).click();
-  } else await page.locator(".snav").getByRole("button", { name, exact: true }).click();
+    await page.getByTestId("settings.shell.back").click();
+    await listButton(page, name).click();
+  } else await navButton(page, name).click();
 }
 
 /** Stable test-only identities survive changes to a row's label and classes. */
@@ -118,9 +118,9 @@ for (const width of [1440, 360]) {
       await waitReady(page);
       await page.keyboard.press("Control+Comma");
       if (width <= 640) {
-        await page.getByRole("button", { name: "Back to Settings" }).click();
-        await page.locator(".set-list").getByRole("button", { name: "Advanced" }).click();
-      } else await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+        await page.getByTestId("settings.shell.back").click();
+        await page.getByTestId("settings.sections.open-advanced").click();
+      } else await page.getByTestId("settings.nav.open-advanced").click();
       const gpu = page.locator("#gpuMemory");
       const verdict = gpu.locator(".fp-v:visible");
       await expect(verdict).toHaveCount(1);

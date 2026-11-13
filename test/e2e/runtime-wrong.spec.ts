@@ -21,7 +21,7 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.locator(".banner")).toBeVisible();
     await expect(page.locator(".banner")).toContainText(port);
     await expect(page.locator("#ta")).toHaveAttribute("placeholder", "Chat starts when Ollama answers on its port");
-    await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await expect(page.getByTestId("chat.composer.send")).toBeDisabled();
 
     await gear(page).click();
     await expect(page.getByRole("heading", { name: "Runtime" })).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("with the system Ollama chosen", () => {
     await expect(page.locator(".banner")).toContainText(String(runtimePorts.system));
     // the stack control turns the fake into a healthy Ollama on the same port
     await stack.scenario("models");
-    await page.locator(".banner").getByRole("button", { name: "Retry" }).click();
+    await page.getByTestId("chat.banner.retry").click();
     await waitReady(page);
     await expect(page.locator(".banner")).toHaveCount(0);
   });

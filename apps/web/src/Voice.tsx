@@ -154,7 +154,7 @@ export function Voice({ textarea, held = null }: { textarea: RefObject<HTMLTextA
     void toggle();
   };
   if (held !== null) return null;
-  return <button type="button" className={`ctl sq voice ${phase}`} aria-label={name} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} data-tip={tip} data-elapsed={phase === "listening" ? seconds : undefined} onPointerDown={(e) => e.preventDefault()} onClick={click}>
+  return <button type="button" className={`ctl sq voice ${phase}`} data-testid="chat.composer.dictate" aria-label={name} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} data-tip={tip} data-elapsed={phase === "listening" ? seconds : undefined} onPointerDown={(e) => e.preventDefault()} onClick={click}>
     {phase === "transcribing" ? <Icon id="spin" cls="spin" />
       : <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>}
     <span className="vh" role="status">{status}</span>

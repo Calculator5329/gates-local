@@ -269,7 +269,7 @@ describe("the Updates group of an installed copy", () => {
   const INSTALLED: UpdateStatus = { version: { kind: "installed", version: "1.2.3" }, result: null, lastCheck: null, activity: [], installing: false };
   const PAGE = "https://example.invalid/owner/repo/releases/latest";
   const installedWith = (lastCheck: UpdateCheck) => ({ status: { ...INSTALLED, lastCheck } });
-  const link = `<a class="link" href="${PAGE}" target="_blank" rel="noreferrer noopener">Open the release page</a>`;
+  const link = `<a class="link" href="${PAGE}" data-testid="settings.updates.release-page" target="_blank" rel="noreferrer noopener">Open the release page</a>`;
 
   it("names the copy, checks the release page and has no git words or clone switches", () => {
     const html = view({ status: INSTALLED });
@@ -359,7 +359,7 @@ describe("the Updates group of an installed copy", () => {
   });
 
   it("offers Download for a version this copy can use only while automatic checks are off", () => {
-    const button = '<button type="button" class="btn outline">Download</button>';
+    const button = '<button type="button" class="btn outline" data-testid="settings.updates.download">Download</button>';
     const onDownload = vi.fn();
     const off = view({ ...installedWith(newer()), settings: OFF, onDownload });
     expect(off).toContain(button);

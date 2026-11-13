@@ -58,11 +58,11 @@ function useTicker(ms: number, on: boolean): number {
 }
 
 /** Copy, with the check-mark flash (F60): the icon and tip read "Copied" for 1.2 s. */
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, handle }: { text: string; handle: "reply" | "user-message" }) {
   const [copied, copy] = useCopy(text, 1200);
   return (
     <>
-      <button type="button" className="ibtn xs" data-copy data-tip={copied ? "Copied" : "Copy"} aria-label="Copy" onClick={copy}>
+      <button type="button" className="ibtn xs" data-testid={`chat.copy.${handle}`} data-copy data-tip={copied ? "Copied" : "Copy"} aria-label="Copy" onClick={copy}>
         <Icon id={copied ? "check" : "copy"} />
       </button>
       {copied === false ? <span className="na" role="status">Couldn't copy</span> : null}
@@ -80,11 +80,12 @@ function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; m
   return (
     <div className={`a-act${stop === undefined ? "" : " stop"}${details ? " det" : ""}`}>
       {stop === undefined ? null : <StopMark secs={stop ?? undefined} />}
-      <CopyButton text={text} />
+      <CopyButton text={text} handle="reply" />
       {regen ? (
         <button
           type="button"
           className="ibtn xs"
+          data-testid="chat.reply.regenerate"
           data-regen
           data-tip="Regenerate"
           aria-label="Regenerate"
@@ -97,7 +98,7 @@ function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; m
           <Icon id="redo" />
         </button>
       ) : null}
-      <button type="button" className="ibtn xs a-det" aria-label="Reply details" aria-expanded={details} onClick={() => setDetails(!details)}>
+      <button type="button" className="ibtn xs a-det" data-testid="chat.reply.details" aria-label="Reply details" aria-expanded={details} onClick={() => setDetails(!details)}>
         <Icon id="more" />
       </button>
       <span className="meta">{meta}</span>
@@ -107,7 +108,7 @@ function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; m
 
 function UserBubble({ text, time, images = [], files = [], noted = false }: { text: string; time: string; images?: readonly string[] | undefined; files?: readonly AttachedFile[] | undefined; noted?: boolean }) {
   return (
-    <div className={noted ? "turn u noted" : "turn u"} tabIndex={0} aria-label="Your message">
+    <div className={noted ? "turn u noted" : "turn u"} data-testid="chat.user-message.turn" tabIndex={0} aria-label="Your message">
       {/* the bubble, then its actions under it at its right edge; their row's space is always kept, so showing it moves nothing */}
       <div className="u-row">
         <div className="bubble">{images.length || files.length ? <div className="user-images"><AttachmentImages images={images} /><AttachedFiles files={files} /></div> : null}{text}</div>
@@ -116,6 +117,7 @@ function UserBubble({ text, time, images = [], files = [], noted = false }: { te
           <button
             type="button"
             className="ibtn xs"
+            data-testid="chat.user-message.edit"
             data-edit
             data-tip="Edit"
             aria-label="Edit"
@@ -126,7 +128,7 @@ function UserBubble({ text, time, images = [], files = [], noted = false }: { te
           >
             <Icon id="pencil" />
           </button>
-          <CopyButton text={text} />
+          <CopyButton text={text} handle="user-message" />
         </div>
       </div>
     </div>
@@ -323,7 +325,7 @@ export function chipStep(thinking: string, tools: readonly ToolStep[], clock: Wo
 function ToggleLine({ open, onToggle, body, chip, live, step, busy, writing, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; writing: boolean; children: ReactNode }) {
   return (
     <div className={open ? "fold-line open" : "fold-line"}>
-      <button type="button" className={chip ? "think fold" : live ? "think live" : "think"} aria-expanded={open} aria-controls={body}
+      <button type="button" className={chip ? "think fold" : live ? "think live" : "think"} data-testid="chat.fold.toggle" aria-expanded={open} aria-controls={body}
         aria-label={step === null ? undefined : chipName(step, busy)} onClick={onToggle}>
         {step === null ? (
           <>
@@ -348,7 +350,7 @@ function ThoughtRound({ text, live, secs, open, onToggle }: { text: string; live
   const id = useId();
   return (
     <>
-      <button type="button" className="th-line" aria-expanded={open} aria-controls={id} onClick={() => onToggle(!open)}>
+      <button type="button" className="th-line" data-testid="chat.fold.thinking" aria-expanded={open} aria-controls={id} onClick={() => onToggle(!open)}>
         <span className="wr-st">
           <Icon id="bulb" />
         </span>
@@ -433,6 +435,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
   return (
     <div
       className="wr"
+      data-testid="chat.tool-call.toggle"
       role="button"
       tabIndex={0}
       aria-expanded={open}
@@ -466,7 +469,7 @@ function ToolRow({ step, stopped }: { step: ToolStep; stopped?: boolean }) {
         </span>
       </div>
       {/* one box up to 360 px: longer output scrolls inside it, by wheel or keys; the wheel goes on to the page at its ends */}
-      <div className="wr-body" tabIndex={open ? 0 : -1} aria-label={`${step.summary}: details`}>
+      <div className="wr-body" data-testid="chat.tool-call.body" tabIndex={open ? 0 : -1} aria-label={`${step.summary}: details`}>
         {meta === null ? <p className="wr-who">{lead}</p> : null}
         {cmd !== "" ? (
           <p className="cmd">
@@ -640,7 +643,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
       {job.state === "running" && job.phase === undefined ? <RunningNumbers job={job} since={since} /> : <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>}
-      {stopCovers ? null : <button type="button" className="qa" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
+      {stopCovers ? null : <button type="button" className="qa" data-testid="chat.image-job.action" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
       {error ? <p>{error}</p> : null}
     </div>}
   </div>;
@@ -677,7 +680,7 @@ function StopMark({ secs }: { secs?: number | undefined }) {
   return (
     <span className="stop-mark">
       {/* focusable, so the keyboard reaches the one place that says the model won't see this reply */}
-      <span role="img" tabIndex={0} aria-label={UNSEEN} data-tip={esc(UNSEEN)} />
+      <span role="img" data-testid="chat.reply.unseen-mark" tabIndex={0} aria-label={UNSEEN} data-tip={esc(UNSEEN)} />
       {secs === undefined ? null : <span className="s">{secs} s</span>}
     </span>
   );
@@ -730,7 +733,7 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
   const writing = (streaming || pending) && text !== "";
   const folded = thinking !== "" || calls.length > 0;
   return (
-    <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
+    <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} data-testid="chat.reply.turn" tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
       {folded ? (
         <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? thoughtOrigin(live) : undefined} thinkingNow={thinkingNow}
           busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} writing={writing} />
@@ -743,7 +746,7 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
         <div className="err-line" data-tip={esc(end.message)}>
           <Icon id="alert" cls="s14" />
           <span>{SAYS_WHY.has(end.code) ? end.message : end.code === "closed" ? "The connection dropped before this reply finished." : "The reply didn't finish."}</span>
-          <button type="button" className="qa" onClick={retry}>
+          <button type="button" className="qa" data-testid="chat.reply.retry" onClick={retry}>
             Retry
           </button>
         </div>
@@ -1076,7 +1079,7 @@ export function Timeline({ threadId }: { threadId: string }) {
           <div className="err-line" role="status" data-load-error>
             <Icon id="alert" cls="s14" />
             <span>{loadError}</span>
-            <button type="button" className="qa" onClick={() => reloadThread(threadId)}>
+            <button type="button" className="qa" data-testid="chat.thread.reload" onClick={() => reloadThread(threadId)}>
               Retry
             </button>
           </div>

@@ -32,9 +32,9 @@ async function composerClip(page: Page) {
 
 async function imageGenOn(page: Page) {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
-  await expect(page.getByRole("switch", { name: "Generate images" })).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
+  await expect(page.getByTestId("settings.images.enable")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   await waitReady(page);
 }
@@ -52,7 +52,7 @@ test("Image on: the button names the image model and size where the chat model w
   await imageGenOn(page);
   const button = page.locator("#modelBtn");
   const before = await boxes(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   // unset: the General style setup of the card's level (16 GB here: the GPU reading is the stack's default)
   await expect(button).toContainText("General");
   await expect(button).toContainText("896×896");
@@ -96,7 +96,7 @@ test("Image on: the button names the image model and size where the chat model w
   expect(await boxes(page)).toEqual(before);
 
   // Image off: the chat model again, at the same right edge
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(button).not.toContainText("Klein 4B");
   expect(await boxes(page)).toEqual(before);
 });
@@ -109,7 +109,7 @@ test("the picker lists only presets whose files ComfyUI reports", async ({ page,
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   // the default falls past Klein to the first setup ComfyUI has every file for, without naming Klein
   await expect(page.locator("#modelBtn")).toContainText("Z-Image1024×1024");
   await expect(page.locator("#modelBtn")).not.toContainText("Klein");
@@ -147,7 +147,7 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
   await expect(picker.locator(".pk-r").first()).toBeVisible();
@@ -224,7 +224,7 @@ async function downloadable(page: Page, open: () => Promise<void>) {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
   // the default (General's style setup) is in Defaults; Klein is in Other models
@@ -286,7 +286,7 @@ test.describe("on the phone", () => {
     await expect(page.locator(".composer:not(.blocked)")).toBeAttached({ timeout: 10_000 });
     // at phone width Image is in the composer's options, not a pill
     await page.locator("#optBtn").click();
-    await page.getByRole("menuitemcheckbox", { name: "Image" }).click();
+    await page.getByTestId("chat.options-menu.image").click();
     await page.keyboard.press("Escape");
     await page.locator("#modelBtn").click();
     const picker = page.locator("#imagePicker");
@@ -315,7 +315,7 @@ test("ComfyUI up but never listed: one full-width row says so with Check again, 
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
   await expect(picker).toContainText("Image models show here once ComfyUI has run.");
@@ -345,7 +345,7 @@ test("a first send whose default settles to other files: the card keeps the box 
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(page.locator("#modelBtn"), "never read: nothing named").toContainText("Image model");
   comfy.unlisted(false);
   // every size the card's box takes, from the first frame it is drawn
@@ -388,7 +388,7 @@ test("Send with Image on: no chat request, one job with the words, preset and si
   try { await client.call("settings.update", { imageGen: true, imageChoice: { preset: "flux2-klein-4b", width: 1024, height: 768 } }); } finally { client.close(); }
   await page.reload(); await waitReady(page);
   const chats = (await state()).turns.length;
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
   await sendMessage(page, "a lighthouse at dusk");
 
@@ -420,7 +420,7 @@ test("Send with Image on: no chat request, one job with the words, preset and si
   await expect(page.locator("#modelBtn")).toContainText("1024×768");
   await page.reload(); await waitReady(page);
   // Image itself is per session; the choice is the app's
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
   await expect(page.locator("#modelBtn")).toContainText("1024×768");
 });
@@ -429,7 +429,7 @@ test("Stop on a running Image turn cancels its job", async ({ page, open }) => {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
-  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByTestId("chat.composer.image").click();
   await sendMessage(page, "a red kite");
   const card = page.locator("[data-image-job]");
   await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
@@ -442,15 +442,15 @@ test("Settings › Tools: Make images needs image generation, is on once a setup
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
-  const make = page.getByRole("switch", { name: "Make images" });
+  await page.getByTestId("settings.nav.open-tools").click();
+  const make = page.getByTestId("settings.tools.make-images");
   const row = page.locator('.srow[data-tool="images"]');
   await expect(make).toHaveAttribute("aria-checked", "false");
   await expect(make).toBeDisabled();
   await expect(row).toContainText("Needs Generate images, in Image generation.");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
-  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
+  await page.getByTestId("settings.nav.open-tools").click();
   await expect(make).toBeEnabled();
   await expect(make, "Klein's files are listed: on with no click").toHaveAttribute("aria-checked", "true");
   await expect(row).toContainText("It can make a picture with the image model picked in the message box.");
@@ -458,7 +458,7 @@ test("Settings › Tools: Make images needs image generation, is on once a setup
   await expect(make).toHaveAttribute("aria-checked", "false");
   await page.reload(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByTestId("settings.nav.open-tools").click();
   await expect(make, "switched off stays off").toHaveAttribute("aria-checked", "false");
   await make.click();
   await expect(make).toHaveAttribute("aria-checked", "true");

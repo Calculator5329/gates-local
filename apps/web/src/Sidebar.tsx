@@ -379,13 +379,13 @@ export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
     <div className="snav">
       {/* the pop-up has its own Close */}
       {inDialog ? null : (
-        <button type="button" className="sb-act back" data-tip="Back to chat · Esc" onClick={() => closeDrawer(leaveSettings, true)}>
+        <button type="button" className="sb-act back" data-testid="settings.nav.back-to-chat" data-tip="Back to chat · Esc" onClick={() => closeDrawer(leaveSettings, true)}>
           <Icon id="left" />
           <span className="grow">Back to chat</span>
         </button>
       )}
       {SECTIONS.filter(([id]) => !inDialog || id !== "models").map(([id, label, icon]) => (
-        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} data-tipt={inDialog ? label : undefined} onClick={() => closeDrawer(() => openSettings(id), true)}>
+        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} data-testid={`settings.nav.open-${id}`} data-tipt={inDialog ? label : undefined} onClick={() => closeDrawer(() => openSettings(id), true)}>
           <Icon id={icon} />
           {/* in a narrow pop-up the sections are an icon rail (panel.css): the hidden name shows as the tip */}
           <span className="grow t">{label}</span>

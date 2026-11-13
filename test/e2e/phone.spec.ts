@@ -15,7 +15,7 @@ import { networkInterfaces } from "node:os";
 import type { Page } from "@playwright/test";
 import { CONTROL_URL } from "./env.ts";
 import { fakeComfy } from "./fake-comfy.ts";
-import { expect, sendMessage, stack, test } from "./fixtures.ts";
+import { expect, listButton, sendMessage, stack, test } from "./fixtures.ts";
 
 test.use({ viewport: { width: 412, height: 915 } });
 
@@ -115,13 +115,13 @@ async function showSection(page: Page, section: string): Promise<void> {
   if ((await page.locator('[role="menu"]:visible').count()) > 0) await page.keyboard.press("Escape");
   const bar = page.locator(".set-bar h2");
   if ((await bar.isVisible()) && (await bar.textContent()) === section) return;
-  const back = page.getByRole("button", { name: "Back to Settings" });
+  const back = page.getByTestId("settings.shell.back");
   if (await back.isVisible()) await back.click();
   if (!(await page.locator(".set-list").isVisible())) {
     await page.getByRole("button", { name: "Open threads" }).click();
     await page.locator(".sb").getByRole("button", { name: "Settings" }).click();
   }
-  await page.locator(".set-list").getByRole("button", { name: section }).click();
+  await listButton(page, section).click();
   await expect(bar).toHaveText(section);
 }
 

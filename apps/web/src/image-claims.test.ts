@@ -62,7 +62,7 @@ describe("fabricated mixed-image follow-ups", () => {
       setState({ threadId: thread.id, messages: { [thread.id]: messages } });
       const html = renderToStaticMarkup(createElement(Timeline, { threadId: thread.id }));
       // Exact reply body produced by the cdda4a8 renderer for this saved content.
-      expect(html.match(/<div class="md">.*?<\/div>/s)?.[0]).toBe('<div class="md"><p>The report total is 42: <a href="https://tool.example/report" target="_blank" rel="noreferrer noopener">Report</a>.</p><p>Ship</p></div>');
+      expect(html.match(/<div class="md">.*?<\/div>/s)?.[0]).toBe('<div class="md"><p>The report total is 42: <a href="https://tool.example/report" data-testid="chat.markdown.link" target="_blank" rel="noreferrer noopener">Report</a>.</p><p>Ship</p></div>');
       expect(html).toContain("Waiting for the GPU");
     } finally { store.close(); }
   });

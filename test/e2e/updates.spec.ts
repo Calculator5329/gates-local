@@ -216,7 +216,7 @@ test.describe("Version and the update state in two rows", () => {
         expect(text).not.toContain("Asks this copy's git remote");
         if (copy.name === "clone") {
           // UR-01, row 9: the switch now follows every change, so the server drops the release check; row 2 waits for a check, in the same space.
-          const every = group.getByRole("switch", { name: "Get every change, not only releases", exact: true });
+          const every = group.getByTestId("settings.updates.every-change");
           const label = group.locator(".srow").nth(1).locator(".sl b");
           await every.click();
           await expect(every).toHaveAttribute("aria-checked", "true");
@@ -256,7 +256,7 @@ test.describe("Version and the update state in two rows", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set")).toBeVisible();
     // The settings section may start on the phone section list.
-    const general = page.locator(".set-list").getByRole("button", { name: /General/ });
+    const general = page.getByTestId("settings.sections.open-general");
     if (await general.isVisible()) await general.click();
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
     const card = group.locator(".box");
@@ -264,7 +264,7 @@ test.describe("Version and the update state in two rows", () => {
     await group.scrollIntoViewIfNeeded();
     const height = () => card.evaluate((box) => box.getBoundingClientRect().height);
     const control = group.locator(".srow").nth(1).locator("button.btn");
-    const link = group.getByRole("link", { name: "Open the release page" });
+    const link = group.getByTestId("settings.updates.release-page");
     const start = await height();
     const heights: string[] = [];
     const steps: readonly (readonly [string, UpdateCheck, boolean])[] = [
@@ -313,10 +313,10 @@ test.describe("Version and the update state in two rows", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set .set-h h1")).toHaveText("General");
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
-    await expect(group.getByRole("switch", { name: "Get every change, not only releases", exact: true })).toHaveAttribute("aria-checked", "false");
-    await group.getByRole("button", { name: "Check for updates", exact: true }).click();
+    await expect(group.getByTestId("settings.updates.every-change")).toHaveAttribute("aria-checked", "false");
+    await group.getByTestId("settings.updates.check").click();
     await expect(group.locator(".srow").nth(1).locator(".sl b")).toHaveText("Update available: def5678");
-    await expect(group.getByRole("button", { name: "Update and restart", exact: true })).toBeVisible();
+    await expect(group.getByTestId("settings.updates.update")).toBeVisible();
     await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
     await group.screenshot({ path: test.info().outputPath("update-row9-no-tags-switch-off.png") });
   });
@@ -340,7 +340,7 @@ test.describe("Version and the update state in two rows", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set")).toBeVisible();
     // The settings section may start on the phone section list.
-    const general = page.locator(".set-list").getByRole("button", { name: /General/ });
+    const general = page.getByTestId("settings.sections.open-general");
     if (await general.isVisible()) await general.click();
     const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
     const row = group.locator(".srow").nth(1);
@@ -351,7 +351,7 @@ test.describe("Version and the update state in two rows", () => {
     const before = await height();
     route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: newer, canControl: false } }));
     await expect(row.locator(".sl b")).toHaveText("Update available: 0.2.2");
-    await expect(group.getByRole("link", { name: "Open the release page" })).toHaveCount(0);
+    await expect(group.getByTestId("settings.updates.release-page")).toHaveCount(0);
     await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /Release page: https:\/\/example\.invalid\/releases\/latest/);
     expect(await height(), "the listener's state row changed height at 390px").toBe(before);
     await group.screenshot({ path: test.info().outputPath("update-row10-listener-390.png") });

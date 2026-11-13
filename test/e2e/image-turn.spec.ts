@@ -19,17 +19,17 @@ async function setup(page: Page, open: () => Promise<void>, via: "image" | "tool
   await stack.reset("image-turn", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
   if (via === "tool") {
-    await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+    await page.getByTestId("settings.nav.open-tools").click();
     // on once a setup can run, with no click
-    const make = page.getByRole("switch", { name: "Make images" });
+    const make = page.getByTestId("settings.tools.make-images");
     await expect(make).toBeEnabled();
     await expect(make).toHaveAttribute("aria-checked", "true");
   }
   await page.keyboard.press("Escape");
-  if (via === "image") await page.getByRole("button", { name: "Image", exact: true }).click();
+  if (via === "image") await page.getByTestId("chat.composer.image").click();
   await sendMessage(page, "Generate an image of a Star Trek ship");
 }
 
@@ -185,7 +185,7 @@ test("after a restart, one chat turn on the model that stayed loaded lets the ne
     await again.call("chat.send", { threadId, content: "and again", model: "qwen3.5:9b", numCtx: 16384 });
     await replies(again, threadId, 4);
     // Before Send the picker says what the server will do: the model the turn ran on is freed, not Too big.
-    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.getByTestId("chat.composer.image").click();
     await page.locator("#modelBtn").click();
     const sizes = page.locator("#imagePicker .pk-context");
     await expect(sizes.locator(".pk-cost.spill").first(), "the size row marks that it stops the chat model").toBeVisible();

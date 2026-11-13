@@ -5,7 +5,7 @@
 // model picker; Settings is a list screen and a section
 // screen with a back button. None of it may scroll the page sideways.
 import type { Page } from "@playwright/test";
-import { expect, stack, test, waitReady } from "./fixtures.ts";
+import { expect, listButton, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -82,10 +82,10 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await expect(page.locator(".set-list")).toBeVisible();
   await noSideScroll(page, "settings list");
   for (const section of ["General", "Models", "Instructions", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts"]) {
-    await page.locator(".set-list").getByRole("button", { name: section }).tap();
+    await listButton(page, section).tap();
     await expect(page.locator(".set-bar h2")).toHaveText(section);
     await noSideScroll(page, `settings ${section}`);
-    await page.getByRole("button", { name: "Back to Settings" }).tap();
+    await page.getByTestId("settings.shell.back").tap();
     await expect(page.locator(".set-list")).toBeVisible();
   }
 });
@@ -128,7 +128,7 @@ test("the drawer opens and closes, and picking a thread closes it", async ({ pag
 test("a message sends from the phone composer and its reply streams", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  const send = page.getByRole("button", { name: "Send message" });
+  const send = page.getByTestId("chat.composer.send");
   const box = await send.boundingBox();
 
   await stack.scenario("models", { tokenDelayMs: 60 });
@@ -180,12 +180,12 @@ test("settings opens a section and goes back to the list and the chat", async ({
   const list = page.locator(".set-list");
   await expect(list).toBeVisible();
   await expect(drawerRow(page)).not.toBeInViewport();
-  await list.getByRole("button", { name: "Models" }).tap();
+  await page.getByTestId("settings.sections.open-models").tap();
   await expect(page.locator(".set-bar h2")).toHaveText("Models");
   await expect(list).toBeHidden();
-  await page.getByRole("button", { name: "Back to Settings" }).tap();
+  await page.getByTestId("settings.shell.back").tap();
   await expect(list).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).tap();
+  await page.getByTestId("settings.shell.done").tap();
   await expect(page.locator(".start-mark")).toBeVisible();
 });
 

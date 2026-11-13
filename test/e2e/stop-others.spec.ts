@@ -47,7 +47,7 @@ async function secondChatReady(page: Page): Promise<void> {
   await page.locator("#ta").fill("A question for the other model");
 }
 
-const warning = (page: Page) => page.getByRole("alertdialog", { name: "Stop the other reply?" });
+const warning = (page: Page) => page.getByTestId("chat.stop-warning.dialog");
 
 // Guards the owner's ruling (R18): a send that needs the memory warns, then stops the other chat, which keeps its words.
 test("sending on a model that needs the memory warns, then stops the other chat, which keeps its words", async ({ page, open }) => {
@@ -61,12 +61,12 @@ test("sending on a model that needs the memory warns, then stops the other chat,
   await expect(warning(page)).toContainText("This stops Gemma 4 12B in “How do I check disk space before a download?”. Its reply so far is kept.");
   await shot(page, "02-warning");
 
-  await warning(page).getByRole("button", { name: "Cancel" }).click();
+  await warning(page).getByTestId("chat.stop-warning.cancel").click();
   await expect(warning(page)).toBeHidden();
   await expect(page.locator("#ta")).toHaveValue("A question for the other model");
 
   await page.locator("#ta").press("Enter");
-  await warning(page).getByRole("button", { name: "Stop and send" }).click();
+  await warning(page).getByTestId("chat.stop-warning.confirm").click();
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
   await expect(page.locator("#ta")).toHaveValue("");
 
@@ -90,16 +90,16 @@ test("'Don't show this again' survives a reload and later sends stop the other c
   await firstChatAnswering(page);
   await secondChatReady(page);
   await page.locator("#ta").press("Enter");
-  await warning(page).getByLabel("Don't show this again").check();
+  await warning(page).getByTestId("chat.stop-warning.never").check();
   await shot(page, "04-dont-show-again");
-  await warning(page).getByRole("button", { name: "Stop and send" }).click();
+  await warning(page).getByTestId("chat.stop-warning.confirm").click();
   await expect(page.locator(".turn.u").last()).toContainText("A question for the other model");
   await expect(page.locator(".turn.a .writing")).toBeVisible();
   // Stop hides immediately, even before chat.send returns its turn id.
   // Regenerate appears only after the server has ended that turn and saved its words.
   await page.getByRole("button", { name: "Stop" }).click();
   await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Regenerate", exact: true })).toBeEnabled();
+  await expect(page.getByTestId("chat.reply.regenerate")).toBeEnabled();
   await expect.poll(async () => (await runtimeState()).turns.every((turn) => turn.endedAt !== undefined)).toBe(true);
 
   await page.reload();

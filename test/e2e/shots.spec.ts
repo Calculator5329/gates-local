@@ -11,7 +11,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { LONG_NAME } from "../fake-ollama/models.ts";
 import { CHECKOUT_CACHE, SHOTS_DIR } from "./env.ts";
-import { type RuntimeMode, type Scenario, expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { type RuntimeMode, type Scenario, expect, listButton, navButton, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6). */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -35,11 +35,11 @@ const settings = (label: string) => async (page: Page) => {
   await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
     // a phone has no section nav: back to the list, then the section
-    await page.getByRole("button", { name: "Back to Settings" }).click();
-    await page.locator(".set-list").getByRole("button", { name: label }).click();
+    await page.getByTestId("settings.shell.back").click();
+    await listButton(page, label).click();
     return;
   }
-  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+  await navButton(page, label).click();
 };
 
 /**
@@ -50,7 +50,7 @@ const settings = (label: string) => async (page: Page) => {
 const goLight = async (page: Page, canUseSettings: boolean) => {
   if (!canUseSettings) return page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
   await settings("General")(page);
-  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+  await page.getByTestId("settings.segment.theme-light").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.keyboard.press("Escape");
 };
@@ -233,9 +233,9 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     async (p) => {
       const folder = path.join(CHECKOUT_CACHE, "e2e-library", "notes");
       mkdirSync(folder, { recursive: true });
-      await p.getByRole("button", { name: "Add folder…" }).click();
-      await p.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
-      await p.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
+      await p.getByTestId("settings.library.add-folder").click();
+      await p.getByTestId("settings.add-source.path-folder").fill(folder);
+      await p.getByTestId("settings.add-source.add-folder").click();
       await expect(p.locator(".srow.src")).toHaveCount(1);
     },
   ],
@@ -245,7 +245,7 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
     "image-generation-on",
     "Image generation",
     async (p) => {
-      await p.getByRole("switch", { name: "Generate images" }).click();
+      await p.getByTestId("settings.images.enable").click();
       await expect(p.locator(".srow", { hasText: "Not connected" })).toBeVisible();
     },
   ],
@@ -253,7 +253,7 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
   ["runtime-confirm", "Runtime", (p) => p.getByRole("button", { name: /^Use .*Ollama…$/ }).click()],
   ["advanced", "Advanced"],
   ["advanced-details", "Advanced", (p) => p.getByText("Details", { exact: true }).click()],
-  ["advanced-reset", "Advanced", (p) => p.getByRole("button", { name: "Reset…" }).click()],
+  ["advanced-reset", "Advanced", (p) => p.getByTestId("settings.advanced.reset").click()],
   ["shortcuts", "Shortcuts"],
   ["models", "Models"],
 ];
@@ -339,12 +339,12 @@ const phoneSettings = (section?: string) => async (p: Page) => {
   await p.locator(".sb").getByRole("button", { name: "Settings" }).tap();
   if (section === undefined) return;
   if (isPhoneWidth(p)) {
-    await p.locator(".set-list").getByRole("button", { name: section }).tap();
+    await listButton(p, section).tap();
     return;
   }
   // a tablet's sections are in the drawer
   await p.getByRole("button", { name: "Open threads" }).tap();
-  await p.locator(".snav").getByRole("button", { name: section }).tap();
+  await navButton(p, section).tap();
 };
 
 const MOBILE: readonly MobileShot[] = [

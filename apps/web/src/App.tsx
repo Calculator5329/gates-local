@@ -80,7 +80,7 @@ function SetupIcons() {
   return (
     <div className="setup-row">
       {icons.map(([go, icon, name]) => (
-        <button key={go} type="button" className="setup-ic" data-go={go} data-tip={name} aria-label={`Set up ${name.toLowerCase()}`} onClick={() => openSettings(go)}>
+        <button key={go} type="button" className="setup-ic" data-go={go} data-testid={`chat.setup.open-${go}`} data-tip={name} aria-label={`Set up ${name.toLowerCase()}`} onClick={() => openSettings(go)}>
           <Icon id={icon} />
           <span className="unset" />
         </button>
@@ -140,14 +140,14 @@ function SettingsBar() {
       {root ? (
         <span className="hb sp" />
       ) : (
-        <button type="button" className="bk" aria-label="Back to Settings" onClick={settingsBack}>
+        <button type="button" className="bk" data-testid="settings.shell.back" aria-label="Back to Settings" onClick={settingsBack}>
           <Icon id="left" cls="s18" />
           Settings
         </button>
       )}
       <h2>{title}</h2>
       {root ? (
-        <button type="button" className="set-done" onClick={leaveSettings}>
+        <button type="button" className="set-done" data-testid="settings.shell.done" onClick={leaveSettings}>
           Done
         </button>
       ) : (
@@ -197,6 +197,7 @@ function SettingsList() {
             key={id}
             type="button"
             className="sl-r"
+            data-testid={`settings.sections.open-${id}`}
             onClick={() => {
               document.querySelector(".set")?.scrollTo(0, 0);
               setState({ setList: false });

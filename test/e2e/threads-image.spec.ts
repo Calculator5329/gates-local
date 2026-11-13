@@ -16,11 +16,11 @@ async function setup(page: Page, open: () => Promise<void>) {
   // its chat claim; no different-model load can preempt alpha during setup.
   await configure({ parallelLimit: 2, prompts: { alpha: { holdAfterTokens: 28 } } });
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
   // the chat model makes the picture through its tool: Make images is on once a setup can run
-  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
-  await expect(page.getByRole("switch", { name: "Make images" })).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("settings.nav.open-tools").click();
+  await expect(page.getByTestId("settings.tools.make-images")).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 }
 

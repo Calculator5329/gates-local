@@ -37,7 +37,7 @@ async function openPopUp(page: Page, open: (hash?: string) => Promise<void>, car
   if (!server) throw new Error("No test server URL");
   const client = createClient(new WebSocket(server));
   try { await client.call("settings.update", { imageGen: true }); } finally { client.close(); }
-  const imageBtn = page.getByRole("button", { name: "Image", exact: true });
+  const imageBtn = page.getByTestId("chat.composer.image");
   await imageBtn.click();
   const pop = page.getByRole("dialog", { name: "Images are not set up" });
   await expect(pop).toBeVisible();

@@ -11,8 +11,8 @@ function Failure({ error, scope, retry, reload }: { error: string; scope: Props[
       <div className="col">
         <p className="na render-error" role="alert">
           <span>{scope === "thread" ? "This conversation could not be shown." : "The app could not be shown."}</span>
-          <button type="button" className="link" onClick={reload ? () => window.location.reload() : retry}>{reload ? "Reload window" : "Try again"}</button>
-          <button type="button" className="link" onClick={copy}>{copied === true ? "Copied" : copied === false ? "Copy failed. Try again" : "Copy error"}</button>
+          <button type="button" className="link" data-testid="ui.error.retry" onClick={reload ? () => window.location.reload() : retry}>{reload ? "Reload window" : "Try again"}</button>
+          <button type="button" className="link" data-testid="ui.error.copy" onClick={copy}>{copied === true ? "Copied" : copied === false ? "Copy failed. Try again" : "Copy error"}</button>
         </p>
       </div>
     </div>

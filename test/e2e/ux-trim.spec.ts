@@ -70,7 +70,7 @@ test.describe("a sent message's actions", () => {
     expect(await reply.boundingBox(), "showing the row moves nothing").toEqual(off);
     const [b, a] = await Promise.all([bubble.boundingBox(), act.boundingBox()]);
     expect(a!.y, "under the bubble").toBeGreaterThanOrEqual(b!.y + b!.height - 0.5);
-    const [tm, edit, copy] = await Promise.all([act.locator(".tm").boundingBox(), act.getByRole("button", { name: "Edit", exact: true }).boundingBox(), act.getByRole("button", { name: "Copy", exact: true }).boundingBox()]);
+    const [tm, edit, copy] = await Promise.all([act.locator(".tm").boundingBox(), act.getByTestId("chat.user-message.edit").boundingBox(), act.getByTestId("chat.copy.user-message").boundingBox()]);
     expect(tm!.x < edit!.x && edit!.x < copy!.x, "time, then Edit, then Copy").toBe(true);
   });
 });

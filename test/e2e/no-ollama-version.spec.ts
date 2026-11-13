@@ -19,7 +19,7 @@ test("no screen prints the version of Ollama", async ({ page, open }) => {
   await noVersion(page);
 
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Runtime", exact: true }).click();
+  await page.getByTestId("settings.nav.open-runtime").click();
   await expect(page.locator(".snav")).toBeVisible();
   await noVersion(page);
 });

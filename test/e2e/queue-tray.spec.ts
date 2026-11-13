@@ -46,10 +46,10 @@ test.describe("a message queued while a picture is being made", () => {
     await stack.reset("image-turn", 0, undefined, "system", undefined, comfy.url);
     await open(); await waitReady(page);
     await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-    await page.getByRole("switch", { name: "Generate images" }).click();
+    await page.getByTestId("settings.nav.open-images").click();
+    await page.getByTestId("settings.images.enable").click();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.getByTestId("chat.composer.image").click();
     await sendMessage(page, PICTURE);
     await expect(page.locator("[data-image-job]").getByRole("status", { name: /Making image/ })).toBeVisible();
     await sendMessage(page, NEXT);
@@ -83,7 +83,7 @@ test.describe("a message queued while a picture is being made", () => {
     await expect(row).toHaveText(NEXT);
     // the actions are icons, and Send now says what it stops
     for (const name of ["Send now", "Edit", "Remove"]) await expect(row.getByRole("button", { name, exact: true })).toHaveText("");
-    await expect(row.getByRole("button", { name: "Send now", exact: true })).toHaveAttribute("data-tip", "Send now. Cancels the image");
+    await expect(row.getByTestId("chat.queue.send-now-1")).toHaveAttribute("data-tip", "Send now. Cancels the image");
     await expect(page.locator(".composer button.send"), "the composer's Stop names the picture too").toHaveAttribute("data-tip", "Cancel the image. Enter queues your message after it");
     comfy.finish();
   });

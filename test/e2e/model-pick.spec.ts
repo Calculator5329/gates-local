@@ -101,7 +101,7 @@ test("the picker never lists the embedding model and is a connected combobox and
 test("the Thinking pill is on for a model that thinks and greyed with a reason for one that does not", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  const pill = page.getByRole("button", { name: "Thinking", exact: true });
+  const pill = page.getByTestId("chat.composer.thinking");
   await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
   await expect(pill).not.toHaveAttribute("aria-disabled", /./);
   await expect(pill).not.toHaveClass(/unavail/);
@@ -142,7 +142,7 @@ test.describe("first download", () => {
     await open();
     await page.getByRole("button", { name: "Download and start" }).click();
     await page.getByRole("button", { name: "Start chatting" }).click();
-    const pill = page.getByRole("button", { name: "Thinking", exact: true });
+    const pill = page.getByTestId("chat.composer.thinking");
     await expect(pill).toHaveAttribute("aria-disabled", "true");
     await expect(pill).toHaveAttribute("aria-pressed", "false");
     await expect(pill).toHaveText("Thinking");

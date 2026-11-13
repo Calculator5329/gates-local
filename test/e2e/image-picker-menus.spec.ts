@@ -29,9 +29,9 @@ async function openPicker(page: Page, open: () => Promise<void>, otherMib = 0) {
   // at phone width Image is in the composer's options, not a pill
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
     await page.locator("#optBtn").click();
-    await page.getByRole("menuitemcheckbox", { name: "Image" }).click();
+    await page.getByTestId("chat.options-menu.image").click();
     await page.keyboard.press("Escape");
-  } else await page.getByRole("button", { name: "Image", exact: true }).click();
+  } else await page.getByTestId("chat.composer.image").click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
   // the menu open is Defaults, or Other models when the picked setup is there

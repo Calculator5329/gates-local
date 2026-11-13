@@ -49,11 +49,11 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   expect(names, "Models is the footer's own pop-up, not a section (settings row 6)").not.toContain("Models");
   for (const name of names) {
     await settled(delay, 3000);
-    const button = page.locator(".snav").getByRole("button", { name, exact: true });
+    const button = page.getByTestId(`settings.nav.open-${name === "Image generation" ? "images" : name.toLowerCase()}`);
     r.check(`first visit to ${name}`, await watchWhole(page, section(name), () => button.click(), delay));
   }
   await settled(delay, 3000);
-  r.check("General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+  r.check("General, second visit", await watchWhole(page, section("General"), () => page.getByTestId("settings.nav.open-general").click(), delay));
   // Settings is a pop-up: it closes before the footer's Models opens its own
   await page.keyboard.press("Escape");
   await expect(page.locator(".dlg")).toHaveCount(0);
@@ -73,13 +73,13 @@ test("Library after a download is whole on its first frame", async ({ page, open
   await open();
   await ready(page, delay);
   await page.keyboard.press("Control+Comma");
-  const library = page.locator(".snav").getByRole("button", { name: "Library", exact: true });
+  const library = page.getByTestId("settings.nav.open-library");
   await library.click();
   const row = page.locator('[data-db="sample:chinook"]');
   await row.getByRole("button", { name: "Download Chinook" }).click();
   await expect(row.getByRole("button", { name: "Remove Chinook" })).toBeVisible({ timeout: 30_000 });
   await settled(delay, 3000);
-  await page.locator(".snav").getByRole("button", { name: "General", exact: true }).click();
+  await page.getByTestId("settings.nav.open-general").click();
   await settled(delay, 3000);
   const r = recorder();
   r.check("Library after a download", await watchWhole(page, section("Library"), () => library.click(), delay));

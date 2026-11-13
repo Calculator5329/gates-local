@@ -42,7 +42,7 @@ for (const mode of ["rejected", "missing"] as const) {
       for (const target of ["user message", "reply", "code"] as const) await test.step(`copy exact ${target} text`, async () => {
       await page.evaluate(() => window.copyProbe.write("clipboard sentinel"));
       const turn = page.locator(target === "user message" ? ".turn.u" : ".turn.a").last();
-      const copy = target === "code" ? turn.getByRole("button", { name: "Copy code", exact: true }) : turn.locator("[data-copy]");
+      const copy = target === "code" ? turn.getByTestId("chat.markdown.copy-code") : turn.locator("[data-copy]");
       const expected = target === "code" ? "PATH=/usr/local/bin:/usr/bin:/bin" : target === "reply" ? reply : "Question 1: why does my cron job not find node?";
       await turn.hover();
       await copy.click();

@@ -49,9 +49,9 @@ export function VoiceSettings() {
   return <Grp title="Voice to text">
     <Row label="Speech server" tip={TIP} desc={settings.whisperUrl ? "Connected for dictation. Gates Local keeps no recording." : locked ? `Off. ${COMPUTER_ONLY}` : "Off. Connect your running local server to use the microphone."} err={err}>
       {locked ? null : <>
-        <input className="inp" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
-        <button type="button" className="btn outline" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
-        {settings.whisperUrl ? <button type="button" className="btn ghost" onClick={() => void disconnect()}>Disconnect</button> : null}
+        <input className="inp" data-testid="settings.voice.address" aria-label="whisper.cpp address" value={url ?? settings.whisperUrl ?? "http://127.0.0.1:8178"} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
+        <button type="button" className="btn outline" data-testid="settings.voice.connect" disabled={busy} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button>
+        {settings.whisperUrl ? <button type="button" className="btn ghost" data-testid="settings.voice.disconnect" onClick={() => void disconnect()}>Disconnect</button> : null}
       </>}
     </Row>
   </Grp>;

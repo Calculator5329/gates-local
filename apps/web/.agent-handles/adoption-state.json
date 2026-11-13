@@ -1,0 +1,17 @@
+{
+  "schema": "agent-handles/adoption-state/v1",
+  "startedAt": "2026-11-13T22:45:01.293Z",
+  "updatedAt": "2026-11-13T22:45:01.293Z",
+  "passCount": 1,
+  "status": "in_progress",
+  "initialBaseline": {
+    "sourceDigest": "sha256:54a830b707faef20781213bc63e149b5649e986dab571f58539dc32eb69979e8",
+    "controlCandidates": 254,
+    "unresolvedCandidates": 254
+  },
+  "baseline": {
+    "sourceDigest": "sha256:54a830b707faef20781213bc63e149b5649e986dab571f58539dc32eb69979e8",
+    "controlCandidates": 254,
+    "unresolvedCandidates": 254
+  }
+}

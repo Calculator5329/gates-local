@@ -67,10 +67,10 @@ test.describe("code blocks", () => {
     const reply = page.locator(".turn.a").last();
     // one button per fenced block; inline code spans get none
     await expect(reply.locator(".md li code").filter({ hasText: "PATH" })).toBeVisible();
-    await expect(reply.getByRole("button", { name: "Copy code" })).toHaveCount(1);
+    await expect(reply.getByTestId("chat.markdown.copy-code")).toHaveCount(1);
     const block = reply.locator(".md .cb");
     await expect(block.locator(".cb-lang")).toHaveText("sh");
-    const copy = block.getByRole("button", { name: "Copy code" });
+    const copy = block.getByTestId("chat.markdown.copy-code");
     await expect(copy).toHaveCSS("opacity", "0");
     await block.hover();
     await expect(copy).toHaveCSS("opacity", "1");
@@ -123,15 +123,15 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
   await page.keyboard.press("Escape");
   const pill = page.locator('.cf-l button[aria-label="Thinking"]');
   const label = pill.locator(".plbl");
   await expect(label).toBeHidden();
   const model = await page.locator("#modelBtn").boundingBox();
   const image = await page.locator('.cf-l button[aria-label="Image"]').boundingBox();
-  const send = await page.getByRole("button", { name: "Send message" }).boundingBox();
+  const send = await page.getByTestId("chat.composer.send").boundingBox();
   const rest = await pill.boundingBox();
   await pill.hover();
   await expect(page.locator("#tip")).toHaveClass(/\bopen\b/);
@@ -140,7 +140,7 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   expect(await pill.boundingBox()).toEqual(rest);
   expect(await page.locator("#modelBtn").boundingBox()).toEqual(model);
   expect(await page.locator('.cf-l button[aria-label="Image"]').boundingBox()).toEqual(image);
-  expect(await page.getByRole("button", { name: "Send message" }).boundingBox()).toEqual(send);
+  expect(await page.getByTestId("chat.composer.send").boundingBox()).toEqual(send);
   await page.mouse.move(5, 5);
   await pill.focus();
   await expect(label).toBeHidden();
@@ -164,7 +164,7 @@ test("no runtime dot or words on the sidebar's Settings icon while the runtime i
   await expect(gear).not.toHaveAttribute("data-tip", /0\.40\.4/);
   // Settings > Runtime carries the state, and no version number anywhere (test/e2e/no-ollama-version.spec.ts)
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Runtime", exact: true }).click();
+  await page.getByTestId("settings.nav.open-runtime").click();
   await expect(page.locator(".set")).toContainText("Running");
   await expect(page.locator(".set")).not.toContainText("0.40.4");
 });
@@ -221,8 +221,8 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await page.keyboard.press("Control+Comma");
   const nav = page.locator(".snav").getByRole("button");
   await expect(nav.last()).toHaveText("Shortcuts");
-  await expect(page.locator(".snav").getByRole("button", { name: "Memory", exact: true })).toHaveCount(0);
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await expect(page.getByTestId("settings.nav.open-memory")).toHaveCount(0);
+  await page.getByTestId("settings.nav.open-advanced").click();
   const set = page.locator(".set");
   await expect(set.getByRole("heading", { name: "Advanced" })).toBeVisible();
   await expect(set.locator(".grp").first()).toContainText("GPU memory");
@@ -259,13 +259,13 @@ test("a send refused for memory says why and its click opens Settings > Advanced
   await page.locator('#picker .pk-r[data-m="gemma4:12b"]').click();
   await expect(page.locator("#modelBtn")).toContainText("Gemma 4 12B");
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
   await page.locator(".set").getByRole("button", { name: "64k" }).first().click();
   // Settings judges the card's own memory, where it spills; Send judges right now, where it won't fit
   await expect(page.locator(".set .fp-v")).toContainText("Should run slower");
   await page.keyboard.press("Escape");
   await page.locator("#ta").fill("Too big?");
-  const sendBtn = page.getByRole("button", { name: "Send message" });
+  const sendBtn = page.getByTestId("chat.composer.send");
   await expect(sendBtn).toHaveAttribute("data-tip", /not enough memory at 64k/);
   await expect(sendBtn).toHaveAttribute("data-tip", /Settings › Advanced/);
   await sendBtn.hover();

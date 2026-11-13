@@ -6,7 +6,7 @@
 // Library's database went unread.
 import type { Page } from "@playwright/test";
 import { FAKE_URL } from "./env.ts";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, navButton, test, waitReady } from "./fixtures.ts";
 
 type ChatBody = { tools?: { function: { name: string } }[]; messages: { role: string; content: string }[] };
 async function chatBodies(): Promise<ChatBody[]> {
@@ -18,7 +18,7 @@ async function chatBodies(): Promise<ChatBody[]> {
 /** Open a Settings section by the nav (desktop width). */
 async function section(page: Page, label: string) {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+  await navButton(page, label).click();
   await expect(page.locator(".set h1").first()).toHaveText(label);
 }
 

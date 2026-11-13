@@ -259,7 +259,7 @@ export function Composer() {
     stopThisReply();
     primary.current?.focus();
   }, { ignoreRepeatedClicks: true });
-  const stopSquare = <button type="button" className="ctl sq stop-sq" aria-label="Stop" data-tip={drawingNow ? "Cancel the image. Your draft stays here" : "Stop this reply. Your draft stays here"} {...compactStopPress}><span className="sqr" /></button>;
+  const stopSquare = <button type="button" className="ctl sq stop-sq" data-testid="chat.composer.stop-square" aria-label="Stop" data-tip={drawingNow ? "Cancel the image. Your draft stays here" : "Stop this reply. Your draft stays here"} {...compactStopPress}><span className="sqr" /></button>;
 
   return (
     <>
@@ -269,6 +269,7 @@ export function Composer() {
       <QueueTray />
       <form
         className={`composer${blocked && !boot ? " blocked" : ""}`}
+        data-testid="chat.composer.form"
         autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault();
@@ -280,6 +281,7 @@ export function Composer() {
         <input
           type="file"
           id="attachInput"
+          data-testid="chat.composer.attach-input"
           multiple
           hidden
           onChange={(e) => {
@@ -295,6 +297,7 @@ export function Composer() {
               type="button"
               className="ctl sq gate"
               id="plusBtn"
+              data-testid="chat.composer.add"
               aria-haspopup="menu"
               aria-expanded={pop === "plus"}
               aria-label="Add"
@@ -308,6 +311,7 @@ export function Composer() {
                 type="button"
                 className="pill gate"
                 id="imageBtn"
+                data-testid="chat.composer.image"
                 aria-pressed={image}
                 aria-label="Image"
                 aria-expanded={!image && unset ? pop === "unset" : undefined}
@@ -331,6 +335,7 @@ export function Composer() {
               <button
                 type="button"
                 className={`meter${pct > 0.85 ? " hi" : ""}`}
+                data-testid="chat.composer.context-meter"
                 aria-label="Context used"
                 data-tip={`Context used: ${(used / 1000).toFixed(1)}k of ${k(ctx)} tokens`}
               >
@@ -341,6 +346,7 @@ export function Composer() {
             {drawing ? <CountButton open={pop === "count"} /> : <button
               type="button"
               className={`pill gate thinking${thinkNa !== null ? " unavail" : ""}`}
+              data-testid="chat.composer.thinking"
               aria-pressed={thinkNa !== null ? false : think}
               aria-label="Thinking"
               aria-disabled={thinkNa !== null ? true : undefined}
@@ -368,6 +374,7 @@ export function Composer() {
               type="button"
               className="ctl gate"
               id="modelBtn"
+              data-testid="chat.composer.model"
               aria-haspopup="dialog"
               aria-expanded={drawing ? pop === "images" : pop === "picker" && !pickerPending}
               aria-busy={!drawing && (boot || loading || pickerPending) || undefined}
@@ -397,7 +404,7 @@ export function Composer() {
               </>}
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
-            <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
+            <button type="button" className="ctl sq gate" id="optBtn" data-testid="chat.composer.options" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
             </button>
             {/* a reply on touch: the main button is the queue arrow, and Stop holds its own slot one press away */}
@@ -406,6 +413,7 @@ export function Composer() {
               ref={primary}
               type="button"
               className={showStop ? "send stop" : "send"}
+              data-testid="chat.composer.send"
               aria-label={showStop ? "Stop" : sendLabel}
               data-tip={showStop ? (drawingNow ? "Cancel the image. Enter queues your message after it" : "Stop. Enter queues your message after this reply") : sendTip}
               // Keep the same focusable node through empty, running and finished states.
@@ -419,7 +427,7 @@ export function Composer() {
         </div>
       </form>
       {notice !== null ? (
-        <p className={`na c-note${memNo ? " no" : ""}`} role="status" tabIndex={0} data-tip={esc(notice)}>
+        <p className={`na c-note${memNo ? " no" : ""}`} data-testid="chat.composer.notice" role="status" tabIndex={0} data-tip={esc(notice)}>
           {notice}
         </p>
       ) : null}
@@ -448,7 +456,7 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft, placeholder, textarea]);
-  return <textarea ref={textarea} id="ta" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
+  return <textarea ref={textarea} id="ta" data-testid="chat.composer.message" data-draft-version={version} className="ta" rows={1} placeholder={placeholder} aria-label="Message" value={draft} onPaste={paste}
     onChange={e => editDraft(e.target.value)} onKeyDown={e => {
       if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isTouch()) { e.preventDefault(); submit(); }
     }} />;
@@ -527,20 +535,20 @@ function QueueTray() {
               {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
             </span>
             {q.waitFor === "reply" && !editing ? (
-              <button type="button" className="ibtn xs" aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
+              <button type="button" className="ibtn xs" data-testid={`chat.queue.send-now-${i + 1}`} aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
                 <SendArrow />
               </button>
             ) : null}
             {editing ? (
-              <button type="button" className="ibtn xs" aria-label="Cancel editing" aria-pressed="true" data-tip="Cancel editing" onClick={andFocus(cancelQueuedEdit)}>
+              <button type="button" className="ibtn xs" data-testid={`chat.queue.cancel-edit-${i + 1}`} aria-label="Cancel editing" aria-pressed="true" data-tip="Cancel editing" onClick={andFocus(cancelQueuedEdit)}>
                 <Icon id="pencil" cls="s14" />
               </button>
             ) : (
-              <button type="button" className="ibtn xs" aria-label="Edit" data-edit-queued data-tip="Edit" onClick={andFocus(() => editQueued(q.id))}>
+              <button type="button" className="ibtn xs" data-testid={`chat.queue.edit-${i + 1}`} aria-label="Edit" data-edit-queued data-tip="Edit" onClick={andFocus(() => editQueued(q.id))}>
                 <Icon id="pencil" cls="s14" />
               </button>
             )}
-            <button type="button" className="ibtn xs" aria-label="Remove" data-unqueue data-tip="Remove" onClick={andFocus(() => removeQueued(q.id))}>
+            <button type="button" className="ibtn xs" data-testid={`chat.queue.remove-${i + 1}`} aria-label="Remove" data-unqueue data-tip="Remove" onClick={andFocus(() => removeQueued(q.id))}>
               <Icon id="x" cls="s14" />
             </button>
           </li>
@@ -568,6 +576,7 @@ function StopWarning() {
   return (
     <div
       className="stopask"
+      data-testid="chat.stop-warning.dialog"
       role="alertdialog"
       aria-label="Stop the other reply?"
       onKeyDown={(e) => {
@@ -581,13 +590,13 @@ function StopWarning() {
       </p>
       <div className="stopask-f">
         <label className="stopask-n">
-          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />
+          <input type="checkbox" data-testid="chat.stop-warning.never" checked={never} onChange={(e) => setNever(e.target.checked)} />
           Don't show this again
         </label>
-        <button type="button" className="btn ghost" onClick={andFocus(cancelStopAsk)}>
+        <button type="button" className="btn ghost" data-testid="chat.stop-warning.cancel" onClick={andFocus(cancelStopAsk)}>
           Cancel
         </button>
-        <button type="button" className="btn primary" autoFocus onClick={andFocus(() => confirmStopAsk(never))}>
+        <button type="button" className="btn primary" data-testid="chat.stop-warning.confirm" autoFocus onClick={andFocus(() => confirmStopAsk(never))}>
           Stop and send
         </button>
       </div>
@@ -643,6 +652,7 @@ function CountButton({ open }: { open: boolean }) {
       type="button"
       className={`pill gate thinking count${count > 1 ? " on" : ""}`}
       id="countBtn"
+      data-testid="chat.composer.count"
       aria-haspopup="menu"
       aria-expanded={open}
       aria-label={`Pictures per send: ${count}`}
@@ -683,9 +693,9 @@ export function CountMenu() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
   return (
-    <div className={`pop menu count-menu${open ? " open" : ""}`} id="countMenu" role="menu" aria-label="Pictures per send" ref={ref} onKeyDown={countArrows}>
+    <div className={`pop menu count-menu${open ? " open" : ""}`} id="countMenu" data-testid="chat.count-menu.menu" role="menu" aria-label="Pictures per send" ref={ref} onKeyDown={countArrows}>
       {Array.from({ length: IMAGE_COUNT_MAX }, (_, i) => i + 1).map((n) => (
-        <button key={n} type="button" className="mi" role="menuitemradio" aria-checked={n === count} onClick={() => pickCount(n)}>
+        <button key={n} type="button" className="mi" data-testid={`chat.count-menu.pick-${n}`} role="menuitemradio" aria-checked={n === count} onClick={() => pickCount(n)}>
           <Icon id="check" cls="chk" />
           <b>{images(n)}</b>
           {ms === undefined ? null : <small>{about(ms, n)}</small>}
@@ -721,6 +731,7 @@ export function PlusMenu() {
         type="button"
         className="mi"
         role="menuitem"
+        data-testid="chat.plus-menu.attach"
         data-attach
         data-tip="Images go with this message. Other files show as not sent. You can also drop files on the window."
         onClick={() => {
@@ -738,6 +749,7 @@ export function PlusMenu() {
         type="button"
         className="mi"
         role="menuitem"
+        data-testid="chat.plus-menu.library"
         data-lib
         onClick={() => {
           closePop();
@@ -757,6 +769,7 @@ export function PlusMenu() {
           className="mi"
           role="menuitemcheckbox"
           aria-checked={image}
+          data-testid="chat.plus-menu.image"
           data-gen
           onClick={() => menuImage(image, true)}
         >
@@ -772,6 +785,7 @@ export function PlusMenu() {
           type="button"
           className="mi"
           role="menuitem"
+          data-testid="chat.plus-menu.image-setup"
           data-gen
           onClick={() => {
             closePop();
@@ -818,6 +832,7 @@ export function OptsMenu() {
       <button
         type="button"
         className={`mi${thinkNa !== null ? " off" : ""}`}
+        data-testid="chat.options-menu.thinking"
         role="menuitemcheckbox"
         aria-checked={thinkNa !== null ? false : think}
         aria-disabled={thinkNa !== null ? true : undefined}
@@ -833,7 +848,7 @@ export function OptsMenu() {
         <span className="switch" aria-hidden="true" />
       </button>
       {imageGen ? (
-        <button type="button" className="mi" role="menuitemcheckbox" aria-checked={image} onClick={() => menuImage(image, false)}>
+        <button type="button" className="mi" data-testid="chat.options-menu.image" role="menuitemcheckbox" aria-checked={image} onClick={() => menuImage(image, false)}>
           <Icon id="image" />
           <span>
             <b>Image</b>
@@ -842,7 +857,7 @@ export function OptsMenu() {
           <span className="switch" aria-hidden="true" />
         </button>
       ) : (
-        <button type="button" className="mi off" role="menuitemcheckbox" aria-checked={false} aria-disabled="true" data-image-off>
+        <button type="button" className="mi off" data-testid="chat.options-menu.image-off" role="menuitemcheckbox" aria-checked={false} aria-disabled="true" data-image-off>
           <Icon id="image" />
           <span>
             <b>Image</b>

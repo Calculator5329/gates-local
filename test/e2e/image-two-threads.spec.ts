@@ -41,10 +41,10 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
     await open(); await waitReady(page);
     await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-    await page.getByRole("switch", { name: "Generate images" }).click();
+    await page.getByTestId("settings.nav.open-images").click();
+    await page.getByTestId("settings.images.enable").click();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.getByTestId("chat.composer.image").click();
     // A: nothing picked anywhere, so the composer sends the default it shows (General's style setup, on Klein's weights)
     await expect(button).toContainText("General");
     await sendMessage(page, "IR320 A default");
@@ -129,10 +129,10 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
     if (!server) throw new Error("No test server");
     client = createClient(new WebSocket(server));
     await page.keyboard.press("Control+Comma");
-    await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-    await page.getByRole("switch", { name: "Generate images" }).click();
+    await page.getByTestId("settings.nav.open-images").click();
+    await page.getByTestId("settings.images.enable").click();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Image", exact: true }).click();
+    await page.getByTestId("chat.composer.image").click();
 
     await test.step("A makes Z-Image, then B makes FLUX after A releases the GPU", async () => {
       await pick(X, "Z-Image");

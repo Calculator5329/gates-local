@@ -85,7 +85,7 @@ test("Models is its own pop-up over the chat: the shell's box, tabs and Close in
   // Settings no longer lists Models, and does not reopen on it
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".snav")).toBeVisible();
-  await expect(page.locator(".snav").getByRole("button", { name: "Models", exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("settings.nav.open-models")).toHaveCount(0);
   await expect(page.locator(".snav .sb-act.on")).toHaveText("General");
   await page.keyboard.press("Escape");
 
@@ -139,7 +139,7 @@ test("Settings is the same pop-up: its sections at its left, the chat and thread
 
   // the sections are inside the pop-up; picking one keeps the box
   const nav = set.locator(".snav");
-  await nav.getByRole("button", { name: "Tools", exact: true }).click();
+  await nav.getByTestId("settings.nav.open-tools").click();
   await expect(nav.locator(".sb-act.on")).toHaveText("Tools");
   expect(await box(set)).toEqual(b);
   await page.keyboard.press("Escape");
@@ -288,7 +288,7 @@ test.describe("one shell for Models, Usage and Settings", () => {
     const set = page.getByRole("dialog", { name: "Settings" });
     await expect(set.getByText("Theme", { exact: true })).toBeVisible();
     expect((await box(set.locator(".dlg-nav"))).width).toBe(56);
-    const tools = set.locator(".snav").getByRole("button", { name: "Tools", exact: true });
+    const tools = set.getByTestId("settings.nav.open-tools");
     await tools.hover();
     await expect(page.locator("#tip.open")).toHaveText("Tools");
     await page.mouse.move(0, 0);

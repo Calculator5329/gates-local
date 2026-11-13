@@ -20,10 +20,10 @@ async function imageGenOn(page: Page, open: () => Promise<void>) {
   await stack.reset("image-batch", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
-  await page.getByRole("switch", { name: "Generate images" }).click();
-  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
-  return page.getByRole("switch", { name: "Make images" });
+  await page.getByTestId("settings.nav.open-images").click();
+  await page.getByTestId("settings.images.enable").click();
+  await page.getByTestId("settings.nav.open-tools").click();
+  return page.getByTestId("settings.tools.make-images");
 }
 
 async function outlined(page: Page, selector: string, path: string) {

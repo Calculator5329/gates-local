@@ -1,6 +1,7 @@
 // The building blocks every Settings section uses: the section head, a
 // group, a row with its failure line, and the keyboard rules of a popover.
 import { type KeyboardEvent, type ReactNode, type RefObject, useCallback, useEffect, useState } from "react";
+import { handleKey } from "./handles.ts";
 import type { ActionResult } from "./session.ts";
 import { esc } from "./ui.tsx";
 
@@ -96,11 +97,11 @@ export function useOutside(ref: RefObject<HTMLElement | null>, open: boolean, cl
 }
 
 /** Two choices side by side; the app's control for a short fixed set, never a native select. */
-export function Seg2<T extends string | number>({ value, options, onPick, label, disabled = false }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string; disabled?: boolean }) {
+export function Seg2<T extends string | number>({ value, options, onPick, label, handle, disabled = false }: { value: T | undefined; options: readonly (readonly [T, string])[]; onPick: (v: T) => void; label: string; handle: string; disabled?: boolean }) {
   return (
     <span className="seg2" role="group" aria-label={label}>
       {options.map(([v, text]) => (
-        <button key={String(v)} type="button" className={v === value ? "on" : ""} aria-pressed={v === value} disabled={disabled} onClick={() => onPick(v)}>
+        <button key={String(v)} type="button" className={v === value ? "on" : ""} data-testid={`settings.segment.${handle}-${handleKey(v)}`} aria-pressed={v === value} disabled={disabled} onClick={() => onPick(v)}>
           {text}
         </button>
       ))}

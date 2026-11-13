@@ -24,7 +24,7 @@ afterEach(() => { setState({ messages: {}, turns: {}, stopNotes: {} }); vi.unstu
 /** The stop square's name and tooltip: the one place the app says a stopped reply stays out of later prompts. */
 const UNSEEN = "Stopped. The model won&#x27;t see this reply.";
 /** Focusable (tabindex 0), so the keyboard reaches the square's tooltip. */
-const MARK = `role="img" tabindex="0" aria-label="${UNSEEN}" data-tip="${UNSEEN}"`;
+const MARK = `role="img" data-testid="chat.reply.unseen-mark" tabindex="0" aria-label="${UNSEEN}" data-tip="${UNSEEN}"`;
 const OLD_WORDS = /excluded from later model prompts|Its text is kept here|Stopped after|Interrupted before this reply finished/;
 
 it("marks an interrupted reply whose cause this client does not know (a reload) with the stop square alone", () => {

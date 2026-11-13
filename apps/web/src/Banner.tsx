@@ -121,7 +121,7 @@ function Shell({ icon, role, title, children }: { icon: ReactNode; role: "status
 }
 
 const RetryButton = ({ primary }: { primary?: boolean }) => (
-  <button type="button" className={primary ? "btn primary" : "btn outline"} onClick={() => void recheckRuntime()}>
+  <button type="button" className={primary ? "btn primary" : "btn outline"} data-testid="chat.banner.retry" onClick={() => void recheckRuntime()}>
     Retry
   </button>
 );
@@ -147,7 +147,7 @@ export function Banner() {
         <Shell icon={<Icon id="download" />} role="status" title="Setting up Ollama">
           <div className="bm">
             No Ollama was found, so Gates Local is installing{" "}
-            <span className="tipd" tabIndex={0} data-tip='Into <span class="mono">~/.local/share/gates-local/ollama</span>. Gates Local starts and stops only this copy.'>
+            <span className="tipd" data-testid="chat.banner.install-place" tabIndex={0} data-tip='Into <span class="mono">~/.local/share/gates-local/ollama</span>. Gates Local starts and stops only this copy.'>
               its own copy
             </span>
             , then your first model.

@@ -6,12 +6,12 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { CHECKOUT_CACHE } from "./env.ts";
-import { expect, openModels, stack, test, waitReady } from "./fixtures.ts";
+import { expect, navButton, openModels, stack, test, waitReady } from "./fixtures.ts";
 
 const section = async (page: Page, label: string) => {
   if (label === "Models") return openModels(page);
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+  await navButton(page, label).click();
 };
 
 /** No "!", no "Oops": one sentence that ends in a full stop. */
@@ -28,10 +28,10 @@ test("a Library add with a wrong path keeps the form, says why, and works once t
   await open();
   await waitReady(page);
   await section(page, "Library");
-  await page.getByRole("button", { name: "Add folder…" }).click();
-  const input = page.getByRole("textbox", { name: "Add a folder path" });
+  await page.getByTestId("settings.library.add-folder").click();
+  const input = page.getByTestId("settings.add-source.path-folder");
   await input.fill(wrong);
-  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByTestId("settings.add-source.add-folder").click();
 
   const alert = page.getByRole("alert");
   await expect(alert).toHaveText("Couldn't add this folder because nothing is at that path; check it and try again.");
@@ -39,7 +39,7 @@ test("a Library add with a wrong path keeps the form, says why, and works once t
   await expect(input).toHaveValue(wrong);
 
   await input.fill(real);
-  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByTestId("settings.add-source.add-folder").click();
   await expect(input).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
   // the new source's row, by its label (the folder name), with its own actions
@@ -57,19 +57,18 @@ test.describe("while the server is down", () => {
     await open();
     await waitReady(page);
     await section(page, "General");
-    const theme = page.getByRole("group", { name: "Theme" });
-    await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("settings.segment.theme-dark")).toHaveAttribute("aria-pressed", "true");
 
     const restart = stack.restart(4000);
     // Settings has no banner; the sidebar footer's Settings icon says it, with a dot and in its tooltip
     const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
     await expect(gear).toHaveAccessibleName("Settings · Reconnecting");
     await expect(gear).toHaveAttribute("data-tip", /^<b>Reconnecting<\/b>/);
-    await theme.getByRole("button", { name: "Light" }).click();
+    await page.getByTestId("settings.segment.theme-light").click();
     const saved = page.getByRole("alert");
     await expect(saved).toHaveText("Couldn't save the theme because Gates Local isn't connected; try again once it reconnects.");
     calm(await saved.textContent());
-    await expect(theme.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("settings.segment.theme-dark")).toHaveAttribute("aria-pressed", "true");
 
     await openModels(page);
     // Gemma: a tag without dots, so calm() can count one sentence

@@ -25,11 +25,11 @@ test("on touch the Make images row keeps its height when the switch above flips,
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
-  await page.getByRole("button", { name: "Back to Settings" }).click();
-  await page.locator(".set-list").getByRole("button", { name: "Tools" }).click();
+  await page.getByTestId("settings.shell.back").click();
+  await page.getByTestId("settings.sections.open-tools").click();
   await expect(page.locator(".set h1").first()).toHaveText("Tools");
   const row = page.locator('.set .srow[data-tool="images"]');
-  const master = page.getByRole("switch", { name: "Let the model use tools" });
+  const master = page.getByTestId("settings.tools.enable");
   await expect(master).toHaveAttribute("aria-checked", "true");
   await expect(row).toContainText("Needs Generate images, in Image generation.");
   const height = () => row.evaluate((e) => Math.round(e.getBoundingClientRect().height * 10) / 10);

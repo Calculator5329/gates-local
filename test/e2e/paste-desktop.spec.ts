@@ -172,7 +172,7 @@ test("desktop paste: native menus, X11 clipboard, undo, toolbar and sidebar coex
   page.on("pageerror", error => errors.push(error.message));
   try {
     const ta = page.locator("#ta");
-    const send = page.getByRole("button", { name: "Send message", exact: true });
+    const send = page.getByTestId("chat.composer.send");
     await ta.fill("before after");
     await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(7, 7));
     await app.evaluate(async ({ clipboard }: DesktopApi) => clipboard.writeText("one\ntwo\nthree\nfour\n"));
@@ -261,7 +261,7 @@ test("desktop paste: native menus, X11 clipboard, undo, toolbar and sidebar coex
     await app.evaluate(({ clipboard }: DesktopApi) => clipboard.clear());
     await choose(app, "Copy Image");
     await expect.poll(() => app.evaluate(({ clipboard }: DesktopApi) => clipboard.has("image/png"))).toBe(true);
-    await page.getByRole("button", { name: "Remove image 1", exact: true }).click();
+    await page.getByTestId("chat.attachment.remove-image-1").click();
     expect((await send.boundingBox())!.y).toBe(before!.y);
     await ta.focus();
     await app.evaluate(({ BrowserWindow }: DesktopApi) => {

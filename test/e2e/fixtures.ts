@@ -189,6 +189,13 @@ export const test = base.extend<Fixtures>({
 
 export { expect };
 
+/** A Settings section's id from the name a spec knows it by ("Image generation" -> "images"). */
+export const sectionId = (name: string): string => (name === "Image generation" ? "images" : name.toLowerCase());
+/** The desktop Settings nav button for a section. */
+export const navButton = (page: Page, name: string): Locator => page.getByTestId(`settings.nav.open-${sectionId(name)}`);
+/** The phone Settings list row for a section. */
+export const listButton = (page: Page, name: string): Locator => page.getByTestId(`settings.sections.open-${sectionId(name)}`);
+
 /** Type into the composer and send with Enter. */
 export async function sendMessage(page: Page, text: string): Promise<void> {
   const ta = page.locator("#ta");
@@ -199,7 +206,7 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 /** Open Settings › Advanced; resolves to its GPU memory group. */
 export async function openGpuMemory(page: Page): Promise<Locator> {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
   const gpu = page.locator(".set #gpuMemory");
   await expect(gpu).toBeVisible();
   return gpu;
@@ -226,8 +233,8 @@ export async function waitReady(page: Page): Promise<void> {
 export async function openModels(page: Page): Promise<void> {
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
     await page.keyboard.press("Control+Comma");
-    await page.getByRole("button", { name: "Back to Settings" }).click();
-    await page.locator(".set-list").getByRole("button", { name: "Models" }).click();
+    await page.getByTestId("settings.shell.back").click();
+    await page.getByTestId("settings.sections.open-models").click();
     return;
   }
   // the footer is under the Settings pop-up's blur: close it first

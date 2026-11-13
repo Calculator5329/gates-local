@@ -95,12 +95,12 @@ test("large text paste preserves selection, undo, typing and the saved draft", a
 // Guards the owner's ask to paste images, and his rule that nothing moves.
 test("paste an image, remove it, and keep the toolbar still", async ({ page, open }) => {
   await open(); await waitReady(page);
-  const send = page.getByRole("button", { name: "Send message", exact: true });
+  const send = page.getByTestId("chat.composer.send");
   const before = await send.boundingBox();
   await paste(page, { images: 1 });
   await expect(page.locator(".att img")).toHaveCount(1);
   expect((await send.boundingBox())!.y).toBe(before!.y);
-  await page.getByRole("button", { name: "Remove image 1", exact: true }).click();
+  await page.getByTestId("chat.attachment.remove-image-1").click();
   await expect(page.locator(".att img")).toHaveCount(0);
   expect((await send.boundingBox())!.y).toBe(before!.y);
 });
@@ -137,7 +137,7 @@ test.describe("vision turns", () => {
     await paste(page, { images: 1 });
     await expect(page.locator(".att img")).toHaveCount(1);
     await page.locator("#ta").fill("Notice image fixture");
-    await expect(page.getByRole("button", { name: "Send message", exact: true })).not.toHaveAttribute("aria-disabled", "true");
+    await expect(page.getByTestId("chat.composer.send")).not.toHaveAttribute("aria-disabled", "true");
     await page.locator("#ta").press("Enter");
     await expect(page.locator(".turn.a.done")).toHaveCount(1);
     await page.locator("#modelBtn").click();
@@ -175,8 +175,8 @@ test.describe("image history", () => {
     await expect(page.locator(".turn.u img")).toHaveCount(2);
     await page.locator("[data-edit]").click();
     await expect(page.locator(".att img")).toHaveCount(2);
-    await page.getByRole("button", { name: "Remove image 2", exact: true }).click();
-    await page.getByRole("button", { name: "Remove image 1", exact: true }).click();
+    await page.getByTestId("chat.attachment.remove-image-2").click();
+    await page.getByTestId("chat.attachment.remove-image-1").click();
     await page.locator("#ta").fill("");
     await page.locator("[data-regen]").click();
     await expect.poll(async () => (await chats("Describe these")).length).toBe(2);

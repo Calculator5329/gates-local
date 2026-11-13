@@ -147,7 +147,7 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
       }
       const isUrl = /^https?:\/\//.test(label);
       out.push(
-        <a key={n++} href={m[5]} className={isUrl ? "url" : undefined} target="_blank" rel="noreferrer noopener">
+        <a key={n++} href={m[5]} className={isUrl ? "url" : undefined} data-testid="chat.markdown.link" target="_blank" rel="noreferrer noopener">
           {isUrl ? wrapUrl(label) : label}
         </a>,
       );
@@ -159,7 +159,7 @@ export function inline(text: string, partial = false, allowedLinks?: ReadonlySet
       // a sentence's closing punctuation stays outside the link
       const url = s.replace(/[.,;:!?]+$/, "");
       out.push(allowedLinks !== undefined && !allowedLinks.has(linkKey(url) ?? "") ? <span key={n++} className="url">{wrapUrl(url)}</span> : (
-        <a key={n++} href={url} className="url" target="_blank" rel="noreferrer noopener">
+        <a key={n++} href={url} className="url" data-testid="chat.markdown.url" target="_blank" rel="noreferrer noopener">
           {wrapUrl(url)}
         </a>
       ));
@@ -206,6 +206,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
         <button
           type="button"
           className={copied !== null ? "cb-copy on" : "cb-copy"}
+          data-testid="chat.markdown.copy-code"
           aria-label="Copy code"
           data-tip={copied !== null ? undefined : "Copy code"}
           onClick={copy}

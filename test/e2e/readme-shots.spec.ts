@@ -9,7 +9,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { ROOT } from "./env.ts";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, navButton, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago (CST, UTC-6), as in shots.spec.ts. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -26,7 +26,7 @@ interface Shot {
 
 const settings = (label: string) => async (page: Page) => {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+  await navButton(page, label).click();
 };
 
 const SHOTS: readonly Shot[] = [

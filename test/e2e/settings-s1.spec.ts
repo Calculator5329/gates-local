@@ -7,11 +7,11 @@ import path from "node:path";
 import { type Params, createClient } from "@gates-local/contracts";
 import type { Page } from "@playwright/test";
 import { CHECKOUT_CACHE, FAKE_URL } from "./env.ts";
-import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
+import { expect, navButton, sendMessage, test, waitReady } from "./fixtures.ts";
 
 const section = async (page: Page, label: string) => {
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: label, exact: true }).click();
+  await navButton(page, label).click();
 };
 
 const replied = async (page: Page, count: number) => {
@@ -39,9 +39,9 @@ test("the Tools switch decides whether a chat is offered tools", async ({ page, 
   await open();
   await waitReady(page);
   await section(page, "Library");
-  await page.getByRole("button", { name: "Add folder…" }).click();
-  await page.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
-  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByTestId("settings.library.add-folder").click();
+  await page.getByTestId("settings.add-source.path-folder").fill(folder);
+  await page.getByTestId("settings.add-source.add-folder").click();
   await expect(page.locator(".srow .sl b", { hasText: "tools-notes" })).toBeVisible();
   await page.keyboard.press("Escape");
   await waitReady(page);
@@ -51,7 +51,7 @@ test("the Tools switch decides whether a chat is offered tools", async ({ page, 
   expect(await toolsOffered("first question with tools on")).toBe(true);
 
   await section(page, "Tools");
-  const master = page.getByRole("switch", { name: "Let the model use tools" });
+  const master = page.getByTestId("settings.tools.enable");
   await expect(master).toHaveAttribute("aria-checked", "true");
   await master.click();
   await expect(master).toHaveAttribute("aria-checked", "false");
@@ -87,8 +87,8 @@ test("there is no Text size: messages and the message box are 15 px, even after 
   await expect(page.getByRole("group", { name: "Theme" })).toBeVisible();
   await expect(page.getByText("Text size", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("group", { name: "Text size" })).toHaveCount(0);
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
-  await page.getByRole("button", { name: "Reset…" }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
+  await page.getByTestId("settings.advanced.reset").click();
   await expect(page.getByRole("group", { name: "Confirm reset" })).not.toContainText("text size");
 });
 
@@ -112,7 +112,7 @@ test("Accent starts Neutral, a pick sets --accent at once in this theme's step, 
   await expect(page.locator("html")).toHaveAttribute("data-accent", "blue");
   expect(await token("--accent")).toBe("#3b82f6");
   expect(await semantic()).toEqual(before);
-  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+  await page.getByTestId("settings.segment.theme-light").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   expect(await token("--accent")).toBe("#2563eb");
 

@@ -8,6 +8,7 @@ import type { Accent, ImageStatus, ShellStatus, Source, Theme } from "@gates-loc
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, noGpu, sourceDetail } from "./format.ts";
+import { handleKey } from "./handles.ts";
 import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
@@ -47,7 +48,7 @@ function Swatches({ value, onPick }: { value: Accent | undefined; onPick: (a: Ac
   return (
     <span className="swatches" role="group" aria-label="Accent">
       {ACCENTS.map(([a, name]) => (
-        <button key={a} type="button" className="swatch" aria-label={name} aria-pressed={a === value} data-tip={name} style={{ "--sw": a === "neutral" ? "var(--foreground)" : `var(--accent-${a})` } as CSSProperties} onClick={() => onPick(a)} />
+        <button key={a} type="button" className="swatch" data-testid={`settings.appearance.accent-${a}`} aria-label={name} aria-pressed={a === value} data-tip={name} style={{ "--sw": a === "neutral" ? "var(--foreground)" : `var(--accent-${a})` } as CSSProperties} onClick={() => onPick(a)} />
       ))}
     </span>
   );
@@ -65,7 +66,7 @@ function General() {
       {settings === NA || unavailable ? null : (
         <Grp title="Appearance">
           <Row label="Theme" tip="System follows your desktop's light or dark setting." err={themeErr}>
-            <Seg2 label="Theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
+            <Seg2 label="Theme" handle="theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
           </Row>
           <Row label="Accent" tip="The colour of the mark on the start screen." err={accentErr}>
             <Swatches value={current === undefined ? undefined : (current.accent ?? "neutral")} onPick={(a) => void runAccent(updateSettings({ accent: a }))} />
@@ -135,7 +136,7 @@ function Runtime() {
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
           {switchable ? (
-            <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
+            <button type="button" className={`btn outline${confirm ? " pressed" : ""}`} data-testid="settings.runtime.switch" aria-expanded={confirm} onClick={() => setState({ ownerConfirm: !confirm })}>
               {ownCopy ? "Use the system Ollama" : "Use Gates Local's Ollama"}
             </button>
           ) : null}
@@ -171,12 +172,13 @@ function Runtime() {
               </>
             )}
             <div className="ca">
-              <button type="button" className="btn ghost" onClick={() => setState({ ownerConfirm: false })}>
+              <button type="button" className="btn ghost" data-testid="settings.runtime.switch-cancel" onClick={() => setState({ ownerConfirm: false })}>
                 Cancel
               </button>
               <button
                 type="button"
                 className="btn primary"
+                data-testid="settings.runtime.switch-confirm"
                 onClick={() => {
                   setState({ ownerConfirm: false });
                   void run(updateSettings({ runtimeMode: ownCopy ? "system" : "app" }));
@@ -189,7 +191,7 @@ function Runtime() {
         ) : null}
         {runtime?.baseUrl === undefined ? null : (
           <Row label="Ollama address" desc={<span className="mono">{runtime.baseUrl.replace(/^https?:\/\//, "")}</span>}>
-            <CopyButton text={runtime.baseUrl} label="Copy Ollama address" />
+            <CopyButton text={runtime.baseUrl} label="Copy Ollama address" handle="ollama-address" />
           </Row>
         )}
         {folder === undefined && !models ? null : (
@@ -204,11 +206,11 @@ function Runtime() {
             err={openErr}
           >
             {folder !== undefined && canOpenFolder() ? (
-              <button type="button" className="btn outline" aria-label="Open models folder" onClick={() => void runOpen(window.gatesLocal?.openModelsFolder?.() ?? Promise.resolve(null))}>
+              <button type="button" className="btn outline" data-testid="settings.runtime.open-models-folder" aria-label="Open models folder" onClick={() => void runOpen(window.gatesLocal?.openModelsFolder?.() ?? Promise.resolve(null))}>
                 Open
               </button>
             ) : null}
-            {folder === undefined ? null : <CopyButton text={folder} label="Copy models folder path" />}
+            {folder === undefined ? null : <CopyButton text={folder} label="Copy models folder path" handle="models-folder" />}
           </Row>
         )}
       </Grp>
@@ -228,7 +230,7 @@ interface ToolState {
 }
 
 /** One tool: its own readiness on the right, and the whole row a link to where that is changed. */
-function ToolRow({ name, desc, state }: { name: string; desc: string; state: ToolState }) {
+function ToolRow({ tool, name, desc, state }: { tool: LibraryTool; name: string; desc: string; state: ToolState }) {
   const cls = `srow tool${state.dim === true ? " dim" : ""}`;
   const inner = (
     <>
@@ -245,7 +247,7 @@ function ToolRow({ name, desc, state }: { name: string; desc: string; state: Too
   return state.go === undefined ? (
     <div className={cls}>{inner}</div>
   ) : (
-    <button type="button" className={cls} onClick={state.go}>
+    <button type="button" className={cls} data-testid={`settings.tools.open-${tool}`} onClick={state.go}>
       {inner}
     </button>
   );
@@ -297,7 +299,7 @@ function Tools() {
   // Both fixes are in Image generation: the reason goes there, as every Tools row goes where it is fixed.
   // The same button in both sentences, so the cell keeps one height on touch (a link is 44 px there);
   // while its sentence is the hidden one it is invisible and out of the tab order.
-  const fixIt = <button type="button" className="link" data-go="images" tabIndex={on ? undefined : -1} onClick={() => openSettings("images")}>Image generation</button>;
+  const fixIt = <button type="button" className="link" data-go="images" data-testid="settings.tools.image-setup" tabIndex={on ? undefined : -1} onClick={() => openSettings("images")}>Image generation</button>;
   const onWhy = settings === NA || settings?.imageGen !== true ? <>Needs Generate images, in {fixIt}.</>
     : status === NA ? "Not available in this build."
     : !image.usable ? <>ComfyUI: {image.word}. Set it up in {fixIt}.</>
@@ -312,16 +314,16 @@ function Tools() {
             <span aria-hidden={!on}>On. It can use the tools below when a chat needs them.</span>
             <span aria-hidden={on}>Off. It answers from the conversation alone.</span>
           </span>} err={err}>
-            {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}
+            {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}
           </Row>
         </Grp>
       )}
       <Grp>
-        <ToolRow name="Read files" desc="Reads the folders and files in your Library. It can't change them." state={libraryTool(on, sources, "read", "Add a folder or file to your Library")} />
+        <ToolRow tool="read" name="Read files" desc="Reads the folders and files in your Library. It can't change them." state={libraryTool(on, sources, "read", "Add a folder or file to your Library")} />
         {windows ? (
-          <ToolRow name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "Add a SQLite database to your Library")} />
+          <ToolRow tool="query" name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "Add a SQLite database to your Library")} />
         ) : (
-          <ToolRow name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={runTool(on, sources, shell)} />
+          <ToolRow tool="run" name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={runTool(on, sources, shell)} />
         )}
         <div className={`srow tool${imageWhy === null ? "" : " dim"}`} data-tool="images">
           <span className="sl">
@@ -337,7 +339,7 @@ function Tools() {
               // a phone cannot change settings: the row says what the computer set, and its dot whether
               // the tool is offered now (the reason why not is the line beside it)
               : locked ? <Status dot={imageTool && imageWhy === null ? "ok" : "off"}>{imageTool ? "On" : "Off"}</Status>
-              : <button type="button" className="switch" role="switch" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
+              : <button type="button" className="switch" role="switch" data-testid="settings.tools.make-images" aria-checked={imageTool} aria-label="Make images" disabled={imageWhy !== null} onClick={() => void runImage(updateSettings({ imageTool: !imageTool }))} />}
           </span>
         </div>
       </Grp>
@@ -350,7 +352,7 @@ function Tools() {
 const SETUP_URL = "https://github.com/Calculator5329/gates-local/blob/main/docs/setup/linux.md#4-optional-image-generation-with-comfyui";
 
 const SetupLink = () => (
-  <a className="btn outline" href={SETUP_URL} target="_blank" rel="noreferrer noopener">
+  <a className="btn outline" href={SETUP_URL} data-testid="settings.images.setup-guide" target="_blank" rel="noreferrer noopener">
     How to set up
   </a>
 );
@@ -381,11 +383,11 @@ function ImageState({ address }: { address: string }) {
   return (
     <Row label={<Status dot={dot}>{word}</Status>} desc={desc} err={err}>
       {state === "error" ? (
-        <button type="button" className="btn outline" onClick={() => void run(checkImageStatus())}>
+        <button type="button" className="btn outline" data-testid="settings.images.retry" onClick={() => void run(checkImageStatus())}>
           Retry
         </button>
       ) : state === "ready" || state === "busy" ? (
-        <a className="btn outline" href={status?.baseUrl ?? address} target="_blank" rel="noreferrer noopener">
+        <a className="btn outline" href={status?.baseUrl ?? address} data-testid="settings.images.open-comfyui" target="_blank" rel="noreferrer noopener">
           Open
         </a>
       ) : null}
@@ -422,7 +424,7 @@ function Images() {
       {settings === NA || settings === undefined ? null : (
         <Grp>
           <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "Then turn Image on in a chat's message box. If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer." err={genErr}>
-            {locked ? null : <button type="button" className="switch" role="switch" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
+            {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
           <Row label="Set up ComfyUI" desc="A separate free program you install yourself.">
             <SetupLink />
@@ -434,8 +436,8 @@ function Images() {
           <ImageState address={address} />
           {locked ? null : (
             <Row label="ComfyUI address" desc="Only change this if ComfyUI runs somewhere else." err={urlErr}>
-              <input className="inp" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
-              <button type="button" className="btn outline" disabled={testing} onClick={() => void test()}>
+              <input className="inp" data-testid="settings.images.address" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
+              <button type="button" className="btn outline" data-testid="settings.images.test-connection" disabled={testing} onClick={() => void test()}>
                 <span className="steady">
                   <span aria-hidden={testing}>Test connection</span>
                   <span aria-hidden={!testing}>Testing…</span>
@@ -490,8 +492,8 @@ function SourceRow({ src }: { src: Source }) {
       <div className="sv">
         {detail === "" ? null : <span className="src-d">{detail}</span>}
         {locked ? null : (
-          <div className="mp-acts" ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
-            <button ref={btn} type="button" className={`mp-kebab${open ? " on" : ""}`} aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <div className="mp-acts" data-testid={`settings.source.actions-${handleKey(src.id)}`} ref={box} onKeyDown={(e) => open && walk(e, box.current, "[role=menuitem]", close)}>
+            <button ref={btn} type="button" className={`mp-kebab${open ? " on" : ""}`} data-testid={`settings.source.more-${handleKey(src.id)}`} aria-label={`More for ${name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
               <Icon id="more" />
             </button>
             {open ? (
@@ -501,6 +503,7 @@ function SourceRow({ src }: { src: Source }) {
                     type="button"
                     role="menuitem"
                     className="mp-mi"
+                    data-testid={`settings.source.refresh-${handleKey(src.id)}`}
                     onClick={() => {
                       close();
                       void run(refreshSource(src.id));
@@ -513,6 +516,7 @@ function SourceRow({ src }: { src: Source }) {
                   type="button"
                   role="menuitem"
                   className="mp-mi danger"
+                  data-testid={`settings.source.remove-${handleKey(src.id)}`}
                   onClick={() => {
                     close();
                     void run(removeSource(src.id));
@@ -541,6 +545,7 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
       <input
         ref={input}
         className="inp"
+        data-testid={`settings.add-source.path-${kind}`}
         aria-label={`Add a ${noun} path`}
         aria-invalid={err !== null}
         placeholder={hint}
@@ -556,13 +561,14 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
       <button
         type="button"
         className="btn outline"
+        data-testid={`settings.add-source.add-${kind}`}
         disabled={path.trim() === ""}
         // the form keeps the typed path until the server added it (W-07)
         onClick={() => void run(addSource(kind, path)).then((ok) => ok && close())}
       >
         Add
       </button>
-      <button type="button" className="btn outline" aria-label="Cancel adding source" data-tip="Cancel" onClick={close}>
+      <button type="button" className="btn outline" data-testid={`settings.add-source.cancel-${kind}`} aria-label="Cancel adding source" data-tip="Cancel" onClick={close}>
         <Icon id="x" />
       </button>
     </Row>
@@ -581,7 +587,7 @@ function SourceGroup({ title, note, kinds, items }: { title: string; note: strin
     requestAnimationFrame(() => entry.current?.querySelector<HTMLButtonElement>(`[data-add="${kind}"]`)?.focus({ preventScroll: true }));
   };
   const action = kinds.map((kind) => (
-    <button key={kind} type="button" className="btn outline" data-add={kind} onClick={() => setAdding(kind)}>
+    <button key={kind} type="button" className="btn outline" data-add={kind} data-testid={`settings.library.add-${kind}`} onClick={() => setAdding(kind)}>
       Add {ADD_WORDS[kind].noun}…
     </button>
   ));
@@ -616,7 +622,7 @@ function AddDatabase() {
       {adding ? <AddRow kind="sqlite" close={close} /> : (
         <Row label="Add a database" desc={<span className="src-help">A SQLite file of your own.</span>}>
           {locked ? <Na>{COMPUTER_ONLY}</Na> : (
-            <button type="button" className="btn outline" data-add="sqlite" onClick={() => setAdding(true)}>
+            <button type="button" className="btn outline" data-add="sqlite" data-testid="settings.library.add-sqlite" onClick={() => setAdding(true)}>
               Add database…
             </button>
           )}
@@ -662,7 +668,7 @@ function DataFolder() {
   if (path === undefined) return <Row label="Data folder" desc={<Skel w="24em" />} busy><Skel w="7em" /></Row>;
   return (
     <Row label="Data folder" desc={<span className="mono">{path}</span>} err={err}>
-      <button type="button" className="btn outline" onClick={() => void run(openDataFolder())}>
+      <button type="button" className="btn outline" data-testid="settings.advanced.open-data-folder" onClick={() => void run(openDataFolder())}>
         Open folder
       </button>
     </Row>
@@ -675,7 +681,7 @@ function ResetSettings() {
   return (
     <>
       <Row label="Reset settings" desc="Your chats, Library and models stay." err={err}>
-        <button type="button" className={`btn outline${asking ? " pressed" : ""}`} aria-expanded={asking} onClick={() => setAsking(!asking)}>
+        <button type="button" className={`btn outline${asking ? " pressed" : ""}`} data-testid="settings.advanced.reset" aria-expanded={asking} onClick={() => setAsking(!asking)}>
           Reset…
         </button>
       </Row>
@@ -689,12 +695,13 @@ function ResetSettings() {
             <li>Which Ollama Gates Local uses stays as it is.</li>
           </ul>
           <div className="ca">
-            <button type="button" className="btn ghost" onClick={() => setAsking(false)}>
+            <button type="button" className="btn ghost" data-testid="settings.advanced.reset-cancel" onClick={() => setAsking(false)}>
               Cancel
             </button>
             <button
               type="button"
               className="btn mp-danger"
+              data-testid="settings.advanced.reset-confirm"
               onClick={() => {
                 setAsking(false);
                 void run(resetSettings());

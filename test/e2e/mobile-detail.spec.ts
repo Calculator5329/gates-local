@@ -2,7 +2,7 @@
 // Settings on a phone and the model rows' Remove. mobile.spec.ts has the whole
 // phone journeys.
 import type { Page } from "@playwright/test";
-import { expect, openModels, test, waitReady } from "./fixtures.ts";
+import { expect, listButton, openModels, test, waitReady } from "./fixtures.ts";
 
 /** Thu 2026-11-12 14:00 in Chicago, as in the screenshot rig. */
 const NOW = Date.UTC(2026, 10, 12, 20, 0);
@@ -20,7 +20,7 @@ const phoneSettings = async (page: Page, section?: string) => {
   await openDrawer(page);
   await page.locator(".sb").getByRole("button", { name: "Settings" }).tap();
   await expect(page.locator(".set-list")).toBeVisible();
-  if (section !== undefined) await page.locator(".set-list").getByRole("button", { name: section }).tap();
+  if (section !== undefined) await listButton(page, section).tap();
 };
 
 test.describe("Settings on a phone", () => {

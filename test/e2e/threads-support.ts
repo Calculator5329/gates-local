@@ -32,7 +32,7 @@ export async function contextSize(page: Page, size: number): Promise<void> {
   // Settings permits a context that cannot fit this model; the picker now
   // refuses that selection. Exercise the real refusal/held-send path via Settings.
   await page.keyboard.press("Control+Comma");
-  await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
+  await page.getByTestId("settings.nav.open-advanced").click();
   const context = page.locator(`#gpuMemory [data-ctx="${size}"]`);
   await context.click();
   await expect(context).toHaveAttribute("aria-pressed", "true");

@@ -5,9 +5,9 @@ import { expect, test, waitReady } from "./fixtures.ts";
 async function library(page: Page) {
   await waitReady(page); await page.keyboard.press("Control+Comma");
   if ((page.viewportSize()?.width ?? 1440) <= 640) {
-    await page.getByRole("button", { name: "Back to Settings" }).click();
-    await page.locator(".set-list").getByRole("button", { name: "Library" }).click();
-  } else await page.locator(".snav").getByRole("button", { name: "Library", exact: true }).click();
+    await page.getByTestId("settings.shell.back").click();
+    await page.getByTestId("settings.sections.open-library").click();
+  } else await page.getByTestId("settings.nav.open-library").click();
   await expect(page.locator('[data-db="sample:chinook"]')).toBeVisible();
 }
 async function size(button: Locator) { const box = await button.boundingBox(); expect(box).not.toBeNull(); return box; }
@@ -20,7 +20,7 @@ const isDatabase = (row: Locator, label: string) => expect(row.getByRole("button
 test("a sample downloads in its own row: same place and height throughout, one row at the end", async ({ page, open }) => {
   await open(); await library(page);
   const row = slot(page, "chinook"); const button = fill(row);
-  const add = page.getByRole("button", { name: "Add database…" });
+  const add = page.getByTestId("settings.library.add-sqlite");
   await expect(button).toHaveText("Download"); await expect(row).toContainText("Sample ·"); await expect(row.locator(".import-rest")).toContainText("8 KB");
   const before = await size(row); const addBefore = await size(add); const buttonBefore = await size(button);
   await button.click(); await expect(button).toHaveText(/^\d+%$/);
