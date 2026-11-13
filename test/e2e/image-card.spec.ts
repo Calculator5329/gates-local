@@ -55,7 +55,7 @@ test("image card: waiting, making, done", async ({ page, open }, info) => {
     await expect(card).toContainText("Waiting for the GPU");
     await shot(page, "image-card-waiting.png", n => info.outputPath(n));
     await client.call("chat.cancel", { turnId }); turnId = undefined;
-    await expect(card).toContainText("Making image");
+    await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
     // the server's socket to ComfyUI may open after the prompt: send until the card shows it
     await expect.poll(async () => {
       try { comfy.progress(2, 5); } catch { /* no prompt yet */ }

@@ -391,7 +391,9 @@ function callLine(line: string): { cmd: string; shell: boolean } {
     if (typeof input === "object" && input !== null) {
       const i = input as Record<string, unknown>;
       if (typeof i["command"] === "string") return { cmd: i["command"], shell: true };
-      const arg = [i["query"], i["path"], i["prompt"]].find((v) => typeof v === "string");
+      // an image call's prompts, one per line (an older step saved one prompt)
+      const prompts = Array.isArray(i["prompts"]) && i["prompts"].every((p) => typeof p === "string") ? i["prompts"].join("\n") : undefined;
+      const arg = [i["query"], i["path"], i["prompt"], prompts].find((v) => typeof v === "string");
       if (typeof arg === "string") return { cmd: arg, shell: false };
     }
   } catch {
@@ -516,12 +518,26 @@ export function retryRows(thread: readonly Message[]): ReadonlySet<string> {
   return ids;
 }
 
-/** The card's words: what is happening now, in two or three words and the percent. */
+/** What a pending card is doing, as a screen reader hears it; on screen a running job is the spinner and its numbers. */
 function jobWords(job: ImageEvent): string {
   if (job.phase === "freeing") return "Freeing memory";
   if (job.state === "queued") return "Waiting for the GPU";
   const pct = Math.round((job.progress ?? 0) * 100);
   return pct > 0 ? `Making image · ${pct}%` : "Making image";
+}
+
+/** A running job beside its spinner: the percent once there is one, and the seconds since it was asked for. */
+function RunningNumbers({ job, since }: { job: ImageEvent; since: number }) {
+  const now = useTicker(1000, true);
+  const pct = Math.round((job.progress ?? 0) * 100);
+  const secs = Math.max(0, Math.floor((now - since) / 1000));
+  return <p aria-hidden="true">{pct > 0 ? `${pct}% · ${secs} s` : `${secs} s`}</p>;
+}
+
+/** The first card after the user message an Image turn sent: the card that turn's Stop cancels. */
+function turnCard(thread: readonly Message[], userMessageId: string): string | undefined {
+  const at = thread.findIndex((m) => m.id === userMessageId);
+  return at < 0 ? undefined : thread.slice(at + 1).find((m) => m.imageJob !== undefined)?.id;
 }
 
 /** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
@@ -545,6 +561,16 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
   // what the job runs (or ran): the end of its retry chain, after any settling
   const ran = job.choice ?? msg.imageJob!.choice;
   const model = useStore((s) => (ran === undefined ? undefined : presetName(s, ran.preset)));
+  // An Image turn's own card is cancelled by the composer's Stop, so the card offers no second way;
+  // a card the chat model's tool or a retry started has no Stop and keeps its Cancel.
+  const turn = useStore((s) => turnOf(s, msg.threadId));
+  const stopCovers = pending && turn?.image === true && turn.end === undefined && turn.userMessageId !== undefined && turnCard(thread, turn.userMessageId) === msg.id;
+  const since = thread.find((m) => m.id === job.jobId)?.createdAt ?? msg.createdAt;
+  // A prompt the chat model wrote is said under its card; an Image turn's prompt is the person's own
+  // message just above, so it is not said twice.
+  const at = thread.findIndex((m) => m.id === msg.id);
+  const asked = thread.slice(0, Math.max(0, at)).findLast((m) => m.role === "user")?.content;
+  const caption = msg.content.trim() !== "" && msg.content !== asked ? msg.content : undefined;
   const action = async () => {
     setBusy(true);
     if (pending) setError(await cancelImage(job.jobId));
@@ -555,15 +581,17 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
     }
     setBusy(false);
   };
-  return <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
-    {ran === undefined ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
-    {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status">
+  const card = <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
+    {/* the model and size belong to the result: while it runs the composer already names them */}
+    {ran === undefined || pending ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
+    {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
-      <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>
-      <button type="button" className="qa" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>
+      {job.state === "running" && job.phase === undefined ? <RunningNumbers job={job} since={since} /> : <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>}
+      {stopCovers ? null : <button type="button" className="qa" disabled={busy} onClick={() => void action()}>{pending ? "Cancel image" : "Try again"}</button>}
       {error ? <p>{error}</p> : null}
     </div>}
   </div>;
+  return caption === undefined ? card : <figure className="image-job-fig">{card}<figcaption className="image-job-prompt">{caption}</figcaption></figure>;
 }
 
 const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: boolean }) {

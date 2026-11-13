@@ -59,14 +59,17 @@ describe("a retry takes over its failed card's box", () => {
   });
 
   it.each([
-    [{ state: "queued" }, "Waiting for the GPU"],
-    [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory"],
-    [{ state: "running", progress: 0.4 }, "Making image · 40%"],
-  ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words) => {
+    [{ state: "queued" }, "Waiting for the GPU", "<p>Waiting for the GPU</p>"],
+    [{ state: "running", progress: 0, phase: "freeing" }, "Freeing memory", "<p>Freeing memory</p>"],
+    // running, the spinner says it: on screen only the percent and the seconds since it was asked for
+    [{ state: "running", progress: 0.4 }, "Making image · 40%", '<p aria-hidden="true">40% · '],
+  ] as const)("while the retry is %o the one box says %s, not the old reason", async (retry, words, shown) => {
     const { html, boxes } = await render(retry);
     expect(boxes).toHaveLength(1);
     expect(boxes[0]).toContain(size);
-    expect(html).toContain(`<p>${words}</p>`);
+    expect(html).toContain(`aria-label="${words}"`);
+    expect(html).toContain(shown);
+    // a retry has no turn, so no Stop: its Cancel stays on the card
     expect(html).toContain(">Cancel image</button>");
     expect(html).not.toContain(refused);
   });
@@ -121,21 +124,29 @@ describe("a card names its model", () => {
   }
   afterEach(() => setState({ imagePresets: undefined }));
 
-  it.each([{ state: "queued" }, { state: "running", progress: 0.4 }, { state: "done", imagePath: "images/tree.png" }, { state: "error", message: "ComfyUI stopped." }] as const)("by its full name and size while %o, and the box keeps its size", async (state) => {
+  it.each([{ state: "done", imagePath: "images/tree.png" }, { state: "error", message: "ComfyUI stopped." }, { state: "cancelled" }] as const)("by its full name and size once %o, and the box keeps its size", async (state) => {
     const { html, box } = await card({ ...state, choice: { preset: "z-image-int8", width: 1024, height: 768 } }, true);
     expect(html).toContain(">Z-Image Turbo int8 · 1024×768</span>");
+    expect(box).toContain('style="aspect-ratio:1024 / 768;width:1024px"');
+  });
+
+  // while it runs the composer names the model and size: the card shows only the spinner
+  it.each([{ state: "queued" }, { state: "running", progress: 0.4 }] as const)("names nothing while %o, and the box keeps its size", async (state) => {
+    const { html, box } = await card({ ...state, choice: { preset: "z-image-int8", width: 1024, height: 768 } }, true);
+    expect(html).not.toContain("image-job-model");
+    expect(html).not.toContain("Z-Image Turbo int8");
     expect(box).toContain('style="aspect-ratio:1024 / 768;width:1024px"');
   });
 
   it("a job that settled to another setup names the one that ran; a setup ComfyUI no longer lists by its id", async () => {
     const settled = await card({ state: "done", imagePath: "images/tree.png", choice: { preset: "z-image-int8", width: 1024, height: 768 }, sent: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }, true);
     expect(settled.html).toContain(">Z-Image Turbo int8 · 1024×768</span>");
-    expect((await card({ choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }, true)).html).toContain(">FLUX.2 Klein 4B · 1024×1024</span>");
-    expect((await card({ choice: { preset: "template:gone", width: 512, height: 512 } }, false)).html).toContain(">template:gone · 512×512</span>");
+    expect((await card({ state: "done", imagePath: "images/tree.png", choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }, true)).html).toContain(">FLUX.2 Klein 4B · 1024×1024</span>");
+    expect((await card({ state: "done", imagePath: "images/tree.png", choice: { preset: "template:gone", width: 512, height: 512 } }, false)).html).toContain(">template:gone · 512×512</span>");
   });
 
   it("a card from before choices were saved names nothing", async () => {
-    expect((await card({}, true)).html).not.toContain("image-job-model");
+    expect((await card({ state: "done", imagePath: "images/tree.png" }, true)).html).not.toContain("image-job-model");
   });
 });
 

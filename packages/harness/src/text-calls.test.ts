@@ -58,8 +58,11 @@ describe("a tool call written as the whole reply is run, not shown (owner screen
 });
 
 describe("looseCall: the accepted shapes", () => {
-  const image = { name: "image", arguments: { prompt: "a ship" } };
+  // the image tool takes a list of prompts: one prompt, or a bare string, is a list of one
+  const image = { name: "image", arguments: { prompts: ["a ship"] } };
   it.each([
+    ['{"name":"image","arguments":{"prompts":["a ship"]}}'],
+    ['{"action":"image","action_input":{"prompts":"a ship"}}'],
     ['{"name":"image","arguments":{"prompt":"a ship"}}'],
     ['{"name":"image","parameters":{"prompt":"a ship"}}'],
     ['{"action":"image","action_input":{"prompt":"a ship"}}'],

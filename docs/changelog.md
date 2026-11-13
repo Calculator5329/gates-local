@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-13: Ask for five pictures, get five; the picker is two menus
+
+- Make images (Settings › Tools) is on once image generation has a setup
+  that can run. If you turned it off, it stays off. Reset settings puts it
+  back to that default.
+- Ask the chat for "5 images of sci-fi backgrounds" and the model writes
+  five different prompts. They run one after another after the reply,
+  each on its own card with its prompt underneath. One message makes at
+  most 10; if the model asks for more, it is told how many were queued
+  and why the rest were not, so it can say so.
+- With Make images off, the model says "Turn on Make images in Settings >
+  Tools, or switch the message box to Image" instead of pointing you to
+  another app.
+- The image picker's rail is two menus, Defaults by style and Other
+  models, and the pop-up keeps one height on both. A Defaults row is the
+  style's name alone and runs the measured pick for your card. Each size
+  bar is green only when it fits in what is free now, and red with "Too
+  big" when it does not. A memory figure that is the same for every size
+  is said once. A greyed row's tooltip gives the whole reason.
+- The image card says each thing once: one Cancel while it runs, and no
+  "Making image" label next to the spinner.
+- With image generation on, the app is ready in a second or two even when
+  ComfyUI is slow or not answering. It used to wait for ComfyUI first.
+
 ## 2026-11-13: A message that waits behind another reply stays sent
 
 - A message sent in a new thread while another thread is replying on a full

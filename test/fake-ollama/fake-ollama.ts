@@ -19,6 +19,8 @@
 //   long-name         the three models plus a long Hugging Face GGUF tag
 //   threads           prompt-labelled paragraphs with independent request timing
 //   image-text-call   streams IMAGE_TEXT_CALL, an image call written as reply text, with no tool_calls
+//   image-batch       "N images of X": one image call with N distinct prompts when the tool is
+//                     offered; without it, the reply says what the system prompt's image line says
 // A prompt with the word "tool" makes any scenario call the first offered tool
 // once (repeatToolCalls: every round; toolCalls: N, the first N rounds);
 // quietToolRounds ends such a round at the call, with no reply text.
@@ -40,7 +42,7 @@ const SCENARIO_INSTALLED: Readonly<Record<string, readonly string[]>> = {
 };
 const installedFor = (s: string): readonly string[] => SCENARIO_INSTALLED[s] ?? DEFAULT_INSTALLED;
 
-export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims", "image-text-call"] as const;
+export const SCENARIOS = ["models", "no-models", "slow-first-token", "mid-stream-error", "wrong-service", "embed-smallest", "embed-only", "slow-drip", "long-name", "threads", "image-turn", "image-claims", "image-text-call", "image-batch"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 /** A Gemma 4 12B reply seen 2026-11-11: it wrote its image call as text in a shape of its own. */
 const IMAGE_TEXT_CALL_PROMPT ="A cinematic sci-fi background featuring a massive, high-tech space station orbiting a ringed planet within a vibrant, colorful nebula. The scene includes distant stars, glowing energy fields, and intricate hull details on the station. High-resolution, 8k, photorealistic, epic scale, and dramatic lighting.";
@@ -419,6 +421,31 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           await sleep(timing.tokenDelayMs, abort.signal);
         }
         line({ ...base(), message: { role: "assistant", content: "" }, done: true, done_reason: "stop" });
+        turn.outcome = "done";
+        res.end(); return;
+      }
+      if (mode === "image-batch") {
+        // "N images of <subject>": with the image tool offered, one call with N distinct prompts the
+        // model wrote. Without it, the reply says what the system prompt's image line says to say.
+        const all = Array.isArray(messages) ? messages : [];
+        const system = all.filter(x => field(x, "role") === "system").map(x => String(field(x, "content"))).join("\n");
+        const asked = String(field(all.findLast(x => field(x, "role") === "user"), "content"));
+        const offered = (Array.isArray(tools) && tools.some(t => str(field(t, "function"), "name") === "image")) || system.includes('"name":"image"');
+        const observed = all.some(x => field(x, "role") === "tool" || String(field(x, "content")).startsWith("Tool output follows."));
+        const ask = /(\d+)\s+images?\s+of\s+(.+)/i.exec(asked);
+        let message: Record<string, unknown>;
+        if (offered && !observed) {
+          const count = Number(ask?.[1] ?? 1);
+          const subject = (ask?.[2] ?? asked).replace(/[.!?]+$/, "");
+          const scenes = ["a ringed planet over a desert city", "a derelict station in a violet nebula", "a neon canyon of stacked towers", "an ice moon under twin suns", "a jungle overgrowing a crashed freighter", "a storm over a floating refinery"];
+          const call = { name: "image", arguments: { prompts: Array.from({ length: count }, (_, i) => `${subject}: ${scenes[i % scenes.length]}`) } };
+          message = Array.isArray(tools) ? { role: "assistant", content: "", tool_calls: [{ function: call }] } : { role: "assistant", content: `<tool_call>${JSON.stringify(call)}</tool_call>` };
+        } else if (offered) message = { role: "assistant", content: "They are queued." };
+        else {
+          const say = /say: "([^"]+)"/.exec(system)?.[1];
+          message = { role: "assistant", content: say ? `I can't make images in this chat. ${say}` : "I can't make images. Try an image app such as an online generator." };
+        }
+        line({ ...base(), message, done: true, done_reason: "stop" });
         turn.outcome = "done";
         res.end(); return;
       }

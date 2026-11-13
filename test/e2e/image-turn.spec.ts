@@ -23,9 +23,9 @@ async function setup(page: Page, open: () => Promise<void>, via: "image" | "tool
   await page.getByRole("switch", { name: "Generate images" }).click();
   if (via === "tool") {
     await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+    // on once a setup can run, with no click
     const make = page.getByRole("switch", { name: "Make images" });
     await expect(make).toBeEnabled();
-    await make.click();
     await expect(make).toHaveAttribute("aria-checked", "true");
   }
   await page.keyboard.press("Escape");
@@ -38,13 +38,15 @@ test("the chat model's image tool answers with a durable job card, never the inv
   page.on("request", req => { if (req.url().includes("example.com")) remote.push(req.url()); });
   await setup(page, open, "tool");
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
+  // the chat model's tool started it, so no Stop covers it: the card keeps its own Cancel
+  await expect(card.getByRole("button", { name: "Cancel image" })).toBeVisible();
   await expect(page.locator(".tl")).not.toContainText("Here's an image");
   // no zero-length step; a real one may last 20 ms
   await expect(page.locator(".tl")).not.toContainText(/\b0 ms/);
   const before = await card.boundingBox();
   await page.reload(); await waitReady(page);
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await page.screenshot({ path: info.outputPath("making.png"), animations: "disabled" });
   comfy.finish();
   await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();
@@ -73,12 +75,12 @@ test("a retry takes over the failed card's box across clients and reloads, and o
   await card.getByRole("button", { name: "Try again" }).click();
   // the one box now says what the retry is doing; the old reason is gone
   await expect(card).toHaveCount(1);
-  await expect(card).toContainText(/Waiting for the GPU|Making image/);
+  await expect(card.getByRole("status", { name: /Waiting for the GPU|Making image/ })).toBeVisible();
   await expect(card).not.toContainText(MISSING);
   expect(await card.boundingBox()).toEqual(box);
   await page.reload(); await waitReady(page);
   await expect(card).toHaveCount(1);
-  await expect(card).toContainText(/Waiting for the GPU|Making image/);
+  await expect(card.getByRole("status", { name: /Waiting for the GPU|Making image/ })).toBeVisible();
   expect(await card.boundingBox()).toEqual(box);
   const server = new URL(page.url()).searchParams.get("server");
   const threadId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("thread");
@@ -88,7 +90,7 @@ test("a retry takes over the failed card's box across clients and reloads, and o
   try {
     await other.goto(page.url()); await waitReady(other);
     await expect(other.locator("[data-image-job]")).toHaveCount(1);
-    await expect(other.locator("[data-image-job]")).toContainText(/Waiting for the GPU|Making image/);
+    await expect(other.locator("[data-image-job]").getByRole("status", { name: /Waiting for the GPU|Making image/ })).toBeVisible();
     const snapshot = await client.call("threads.get", { threadId });
     const failed = snapshot.messages.find(m => m.imageJob?.retryJobId !== undefined)?.imageJob;
     if (!failed?.retryJobId) throw new Error("No accepted retry link");
@@ -136,13 +138,21 @@ test("a retry that fails shows its own reason and Try again in the same box, aft
   await expect(card).toHaveCount(1);
 });
 
-test("a restart cannot strand an unfinished image", async ({ page, open }) => {
+test("a restart cannot strand an unfinished image", async ({ page, open }, info) => {
   await setup(page, open);
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
+  // an Image turn's card: the composer's Stop cancels it, so the card has no Cancel; the model and
+  // size wait for the result; beside the spinner only numbers, the seconds since the ask
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Cancel image" })).toHaveCount(0);
+  await expect(card.locator(".image-job-model")).toHaveCount(0);
+  await expect(card.locator(".image-job-state p")).toHaveText(/^(\d+% · )?\d+ s$/);
+  await page.screenshot({ path: info.outputPath("image-turn-running.png"), animations: "disabled" });
   await stack.restart();
   await expect(card).toContainText(/cancelled|restarted/);
   await expect(card.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(card.locator(".image-job-model")).toBeVisible();
 });
 
 /** The models the fake Ollama holds in memory now. */
@@ -184,9 +194,9 @@ test("after a restart, one chat turn on the model that stayed loaded lets the ne
     comfy.gpu();
     await again.call("image.generate", { threadId, prompt: "a sci fi background" });
     const card = page.locator("[data-image-job]");
-    await expect(card).toContainText("Making image");
+    await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
     await expect(card).not.toHaveAttribute("data-fit", "refuse");
-    // the card says Making image as the job starts, before its fit frees memory: wait for the unload
+    // the card is running as the job starts, before its fit frees memory: wait for the unload
     await expect.poll(loaded, { message: "the image unloaded the model the turn ran on", timeout: 15_000 }).not.toContain("qwen3.5:9b");
     comfy.finish();
     await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();

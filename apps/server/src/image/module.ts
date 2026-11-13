@@ -94,6 +94,11 @@ export interface ImageModule {
   presets(): Promise<ImagePresets>;
   /** The choice an unset Settings choice means now: the first preset ComfyUI last listed every file for. */
   defaultChoice(): ImageChoice;
+  /**
+   * Whether a setup can run here: ComfyUI last listed every file for one, and the card has room for
+   * a default. Tools › Make images left unset is on exactly while this holds.
+   */
+  runnable(): boolean;
   /** A job runs `choice`, else Settings' imageChoice, else defaultChoice(); a retry runs its failed job's. */
   generate(params: Params<"image.generate">): Promise<{ jobId: string }>;
   cancel(jobId: string): { cancelled: boolean };
@@ -492,6 +497,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     activeJobs: () => jobs.size,
     status: discover,
     defaultChoice: chooseDefault,
+    runnable() {
+      const files = knownFiles();
+      return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras()).ready.length > 0;
+    },
     async presets() {
       const cfg = config();
       if (!cfg.enabled) return { presets: [], current: currentChoice() };

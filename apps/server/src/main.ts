@@ -81,7 +81,7 @@ import { createImageModule } from "./image/module.ts";
 import { createPicturesModule } from "./pictures/handlers.ts";
 import { makeThumbnail } from "./pictures/thumbs.ts";
 import { fetchFrom } from "./image/download.ts";
-import { imageToolChoice } from "./image/presets.ts";
+import { imageOffLine, imageToolChoice } from "./image/presets.ts";
 import { phoneConfig } from "./web/config.ts";
 import { createUpdateModule } from "./update/module.ts";
 import { chooseUpdateModule, createInstalledUpdateModule, INSTALLED_VERSION_ENV, installedFeed, parseRestart, RESTART_ENV } from "./update/installed/module.ts";
@@ -325,11 +325,12 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     // A turn that does not say runs tools when Settings has them on.
     toolsEnabled: () => services.settings.get().tools,
     shellStatus: createShellStatus(probeSandbox, (line) => log(line)),
-    // Tools › Make images: off unless switched on; an unset choice is the first preset ComfyUI has.
+    // Tools › Make images: unset is on once a setup can run; an unset choice is the first preset ComfyUI has.
     imageTool: () => {
       const settings = services.settings.get();
-      return imageToolChoice({ ...settings, imageChoice: settings.imageChoice ?? image.defaultChoice() });
+      return imageToolChoice({ ...settings, imageChoice: settings.imageChoice ?? image.defaultChoice() }, image.runnable());
     },
+    imageOff: (toolsOn) => imageOffLine(services.settings.get(), image.runnable(), toolsOn),
     // discover-only never starts Ollama: runtime Retry looks again without starting one
     runtime: discoverOnly
       ? { status: () => runtime.status(), baseUrl: () => runtime.baseUrl(), onChange: (l) => runtime.onChange(l), ensure: () => runtime.discover(), lookIfDown: () => runtime.lookIfDown() }

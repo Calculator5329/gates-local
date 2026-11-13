@@ -16,28 +16,35 @@ test.afterEach(async () => { await comfy.close(); });
 
 const NO_GPU = "Image mode needs a GPU with 4 GB.";
 
-/** General's rows in order, each with its tier tag ("" when it has none). */
-const general = (page: Page) => page.locator('#imagePicker [role=group][aria-label="General"] [data-preset]').evaluateAll((rows) =>
-  rows.map((r) => `${r.getAttribute("data-preset")} ${r.querySelector(".pk-variant")?.textContent ?? ""}`.trim()));
+/**
+ * General's rows: Defaults' General row first ("General: <setup>", the tier's pick, named by the
+ * style alone), then Other models' General rows in order, each with its tier tag ("" when none).
+ */
+const general = (page: Page) => page.locator("#imagePicker").evaluate((root) => {
+  const style = [...root.querySelectorAll<HTMLElement>('[role=listbox][aria-label="Defaults"] .pk-r')].find((r) => r.querySelector(".pk-nm")?.textContent === "General");
+  const rest = [...root.querySelectorAll<HTMLElement>('[role=group][aria-label="General"] [data-preset]')];
+  return [...style === undefined ? [] : [`General: ${style.dataset["preset"]}`], ...rest.map((r) => `${r.dataset["preset"]} ${r.querySelector(".pk-variant")?.textContent ?? ""}`.trim())];
+});
 
 /** The picker with the parts this change touches outlined in amber: the button, General and the footer. */
 async function shot(page: Page, path: string) {
   await page.mouse.move(5, 5);
-  const marked = page.locator('#modelBtn, #imagePicker [role=group][aria-label="General"], #imagePicker .pk-bottom');
+  const marked = page.locator('#modelBtn, #imagePicker .pk-menu:not([inert]), #imagePicker .pk-bottom');
   await marked.evaluateAll((els) => { for (const el of els) { (el as HTMLElement).style.outline = "2px solid #f59e0b"; (el as HTMLElement).style.outlineOffset = "2px"; } });
   await page.screenshot({ path, animations: "disabled" });
   await marked.evaluateAll((els) => { for (const el of els) { (el as HTMLElement).style.outline = ""; (el as HTMLElement).style.outlineOffset = ""; } });
 }
 
-const TOP = ["flux2-klein-4b Fast", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b-compact"];
+const TOP = ["General: flux2-klein-4b", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b-compact"];
+// no tier: no measured pick, so General has no Defaults row
 const NONE = ["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image"];
 /** A card's size as nvidia-smi reports it (an "8 GB" card says 8188 MiB), and another program's MiB on it. */
 const LEVELS: readonly { name: string; gpu?: { other: number; card?: number }; rows: readonly string[]; button?: string; shot?: string }[] = [
   { name: "a 16 GB card", gpu: { other: 0 }, rows: TOP, button: "Klein 4B", shot: "image-5-after-16gb.png" },
   { name: "a 16 GB card another program holds 11 GB of", gpu: { other: 11_264 }, rows: TOP, button: "Klein 4B", shot: "image-5-after-16gb-busy.png" },
   { name: "an 8 GB card", gpu: { other: 0, card: 8188 }, rows: TOP, button: "Klein 4B" },
-  { name: "a 6 GB card", gpu: { other: 0, card: 6144 }, rows: ["flux2-klein-4b-compact Fast", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b"], button: "Compact" },
-  { name: "a 4 GB card", gpu: { other: 0, card: 4096 }, rows: ["flux2-klein-4b-compact Fast and balanced", "moss-image Best", "flux2-klein-4b", "z-image-int8"], button: "Compact" },
+  { name: "a 6 GB card", gpu: { other: 0, card: 6144 }, rows: ["General: flux2-klein-4b-compact", "z-image-int8 Balanced", "moss-image Best", "flux2-klein-4b"], button: "Compact" },
+  { name: "a 4 GB card", gpu: { other: 0, card: 4096 }, rows: ["General: flux2-klein-4b-compact", "moss-image Best", "flux2-klein-4b", "z-image-int8"], button: "Compact" },
   { name: "a 3 GB card", gpu: { other: 0, card: 3072 }, rows: NONE },
   { name: "the CPU", rows: NONE, shot: "image-5-after-cpu.png" },
 ];

@@ -1,7 +1,7 @@
 // Diagnostic journey: thread-local intent, actual workflow graphs, retry and FIFO admission.
 // The fake proves ordering and model routing, not real weight loading or VRAM use.
 import { createClient, type ImageChoice } from "@gates-local/contracts";
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
@@ -10,6 +10,15 @@ test.use({ video: process.env["GL_E2E_RECORD"] ? "on" : "off" });
 const X: ImageChoice = { preset: "z-image-int8", width: 1024, height: 1024 };
 const Y: ImageChoice = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
 const red = process.env["GL_IMAGE_TWO_THREADS_RED"] === "1";
+
+/** Picks a setup's row in the open image picker, on whichever menu (Defaults or Other models) lists it. */
+async function pickRow(page: Page, preset: string) {
+  const row = page.locator(`#imagePicker .pk-r[data-preset="${preset}"]`);
+  // `has` is matched inside each menu, so its selector is relative to the menu
+  const menu = await page.locator("#imagePicker .pk-menu", { has: page.locator(`.pk-r[data-preset="${preset}"]`) }).getAttribute("aria-label");
+  await page.locator("#imagePicker .pk-rail").getByRole("button", { name: menu ?? "" }).click();
+  await row.locator(".pk-select").click();
+}
 
 test("A sends the default without a pick, then B picks: A's next send runs what A ran", async ({ page, open }, info) => {
   test.setTimeout(60_000);
@@ -44,7 +53,7 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     // B picks Z-Image and sends
     await page.getByRole("button", { name: "New thread" }).click();
     await button.click();
-    await page.locator(`#imagePicker .pk-r[data-preset="${X.preset}"] .pk-select`).click();
+    await pickRow(page, X.preset);
     await expect(button).toContainText("Z-Image");
     await sendMessage(page, "IR320 B picks Z-Image");
     await run(1);
@@ -83,7 +92,7 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
   };
   const pick = async (choice: ImageChoice, name: string) => {
     await button.click();
-    await page.locator(`#imagePicker .pk-r[data-preset="${choice.preset}"] .pk-select`).click();
+    await pickRow(page, choice.preset);
     await expect(page.locator("#imagePicker")).toBeHidden();
     await expect(button).toContainText(name);
     await expect(button).toContainText("1024×1024");

@@ -17,8 +17,8 @@ test("an image call the model wrote as text queues the image and never shows its
   await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
   await page.getByRole("switch", { name: "Generate images" }).click();
   // the chat model's image call is Tools › Make images; the composer's Image button would skip the chat model
+  // (on once a setup can run, with no click)
   await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("switch", { name: "Make images" }).click();
   await expect(page.getByRole("switch", { name: "Make images" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
   // Watch every frame of the reply for the call's JSON while it streams.
@@ -37,7 +37,7 @@ test("an image call the model wrote as text queues the image and never shows its
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("textcall.png"), animations: "disabled" });
   expect(await page.evaluate(() => (window as unknown as { jsonSeen: string[] }).jsonSeen)).toEqual([]);
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await expect(json).toHaveCount(0);
   comfy.finish();
   await expect(card.getByRole("img", { name: "Generated image" })).toBeVisible();

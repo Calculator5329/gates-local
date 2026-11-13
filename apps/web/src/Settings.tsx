@@ -283,10 +283,13 @@ function Tools() {
   // Asked each time Tools opens: the server keeps a passed probe and asks a failed one again.
   useEffect(() => { if (!windows) checkShell(); }, [windows]);
   const [imageErr, runImage] = useAct();
-  // The chat model's image tool: app-wide, off by default, offered only with the master switch on.
+  // The chat model's image tool: app-wide, offered only with the master switch on. Unset is on once a
+  // setup can run (ComfyUI listed every file for one, and the card has room), as the server reads it.
   // The composer's Image button sends to the image model itself and never needs it.
   const image = imageFace(status);
-  const imageTool = settings !== NA && settings?.imageTool === true;
+  const presets = useStore((s) => s.imagePresets);
+  const runnable = presets !== NA && presets !== undefined && presets.presets.length > 0 && presets.noGpu === undefined;
+  const imageTool = settings !== NA && settings !== undefined && (settings.imageTool ?? (settings.imageGen && runnable));
   // Why it cannot be turned on with the master switch on; both sentences hold one cell, so the
   // row keeps its height when the switch above flips.
   // Both fixes are in Image generation: the reason goes there, as every Tools row goes where it is fixed.

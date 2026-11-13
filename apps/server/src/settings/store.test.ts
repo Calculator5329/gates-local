@@ -29,22 +29,28 @@ describe("settings store", () => {
     expect(JSON.parse(readFileSync(fileIn(dir), "utf8"))).toEqual({ version: 1, settings: s.get() });
   });
 
-  it("a file from before image presets loads with Make images off; the choice and the switch persist and clear", async () => {
+  it("a file from before image presets loads with Make images unset: on once a setup can run; an explicit off stays off and clears back to unset", async () => {
     const dir = dataDir();
+    const moss = { preset: "moss-image", width: 1024, height: 1024 };
     // What a person who used the Image button had on disk: image generation on, nothing else.
-    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: true, comfyUrl: "http://127.0.0.1:8188" } }));
+    writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: true, comfyUrl: "http://127.0.0.1:8188", imageChoice: moss } }));
     const s = await open(dir);
     expect(s.loadNote).toBeUndefined();
     expect(s.get().imageTool).toBeUndefined();
-    expect(imageToolChoice(s.get())).toBeUndefined();
-    s.update({ imageChoice: { preset: "moss-image", width: 1024, height: 1024 }, imageTool: true });
+    expect(imageToolChoice(s.get(), false), "no setup can run yet").toBeUndefined();
+    expect(imageToolChoice(s.get(), true), "a setup can run").toEqual(moss);
+    s.update({ imageTool: false });
     const again = await open(dir);
-    expect(again.get()).toMatchObject({ imageChoice: { preset: "moss-image", width: 1024, height: 1024 }, imageTool: true });
-    expect(imageToolChoice(again.get())).toEqual({ preset: "moss-image", width: 1024, height: 1024 });
+    expect(again.get()).toMatchObject({ imageChoice: moss, imageTool: false });
+    expect(imageToolChoice(again.get(), true), "switched off stays off").toBeUndefined();
+    again.update({ imageTool: true });
+    expect(imageToolChoice(again.get(), false), "switched on, no setup: the job refuses in words").toEqual(moss);
+    again.update({ imageTool: null });
+    expect(again.get()).not.toHaveProperty("imageTool");
     again.update({ imageChoice: null, imageGen: false });
     expect(again.get()).not.toHaveProperty("imageChoice");
     // Image generation off turns the tool off with it, whatever the switch says.
-    expect(imageToolChoice(again.get())).toBeUndefined();
+    expect(imageToolChoice({ ...again.get(), imageTool: true }, true)).toBeUndefined();
   });
 
   it("first run with no system Ollama picks the app's own copy", async () => {

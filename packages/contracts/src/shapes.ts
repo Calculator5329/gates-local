@@ -351,7 +351,7 @@ export const Settings = S.Struct({
   imageGen: S.Boolean,
   /** The image preset and size for every image job (the composer's Image mode and the tool). Unset means the server's first listed preset. */
   imageChoice: S.optional(ImageChoice),
-  /** Tools › Make images: a chat model may call the image tool. Unset means off. */
+  /** Tools › Make images: a chat model may call the image tool. Unset means on once a setup can run; false stays off. */
   imageTool: S.optional(S.Boolean),
   /** A ComfyUI the user points at; unset means discover the local install. */
   comfyUrl: S.optional(S.String),
@@ -379,7 +379,8 @@ export const SettingsPatch = S.Struct({
   tools: S.optional(S.Boolean),
   imageGen: S.optional(S.Boolean),
   imageChoice: S.optional(S.NullOr(ImageChoice)),
-  imageTool: S.optional(S.Boolean),
+  /** null: back to unset (Reset settings). */
+  imageTool: S.optional(S.NullOr(S.Boolean)),
   comfyUrl: S.optional(S.NullOr(S.String)),
   whisperUrl: S.optional(S.NullOr(S.String)),
   updateEveryChange: S.optional(S.Boolean),

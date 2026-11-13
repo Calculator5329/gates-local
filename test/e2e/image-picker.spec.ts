@@ -1,7 +1,7 @@
 // Image on in the composer: the model button names the image model and size where the chat
 // model was (the same right edge, the width its name needs), its picker lists only what ComfyUI has every file for, Send goes straight
 // to the image model (no chat request), and the choice is the app's: the same in a new thread
-// and after a reload. Settings › Tools › Make images starts off.
+// and after a reload. Settings › Tools › Make images is on once a setup can run; an off stays off.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL } from "./env.ts";
@@ -61,11 +61,14 @@ test("Image on: the button names the image model and size where the chat model w
   const picker = page.locator("#imagePicker");
   await expect(picker).toBeVisible();
   await expect(picker.locator(".pk-r")).toHaveCount(8);
-  // the tier setups first in tier order, then the rest of General, then the themes
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
-  await expect(picker.locator(".pk-rail"), "three families: the rail shows").toBeVisible();
+  // Defaults: General's Fast-tier setup, then one per theme; Other models: the rest of General in tier order
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
+  await expect(picker.locator(".pk-rail").getByRole("button"), "the rail is the two menus").toHaveText(["", ""]);
+  await expect(picker.locator(".pk-rail").getByRole("button").nth(0)).toHaveAccessibleName("Defaults");
+  await expect(picker.locator(".pk-rail").getByRole("button").nth(1)).toHaveAccessibleName("Other models");
   await expect(picker.locator("input"), "the image picker has no search box").toHaveCount(0);
-  await expect(picker.locator(".pk-r[data-tip], .pk-r [data-tip]"), "no row tooltips").toHaveCount(0);
+  // a Defaults row's tip names its setup; no other row has one (every row is ready: no Download)
+  await expect(picker.locator(".pk-r[data-tip], .pk-r:not(.style) [data-tip]"), "no row tooltips but the styles'").toHaveCount(0);
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
   await shot(page, "image-after-picker.png", info);
 
@@ -109,14 +112,19 @@ test("the picker lists only presets whose files ComfyUI reports", async ({ page,
   await expect(picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select')).toHaveAttribute("aria-disabled", "true");
   // its Download button stays a button: the row itself is not marked disabled, only its pick
   await expect(picker.locator('.pk-r.off[aria-disabled]')).toHaveCount(0);
+  // the pick is in Other models, so it opens there; Klein is General's default, greyed
+  await expect(picker.getByRole("button", { name: "Other models" })).toHaveAttribute("aria-pressed", "true");
+  await picker.getByRole("button", { name: "Defaults" }).click();
   await picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select').click({ force: true });
   await expect(picker, "a greyed row picks nothing").toBeVisible();
   await expect(page.locator("#modelBtn")).toContainText("Z-Image1024×1024");
   await expect(picker.locator(".pk-ctx-row:enabled"), "its sizes show, not pickable").toHaveCount(0);
 });
 
-/** Each group's name and its rows in order, ready rows first. */
-const groups = (page: Page) => page.locator("#imagePicker [role=group]").evaluateAll((list) => list.map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))]));
+/** Each menu's name and its rows in order; in Other models, each group's name and its rows, ready rows first. */
+const groups = (page: Page) => page.locator("#imagePicker .pk-menu").evaluateAll((menus) => menus.map((m) => [m.getAttribute("aria-label"),
+  ...m.querySelector("[role=group]") === null ? [...m.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))
+    : [...m.querySelectorAll("[role=group]")].map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))])]));
 
 test("the picker groups setups by theme, greys what ComfyUI lacks with the reason, and downloads one with progress and Stop", async ({ page, open }, info) => {
   await comfy.close();
@@ -134,15 +142,14 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await expect(picker.locator(".pk-r").first()).toBeVisible();
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-groups.png", info);
+  // Defaults: each style's setup, downloaded or not; the theme groups live there, not in Other models
   expect(await groups(page)).toEqual([
-    ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
-    ["Portraits and people", "flux2-klein-4b-portraits"],
-    ["Pixel art", "flux2-klein-4b-pixel"],
-    ["Game sprites", "flux2-klein-4b-sprites"],
-    ["Backgrounds", "flux2-klein-4b-backgrounds"],
+    ["Defaults", "flux2-klein-4b", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"],
+    ["Other models", ["General", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]],
   ]);
-  // each tier's setup says its tier, downloaded or not
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual(["Fast", "Balanced", "Best", null, null, null, null, null]);
+  await expect(picker.getByRole("listbox", { name: "Defaults" }).locator(".pk-nm")).toHaveText(["General", "People", "Pixel art", "Game sprites", "Backgrounds"]);
+  // each Other tier setup says its tier, downloaded or not; a style row is the style alone
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual([null, null, null, null, null, "Balanced", "Best", null]);
   await expect(picker.locator(".pk-title"), "no heading saying the button's name again").toHaveCount(0);
   await expect(picker).not.toContainText("Image model");
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
@@ -258,11 +265,14 @@ test.describe("on the phone", () => {
     await page.locator("#modelBtn").click();
     const picker = page.locator("#imagePicker");
     const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
+    // Klein is General's default, greyed; the pick (Z-Image) is in Other models, where the picker opens
+    await picker.getByRole("button", { name: "Defaults" }).click();
     await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
     await page.mouse.move(5, 5);
     await shot(page, "image-picker-phone.png", info);
     await expect(picker.getByRole("button", { name: /^(Download|Stop downloading)/ })).toHaveCount(0);
     // a ready row, then its size: the thread keeps it; Settings is the computer's, so it is not written
+    await picker.getByRole("button", { name: "Other models" }).click();
     await picker.locator('.pk-r[data-preset="z-image-int8"] .pk-select').click();
     await picker.locator(".pk-ctx-row").first().click();
     await expect(picker).toBeHidden();
@@ -326,7 +336,7 @@ test("a first send whose default settles to other files: the card keeps the box 
   });
   await sendMessage(page, "a tree");
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   // the job settled to Z-Image 1024×1024 and runs it
   await expect.poll(() => comfy.prompts().length).toBe(1);
   expect(JSON.stringify(comfy.prompts()[0])).toContain("z_image_turbo_int8_convrot.safetensors");
@@ -357,7 +367,7 @@ test("Send with Image on: no chat request, one job with the words, preset and si
   await sendMessage(page, "a lighthouse at dusk");
 
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await expect.poll(() => comfy.prompts().length).toBe(1);
   const graph = comfy.prompts()[0]!;
   const latent = Object.values(graph).find((n) => n.class_type === "EmptyFlux2LatentImage");
@@ -396,13 +406,13 @@ test("Stop on a running Image turn cancels its job", async ({ page, open }) => {
   await page.getByRole("button", { name: "Image", exact: true }).click();
   await sendMessage(page, "a red kite");
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(card).toContainText("The image was cancelled");
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
 });
 
-test("Settings › Tools: Make images starts off and needs image generation", async ({ page, open }, info) => {
+test("Settings › Tools: Make images needs image generation, is on once a setup can run, and an off stays off", async ({ page, open }, info) => {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await page.keyboard.press("Control+Comma");
@@ -416,8 +426,14 @@ test("Settings › Tools: Make images starts off and needs image generation", as
   await page.getByRole("switch", { name: "Generate images" }).click();
   await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
   await expect(make).toBeEnabled();
-  await expect(make).toHaveAttribute("aria-checked", "false");
+  await expect(make, "Klein's files are listed: on with no click").toHaveAttribute("aria-checked", "true");
   await expect(row).toContainText("It can make a picture with the image model picked in the message box.");
+  await make.click();
+  await expect(make).toHaveAttribute("aria-checked", "false");
+  await page.reload(); await waitReady(page);
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
+  await expect(make, "switched off stays off").toHaveAttribute("aria-checked", "false");
   await make.click();
   await expect(make).toHaveAttribute("aria-checked", "true");
   await page.mouse.move(5, 5);

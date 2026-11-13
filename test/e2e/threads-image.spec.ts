@@ -18,9 +18,8 @@ async function setup(page: Page, open: () => Promise<void>) {
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Image generation", exact: true }).click();
   await page.getByRole("switch", { name: "Generate images" }).click();
-  // the chat model makes the picture through its tool
+  // the chat model makes the picture through its tool: Make images is on once a setup can run
   await page.locator(".snav").getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("switch", { name: "Make images" }).click();
   await expect(page.getByRole("switch", { name: "Make images" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 }
@@ -45,7 +44,7 @@ test("image behind chat: the card explains its wait, and rendering starts only a
   expect((await state()).turns.find((turn) => turn.prompt === "alpha")?.endedAt).toBeUndefined();
   await shot(page, "image-waiting-for-chat");
   await release("alpha");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await expect.poll(() => comfy.state().length).toBe(1);
   const chat = (await state()).turns.find((turn) => turn.prompt === "alpha");
   expect(chat?.outcome).toBe("done");
@@ -61,7 +60,7 @@ test("chat behind image: the reply names image generation and sends to Ollama on
   await setup(page, open);
   await askForImage(page);
   const card = page.locator("[data-image-job]");
-  await expect(card).toContainText("Making image");
+  await expect(card.getByRole("status", { name: /Making image/ })).toBeVisible();
   await expect.poll(() => comfy.state().length).toBe(1);
   const before = (await state()).turns.length;
   await page.getByRole("button", { name: "New thread" }).click();

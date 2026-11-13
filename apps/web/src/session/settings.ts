@@ -81,7 +81,7 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     tools: true,
     imageGen: false,
     imageChoice: null,
-    imageTool: false,
+    imageTool: null,
     comfyUrl: null,
     whisperUrl: null,
     updateEveryChange: false,

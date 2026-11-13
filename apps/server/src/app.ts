@@ -151,6 +151,11 @@ export interface AppDeps {
    */
   readonly imageTool?: () => ImageChoice | undefined;
   /**
+   * The system prompt's line for a chat turn the image tool is not offered to: what turns it on
+   * here, so the model never names another app. `toolsOn`: the turn runs tools.
+   */
+  readonly imageOff?: (toolsOn: boolean) => string | undefined;
+  /**
    * The app's one GPU lease. A turn holds a shared chat claim from just after
    * its reservation to its end, so an image job never runs beside a stream.
    */
@@ -488,10 +493,15 @@ export function createApp(deps: AppDeps): App {
         if (show === HALTED || turn.halted) { finish(haltedEnd(turn.halted!)); return; }
         systemPrompt = show.system ?? "";
       }
+      // Without the image tool the model is told what turns it on here, so it never names another app.
+      const offLine = image || deps.image === undefined ? undefined : deps.imageOff?.(wantsTools);
+      const system = offLine === undefined ? systemPrompt : systemPrompt ? `${systemPrompt}\n\n${offLine}` : offLine;
       const input = {
         baseUrl,
         model,
-        messages: systemPrompt === undefined ? messages : [{ role: "system" as const, content: systemPrompt }, ...messages.filter(m => m.role !== "system")],
+        messages: system === undefined ? messages
+          : systemPrompt === undefined ? [{ role: "system" as const, content: system }, ...messages]
+          : [{ role: "system" as const, content: system }, ...messages.filter(m => m.role !== "system")],
         settings: options.settings,
         numCtx,
         signal: controller.signal,

@@ -87,14 +87,16 @@ const modelsSession = createModels({ applyServerEvent,
 export const { refreshModels, pickModel, pull, cancelPull, removeModel, recheckRuntime } = modelsSession;
 const { modelsOrder, runtimeOrder, catalogOrder, catalogLands } = modelsSession;
 
-const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyAccent, refreshImageStatus: probeImageStatus });
+// Image generation turning on (or a new address) reads the file list too: Make images left unset is
+// on once a setup there can run, and the server learns that from the same read.
+const settingsSession = createSettings({ applyServerEvent, authority: applyServerEvent.settings, sync: () => connection.sync, act, applyTheme, applyAccent, refreshImageStatus: () => { probeImageStatus(); void loadImagePresets(); } });
 export const { setContext, updateSettings, updateModelSettings, resetSettings } = settingsSession;
 const { settingsPatch } = settingsSession;
 
 // ---------------------------------------------------------------- hydrate and pushes
 
-/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, image.status, models.speed). */
-const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "image.status", "update.changed", "models.speed"]);
+/** Channels whose snapshot the second hydrate batch reads (gpu.status, sources.list, models.speed). */
+const SECOND_BATCH: ReadonlySet<Channel> = new Set<Channel>(["gpu.changed", "fit.changed", "sources.changed", "update.changed", "models.speed"]);
 
 async function hydrate(c: Client): Promise<void> {
   settingsSession.beginHydration();
@@ -212,19 +214,24 @@ async function hydrateWith(
   void probe("fit.table", {}).then((fitTable) => { if (fitTable !== undefined && fitTable !== NA) fitTableArrived(fitTable); });
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
+  // The image reads wait for nothing and nothing waits for them: both ask ComfyUI first (and the
+  // status asks systemctl), which may be a minute away or never answer, and the page is ready
+  // without them. A push that lands first takes the status's ticket, so the older read drops.
+  probeImageStatus();
   const presetsTicket = presetsOrder.next();
-  const [gpu, catalog, sources, imageStatus, update, speeds, imagePresets] = await Promise.all([
+  void probe("image.presets", {}).then((imagePresets) => {
+    if (imagePresets === undefined || !presetsOrder.current(presetsTicket)) return;
+    // A download push from before the reconnect may be stale (its server restarted, or its end missed): the list says what runs now.
+    applyServerEvent({ imagePresets, ...imagePresets === NA ? {} : { imageDownload: imagePresets.download } });
+  });
+  const [gpu, catalog, sources, update, speeds] = await Promise.all([
     probe("gpu.status", {}),
     probe("models.catalog", {}),
     probe("sources.list", {}),
-    probe("image.status", {}),
     probe("update.status", {}),
     probe("models.speed", {}),
-    probe("image.presets", {}),
   ]);
-  // A download push from before the reconnect may be stale (its server restarted, or its end missed): the list says what runs now.
-  const presetsRead = presetsOrder.current(presetsTicket) ? { imagePresets, ...imagePresets === undefined || imagePresets === NA ? {} : { imageDownload: imagePresets.download } } : {};
-  applyServerEvent((s) => ({ gpu, sources, imageStatus, ...presetsRead, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
+  applyServerEvent((s) => ({ gpu, sources, ...(updateOrder.current(updateTicket) ? { update } : {}), ...(catalogLands(catalogTicket) ? { catalog } : {}), ...speedsRead(s, speeds) }));
   release("none");
   void settingsReads.read();
   // A model's thoughts take minutes in system memory, so Thinking starts off with no GPU; the composer's button still turns it on.

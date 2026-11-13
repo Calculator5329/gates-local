@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createTools, type LibraryFs } from "./tools.ts";
+import { MAX_IMAGES_PER_TURN } from "./prompt.ts";
 
 const processCleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of processCleanups.splice(0)) await cleanup(); });
@@ -140,18 +141,25 @@ describe("Library tools", () => {
     expect((await tools.execute({ name: "read", input: { path: "/library/docs/note.txt" } }, new AbortController().signal)).output).toBe("hello");
   });
   it("offers the image tool only when the turn asked for it and generation is wired, and it queues rather than makes", async () => {
-    const queueImage = vi.fn(async () => ({ jobId: "job-7" }));
+    const queueImage = vi.fn(async (_prompt: string, _signal: AbortSignal) => ({ jobId: "job-7" }));
     const signal = new AbortController().signal;
     const on = createTools({ sources: [], queueImage, image: true });
     expect(on.definitions.map(t => t.function.name)).toContain("image");
-    const result = await on.execute({ name: "image", input: { prompt: "cat" } }, signal);
+    const result = await on.execute({ name: "image", input: { prompts: ["cat"] } }, signal);
     // The model reads that the picture is not made yet, so it cannot claim it is.
     expect(result).toEqual({ output: expect.stringMatching(/^Queued image job job-7\..*not made yet/), summary: "Queued an image" });
     expect(queueImage).toHaveBeenCalledWith("cat", signal);
+    // One job per prompt, in order; every call this turn counts toward one limit, and the result says
+    // how many went and why the rest did not: never a silent cap.
+    const many = await on.execute({ name: "image", input: { prompts: Array.from({ length: MAX_IMAGES_PER_TURN }, (_, i) => `p${i}`) } }, signal);
+    expect(queueImage.mock.calls.slice(1).map(([prompt]) => prompt)).toEqual(Array.from({ length: MAX_IMAGES_PER_TURN - 1 }, (_, i) => `p${i}`));
+    expect(many.output).toContain(`Not queued: 1 more, because one message makes at most ${MAX_IMAGES_PER_TURN} images.`);
+    expect(many.summary).toBe(`Queued ${MAX_IMAGES_PER_TURN - 1} images`);
+    await expect(on.execute({ name: "image", input: { prompts: ["one more"] } }, signal)).rejects.toThrow(/Queued no images\. Not queued: 1 more/);
     queueImage.mockClear();
     for (const off of [createTools({ sources: [], queueImage }), createTools({ sources: [], image: true })]) {
       expect(off.definitions.map(t => t.function.name)).not.toContain("image");
-      await expect(off.execute({ name: "image", input: { prompt: "cat" } }, signal)).rejects.toThrow(TypeError);
+      await expect(off.execute({ name: "image", input: { prompts: ["cat"] } }, signal)).rejects.toThrow(TypeError);
     }
     expect(queueImage).not.toHaveBeenCalled();
   });

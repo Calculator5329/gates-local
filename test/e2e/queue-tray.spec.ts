@@ -36,7 +36,8 @@ async function theme(page: Page, scheme: "dark" | "light"): Promise<void> {
 
 test.describe("a message queued while a picture is being made", () => {
   let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-  test.beforeEach(async () => { comfy = await fakeComfy(); });
+  // a GPU, so the picture is really being made: on the CPU an unset send is refused at once
+  test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
   test.afterEach(async () => { await comfy.close(); });
   test.use({ viewport: WIDE });
 
@@ -49,7 +50,7 @@ test.describe("a message queued while a picture is being made", () => {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Image", exact: true }).click();
     await sendMessage(page, PICTURE);
-    await expect(page.locator("[data-image-job]")).toContainText("Making image");
+    await expect(page.locator("[data-image-job]").getByRole("status", { name: /Making image/ })).toBeVisible();
     await sendMessage(page, NEXT);
 
     const tray = page.locator(".qt");

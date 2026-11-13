@@ -36,7 +36,7 @@ for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]]
         await expect(reply.getByRole("link", { name: "Person", exact: true })).toHaveAttribute("href", "https://person.example/brief");
         await expect(reply.getByRole("link", { name: "Report", exact: true })).toHaveAttribute("href", "https://tool.example/report");
         await expect(card).toHaveCount(1);
-        await expect(card).toContainText(/Waiting for the GPU|Making image/);
+        await expect(card.getByRole("status", { name: /Waiting for the GPU|Making image/ })).toBeVisible();
         await expect(card).toBeVisible();
       };
       if (mode === "native") {

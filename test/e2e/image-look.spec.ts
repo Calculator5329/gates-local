@@ -34,7 +34,7 @@ const cut = (page: Page) => page.locator("#modelBtn").evaluate((b) =>
 
 const width = async (page: Page) => Math.round((await page.locator("#modelBtn").boundingBox())?.width ?? 0);
 
-test("the picker's look: the button names the setup whole, the size rows carry the number once with a mark", async ({ page, open }, info) => {
+test("the picker's look: the button names the setup whole, the size list says its number once, each row a mark", async ({ page, open }, info) => {
   comfy.withApp(); // every row ready: a row that needs files names their download size, which is not a fit number
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
@@ -53,7 +53,9 @@ test("the picker's look: the button names the setup whole, the size rows carry t
   expect(await cut(page), "the button's name and size are whole: the composer row has the room").toEqual([]);
   for (const row of await picker.locator(".pk-r").all()) await expect(row, "the model rows carry no GB number").not.toContainText("GB");
   await expect(picker, "a mark, not the word").not.toContainText("Fits");
-  for (const row of await picker.locator(".pk-ctx-row").all()) expect((await row.innerText()).match(/GB/g), "one number per size row").toHaveLength(1);
+  // Klein's number is the same at every size: the head says it once, the rows keep only the mark
+  expect((await picker.locator(".pk-context").innerText()).match(/GB/g), "the shared number is said once").toHaveLength(1);
+  expect((await picker.locator(".pk-context-head").innerText()).match(/GB/g), "and it is in the head").toHaveLength(1);
 });
 
 test("two Klein setups never look the same on the button, wide or narrow", async ({ page, open }) => {

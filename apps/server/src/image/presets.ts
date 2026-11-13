@@ -332,13 +332,33 @@ export function describeChoice(choice: ImageChoice, fallback: ImageChoice, extra
   return { preset: row(PRESETS[0]!), width: DEFAULT_CHOICE.width, height: DEFAULT_CHOICE.height };
 }
 
+/** Tools › Make images as the person left it: on or off when they flipped it, else on exactly while a setup can run. */
+export function imageToolOn(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean): boolean {
+  return settings.imageGen === true && (settings.imageTool ?? runnable);
+}
+
+/**
+ * The system prompt's one line for a chat turn without the image tool, so a model asked for a
+ * picture says what turns it on here instead of naming another app. `toolsOn`: the turn runs tools
+ * (Let the model use tools). Undefined when the tool is offered.
+ */
+export function imageOffLine(settings: Pick<Settings, "imageGen" | "imageTool">, runnable: boolean, toolsOn: boolean): string | undefined {
+  if (toolsOn && imageToolOn(settings, runnable)) return undefined;
+  const say = !settings.imageGen ? "Turn on Generate images in Settings > Image generation."
+    : !runnable && settings.imageTool !== false ? "Set up an image model in Settings > Image generation."
+    : !toolsOn ? "Turn on Let the model use tools and Make images in Settings > Tools, or switch the message box to Image."
+    : "Turn on Make images in Settings > Tools, or switch the message box to Image.";
+  return `You cannot make images in this chat. If asked for one, say: "${say}" Never send the person to another app or website for it.`;
+}
+
 /**
  * Tools › Make images: the choice a chat model's image tool runs, or undefined when the tool is
- * off. It needs image generation on too. Unset (every settings file from before the switch) is off.
+ * off. It needs image generation on too. Unset is on once a setup can run (`runnable`); an
+ * explicit off stays off.
  */
-export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool" | "imageChoice">, lists?: ComfyLists, extra: readonly Preset[] = []): ImageChoice | undefined {
+export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool" | "imageChoice">, runnable: boolean, lists?: ComfyLists, extra: readonly Preset[] = []): ImageChoice | undefined {
   // with no default (no GPU room), DEFAULT_CHOICE: the job's own check then refuses it in words
-  return settings.imageGen && settings.imageTool === true ? (settings.imageChoice ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
+  return imageToolOn(settings, runnable) ? (settings.imageChoice ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
 }
 
 /**

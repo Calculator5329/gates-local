@@ -1,6 +1,6 @@
 // The model button and its picker with Image on: the button names the image model and size a
 // send uses (the chat model with Image off), and the picker lists the presets the server
-// read from ComfyUI and nothing else, with a family rail only when there is more than one family.
+// read from ComfyUI and nothing else, in two menus: Defaults (one row per style) and Other models.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
@@ -76,15 +76,19 @@ it("the picker lists only the presets the server read, with their sizes", () => 
   expect(html).not.toContain(`data-preset="${PLAIN.id}"`);
   expect(html).toContain("768×768");
   expect(html).toContain("1024×1024");
-  expect(html, "two families get the rail").not.toContain("no-rail");
   expect(html, "no search box for a short list").not.toContain("<input");
 });
 
-it("one family: no rail", () => {
-  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, PLAIN) });
-  const html = picker();
-  expect(rowNames(html)).toEqual([PIXEL.name, PLAIN.name]);
-  expect(html).toContain("no-rail");
+it("one family or two: the rail is the two menus, named, with no family codes", () => {
+  for (const presets of [presetsOf(PIXEL, PLAIN), presetsOf(PIXEL, MOSS)]) {
+    setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presets });
+    const html = picker();
+    const rail = html.match(/<nav class="pk-rail"[\s\S]*?<\/nav>/)?.[0] ?? "";
+    expect([...rail.matchAll(/<button[^>]*aria-label="([^"]*)"/g)].map((m) => m[1])).toEqual(["Defaults", "Other models"]);
+    expect(rail, "no family code on the rail").not.toContain("maker-mark");
+    expect(rail.replace(/<[^>]*>/g, ""), "the rail shows icons, no letters").toBe("");
+    expect(html).not.toContain("no-rail");
+  }
 });
 
 it("ComfyUI has none of the files: the picker says so and lists nothing", () => {
@@ -163,7 +167,7 @@ it("the default ComfyUI lists is named, as the first row", () => {
 const KLEIN: ImagePreset = { ...PIXEL, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", group: "General" };
 const ZIMAGE: ImagePreset = { ...MOSS, id: "z-image-int8", name: "Z-Image Turbo int8", family: "zimage", group: "General" };
 
-it("General shows this GPU's tier rows first, in tier order, each with its tier; a tier row still to download keeps its place", () => {
+it("Defaults runs this GPU's Fast tier for General and names it by the style alone; Other models shows the other tier rows first, in tier order, each with its tier; a tier row still to download keeps its place", () => {
   // the server's order is not the tier order, and Z-Image's files are not there yet
   const imagePresets: ImagePresets = {
     presets: [{ ...MOSS, group: "General", tier: "Best" }, { ...PIXEL, group: "Pixel art" }, { ...PLAIN, group: "General" }, { ...KLEIN, tier: "Fast" }],
@@ -172,14 +176,20 @@ it("General shows this GPU's tier rows first, in tier order, each with its tier;
   };
   setState({ image: true, pop: { id: "images", kb: false }, imagePresets });
   const html = picker();
-  expect(rowNames(html)).toEqual([KLEIN.name, ZIMAGE.name, MOSS.name, PLAIN.name, PIXEL.name]);
-  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast", "Balanced", "Best"]);
-  expect(html, "the rail names the new families").toContain('aria-label="Z-Image"');
+  // Defaults, then Other models: the styles by name, then the rest by their own
+  expect(rowNames(html)).toEqual(["General", "Pixel art", ZIMAGE.name, MOSS.name, PLAIN.name]);
+  expect(html.match(/<div class="pk-r style[^"]*"[^>]*data-preset="([^"]*)"/g)?.map((r) => /data-preset="([^"]*)"/.exec(r)?.[1])).toEqual([KLEIN.id, PIXEL.id]);
+  expect(html, "the style row's setup is in its tip").toContain(`data-tip="${KLEIN.name}"`);
+  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Balanced", "Best"]);
+  expect(html.match(/class="maker-mark"/g), "the three Other models rows keep their family marks; the rail and the styles have none").toHaveLength(3);
 });
 
-it("one setup that is two tiers' pick says both once", () => {
+it("one setup that is two tiers' pick is listed once: General's default, not again in Other models", () => {
   setState({ image: true, pop: { id: "images", kb: false }, imagePresets: { presets: [{ ...PLAIN, group: "General", tier: "Fast and balanced" }, { ...MOSS, group: "General", tier: "Best" }], readAt: 1, current: { preset: PLAIN, width: 768, height: 768 } } });
-  expect([...picker().matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast and balanced", "Best"]);
+  const html = picker();
+  expect(html.match(new RegExp(`data-preset="${PLAIN.id}"`, "g"))).toHaveLength(1);
+  expect(rowNames(html)).toEqual(["General", MOSS.name]);
+  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Best"]);
 });
 
 const NO_GPU = "Image mode needs a GPU with 4 GB.";

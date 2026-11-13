@@ -1,3 +1,6 @@
+/** The image tool queues at most this many pictures in one turn; its result says how many went and why the rest did not. */
+export const MAX_IMAGES_PER_TURN = 10;
+
 function def(name: string, description: string, properties: Record<string, unknown>, required: string[]) {
   return { type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false } } };
 }
@@ -15,7 +18,7 @@ export function toolDefinitions(platform: NodeJS.Platform = process.platform, op
       ? [def("sql", "Read rows from a SQLite snapshot. source is the SQLite source id from the Library list. No writes or PRAGMA statements.", { source: string, query: string, limit: number }, ["source", "query"])]
       : options.shell === false ? []
       : [def("shell", "Run a Linux shell command with no home, network or file locks. SQLite snapshots: sqlite3 /data/<source id>.db; files: /library/<source id>.", { command: string, timeoutMs: number }, ["command"])]),
-    ...(options.image ? [def("image", "Queue an image from a text prompt. It is made after your reply ends and appears in this chat on its own.", { prompt: string }, ["prompt"])] : []),
+    ...(options.image ? [def("image", `Queue images, one per prompt: write a separate, distinct prompt for each picture asked for. They are made in order after your reply ends and appear in this chat on their own. At most ${MAX_IMAGES_PER_TURN} per message.`, { prompts: { type: "array", items: string, minItems: 1 } }, ["prompts"])] : []),
   ];
 }
 

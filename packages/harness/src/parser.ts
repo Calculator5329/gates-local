@@ -117,17 +117,24 @@ const WHOLE_FENCE = new RegExp(`^${literal(FENCE)}[\\w-]*[ \\t]*\\r?\\n([\\s\\S]
 type LooseCall = { name: string; arguments: Record<string, unknown> };
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
+type Property = { type?: string; minimum?: number; minItems?: number; items?: Property };
+/** Whether one value fits one property: strings not empty, integers at their minimum, arrays of fitting items. */
+function fitsProperty(property: Property | undefined, value: unknown): boolean {
+  if (property?.type === "string") return typeof value === "string" && value.trim() !== "";
+  if (property?.type === "integer") return typeof value === "number" && Number.isInteger(value) && value >= (property.minimum ?? -Infinity);
+  if (property?.type === "array") return Array.isArray(value) && value.length >= (property.minItems ?? 0) && value.every(item => fitsProperty(property.items, item));
+  return false;
+}
+
 /** Whether `input` fits the tool's offered schema: required fields present, no others, types right, strings not empty. */
 function fitsDefinition(definition: ToolDefinition, input: Record<string, unknown>): boolean {
   const { properties, required } = definition.function.parameters;
   if (!required.every(key => key in input)) return false;
-  return Object.entries(input).every(([key, value]) => {
-    const property = properties[key] as { type?: string; minimum?: number } | undefined;
-    if (property?.type === "string") return typeof value === "string" && value.trim() !== "";
-    if (property?.type === "integer") return typeof value === "number" && Number.isInteger(value) && value >= (property.minimum ?? -Infinity);
-    return false;
-  });
+  return Object.entries(input).every(([key, value]) => fitsProperty(properties[key] as Property | undefined, value));
 }
+
+/** Whether a property takes text: a string, or a list of strings (one bare string is then a list of one). */
+const takesText = (property: Property | undefined) => property?.type === "string" || (property?.type === "array" && property.items?.type === "string");
 
 /** One parsed JSON value as a call to an offered tool, or undefined. */
 function callFrom(value: unknown, offered: readonly ToolDefinition[]): LooseCall | undefined {
@@ -145,10 +152,11 @@ function callFrom(value: unknown, offered: readonly ToolDefinition[]): LooseCall
   const definition = offered.find(d => d.function.name === call.name);
   if (!definition) return undefined;
   if (typeof args === "string") {
-    // A bare string is the tool's one required string field, or not a call.
+    // A bare string is the tool's one required text field (a list of one for a list), or not a call.
     const { required, properties } = definition.function.parameters;
-    if (required.length !== 1 || (properties[required[0]!] as { type?: string } | undefined)?.type !== "string") return undefined;
-    call.input = { [required[0]!]: args };
+    const property = properties[required[0]!] as Property | undefined;
+    if (required.length !== 1 || !takesText(property)) return undefined;
+    call.input = { [required[0]!]: property?.type === "array" ? [args] : args };
   }
   return fitsDefinition(definition, call.input) ? { name: call.name, arguments: call.input } : undefined;
 }
@@ -330,7 +338,14 @@ export function repairCall(raw: unknown): ToolCall {
     const v = input[key];
     if (typeof v === "string" && /^\d+$/.test(v)) input[key] = Number(v);
   }
-  return { name: repairName(value.name), input };
+  const name = repairName(value.name);
+  // The image tool takes a list of prompts; a model that writes one prompt (the tool's older form,
+  // or a habit) means a list of one.
+  if (name === "image") {
+    if (input.prompts === undefined && typeof input.prompt === "string") { input.prompts = [input.prompt]; delete input.prompt; }
+    else if (typeof input.prompts === "string") input.prompts = [input.prompts];
+  }
+  return { name, input };
 }
 
 /** The tool a model's name for it means: models trained on other harnesses say bash for shell. */

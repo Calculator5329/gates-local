@@ -107,9 +107,11 @@ function writeAtomic(file: string, settings: Settings, rename: (from: string, to
 const stamp = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
 
 export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
-  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, imageChoice, ...rest } = { ...current };
+  const { defaultModel, comfyUrl, whisperUrl, systemPrompt, modelSettings, imageChoice, imageTool, ...rest } = { ...current };
   const next: Settings = { ...rest };
   const model = patch.defaultModel === undefined ? defaultModel : (patch.defaultModel ?? undefined);
+  // null: back to unset, which is on once a setup can run (Reset settings)
+  const tool = patch.imageTool === undefined ? imageTool : (patch.imageTool ?? undefined);
   const choice = patch.imageChoice === undefined ? imageChoice : (patch.imageChoice ?? undefined);
   const comfy = patch.comfyUrl === undefined ? comfyUrl : (patch.comfyUrl ?? undefined);
   const whisper = patch.whisperUrl === undefined ? whisperUrl : (patch.whisperUrl ?? undefined);
@@ -128,7 +130,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(patch.runtimeMode === undefined ? {} : { runtimeMode: patch.runtimeMode }),
     ...(patch.tools === undefined ? {} : { tools: patch.tools }),
     ...(patch.imageGen === undefined ? {} : { imageGen: patch.imageGen }),
-    ...(patch.imageTool === undefined ? {} : { imageTool: patch.imageTool }),
+    ...(tool === undefined ? {} : { imageTool: tool }),
     ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
     ...(patch.updateAutomatic === undefined ? {} : { updateAutomatic: patch.updateAutomatic }),
     ...(patch.accent === undefined ? {} : { accent: patch.accent }),

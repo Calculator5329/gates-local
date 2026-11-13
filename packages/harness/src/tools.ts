@@ -4,7 +4,7 @@ import path from "node:path";
 import { canonicalPath, containsPath, samePath, sourceUnavailable, type Realpath } from "./paths.ts";
 import { runSandbox } from "./sandbox/index.ts";
 import { runSnapshotQuery } from "./sql.ts";
-import { toolDefinitions } from "./prompt.ts";
+import { MAX_IMAGES_PER_TURN, toolDefinitions } from "./prompt.ts";
 import type { LibraryEntry, ToolCall, ToolResult } from "./types.ts";
 
 export interface ToolsDeps {
@@ -32,6 +32,11 @@ const text = (input: Record<string, unknown>, key: string) => {
   if (typeof value !== "string" || value.trim() === "") throw new TypeError(`${key} must be a non-empty string`);
   return value;
 };
+const texts = (input: Record<string, unknown>, key: string) => {
+  const value = input[key];
+  if (!Array.isArray(value) || value.length === 0 || !value.every((v) => typeof v === "string" && v.trim() !== "")) throw new TypeError(`${key} must be a list of non-empty strings`);
+  return value as string[];
+};
 const integer = (input: Record<string, unknown>, key: string, fallback: number, max: number, min = 1) => {
   const value = input[key] ?? fallback;
   if (typeof value !== "number" || !Number.isInteger(value) || value < min) throw new TypeError(`${key} must be an integer >= ${min}`);
@@ -41,6 +46,8 @@ const integer = (input: Record<string, unknown>, key: string, fallback: number, 
 export function createTools(deps: ToolsDeps) {
   const platform = deps.platform ?? process.platform;
   const queueImage = deps.image === true ? deps.queueImage : undefined;
+  // A turn's tools are made for that turn: this counts its images across calls.
+  let imagesQueued = 0;
   return {
     definitions: toolDefinitions(platform, { image: queueImage !== undefined, ...(deps.shell === false ? { shell: false } : {}) }),
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
@@ -59,10 +66,31 @@ export function createTools(deps: ToolsDeps) {
         }
         case "image": {
           if (!queueImage) throw new TypeError("The image tool is not on for this turn");
-          const prompt = text(call.input, "prompt");
-          const { jobId } = await queueImage(prompt, signal);
-          signal.throwIfAborted();
-          return { output: `Queued image job ${jobId}. The image is not made yet. It starts after this reply ends and appears in this chat on its own; the job card shows its outcome.`, summary: "Queued an image" };
+          const prompts = texts(call.input, "prompts");
+          // One job per prompt, in order; every call this turn counts toward the one limit.
+          const room = Math.max(0, MAX_IMAGES_PER_TURN - imagesQueued);
+          const jobs: string[] = [];
+          let failed: string | undefined;
+          for (const prompt of prompts.slice(0, room)) {
+            try { jobs.push((await queueImage(prompt, signal)).jobId); }
+            catch (error) {
+              // the first refusal stops the rest; the ones already queued stay and are said
+              if (jobs.length === 0 || signal.aborted) throw error;
+              failed = (error as Error).message;
+              break;
+            }
+            imagesQueued++;
+            signal.throwIfAborted();
+          }
+          const left = prompts.length - jobs.length;
+          const queued = jobs.length === 1
+            ? `Queued image job ${jobs[0]}. The image is not made yet. It starts after this reply ends and appears in this chat on its own; the job card shows its outcome.`
+            : jobs.length > 1 ? `Queued ${jobs.length} image jobs: ${jobs.join(", ")}. The images are not made yet. They run in order after this reply ends and appear in this chat on their own; each job card shows its outcome.`
+            : "Queued no images.";
+          const why = failed === undefined ? `one message makes at most ${MAX_IMAGES_PER_TURN} images` : `the next one was refused: ${failed}`;
+          const rest = left === 0 ? "" : ` Not queued: ${left} more, because ${why}. Tell the person how many are coming and why the rest are not.`;
+          if (jobs.length === 0) throw new Error(`${queued}${rest}`);
+          return { output: `${queued}${rest}`, summary: jobs.length === 1 ? "Queued an image" : `Queued ${jobs.length} images` };
         }
         default: throw new TypeError(`Unknown tool: ${call.name}`);
       }
