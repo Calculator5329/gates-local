@@ -306,10 +306,12 @@ test.describe("on the phone", () => {
   });
 });
 
-test("ComfyUI not answering and never listed: one full-width row says so with Check again, and there is no Size pane", async ({ page, open }, info) => {
+// With no ComfyUI answering at all the Image button no longer reaches the picker (image-unset.spec.ts);
+// the blank row is for a ComfyUI that answers but whose files were never read.
+test("ComfyUI up but never listed: one full-width row says so with Check again, and there is no Size pane", async ({ page, open }, info) => {
   await comfy.close();
   comfy = await fakeComfy(); // Klein's files
-  comfy.down(true);
+  comfy.unlisted(true);
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
@@ -326,9 +328,7 @@ test("ComfyUI not answering and never listed: one full-width row says so with Ch
   expect(row && all && row.width, "the row takes the picker's width").toBeGreaterThan((all?.width ?? 0) - 40);
   // explicit, never on open: nothing was started, and the button says what it does
   const check = blank.getByRole("button", { name: "Check again" });
-  await check.click();
-  await expect(blank).toContainText("ComfyUI did not answer.");
-  comfy.down(false);
+  comfy.unlisted(false);
   await check.click();
   // Klein: no GPU here, and the basic-PC style setups need the FP4 encoder Klein's files lack
   await expect.poll(() => picker.locator(".pk-r:not(.off)").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b"]);

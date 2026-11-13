@@ -134,6 +134,12 @@ export interface ImageModule {
 const DEFAULT_URL = "http://127.0.0.1:8188";
 
 /**
+ * No ComfyUI answered and the app has none to start: what a person reads, on the card, the send's
+ * refusal and Settings. It names no service (Windows has none) and no unit.
+ */
+export const IMAGES_UNSET = "Images are not set up on this computer. No ComfyUI answered; start one, or set its address in Settings › Image generation.";
+
+/**
  * One spelling per IP address: lowercase, no brackets or zone, IPv6 written
  * the way the URL parser writes it, and an IPv4-mapped IPv6 address
  * (::ffff:a.b.c.d, which the parser writes as ::ffff:XXXX:YYYY) as plain
@@ -345,7 +351,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (jobs.size > 0) return status;
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
     return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl,
-      detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : "ComfyUI did not answer. Install the local user service or set a running ComfyUI address in Settings." });
+      detail: starting ? "ComfyUI is running or changing state but its HTTP interface is not ready yet." : unit.present ? "ComfyUI will start when you make an image." : IMAGES_UNSET });
   };
   const measure = deps.readGpu ?? (async () => {
     const gpu = await readGpu(deps.runNvidiaSmi);
@@ -446,7 +452,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       return comfy;
     }
     const before = managed ? await service.inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
-    if (!before.present) throw imageError("image-missing", "ComfyUI did not answer. Install comfyui.service or set a running ComfyUI address in Settings.");
+    if (!before.present) throw imageError("image-missing", IMAGES_UNSET);
     const canStart = ["inactive", "failed"].includes(before.activeState);
     update({ state: "starting", owner: owned ? "app" : canStart ? "none" : "external", baseUrl });
     signal.throwIfAborted();
@@ -454,13 +460,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (canStart) {
       await service.start();
       const after = await service.inspect();
-      if (!after.active || after.pid <= 0) throw new Error("ComfyUI started without a live MainPID. Check comfyui.service and retry.");
+      if (!after.active || after.pid <= 0) throw new Error("ComfyUI started but is not running. Check its log, then try again.");
       owned = { pid: after.pid, baseUrl };
     }
     const deadline = Date.now() + (deps.startupTimeoutMs ?? 60_000);
     while (!await comfy.healthy()) {
       signal.throwIfAborted();
-      if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check comfyui.service and retry.");
+      if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
       await delay(250, undefined, { signal });
     }
     signal.throwIfAborted();
@@ -671,12 +677,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           if (stuckPromptId) stuck.set(cfg.baseUrl, { promptId: stuckPromptId, ...owned?.baseUrl === cfg.baseUrl ? { pid: owned.pid } : {} });
           const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : stage;
           const missingFile = error instanceof Error && "file" in error && typeof error.file === "string" ? error.file : undefined;
+          // no ComfyUI and none to start (ensure's own refusal), apart from a start that failed in the same stage
+          const noComfy = error instanceof Error && "code" in error && error.code === "image-missing";
           const reasons: Record<string, string> = {
             "image-config": "Check the ComfyUI address in Settings, then try again.",
             "image-off": "Turn on image generation in Settings, then try again.",
             "image-fit": "GPU memory could not be checked; check the GPU status and try again.",
             "wont-fit": "There is not enough GPU memory for this image.", // the fit's own sentence wins below
-            "image-missing": "ComfyUI is not ready; check its service or address in Settings and try again.",
+            "image-missing": noComfy ? IMAGES_UNSET : "ComfyUI did not start. Check its log, then try again.",
             "image-model": missingFile === undefined ? "Pick an image model ComfyUI has, then try again." : `Install ${missingFile} in ComfyUI, then try again.`,
             "image-busy": "ComfyUI is busy; wait for its other job to finish and try again.",
             "image-disconnected": "ComfyUI disconnected; wait until it is ready and try again.",
@@ -696,6 +704,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           } else if (controller.signal.aborted && activeJob === jobId) {
             const healthy = await client(cfg.baseUrl).healthy();
             if (activeJob === jobId) update({ state: healthy ? "ready" : "stopped", owner: owned?.baseUrl === cfg.baseUrl ? "app" : healthy ? "external" : "none", baseUrl: cfg.baseUrl });
+          } else if (!controller.signal.aborted && noComfy && (activeJob === jobId || activeJob === undefined)) {
+            // nothing to draw with is the state, not a fault: the Image button reads it and stays out of Image mode
+            update({ state: "missing", owner: "none", baseUrl: cfg.baseUrl, detail: IMAGES_UNSET });
           } else if (!controller.signal.aborted && (activeJob === jobId || activeJob === undefined)) {
             update({ state: "error", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "none", baseUrl: cfg.baseUrl, detail: message });
           }

@@ -632,9 +632,11 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
     }
     setBusy(false);
   };
-  const card = <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
+  // No ComfyUI to draw with: one line says so, where a picture-sized box would promise a picture.
+  const line = job.state === "error" && job.errorKind === "image-missing";
+  const card = <div className={line ? "image-job line" : "image-job"} style={line ? undefined : size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
     {/* the model and size belong to the result: while it runs the composer already names them */}
-    {ran === undefined || pending || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
+    {ran === undefined || pending || line || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
       {job.state === "running" && job.phase === undefined ? <RunningNumbers job={job} since={since} /> : <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>}

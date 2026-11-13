@@ -16,7 +16,7 @@ import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZI
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
 import { startWsServer } from "../ws/server.ts";
-import { createImageModule, imageFitError, imageRoom, isLocalHost, type GpuHolder, type ImageDeps } from "./module.ts";
+import { createImageModule, IMAGES_UNSET, imageFitError, imageRoom, isLocalHost, type GpuHolder, type ImageDeps } from "./module.ts";
 import { createImageHandlers } from "./handlers.ts";
 import { createComfyService } from "./service.ts";
 import { createServerShutdown, HARD_EXIT_MS } from "../shutdown.ts";
@@ -1120,7 +1120,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
   it("Start ComfyUI says why when there is nothing to start", async () => {
     const f = await fixture();
     f.configure({ answering: false, present: false });
-    await expect(f.module.start()).rejects.toThrow("ComfyUI did not answer. Install comfyui.service or set a running ComfyUI address in Settings.");
+    await expect(f.module.start()).rejects.toThrow(IMAGES_UNSET);
     f.configure({ enabled: false });
     await expect(f.module.start()).rejects.toThrow("Image generation is off. Turn it on in Settings first.");
     expect(f.calls).not.toContain("start");

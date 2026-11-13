@@ -168,7 +168,7 @@ export interface State {
   /** The open popover. A thread menu belongs to its row and opens at its button or a right-click point. */
   readonly pop:
     | { readonly id: "picker"; readonly kb: boolean; readonly ready?: true }
-    | { readonly id: "plus" | "opts" | "images" | "count"; readonly kb: boolean }
+    | { readonly id: "plus" | "opts" | "images" | "count" | "unset"; readonly kb: boolean }
     | { readonly id: "thread"; readonly kb: boolean; readonly thread: string; readonly at?: { readonly x: number; readonly y: number } }
     | null;
   /** The pop-up over the chat area (the footer's Usage); the chat stays mounted under it. */

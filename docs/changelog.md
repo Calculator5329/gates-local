@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-13: Image stays off until there is a ComfyUI to draw with
+
+- With image generation on and no ComfyUI answering at its address (and
+  none the app can start), the Image button no longer turns Image mode on.
+  It opens a small pop-up instead: "Images are not set up on this
+  computer.", the address it tried, Open Settings, and Check again, which
+  turns Image on once a ComfyUI answers. The + menu's Generate image and
+  the phone's Image row open the same pop-up.
+- The server refuses an image send in that state too, so nothing is
+  queued that cannot run, and the words go back to the composer.
+- A picture that could not start because there is no ComfyUI is a
+  one-line notice in the thread, not an empty box the size of the
+  picture.
+- No message names `comfyui.service` or any other service any more; on
+  Windows there is none. A ComfyUI that is installed but stopped keeps its
+  Start path.
+
 ## 2026-11-13: Writing above the reply, and a model button that keeps its size
 
 - "Writing" now sits above a streaming reply instead of under it. With a

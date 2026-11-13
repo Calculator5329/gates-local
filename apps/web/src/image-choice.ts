@@ -21,6 +21,9 @@ export interface ImageView {
 /** Image is on and image generation is on: Send goes to the image model. */
 export const imageMode = (s: State): boolean => s.image && s.settings !== NA && s.settings?.imageGen === true;
 
+/** No ComfyUI answered and the app has none to start: Image mode is not reachable until one does. */
+export const imagesUnset = (s: State): boolean => s.imageStatus !== undefined && s.imageStatus !== NA && s.imageStatus.state === "missing";
+
 /** The last answer, so a store selector gets the same object back until its inputs change. */
 let lastView: { presets: ImagePresets; saved: ImageChoice | undefined; view: ImageView } | undefined;
 

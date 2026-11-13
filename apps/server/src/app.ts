@@ -31,7 +31,7 @@ import type { ThreadStore } from "./threads/store.ts";
 import type { NewMessage } from "./threads/types.ts";
 import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
-import type { ImageModule } from "./image/module.ts";
+import { IMAGES_UNSET, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
 import type { Usage } from "./usage/index.ts";
@@ -612,6 +612,9 @@ export function createApp(deps: AppDeps): App {
     const image = deps.image;
     if (attached) throw new AppError("image-input", "Image mode makes a picture from words alone. Remove the attachments, or turn Image off to ask a chat model about them.");
     if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
+    // No ComfyUI answered last time and the app has none to start: ask once more, and refuse before
+    // any card or question is kept, so the words go back to the composer with one line of why.
+    if (image.current().state === "missing" && (await image.status()).state === "missing") throw new AppError("image-input", IMAGES_UNSET);
     const { turn, end } = reserve(threadId, choice.preset);
     turn.drawing = true;
     const jobIds: string[] = [];

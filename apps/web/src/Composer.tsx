@@ -13,7 +13,7 @@ import { DownloadBar, LoadBar, LoadTime } from "./LoadBar.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
-import { chosenImage, imageCount, imageMode, sizeLabel } from "./image-choice.ts";
+import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
@@ -133,6 +133,7 @@ export function Composer() {
   const voiceThread = useStore((s) => s.threadId);
   const drawing = useStore(imageMode);
   const pictured = useStore(chosenImage);
+  const unset = useStore(imagesUnset);
   // a default ComfyUI does not list is still sent (the server settles it) but never named
   const named = pictured?.listed === true ? pictured : undefined;
   const online = useStore((s) => s.conn.kind === "open");
@@ -213,7 +214,7 @@ export function Composer() {
   if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first. A message carries text and images only.`;
   if (pasting) sendTip = "Preparing pasted images. They will be ready in a moment.";
   // Image on: the words go to the image model, so the chat model's readiness, memory and sight do not count.
-  const drawNo = !drawing ? null : images.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : pictured === undefined ? "Reading the image models…" : null;
+  const drawNo = !drawing ? null : images.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : unset ? "Images are not set up on this computer." : pictured === undefined ? "Reading the image models…" : null;
   if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? (text ? `Make the image${enter}` : "Describe the image to make");
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
     : (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
@@ -300,14 +301,18 @@ export function Composer() {
               <button
                 type="button"
                 className="pill gate"
+                id="imageBtn"
                 aria-pressed={image}
                 aria-label="Image"
+                aria-expanded={!image && unset ? pop === "unset" : undefined}
                 data-tip={
                   image
                     ? "<b>Image on.</b> Send makes a picture from your words. Click to turn off."
-                    : "<b>Image off.</b> Click to send your words to an image model."
+                    : unset ? undefined : "<b>Image off.</b> Click to send your words to an image model."
                 }
-                onClick={() => {
+                onClick={(e) => {
+                  // nothing here can draw: say so instead of entering a mode whose Send cannot work
+                  if (!image && unset) { togglePop("unset", e.detail === 0); return; }
                   setState({ image: !image });
                   closeTip();
                 }}
@@ -682,6 +687,14 @@ export function CountMenu() {
 
 // ---------------------------------------------------------------- + menu
 
+/** A menu's Image row: on or off, or, with nothing here that can draw, the pop-up that says so in the menu's place. */
+function menuImage(image: boolean, close: boolean): void {
+  const unset = !image && imagesUnset(getState());
+  if (close || unset) closePop();
+  if (unset) togglePop("unset");
+  else setState({ image: !image });
+}
+
 export function PlusMenu() {
   const open = useStore((s) => s.pop?.id === "plus");
   const imageGen = useStore(imageGenOf);
@@ -735,10 +748,7 @@ export function PlusMenu() {
           role="menuitemcheckbox"
           aria-checked={image}
           data-gen
-          onClick={() => {
-            closePop();
-            setState({ image: !image });
-          }}
+          onClick={() => menuImage(image, true)}
         >
           <Icon id="image" />
           <span>
@@ -813,7 +823,7 @@ export function OptsMenu() {
         <span className="switch" aria-hidden="true" />
       </button>
       {imageGen ? (
-        <button type="button" className="mi" role="menuitemcheckbox" aria-checked={image} onClick={() => setState({ image: !image })}>
+        <button type="button" className="mi" role="menuitemcheckbox" aria-checked={image} onClick={() => menuImage(image, false)}>
           <Icon id="image" />
           <span>
             <b>Image</b>
