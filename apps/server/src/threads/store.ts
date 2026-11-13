@@ -32,6 +32,8 @@ export interface ThreadStore {
   imageReferences(): Map<string, number>;
   /** How many messages hold each attached file's copy (AttachedFile.path). */
   fileReferences(): Map<string, number>;
+  /** The thread each kept file belongs to: the thread of a saved message that holds it. */
+  fileOwners(): Map<string, string>;
   /** Every stored reply's model, time and reported tokens, for usage's one-time fill; `lacking` counts replies with no figures. */
   replyUsage(): {
     replies: Array<{ model: string; at: number; promptTokens: number | undefined; completionTokens: number | undefined; evalDurationMs: number | undefined; promptEvalDurationMs: number | undefined; durationMs: number | undefined }>;
@@ -219,6 +221,15 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         for (const file of decodeFiles(JSON.parse(str(row, "files_json")))) refs.set(file.path, (refs.get(file.path) ?? 0) + 1);
       }
       return refs;
+    },
+
+    fileOwners() {
+      guard();
+      const owners = new Map<string, string>();
+      for (const row of db.prepare("SELECT thread_id, files_json FROM messages WHERE files_json IS NOT NULL").all()) {
+        for (const file of decodeFiles(JSON.parse(str(row, "files_json")))) if (!owners.has(file.path)) owners.set(file.path, str(row, "thread_id"));
+      }
+      return owners;
     },
 
     replyUsage() {

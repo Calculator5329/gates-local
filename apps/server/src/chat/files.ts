@@ -39,12 +39,20 @@ export async function saveFile(dataDir: string, input: { name: string; type: str
   return { path: `files/${name}`, name: input.name, size: bytes.length, type: input.type };
 }
 
-/** chat.send: every file is a regular file under files/ (never a link), sized as stored. */
-export async function checkFiles(dataDir: string, files: readonly AttachedFile[]): Promise<AttachedFile[]> {
+/** A file belongs to the first thread that saves a message with it; until then, to whoever uploaded it. */
+export interface Holder { threadId: string; owners: ReadonlyMap<string, string>; }
+
+/**
+ * chat.send: every file is a regular file under files/ (never a link), sized as stored, and
+ * not one another thread's message holds.
+ */
+export async function checkFiles(dataDir: string, files: readonly AttachedFile[], holder?: Holder): Promise<AttachedFile[]> {
   if (!files.length) return [];
   const root = await folder(dataDir);
   return Promise.all(files.map(async file => {
     if (!FILE_PATH.test(file.path)) throw unavailable(file.name);
+    const owner = holder?.owners.get(file.path);
+    if (owner !== undefined && owner !== holder?.threadId) throw new Error(`${file.name} is attached in another chat. Attach it here again; your words are kept.`);
     const info = await lstat(path.join(root, path.basename(file.path))).catch(() => undefined);
     if (!info?.isFile()) throw unavailable(file.name);
     return { ...file, size: info.size };
@@ -83,7 +91,7 @@ export async function fileSources(dataDir: string, files: readonly AttachedFile[
   return entries;
 }
 
-interface References { fileReferences(): ReadonlyMap<string, number>; }
+interface References { fileReferences(): ReadonlyMap<string, number>; fileOwners?(): ReadonlyMap<string, string>; }
 
 /** Saved messages own the copies. A copy no message holds is removed with its last message, or after a day (a draft or queue may still send it). */
 export function fileLifecycle(dataDir: string, store: References) {
@@ -107,8 +115,9 @@ export function fileLifecycle(dataDir: string, store: References) {
   return {
     collect: (paths: readonly string[]) => serial(() => collect(paths)),
     /** The message row goes in inside the queue, so a collect cannot remove a copy it is about to hold. */
-    save: <T>(files: readonly AttachedFile[], append: () => T): Promise<T> => serial(async () => {
-      await checkFiles(dataDir, files);
+    save: <T>(files: readonly AttachedFile[], append: () => T, threadId?: string): Promise<T> => serial(async () => {
+      // Read inside the queue: two threads sending one unsent copy at once cannot both keep it.
+      await checkFiles(dataDir, files, threadId === undefined || !store.fileOwners ? undefined : { threadId, owners: store.fileOwners() });
       return append();
     }),
     sweep: () => serial(async () => {

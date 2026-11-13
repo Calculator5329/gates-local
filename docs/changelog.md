@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: An attached file stays with the chat it was sent in
+
+- A message that names a file another chat already holds is refused:
+  "plan.txt is attached in another chat. Attach it here again; your words
+  are kept." Before, the server checked only that the copy existed, so a
+  client could save one chat's file on another chat's message, where that
+  chat's model could read it and where it outlived the first chat's
+  deletion. The app itself never sent such a message.
+- A file belongs to the first chat that saves a message with it. The same
+  chat can send it again (Retry does).
+
 ## 2026-11-13: Models, Usage and Settings are one pop-up of one size
 
 - The three open in the same box, as T3 Code's Settings does: 40 px in from

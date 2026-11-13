@@ -1839,6 +1839,24 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     expect(prompts[0]).toBe('[Attached file "data.csv" (8 B, text/csv): you cannot open it in this reply, because tools are off.]');
   });
 
+  it("a file one chat holds is refused in another chat, and the first chat can send it again", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const file = await r.client.call("files.attach", { name: "plan.txt", type: "text/plain", data: body64("the plan") });
+    r.setChat(async res => stream(res, [piece("ok"), doneLine]));
+    const first = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: first.id, content: "read this", model: MODEL, numCtx: 16384, files: [file] });
+    await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+
+    const second = await r.client.call("threads.create", {});
+    const refused = await rejection(r.client.call("chat.send", { threadId: second.id, content: "and here", model: MODEL, numCtx: 16384, files: [file] }));
+    expect(refused.message).toBe("plan.txt is attached in another chat. Attach it here again; your words are kept.");
+    expect((await r.client.call("threads.get", { threadId: second.id })).messages).toEqual([]);
+
+    const again = await r.client.call("chat.send", { threadId: first.id, content: "once more", model: MODEL, numCtx: 16384, files: [file] });
+    await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
+    expect((await r.client.call("threads.get", { threadId: first.id })).messages.filter(m => m.files?.length)).toHaveLength(2);
+  });
+
   it("a link in the files folder is refused at send, and deleting never touches a file outside the folder", async () => {
     const r = await rig({ show: caps(["completion", "tools"]) });
     const dataDir = path.dirname(r.store.dbPath);

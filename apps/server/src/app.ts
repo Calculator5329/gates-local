@@ -826,7 +826,7 @@ export function createApp(deps: AppDeps): App {
         // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
         load = deps.models?.loader?.reserve(model);
         await imageReady;
-        const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching).catch(attachError) : [];
+        const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching, { threadId, owners: store.fileOwners() }).catch(attachError) : [];
         // The thread's files, this message's included, open by label in this turn when tools are on.
         const wantsTools = tools ?? deps.toolsEnabled?.() ?? false;
         const fileEntries = wantsTools && deps.dataDir ? await fileSources(deps.dataDir, [...prior.flatMap(m => m.files ?? []), ...files], deps.sources?.entries() ?? []).catch(attachError) : new Map<string, LibraryEntry>();
@@ -969,7 +969,7 @@ export function createApp(deps: AppDeps): App {
         const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
         const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(imageError) : append();
         // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
-        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages).catch(attachError) : await withImages();
+        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages, threadId).catch(attachError) : await withImages();
         push("threads.changed", { threadId });
         started = true;
         turn.started = true;
