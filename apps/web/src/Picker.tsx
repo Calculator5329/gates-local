@@ -8,7 +8,7 @@ import { openFit } from "./fit-actions.ts";
 import { answers, canPick, cardFit, fitFor, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { Icon } from "./icons.tsx";
-import { activeEntry, contextRuler, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
+import { activeEntry, contextRuler, MAKERS, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { openSettings, pickModel, setContext } from "./session.ts";
 import { NA, chatReady, getState, setState, useStore } from "./store.ts";
@@ -17,7 +17,6 @@ import { FitSkel, PHONE, closePop, closeTip, esc, isTouch, openTip, tabStops, us
 const FAVORITES = "gates-local.model-favorites";
 /** Below this height the picker's rail, list and context column stop being usable. */
 const CRAMPED = 280;
-const makers: readonly Maker[] = ["Gemma", "Qwen", "Milo", "gpt-oss", "Phi", "Mistral", "Other"];
 interface Row { tag: string; label: string; name: string; variant: string; info?: ModelInfo; v?: Verdict; downloading?: number; frees: boolean }
 
 function savedFavorites(): string[] {
@@ -192,7 +191,7 @@ export function Picker() {
         <button className="pk-fam" aria-label="Favorites" aria-pressed={group === "favorites"} data-tip="Favorites" onClick={() => { setGroup("favorites"); setQuery(""); setHighlight(null); setExpanded(false); }}><Icon id="star" /></button>
         <span className="pk-rail-line" />
         <button className="pk-fam" aria-label="All models" aria-pressed={group === "all"} data-tip="All models" onClick={() => { setGroup("all"); setQuery(""); setHighlight(null); setExpanded(false); }}><svg className="mark"><use href="#i-mark" /></svg></button>
-        {makers.filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
+        {MAKERS.filter(m => present.has(m)).map(m => <button key={m} className="pk-fam" aria-label={m} aria-pressed={group === m} data-tip={esc(m)} onClick={() => { setGroup(m); setQuery(""); setHighlight(null); setExpanded(false); input.current?.focus({ preventScroll: true }); }}><MakerMark tag={m === "Phi" ? "phi4" : m} /></button>)}
       </nav>
       <div className="pk-main">
         <div className="pk-search"><Icon id="search" /><input ref={input} id="pkSearch" role="combobox" placeholder="Search models…" aria-label="Search models" aria-controls="pkList" aria-expanded={!!pop} aria-autocomplete="list" aria-activedescendant={highlight && visible.some(r => r.tag === highlight) ? `pk-opt-${visible.findIndex(r => r.tag === highlight)}` : undefined} value={query} onChange={e => { setQuery(e.target.value); setHighlight(null); closeTip(); }} onKeyDown={modelKeys} /><button className="pk-close" aria-label="Close" onClick={() => closePop(true)}><Icon id="x" /></button></div>

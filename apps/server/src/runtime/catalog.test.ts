@@ -7,6 +7,7 @@ import { defaultSettings } from "../settings/store.ts";
 import { buildCatalog, estimateTyped, markRecommended } from "./catalog.ts";
 import { listModels } from "./models.ts";
 import { CURATED_MODELS } from "./recommended.ts";
+import { tierFor, TIERS } from "./tiers.ts";
 
 const fitFixture = (name: string) => readFileSync(new URL(`../fit/fixtures/${name}`, import.meta.url), "utf8");
 const GPU = fitFixture("nvidia-smi-gpu.machine.txt"); // 16303 total, 9468 MiB free
@@ -86,9 +87,13 @@ describe("models.catalog", () => {
     expect(e.has("search:latest")).toBe(false);
 
     for (const entry of entries) expect(entry.purpose.split(" ").length).toBeLessThanOrEqual(4);
-    // A 16 GB card's tier (tiers.ts); Gemma 4 12B is not one of its picks.
-    expect(picks(entries)).toEqual(["qwen3.5:9b", "qwen3:14b", "gpt-oss:20b"]);
-    expect(e.get("gemma4:12b")?.recommended).toBe(false);
+    // A 16 GB card's tier (chat-models.json); a curated model outside it is not recommended.
+    const tier = tierFor({ gpuCount: 1, gpuTotalBytes: 16303 * 1024 ** 2, systemTotalBytes: 0 });
+    expect(tier.gb).toBe(16);
+    expect(picks(entries)).toEqual(tier.picks);
+    const outside = CURATED_MODELS.find((m) => !tier.picks.includes(m.name));
+    expect(outside, "a curated model outside the 16 GB tier").toBeDefined();
+    expect(e.get(outside?.name ?? "")?.recommended).toBe(false);
   });
 
   it("with no NVIDIA GPU, plans in system memory and recommends the system tier's picks", async () => {
@@ -150,25 +155,17 @@ const picks = (entries: readonly CatalogEntry[]) =>
 
 describe("recommended by the computer's tier (row 21)", () => {
   // Cards read a little under their label (a "16 GB" card is 16303 MiB here); system memory too.
-  const gpuTiers: [string, number, string[]][] = [
-    ["4 GB card", 4 * MIB_PER_GB - 150, ["qwen3.5:4b"]],
-    ["6 GB card", 6 * MIB_PER_GB - 150, ["qwen3.5:4b", "qwen3-vl:8b"]],
-    ["8 GB card", 8 * MIB_PER_GB - 150, ["qwen3.5:9b", "qwen3.5:4b", "qwen3-vl:8b"]],
-    ["12 GB card", 12 * MIB_PER_GB - 150, ["qwen3.5:9b", "gemma4:12b", "qwen3:14b"]],
-    ["16 GB card", 16303, ["qwen3.5:9b", "qwen3:14b", "gpt-oss:20b"]],
-    ["24 GB card", 24 * MIB_PER_GB - 150, ["mistral-small3.2:24b", "gpt-oss:20b", "qwen3:14b"]],
-  ];
+  // The picks are data (chat-models.json): every tier there, at a card a little under its label,
+  // recommends all its picks in order, so a pick that would not run at its own tier fails here.
+  const gpuTiers: [string, number, readonly string[]][] = TIERS.filter((t) => t.by === "gpu").map((t) => [`${t.gb} GB card`, t.gb === 16 ? 16303 : t.gb * MIB_PER_GB - 150, t.picks]);
   for (const [label, totalMib, expected] of gpuTiers) {
     it(`a ${label} recommends its tier's picks, first pick first`, async () => {
       expect(picks(await catalogOn(card(totalMib), meminfo(31.25)))).toEqual(expected);
     });
   }
 
-  const systemTiers: [string, number, string[]][] = [
-    ["8 GB", 7.6, ["qwen3.5:4b"]],
-    ["16 GB", 15.6, ["qwen3.5:4b", "qwen3.5:9b", "qwen3-vl:8b"]],
-    ["32 GB", 31.25, ["gpt-oss:20b", "qwen3.5:9b", "gemma4:12b"]],
-  ];
+  // System memory reads about 5% under its label (an "8 GB" computer is 7.6 GiB).
+  const systemTiers: [string, number, readonly string[]][] = TIERS.filter((t) => t.by === "system").map((t) => [`${t.gb} GB`, t.gb * 0.95, t.picks]);
   for (const [label, totalGib, expected] of systemTiers) {
     it(`with no GPU and ${label} of memory, recommends that tier's picks`, async () => {
       expect(picks(await catalogOn(noNvidia, meminfo(totalGib)))).toEqual(expected);
@@ -197,7 +194,7 @@ describe("recommended by the computer's tier (row 21)", () => {
       fit: { runNvidiaSmi: noNvidia, readMeminfo: async () => meminfo(15.6, 1), now: () => 1 },
     });
     expect(byName(entries).get("qwen3.5:9b")?.installed).toBe(true);
-    expect(picks(entries)).toEqual(["qwen3.5:4b", "qwen3.5:9b", "qwen3-vl:8b"]);
+    expect(picks(entries)).toEqual(tierFor({ gpuCount: 0, gpuTotalBytes: 0, systemTotalBytes: 15.6 * 1024 ** 3 }).picks);
   });
 });
 

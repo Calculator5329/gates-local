@@ -50,10 +50,10 @@ describe("what the machine check recommends", () => {
   it("a large GPU: the app's first recommended model, the others it recommends, and images on", () => {
     const { text, image } = advise(machine(nvidia(24)));
     // the 24 GB tier's picks, in the tier table's order (row 21)
-    expect(text).toMatchObject({ use: true, model: "mistral-small3.2:24b", verdict: "fits" });
+    expect(text).toMatchObject({ use: true, model: "qwen3.8:27b", verdict: "fits" });
     if (!text.use) throw new Error("expected a text model");
     expect(text.alsoRecommended).toContain("gpt-oss:20b");
-    expect(text.alsoRecommended).not.toContain("mistral-small3.2:24b");
+    expect(text.alsoRecommended).not.toContain("qwen3.8:27b");
     expect(image).toMatchObject({ use: true, setups: [KLEIN, Z_IMAGE, MOSS] });
     // each file once, at the size the app's own record gives
     if (!image.use) throw new Error("expected images");
@@ -94,7 +94,7 @@ describe("what the machine check recommends", () => {
   it("the report names every reading and both recommendations", () => {
     const m = machine(nvidia(24, 20));
     const report = formatReport(m, advise(m));
-    for (const expected of ["Linux 6.1 x64", "Example GPU", "24.0 GB", "20.0 GB", "Free disk", "mistral-small3.2:24b", "Fast: FLUX.2 Klein 4B", "Balanced: Z-Image Turbo int8", "Best: MOSS-Image", ...MOSS.files]) expect(report).toContain(expected);
+    for (const expected of ["Linux 6.1 x64", "Example GPU", "24.0 GB", "20.0 GB", "Free disk", "qwen3.8:27b", "Fast: FLUX.2 Klein 4B", "Balanced: Z-Image Turbo int8", "Best: MOSS-Image", ...MOSS.files]) expect(report).toContain(expected);
     const none = machine({ kind: "none" });
     expect(formatReport(none, advise(none))).toMatch(/Skip/);
   });

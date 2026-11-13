@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-13: The suggested chat models are one data file
+
+- The models the app suggests now come from one file. That covers the
+  download list and the tiers it recommends from, the picker's maker
+  groups, and the example model named in the message box and on first
+  run. The file is `packages/contracts/src/chat-models.json`; changing
+  the list needs no code edit. A broken edit, such as a tier pick that
+  isn't in the list, stops the app at startup and names the problem.
+- The list follows the 2026-11-11 research:
+  - Qwen 3.8 27B is the first pick on a 24 GB card.
+  - Qwen 3 VL 8B is gone: Qwen 3.5 9B already reads images.
+  - Mistral Small 3.2 24B is gone: no newer version is out.
+  - Qwen 3 14B is gone: no tier picked it.
+  - Each of the three still shows if you have it installed, as your own.
+- The "Something else" field's example is now `granite4.2:8b`, a real
+  model. `phi5:14b` doesn't exist.
+- A Hugging Face copy in the picker is named from its repository, with the
+  publisher in brackets. The code no longer carries names for particular
+  community builds.
+
 ## 2026-11-13: The Library says when it is read, and that a clone is a copy
 
 - Settings › Library drops its subtitle, which said the model reads it "in

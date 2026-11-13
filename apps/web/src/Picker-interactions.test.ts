@@ -275,11 +275,11 @@ it("PK-03: hosted quantizations have different visible and accessible selection 
 });
 
 it.each(["failed pull", "embedding"])("PK-03: a hidden %s does not dirty an ordinary model name", hidden => {
-  const base = "hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF";
+  const base = "hf.co/someone/gemma-4-26B-A4B-it-GGUF";
   probe.state.models = [{ name: `${base}:Q4_K_M`, capabilities: ["completion"] }, ...(hidden === "embedding" ? [{ name: `${base}:Q8_0`, capabilities: ["embedding"] }] : [])];
   if (hidden === "failed pull") probe.state.pulls = { other: { name: `${base}:Q8_0`, state: "error" } };
   const button = find(render(), p => p.className === "pk-select");
-  expect(button.props["aria-label"]).toBe("Gemma 4 26B ultra-uncensored (llmfan46)");
+  expect(button.props["aria-label"]).toBe("Gemma 4 26B A4B it (someone)");
 });
 
 for (const owner of ["picker", "app"] as const) {

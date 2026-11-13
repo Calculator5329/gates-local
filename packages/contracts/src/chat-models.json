@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "checked": "2026-11-11",
+  "about": "The chat models Gates Local suggests. Edit this file to change the list: no code names a model. Each model must be one anyone can fetch with ollama pull. downloadBytes is the sum of layer and config sizes in the registry manifest (registry.ollama.ai/v2/<name>/manifests/<tag>); an installed model uses its own size instead. purpose is four words or fewer and must hold on any computer (no GPU words). The order of models is the rank the app picks a chat model by.",
+  "models": [
+    { "name": "qwen3.5:9b", "label": "Qwen 3.5 9B", "purpose": "Fast everyday answers", "downloadBytes": 6550825550 },
+    { "name": "gemma4:12b", "label": "Gemma 4 12B", "purpose": "Careful longer answers", "downloadBytes": 8021618941 },
+    { "name": "gpt-oss:20b", "label": "gpt-oss 20B", "purpose": "Step-by-step reasoning", "downloadBytes": 13793441566 },
+    { "name": "qwen3.5:4b", "label": "Qwen 3.5 4B", "purpose": "Fastest replies, lighter answers", "downloadBytes": 3324173934 },
+    { "name": "qwen3.8:27b", "label": "Qwen 3.8 27B", "purpose": "Strongest all-round answers", "downloadBytes": 17741872154 }
+  ],
+  "tiers": {
+    "about": "One tier per amount of memory: a first pick, then up to two alternates, all from models. A computer with a supported GPU is placed by the GPU's memory, one without by its system memory; both are the memory it has, never what is free right now.",
+    "system": [
+      { "gb": 8, "picks": ["qwen3.5:4b"] },
+      { "gb": 16, "picks": ["qwen3.5:4b", "qwen3.5:9b"] },
+      { "gb": 32, "picks": ["gpt-oss:20b", "qwen3.5:9b", "gemma4:12b"] }
+    ],
+    "gpu": [
+      { "gb": 4, "picks": ["qwen3.5:4b"] },
+      { "gb": 6, "picks": ["qwen3.5:4b"] },
+      { "gb": 8, "picks": ["qwen3.5:9b", "qwen3.5:4b"] },
+      { "gb": 12, "picks": ["qwen3.5:9b", "gemma4:12b"] },
+      { "gb": 16, "picks": ["qwen3.5:9b", "gpt-oss:20b", "gemma4:12b"] },
+      { "gb": 24, "picks": ["qwen3.8:27b", "gpt-oss:20b", "gemma4:12b"] }
+    ]
+  },
+  "makers": [
+    { "name": "Gemma", "match": "gemma" },
+    { "name": "Qwen", "match": "qwen" },
+    { "name": "Milo", "match": "milo" },
+    { "name": "gpt-oss", "match": "gpt-oss" },
+    { "name": "Phi", "match": "(?:^|/)phi\\d" },
+    { "name": "Mistral", "match": "mistral" }
+  ],
+  "example": "qwen3.5:9b",
+  "typedExample": "granite4.2:8b"
+}

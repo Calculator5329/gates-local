@@ -3,7 +3,7 @@
 // Models page's Download tab shows these as they are, and first run and the
 // Installed tab share the progress bar and timing words.
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { CatalogEntry, FitReport, ModelEstimate, PullProgress } from "@gates-local/contracts";
+import { CHAT_MODELS, type CatalogEntry, type FitReport, type ModelEstimate, type PullProgress } from "@gates-local/contracts";
 import { shortGpu } from "./FitPanel.tsx";
 import { type Verdict, etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -285,7 +285,7 @@ function CustomPull({ actions, numCtx }: { actions: DownloadActions; numCtx: num
         )
       }
     >
-      <input className="inp" placeholder="Model name, e.g. phi5:14b" aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="inp" placeholder={`Model name, e.g. ${CHAT_MODELS.typedExample}`} aria-label="Model name" value={name} onChange={(e) => setName(e.target.value)} />
       <div className="dl-typed-a" ref={box} onKeyDown={(e) => menu && walk(e, box.current, "[role=menuitem]", closeMenu)}>
         <DlButton
           size={answer?.downloadBytes === undefined ? undefined : gb(answer.downloadBytes)}

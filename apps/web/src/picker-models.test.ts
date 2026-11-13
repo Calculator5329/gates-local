@@ -3,7 +3,7 @@ import { makerOf, memoryRuler, pickerLabel, pickerLabels } from "./picker-models
 
 describe("model picker presentation", () => {
   it("keeps single names clean and falls back to a full tag when collision suffixes also match", () => {
-    const a = "hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_M";
+    const a = "hf.co/someone/gemma-4-26B-A4B-it-GGUF:Q4_K_M";
     const b = a.replace(":Q4_K_M", ":Q8_0");
     expect(pickerLabels([a]).get(a)).toBe(pickerLabel(a));
     const pair = pickerLabels([a, b]);
@@ -17,13 +17,14 @@ describe("model picker presentation", () => {
       ["gemma4:12b", "Gemma 4 12B"],
       ["gemma3-abliterated:12b-q4", "Gemma 3 12B abliterated"],
       ["gemma4-abliterated:26b", "Gemma 4 26B abliterated"],
-      ["hf.co/llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF:Q4_K_M", "Gemma 4 26B ultra-uncensored (llmfan46)"],
+      // a Hugging Face copy: its repository's words, its publisher in brackets (no per-name rules)
+      ["hf.co/someone/gemma-4-26B-A4B-it-GGUF:Q4_K_M", "Gemma 4 26B A4B it (someone)"],
+      ["hf.co/another/Qwen3.8-27B-Instruct-GGUF:IQ3_M", "Qwen3.8 27B Instruct (another)"],
       ["milo-e2b-v3:latest", "Milo E2B v3"],
       ["milo-e4b-v3:latest", "Milo E4B v3"],
       ["milo-e4b-v4:latest", "Milo E4B v4"],
       ["qwen3.5:9b", "Qwen 3.5 9B"],
       ["qwen3.8-abliterated:27b", "Qwen 3.8 27B abliterated"],
-      ["hf.co/0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF:IQ3_M", "Qwen 3.8 27B Heretic (0bserverx)"],
       ["qwen2.5-coder:14b", "Qwen 2.5 14B coder"],
       ["phi4:latest", "Phi 4"],
       ["gpt-oss:20b", "gpt-oss 20B"],

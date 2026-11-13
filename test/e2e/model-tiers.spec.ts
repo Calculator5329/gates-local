@@ -1,6 +1,6 @@
 // Settings rows 18 and 21, the owner 2026-11-13 after a fresh Windows install. Row 21: recommend by
 // the computer's memory, a tier per GPU size and per system memory size without a GPU (the picks
-// are in apps/server/src/runtime/tiers.ts). Row 18, the layout he picked (A): a verdict every row
+// are in packages/contracts/src/chat-models.json). Row 18, the layout he picked (A): a verdict every row
 // shares is said once above the list, the size is the download button's label, and models that
 // cannot run sit in a closed last group, "Too big for this computer", with what they need.
 import type { Page } from "@playwright/test";
@@ -29,16 +29,16 @@ const PROFILES: readonly Profile[] = [
     name: "no GPU and 16 GB of memory",
     shot: "dl-a-after-nogpu-16gb.png",
     computer: () => stack.computer(15.6, "none"),
-    picks: ["qwen3.5:4b", "qwen3.5:9b", "qwen3-vl:8b"],
+    picks: ["qwen3.5:4b", "qwen3.5:9b"],
     once: NO_GPU_ONCE,
-    tooBig: ["gpt-oss:20b", "mistral-small3.2:24b"],
+    tooBig: ["gpt-oss:20b", "qwen3.8:27b"],
   },
-  { name: "a 16 GB card", shot: "dl-a-after-gpu-16gb.png", picks: ["qwen3.5:9b", "qwen3:14b", "gpt-oss:20b"], once: SPLIT_ONCE, tooBig: [] },
+  { name: "a 16 GB card", shot: "dl-a-after-gpu-16gb.png", picks: ["qwen3.5:9b", "gpt-oss:20b", "gemma4:12b"], once: SPLIT_ONCE, tooBig: [] },
   {
     name: "a 24 GB card",
     shot: "dl-a-after-all-fit.png",
     computer: () => stack.gpu(0, 24 * 1024 - 150),
-    picks: ["mistral-small3.2:24b", "gpt-oss:20b", "qwen3:14b"],
+    picks: ["qwen3.8:27b", "gpt-oss:20b", "gemma4:12b"],
     once: /^These run on your .+\.$/,
     tooBig: [],
   },
@@ -46,9 +46,9 @@ const PROFILES: readonly Profile[] = [
     name: "an 8 GB card and 8 GB of memory, one downloading",
     shot: "dl-a-after-8gb-downloading.png",
     computer: async () => { await stack.computer(7.6); await stack.gpu(0, 8 * 1024 - 150); },
-    picks: ["qwen3.5:9b", "qwen3.5:4b", "qwen3-vl:8b"],
+    picks: ["qwen3.5:9b", "qwen3.5:4b"],
     once: SPLIT_ONCE,
-    tooBig: ["gpt-oss:20b", "mistral-small3.2:24b"],
+    tooBig: ["gpt-oss:20b", "qwen3.8:27b"],
     download: "qwen3.5:4b",
   },
 ];
@@ -60,7 +60,8 @@ const tags = (rows: ReturnType<Page["locator"]>) => rows.evaluateAll((els) => el
 for (const profile of PROFILES) {
   test(`Download on ${profile.name}: the tier's picks, the shared verdict said once, the size on each button`, async ({ page, open }, info) => {
     // two models installed, so every verdict above comes from the curated list; a scenario resets the GPU, so it goes first
-    await stack.scenario("models", { installed: INSTALLED, ...profile.download === undefined ? {} : { pullTickMs: 1000, pullChunkBytes: 100 * 1024 ** 2 } });
+    // with one downloading, Gemma 4 12B stays out so an idle row still shows its size on the button
+    await stack.scenario("models", { installed: profile.download === undefined ? INSTALLED : ["qwen3.5:9b"], ...profile.download === undefined ? {} : { pullTickMs: 1000, pullChunkBytes: 100 * 1024 ** 2 } });
     await profile.computer?.();
     await open();
     await waitReady(page);
@@ -84,7 +85,7 @@ for (const profile of PROFILES) {
     else await expect(list.locator(".dlrow .vl")).toHaveCount(0);
     await expect(list.locator(".dlrow .vl.gpu")).toHaveCount(0);
     // the size is the button's label
-    const idle = profile.download === "qwen3.5:4b" ? "qwen3-vl:8b" : "qwen3.5:4b";
+    const idle = profile.download === "qwen3.5:4b" ? "gemma4:12b" : "qwen3.5:4b";
     await expect(list.locator(`.dlrow[data-cat="${idle}"]`).getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toHaveText(/^\d+\.\d\sGB$/);
 
     const big = list.locator("details.dl-bigs");
@@ -131,10 +132,10 @@ test("a typed model name: its size and verdict, too big with Download anyway in 
   await expect(said, "a model that runs on the GPU needs no words").toHaveCount(0);
   await shot("typed-fits.png");
 
-  await field.fill("mistral-small3.2:24b");
+  await field.fill("qwen3.8:27b");
   await expect(said).toHaveText(/^Too big for this computer · needs \d+\.\d\sGB$/);
   await expect(row.getByRole("button", { name: /^Download \d+\.\d\sGB$/ })).toBeDisabled();
-  await row.getByRole("button", { name: "More for mistral-small3.2:24b" }).click();
+  await row.getByRole("button", { name: "More for qwen3.8:27b" }).click();
   const anyway = page.getByRole("menuitem", { name: /^Download anyway/ });
   await expect(anyway).toBeVisible();
   // the size is said whole in the menu (it was cut to "14.1 G")
@@ -143,7 +144,7 @@ test("a typed model name: its size and verdict, too big with Download anyway in 
   // Escape closes the row menu, not the Models pop-up
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menuitem", { name: /^Download anyway/ })).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "More for mistral-small3.2:24b" })).toBeFocused();
+  await expect(row.getByRole("button", { name: "More for qwen3.8:27b" })).toBeFocused();
 
   await field.fill("no-such-model:1b");
   await expect(said).toHaveText("Not in the Ollama library. Check the name.");

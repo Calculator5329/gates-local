@@ -1,25 +1,30 @@
-import type { CatalogEntry, ModelInfo, PullProgress } from "@gates-local/contracts";
+import { CHAT_MODELS, type CatalogEntry, type ModelInfo, type PullProgress } from "@gates-local/contracts";
 import { friendlyName, type Verdict } from "./format.ts";
 import { chatModels, pendingDownload } from "./pick.ts";
 
-export type Maker = "Gemma" | "Qwen" | "Milo" | "gpt-oss" | "Phi" | "Mistral" | "Other";
+/** A maker from chat-models.json, or "Other". */
+export type Maker = string;
 
-/** Display brands stay stable across local aliases, quantizations and hosted variants. */
-export function makerOf(tag: string): Maker {
-  const lower = tag.toLowerCase();
-  if (lower.includes("gemma")) return "Gemma";
-  if (lower.includes("qwen")) return "Qwen";
-  if (lower.includes("milo")) return "Milo";
-  if (lower.includes("gpt-oss")) return "gpt-oss";
-  if (/(?:^|\/)phi\d/.test(lower)) return "Phi";
-  if (lower.includes("mistral")) return "Mistral";
-  return "Other";
-}
+/** Display brands stay stable across local aliases, quantizations and hosted variants; the patterns are data. */
+export { makerOf } from "@gates-local/contracts";
 
-/** Tags remain the identity and tooltip; packaging words do not become the visible name. */
+/** The model the app names when it needs an example ("such as …", "ollama pull …"), from chat-models.json. */
+export const EXAMPLE_MODEL = CHAT_MODELS.example;
+export const EXAMPLE_LABEL = CHAT_MODELS.models.find(m => m.name === EXAMPLE_MODEL)?.label ?? EXAMPLE_MODEL;
+
+/** The picker's groups: the data file's makers in its order, then Other. */
+export const MAKERS: readonly Maker[] = [...CHAT_MODELS.makers.map(m => m.name), "Other"];
+
+/**
+ * Tags remain the identity and tooltip; packaging words do not become the visible name. A
+ * Hugging Face copy is named for its repository, its publisher in brackets, without the GGUF word.
+ */
 export function pickerLabel(tag: string, catalogLabel?: string): string {
-  if (tag.startsWith("hf.co/llmfan46/gemma-4-26B-")) return "Gemma 4 26B ultra-uncensored (llmfan46)";
-  if (tag.startsWith("hf.co/0bserverx/Qwen3.8-27B-")) return "Qwen 3.8 27B Heretic (0bserverx)";
+  const hf = /^hf\.co\/([^/]+)\/([^:]+)/.exec(tag);
+  if (hf) {
+    const name = (hf[2] ?? "").replace(/[-_]GGUF$/i, "").replaceAll(/[-_]+/g, " ");
+    return `${name.charAt(0).toUpperCase()}${name.slice(1)} (${hf[1] ?? ""})`;
+  }
   const milo = /^milo-(e\d+b)-(v\d+)(?::latest)?$/i.exec(tag);
   if (milo) return `Milo ${milo[1]?.toUpperCase()} ${milo[2]?.toLowerCase()}`;
   const oss = /^gpt-oss:(\d+)b/i.exec(tag);

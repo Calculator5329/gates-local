@@ -140,13 +140,14 @@ for (const width of [1440, 360]) {
 
     // Guards a shipped bug fix: a late fit table moved the Download rows.
     test("Download groups after a second without a fit table, and a late table moves nothing until the next visit", async ({ page, open }) => {
+      // one of the 16 GB card's recommended picks (chat-models.json), left uninstalled here
+      const tag = "gemma4:12b";
+      await stack.scenario("models", { installed: ["qwen3.5:9b", "qwen3.8-abliterated:27b"] });
       const fits = await holdFits(page);
       await open();
       await waitReady(page);
       await section(page, "Models", true);
       await page.getByRole("tab", { name: /Download/ }).click();
-      // one of the 16 GB card's recommended picks that is not installed (tiers.ts)
-      const tag = "qwen3:14b";
       const row = page.locator(`.dlrow[data-cat="${tag}"]`);
       await expect.poll(fits.held).toBeGreaterThan(0);
       // the top of "Something else", and whether the groups' placeholder is up, read in one frame

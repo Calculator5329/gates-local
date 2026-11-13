@@ -12,7 +12,7 @@ import { ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./fo
 import { DownloadBar, LoadRing } from "./LoadBar.tsx";
 import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
-import { pickerLabels } from "./picker-models.ts";
+import { EXAMPLE_LABEL, pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
 import { chosenImage, imageCount, imageMode, imagesUnset, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
@@ -66,7 +66,7 @@ function usedTokens(s: State): number {
  */
 export function thinkUnavailable(model: ModelInfo | undefined, name: string, downloading: boolean): string | null {
   if (downloading || model === undefined) return "Available when the model finishes downloading.";
-  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does, such as Qwen 3.5 9B.`;
+  if (!canThink(model)) return `<b>Thinking</b> is not available: ${esc(name)} does not reason before answering. Pick a model that does, such as ${esc(EXAMPLE_LABEL)}.`;
   return null;
 }
 

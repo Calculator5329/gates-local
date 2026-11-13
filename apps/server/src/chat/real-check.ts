@@ -6,6 +6,7 @@
 // whisper again. Loads nothing when the fit refuses. Exits 1 if whisper
 // changed or the turn did not finish.
 import { pathToFileURL } from "node:url";
+import { CHAT_MODELS } from "@gates-local/contracts";
 import { checkFit, fetchPs, findLoaded, formatBytes, measuredFit, readGpu, type FitDeps, type GpuSnapshot } from "../fit/index.ts";
 import { streamTurn } from "./stream.ts";
 
@@ -132,7 +133,7 @@ export async function realCheck({ baseUrl, model, numCtx }: { baseUrl: string; m
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  realCheck({ baseUrl: process.env.OLLAMA_HOST_URL ?? "http://127.0.0.1:11434", model: process.argv[2] ?? "qwen3.5:9b", numCtx: Number(process.argv[3] ?? 16384) }).then(
+  realCheck({ baseUrl: process.env.OLLAMA_HOST_URL ?? "http://127.0.0.1:11434", model: process.argv[2] ?? CHAT_MODELS.example, numCtx: Number(process.argv[3] ?? 16384) }).then(
     (code) => process.exit(code),
     (error: unknown) => {
       console.error(error);
