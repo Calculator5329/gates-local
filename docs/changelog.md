@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-13: A bug finder for the screens a change touched
+
+- Tools: a bug finder walks the screens a change touched and reports frames
+  that move, flicker, say a thing twice or arrive late
+  (`node scripts/bug-finder.ts --range main..HEAD`, or `--all`).
+
 ## 2026-11-13: The model button shows a load, and thinking time leaves it out
 
 - While a model loads into memory, a 2 px bar runs along the bottom of the

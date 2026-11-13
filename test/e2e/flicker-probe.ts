@@ -179,8 +179,8 @@ export const TRACK = [
   "[role=alert]", "[data-watch]",
 ].join(", ");
 
-/** Runs in the page from before the action (or before the app's first script) until stopped. */
-function wholeSampler(o: WholeOptions & { track: string }): void {
+/** Runs in the page from before the action (or before the app's first script) until stopped. Exported for the bug finder (test/finder), which samples beside it. */
+export function wholeSampler(o: WholeOptions & { track: string }): void {
   const w = window as unknown as { wholeWatch?: { frames: unknown[]; on: boolean } };
   const state = { frames: [] as unknown[], on: true };
   w.wholeWatch = state;
