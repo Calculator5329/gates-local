@@ -49,14 +49,31 @@ export interface Change {
   signal: "slower" | "faster" | "within noise";
 }
 
+/** The actions one build measured. Every round of a build must measure the same ones. */
+function actions(runs: Run[]): string[] {
+  const names = (run: Run) => run.metrics.map(m => m.action).toSorted();
+  const first = names(runs[0]!);
+  for (const run of runs) if (names(run).join("\n") !== first.join("\n")) throw new Error("Journey sets differ");
+  return first;
+}
+
+/**
+ * Actions only one build measured. A release that moves or removes a screen
+ * changes the journey, so these are listed beside the comparison and the
+ * actions both builds have are still compared.
+ */
+export function unpaired(base: Run[], candidate: Run[]): { base: string[]; candidate: string[] } {
+  const a = actions(base), b = actions(candidate);
+  return { base: a.filter(name => !b.includes(name)), candidate: b.filter(name => !a.includes(name)) };
+}
+
 /** Pair whole rounds, never pretend frames or keystrokes are independent runs. */
 export function compare(base: Run[], candidate: Run[]): Change[] {
   if (base.length < 4 || base.length !== candidate.length) throw new Error("Need at least four paired rounds");
-  const keys = base[0]!.metrics.map(m => m.action).toSorted().join("\n");
-  for (const run of [...base, ...candidate]) {
-    if (run.metrics.map(m => m.action).toSorted().join("\n") !== keys) throw new Error("Journey sets differ");
-  }
-  return base[0]!.metrics.map(first => {
+  const inCandidate = actions(candidate);
+  const shared = actions(base).filter(name => inCandidate.includes(name));
+  if (shared.length === 0) throw new Error("No journey was measured on both builds");
+  return base[0]!.metrics.filter(m => shared.includes(m.action)).map(first => {
     const rows = (runs: Run[]) => runs.map(r => {
       const row = r.metrics.find(m => m.action === first.action)!;
       if (row.unit !== first.unit) throw new Error("Metric units differ");

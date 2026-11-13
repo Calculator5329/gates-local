@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport } from "../scripts/release.ts";
+import { checkTag, runReleaseCheck, runReleaseCommand, unitTotals, type ReleaseReport, cleanEnvironment, missingHostTools } from "../scripts/release.ts";
 import { groupAlive, processAlive } from "../apps/server/src/process-state.ts";
 
 const scratch: string[] = [];
@@ -216,6 +216,24 @@ describe("release tag decisions against a local bare remote", () => {
     f.git("commit", "--allow-empty", "-m", "unpublished");
     await expect(checkTag(f.cwd, "v1.0.0", f.report)).rejects.toThrow(/HEAD/);
   });
+});
+
+test("the release check names the host tools it needs and stops before the clone when one is missing", async () => {
+  // 0.2.0 and 0.2.1 were checked on a machine without bubblewrap: 28 of 30 sandbox tests skipped and the check passed.
+  expect(missingHostTools("linux", file => file !== "/usr/bin/bwrap")).toEqual(["/usr/bin/bwrap"]);
+  expect(missingHostTools("linux", () => false)).toEqual(["/usr/bin/bwrap", "/usr/bin/sqlite3"]);
+  expect(missingHostTools("linux", () => true)).toEqual([]);
+  expect(missingHostTools("win32", () => false)).toEqual([]);
+  const f = fixture();
+  const report = await runReleaseCheck({ cwd: f.cwd, remote: f.remote, commit: f.sha, reportPath: path.join(f.dir, "machine.json"), hostTools: () => ["/usr/bin/bwrap"] });
+  expect(report.status).toBe("failed");
+  expect(report.steps.map(s => s.name)).toEqual(["machine"]);
+  expect(report.failures[0]).toMatchObject({ step: "machine" });
+  expect(report.failures[0]!.message).toContain("/usr/bin/bwrap");
+}, 30_000);
+
+test("tests started by the release check may not skip for a missing host tool", () => {
+  expect(cleanEnvironment("/h", "/t", "/c")["GATES_LOCAL_REQUIRE_HOST_TOOLS"]).toBe("1");
 });
 
 test("a failing unit command stops the clean-clone check and writes a failed report", async () => {

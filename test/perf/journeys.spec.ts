@@ -81,7 +81,10 @@ test("production browser journeys", async ({ browser }) => {
     for (const [count, title] of [[200, "Perf long 200"], [2000, "Perf thousands 2000"]] as const) {
       const target = await select(page, title);
       latency(`open-thread-${count}`, await measure(page, () => target.click(), "click", ".tl .turn:last-child .md", title, "text", { selector: "turn", text: String(count), mode: "class-count" }));
-      latency(`open-thread-${count}-mounted`, await page.evaluate(() => window.perfJourney.later));
+      const mounted = await page.evaluate(() => window.perfJourney.later);
+      latency(`open-thread-${count}-mounted`, mounted);
+      // The longest stretch the page could not answer input while the thread filled in.
+      add(`open-thread-${count}.long-task-max`, Math.max(0, ...mounted.longTasks));
       await expect(page.locator(".tl .turn")).toHaveCount(count);
     }
     const huge = await select(page, "Perf huge reply");
@@ -111,10 +114,21 @@ test("production browser journeys", async ({ browser }) => {
     await page.locator('#picker .pk-r[data-m="qwen3.5:9b"]').click();
 
     latency("settings-open", await measure(page, () => page.keyboard.press("Control+Comma"), "keydown", ".set h1", "General"));
-    for (const label of ["Models", "Instructions", "Library", "Tools", "Image generation", "Runtime", "Advanced", "Shortcuts", "General"]) {
+    // The pages come from the app's own list, so a build that adds, moves or
+    // drops one is still measured. General is open already and goes last.
+    const pages = await page.locator(".snav .sb-act:not(.back) .grow").allTextContents();
+    expect(pages[0]).toBe("General");
+    for (const label of [...pages.slice(1), "General"]) {
       latency(`settings-${label.toLowerCase().replaceAll(" ", "-")}`, await measure(page, () => page.locator(".snav").getByRole("button", { name: label, exact: true }).click(), "click", ".set h1", label));
     }
     await page.keyboard.press("Escape");
+    // Models was a Settings page through 0.2.1. Since 0.2.2 it is a pop-up
+    // opened from the sidebar's footer; the row keeps its name across both.
+    if (!pages.includes("Models")) {
+      latency("settings-models", await measure(page, () => page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click(), "click", ".dlg-head h2", "Models"));
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".dlg-head")).toHaveCount(0);
+    }
 
     await scenario({ longDrip: 1, tokenDelayMs: 12, burstTokens: 4 });
     await newThread(page);

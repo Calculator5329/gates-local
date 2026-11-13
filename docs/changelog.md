@@ -77,6 +77,34 @@
   longer listed. A pick saved earlier, or a retry of an old card, still
   runs them.
 
+## 2026-11-13: The release check stops on a machine without the sandbox tools
+
+- The 0.2.0 and 0.2.1 release checks ran on a machine without bubblewrap.
+  The real sandbox tests skipped (28 of 30 skips) and both checks passed.
+  The check now names what the machine must have on Linux, `/usr/bin/bwrap`
+  and `/usr/bin/sqlite3`, and stops before the clone when one is missing.
+- Tests started by the check no longer skip the real sandbox suite for a
+  missing bubblewrap: they run and fail with the reason.
+
+## 2026-11-13: The release comparison survives a moved screen; timing tests stop asserting another machine's numbers
+
+- The 0.2.2 release check had no speed comparison against 0.2.1: the
+  journey clicked Models in Settings' list, and Models had become a pop-up
+  opened from the footer. The journey now reads the Settings pages from the
+  app and opens Models wherever that build has it.
+- The comparison used to stop when the two builds measured different
+  actions. It now compares every action both builds have and lists the ones
+  only one build has under the table.
+- The journey also records the longest task while a 200 and a 2000 message
+  thread fill in.
+- The three timing tests asserted lines measured on one machine on
+  2026-11-07 (first paint 120 ms, ready composer 180 ms, key p95 50 ms, no
+  task over 50 ms). They were missed at 0.2.0, 0.2.1 and 0.2.2 on the test
+  machine and never held a release. The tests now log those numbers and
+  assert only what holds on any machine: the measurement happened, the key
+  handlers stay under 16 ms, and each observer sees a delay it is given.
+  Whether a release got slower is the paired comparison's job.
+
 ## 2026-11-13: Usage has an X in its corner and no bar under a model's name
 
 - The Usage pop-up showed its close button on a phone only; on a desktop

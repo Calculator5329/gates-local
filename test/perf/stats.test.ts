@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compare, metric, type Run } from "./stats.ts";
+import { compare, metric, unpaired, type Run } from "./stats.ts";
 
 function run(round: number, samples: number[]): Run {
   return { schema: 1, commit: "a".repeat(40), round, arm: "base", browser: "fixture", machine: { cpus: 1, memoryBytes: 1, freeBytes: 1, loadBefore: [], loadAfter: [] }, fake: { firstTokenDelayMs: 40, tokenDelayMs: 8, burstTokens: 8, thinking: false, loadDelayMs: 0, longMarkdown: { tokenDelayMs: 12, burstTokens: 4 } }, metrics: [metric("paint", "ms", samples)] };
 }
+const withAction = (r: Run, action: string): Run => ({ ...r, metrics: [...r.metrics, metric(action, "ms", [5])] });
 describe("informational comparison diagnostic probes", () => {
   it("keeps identical timings within measured noise", () => {
     const runs = [100, 110, 98, 108, 101].map((v, i) => run(i, [v, v + 1, v + 2]));
@@ -19,7 +20,23 @@ describe("informational comparison diagnostic probes", () => {
     const runs = [100, 100, 100, 100, 100].map((v, i) => run(i, [v]));
     const noisy = [60, 180, 90, 190, 160].map((v, i) => run(i, [v]));
     expect(compare(runs, noisy)[0]).toMatchObject({ signal: "within noise", tooNoisy: true });
-    expect(() => compare(runs, noisy.map(r => ({ ...r, metrics: [] })))).toThrow("Journey sets differ");
+    expect(() => compare(runs, noisy.map(r => ({ ...r, metrics: [] })))).toThrow("No journey was measured on both builds");
+  });
+  it("pairs the actions both builds have and names the ones only one has", () => {
+    // A release moves or removes a screen: the rest of the journey still compares.
+    const base = [100, 110, 98, 108].map((v, i) => withAction(run(i, [v, v + 1, v + 2]), "settings-old-page"));
+    const candidate = [400, 410, 398, 408].map((v, i) => withAction(run(i, [v, v + 1, v + 2]), "new-popup"));
+    const changes = compare(base, candidate);
+    expect(changes.map(c => c.action)).toEqual([base[0]!.metrics[0]!.action]);
+    expect(changes[0]).toMatchObject({ signal: "slower", delta: 300 });
+    expect(unpaired(base, candidate)).toEqual({ base: ["settings-old-page"], candidate: ["new-popup"] });
+    expect(unpaired(base, base)).toEqual({ base: [], candidate: [] });
+  });
+  it("still refuses rounds of one build that measured different actions", () => {
+    const base = [100, 110, 98, 108].map((v, i) => run(i, [v]));
+    const uneven = base.map((r, i) => i === 2 ? { ...r, metrics: [...r.metrics, metric("extra", "ms", [1])] } : r);
+    expect(() => compare(base, uneven)).toThrow("Journey sets differ");
+    expect(() => unpaired(uneven, base)).toThrow("Journey sets differ");
   });
   it("includes within-round jitter when round medians happen to be steady", () => {
     const base = Array.from({ length: 4 }, (_, i) => run(i, [40, 70]));

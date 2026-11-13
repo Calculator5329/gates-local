@@ -597,6 +597,13 @@ targets and never block; a size that can't be measured still fails.
 A failed blocking command, missing browser report or zero executed
 unit/browser tests fails the release.
 
+The check starts by naming what the machine itself must have beside git,
+pnpm and a browser: on Linux, bubblewrap at `/usr/bin/bwrap` and
+`/usr/bin/sqlite3`, the shell tool's prerequisites. If one is missing the
+check stops before the clone with a failed `machine` step that names it.
+Commands the check starts carry `GATES_LOCAL_REQUIRE_HOST_TOOLS=1`, and with
+it the real sandbox tests run instead of skipping for a missing bubblewrap.
+
 Timing is informational. After the blocking steps pass, a separate
 `timing` project runs with its own 120-second limit, followed by bounded
 process-group shutdown if needed. The release report records whether the
@@ -604,7 +611,10 @@ command completed, its exit code or signal, whether it timed out, and the
 path to its raw report. Neither release-check nor release-tag parses or
 uses the timing report to decide the verdict. A timing crash, missing,
 stale or empty report, assertion failure or timeout cannot pass or fail
-the release. Timing thresholds are unchanged.
+the release. The timing tests assert no fixed millisecond line: they log
+first paint, ready composer, the longest task and the key event's p95, and
+the comparison below judges whether the candidate got slower than the last
+release on the same machine.
 
 Run the whole release check as one exclusive browser job. After correctness
 and timing, it also compares the newest annotated stable release tag whose

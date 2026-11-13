@@ -5,7 +5,7 @@ import { availableParallelism, freemem, homedir, loadavg, totalmem } from "node:
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { ROOT } from "../e2e/env.ts";
-import { compare, type Run } from "./stats.ts";
+import { compare, unpaired, type Run } from "./stats.ts";
 import { bundleSizeWarnings, bundleSize } from "../bundle-size.ts";
 import { prepareFixture } from "./fixture.ts";
 import { firstRunTimes } from "./first-run.ts";
@@ -34,9 +34,12 @@ type Runs = { base: Run[]; candidate: Run[] };
 type Bundles = { base: ReturnType<typeof bundleSize>; candidate: ReturnType<typeof bundleSize> };
 function report(runs: Runs, commits: Inputs, count: number, repetitions: number, bundles: Bundles) {
   const changes = compare(runs.base, runs.candidate);
+  const only = unpaired(runs.base, runs.candidate);
   const bundleWarnings = { base: bundleSizeWarnings(bundles.base), candidate: bundleSizeWarnings(bundles.candidate) };
-  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, only: runs.base[0]?.only, bundles, bundleWarnings, threadWindowNote: THREAD_WINDOW_NOTE, changes }, null, 2) + "\n", { flag: "wx" });
+  writeFileSync(path.join(out, "comparison.json"), JSON.stringify({ schema: 1, analysisVersion: 4, informational: true, commits, rounds: count, samples: repetitions, only: runs.base[0]?.only, bundles, bundleWarnings, threadWindowNote: THREAD_WINDOW_NOTE, changes, unpaired: only }, null, 2) + "\n", { flag: "wx" });
   const lines = ["Timing is informational. Slower means a measured signal, never a release failure.", "", "| Action | Unit | Base median | Base p95 | Candidate median | Delta | Noise floor | Signal |", "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |", ...changes.map(c => `| ${c.action} | ${c.unit} | ${c.base.median.toFixed(2)} | ${c.base.p95.toFixed(2)} | ${c.candidate.median.toFixed(2)} | ${c.delta.toFixed(2)} | ${c.noiseFloor.toFixed(2)} | ${c.signal}${c.tooNoisy ? "; too noisy for small changes" : ""} |`)];
+  if (only.base.length > 0) lines.push("", `Measured on the base build only (moved or removed since): ${only.base.join(", ")}`);
+  if (only.candidate.length > 0) lines.push("", `Measured on the candidate build only (new): ${only.candidate.join(", ")}`);
   lines.push("", THREAD_WINDOW_NOTE, "", "Bundle sizes are informational soft targets (KiB gzip).");
   for (const arm of ["base", "candidate"] as const) {
     lines.push(`${arm}: ${JSON.stringify(bundles[arm])}`, ...bundleWarnings[arm].map(warning => `${arm} warning: ${warning}`));

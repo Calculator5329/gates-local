@@ -45,7 +45,9 @@ export interface ReleaseReport {
   scratchRemoved?: boolean;
   limits?: string[];
 }
-export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number }
+export interface CheckOptions { cwd: string; remote?: string; commit?: string; reportPath: string; storeDir?: string; browserPath?: string; signal?: AbortSignal; timingTimeoutMs?: number; performanceBase?: string; performanceTimeoutMs?: number;
+  /** Host tools this machine lacks. The command passes missingHostTools; a named tool stops the check before the clone. */
+  hostTools?: () => string[] }
 
 // The first corrected comparison scorer is the stated base before the first release.
 const FIRST_PERFORMANCE_BASE = "a369f0a3b7280f33802d6f816287546814da99eb";
@@ -129,6 +131,19 @@ export function checkBeforePush(cwd: string, version: string, commit: string, re
   if (!planned || (latest && compare(planned, latest) <= 0)) throw new Error(`A newer release tag ${newest ?? "(invalid version)"} appeared before push: choose a greater version`);
 }
 
+/**
+ * What the machine itself must have for the check to mean something, beside
+ * git, pnpm and a browser: the shell tool's sandbox and its database client
+ * (the README's prerequisites). Their tests skip when one is missing, so a
+ * check on such a machine passes without having run them.
+ */
+export const HOST_TOOLS = ["/usr/bin/bwrap", "/usr/bin/sqlite3"] as const;
+
+/** The host tools this machine lacks. The shell tool is Linux only, so nothing is needed elsewhere. */
+export function missingHostTools(platform: NodeJS.Platform = process.platform, exists: (file: string) => boolean = existsSync): string[] {
+  return platform === "linux" ? HOST_TOOLS.filter(file => !exists(file)) : [];
+}
+
 /** Do not inherit app state, pnpm configuration, tokens, Node hooks, or git configuration from the calling checkout. */
 export function cleanEnvironment(home: string, temp: string, checkout: string, browserPath?: string): NodeJS.ProcessEnv {
   const checkoutRoot = path.resolve(checkout);
@@ -139,6 +154,8 @@ export function cleanEnvironment(home: string, temp: string, checkout: string, b
   const env: NodeJS.ProcessEnv = {
     PATH: cleanPath, HOME: home, USERPROFILE: home, TMPDIR: temp, TEMP: temp, TMP: temp,
     XDG_CACHE_HOME: path.join(home, ".cache"), XDG_CONFIG_HOME: path.join(home, ".config"), XDG_DATA_HOME: path.join(home, ".local", "share"),
+    // a test that would skip for a missing host tool runs, and fails naming the tool
+    GATES_LOCAL_REQUIRE_HOST_TOOLS: "1",
     CI: "1", NO_COLOR: "1", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null", GIT_TERMINAL_PROMPT: "0",
   };
   for (const key of ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"]) if (process.env[key]) env[key] = process.env[key];
@@ -322,6 +339,11 @@ export async function runReleaseCheck(options: CheckOptions): Promise<ReleaseRep
   let active = "setup";
   let cleanupUnsafeReason: string | undefined;
   try {
+    const missing = options.hostTools?.() ?? [];
+    if (missing.length > 0) {
+      active = "machine";
+      throw new Error(`This machine lacks what the release check needs: ${missing.join(", ")}. Install it and run the check again.`);
+    }
     report.remote ||= git(options.cwd, "remote", "get-url", "origin");
     report.commit ||= git(options.cwd, "rev-parse", "refs/remotes/origin/main");
     if (!/^[a-f0-9]{40}$/.test(report.commit)) throw new Error("--commit must be a full 40-character commit sha");

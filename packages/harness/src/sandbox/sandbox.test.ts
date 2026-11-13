@@ -84,7 +84,10 @@ const noHostPath = (message: string, hostPaths: readonly string[]) => { for (con
 const probe = await probeSandbox();
 // Off by design anywhere but Linux (the shell tool is Linux only); on Linux
 // only a missing bwrap skips, so a broken setup there still fails loudly.
-const bwrapAbsent = process.platform !== "linux" || (!probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason));
+// The release check sets GATES_LOCAL_REQUIRE_HOST_TOOLS: there a missing bwrap
+// fails too (0.2.0 and 0.2.1 were checked with this whole suite skipped).
+const mustRun = process.platform === "linux" && process.env["GATES_LOCAL_REQUIRE_HOST_TOOLS"] === "1";
+const bwrapAbsent = !mustRun && (process.platform !== "linux" || (!probe.available && /bubblewrap|cannot create its sandbox/.test(probe.reason)));
 describe.skipIf(bwrapAbsent)(`real bwrap confinement${probe.available ? "" : ` [${bwrapAbsent ? "SKIP" : "OFF"}: ${probe.reason}]`}`, () => {
   const root = mkdtempSync(path.join(tmpdir(), "gl-bwrap-"));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
