@@ -394,7 +394,8 @@ describe("the Updates group of an installed copy", () => {
 });
 
 const note = (result: UpdateStatus["result"] & object) =>renderToStaticMarkup(createElement(ui.UpdateNoteView, { result, onDismiss: () => undefined }));
-const hydrated = () => store.getState().imageStatus !== undefined && store.getState().conn.kind === "open";
+// The page is ready without image.status now (it waits on ComfyUI), so hydration here is the update read landing.
+const hydrated = () => store.getState().imageStatus !== undefined && store.getState().update !== undefined && store.getState().conn.kind === "open";
 
 describe("the note after an update", () => {
 
