@@ -8,7 +8,7 @@
 // chunks come through the app's own protocol.
 import type { Page } from "@playwright/test";
 import { type Delay, type WholeFinding, type WholeFrame, type WholeOptions, collectWhole, delayEverything, settled, watchFromLoad, watchWhole, wholeFindings } from "./flicker-probe.ts";
-import { expect, test, waitReady } from "./fixtures.ts";
+import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 /** Long enough that every loading state shows on a fast machine. */
 const DELAY_MS = 600;
@@ -127,19 +127,21 @@ test("the model picker is whole on its first frame", async ({ page, open }) => {
 // Guards the owner's ruling (N21): the fit panel is whole on its first frame.
 test("the fit panel is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
+  // A computer where the 27B cannot load (the 16 GB card and 8 GB of memory), so its row offers
+  // Memory details: the one step from the picker onto Settings › Advanced.
+  await stack.computer(8);
   const delay = await delayEverything(page, DELAY_MS);
   await open();
   await ready(page, delay);
   const r = recorder();
-  // The composer and the picker open memory details through openFit, onto Settings › Advanced.
   await page.locator("#modelBtn").click();
   await expect(page.locator("#picker.open")).toBeVisible();
   await settled(delay, 3000);
-  const big = page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"]');
-  await big.hover();
+  await page.locator('#picker .pk-r[data-m="qwen3.8-abliterated:27b"]').hover();
+  // No other route here: a detour through Settings would be watched as a passing screen.
   const details = page.locator("#picker").getByRole("button", { name: "Memory details", exact: true });
-  const action = await details.isVisible() ? () => details.click() : async () => { await page.keyboard.press("Escape"); await page.keyboard.press("Control+Comma"); await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click(); };
-  r.check("open the fit panel", await watchWhole(page, { root: ".set", arrive: { selector: ".set-h h1", text: "Advanced" } }, action, delay));
+  await expect(details).toBeVisible();
+  r.check("open the fit panel", await watchWhole(page, { root: ".set", arrive: { selector: ".set-h h1", text: "Advanced" } }, () => details.click(), delay));
   expect(r.all, "fit panel: what arrived late, moved or changed its words").toEqual([]);
 });
 
