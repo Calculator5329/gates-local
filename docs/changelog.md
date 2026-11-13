@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: A quick Library download is seen to happen
+
+- A sample database's Download button takes at least 0.8 s to fill, however
+  fast the file arrives, and its % counts with the fill. Then the check
+  fades in. Before, a quick download went from Download to the check in a
+  blink.
+- A slow download fills with the bytes, as before. Pressing the button
+  while it fills still cancels.
+- With reduced motion there is no sweep: the row goes straight to the
+  finished database, as before.
+
 ## 2026-11-13: A download shows its size when the registry cannot say
 
 - When the model's whole size cannot be looked up (offline, a private

@@ -20,6 +20,8 @@ await main({ imports: {
   fetch: async (input, init) => {
     const url = String(input);
     if (url.includes("northwind") && northwindAttempts++ === 0) throw new TypeError("fetch failed");
+    // The Periodic table is the quick download: the whole file at once.
+    if (url === samples.find(s => s.id === "elements")?.url) return new Response(bytes);
     // Enough time for a screenshot burst and cancel, without a public request.
     return new Response(new ReadableStream({
       async start(controller) {

@@ -44,6 +44,43 @@ test("a sample downloads in its own row: same place and height throughout, one r
   expect(await size(row)).toEqual(before);
 });
 
+// Settings row 12 (owner 2026-11-13): "the download library animation isn't good when its quick.
+// maybe a minimum animation". The fake hands over the Periodic table at once.
+test("a quick download still fills over at least 800 ms, its % with the fill, then the check", async ({ page, open }) => {
+  await open(); await library(page);
+  const row = slot(page, "elements"); const button = fill(row);
+  await expect(button).toHaveText("Download");
+  await button.evaluate((el: HTMLElement) => {
+    const w = window as unknown as { fillFrames: { at: number; scale: number; label: string; check: number }[] };
+    w.fillFrames = [];
+    el.addEventListener("pointerdown", () => {
+      const from = performance.now();
+      const frame = () => {
+        const bar = el.querySelector(".fill"); const chk = el.querySelector(".chk");
+        if (!el.isConnected || !bar || !chk) return;
+        const m = new DOMMatrixReadOnly(getComputedStyle(bar).transform);
+        w.fillFrames.push({ at: performance.now() - from, scale: getComputedStyle(bar).transform === "none" ? 1 : m.a, label: el.querySelector(".lab")?.textContent ?? "", check: Number(getComputedStyle(chk).opacity) });
+        if (performance.now() - from < 2500) requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    }, { once: true, capture: true });
+  });
+  await button.click();
+  await isDatabase(row, "Periodic table");
+  const frames = await page.evaluate(() => (window as unknown as { fillFrames: { at: number; scale: number; label: string; check: number }[] }).fillFrames);
+  expect(frames.length, "the frame probe must be live").toBeGreaterThan(20);
+  const full = frames.find(f => f.scale >= 0.99);
+  expect(full, "the fill reaches full").toBeDefined();
+  expect(full!.at, "the fill takes at least 800 ms from the press").toBeGreaterThanOrEqual(800);
+  const counts = frames.flatMap(f => /^\d+%$/.test(f.label) ? [Number.parseInt(f.label, 10)] : []);
+  expect(new Set(counts.filter(n => n > 0 && n < 100)).size, "the % counts up through the fill").toBeGreaterThanOrEqual(5);
+  expect(counts, "the % never goes back").toEqual(counts.toSorted((a, b) => a - b));
+  for (const f of frames) if (/^\d+%$/.test(f.label)) expect(Math.abs(Number.parseInt(f.label, 10) - f.scale * 100), `the % is the fill shown at ${Math.round(f.at)} ms`).toBeLessThanOrEqual(10);
+  const checked = frames.find(f => f.check > 0);
+  expect(checked, "the check shows").toBeDefined();
+  expect(checked!.at, "the check waits for the full fill").toBeGreaterThanOrEqual(full!.at);
+});
+
 // Guards the owner's ruling: a sample database offers questions to ask it.
 test("an opened sample lists its tables and asks its questions in a new chat", async ({ page, open }) => {
   await open(); await library(page);

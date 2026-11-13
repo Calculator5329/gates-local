@@ -712,7 +712,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .fill-btn .fill{position:absolute;inset:0;z-index:-1;background:var(--track);transform-origin:left;transform:scaleX(var(--f,0));transition:transform .2s linear}
 /* Each face of a sample's line is at most two lines, so a narrow screen's row is two lines tall at rest, mid-download and after. */
 .db-row .import-line>*{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.fill-btn .chk{position:absolute;left:50%;top:50%;margin:-8px 0 0 -8px;opacity:0;color:var(--green)}
+/* a quick download's fill is drawn frame by frame (LibraryImports.tsx FillButton): no easing on top */
+.fill-btn.sweep .fill{transition:none}
+.fill-btn .chk{position:absolute;left:50%;top:50%;margin:-8px 0 0 -8px;opacity:0;color:var(--green);transition:opacity .2s ease-out}
 .fill-btn.done{opacity:1}
 .fill-btn.done .chk{opacity:1}
 .fill-btn.done .fill{background:none}
@@ -728,7 +730,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .db-q:disabled{color:var(--muted-foreground);cursor:default}
 .db-q:disabled .ic{visibility:hidden}
 .db-lic{font-size:12px}
-@media (prefers-reduced-motion:reduce){.db-caret,.fill-btn .fill{transition:none}}
+@media (prefers-reduced-motion:reduce){.db-caret,.fill-btn .fill,.fill-btn .chk{transition:none}}
 .import-url{width:280px;max-width:100%}
 .import-row .sl{min-width:0;overflow-wrap:anywhere}
 .mp-menu.src-menu{width:140px}

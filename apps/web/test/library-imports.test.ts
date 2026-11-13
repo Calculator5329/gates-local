@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // A small hook host exercises the actual component's handlers across unmount
 // and remount. The browser journey covers the same navigation with real React.
 const host = vi.hoisted(() => ({
-  slots: [] as unknown[], at: 0, fresh: true, cleanups: [] as (() => void)[], request: vi.fn(), start: vi.fn(),
+  slots: [] as unknown[], at: 0, mark: 0, fresh: true, cleanups: [] as (() => void)[], request: vi.fn(), start: vi.fn(),
   rt: "ready", state: {} as Record<string, unknown>,
 }));
 vi.mock("react", async original => {
@@ -12,12 +12,12 @@ vi.mock("react", async original => {
   return { ...react,
     useState: (initial?: unknown) => {
       const at = host.at++;
-      if (host.fresh) host.slots[at] = typeof initial === "function" ? (initial as () => unknown)() : initial;
+      if (host.fresh || !(at in host.slots)) host.slots[at] = typeof initial === "function" ? (initial as () => unknown)() : initial;
       return [host.slots[at], (value: unknown) => { host.slots[at] = typeof value === "function" ? (value as (old: unknown) => unknown)(host.slots[at]) : value; }];
     },
     useRef: (initial: unknown) => {
       const at = host.at++;
-      if (host.fresh) host.slots[at] = { current: initial };
+      if (host.fresh || !(at in host.slots)) host.slots[at] = { current: initial };
       return host.slots[at];
     },
     useEffect: (effect: () => (() => void) | undefined) => { if (host.fresh) { const done = effect(); if (done) host.cleanups.push(done); } },
@@ -27,7 +27,7 @@ vi.mock("../src/session.ts", () => ({ libraryRequest: host.request, applyServerE
 vi.mock("../src/store.ts", () => ({ NA: "na", useStore: (select: (s: unknown) => unknown) => select(host.state) }));
 vi.mock("../src/Banner.tsx", () => ({ rtOf: () => host.rt }));
 vi.mock("../src/starter.ts", () => ({ askWith: host.start }));
-import LibraryImports from "../src/LibraryImports.tsx";
+import LibraryImports, { MIN_FILL_MS } from "../src/LibraryImports.tsx";
 import { PathText } from "../src/settings-controls.tsx";
 
 type Props = { children?: ReactNode; onClick?: (event?: { detail: number }) => void; onChange?: (event: { target: { value: string } }) => void; disabled?: boolean; "aria-label"?: string; "data-tip"?: string; className?: string; path?: string };
@@ -35,11 +35,14 @@ function leaveSettings() {
   for (const cleanup of host.cleanups.splice(0)) cleanup();
   host.slots = []; host.at = 0; host.fresh = true;
 }
-function render() { host.at = 0; const tree = LibraryImports({ add: null, clone: true }); host.fresh = false; return tree; }
+function render() { host.at = 0; const tree = LibraryImports({ add: null, clone: true }); host.fresh = false; host.mark = host.at; return tree; }
 function all(tree: ReactNode, match: (type: unknown, props: Props) => boolean) {
   const found: Props[] = [];
+  host.at = host.mark;
   const visit = (node: ReactNode) => Children.forEach(node, child => {
     if (!isValidElement<Props>(child)) return;
+    // The download button is a component of its own with its own hooks; the walk looks at what it draws.
+    if (typeof child.type === "function" && child.type.name === "FillButton") { visit((child.type as (props: Props) => ReactNode)(child.props)); return; }
     if (match(child.type, child.props)) found.push(child.props);
     if (child.props.children) visit(child.props.children);
   });
@@ -59,13 +62,18 @@ const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve()
 const SAMPLE = { id: "chinook", label: "Chinook", description: "A music store", sizeBytes: 1000, url: "https://example.test/chinook.db", license: "MIT", licenseUrl: "https://example.test/LICENSE", tables: [{ name: "albums", rows: 347 }], questions: ["Which artist has the most albums?", "q2", "q3", "q4"] };
 const COPY = { id: "copy", kind: "sqlite", label: "Chinook", path: "/library/chinook.db", addedAt: 1, state: "ready", managed: { kind: "sample", key: "chinook" }, tables: [{ name: "albums", rows: 347 }] };
 let jobs: unknown[] = [];
+// The fill is timed from performance.now(); the tests move that clock by hand.
+let now = 0;
+let clock: { mockRestore: () => void };
 beforeEach(() => {
   jobs = [];
+  now = 0;
+  clock = vi.spyOn(performance, "now").mockImplementation(() => now);
   host.rt = "ready";
   host.state = { sources: [], settings: { tools: true }, models: [{ name: "chat", capabilities: ["completion", "tools"] }], unavailable: {} };
   host.request.mockImplementation(async (method: string) => method === "sources.imports" ? { samples: [SAMPLE], jobs } : { id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 0, total: 1000 });
 });
-afterEach(() => { leaveSettings(); host.request.mockReset(); host.start.mockReset(); });
+afterEach(() => { leaveSettings(); host.request.mockReset(); host.start.mockReset(); clock.mockRestore(); });
 
 it.each(["cancelled", "error"] as const)("Retry after leaving Library and returning uses the %s job's repository (DG-02)", async state => {
   const url = "https://github.com/example/docs";
@@ -106,6 +114,11 @@ it("a sample whose finished download was removed offers Download again", async (
 it("the filling button shows the percent and cancels when pressed", async () => {
   jobs = [{ id: "job-1", kind: "sample", key: "chinook", label: "Chinook", state: "downloading", bytes: 420, total: 1000 }];
   render(); await settle();
+  // First seen now: the fill starts empty and takes MIN_FILL_MS to reach full, never ahead of what is really downloaded.
+  expect(text(find(render(), "button", "Cancel download, 0% done").children)).toBe("0%");
+  now += MIN_FILL_MS / 4;
+  expect(text(find(render(), "button", "Cancel download, 25% done").children)).toBe("25%");
+  now += MIN_FILL_MS;
   const fill = find(render(), "button", "Cancel download, 42% done");
   expect(text(fill.children)).toBe("42%");
   // Enter and Space press a button with detail 0.

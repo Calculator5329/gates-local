@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { SampleDatabase, Source, SourceImport, SourceImports } from "@gates-local/contracts";
 import { rtOf } from "./Banner.tsx";
 import { count, fileSize } from "./format.ts";
@@ -21,6 +21,10 @@ const USUAL_SAMPLES = 4;
 /** How long a finished download shows its check before the row shows the database. */
 const FINISH_MS = 900;
 const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The shortest a download button takes to fill, from the press to full, so a quick download is seen to happen (owner 2026-11-13, settings row 12). */
+export const MIN_FILL_MS = 800;
+/** The fill a button shows: the real fraction, never ahead of what the time since the run began allows. */
+export const shownFill = (real: number, since: number | undefined, now: number) => since === undefined ? real : Math.min(real, Math.max(0, (now - since) / MIN_FILL_MS));
 /** The pinned file's repository at its commit: raw.githubusercontent.com/o/r/<sha>/… → github.com/o/r/tree/<sha>. */
 const repoOf = (url: string) => url.replace(/^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([0-9a-f]{40})\/.*$/, "https://github.com/$1/$2/tree/$3");
 /** On Windows the database tool is Query databases; elsewhere Run commands reads them in its sandbox (Settings › Tools). */
@@ -75,6 +79,59 @@ const sampleLine = (sample: SampleDatabase, job: SourceImport | undefined, sourc
   );
 };
 
+interface FillProps {
+  name: string;
+  /** The sample's key, the last part of the button's test name. */
+  handle: string;
+  /** The fraction really downloaded: 1 once the file is in. */
+  real: number;
+  /** When this run began (performance.now()); the fill takes at least MIN_FILL_MS from here. */
+  since: number | undefined;
+  running: boolean;
+  done: boolean;
+  /** What it says at rest: Download, or Retry after a failed or cancelled try. */
+  idle: string;
+  blocked: boolean;
+  onPress: (e: MouseEvent<HTMLButtonElement>) => void;
+}
+
+/** Option A: the button is the progress. It fills with the fraction done and counts; pressing it while it fills cancels. */
+function FillButton({ name, handle, real, since, running, done, idle, blocked, onPress }: FillProps) {
+  const [, frame] = useState(0);
+  const sweeping = !still() && (running || done);
+  const shown = sweeping ? shownFill(real, since, performance.now()) : real;
+  const behind = shown < real;
+  // A download is finished only once a frame has drawn the fill full; until then it counts like any other.
+  const drawnFull = useRef(false);
+  const full = done && !behind;
+  const finished = full && drawnFull.current;
+  useEffect(() => {
+    drawnFull.current = full;
+    if (!behind && finished === full) return;
+    const id = requestAnimationFrame(() => frame(n => n + 1));
+    return () => cancelAnimationFrame(id);
+  });
+  const busyNow = !finished && (running || done);
+  const pct = Math.floor(shown * 100);
+  const label = finished ? "" : busyNow ? `${pct}%` : idle;
+  return (
+    <button
+      type="button"
+      className={`btn outline import-action fill-btn${busyNow ? " running" : ""}${finished ? " done" : ""}${behind || done ? " sweep" : ""}`}
+      data-testid={`settings.database.download-${handle}`}
+      style={{ "--f": finished ? 1 : shown } as React.CSSProperties}
+      aria-label={finished ? `${name} downloaded` : busyNow ? `Cancel download, ${pct}% done` : `${label} ${name}`}
+      data-tip={busyNow ? "Cancel download" : undefined}
+      disabled={finished || blocked}
+      onClick={onPress}
+    >
+      <i className="fill" aria-hidden="true" />
+      <span className="lab">{label}</span>
+      <Icon id="check" cls="chk" />
+    </button>
+  );
+}
+
 /** Settings › Library: one list of databases with the samples in it, then Clone a repository. Polls only while open; remount and restart read the server's state. */
 export default function LibraryImports({ add, clone }: { add: ReactNode; clone: boolean }) {
   // Read before Settings opened (session/settings-reads.ts), so the rows are there on the first frame.
@@ -96,6 +153,8 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
   // Samples whose download this visit saw running: when one lands, its row shows the finish once.
   const ran = useRef(new Set<string>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  // When each sample's current run began, for the shortest fill.
+  const started = useRef(new Map<string, number>());
   useEffect(() => {
     live.current = true;
     const read = async () => {
@@ -131,7 +190,15 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
   };
   const list = sources === NA || sources === undefined ? [] : sources;
   const rows = value ? databaseRows(value.samples, list, value.jobs) : databaseRows([], list.filter(s => s.managed?.kind !== "sample"), []);
-  for (const r of rows) if (r.sample && !r.source && (busy(r.job) || pending === r.sample.id)) ran.current.add(r.sample.id);
+  // A sample's run: pressed, downloading, or done and landing. A finished job is landing only for a download this
+  // visit saw run; the server keeps it after its database is removed.
+  const runs = (r: DbRow) => r.sample !== undefined && (busy(r.job) || pending === r.sample.id || (r.job?.state === "ready" && ran.current.has(r.sample.id)));
+  for (const r of rows) {
+    if (!r.sample || r.source) continue;
+    if (busy(r.job) || pending === r.sample.id) ran.current.add(r.sample.id);
+    if (!runs(r)) started.current.delete(r.sample.id);
+    else if (!started.current.has(r.sample.id)) started.current.set(r.sample.id, performance.now());
+  }
   const landed = rows.flatMap(r => r.sample && r.source && ran.current.has(r.sample.id) ? [r.sample.id] : []).join(" ");
   useEffect(() => {
     if (landed === "") return;
@@ -139,37 +206,31 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
     for (const id of ids) ran.current.delete(id);
     if (still()) return;
     setFinishing(f => [...f, ...ids]);
-    const t = setTimeout(() => { timers.current.delete(t); if (live.current) setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS);
+    // The check shows for FINISH_MS once the fill is full, and a quick download's fill is still sweeping.
+    const sweep = Math.max(0, ...ids.map(id => MIN_FILL_MS - (performance.now() - (started.current.get(id) ?? -Infinity))));
+    const t = setTimeout(() => { timers.current.delete(t); if (live.current) setFinishing(f => f.filter(id => !ids.includes(id))); }, FINISH_MS + sweep);
     timers.current.add(t);
   }, [landed]);
   const toggle = (key: string) => setOpened(o => o.includes(key) ? o.filter(k => k !== key) : [...o, key]);
   const usable = libraryToolCanUse(DB_TOOL, list);
 
-  /** Option A: the button is the progress. It fills with the fraction done and counts; pressing it while it fills cancels. */
   const fillButton = (row: DbRow, sample: SampleDatabase, done: boolean) => {
     const job = row.job;
-    // A finished job is landing only for a download this visit saw run; the server keeps it after its database is removed.
-    const landing = job?.state === "ready" && ran.current.has(sample.id);
-    const running = busy(job) || landing || pending === sample.id;
-    const frac = done || job?.state === "adding" || landing ? 1 : busy(job) ? Math.min(1, job!.bytes / (job!.total ?? sample.sizeBytes)) : 0;
-    const pct = Math.floor(frac * 100);
-    const label = done ? "" : running ? `${pct}%` : job?.state === "error" || job?.state === "cancelled" ? "Retry" : "Download";
+    const running = runs(row);
+    const frac = done || job?.state === "adding" || (job?.state === "ready" && running) ? 1 : busy(job) ? Math.min(1, job!.bytes / (job!.total ?? sample.sizeBytes)) : 0;
     return (
-      <button
-        type="button"
-        className={`btn outline import-action fill-btn${running ? " running" : ""}${done ? " done" : ""}`}
-        data-testid={`settings.database.download-${handleKey(sample.id)}`}
-        style={{ "--f": frac } as React.CSSProperties}
-        aria-label={done ? `${sample.label} downloaded` : running ? `Cancel download, ${pct}% done` : `${label} ${sample.label}`}
-        data-tip={running && !done ? "Cancel download" : undefined}
-        disabled={done || (pending !== undefined && pending !== sample.id)}
+      <FillButton
+        name={sample.label}
+        handle={handleKey(sample.id)}
+        real={frac}
+        since={started.current.get(sample.id)}
+        running={running}
+        done={done}
+        idle={job?.state === "error" || job?.state === "cancelled" ? "Retry" : "Download"}
+        blocked={pending !== undefined && pending !== sample.id}
         // A double click's second press (detail 2) lands on the running button; only a single press cancels. Enter and Space have detail 0.
-        onClick={e => { if (job && busy(job)) { if (e.detail <= 1) void cancel(job); } else if (!running) void start(sample.id, () => libraryRequest("sources.downloadSample", { id: sample.id })); }}
-      >
-        <i className="fill" aria-hidden="true" />
-        <span className="lab">{label}</span>
-        <Icon id="check" cls="chk" />
-      </button>
+        onPress={e => { if (job && busy(job)) { if (e.detail <= 1) void cancel(job); } else if (!running && !done) void start(sample.id, () => libraryRequest("sources.downloadSample", { id: sample.id })); }}
+      />
     );
   };
 
