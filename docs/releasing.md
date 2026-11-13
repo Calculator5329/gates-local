@@ -581,6 +581,12 @@ versions. Nothing here uploads; publishing is a separate step the owner decides.
 A release is an annotated `vX.Y.Z` tag on `main`. There is no hosted CI;
 a release machine checks a stranger's fresh public clone before tagging.
 
+Work lands on `dev`; `main` holds released commits only. To cut a release,
+check a `dev` commit by its full sha, fast-forward `main` to that commit
+and push it, then tag. `dev` keeps moving the whole time. If the check
+fails, the fix lands on `dev` and the new commit is checked; `main` has
+not moved.
+
 ```sh
 pnpm release:check --remote <public-url> --commit <full-sha> --report <new-report.json>
 pnpm release:tag v1.2.3 --report <new-report.json>

@@ -87,6 +87,9 @@ decision.
   `num_gpu` 0; unload what a check loaded. Whisper is never touched.
 - Git: plain `git commit`, stage only your files, never `git stash`, never
   `worktree remove --force`. Lanes never push; a coordinating session
-  lands on `main` and pushes it.
+  lands on `dev` and pushes it.
+- Branches: work lands on `dev`, and lanes are cut from `dev`. `main` is
+  the last released commit and moves only when a release is cut, so a
+  release check never holds up work. Nothing lands on `main` directly.
 - Files ported from another repo start with a comment naming the origin
   path and commit, and keep the origin's shape so later fixes still merge.

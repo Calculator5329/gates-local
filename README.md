@@ -257,7 +257,7 @@ finishes the job. Add `--check` to only see what is new.
 Once the project has releases (`v1.2.3` tags), it follows releases and
 never goes backwards. Until then, and whenever you pass `--channel main`
 or turn on "Get early updates" in Settings, it follows
-every change on the main branch.
+the main branch, which moves each time a release is cut.
 
 It changes nothing when a tracked file has changes of yours or the copy
 has commits of its own, and says how to keep them. Files git does not track,

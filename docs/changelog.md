@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: Work lands on dev; main moves only at a release
+
+- Every change used to land on `main`, and `main` had to stand still
+  for the length of a release check. Work now lands on `dev`. `main` is
+  the last released commit: a release checks a `dev` commit,
+  fast-forwards `main` to it and tags it, and `dev` keeps moving.
+- A source copy on `--channel main` or "Get early updates" follows
+  `main`, so it now moves once per release.
+
 ## 2026-11-13: Setup says when a message goes once
 
 - While Ollama installs, the message box says "Ask anything…" like any
