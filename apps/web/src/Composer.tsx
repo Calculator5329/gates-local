@@ -9,7 +9,7 @@ import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { fitFor, stopsChat } from "./fit-table.ts";
 import { ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
-import { LoadBar, LoadTime } from "./LoadBar.tsx";
+import { DownloadBar, LoadBar, LoadTime } from "./LoadBar.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
@@ -173,14 +173,18 @@ export function Composer() {
   // During setup the gate style already greys every control; otherwise the pill says why it is off.
   const thinkNa = blocked ? null : thinkUnavailable(models?.find((m) => m.name === model), name, first !== undefined);
 
-  const modelLbl =
-    rt === "installing" ? `${name} · downloads next` : first !== undefined ? `${name} · downloading ${firstProgress}%` : name;
+  // the label is the name and nothing else, so the button keeps its width (chat rows 28, 29): a download
+  // is the bar on its edge, and its percent, like a download still to come, is in the tip
   const modelTip =
     shownTag === undefined
       ? "No model is installed yet. Download one in Settings › Models."
-      : loading
-        ? `${tagTip(name, info, shownTag)}<br>Loading into GPU memory…`
-        : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
+      : rt === "installing"
+        ? `${tagTip(name, info, shownTag)}<br>Downloads next`
+        : first !== undefined
+          ? `${tagTip(name, info, shownTag)}<br>Downloading ${firstProgress}%`
+          : loading
+            ? `${tagTip(name, info, shownTag)}<br>Loading into GPU memory…`
+            : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
 
   const ctx = ctxFor(numCtx, models, model);
   const pct = Math.min(1, used / ctx);
@@ -188,7 +192,8 @@ export function Composer() {
 
   // before the first read nothing is known: the words of a ready app, never a problem not yet seen;
   // past the boot bound with still nothing read, one neutral word until the runtime answers
-  const placeholder = first !== undefined && !blocked ? "Type now; it sends when the download finishes" : noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
+  // a message typed during the first download says when it goes once, in its queue row (chat row 29)
+  const placeholder = noModel && ready ? (why ?? "Download a model to start chatting") : boot ? PLACEHOLDER.ready : none ? CONNECTING : PLACEHOLDER[rt];
 
   // A message queued behind a reply is checked when it goes, and memory a reply holds may be freed by stopping it.
   const memNo = v?.k === "no" && !isStreaming && !freed && !editing;
@@ -375,9 +380,9 @@ export function Composer() {
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
                 {/* loading shows in the tile, the time slot and the bar, never in the label: the trigger keeps its width */}
                 {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loadingNow} />}
-                <span>{modelLbl}</span>
+                <span>{name}</span>
                 <small className="picker-trigger-ctx">{loadingNow ? <LoadTime key={loadSince} since={loadSince} ms={loadMs} /> : k(ctx)}</small>
-                {loadingNow ? <LoadBar key={loadSince} since={loadSince} ms={loadMs} /> : null}
+                {first !== undefined ? <DownloadBar pct={firstProgress} /> : loadingNow ? <LoadBar key={loadSince} since={loadSince} ms={loadMs} /> : null}
               </>}
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
@@ -448,7 +453,7 @@ export const DOWNLOAD_STOPPED_TIP = "Download stopped. Download a model to send 
 /** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply. */
 export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
   if (editing) return "Editing";
-  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : "After download";
+  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
   if (q.waitFor === "setup") return "After setup";
   if (q.retry === "running") return RETRYING;
   if (q.retry === "failed") return RETRY_FAILED;
@@ -458,7 +463,9 @@ export function queueWords(q: Queued, editing: boolean, first: string | undefine
 /** The owner's words for a queue behind a failed reply the app retries once (chat row 23); the tip carries them where the row cuts them. */
 const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
-const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED ? words : undefined;
+/** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words (chat row 29). */
+export const AFTER_DOWNLOAD = "Sends when the download finishes";
+const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED || words === AFTER_DOWNLOAD ? words : undefined;
 
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
@@ -501,7 +508,9 @@ function QueueTray() {
             <span className="qt-k" data-tip={q.draw === undefined ? "Chat" : "Image"}><Icon id={q.draw === undefined ? "chat" : "image"} cls="s14" /></span>
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
-            <span className="qt-s" role="status" data-tip={tipFor(words)}>{words ?? ""}</span>
+            <span className="qt-s" role="status" data-tip={tipFor(words)}>
+              {words === AFTER_DOWNLOAD ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
+            </span>
             {q.waitFor === "reply" && !editing ? (
               <button type="button" className="ibtn xs" aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
                 <SendArrow />

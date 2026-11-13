@@ -177,8 +177,15 @@ function ChipFace({ step }: { step: ChipStep }) {
   );
 }
 
-function ChipWords({ step }: { step: ChipStep }) {
-  return <span className="fold-now">{step.words}</span>;
+function ChipWords({ step, writing }: { step: ChipStep; writing: boolean }) {
+  // once the answer streams the same node says "Writing", above the words (chat row 30)
+  const w = writing && step.words === "";
+  return <span className={w ? "fold-now writing" : "fold-now"}>{w ? "Writing" : step.words}</span>;
+}
+
+/** The answer is streaming: one blinking word above it, the same while the paced text catches up. */
+function WritingLabel({ over = false }: { over?: boolean }) {
+  return <span className={over ? "writing over" : "fold-now writing"} role="status">Writing</span>;
 }
 
 /** The screen reader's one name for the chip: what is inside, never a count that ticks. */
@@ -207,6 +214,8 @@ interface FoldProps {
   readonly stopped: boolean;
   /** How long it thought, kept as the turn's events arrived; undefined when this session did not watch it from its start. */
   readonly clock: WorkClock | undefined;
+  /** The answer is streaming: the line says "Writing" beside the pill. */
+  readonly writing: boolean;
 }
 
 /**
@@ -218,7 +227,7 @@ interface FoldProps {
  * in the thinking is the turn's clock's; a reply it did not watch (a reload)
  * lists its thought first, then its calls.
  */
-function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stopped, clock }: FoldProps) {
+function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stopped, clock, writing }: FoldProps) {
   const [open, setOpen] = useState(false);
   const [rounds, setRounds] = useState<Readonly<Record<number, boolean>>>({});
   const body = useId();
@@ -242,7 +251,7 @@ function Fold({ thinking, tools, secs, since, thinkingNow, busy, answering, stop
   };
   const line = (
     <ToggleLine open={open} onToggle={() => setOpen(!open)} body={body} chip={tools.length > 0} live={thinkingNow}
-      step={tools.length === 0 ? null : chipStep(thinking, tools, clock, t, running, answering, busy)} busy={busy}>
+      step={tools.length === 0 ? null : chipStep(thinking, tools, clock, t, running, answering, busy)} busy={busy} writing={writing}>
       {thinkingNow && since !== undefined ? <ThinkingLabel since={since} /> : <ThoughtLabel secs={secs} />}
     </ToggleLine>
   );
@@ -311,7 +320,7 @@ export function chipStep(thinking: string, tools: readonly ToolStep[], clock: Wo
 }
 
 /** The control that opens a reply's fold: the thought line as it was, or the chip with the current step beside it. */
-function ToggleLine({ open, onToggle, body, chip, live, step, busy, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; children: ReactNode }) {
+function ToggleLine({ open, onToggle, body, chip, live, step, busy, writing, children }: { open: boolean; onToggle: () => void; body: string; chip: boolean; live: boolean; step: ChipStep | null; busy: boolean; writing: boolean; children: ReactNode }) {
   return (
     <div className={open ? "fold-line open" : "fold-line"}>
       <button type="button" className={chip ? "think fold" : live ? "think live" : "think"} aria-expanded={open} aria-controls={body}
@@ -329,7 +338,7 @@ function ToggleLine({ open, onToggle, body, chip, live, step, busy, children }: 
         ) : <ChipFace step={step} />}
       </button>
       {/* kept mounted while busy, so a step change swaps words in place and never adds or drops a node */}
-      {step !== null && (busy || step.words !== "") ? <ChipWords step={step} /> : null}
+      {step !== null && (busy || step.words !== "" || writing) ? <ChipWords step={step} writing={writing} /> : writing ? <WritingLabel /> : null}
     </div>
   );
 }
@@ -714,20 +723,19 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
   const thinkingNow = streaming && text === "" && calls.length === 0 && thinking !== "";
   const pending = paced.length < text.length;
   const shown = reveal(paced, streaming || pending);
+  // "Writing" sits above the words (owner, chat row 30): on the thought line beside its pill, or with
+  // no pill in the space over the reply, so it holds still while the text grows and leaves nothing to close up
+  const writing = (streaming || pending) && text !== "";
+  const folded = thinking !== "" || calls.length > 0;
   return (
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
-      {thinking !== "" || calls.length > 0 ? (
+      {folded ? (
         <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? thoughtOrigin(live) : undefined} thinkingNow={thinkingNow}
-          busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} />
-      ) : null}
+          busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} writing={writing} />
+      ) : writing ? <WritingLabel over /> : null}
       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
-      {(streaming || pending) && text !== "" ? (
-        <div className="working writing" role="status">
-          <span className="ph">Writing</span>
-        </div>
-      ) : null}
       {streaming && text === "" && calls.length === 0 && !thinkingNow ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
       {end?.kind === "error" ? (
         <div className="err-line" data-tip={esc(end.message)}>

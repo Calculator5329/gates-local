@@ -20,6 +20,11 @@ export function LoadBar({ since, ms }: Load) {
   return <span className="ldbar" aria-hidden="true" style={{ animationDuration: `${ms}ms`, animationDelay: `${delay}ms` }} />;
 }
 
+/** The model's download on the same edge (chat row 29): filled to its percent, which the button's tip says in numbers. */
+export function DownloadBar({ pct }: { pct: number }) {
+  return <span className="ldbar dl" aria-hidden="true" style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />;
+}
+
 /** "~4 s" for a model loaded before; seconds so far for a first load. */
 export function LoadTime({ since, ms }: Load) {
   const [start] = useState(() => since ?? Date.now());

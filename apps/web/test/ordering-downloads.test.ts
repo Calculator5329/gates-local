@@ -27,7 +27,8 @@ const noop = () => {};
 const MESSAGE = "waiting for the first model";
 const STOPPED = "Download stopped";
 const STOPPED_TIP = 'data-tip="Download stopped. Download a model to send this."';
-const WAITING = "After download";
+// the row shows a clock; these are its tip and its words for a screen reader (chat row 29)
+const WAITING = "Sends when the download finishes";
 type QueueWords = typeof import("../src/Composer.tsx")["queueWords"];
 
 interface World {

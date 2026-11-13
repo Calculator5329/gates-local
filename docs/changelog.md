@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-13: Writing above the reply, and a model button that keeps its size
+
+- "Writing" now sits above a streaming reply instead of under it. With a
+  thought or tool pill it shares the pill's line; without one it sits in the
+  space over the reply. It holds still while the words come in, and when the
+  reply ends it leaves without the text moving.
+- A message typed while the first model downloads says when it goes once:
+  a clock in its queue row, whose tooltip says it sends when the download
+  finishes. The message field keeps "Ask anything…".
+- The model button keeps the model's name during a download. The download
+  shows as the bar along the button's edge, and the percent is in its
+  tooltip.
+- The model button keeps one width while the app starts, while a model
+  downloads or loads, and when Image turns on, so the microphone and the
+  button beside it no longer jump. A longer name still widens it, up to
+  the same limit as before.
+
 ## 2026-11-13: Image mode makes 1 to 4 pictures per send
 
 - In Image mode the Thinking circle shows how many pictures a send makes.

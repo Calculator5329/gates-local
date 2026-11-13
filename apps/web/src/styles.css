@@ -389,16 +389,23 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
 .qt-s{flex:0 1 auto;min-width:0;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qt-s:empty{margin-left:-8px}   /* kept in the tree for screen readers, empty, takes no gap */
+.qt-s:has(>.ic){display:inline-flex;flex:none}
+/* read aloud, not shown: the clock's words are its tip */
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .qt-r .ibtn[aria-pressed="true"]{background:var(--selected);color:var(--foreground)}
 /* the warning before a send stops another chat's reply */
 .stopask{max-width:var(--composer-w);margin:0 auto 8px;padding:10px 12px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--background);font-size:13.5px}
 .stopask p{margin:0 0 8px}
 .stopask-f{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .stopask-n{display:inline-flex;align-items:center;gap:6px;margin-right:auto;font-size:13px;color:var(--muted-foreground)}
-/* Writing stays below the steadily revealed text until the final tail drains. */
-.working.writing{margin-top:2px}
-.working.writing .ph{color:var(--muted-foreground);animation:pulse 2s ease-in-out infinite}
-@media (prefers-reduced-motion:reduce){.working.writing .ph{animation:none}}
+/* "Writing" sits above the streaming answer until the paced text drains (owner, chat row 30): beside the
+   pill on the thought line, or with no pill in the gap over the reply, so it holds still while the text
+   grows and leaves no line to close up. A long thread's live reply is not contained, or the gap would clip it. */
+.writing{font-size:13px;line-height:24px;color:var(--muted-foreground);white-space:nowrap;animation:pulse 2s ease-in-out infinite}
+.turn.a{position:relative}
+.writing.over{position:absolute;left:0;bottom:calc(100% + 4px);pointer-events:none}
+.col.long .turn.a:not(.done){content-visibility:visible}
+@media (prefers-reduced-motion:reduce){.writing{animation:none}}
 
 /* markdown */
 .md{font-size:var(--chat-fs);line-height:1.65;color:var(--prose);overflow-wrap:anywhere;margin-top:var(--s1)}
@@ -456,16 +463,19 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .cf{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 12px}
 .cf-l{display:flex;align-items:center;gap:2px;min-width:0;flex:none}
 .cf-l>*{flex:none}
-/* only the model trigger gives way: its name truncates at a fixed width, the full tag is its tooltip */
-.cf-r>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px}
+/* The model trigger keeps one width while the app starts, while a model downloads or loads, and when Image
+   turns on (chat rows 28, 29): at least the room a usual chat name or image name and size take, with the words
+   at its right end; a longer name widens it up to 240 px, past which it is cut (the tag is its tooltip). */
+.cf-r>#modelBtn{flex:0 1 auto;min-width:13em;max-width:240px;justify-content:flex-end}
 #modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* a load (LoadBar.tsx): 2 px on the button's bottom edge, filling to 90% over the last load; a first load's line moves with no amount */
 #modelBtn{position:relative;overflow:hidden}
 .ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transform:scaleX(.9);animation:ldfill linear both;pointer-events:none}
 .ldbar.wait{width:30%;transform:none;animation:ldslide 1.4s ease-in-out infinite}
+.ldbar.dl{animation:none;transition:transform .25s linear}
 @keyframes ldfill{from{transform:scaleX(0)}to{transform:scaleX(.9)}}
 @keyframes ldslide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
-@media (prefers-reduced-motion:reduce){.ldbar{animation:none}.ldbar.wait{width:100%;opacity:.4}}
+@media (prefers-reduced-motion:reduce){.ldbar{animation:none}.ldbar.wait{width:100%;opacity:.4}.ldbar.dl{transition:none}}
 .cf-r{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
 .cf-r>*{flex:none}
 .stop-sq .sqr{width:9px;height:9px;background:currentColor;display:block}
