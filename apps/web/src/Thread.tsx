@@ -289,16 +289,23 @@ function lastFailed(tools: readonly ToolStep[]): boolean {
  * The chip's state. Thinking seconds are the turn's clock, never rebuilt here:
  * a reply the clock did not watch shows the bulb with no number. The red mark
  * means one thing, the last call failed, and only once the turn has ended.
+ *
+ * While the reply is busy one part is always lit (owner, chat row 24): the wrench while a
+ * call runs, the bulb while it thinks, and the bulb again from a call's end to the next
+ * word, when the model is reading the result (minutes on a crowded GPU). A model that
+ * never thinks has no bulb, so its wrench stays lit then. The answer's own words are the
+ * motion once they stream.
  */
 export function chipStep(thinking: string, tools: readonly ToolStep[], clock: WorkClock | undefined, now: number,
   running: ToolStep | undefined, answering: boolean, busy: boolean): ChipStep {
   const thinkingNow = clock === undefined ? thinking !== "" && !answering : clock.thinking;
+  const reading = running === undefined && !thinkingNow && !answering;
   return {
     think: thinking === "" ? null : clock === undefined ? undefined : thoughtSecs(clock, now),
     calls: tools.length,
-    lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : null,
+    lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : reading ? (thinking === "" ? "calls" : "think") : null,
     failed: !busy && lastFailed(tools),
-    words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : answering ? "" : "Working",
+    words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : reading ? "Reading the result" : "",
   };
 }
 
@@ -320,7 +327,8 @@ function ToggleLine({ open, onToggle, body, chip, live, step, busy, children }: 
           </>
         ) : <ChipFace step={step} />}
       </button>
-      {step !== null && step.words !== "" ? <ChipWords step={step} /> : null}
+      {/* kept mounted while busy, so a step change swaps words in place and never adds or drops a node */}
+      {step !== null && (busy || step.words !== "") ? <ChipWords step={step} /> : null}
     </div>
   );
 }

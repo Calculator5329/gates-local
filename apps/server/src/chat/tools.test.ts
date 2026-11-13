@@ -191,20 +191,26 @@ describe("tool chat transport", () => {
   it("the stall guard aborts a hung /api/chat request through its fetch signal", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      let chatSignal: AbortSignal | undefined;
+      const chatSignals: (AbortSignal | undefined)[] = [];
       const fetcher = vi.fn(async (url, init) => {
         if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
-        chatSignal = init?.signal ?? undefined;
-        return hang(chatSignal);
+        chatSignals.push(init?.signal ?? undefined);
+        return hang(init?.signal ?? undefined);
       });
       const run = (async () => {
         const events = [];
         for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "hi" }], numCtx: 16384, sources: [], fetch: fetcher })) events.push(e);
         return events;
       })();
-      await vi.advanceTimersByTimeAsync(120_000 + 1); // the default stall guard, STREAM_STALL_MS
-      expect(chatSignal?.aborted).toBe(true);
-      expect((await run).at(-1)).toMatchObject({ type: "error", code: "stream-error", message: "The model stopped sending for 120 s; the reply was stopped." });
+      // Nothing has arrived, so the model may still be reading its prompt: the 120 s stall limit does not apply yet.
+      await vi.advanceTimersByTimeAsync(120_000 + 1);
+      expect(chatSignals.map(s => s?.aborted)).toEqual([false]);
+      // At 300 s the tool phase ends that request and asks for the final answer, which gets its own first-byte limit.
+      await vi.advanceTimersByTimeAsync(300_000 - 120_000);
+      expect(chatSignals.map(s => s?.aborted)).toEqual([true, false]);
+      await vi.advanceTimersByTimeAsync(300_000); // the default first-byte limit, FIRST_BYTE_MS
+      expect(chatSignals.map(s => s?.aborted)).toEqual([true, true]);
+      expect((await run).at(-1)).toMatchObject({ type: "error", code: "stream-error", message: "The model did not start answering within 300 s; the reply was stopped." });
     } finally { vi.useRealTimers(); }
   });
   it("names a SQLite source the way the offered tool takes it: a source id for sql on Windows, a /data path for the shell on Linux", async () => {

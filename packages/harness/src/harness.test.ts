@@ -254,6 +254,23 @@ async function* stallsInFinalAnswer(_messages: readonly ModelMessage[], options?
   await new Promise(() => undefined);
 }
 async function* neverAnswers() { await new Promise(() => undefined); yield { type: "complete" as const, content: "", calls: [], stopReason: "stop" }; }
+const untilAborted = (signal?: AbortSignal) => new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+/** Reads the prompt (sends nothing for 150 ms), then answers. */
+async function* slowFirstByte() {
+  await sleep(150);
+  yield { type: "delta" as const, text: "Done reading." };
+  yield { type: "complete" as const, content: "Done reading.", calls: [], stopReason: "stop" };
+}
+/** Sends some words, then nothing until stopped. */
+async function* stallsMidReply(_messages: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) {
+  yield { type: "delta" as const, text: "The answer " };
+  await untilAborted(options?.signal);
+}
+/** Sends nothing until stopped. */
+async function* neverStarts(_messages: readonly ModelMessage[], options?: { tools: boolean; signal?: AbortSignal }) {
+  await untilAborted(options?.signal);
+  yield { type: "delta" as const, text: "never" };
+}
 
 describe("every observation counts against the output budget (T-02)", () => {
   it("four failing 10,000-character commands end with the final-answer request inside the budget and tools off", async () => {
@@ -325,6 +342,25 @@ describe("tool-phase deadline and stall guard (T-03)", () => {
     expect(await Promise.race([consume(), sleep(1000).then(() => "hung")])).toBe("finished");
     expect(seen?.aborted).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "complete", content: "Final." });
+  });
+  // Row 23(a): Ollama sends nothing while it reads a long prompt (a tool result on a crowded GPU took
+  // over two minutes). That wait is not a stall: the stall clock starts at each request's first byte.
+  it("a model request whose first byte comes after the stall limit still finishes", async () => {
+    const events: LoopEvent[] = [];
+    for await (const event of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: slowFirstByte, numCtx: 1000, stallMs: 50, execute: vi.fn() })) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: "complete", content: "Done reading." });
+  });
+  it("a model that sends some words and then nothing for the stall limit is stopped, and the words say so", async () => {
+    const outcome = await (async () => { for await (const _ of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: stallsMidReply, numCtx: 1000, stallMs: 40, execute: vi.fn() })) { /* drain */ } return "finished"; })().catch((e: Error) => e);
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toBe("The model stopped sending for 0.04 s; the reply was stopped.");
+  });
+  it("a model that never starts answering is stopped at the separate first-byte limit, with its own words", async () => {
+    const started = Date.now();
+    const outcome = await (async () => { for await (const _ of runLoop({ messages: [], native: true, signal: new AbortController().signal, stream: neverStarts, numCtx: 1000, stallMs: 40, firstByteMs: 120, execute: vi.fn() })) { /* drain */ } return "finished"; })().catch((e: Error) => e);
+    expect(Date.now() - started, "not cut at the stall limit").toBeGreaterThanOrEqual(110);
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toBe("The model did not start answering within 0.12 s; the reply was stopped.");
   });
   it("a stalled final-answer stream is aborted by the stall guard", async () => {
     const controller = new AbortController();

@@ -169,6 +169,39 @@ function marked(title: string, q: string): ReactNode {
 /** Widths of the placeholder rows: varied like titles, never a full-width block. */
 const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
 
+/**
+ * Threads with a reply asked for and nothing of it shown yet (no word, thought or tool call),
+ * each with when it was asked: a new thread holding only a queued message counts from when it
+ * was typed. "id@at" joined, so the selector's value compares equal until it changes.
+ */
+const notStarted = (s: ReturnType<typeof getState>): string => {
+  const out: string[] = [];
+  for (const t of Object.values(s.turns)) {
+    if (t.end !== undefined || t.early !== undefined || t.listed === true || t.image === true) continue;
+    if (t.text === "" && t.thinking === "" && t.tools.length === 0) out.push(`${t.threadId}@${t.startedAt}`);
+  }
+  for (const q of s.queued) if (s.turns[q.threadId] === undefined && s.messages[q.threadId]?.length === 0) out.push(`${q.threadId}@${q.at}`);
+  return out.join(" ");
+};
+const waitingSince = (joined: string): ReadonlyMap<string, number> =>
+  new Map(joined.split(" ").filter((e) => e !== "").map((e) => [e.slice(0, e.lastIndexOf("@")), Number(e.slice(e.lastIndexOf("@") + 1))]));
+
+/**
+ * Newest first, except that a thread whose reply has shown nothing yet sits under every
+ * running thread that has, or that was asked before it (owner, chat row 23: the thread that
+ * is working stays on top). Once its reply shows something it takes its place by date.
+ */
+export function listOrder<T extends { id: string }>(threads: readonly T[], running: ReadonlySet<string>, waiting: ReadonlyMap<string, number>): readonly T[] {
+  const ahead = (r: T, w: T) => r.id !== w.id && running.has(r.id) && (!waiting.has(r.id) || (waiting.get(r.id) ?? 0) < (waiting.get(w.id) ?? 0));
+  const out = [...threads];
+  for (const w of threads.filter((t) => waiting.has(t.id))) {
+    const from = out.indexOf(w);
+    const to = out.findLastIndex((r) => ahead(r, w));
+    if (to > from) { out.splice(from, 1); out.splice(to, 0, w); }
+  }
+  return out;
+}
+
 /** How far the list runs past each edge, for its fade (styles.css .sb-list): px above the view and below it. */
 function measureFade(el: HTMLElement): void {
   const end = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
@@ -212,7 +245,9 @@ function ThreadList() {
   const now = useNow(30_000);
   const drawerWidth = useMedia("(max-width: 1023px)");
   const boot = useStore(booting);
-  const shown = q === "" ? threads : threads.filter((t) => t.title.toLowerCase().includes(q));
+  const waiting = useStore(notStarted);
+  const ordered = listOrder(threads, running, waitingSince(waiting));
+  const shown = q === "" ? ordered : ordered.filter((t) => t.title.toLowerCase().includes(q));
   if (boot && threads.length === 0) {
     // the list's shape is the data's: row-shaped placeholders until the first read lands
     return (

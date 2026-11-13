@@ -442,8 +442,15 @@ export function queueWords(q: Queued, editing: boolean, first: string | undefine
   if (editing) return "Editing";
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : "After download";
   if (q.waitFor === "setup") return "After setup";
+  if (q.retry === "running") return RETRYING;
+  if (q.retry === "failed") return RETRY_FAILED;
   return q.held ? "On hold" : null;
 }
+
+/** The owner's words for a queue behind a failed reply the app retries once (chat row 23); the tip carries them where the row cuts them. */
+const RETRYING = "Retrying the reply before it";
+const RETRY_FAILED = "On hold: the reply before it didn't finish";
+const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED ? words : undefined;
 
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
@@ -486,7 +493,7 @@ function QueueTray() {
             <span className="qt-k" data-tip={q.draw === undefined ? "Chat" : "Image"}><Icon id={q.draw === undefined ? "chat" : "image"} cls="s14" /></span>
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
-            <span className="qt-s" role="status" data-tip={words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : undefined}>{words ?? ""}</span>
+            <span className="qt-s" role="status" data-tip={tipFor(words)}>{words ?? ""}</span>
             {q.waitFor === "reply" && !editing ? (
               <button type="button" className="ibtn xs" aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
                 <SendArrow />

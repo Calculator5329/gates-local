@@ -53,7 +53,9 @@ export async function finished(page: Page, prompt: string, count = 1): Promise<v
 export async function shot(page: Page, name: string): Promise<void> {
   const dir = process.env["GL_SHOTS_DIR"];
   const repeat = test.info().repeatEachIndex;
-  if (dir) await page.screenshot({ path: `${dir}/threads-${name}${repeat === 0 ? "" : `-r${repeat}`}.png` });
+  const file = `threads-${name}${repeat === 0 ? "" : `-r${repeat}`}.png`;
+  // without GL_SHOTS_DIR the shot goes with the test's results, so a remote run brings it back
+  await page.screenshot({ path: dir ? `${dir}/${file}` : test.info().outputPath(file) });
 }
 /** Sample every frame: catches flashes of warnings or duplicated rows between awaits. */
 export async function observe(page: Page): Promise<void> {

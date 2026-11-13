@@ -91,6 +91,8 @@ export interface Queued {
   readonly model?: string;
   /** Its reply was stopped or failed: it waits for Send now, like a queue after an interrupt in T3 Code. */
   readonly held?: true;
+  /** Held behind a failed reply the app is retrying once on its own ("running"), or whose retry failed too ("failed"). */
+  readonly retry?: "running" | "failed";
   /** Send now: it goes as soon as the reply in its way has ended. */
   readonly now?: true;
   /** Typed with Image on: it goes to this image model and size, not to a chat model. */

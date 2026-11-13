@@ -16,8 +16,14 @@ export const MAX_CALLS_PER_REPLY = 8;
  * flight is aborted, and the loop asks for the final answer with tools off.
  */
 export const TOOL_TIME_BUDGET_MS = 5 * 60 * 1000;
-/** Every model request, the final answer included, is aborted after this long without a streamed chunk. */
+/** Once a model request has sent its first chunk, it is aborted after this long without another. */
 export const STREAM_STALL_MS = 120 * 1000;
+/**
+ * Before its first chunk a request may wait this long: Ollama sends nothing while it reads the
+ * prompt, and a tool result on a crowded GPU took over two minutes to read (chat row 23).
+ * Shorter than FINAL_ANSWER_MS, so a final answer that never starts gets these words, not the cap's.
+ */
+export const FIRST_BYTE_MS = 5 * 60 * 1000;
 /** The final-answer request (tools off) may take this long in all; the tool phase never cuts it. */
 export const FINAL_ANSWER_MS = 10 * 60 * 1000;
 /** Half the context at the 3 characters/token estimate the tool block uses. */
@@ -60,19 +66,26 @@ async function race<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   try { return await Promise.race([work, aborted]); } finally { signal.removeEventListener("abort", fail!); }
 }
 
-/** One model request under `signals` plus a stall guard that aborts it after `stallMs` without a chunk. */
-async function* modelRequest(stream: ModelStream, messages: readonly ModelMessage[], tools: boolean, signals: readonly AbortSignal[], stallMs: number): AsyncGenerator<ModelEvent> {
+/**
+ * One model request under `signals` plus a stall guard: `firstByteMs` for the first chunk
+ * (the model reading its prompt), then `stallMs` between chunks.
+ */
+async function* modelRequest(stream: ModelStream, messages: readonly ModelMessage[], tools: boolean, signals: readonly AbortSignal[], stallMs: number, firstByteMs: number): AsyncGenerator<ModelEvent> {
   const stall = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const signal = AbortSignal.any([...signals, stall.signal]);
   const iterator = stream(messages, { tools, signal })[Symbol.asyncIterator]();
+  let started = false;
   try {
     for (;;) {
       // The clock runs only while waiting on the model, never while the consumer handles a chunk.
-      timer = setTimeout(() => stall.abort(new Error(`The model stopped sending for ${seconds(stallMs)}; the reply was stopped.`)), stallMs);
+      timer = started
+        ? setTimeout(() => stall.abort(new Error(`The model stopped sending for ${seconds(stallMs)}; the reply was stopped.`)), stallMs)
+        : setTimeout(() => stall.abort(new Error(`The model did not start answering within ${seconds(firstByteMs)}; the reply was stopped.`)), firstByteMs);
       const next = await race(iterator.next(), signal);
       clearTimeout(timer);
       if (next.done) return;
+      started = true;
       yield next.value;
     }
   } finally {
@@ -122,6 +135,8 @@ export interface LoopInput {
   toolTimeBudgetMs?: number;
   /** The stall guard (STREAM_STALL_MS). */
   stallMs?: number;
+  /** The wait for a request's first chunk (FIRST_BYTE_MS). */
+  firstByteMs?: number;
   /** The final-answer cap (FINAL_ANSWER_MS). */
   finalAnswerMs?: number;
 }
@@ -160,6 +175,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
   function* say(text: string): Generator<LoopEvent> { endPart(); yield* show(text); endPart(); }
   const offered = input.definitions ?? [];
   const stallMs = input.stallMs ?? STREAM_STALL_MS;
+  const firstByteMs = input.firstByteMs ?? FIRST_BYTE_MS;
   const finalMs = input.finalAnswerMs ?? FINAL_ANSWER_MS;
   const outputBudget = toolOutputBudget(input.numCtx ?? 16384);
   let toolOutput = 0;
@@ -210,7 +226,7 @@ async function* turn(input: LoopInput, phase: AbortSignal): AsyncGenerator<LoopE
     const capTimer = final ? setTimeout(() => cap.abort(new Error(`The final answer ran past its ${seconds(finalMs)} limit and was stopped.`)), finalMs) : undefined;
     try {
       // Tool rounds live inside the tool phase; the final answer has its own cap instead.
-      for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs)) {
+      for await (const event of modelRequest(input.stream, messages, !final, [input.signal, final ? cap.signal : phase], stallMs, firstByteMs)) {
         if (event.type === "complete") complete = event;
         else if (event.type === "thinking") yield event;
         else {

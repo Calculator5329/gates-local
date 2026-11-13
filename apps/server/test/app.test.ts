@@ -1241,6 +1241,24 @@ describe("threads.delete and the image jobs its turns queued", () => {
 });
 
 const untilWords = async (r: Rig, turnId: string, count = 1) => r.waitFor("chat.event", (p) => p.turnId === turnId && p.event.type === "delta" && r.pushes.filter((q) => q.channel === "chat.event" && (q.payload as Payload<"chat.event">).turnId === turnId && (q.payload as Payload<"chat.event">).event.type === "delta").length >= count);
+/**
+ * slowReply's words, held after the first `shown` until `go()`: a test acts mid-reply without racing
+ * slowReply's 150 ms timer, which a loaded machine loses (chat row 25: "one two " where "one " was due).
+ */
+function heldReply(shown = 1): { route: ChatRoute; go: () => void } {
+  const hold: { open?: () => void } = {};
+  const held = new Promise<void>((resolve) => { hold.open = resolve; });
+  const go = () => hold.open?.();
+  cleanups.push(go);
+  const words = ["one ", "two ", "three ", "four "].map(piece);
+  const route: ChatRoute = async (res) => {
+    res.writeHead(200, { "content-type": "application/x-ndjson" });
+    for (const word of words.slice(0, shown)) { res.write(word); await sleep(5); }
+    await held;
+    if (!res.destroyed) res.end([...words.slice(shown), doneLine].join(""));
+  };
+  return { route, go };
+}
 const onDisk = (r: Rig, threadId: string) => r.store.getThread(threadId).messages.filter((m) => m.role === "assistant");
 const startReply = async (r: Rig, route: ChatRoute = slowReply) => {
   r.setChat(route);
@@ -1295,22 +1313,26 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
   it("a start sent again to a client that joins mid-reply says it is a replay; the first one does not", async () => {
     const r = await rig();
-    const { sent } = await startReply(r);
+    const held = heldReply();
+    const { sent } = await startReply(r, held.route);
     await untilWords(r, sent.turnId);
     const replayed: Payload<"chat.event">[] = [];
     r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
     expect(replayed.find((p) => p.turnId === sent.turnId)?.event).toMatchObject({ type: "start", replayed: true });
     expect(events(r, sent.turnId).find((e) => e.type === "start")).not.toHaveProperty("replayed");
+    held.go();
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
   });
 
   describe("a reply on its way to disk", () => {
     it("is written marked interrupted from its first words, and threads.get does not show it while it runs", async () => {
       const r = await rig();
-      const { threadId, sent } = await startReply(r);
+      const held = heldReply();
+      const { threadId, sent } = await startReply(r, held.route);
       await untilWords(r, sent.turnId);
       expect(onDisk(r, threadId)).toMatchObject([{ content: "one ", interrupted: true }]);
       expect((await r.client.call("threads.get", { threadId })).messages.map((m) => m.role)).toEqual(["user"]);
+      held.go();
       await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
       const finished = onDisk(r, threadId);
       expect(finished).toHaveLength(1);
@@ -1320,7 +1342,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
     it("is updated in place while it streams", async () => {
       const r = await rig({ draftEveryMs: 20 });
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply(3).route);
       await untilWords(r, sent.turnId, 3);
       await vi.waitFor(() => expect(onDisk(r, threadId)[0]?.content.startsWith("one two")).toBe(true), { interval: 5 });
       const rows = onDisk(r, threadId);
@@ -1331,14 +1353,14 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
     it("waits between writes rather than writing every word", async () => {
       const r = await rig({ draftEveryMs: 60_000 });
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply(3).route);
       await untilWords(r, sent.turnId, 3);
       expect(onDisk(r, threadId)).toMatchObject([{ content: "one ", interrupted: true }]);
     });
 
     it("a Stop or a failure leaves one row, not the in-progress one beside it", async () => {
       const r = await rig();
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply().route);
       await untilWords(r, sent.turnId);
       await r.client.call("chat.cancel", { turnId: sent.turnId });
       const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
@@ -1347,7 +1369,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
     it("deleting a message mid-reply leaves no in-progress row behind", async () => {
       const r = await rig();
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply().route);
       await untilWords(r, sent.turnId);
       await r.client.call("messages.delete", { threadId, messageId: sent.userMessage.id });
       expect(r.store.getThread(threadId).messages).toEqual([]);
@@ -1360,7 +1382,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
       const older = await r.client.call("chat.send", { threadId: t.id, content: "earlier", model: MODEL, numCtx: 16384 });
       await r.waitFor("chat.event", (p) => p.turnId === older.turnId && p.event.type === "done");
       await vi.waitFor(() => expect(r.app.activeTurns()).toBe(0));
-      r.setChat(slowReply);
+      r.setChat(heldReply().route);
       const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
       await untilWords(r, sent.turnId);
       await r.client.call("messages.delete", { threadId: t.id, messageId: older.userMessage.id });
@@ -1372,7 +1394,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
     it("deleting the whole thread mid-reply saves nothing", async () => {
       const r = await rig();
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply().route);
       await untilWords(r, sent.turnId);
       await r.client.call("threads.delete", { threadId });
       expect(r.store.listThreads().map((t) => t.id)).not.toContain(threadId);
@@ -1390,7 +1412,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
 
     it("a second send while it runs is refused and the model never reads the in-progress row", async () => {
       const r = await rig();
-      const { threadId, sent } = await startReply(r);
+      const { threadId, sent } = await startReply(r, heldReply().route);
       await untilWords(r, sent.turnId);
       expect(onDisk(r, threadId)).toHaveLength(1);
       const asked = r.ollama.requests.filter((q) => q.path === "/api/chat").length;

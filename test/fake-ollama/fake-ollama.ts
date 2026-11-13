@@ -58,6 +58,8 @@ export interface FakeOptions {
   replyWords: number;
   /** Tokens before a mid-stream error. */
   errorAfterTokens: number;
+  /** threads: when nonzero, only the first this-many replies to a prompt break at errorAfterTokens; later ones finish. */
+  errorReplies: number;
   /** slow-drip/threads: pause after this many tokens until released or cancelled; 0 never pauses. */
   holdAfterTokens: number;
   /** Any scenario that thinks: pause after this many thinking tokens until released or cancelled; 0 never pauses. */
@@ -104,6 +106,7 @@ const DEFAULTS: FakeOptions = {
   pullTickMs: 100,
   replyWords: 60,
   errorAfterTokens: 8,
+  errorReplies: 0,
   holdAfterTokens: 0,
   holdThinkingAfterTokens: 0,
   thinkingRepeat: 1,
@@ -467,7 +470,9 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           });
           if (abort.signal.aborted) return;
         }
-        if ((mode === "mid-stream-error" || (mode === "threads" && timing.errorAfterTokens >= 0)) && sent >= timing.errorAfterTokens) {
+        const breaks = mode === "threads" && timing.errorAfterTokens >= 0
+          && (timing.errorReplies === 0 || turns.filter((other) => other.prompt === turn.prompt && other.outcome === "error").length < timing.errorReplies);
+        if ((mode === "mid-stream-error" || breaks) && sent >= timing.errorAfterTokens) {
           turn.outcome = "error";
           line({ error: "an error was encountered while running the model: unexpected EOF" });
           return void res.end();

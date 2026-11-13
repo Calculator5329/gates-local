@@ -56,7 +56,7 @@ it("CO-06 replay: a refused GPU send shows the server explanation and restores i
 
 it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its identity after visiting %s and returning", async destination => {
   const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
+  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
   const { settingsScreen } = await import("../src/screen-loaders.ts");
   const load = vi.spyOn(settingsScreen, "load").mockResolvedValue();
   try {
@@ -174,7 +174,7 @@ it("PC-03: reconnect retry keeps the identity of the unacknowledged send", async
 
 it("PC-02: late success cannot erase words being edited from a recovered queue row", async () => {
   const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
+  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
   try {
     type("original words");
     const waiting = b.server.hold("chat.send");
@@ -203,7 +203,7 @@ it("PC-02: late success cannot erase words being edited from a recovered queue r
 
 it("PC-06: a stalled open-socket admission releases Send for a safe retry", async () => {
   const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
+  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
   try {
     type("stalled send");
     const waiting = b.server.hold("chat.send");
@@ -240,7 +240,7 @@ it("keeps newer typing and puts an unconfirmed timeout in a visible held queue",
 
 it.each([false, true])("late confirmation retires only the matching recovered copy (new draft: %s)", async newer => {
   const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === 30_000 ? 15 : ms, ...args));
+  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
   try {
     const images = ["data:image/png;base64,cGl4ZWw="];
     draftSource.replaceDraft(st().threadId, { text: "slow admission", images });
@@ -264,11 +264,14 @@ it.each([false, true])("late confirmation retires only the matching recovered co
 
 let created: string[];
 let turnsOf: Record<string, number>;
+/** How long chat.send waits for admission before its words come back (shortened to 15 ms where a test stalls it). */
+let sendTimeout: number;
 
 beforeEach(async () => {
   b = installBrowser();
   vi.resetModules();
   session = await import("../src/session.ts");
+  sendTimeout = (await import("../src/session/chat.ts")).SEND_TIMEOUT_MS;
   store = await import("../src/store.ts");
   draftSource = await import("../src/drafts.ts");
   created = ["A", "B", "C"];

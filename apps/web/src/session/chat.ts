@@ -23,7 +23,7 @@ declare global {
 interface ChatEffects {
   /** A function that returns nothing publishes nothing: no selector runs. */
   readonly applyServerEvent: (event: ServerEvent) => void;
-  readonly call: <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
+  readonly call: <M extends MethodName>(method: M, params: Params<M>, options?: { readonly timeoutMs?: number }) => Promise<ResultOf<M>>;
   readonly codeOf: (error: unknown) => string;
   /** `fromDraft` false: the words are not in the composer, so a refusal does not say they are. */
   readonly createThread: (content: string, model: string | undefined, fromDraft?: boolean) => Promise<string | null>;
@@ -42,6 +42,14 @@ const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 const STOP_OTHERS_KEY = "gates-local.stop-others-ok";
 
 const queueId = () => `q-${crypto.randomUUID()}`;
+
+/**
+ * chat.send answers once the question is saved, after the server admits the turn: that can wait
+ * behind another chat's reply and a cold load on a full GPU (3 min 7 s on 2026-11-13, chat row 23).
+ * The 30 s every other call gets made this client drop a send the server then ran anyway. A dropped
+ * connection still ends the wait at once.
+ */
+export const SEND_TIMEOUT_MS = 20 * 60 * 1000;
 
 type Outgoing = Omit<StopAsk, "blocking">;
 
@@ -160,6 +168,26 @@ function retriedRows(messages: readonly Message[]): readonly Message[] {
 function holdQueue(threadId: string): void {
   const waiting = (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
   setState((s) => (s.queued.some(waiting) ? { queued: s.queued.map((q) => (waiting(q) ? { ...q, held: true as const } : q)) } : {}));
+}
+
+const waitsBehind = (threadId: string) => (q: Queued) => q.threadId === threadId && q.waitFor === "reply" && q.now !== true;
+
+/**
+ * The queue behind a reply the app retries on its own: on hold while the retry runs ("running"),
+ * still on hold when it failed too ("failed"), sent as usual when it finished (undefined: no longer held).
+ * A stop during the retry leaves it held with no retry word.
+ */
+function markRetry(threadId: string, retry: "running" | "failed" | "finished" | "stopped"): void {
+  const waiting = waitsBehind(threadId);
+  setState((s) => (s.queued.some(waiting) ? {
+    queued: s.queued.map((q) => {
+      if (!waiting(q)) return q;
+      const { held: _held, retry: _retry, ...rest } = q;
+      if (retry === "finished") return q.retry === "running" ? rest : q;
+      if (retry === "stopped") return { ...rest, held: true as const };
+      return { ...rest, held: true as const, retry };
+    }),
+  } : {}));
 }
 
 /** Remove: the message is gone. Edit is the way to get its words back. */
@@ -456,7 +484,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         ...(images.length ? { images } : {}),
         ...(draw === undefined ? {} : { draw }),
         ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
-      });
+      }, { timeoutMs: SEND_TIMEOUT_MS });
       confirmCopy(r.userMessage);
       // the phone's pick for a new chat went with its first send, which the thread keeps; the next new chat starts from Settings
       if (draw !== undefined && opts.out?.threadId === null) {
@@ -489,6 +517,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         for (const p of theirs) if (p.event.type === "done") untrackedDone(p.threadId, p.event.message);
       }
     } catch (e) {
+      // the app's own retry was refused: that counts as its one try
+      if (opts.out?.regenerate === true) retryEnded(threadId, "failed");
       notSent(e, gen, threadId, content, model, opts);
       // A refused send may have buffered another client's start in this thread.
       // With its pending owner removed those events can land.
@@ -567,6 +597,37 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     // sent again the way Send would send it now: with Image on, to the image model
     const draw = drawChoice(s);
     void admit({ content: last.content, images: last.images, model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true, ...(draw === undefined ? {} : { draw }) });
+  }
+
+  /**
+   * Threads whose failed reply the app is retrying once on its own, because a message
+   * waits behind it (owner ruling, chat row 23). A second failure is not retried.
+   */
+  const retrying = new Set<string>();
+
+  /** A reply that failed with a message queued behind it in its chat: retried once, the way Retry would, in that chat whether it is open or not. */
+  function retryBehindQueue(threadId: string, model: string): boolean {
+    if (retrying.has(threadId) || !getState().queued.some(waitsBehind(threadId))) return false;
+    retrying.add(threadId);
+    markRetry(threadId, "running");
+    void (async () => {
+      if (getState().messages[threadId] === undefined) await loadThread(threadId);
+      const s = getState();
+      const last = (s.messages[threadId] ?? []).findLast((m) => m.role === "user");
+      if (last === undefined || !retrying.has(threadId) || unfinished(s.turns[threadId]) || s.turns[threadId]?.ending === true) {
+        if (retrying.delete(threadId)) markRetry(threadId, "failed");
+        flushQueued();
+        return;
+      }
+      // the model that failed, as Retry would send it from that chat
+      await admit({ content: last.content, images: last.images, model: model !== "" ? model : last.model ?? s.model ?? "", threadId, keepDraft: true, regenerate: true });
+    })();
+    return true;
+  }
+
+  /** How a retried reply ended: a finish sends the queue behind it, a failure keeps it held and says so, a stop just holds it. */
+  function retryEnded(threadId: string, how: "finished" | "failed" | "stopped"): void {
+    if (retrying.delete(threadId)) markRetry(threadId, how);
   }
 
   /**
@@ -721,7 +782,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         // a chat not on screen reloads: its cached history may be behind
         if (!open) untrackedDone(threadId, msg);
         // the person said stop: a Stop that lost the race to the last token holds the queue like any other
-        if (turn.end?.kind === "stopped") holdQueue(threadId);
+        if (turn.end?.kind === "stopped") { holdQueue(threadId); retryEnded(threadId, "stopped"); }
+        else retryEnded(threadId, "finished");
         flushQueued();
         return;
       }
@@ -754,6 +816,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           const ended = getState().turns[threadId];
           if (!open && ended !== undefined && ended.gen === turn.gen) settle(ended, said);
         }
+        // a reply the person stopped, or the server halted to make way for something, is not retried
+        const stopped = turn.end?.kind === "stopped" || aborted(event.code);
+        if (retrying.has(threadId)) retryEnded(threadId, stopped ? "stopped" : "failed");
+        else if (!stopped && turn.image !== true && retryBehindQueue(threadId, turn.model)) return;
         flushQueued();
         return;
       }
@@ -839,7 +905,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const q = s.queued.find((x) => x.id === id);
     if (!q || q.waitFor !== "reply") return;
     if (unfinished(s.turns[q.threadId])) {
-      const { held: _held, ...rest } = q;
+      const { held: _held, retry: _retry, ...rest } = q;
       setState({ queued: [{ ...rest, now: true }, ...s.queued.filter((x) => x.id !== id)] });
       stop(q.threadId);
       return;

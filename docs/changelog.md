@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-13: A message that waits behind another reply stays sent
+
+- A message sent in a new thread while another thread is replying on a full
+  GPU waits as long as it takes to start. It no longer comes back to the
+  box after 30 s while the reply runs anyway.
+- A thread whose reply has shown nothing yet sits under the threads already
+  replying, so the one at work stays on top. Once its reply shows something
+  it takes its place by date.
+- A reply whose model reads a long prompt for minutes before its first word
+  is no longer cut at 2 min; it gets 5 min to start, then 2 min between
+  words as before.
+- When a reply fails with a message queued behind it, the reply is tried
+  once more before the queued message goes. The queue row says "Retrying
+  the reply before it". If the retry fails too, the row says "On hold: the
+  reply before it didn't finish", nothing else is sent, and the sidebar
+  dot goes out. A reply you stopped is never retried.
+- While the model reads a tool's result, the reply's chip stays lit and
+  says "Reading the result", so a tool call shows while the reply runs,
+  not only after.
+
 ## 2026-11-13: Models is its own pop-up
 
 - The bot in the sidebar footer opens Models in the middle of the window,
