@@ -89,6 +89,10 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
 - [ ] Pictures: `THIRD_PARTY_NOTICES.md` in the repo does not list the WebP encoder and the PNG reader yet; only the packaged notices file does.
 - [ ] Pictures: backfill time on a large library is not measured, and the phone listener's thumbnail route has no test.
+- [ ] Pictures round 3: Compare, Save all, Delete; timing journeys with 5,000 pictures.
+- [ ] Image defaults: the style bench should report winners for Icons, Text and logos, and Painterly and concept art. Until then the Defaults menu has no row for those three.
+- [ ] The shell tool description could show a quoted dot command, such as `sqlite3 db ".schema elements"`. A model that writes `sqlite3 db .schema elements` passes "elements" as a separate SQL argument and the call fails.
+- [ ] Settings row 6: Models is its own pop-up (done 2026-11-13). Usage, wider and shorter, and Settings as a pop-up in the same style are next.
 - [ ] <!-- workspace:id=work:ac0688c8-5c8a-5e45-9db3-ff28388854c2 --> A tooltip that kept its left edge while its anchor's words changed can end up no longer over its anchor when the anchor moved a long way. Keep the old edge only while it still overlaps the anchor.
 - [ ] <!-- workspace:id=work:8f735c71-ed2b-50ce-af38-4f7fb674a909 --> An installed copy with a bad release signature: the footer's click that opens the release page is not built; it opens Settings.
 - [ ] <!-- workspace:id=work:fc4fd672-4932-5890-95b8-e2804d8dcdb5 --> Footer browser specs for the fix rounds (errors cleared by good news, the ask re-read at Go, Escape order) were written with their fixes and were not each watched failing in a browser first; the unit tests for the same rules were.
