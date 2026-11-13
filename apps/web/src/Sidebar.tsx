@@ -7,8 +7,8 @@ import { booting, rtInfo, rtOf, unread } from "./Banner.tsx";
 import { finishedInBurst, modelsIcon, settingsIcon } from "./footer-state.ts";
 import { describeModel, shortAge, when } from "./format.ts";
 import { Icon, type IconId } from "./icons.tsx";
-import { cancelPendingSettings, closeSettings, closeUsage, leaveSettings, newThread, openSettings, openThread, preloadThread, spareScreenEntry, toggleModels, toggleUsage } from "./session.ts";
-import { NA, type Section, getState, runningThreads, setState, useStore } from "./store.ts";
+import { cancelPendingSettings, closeSettings, closeUsage, leavePictures, leaveSettings, newThread, openSettings, openThread, preloadThread, spareScreenEntry, toggleModels, togglePictures, toggleUsage } from "./session.ts";
+import { NA, type Section, getState, overChat, runningThreads, setState, useStore } from "./store.ts";
 import { PHONE, closePop, closeTip, isTouch, useMedia } from "./ui.tsx";
 import { FootButton, SidebarUpdate } from "./Updates.tsx";
 
@@ -120,8 +120,9 @@ export function openSearch(): void {
   // below 1024 px the search field lives in the drawer, which takes over the screen's history entry
   const narrow = window.innerWidth < 1024;
   if (s.panel !== null) closeUsage(false, narrow);
-  else if (s.view === "settings" && narrow) closeSettings();
+  else if (overChat(s.view) && narrow) closeSettings();
   else if (s.view === "settings") leaveSettings();
+  else if (s.view === "pictures") leavePictures();
   if (narrow) openDrawer();
   requestAnimationFrame(() => document.querySelector<HTMLInputElement>("#searchIn")?.focus());
 }
@@ -488,6 +489,22 @@ function UsageButton() {
   );
 }
 
+/** Pictures: the screen of every finished picture, pressed while it is on show (Ctrl Shift P). */
+function PicturesButton() {
+  const open = useStore((s) => s.view === "pictures");
+  return (
+    <FootButton
+      icon="image"
+      label="Pictures"
+      tip="Pictures"
+      cls="pics-btn"
+      {...(open ? { tone: "on" as const } : {})}
+      pressed={open}
+      onClick={() => closeDrawer(togglePictures, true)}
+    />
+  );
+}
+
 export function Sidebar() {
   // under the Models pop-up (wider than a phone) the sidebar keeps its threads
   const phone = useMedia(PHONE);
@@ -509,6 +526,7 @@ export function Sidebar() {
         <SettingsButton />
         <ModelsButton />
         <UsageButton />
+        <PicturesButton />
         <SidebarUpdate via={(then) => closeDrawer(then, true)} />
       </div>
     </aside>

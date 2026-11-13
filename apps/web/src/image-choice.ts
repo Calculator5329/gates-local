@@ -49,6 +49,12 @@ export function drawChoice(s: State): ImageChoice | undefined {
 
 export const sizeLabel = (width: number, height: number): string => `${width}×${height}`;
 
+/** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
+export function presetName(s: State, id: string): string {
+  const listed = s.imagePresets === undefined || s.imagePresets === NA ? undefined : s.imagePresets;
+  return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id)?.name ?? id;
+}
+
 const held = (gpu: GpuStatus, keep: (o: GpuStatus["occupants"][number]) => boolean) => gpu.occupants.filter(keep).reduce((n, o) => n + o.bytes, 0);
 
 /**

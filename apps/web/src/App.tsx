@@ -17,9 +17,9 @@ import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadSc
 import { SECTIONS, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
 import { Dialog, DialogHead, PopPanel } from "./Panel.tsx";
-import { usageScreen } from "./screen-loaders.ts";
-import { call, cancelPendingSettings, closeUsage, deleteThread, leaveSettings, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
-import { NA, type Section, type State, getState, setState, useStore } from "./store.ts";
+import { picturesScreen, usageScreen } from "./screen-loaders.ts";
+import { call, cancelPendingSettings, closeUsage, deleteThread, leavePictures, leaveSettings, pictures, togglePictures, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
+import { NA, type Section, type State, getState, overChat, setState, useStore } from "./store.ts";
 import { useDraft } from "./drafts.ts";
 import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
@@ -424,11 +424,18 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
     if (s.view === "settings" && s.ownerConfirm) return setState({ ownerConfirm: false });
     if (s.view === "settings" && s.addPage) return setState({ addPage: false });
     if (s.view === "settings") return leaveSettings();
+    if (s.view === "pictures") {
+      e.preventDefault();
+      return pictures.get().large ? pictures.setLarge(false) : leavePictures();
+    }
     return;
   }
   if (!(e.ctrlKey || e.metaKey) || s.view === "firstrun") return;
   const key = e.key.toLowerCase();
-  if (key === "n") {
+  if (key === "p" && e.shiftKey) {
+    e.preventDefault();
+    togglePictures();
+  } else if (key === "n") {
     e.preventDefault();
     goNew();
   } else if (key === "k") {
@@ -436,7 +443,7 @@ export function onKey(e: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "m
     openSearch();
   } else if (key === "m") {
     e.preventDefault();
-    if (s.view !== "settings" && s.panel === null) setState({ pop: { id: imageMode(s) ? "images" : "picker", kb: true } });
+    if (!overChat(s.view) && s.panel === null) setState({ pop: { id: imageMode(s) ? "images" : "picker", kb: true } });
   } else if (key === ",") {
     e.preventDefault();
     openSettings();
@@ -483,7 +490,8 @@ export function App() {
   const imagePicker = useScreen(imagePickerScreen, popId === "images");
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
   const popOpen = popId !== null && (popId !== "picker" || picker.kind === "error" || !pickerPending);
-  const thread = useScreen(threadScreen, view === "thread" || (view === "settings" && threadId !== null));
+  const thread = useScreen(threadScreen, view === "thread" || (overChat(view) && threadId !== null));
+  const pics = useScreen(picturesScreen, view === "pictures");
   const panel = useStore((s) => s.panel);
   const usage = useScreen(usageScreen, panel === "usage");
   useEffect(preloadScreens, []);
@@ -518,6 +526,8 @@ export function App() {
   const models = useStore((s) => modelsDialog(s, phone));
   // Settings as a page over the chat; Models, wider than a phone, is a pop-up and leaves the chat in view
   const isSet = view === "settings" && !models;
+  const isPics = view === "pictures";
+  const under = isSet || isPics;
   // the section list is a phone's Settings home; leaving Settings forgets it
   useEffect(() => {
     if (view !== "settings" && getState().setList) setState({ setList: false });
@@ -537,12 +547,13 @@ export function App() {
         <main className="main" inert={covered || drawer}>
           {/* under the pop-up the chat stays mounted and takes no focus, keys or clicks */}
           <div style={{ display: "contents" }} inert={panel !== null}>
-          {isSet ? <SettingsBar /> : <Header isNew={isNew} />}
+          {/* Pictures draws its own bar, in its own chunk */}
+          {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
           <div className="work">
             {/* Settings lies over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
-            <div className={`stage${isSet ? " under" : ""}`} inert={isSet || models}>
+            <div className={`stage${under ? " under" : ""}`} inert={under || models}>
                 {isNew || threadId === null ? (
-                  <Draft under={isSet} />
+                  <Draft under={under} />
                 ) : (
                   <>
                     <ErrorBoundary key={threadId} scope="thread">
@@ -554,7 +565,7 @@ export function App() {
                     </ErrorBoundary>
                     <div className="cw">
                       <div className="banner-slot">
-                        {isSet ? null : <UpdateNote />}
+                        {under ? null : <UpdateNote />}
                         <Banner />
                       </div>
                       <Composer />
@@ -571,6 +582,7 @@ export function App() {
                 </div>
               </div>
             ) : null}
+            {isPics ? pics.kind === "ready" ? <pics.value.Pictures /> : <div className="pics"><ScreenError /></div> : null}
           </div>
           </div>
           {panel === "usage" && usage.kind !== "pending" ? (

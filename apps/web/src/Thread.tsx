@@ -11,7 +11,7 @@ import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { imageTurnLinks } from "./image-links.ts";
-import { sizeLabel } from "./image-choice.ts";
+import { presetName, sizeLabel } from "./image-choice.ts";
 import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -539,12 +539,6 @@ function RunningNumbers({ job, since }: { job: ImageEvent; since: number }) {
 function turnCard(thread: readonly Message[], userMessageId: string): string | undefined {
   const at = thread.findIndex((m) => m.id === userMessageId);
   return at < 0 ? undefined : thread.slice(at + 1).find((m) => m.imageJob !== undefined)?.id;
-}
-
-/** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */
-function presetName(s: State, id: string): string {
-  const listed = s.imagePresets === undefined || s.imagePresets === NA ? undefined : s.imagePresets;
-  return [...listed?.presets ?? [], ...listed?.others ?? [], ...listed ? [listed.current.preset] : []].find((p) => p.id === id)?.name ?? id;
 }
 
 function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {

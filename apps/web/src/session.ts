@@ -10,7 +10,7 @@ import {
   type Payload,
 } from "@gates-local/contracts";
 import { modelChoice as pickChoice, newestOnly } from "./pick.ts";
-import { NA, type State, getState, setState } from "./store.ts";
+import { NA, type State, getState, overChat, setState } from "./store.ts";
 import { createChat } from "./session/chat.ts";
 import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
@@ -23,6 +23,7 @@ import { createNavigation, enterScreen, exitScreen, onScreenEntry } from "./sess
 import { createUpdates } from "./session/updates.ts";
 import { speedsChanged, speedsRead } from "./session/speed.ts";
 import { createUsage } from "./session/usage.ts";
+import { createPictures } from "./session/pictures.ts";
 import { type ActionResult, codeOf, createConnection, failure, isNA } from "./session/connection.ts";
 
 // Preserve the UI's action imports while implementation moves into session modules.
@@ -156,6 +157,7 @@ async function hydrateWith(
   on("usage.changed", () => usageSession.usageChanged());
   on("image.event", (e) => {
     if (e.threadId !== undefined) imageSaved(e.threadId);
+    if (e.state === "done") void pictures.finished();
     // the job settled to other files than the button names: the server read ComfyUI's list again
     if (e.sent !== undefined && !settledJobs.has(e.jobId)) { settledJobs.add(e.jobId); void loadImagePresets(); }
   });
@@ -264,20 +266,24 @@ export function loadImagePresets(): Promise<void> {
   });
 }
 
+/** The Pictures screen's list and selection (session/pictures.ts). */
+export const pictures = createPictures({ list: (params) => call("pictures.list", params) });
+
 const navigation = createNavigation({
   flushQueued, catchUp, chooseModel, loadThread, loading,
   settingsData: () => settingsReads.ready(),
+  picturesData: () => pictures.enter(),
   // usageSession is made below; this runs only on a navigation, long after
   dropPendingPanel: () => usageSession.dropPendingOpen(),
   newChatModel: (s) => decided(pickChoice(s.models, s.model, s.chosen)),
 });
-export const { openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun } = navigation;
+export const { openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun, leavePictures, togglePictures } = navigation;
 export { spareScreenEntry } from "./session/navigation.ts";
 const { firstRunDone } = navigation;
 
 const usageSession = createUsage({
   read: () => call("usage.read", { since: 0 }),
-  beforeOpen: () => { if (getState().view === "settings") closeSettings(); },
+  beforeOpen: () => { if (overChat(getState().view)) closeSettings(); },
   asked: () => void cancelPendingSettings(),
   enter: enterScreen,
   exit: exitScreen,
@@ -289,7 +295,7 @@ export function onScreenPop(): void {
   if (onScreenEntry()) return;
   const s = getState();
   if (s.panel !== null) usageSession.closeUsage(true, true);
-  if (s.view === "settings") closeSettings();
+  if (overChat(s.view)) closeSettings();
 }
 
 /** The running turns this load would have to stop; none when the server cannot say, and the send goes as it always did. */

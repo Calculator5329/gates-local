@@ -39,7 +39,9 @@ export type Conn =
   | { readonly kind: "down"; readonly since: number }
   | { readonly kind: "no-server" };
 
-export type View = "thread" | "new" | "settings" | "firstrun";
+export type View = "thread" | "new" | "settings" | "pictures" | "firstrun";
+/** A screen that lies over the chat, which stays mounted under it. */
+export const overChat = (view: View): boolean => view === "settings" || view === "pictures";
 export type Section = "general" | "models" | "instructions" | "library" | "tools" | "images" | "runtime" | "advanced" | "shortcuts";
 
 /** A chat's reply being written now, or its last one that stopped before it finished. */

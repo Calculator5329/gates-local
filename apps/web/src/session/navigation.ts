@@ -1,6 +1,6 @@
 // Hash routing, deferred Settings and first-run navigation share one intent generation.
-import { type Section, type State, chatReady, getState, setState } from "../store.ts";
-import { settingsScreen } from "../screen-loaders.ts";
+import { type Section, type State, chatReady, getState, overChat, setState } from "../store.ts";
+import { picturesScreen, settingsScreen } from "../screen-loaders.ts";
 import { cancelQueuedDraft, renewDraft } from "../drafts.ts";
 
 /** The open thread lives in the URL hash: #thread=<id>. */
@@ -21,7 +21,7 @@ export function exitScreen(): void {
   if (onScreenEntry()) history.back();
 }
 /** The screen this entry was made for has closed without taking it away (the drawer reuses it). */
-export const spareScreenEntry = () => onScreenEntry() && getState().view !== "settings" && getState().panel === null;
+export const spareScreenEntry = () => onScreenEntry() && !overChat(getState().view) && getState().panel === null;
 
 /**
  * Settings has closed onto the chat kept under it: the composer takes the caret back, where
@@ -32,7 +32,7 @@ export const spareScreenEntry = () => onScreenEntry() && getState().view !== "se
 function caretBack(): void {
   requestAnimationFrame(() => {
     const s = getState();
-    if (s.view === "settings" || s.panel !== null || s.drawer || !chatReady(s) || matchMedia("(hover: none)").matches) return;
+    if (overChat(s.view) || s.panel !== null || s.drawer || !chatReady(s) || matchMedia("(hover: none)").matches) return;
     const el = document.activeElement;
     if (el === null || el === document.body || (el.tagName === "BUTTON" && el.closest('[role="dialog"]') === null)) {
       document.querySelector<HTMLTextAreaElement>("#ta")?.focus({ preventScroll: true });
@@ -58,6 +58,8 @@ interface NavigationEffects {
   readonly settingsData?: () => Promise<void> | null;
   /** A pop-up still waiting to open is dropped by any destination picked meanwhile. */
   readonly dropPendingPanel: () => void;
+  /** Pictures' first page: resolves once it is in hand, or at a bound. */
+  readonly picturesData?: () => Promise<void>;
 }
 
 /** What belongs to the chat being left: its notice, its warning, and a queued message open for editing. */
@@ -67,7 +69,7 @@ function leavingChat(s: State): Partial<State> {
 }
 
 /** Navigation keeps its own intent; chat and history operations are wired by session.ts. */
-export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel }: NavigationEffects) {
+export function createNavigation({ flushQueued, catchUp, chooseModel, newChatModel, loadThread, loading, settingsData = () => null, dropPendingPanel, picturesData = () => Promise.resolve() }: NavigationEffects) {
   /** Bumped by each navigation, Settings in and out included: a thread load's failure moves the view only if none happened since it was sent (WF-03). */
   let navGen = 0;
   let pendingSettings: number | null = null;
@@ -94,7 +96,7 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     beginNavigation();
     dropPendingPanel();
     wakeAfterEdit();
-    if (getState().view === "settings") caretBack();
+    if (overChat(getState().view)) caretBack();
     setState((s) => {
       // Back on the model last used in this thread; a thread not yet loaded takes its saved one in loadThread.
       const model = s.threadModels[threadId] ?? s.model;
@@ -110,7 +112,7 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     beginNavigation();
     dropPendingPanel();
     wakeAfterEdit();
-    if (getState().view === "settings") caretBack();
+    if (overChat(getState().view)) caretBack();
     // A new chat starts on the model the person used last (store.ts `chosen`), loading or not, at the
     // app-wide context; with nothing used yet it follows the pick (MP-05).
     setState((s) => ({ view: "new", threadId: null, panel: null, ...leavingChat(s), ...newChatModel(s) }));
@@ -145,11 +147,11 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
     exitScreen();
   }
 
-  /** Close Settings onto the chat kept under it; the history entry is left to the caller (Back, or a switch to Usage). */
+  /** Close Settings or Pictures onto the chat kept under it; the history entry is left to the caller (Back, or a switch to Usage). */
   function closeSettings(): void {
     beginNavigation();
     const s = getState();
-    if (s.view === "settings") caretBack();
+    if (overChat(s.view)) caretBack();
     setState({ view: s.threadId !== null ? "thread" : "new" });
     // back to a thread with nothing on screen whose load failed meanwhile: try again (a loaded one returns at once)
     const id = s.threadId;
@@ -160,6 +162,34 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
   function toggleSettings(): void {
     if (getState().view === "settings") leaveSettings();
     else openSettings();
+  }
+
+  /**
+   * Pictures, over the chat as Settings is, on the same history entry. Like Settings it commits
+   * only once its chunk and first page are in hand, so its first frame has the tiles.
+   */
+  function openPictures(): void {
+    const nav = beginNavigation();
+    dropPendingPanel();
+    pendingSettings = nav;
+    void Promise.all([picturesScreen.load(), picturesData()]).then(() => {
+      if (nav !== navGen) return;
+      pendingSettings = null;
+      setState({ view: "pictures", ownerConfirm: false, panel: null });
+      enterScreen();
+    });
+  }
+
+  /** Close Pictures and take its history entry away: the icon, Esc and Ctrl Shift P. */
+  function leavePictures(): void {
+    closeSettings();
+    exitScreen();
+  }
+
+  /** The footer's Pictures icon and Ctrl Shift P. */
+  function togglePictures(): void {
+    if (getState().view === "pictures") leavePictures();
+    else openPictures();
   }
 
   /** The footer's Models icon: Settings › Models, or close when that is on show; addPage opens the download page. */
@@ -196,6 +226,7 @@ export function createNavigation({ flushQueued, catchUp, chooseModel, newChatMod
 
   return {
     openThread, newThread, openSettings, leaveSettings, closeSettings, toggleSettings, toggleModels, cancelPendingSettings, initialView, finishFirstRun, firstRunDone,
+    openPictures, leavePictures, togglePictures,
     get generation() { return navGen; },
     get pendingSettings() { return pendingSettings; },
   };

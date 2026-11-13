@@ -28,6 +28,8 @@ export async function fakeComfy() {
   let listed: readonly FakeFiles[] = [KLEIN_FILES];
   const lists = () => missingModel ? listed.map((f) => ({ ...f, diffusion_models: [] })) : listed;
   let folders: string | undefined, slow = false, slowFile: string | undefined;
+  /** What /view serves: a 1×1 PNG unless a test set a picture of its own. */
+  let viewPng: Buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
   /** Held downloads: each ends its response when released. */
   const held = new Set<() => void>();
   /** A held GET trickles 16 KiB every 100 ms, never the last piece, until released or the app stops it. */
@@ -79,7 +81,7 @@ export async function fakeComfy() {
       case "/interrupt": active.clear(); break;
       case "/view":
         res.writeHead(200, { "content-type": "image/png" });
-        res.end(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")); return;
+        res.end(viewPng); return;
       default:
         if (url.pathname.startsWith("/history/") && (complete || completed.has(url.pathname.slice("/history/".length)))) {
           const id = url.pathname.slice("/history/".length); active.delete(id);
@@ -110,6 +112,8 @@ export async function fakeComfy() {
     url: `http://127.0.0.1:${address.port}`,
     state: () => runs.map((run) => ({ ...run })),
     prompts: () => prompts.map((p) => p.prompt),
+    /** Serve this PNG for every finished prompt from now on. */
+    picture: (png: Buffer) => { viewPng = png; },
     /** List every built-in setup's files: Klein, its compact encoder, Z-Image int8 and MOSS-Image. */
     withApp: () => { listed = APP_FILES; },
     /** List these file sets and nothing else. */

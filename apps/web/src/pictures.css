@@ -1,0 +1,74 @@
+/* Pictures (Pictures.tsx): the contact sheet and its inspector, over the chat as Settings is.
+   The accent is the person's (Settings › General), the theme's foreground when none. */
+.pics{--acc:var(--accent,var(--foreground));--on-acc:var(--on-accent,var(--background));flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--background)}
+.pics-bar{gap:8px}
+.pics-bar h2{display:flex;align-items:baseline;gap:8px}
+.pics-count{font-size:13px;font-weight:400;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.pics-search{width:260px;flex:none}
+.pics-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 300px;position:relative}
+.pics-main{position:relative;min-width:0;min-height:0;display:flex}
+
+/* the sheet: rows placed by pictures-layout.ts, only those near the window drawn */
+.pics-sheet{flex:1;min-width:0;min-height:0;overflow-y:auto;padding:0 20px 32px 24px;scrollbar-gutter:stable}
+.pics-rows{position:relative}
+.pics-day{position:absolute;left:0;right:0;display:flex;align-items:flex-end;padding-bottom:10px;font-size:13px;font-weight:500;color:var(--muted-foreground)}
+.pics-tile{position:absolute;padding:0;border-radius:4px;overflow:hidden;background:var(--card);box-shadow:inset 0 0 0 1px var(--border)}
+.pics-tile img{display:block;width:100%;height:100%;object-fit:cover}
+.pics-tile[aria-pressed="true"]{outline:2px solid var(--acc);outline-offset:2px}
+.pics-tile:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.pics-ck{position:absolute;top:7px;left:7px;width:20px;height:20px;border-radius:50%;background:var(--acc);color:var(--on-acc);display:grid;place-items:center}
+.pics-ck .ic{width:13px;height:13px;stroke-width:2.6}
+.pics-empty{display:flex;align-items:flex-start;justify-content:center;padding-top:20vh;color:var(--muted-foreground);font-size:14px;text-align:center}
+.pics-empty p{max-width:360px;margin:0;line-height:1.55}
+
+/* the inspector: always there, showing the pick */
+.pics-insp{border-left:1px solid var(--border);padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;min-height:0}
+.pics-big{display:block;width:100%;padding:0;border-radius:4px;overflow:hidden;background:var(--card);box-shadow:inset 0 0 0 1px var(--border);cursor:zoom-in}
+.pics-big img{display:block;width:100%;height:100%;object-fit:cover}
+.pics-prompt{margin:0;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.pics-facts{display:grid;grid-template-columns:64px minmax(0,1fr);gap:9px 12px;margin:0;font-size:13px;align-items:baseline}
+.pics-facts dt{color:var(--muted-foreground)}
+.pics-facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.pics-facts .mono{font:400 12.5px/1.3 var(--font-mono);font-variant-numeric:tabular-nums}
+.pics-lnk{color:var(--foreground);text-align:left;text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px;overflow-wrap:anywhere}
+.pics-lnk:hover{text-decoration-color:var(--foreground)}
+.pics-lnk.dim{color:var(--muted-foreground);font-size:13px}
+.pics-acts{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.pics-acts .btn{margin-right:6px;gap:7px}
+.pics-acts .ibtn.red{color:var(--red)}
+.pics-n{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
+.pics-n .pics-lnk{margin-left:auto;font-weight:400}
+.pics-ths{display:flex;flex-wrap:wrap;gap:8px}
+.pics-ths img{height:64px;border-radius:4px;display:block;object-fit:cover;background:var(--card)}
+
+/* Enter's large view, over the sheet; the inspector stays beside it */
+.pics-large{position:absolute;inset:0;z-index:2;background:var(--background);display:flex;align-items:center;justify-content:center;padding:20px 56px}
+.pics-large img{max-width:100%;max-height:100%;object-fit:contain;display:block;border-radius:4px;background:var(--card)}
+.pics-x{position:absolute;top:10px;right:12px}
+.pics-step{position:absolute;top:50%;margin-top:-15px}
+.pics-step.l{left:12px}
+.pics-step.r{right:12px}
+
+/* a tablet: the same two panes, a narrower inspector */
+@media (max-width:1023px){
+  .pics-body{grid-template-columns:minmax(0,1fr) 260px}
+  .pics-search{width:200px}
+}
+
+/* a phone: two or so to a row, the inspector a sheet on the bottom edge */
+@media (max-width:640px){
+  .pics-bar h2{justify-content:center}
+  .pics-bar .pics-search{flex:1;width:auto;margin:0 4px}
+  .pics-body{grid-template-columns:minmax(0,1fr)}
+  .pics-sheet{padding:0 12px 236px}
+  .pics-insp{position:absolute;left:0;right:0;bottom:0;z-index:3;border-left:0;background:var(--popover);box-shadow:inset 0 1px 0 var(--popover-border),var(--popover-shadow);border-radius:10px 10px 0 0;padding:16px 16px max(16px,env(safe-area-inset-bottom));gap:12px;overflow:visible}
+  .pics-row{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:start}
+  .pics-th{display:block;width:72px;height:72px;padding:0;border-radius:4px;overflow:hidden;background:var(--card)}
+  .pics-th img{display:block;width:100%;height:100%;object-fit:cover}
+  .pics-row .pics-prompt{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .pics-line{font:400 12px/1.4 var(--font-mono);color:var(--muted-foreground);margin-top:6px}
+  .pics-acts .btn,.pics-acts .ibtn{height:44px}
+  .pics-acts .ibtn{width:44px}
+  .pics-large{padding:12px 8px 236px}
+  .pics-step{display:none}
+}

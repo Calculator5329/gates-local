@@ -1,5 +1,5 @@
 // Chat admissions, concurrent replies, streaming buffers and queue policy.
-import { type BlockingTurn, type Message, type MethodName, type Params, type Payload, type ResultOf, WireError } from "@gates-local/contracts";
+import { type BlockingTurn, type ImageChoice, type Message, type MethodName, type Params, type Payload, type ResultOf, WireError } from "@gates-local/contracts";
 import { ctxFor, describeModel, k } from "../format.ts";
 import { firstChatPull, sendableModel } from "../pick.ts";
 import { type LiveTurn, NA, type Queued, type State, type StopAsk, type StopNote, chatReady, getState, runningTurn, setState, streamingHere, turnOf } from "../store.ts";
@@ -349,7 +349,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   let early: Array<Payload<"chat.event">> = [];
 
   /** `keepDraft`: words from elsewhere (a Library question). The composer's draft is not this message: none of its pictures go, and it is left as it is, here and after the new chat exists. */
-  async function send(text: string, opts: { reuseThread?: boolean; keepDraft?: true } = {}): Promise<void> {
+  async function send(text: string, opts: { reuseThread?: boolean; keepDraft?: true; draw?: ImageChoice } = {}): Promise<void> {
     const content = text.trim();
     const s = getState();
     const key = currentDraftKey();
@@ -359,8 +359,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (creatingDraft(draft.version)) return;
     if ((content === "" && images.length === 0) || asking) return;
     if (s.pasting) return;
-    // Image on: the words go to the image model, so no chat model has to be ready, see the attachments or fit
-    const draw = drawChoice(s);
+    // Image on: the words go to the image model, so no chat model has to be ready, see the attachments or fit.
+    // `draw`: a picture's own setup (Pictures' Again), whatever the composer is set to.
+    const draw = opts.draw ?? drawChoice(s);
     if (draw === undefined && imageMode(s)) return setState({ notice: "The image models are still being read. Send again in a moment." });
     const cannotSee = draw === undefined ? imageReason(s.models, s.model, images) : null;
     if (cannotSee) return setState({ notice: cannotSee });

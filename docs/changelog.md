@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Pictures, every picture you have made on one screen
+
+- A picture icon in the sidebar's footer, or Ctrl+Shift+P, opens Pictures:
+  every finished picture from every thread, newest first, in rows under the
+  day it was made. The count sits beside the title. Esc or the icon again
+  goes back to the chat you were in.
+- Click a picture and the panel on the right shows its prompt, style, size,
+  seed, steps, how long it took, when it was made, and its thread as a
+  link. Ctrl-click or Shift-click picks several.
+- Under the prompt: Again makes the same prompt with the same style and
+  size in its own thread, Edit prompt opens that thread with the prompt in
+  the composer and Image on, Copy puts the picture on the clipboard, and
+  Save downloads it.
+- Enter, or a click on the panel's picture, shows it full size; the arrow
+  keys step to the next one.
+- Search prompts narrows the grid as you type. A picture that finishes
+  while Pictures is open joins the top without moving what you are looking
+  at.
+- On a phone the grid is three or so to a row and the panel is a sheet on
+  the bottom edge with the same buttons.
+
 ## 2026-11-13: A bug finder for the screens a change touched
 
 - Tools: a bug finder walks the screens a change touched and reports frames

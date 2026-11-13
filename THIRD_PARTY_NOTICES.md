@@ -115,6 +115,21 @@ ComfyUI runs, was written for this repository from the file format and
 ComfyUI's `/object_info` answer; no code from ComfyUI's GPL-3.0 frontend was
 read or copied.
 
+## Picture thumbnails
+
+The server makes the Pictures screen's thumbnails with two runtime
+dependencies of `apps/server`, used unchanged from npm:
+
+- **`@jsquash/webp` 1.5.0:** Apache-2.0, Copyright the jSquash authors; the
+  license text ships in the package as `LICENSE`. It encodes the WebP files.
+  Its WebAssembly codec is built from Google's libwebp, BSD-3-Clause,
+  Copyright (c) 2010 Google Inc.; the package's `codec/README.md` names that
+  source and license.
+- **`pngjs` 7.0.0:** MIT, Copyright (c) 2015 Luke Page & Original
+  Contributors, and Copyright (c) 2012 Kuba Niegowski for the derived work;
+  the license text ships in the package as `LICENSE`. It reads the PNGs that
+  ComfyUI saves.
+
 ## MPL-2.0 build dependencies
 
 `lightningcss` and its native package `lightningcss-linux-x64-gnu` (1.33.0)

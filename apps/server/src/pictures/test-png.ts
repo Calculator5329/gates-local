@@ -26,6 +26,35 @@ export function testPng(width: number, height: number, text: Record<string, stri
   return Buffer.concat([bytes.subarray(0, ihdrEnd), ...texts, bytes.subarray(ihdrEnd)]);
 }
 
+function hsl(h: number, s: number, l: number): [number, number, number] {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+  };
+  return [f(0), f(8), f(4)];
+}
+
+/** A picture that still reads as one at thumbnail size, for screenshots: a sky in two colours from `hue`, a sun, and ground. */
+export function scenePng(width: number, height: number, hue: number): Buffer {
+  const png = new PNG({ width, height });
+  const top = hsl(hue, 0.55, 0.2), low = hsl((hue + 35) % 360, 0.65, 0.58), sun = hsl((hue + 60) % 360, 0.9, 0.86), ground = hsl((hue + 190) % 360, 0.3, 0.13);
+  const horizon = height * 0.7, cx = width * 0.66, cy = height * 0.42, r = Math.min(width, height) * 0.13;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const t = Math.min(1, y / horizon);
+      let c: readonly number[] = y > horizon + Math.sin(x / width * 9) * height * 0.03 ? ground : top.map((v, k) => v + (low[k]! - v) * t);
+      if (c !== ground && (x - cx) ** 2 + (y - cy) ** 2 < r * r) c = sun;
+      const i = (y * width + x) * 4;
+      png.data[i] = c[0]!;
+      png.data[i + 1] = c[1]!;
+      png.data[i + 2] = c[2]!;
+      png.data[i + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
+
 /** ComfyUI's `prompt` chunk for a one-sampler graph. */
 export function promptChunk(seed: number, steps: number): Record<string, string> {
   return { prompt: JSON.stringify({ "3": { class_type: "KSampler", inputs: { seed, steps, cfg: 1, model: ["4", 0] } }, "4": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "x.safetensors" } } }) };
