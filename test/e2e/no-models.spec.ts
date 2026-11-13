@@ -23,6 +23,6 @@ test("no models: download, cancel, download again, then chat", async ({ page, op
   await page.getByRole("button", { name: "Download and start" }).click();
   await page.getByRole("button", { name: "Start chatting" }).click();
   await sendMessage(page, "Hello there");
-  await expect(page.getByText("Sends when the download finishes")).toBeVisible();
+  await expect(page.locator(".qt-r")).toContainText("After download");
   await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
 });

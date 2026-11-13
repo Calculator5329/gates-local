@@ -46,6 +46,9 @@ const rowEdges = (page: Page): Promise<Edges> => page.locator(".composer .cf").e
   };
 });
 
+/** Only where each control is, not which one: a control that takes another's place leaves this the same. */
+const at = (e: Edges) => e.ctl.map(({ l, r }) => [l, r]);
+
 function inside(edges: Edges, state: string): void {
   for (const c of edges.ctl) {
     expect(c.l, `${c.k} inside the composer, ${state}`).toBeGreaterThanOrEqual(edges.box.l - 0.5);
@@ -85,7 +88,7 @@ for (const width of [360, 375, 412, 1280]) {
   });
 }
 
-test("desktop: editing a queued message while the reply ends moves the row once, at the end", async ({ page, open }) => {
+test("desktop: editing a queued message while the reply runs and ends moves nothing in the row", async ({ page, open }) => {
   await open(); await waitReady(page);
   await replyRunning(page, false);
   await page.locator("#ta").fill("Keep this queued draft");
@@ -102,6 +105,9 @@ test("desktop: editing a queued message while the reply ends moves the row once,
   console.log(`ROW_EDGES queued-edit ${JSON.stringify({ running, editing, typed, ended })}`);
   for (const [state, e] of [["running", running], ["editing", editing], ["typed", typed], ["ended", ended]] as const) inside(e, state);
   expect(typed.ctl, "typing into the edit moves nothing").toEqual(editing.ctl);
+  // Stop takes Dictate's square and gives it back: the names change, the edges do not
+  expect(at(editing), "the pencil moves nothing").toEqual(at(running));
+  expect(at(ended), "the reply ending moves nothing").toEqual(at(running));
 });
 
 // ------------------------------------------------------------------ 3. a cut name's tip

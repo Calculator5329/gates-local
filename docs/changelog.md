@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Queued messages sit on the composer, and Stop holds still while one is edited
+
+- Messages waiting in a chat sit in a tray on the composer's top edge, as
+  wide as the composer, instead of a row across the whole thread. Each is
+  one line: an icon for what it will make (a picture when it was queued
+  with Image on, a chat reply otherwise), its words, and three icons: send
+  now, edit, remove.
+- A message that is simply waiting shows no words about it. Only states the
+  queue does not already say get a word: On hold, After download, After
+  setup, Editing.
+- The tips are true while a picture is being made: Send now says it
+  cancels the image, and the composer's Stop says Cancel the image, where
+  both used to name a reply.
+- Editing a queued message while a reply runs no longer moves the
+  composer's buttons: Stop takes the microphone's square until the edit or
+  the reply ends. A double-click on Stop as the reply ends no longer lands
+  its second click on the microphone, and Ctrl+Shift+Space says why
+  dictation waits instead of doing nothing.
+- A message whose first model download stopped says Download stopped, with
+  the full sentence in its tip, so it fits on a phone.
+
 ## 2026-11-13: Settings covers the chat completely
 
 - Opening Settings while a reply was thinking let the open thought's words

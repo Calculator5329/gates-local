@@ -161,7 +161,7 @@ test.describe("first download with only an embedding model installed (MP-04)", (
     await expect(page.getByRole("progressbar")).toBeVisible();
     await page.getByRole("button", { name: "Start chatting" }).click();
     await sendMessage(page, "Hello there");
-    await expect(page.getByText("Sends when the download finishes")).toBeVisible();
+    await expect(page.locator(".qt-r")).toContainText("After download");
     await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
     await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
   });

@@ -111,6 +111,7 @@ export function Composer() {
   const editingId = useStore((s) => s.editingQueued);
   const editing = editingId !== null;
   const running = useStore((s) => runningTurn(s, s.threadId)?.gen ?? null);
+  const drawingNow = useStore(runningKind) === "image";
   const touch = useMedia("(hover: none)");
   const freed = stopsChat(fit);
   const wait = useStore(queueReason);
@@ -188,7 +189,7 @@ export function Composer() {
   const enter = touch ? "" : " (Enter)";
   let sendTip = `Send${enter}`;
   if (editing) sendTip = text ? `Update the queued message${enter}` : "Type the message to queue";
-  else if (isStreaming && !blocked) sendTip = text ? `Queue${enter}. It sends when this reply finishes` : "Type now; it sends when this reply finishes";
+  else if (isStreaming && !blocked) sendTip = `${text ? `Queue${enter}. It sends` : "Type now; it sends"} when ${drawingNow ? "the image" : "this reply"} finishes`;
   else if (queueable) sendTip = `${text ? `Send${enter}. It goes out when ` : "Type now; it sends when "}${wait === "download" ? "the download finishes" : "setup finishes"}`;
   // before the first read nothing is known, so nothing is claimed
   else if (boot || none) sendTip = text ? `Send${enter}` : "Type a message to send";
@@ -212,6 +213,14 @@ export function Composer() {
   // Touch Enter inserts a newline, so a draft needs the queue arrow: on touch, Stop and the arrow hold
   // their own slots for the whole reply, so the first character moves nothing under the finger.
   const showStop = isStreaming && !editing && !touch;
+  // Editing a queued message on desktop: Stop leaves the main button for Dictate's square, so the row holds still.
+  const stopForVoice = isStreaming && editing && !touch;
+  // The note that said why Dictate waited is untrue once Dictate is back. Cleared here, not in Voice: Voice remounts when an edit is cancelled.
+  const wasStopForVoice = useRef(stopForVoice);
+  useEffect(() => {
+    if (wasStopForVoice.current && !stopForVoice && getState().notice === VOICE_HELD) setState({ notice: null });
+    wasStopForVoice.current = stopForVoice;
+  }, [stopForVoice]);
 
   const submit = () => {
     if (sendDisabled) return;
@@ -232,12 +241,14 @@ export function Composer() {
     stopThisReply();
     primary.current?.focus();
   }, { ignoreRepeatedClicks: true });
+  const stopSquare = <button type="button" className="ctl sq stop-sq" aria-label="Stop" data-tip={drawingNow ? "Cancel the image. Your draft stays here" : "Stop this reply. Your draft stays here"} {...compactStopPress}><span className="sqr" /></button>;
 
   return (
     <>
       <DropMarker />
-      <QueueTray />
       <StopWarning />
+      {/* on the composer's top edge: nothing comes between them */}
+      <QueueTray />
       <form
         className={`composer${blocked && !boot ? " blocked" : ""}`}
         autoComplete="off"
@@ -327,7 +338,9 @@ export function Composer() {
             </button>
           </div>
           <div className="cf-r">
-            <Suspense fallback={<span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} /></Suspense>
+            {/* Stop takes Dictate's square while a queued message is edited; Dictate stays mounted under it, so its shortcut still answers */}
+            {stopForVoice ? stopSquare : null}
+            <Suspense fallback={stopForVoice ? null : <span className="ctl sq voice" />}><Voice key={`${view}:${voiceThread}:${replacement}`} textarea={ta} held={stopForVoice ? VOICE_HELD : null} /></Suspense>
             <button
               type="button"
               className="ctl gate"
@@ -363,14 +376,14 @@ export function Composer() {
             <button type="button" className="ctl sq gate" id="optBtn" aria-haspopup="menu" aria-expanded={pop === "opts"} aria-label="Chat options" onClick={() => togglePop("opts")}>
               <Icon id="sliders" />
             </button>
-            {/* the main button is not Stop (a queued edit, or any reply on touch): Stop stays one press away */}
-            {isStreaming && !showStop ? <button type="button" className="ctl sq stop-sq" aria-label="Stop" data-tip="Stop this reply. Your draft stays here" {...compactStopPress}><span className="sqr" /></button> : null}
+            {/* a reply on touch: the main button is the queue arrow, and Stop holds its own slot one press away */}
+            {isStreaming && !showStop && !stopForVoice ? stopSquare : null}
             <button
               ref={primary}
               type="button"
               className={showStop ? "send stop" : "send"}
               aria-label={showStop ? "Stop" : sendLabel}
-              data-tip={showStop ? "Stop. Enter queues your message after this reply" : sendTip}
+              data-tip={showStop ? (drawingNow ? "Cancel the image. Enter queues your message after it" : "Stop. Enter queues your message after this reply") : sendTip}
               // Keep the same focusable node through empty, running and finished states.
               aria-disabled={!showStop && sendDisabled ? true : undefined}
               {...primaryPress}
@@ -418,12 +431,27 @@ function DraftTextarea({ textarea, placeholder, submit }: { textarea: RefObject<
 
 // ---------------------------------------------------------------- queue and warning
 
-export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string {
-  if (editing) return "Editing in the composer";
-  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped. Download a model to send this." : "Sends when the download finishes";
-  if (q.waitFor === "setup") return "Sends when setup finishes";
-  return q.held ? "On hold" : "Sends after this reply";
+/** Why Ctrl+Shift+Space does not start dictation while Stop holds Dictate's square. */
+const VOICE_HELD = "Dictate comes back when this reply ends or you finish editing the queued message.";
+
+/** The tray's "Download stopped" word in full, as its tip: the row is too narrow for the sentence on a phone. */
+export const DOWNLOAD_STOPPED_TIP = "Download stopped. Download a model to send this.";
+
+/** A queued message's state in a word or two, only where being in the queue does not already say it: null while it waits for the reply. */
+export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
+  if (editing) return "Editing";
+  if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : "After download";
+  if (q.waitFor === "setup") return "After setup";
+  return q.held ? "On hold" : null;
 }
+
+/** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
+const runningKind = (s: State): "image" | "reply" | null => {
+  const turn = runningTurn(s, s.threadId);
+  return turn === undefined ? null : turn.image ? "image" : "reply";
+};
+
+const SEND_NOW = { image: "Send now. Cancels the image", reply: "Send now. Stops the reply" } as const;
 
 /** A click handler that leaves the typing cursor in the composer, where the next words go. */
 const andFocus = (act: () => void) => () => {
@@ -432,43 +460,49 @@ const andFocus = (act: () => void) => () => {
   focusComposer();
 };
 
-/** Messages waiting in this chat, above the composer as in T3 Code: each can go now, be edited in place, or be removed. */
+/**
+ * Messages waiting in this chat, on the composer's top edge as in T3 Code. One line each: what it
+ * will make (a picture when it was queued with Image on), its words, then icons to send it now,
+ * edit it in the composer, or remove it.
+ */
 function QueueTray() {
   const queued = useStore((s) => s.queued);
   const threadId = useStore((s) => s.threadId);
   const editingId = useStore((s) => s.editingQueued);
   const first = useStore(firstPull);
   const model = useStore((s) => s.model);
+  const kind = useStore(runningKind);
   const mine = queued.filter((q) => q.threadId === threadId);
   if (mine.length === 0) return null;
   const n = mine.length;
+  const nowTip = kind === null ? "Send now" : SEND_NOW[kind];
   return (
     <ul className="qt" aria-label={`${n} queued message${n === 1 ? "" : "s"}`}>
       {mine.map((q, i) => {
         const editing = q.id === editingId;
+        const words = queueWords(q, editing, first, model);
         return (
-          <li key={q.id} className="qt-r" aria-label={`Queued message ${i + 1} of ${n}, not sent`}>
-            <Icon id="clock" cls="s14" />
+          <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
+            <span className="qt-k" data-tip={q.draw === undefined ? "Chat" : "Image"}><Icon id={q.draw === undefined ? "chat" : "image"} cls="s14" /></span>
             <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
-            <span className="qt-s" role="status">
-              {queueWords(q, editing, first, model)}
-            </span>
+            {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
+            <span className="qt-s" role="status" data-tip={words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : undefined}>{words ?? ""}</span>
             {q.waitFor === "reply" && !editing ? (
-              <button type="button" className="qa" data-send-now data-tip={q.held ? "Send this now" : "Stop this reply and send this now"} onClick={andFocus(() => sendQueuedNow(q.id))}>
-                Send now
+              <button type="button" className="ibtn xs" aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>
+                <SendArrow />
               </button>
             ) : null}
             {editing ? (
-              <button type="button" className="qa" onClick={andFocus(cancelQueuedEdit)}>
-                Cancel editing
+              <button type="button" className="ibtn xs" aria-label="Cancel editing" aria-pressed="true" data-tip="Cancel editing" onClick={andFocus(cancelQueuedEdit)}>
+                <Icon id="pencil" cls="s14" />
               </button>
             ) : (
-              <button type="button" className="qa" data-edit-queued onClick={andFocus(() => editQueued(q.id))}>
-                Edit
+              <button type="button" className="ibtn xs" aria-label="Edit" data-edit-queued data-tip="Edit" onClick={andFocus(() => editQueued(q.id))}>
+                <Icon id="pencil" cls="s14" />
               </button>
             )}
-            <button type="button" className="qa" data-unqueue data-tip="Remove from queue" onClick={andFocus(() => removeQueued(q.id))}>
-              Remove
+            <button type="button" className="ibtn xs" aria-label="Remove" data-unqueue data-tip="Remove" onClick={andFocus(() => removeQueued(q.id))}>
+              <Icon id="x" cls="s14" />
             </button>
           </li>
         );

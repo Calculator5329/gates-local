@@ -100,6 +100,11 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] <!-- workspace:id=work:b7c16486-811b-5ff4-b102-bbbcae47de41 --> A model's measured speed can stay on a page left open past the 14-day window with no chat in between; it corrects on the next finished reply or reload. Drop it on time without a polling timer (for example when the window is shown again).
 
 - [ ] <!-- workspace:id=work:ac143e6e-95f6-5116-a351-159edf9b6db9 --> Send a non-image file by path (owner decision 2026-11-11): the app keeps a copy of an attached file with the thread, the model is told the file's name and reads it in pieces with its read tool, and the message shows a file chip. Today a non-image file becomes a "not sent" chip that blocks Send.
+- [ ] A queued message waiting on a reply in another chat shows no reason in its tray row; say which chat it waits on.
+- [ ] Queued messages are kept in the page only, so a reload or restart drops them. Save them with the thread's draft.
+- [ ] Dictation that is running when Dictate becomes held (a reply starts) is discarded with no word. Keep the words, or say they were dropped.
+- [ ] `Voice.tsx` records when Dictate came back in a `useEffect`, so a click in the same frame can slip past the double-click guard. Use `useLayoutEffect`.
+
 - [ ] Text size: removed from Settings 2026-11-13 because it did not work (owner). Think it through before adding it back: what it scales (chat only, or every screen), how it shows on the phone, and a browser check at each size.
 - [ ] <!-- workspace:id=work:f14a8e12-81be-5e22-b536-c6e83c659b45 --> The model picker is placed when it opens and is not placed again when the window is resized while it is open.
 - [ ] <!-- workspace:id=work:429d2e26-ea6a-5741-a4f3-a493e0274206 --> No browser spec covers the "this model cannot see images" message for an image picked with "Attach a file", the 8-image limit reached through a drop, or the file chooser at phone width.

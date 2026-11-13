@@ -8,7 +8,11 @@ import { Icon } from "./icons.tsx";
 
 type Phase = "idle" | "asking" | "listening" | "transcribing";
 type Dictation = { id: string; draftVersion: number };
-export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | null> }) {
+/**
+ * Dictate. `held` is set while Stop holds this square (a queued message edited during a reply): the button is gone,
+ * the component stays, and the shortcut says why it does not start.
+ */
+export function Voice({ textarea, held = null }: { textarea: RefObject<HTMLTextAreaElement | null>; held?: string | null }) {
   const settings = useStore((s) => s.settings);
   const conn = useStore((s) => s.conn);
   const draftVersion = useDraft(d => d.version);
@@ -39,6 +43,14 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
   // Settings or a pop-up over the chat keeps the composer mounted but hidden: a dictation
   // running into it would type where nobody sees and take Esc from the screen on top.
   useEffect(() => { if (covered) cancel(); }, [covered]);
+  // The square was Stop's a moment ago: the rest of a double-click on Stop must not land here (useActionPress guards Send the same way).
+  const shownAt = useRef(-Infinity);
+  const wasHeld = useRef(held !== null);
+  useEffect(() => {
+    if (held !== null) cancel();
+    else if (wasHeld.current) shownAt.current = performance.now();
+    wasHeld.current = held !== null;
+  }, [held]);
   useEffect(() => {
     if (phase !== "listening") return;
     const started = performance.now();
@@ -117,7 +129,11 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape" && phaseRef.current !== "idle") { e.preventDefault(); e.stopImmediatePropagation(); cancel(); }
       // under Settings or a pop-up the chat is kept but hidden: dictation would type into a draft nobody sees
-      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat && getState().view !== "settings" && getState().panel === null) { e.preventDefault(); void toggle(); }
+      else if (e.code === "Space" && e.ctrlKey && e.shiftKey && !e.repeat && getState().view !== "settings" && getState().panel === null) {
+        e.preventDefault();
+        if (held === null) void toggle();
+        else setState({ notice: held });
+      }
     };
     window.addEventListener("keydown", key, true);
     return () => window.removeEventListener("keydown", key, true);
@@ -131,7 +147,14 @@ export function Voice({ textarea }: { textarea: RefObject<HTMLTextAreaElement | 
     : phase === "asking" ? "Allow microphone access to dictate. Esc cancels."
     : unsupported ?? (!enabled ? "Dictate: connect whisper.cpp in Settings › General" : "Dictate (Ctrl+Shift+Space). Click again to stop. Esc cancels.");
   const name = phase === "listening" ? "Stop dictation" : phase === "transcribing" ? "Dictate, transcribing" : phase === "asking" ? "Dictate, waiting for microphone permission" : "Dictate";
-  return <button type="button" className={`ctl sq voice ${phase}`} aria-label={name} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} data-tip={tip} data-elapsed={phase === "listening" ? seconds : undefined} onPointerDown={(e) => e.preventDefault()} onClick={() => void toggle()}>
+  const click = (e?: { detail?: number }) => {
+    // detail 0 (or none) is a keyboard press, never the tail of a double-click
+    const detail = e?.detail ?? 0;
+    if (detail > 1 || (detail === 1 && performance.now() - shownAt.current < 400)) return;
+    void toggle();
+  };
+  if (held !== null) return null;
+  return <button type="button" className={`ctl sq voice ${phase}`} aria-label={name} aria-pressed={phase === "listening"} aria-busy={phase === "transcribing" || phase === "asking"} aria-disabled={unsupported !== null || phase === "transcribing" || phase === "asking"} data-tip={tip} data-elapsed={phase === "listening" ? seconds : undefined} onPointerDown={(e) => e.preventDefault()} onClick={click}>
     {phase === "transcribing" ? <Icon id="spin" cls="spin" />
       : <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" /></svg>}
     <span className="vh" role="status">{status}</span>

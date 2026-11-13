@@ -78,7 +78,7 @@ test("CP-01 editing queued text keeps compact Stop reachable without losing the 
   await page.screenshot({ path: info.outputPath("queued-edit-stop.png") });
   await stop.click();
   await expect(page.locator("#ta")).toHaveValue("Keep this queued draft");
-  await expect(page.locator(".qt-r")).toContainText("Editing in the composer");
+  await expect(page.locator(".qt-r")).toContainText("Editing");
   await expect(primary).toHaveAccessibleName("Update queued message");
   await expect(stop).toHaveCount(0);
 });

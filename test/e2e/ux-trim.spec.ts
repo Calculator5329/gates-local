@@ -191,18 +191,17 @@ test.describe("the reply-running line", () => {
     await expect(page.locator("[data-running-status]")).toHaveCount(0);
     await expect(page.locator(".composer .stop-sq"), "the main button is Stop").toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("trim-reply-running.png") });
-    // A desktop draft keeps Stop as the main button (Enter queues); editing a queued message is where Stop moves aside.
+    // A desktop draft keeps Stop as the main button (Enter queues); editing a queued message is where Stop moves aside, into Dictate's square.
     await page.locator("#ta").fill("Keep this queued draft");
     await page.locator("#ta").press("Enter");
+    const v = await page.locator(".composer .voice").boundingBox();
     await page.locator(".qt-r [data-edit-queued]").click();
     await expect(primary).toHaveAccessibleName("Update queued message");
     const stop = page.getByRole("button", { name: "Stop", exact: true });
     await expect(stop).toBeVisible();
     await expect(stop).toHaveAttribute("data-tip", "Stop this reply. Your draft stays here");
-    const [s, v, p] = await Promise.all([stop.boundingBox(), page.locator(".composer .voice").boundingBox(), primary.boundingBox()]);
-    expect({ w: s!.width, h: s!.height }, "the same square as Dictate").toEqual({ w: v!.width, h: v!.height });
-    expect(s!.x + s!.width, "left of the main button").toBeLessThanOrEqual(p!.x);
-    expect(s!.x, "right of Dictate").toBeGreaterThan(v!.x);
+    expect(await stop.boundingBox(), "Dictate's square").toEqual(v);
+    await expect(page.locator(".composer .voice"), "Dictate gives its square to Stop while the edit lasts").toHaveCount(0);
     await page.screenshot({ path: test.info().outputPath("trim-reply-running-draft.png") });
     await stop.click();
     await expect(primary).toHaveAccessibleName("Update queued message");

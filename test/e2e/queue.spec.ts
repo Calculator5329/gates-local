@@ -23,8 +23,10 @@ test("Enter while a reply runs queues the message and leaves the reply running; 
 
   await sendMessage(page, "And on a second drive?");
   await expect(rows(page)).toHaveCount(1);
-  await expect(rows(page).first()).toContainText("And on a second drive?");
-  await expect(rows(page).first()).toContainText("Sends after this reply");
+  // waiting in the queue says it waits: the row holds the message, and Send now says what it stops
+  await expect(rows(page).first()).toHaveText("And on a second drive?");
+  await expect(rows(page).first()).toHaveAttribute("aria-label", "Queued message 1 of 1");
+  await expect(rows(page).first().locator("[data-send-now]")).toHaveAttribute("data-tip", "Send now. Stops the reply");
   await expect(page.locator("#ta")).toHaveValue("");
   await expect(page.locator(".turn.u")).toHaveCount(1);
   await expect(stop(page), "the reply is still running").toBeVisible();
@@ -46,7 +48,7 @@ test("a queued message can be edited in the composer, removed, or sent now in pl
   // edit: the text comes back to the composer, the row keeps its place
   await rows(page).first().locator("[data-edit-queued]").click();
   await expect(page.locator("#ta")).toHaveValue("First thought");
-  await expect(rows(page).first()).toContainText("Editing in the composer");
+  await expect(rows(page).first()).toContainText("Editing");
   await expect(page.locator(".composer button.send")).toHaveCount(1);
   await expect(page.locator(".composer button.send")).toHaveAccessibleName("Update queued message");
   await page.locator("#ta").fill("First thought, reworded");
@@ -82,6 +84,7 @@ test("Stop leaves a queued message on hold instead of sending it", async ({ page
   await expect(stop(page)).toHaveCount(0);
 
   await expect(rows(page).first()).toContainText("On hold");
+  await expect(rows(page).first().locator("[data-send-now]"), "nothing is running to stop").toHaveAttribute("data-tip", "Send now");
   await expect(page.locator(".turn.u")).toHaveCount(1);
   await expect(page.locator(".turn.a.interrupted .md ul li")).toHaveCount(3);
 

@@ -25,7 +25,9 @@ const failed: PullProgress = { name: FAILED, state: "error", completedBytes: 0, 
 const frame = (socket: string, event: string) => ({ socket, event });
 const noop = () => {};
 const MESSAGE = "waiting for the first model";
-const STOPPED = "Download stopped. Download a model to send this.";
+const STOPPED = "Download stopped";
+const STOPPED_TIP = 'data-tip="Download stopped. Download a model to send this."';
+const WAITING = "After download";
 type QueueWords = typeof import("../src/Composer.tsx")["queueWords"];
 
 interface World {
@@ -116,7 +118,7 @@ function ended(outcome: "done" | "error" | "cancelled", firstModel: boolean, ava
         const firstDownload = w.wire.a.session.firstPull(state);
         const stopped = available && order.includes("hydration.release") && outcome !== "done";
         if (stopped) expect(firstDownload, "the entry cannot promise an absent download").toBeUndefined();
-        expect(w.words(q, false, firstDownload, state.model), "queue words must describe the current download, including during a drop").toBe(stopped ? STOPPED : "Sends when the download finishes");
+        expect(w.words(q, false, firstDownload, state.model), "queue words must describe the current download, including during a drop").toBe(stopped ? STOPPED : WAITING);
       }
     },
   };
@@ -178,7 +180,7 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     void client.session.send(MESSAGE); await drain();
     const queued = client.store.getState().queued;
     expect(queued).toHaveLength(1);
-    expect(tray()).toContain("Sends when the download finishes");
+    expect(tray()).toContain(WAITING);
     if (outcome === "cancelled") {
       w.wire.server.answer("models.cancelPull", () => ({ cancelled: true }));
       await client.session.cancelPull(NAME);
@@ -189,21 +191,22 @@ it.each(["error", "cancelled"] as const)("RS-01: connected %s keeps the message 
     expect(client.session.firstPull(client.store.getState())).toBeUndefined();
     const stopped = tray();
     expect(stopped).toContain(MESSAGE);
-    expect(stopped).toContain(STOPPED);
-    expect(stopped).not.toContain("Sends when the download finishes");
+    expect(stopped).toContain(`>${STOPPED}<`);
+    expect(stopped, "the full sentence is the word's tip").toContain(STOPPED_TIP);
+    expect(stopped).not.toContain(WAITING);
     expect(stopped).toContain("data-edit-queued");
     expect(stopped).toContain("data-unqueue");
     const q = queued[0];
     if (!q) throw new Error("Missing queued message");
     client.session.editQueued(q.id);
-    expect(tray()).toContain("Editing in the composer");
+    expect(tray()).toContain(">Editing<");
     client.session.cancelQueuedEdit();
     expect(tray()).toContain(STOPPED);
     void client.session.pull(NAME); await drain();
-    expect(tray()).toContain("Sends when the download finishes");
+    expect(tray()).toContain(WAITING);
     client.socket.close(); await drain();
     expect(client.session.queueReason(client.store.getState())).toBeNull();
-    expect(tray(), "a disconnect retains the live download and must not say stopped").toContain("Sends when the download finishes");
+    expect(tray(), "a disconnect retains the live download and must not say stopped").toContain(WAITING);
     client.session.removeQueued(q.id);
     expect(tray()).toBeUndefined();
   } finally { await dispose(w); }
