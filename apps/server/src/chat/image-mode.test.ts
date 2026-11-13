@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ImageChoice, ImageEvent } from "@gates-local/contracts";
 import { createApp } from "../app.ts";
+import { sendStarted } from "./send-started.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
 import { createSources } from "../sources/index.ts";
@@ -79,7 +80,7 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean; firstDone
     fit: { runNvidiaSmi: async (args) => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
   });
   const thread = store.createThread();
-  const send = (extra: Record<string, unknown> = {}) => app.handlers["chat.send"]({ threadId: thread.id, content: "a lighthouse at dusk", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
+  const send = (extra: Record<string, unknown> = {}) => sendStarted(app, { threadId: thread.id, content: "a lighthouse at dusk", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
   return { app, store, lease, thread, send, generate, cancel, requests, chatBodies, events, changed, release, close: async () => { await app.shutdown(); store.close(); } };
 }
 
@@ -174,7 +175,7 @@ describe("Image mode: the typed words go straight to the image model", () => {
     try {
       await t.send({ draw: DRAWN });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
-      await t.app.handlers["chat.send"]({ threadId: t.thread.id, content: "a lighthouse at dawn", model: "m", numCtx: 16384, draw: DRAWN }, { clientId: 1 });
+      await sendStarted(t.app, { threadId: t.thread.id, content: "a lighthouse at dawn", model: "m", numCtx: 16384, draw: DRAWN }, { clientId: 1 });
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       expect(t.store.getThread(t.thread.id).messages.map((m) => [m.role, m.content, m.imageJob?.state])).toEqual([
         ["user", "a lighthouse at dusk", undefined], ["assistant", "a lighthouse at dusk", "done"],

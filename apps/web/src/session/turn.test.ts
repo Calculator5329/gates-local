@@ -60,20 +60,22 @@ describe("reduceTurn", () => {
     expect(reduceTurn(turn({ ending: true }), { type: "error", code: "preempted", message: "Stopped so B could load." }, T0)).toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, ending: undefined });
   });
 
-  it("a cancel keeps the time Stop showed, or measures it when the stop came from elsewhere", () => {
+  it("a cancel keeps the time Stop showed, or takes the server's stop time when the stop came from elsewhere", () => {
     const stopped = reduceTurn(turn(), { type: "stop" }, at(4));
     expect(stopped).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: true });
-    expect(reduceTurn(stopped!, { type: "error", code: "cancelled", message: "c" }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
-    expect(reduceTurn(turn(), { type: "error", code: "cancelled", message: "c" }, at(7))?.end).toEqual({ kind: "stopped", secs: 7 });
+    expect(reduceTurn(stopped!, { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(5) } }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
+    // stopped in another window at 6 s; the end reached this one at 7 s
+    expect(reduceTurn(turn(), { type: "error", code: "cancelled", message: "c", ended: { reason: "stopped", at: at(6) } }, at(7))?.end).toEqual({ kind: "stopped", secs: 6 });
   });
 
-  it("a reply stopped here stays stopped when the server's end is an abort, and ends as the failure when it is not", () => {
+  it("chat row 32: how a reply stopped here ended is the server's word, not a guess from its code", () => {
     const stopped = reduceTurn(turn(), { type: "stop" }, at(4))!;
-    for (const code of ["cancelled", "preempted", "runtime-changed"]) {
-      expect(reduceTurn(stopped, { type: "error", code, message: "m" }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
-    }
-    expect(reduceTurn(stopped, { type: "error", code: "model-not-found", message: "HTTP 404" }, at(9))).toMatchObject({ end: { kind: "error", code: "model-not-found", message: "HTTP 404" }, ending: undefined });
-    expect(reduceTurn(turn(), { type: "error", code: "stream-error", message: "m" }, at(9))?.end).toMatchObject({ kind: "error" });
+    expect(reduceTurn(stopped, { type: "error", code: "cancelled", message: "m", ended: { reason: "stopped", at: at(4) } }, at(9))).toMatchObject({ end: { kind: "stopped", secs: 4 }, ending: undefined });
+    // the server stopped it for another model before the Stop reached it: that is why it ended
+    expect(reduceTurn(stopped, { type: "error", code: "preempted", message: "Stopped so B could load.", ended: { reason: "preempted", at: at(4) } }, at(9)))
+      .toMatchObject({ end: { kind: "error", code: "preempted", message: "Stopped so B could load." }, ending: undefined });
+    expect(reduceTurn(stopped, { type: "error", code: "model-not-found", message: "HTTP 404", ended: { reason: "failed", at: at(5) } }, at(9))).toMatchObject({ end: { kind: "error", code: "model-not-found", message: "HTTP 404" }, ending: undefined });
+    expect(reduceTurn(turn(), { type: "error", code: "stream-error", message: "m", ended: { reason: "failed", at: at(9) } }, at(9))?.end).toMatchObject({ kind: "error" });
   });
 
   it("Stop on an ended turn changes nothing", () => {
@@ -81,22 +83,17 @@ describe("reduceTurn", () => {
     expect(reduceTurn(ended, { type: "stop" }, T0)).toBe(ended);
   });
 
-  it("chat.send's answer gives the turn its id and its saved question", () => {
-    const pending = turn({ turnId: null, pendingUser: "hi", early: { turnId: "t9", ended: false } });
-    expect(reduceTurn(pending, { type: "sent", turnId: "t9", userMessageId: "u1" }, T0)).toMatchObject({ turnId: "t9", userMessageId: "u1", pendingUser: null, early: undefined });
+  it("chat.send's answer gives the turn its id; its start brings the saved question", () => {
+    const pending = turn({ turnId: null, pendingUser: "hi" });
+    const sent = reduceTurn(pending, { type: "sent", turnId: "t9" }, T0)!;
+    expect(sent).toMatchObject({ turnId: "t9", pendingUser: "hi" });
+    expect(sent.userMessageId).toBeUndefined();
+    expect(reduceTurn(sent, { type: "start", model: "m", userMessage: question }, T0)).toMatchObject({ turnId: "t9", userMessageId: "u1", pendingUser: null });
   });
 
   it("a refused send keeps how it ended, without the question it waited to save", () => {
-    const stopped = turn({ turnId: null, pendingUser: "hi", end: { kind: "stopped", secs: 1 }, ending: true, early: { turnId: "t9", ended: false } });
-    expect(reduceTurn(stopped, { type: "refused" }, T0)).toMatchObject({ pendingUser: null, ending: undefined, early: undefined, end: { kind: "stopped", secs: 1 } });
-  });
-
-  it("remembers a turn the server started while the send waited, and its end", () => {
-    const pending = turn({ turnId: null, pendingUser: "hi" });
-    const seen = reduceTurn(pending, { type: "early", turnId: "t9", ended: false }, T0)!;
-    expect(seen.early).toEqual({ turnId: "t9", ended: false });
-    expect(reduceTurn(seen, { type: "early", turnId: "other", ended: true }, T0)).toBe(seen);
-    expect(reduceTurn(seen, { type: "early", turnId: "t9", ended: true }, T0)?.early).toEqual({ turnId: "t9", ended: true });
+    const stopped = turn({ turnId: null, pendingUser: "hi", end: { kind: "stopped", secs: 1 }, ending: true });
+    expect(reduceTurn(stopped, { type: "refused" }, T0)).toMatchObject({ pendingUser: null, ending: undefined, end: { kind: "stopped", secs: 1 } });
   });
 
   it("a dropped connection cuts off a running reply, and a stopped one stops waiting", () => {

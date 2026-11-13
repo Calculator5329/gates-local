@@ -52,7 +52,7 @@ export interface LiveTurn {
   readonly gen: number;
   readonly threadId: string;
   readonly turnId: string | null;
-  /** The saved user message, once chat.send answered: reconnect drops this turn when the server saved its reply. */
+  /** The saved user message, once the turn's start came: reconnect drops this turn when the server saved its reply. */
   readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
@@ -70,7 +70,7 @@ export interface LiveTurn {
   readonly clock?: WorkClock;
   readonly text: string;
   readonly tools: readonly ToolStep[];
-  /** The user's text, shown until chat.send returns the saved message. */
+  /** The user's text, shown until the turn's start brings the saved message. */
   readonly pendingUser: string | null;
   readonly pendingImages?: readonly string[];
   readonly pendingFiles?: readonly AttachedFile[];
@@ -78,8 +78,6 @@ export interface LiveTurn {
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
   /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
   readonly ending?: true;
-  /** A turn the server started in this chat while chat.send had not answered, and whether it has ended; whose it is is known at the answer. */
-  readonly early?: { readonly turnId: string; readonly ended: boolean };
   /**
    * Known only from turns.active, with no event of its own yet: it shows as
    * running in the sidebar and nothing more. The server lists a turn before it
@@ -147,12 +145,6 @@ export interface State {
   readonly models: readonly ModelInfo[] | undefined;
   readonly threads: readonly Thread[];
   readonly messages: Readonly<Record<string, readonly Message[]>>;
-  /** First-token times measured this session, by message id, for the meta line. */
-  readonly firstToken: Readonly<Record<string, number>>;
-  /** "Thought for" seconds measured this session, by message id: from the model being ready, never its load. */
-  readonly thought: Readonly<Record<string, number>>;
-  /** A finished reply's thinking clock, kept this session the way `firstToken` is, by message id. */
-  readonly clocks: Readonly<Record<string, WorkClock>>;
   /** Each chat's reply, by thread id: being written, or ended here and still shown. The open chat shows `turns[threadId]`. */
   readonly turns: Readonly<Record<string, LiveTurn>>;
   readonly queued: readonly Queued[];
@@ -160,8 +152,6 @@ export interface State {
   readonly editingQueued: string | null;
   /** The warning before a send stops another chat's reply. */
   readonly stopAsk: StopAsk | null;
-  /** Why a reply stopped, by the message it hangs on: the saved partial, or the question when no word came. This session only: the server saves the words, not the reason. */
-  readonly stopNotes: Readonly<Record<string, StopNote>>;
 
   readonly view: View;
   readonly threadId: string | null;
@@ -253,14 +243,10 @@ const initial: State = {
   models: undefined,
   threads: [],
   messages: {},
-  firstToken: {},
-  thought: {},
-  clocks: {},
   turns: {},
   queued: [],
   editingQueued: null,
   stopAsk: null,
-  stopNotes: {},
   view: "new",
   threadId: null,
   section: "general",
@@ -370,13 +356,11 @@ export function streamingHere(s: State): boolean {
 let running: ReadonlySet<string> = new Set();
 
 /**
- * The chats where a reply is being written: the sidebar's dot. A send still
- * waiting for its id counts by what the server has said about a turn in its
- * chat meanwhile, since a Stop pressed then cannot reach that turn yet.
+ * The chats where a reply is being written, or waiting to start: the sidebar's dot.
  * Same set object until that list changes, so a word arriving re-renders no reader of it.
  */
 export function runningThreads(s: State): ReadonlySet<string> {
-  const now = Object.values(s.turns).filter((t) => (t.early === undefined ? t.end === undefined : !t.early.ended)).map((t) => t.threadId);
+  const now = Object.values(s.turns).filter((t) => t.end === undefined).map((t) => t.threadId);
   if (now.length !== running.size || now.some((id) => !running.has(id))) running = new Set(now);
   return running;
 }

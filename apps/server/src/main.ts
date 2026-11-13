@@ -82,7 +82,7 @@ import { createApp, type App } from "./app.ts";
 import { createGpuBaseline } from "./fit/baseline.ts";
 import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
-import { createNvidiaSmiRunner, parseMemTotal } from "./fit/gpu.ts";
+import { createNvidiaSmiRunner, forgetGpuReadings, parseMemTotal } from "./fit/gpu.ts";
 import { OLLAMA_REGISTRY } from "./runtime/registry-size.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
@@ -293,7 +293,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     settings: () => services.settings.get(),
     imageMayUnload: () => services.loader.imageMayUnload(),
     // The loader forgets a model the image module unloaded (keep_alive 0).
-    onModelUnloaded: (model) => services.loader.unloaded(model),
+    onModelUnloaded: (model) => { forgetGpuReadings(); services.loader.unloaded(model); },
     ollamaUrl: () => runtime.baseUrl(),
     // The default and the picker's tiers read the GPU as the picker does.
     gpuStatus: () => services.gpu.read(),

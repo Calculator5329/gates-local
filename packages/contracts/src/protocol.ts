@@ -148,6 +148,22 @@ export const methods = {
     result: AttachedFile,
     phone: "allow",
   },
+  /**
+   * The copies this window's saved drafts and queued messages still name (chat row 35): each one's
+   * day starts again, so the day-old cleanup spares it. Sent at connect and every few hours.
+   * Answers the paths that are already gone.
+   */
+  "files.keep": {
+    params: S.Struct({ paths: S.Array(S.String.check(S.isMaxLength(200))).check(S.isMaxLength(512)) }),
+    result: S.Struct({ missing: S.Array(S.String) }),
+    phone: "allow",
+  },
+  /** Chips removed from a draft or a queued message: each copy no message holds and no send is carrying goes now. */
+  "files.release": {
+    params: S.Struct({ paths: S.Array(S.String.check(S.isMaxLength(200))).check(S.isMaxLength(64)) }),
+    result: NoParams,
+    phone: "allow",
+  },
   "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
   "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow" },
@@ -213,9 +229,15 @@ export const methods = {
        */
       askFirst: S.optional(S.Boolean),
     }),
-    result: S.Struct({ turnId: S.String, userMessage: Message, replayed: S.optional(S.Boolean) }),
+    /**
+     * Answered once the turn is taken (chat row 32), before its fit, its load and saving the
+     * question: the turn's id. Its `start` event follows with the saved question; a refusal from
+     * then on comes as its `error` event, before any start. `replayed`: this messageId was
+     * already saved, nothing new runs, and `userMessage` is that saved question.
+     */
+    result: S.Struct({ turnId: S.String, userMessage: S.optional(Message), replayed: S.optional(S.Boolean) }),
   },
-  /** Authoritative running replies when a client connects or reconnects; later changes use chat.event. */
+  /** Authoritative running replies when a client connects or reconnects, from the moment chat.send took each (also while it waits to start); later changes use chat.event. */
   "turns.active": {
     params: NoParams,
     result: S.Array(S.Struct({ turnId: S.String, threadId: S.String })),

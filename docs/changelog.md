@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-11-13: The queue is a shelf in the message box
+
+- Queued messages sit inside the message box, above the field, at its
+  width. Each row keeps its three icons: send now, edit, remove.
+- More than three fold to the next two and a count (+3). The count opens
+  the rest and closes them again. A message being edited always shows.
+
+## 2026-11-13: Attached files clean up after themselves
+
+- An upload that arrives garbled now says "could not be read" instead of
+  "is over 50 MB".
+- A copy whose write fails part way (a full disk) is removed instead of
+  left half written.
+- A Retry that leaves out a file the first try carried removes that file's
+  copy, unless another message still holds it.
+- The day-old copy cleanup now runs every hour, not only when the app
+  starts.
+- Two new calls, files.keep and files.release. A window keeps the files
+  its drafts and queue still name, so a draft left open for a day keeps
+  them. A chip removed from a draft or the queue gives its copy up at
+  once. A copy a send is carrying is never removed while that send is
+  admitted. The first cleanup waits ten minutes after start-up so open
+  windows can say what they keep.
+
+## 2026-11-13: Sends that start together share one GPU reading
+
+- Two messages sent at the same moment now share one nvidia-smi reading
+  instead of each taking its own. The model list's fit table takes the
+  reading a send just made instead of reading again.
+- A send still plans on a fresh reading. After the app loads or unloads a
+  model, or stops its ComfyUI, no reading from before is reused.
+
+## 2026-11-13: The server says how a reply ended
+
+- A reply's end now comes with how it ended: done, stopped, stopped to make
+  way for something (another model, a runtime change, the app closing), or
+  failed. Windows no longer work it out from error codes.
+- A reply stopped in another window says "Stopped after N s" here too, timed
+  from when the server took the Stop.
+- A Stop that reaches the server after it had already stopped the reply for
+  another model now says "Stopped so … could load", which is what happened.
+- "Thought for N s", the time to first token, each thinking round's seconds
+  and a stopped reply's seconds are saved with the reply. A reload or a
+  second window shows the same numbers, where it used to show none.
+- Why a reply didn't finish is saved too, so the note under it (or under the
+  question, when no words came) survives a reload.
+- Send answers at once. The server names the reply as soon as it takes the
+  message, and fitting and loading the model happen after. The 20-minute
+  wait after which a slow send used to hand its words back is gone. A send
+  that can't start (it doesn't fit, it's stopped first, the question can't
+  be saved) puts its words back in the box with the reason, as before.
+- Every window sees a reply from the moment it's sent. If it fails before
+  it starts, the sidebar's working dot goes out at once, where before it
+  stayed until the next reconnect.
+
 ## 2026-11-13: Each model shows how fast it runs here
 
 - A model you have chatted with in the last two weeks shows its speed,

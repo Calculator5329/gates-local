@@ -9,6 +9,7 @@ import { fitEach, planLoad, type FitDeps } from "../fit/fit.ts";
 import type { FitReport } from "../fit/types.ts";
 import { cached, procListeningPids, readGpuStatus, systemdMainPid } from "../fit/gpu-status.ts";
 import { createGpuWatcher, type GpuWatcher } from "../fit/gpu-watch.ts";
+import { forgetGpuReadings } from "../fit/gpu.ts";
 import { createGpuHandlers } from "../fit/handlers.ts";
 import { createSettingsHandlers } from "../settings/handlers.ts";
 import { openSettingsStore, type SettingsStore } from "../settings/store.ts";
@@ -165,7 +166,8 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     // preload holds are busy, and it never reclaims ComfyUI (it runs inside a shared chat claim).
     fit: async (model, numCtx, baseUrl, signal) =>
       (await planLoad({ ...options.fit, baseUrl, model, numCtx, signal, busy: loader?.busyModels() ?? [] })).report,
-    onLoaded: () => gpu.poke(),
+    // a load changed the GPU: no fit after it reuses a reading from before it
+    onLoaded: () => { forgetGpuReadings(); gpu.poke(); },
     // An Ollama this app started (now or on an earlier run, per the ownership record) holds only the app's models.
     ownsRuntime: () => runtime.status().owner === "app",
     ...(options.lease ? { lease: options.lease } : {}),

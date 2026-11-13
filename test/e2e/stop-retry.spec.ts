@@ -19,6 +19,7 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
 
   // the stop square and its seconds in the reply's actions row; no line of words
   await expect(live.locator(".a-act.stop .s")).toHaveText(/^\d+ s$/);
+  const secs = (await live.locator(".stop-mark .s").innerText()).trim();
   await expect(live.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
   await expect(page.locator(".stop-note")).toHaveCount(0);
   await expect(page.locator(".writing")).toHaveCount(0);
@@ -32,9 +33,9 @@ test("a stopped reply survives a reload and Regenerate replaces it without a sec
   const kept = page.locator(".turn.a.interrupted");
   await expect(kept).toHaveCount(1);
   await expect(kept.locator(".md")).toContainText(stopped);
-  // after a reload who stopped it and when are not known here: the square alone
+  // after a reload the square keeps Stop's seconds: the server saved them with the row (chat row 32)
   await expect(kept.getByRole("img", { name: UNSEEN, exact: true })).toBeVisible();
-  await expect(kept.locator(".stop-mark .s")).toHaveCount(0);
+  await expect(kept.locator(".stop-mark .s")).toHaveText(secs);
   await expect(page.locator(".stop-note")).toHaveCount(0);
 
   await stack.scenario("models");

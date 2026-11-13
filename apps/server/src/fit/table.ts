@@ -11,7 +11,7 @@ import type { CatalogEntry, ContextSize, FitMemory, FitRow, FitTable, ModelLoad 
 import type { GpuBaseline } from "./baseline.ts";
 import { VRAM_SAFETY_MARGIN_BYTES } from "./constants.ts";
 import { cardRamBytes, decideFit, estimateBeforeDownload, planWith, takeReadings, type FitDeps, type Readings, type TotalNeed, type TotalReport } from "./fit.ts";
-import { defaultNvidiaSmi, readGpu } from "./gpu.ts";
+import { defaultNvidiaSmi, GPU_REUSE_MS, readGpu } from "./gpu.ts";
 import { FitError, type GpuSnapshot } from "./types.ts";
 
 /** The contexts the picker offers. */
@@ -42,8 +42,11 @@ export interface FitTableDeps {
 export interface FitTableSource {
   /** The last table; builds one first when there is none yet. */
   get(): Promise<FitTable>;
-  /** Something the table depends on changed: build a new one (coalesced) and push it if it differs. */
-  changed(): void;
+  /**
+   * Something the table depends on changed: build a new one (coalesced) and push it if it differs.
+   * `afterPlan`: a send just planned on a fresh GPU reading, and the build may take it (chat row 33).
+   */
+  changed(options?: { afterPlan?: boolean }): void;
   /** A models.load notice: no table is built while a load is running (its memory is half counted). */
   load(load: ModelLoad): void;
 }
@@ -124,6 +127,8 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
   let lastPushed: string | undefined;
   let building: Promise<FitTable> | undefined;
   let again = false;
+  /** The next build may take a GPU reading up to GPU_REUSE_MS old: only when every trigger since the last build said so. */
+  let reuseNext: boolean | undefined;
   /** Open models.load notices by model. */
   const loading = new Map<string, number>();
   const now = deps.fit?.now ?? Date.now;
@@ -131,10 +136,12 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
 
   const build = async (): Promise<FitTable> => {
     const at = ++seq;
+    const reuseGpuMs = reuseNext === true ? GPU_REUSE_MS : 0;
+    reuseNext = undefined;
     const baseUrl = deps.baseUrl();
     try {
       if (baseUrl === undefined) throw new Error("the model runtime is not running");
-      const r = await takeReadings({ ...deps.fit, baseUrl });
+      const r = await takeReadings({ ...deps.fit, baseUrl, reuseGpuMs });
       const comfyPid = deps.comfyPid();
       const own = comfyPid === undefined ? [] : [comfyPid];
       deps.fit?.baseline?.observe(r.gpu, own);
@@ -147,7 +154,7 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
       if (e instanceof FitError && e.code === "gpu-unreadable") return unreadable(at, e.message);
       // No runtime to ask: no rows, and the footer's line from the GPU alone.
       try {
-        const gpu = await readGpu(deps.fit?.runNvidiaSmi ?? defaultNvidiaSmi, now);
+        const gpu = await readGpu(deps.fit?.runNvidiaSmi ?? defaultNvidiaSmi, now, undefined, reuseGpuMs);
         return { reading: { boot, seq: at, measuredAt: gpu.measuredAt }, memory: memoryOf(gpu, margin, undefined, []), rows: [] };
       } catch (gpuError) {
         return unreadable(at, (gpuError as Error).message);
@@ -186,20 +193,28 @@ export function createFitTable(deps: FitTableDeps): FitTableSource {
         building = undefined;
         if (again) {
           again = false;
-          trigger();
+          kick();
         }
       });
     return building;
   };
 
   // While a load runs, a trigger waits for it: the load's end triggers once every load has ended.
-  const trigger = () => {
+  const kick = () => {
     if (loading.size === 0) void run();
+  };
+  const trigger = (reuseGpu = false) => {
+    reuseNext = (reuseNext ?? true) && reuseGpu;
+    kick();
   };
 
   return {
-    get: async () => last ?? (await run()),
-    changed: trigger,
+    get: async () => {
+      if (last !== undefined) return last;
+      reuseNext = false;
+      return await run();
+    },
+    changed: (options) => trigger(options?.afterPlan === true),
     load(load) {
       const open = loading.get(load.model) ?? 0;
       if (load.state === "loading") {

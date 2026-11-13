@@ -19,6 +19,8 @@ it("keeps rendered link permissions after Stop followed by Send", async () => {
   try {
     await until(() => store.getState().imageStatus !== undefined && store.getState().conn.kind === "open");
     await session.send("Draw a ship and read the report");
+    // the turn's start, which the server sends after the answer and before any step
+    await tick();
     const live = Object.values(store.getState().turns)[0]!;
     const event = (value: import("@gates-local/contracts").Payload<"chat.event">["event"]) => browser.server.push("chat.event", { turnId: live.turnId!, threadId: live.threadId, event: value });
     event({ type: "tool", step: { callId: "image", name: "image", state: "done", summary: "Image queued", links: [] } });
@@ -36,7 +38,7 @@ it("keeps rendered link permissions after Stop followed by Send", async () => {
     event({ type: "tool", step: { callId: "pending", name: "read", state: "running", summary: "Reading another source" } });
     await tick();
     session.stop();
-    event({ type: "error", code: "cancelled", message: "cancelled" });
+    event({ type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     check();
     await session.send("Read the next report");

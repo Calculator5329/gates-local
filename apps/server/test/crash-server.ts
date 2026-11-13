@@ -9,6 +9,7 @@ import type { ServerResponse } from "node:http";
 import path from "node:path";
 
 import { createApp } from "../src/app.ts";
+import { sendStarted } from "../src/chat/send-started.ts";
 import { json, startFakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime } from "../src/runtime/runtime.ts";
@@ -88,7 +89,7 @@ const app = createApp({
 await runtime.discover();
 
 const thread = store.createThread({ title: "crash test" });
-const send = (content: string) => app.handlers["chat.send"]({ threadId: thread.id, content, model: MODEL, numCtx: 16384 }, { clientId: 1 });
+const send = (content: string) => sendStarted(app, { threadId: thread.id, content, model: MODEL, numCtx: 16384 }, { clientId: 1 });
 await send("first question");
 while (app.activeTurns() > 0) await sleep(1);
 const second = await send("second question");

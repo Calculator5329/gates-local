@@ -265,8 +265,6 @@ export function Composer() {
     <>
       <DropMarker />
       <StopWarning />
-      {/* on the composer's top edge: nothing comes between them */}
-      <QueueTray />
       <form
         className={`composer${blocked && !boot ? " blocked" : ""}`}
         data-testid="chat.composer.form"
@@ -276,6 +274,8 @@ export function Composer() {
           submit();
         }}
       >
+        {/* chat row 36: the queue is a shelf inside the box, at its width */}
+        <QueueTray />
         <div className="att"><AttachmentImages images={images} removable /><AttachedFiles files={files} removable /><RefusedFiles /></div>
         {/* "+ › Attach a file" opens this; like T3 Code's paperclip it takes any file, and each is sorted at its chip */}
         <input
@@ -505,12 +505,16 @@ const andFocus = (act: () => void) => () => {
   focusComposer();
 };
 
+/** More queued than this fold to the next two and a count (chat row 36). */
+const SHELF_ROWS = 3;
+
 /**
- * Messages waiting in this chat, on the composer's top edge as in T3 Code. One line each: what it
- * will make (a picture when it was queued with Image on), its words, then icons to send it now,
- * edit it in the composer, or remove it.
+ * Messages waiting in this chat, on a shelf at the top of the message box (chat row 36). One line
+ * each: what it will make (a picture when it was queued with Image on), its words, then icons to
+ * send it now, edit it in the composer, or remove it. More than three fold to a count.
  */
 function QueueTray() {
+  const [open, setOpen] = useState(false);
   const queued = useStore((s) => s.queued);
   const threadId = useStore((s) => s.threadId);
   const editingId = useStore((s) => s.editingQueued);
@@ -521,9 +525,13 @@ function QueueTray() {
   if (mine.length === 0) return null;
   const n = mine.length;
   const nowTip = kind === null ? "Send now" : SEND_NOW[kind];
+  const folds = n > SHELF_ROWS;
+  const shown = (i: number, id: string) => !folds || open || i < SHELF_ROWS - 1 || id === editingId;
+  const hidden = mine.filter((q, i) => !shown(i, q.id)).length;
   return (
     <ul className="qt" aria-label={`${n} queued message${n === 1 ? "" : "s"}`}>
       {mine.map((q, i) => {
+        if (!shown(i, q.id)) return null;
         const editing = q.id === editingId;
         const words = queueWords(q, editing, first, model);
         return (
@@ -554,6 +562,15 @@ function QueueTray() {
           </li>
         );
       })}
+      {folds ? (
+        <li className="qt-more">
+          <button type="button" className="ibtn xs" data-testid="chat.queue.more" aria-expanded={open}
+            aria-label={open ? "Show fewer queued messages" : `Show ${hidden} more queued message${hidden === 1 ? "" : "s"}`}
+            data-tip={open ? "Show fewer" : `${hidden} more`} onClick={() => setOpen(!open)}>
+            {open ? <Icon id="down" cls="s14 up" /> : `+${hidden}`}
+          </button>
+        </li>
+      ) : null}
     </ul>
   );
 }

@@ -3,12 +3,13 @@
 // keeps, a turn left running behind another chat, and the queue of messages
 // typed while a reply is being written.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BlockingTurn, Message, Payload } from "@gates-local/contracts";
+import type { BlockingTurn, Message, Payload, ReplyTimes } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 import { replay } from "./ordering-replay.ts";
 import { gpuReadFailure } from "../../server/src/fit/gpu.ts";
 import { draftView } from "./draft-view.ts";
+import { drawTimes } from "../src/session/times.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -54,9 +55,7 @@ it("CO-06 replay: a refused GPU send shows the server explanation and restores i
   });
 });
 
-it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its identity after visiting %s and returning", async destination => {
-  const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
+it.each(["Settings", "another thread"])("round 4: a refused send's retry keeps its identity after visiting %s and returning", async destination => {
   const { settingsScreen } = await import("../src/screen-loaders.ts");
   const load = vi.spyOn(settingsScreen, "load").mockResolvedValue();
   try {
@@ -65,6 +64,7 @@ it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its iden
     const sent = session.send(st().draft);
     const request = await waiting;
     const original = request.params.messageId;
+    request.fail("closed", "not confirmed");
     await sent;
     expect(st().draft).toBe("same recovered words");
     if (destination === "Settings") {
@@ -78,7 +78,7 @@ it.each(["Settings", "another thread"])("round 4: a timeout retry keeps its iden
     expect(st()).toMatchObject({ view: "thread", threadId: "A", draft: "same recovered words" });
     await session.send(st().draft);
     expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", original);
-  } finally { load.mockRestore(); timer.mockRestore(); }
+  } finally { load.mockRestore(); }
 });
 
 it("round 4: sending the recovered words in B never uses A's identity", async () => {
@@ -172,47 +172,46 @@ it("PC-03: reconnect retry keeps the identity of the unacknowledged send", async
   expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", id);
 });
 
-it("PC-02: late success cannot erase words being edited from a recovered queue row", async () => {
-  const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
-  try {
-    type("original words");
-    const waiting = b.server.hold("chat.send");
-    const sent = session.send(st().draft);
-    const request = await waiting;
-    type("newer draft");
-    await until(() => st().queued.length === 1, 2000, "recovered queue");
-    const q = st().queued[0]!;
-    session.editQueued(q.id);
-    draftSource.editDraft("edited recovery words");
-    const id = (request.params as { messageId?: string }).messageId ?? "u-A-1";
-    chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "original words") });
-    request.respond({ turnId: "turn-A-1", userMessage: userMsg(id, "A", "original words") });
-    await sent;
-    await tick();
-    expect(st().editingQueued).toBeNull();
-    expect(st().draft).toBe("edited recovery words");
-    await session.send(st().draft);
-    expect(st().draft === "edited recovery words" || st().queued.some(item => item.text === "edited recovery words") || sends().some(item => item.content === "edited recovery words")).toBe(true);
-    const last = b.server.calls("chat.send").at(-1);
-    const edited = st().queued.find(item => item.text === "edited recovery words")?.messageId ?? (last ? (last.params as { messageId?: string }).messageId : undefined);
-    expect(edited).toEqual(expect.any(String));
-    expect(edited).not.toBe(id);
-  } finally { timer.mockRestore(); }
+it("chat row 32: Send answers at once; the words wait as the question until the start brings the saved row", async () => {
+  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  type("slow admission");
+  await session.send(st().draft);
+  // answered with the turn id while the server still admits it: no timer, no words back in the box
+  expect(live()).toMatchObject({ turnId: "turn-A-1", pendingUser: "slow admission" });
+  expect(st().draft).toBe("");
+  type("next words");
+  await session.send(st().draft);
+  expect(st().queued.map(q => q.text), "a second Send queues behind the admitted turn").toEqual(["next words"]);
+  const id = (b.server.calls("chat.send")[0]!.params as { messageId: string }).messageId;
+  chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
+  await tick();
+  expect(live()).toMatchObject({ turnId: "turn-A-1", userMessageId: id, pendingUser: null });
+  expect(st().messages["A"]?.map(m => m.content)).toEqual(["slow admission"]);
+  expect(sends()).toHaveLength(1);
 });
 
-it("PC-06: a stalled open-socket admission releases Send for a safe retry", async () => {
-  const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
-  try {
-    type("stalled send");
-    const waiting = b.server.hold("chat.send");
-    void session.send(st().draft);
-    await waiting;
-    await until(() => st().draft === "stalled send", 2000, "restored timeout");
-    await session.send(st().draft);
-    expect(sends()).toHaveLength(2);
-  } finally { timer.mockRestore(); }
+it("chat row 32: a refusal after the answer puts the words back with the server's reason", async () => {
+  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  draftSource.replaceDraft(st().threadId, { text: "keep these", images: ["data:image/png;base64,cGl4ZWw="] });
+  await session.send(st().draft);
+  const sentence = gpuReadFailure("nvidia-smi timed out");
+  chat("turn-A-1", "A", { type: "error", code: "gpu-unreadable", message: sentence, ended: { reason: "failed", at: 1 } });
+  await tick();
+  expect(st()).toMatchObject({ draft: "keep these", draftImages: ["data:image/png;base64,cGl4ZWw="], notice: `${sentence} Your message is back in the box.` });
+  expect(st().turns, "the refused turn leaves nothing behind").toEqual({});
+  expect(st().messages["A"] ?? []).toEqual([]);
+});
+
+it("chat row 32: a dropped connection before the start puts the words back and keeps their identity", async () => {
+  b.server.answer("chat.send", () => ({ turnId: "turn-A-1" }));
+  type("not started yet");
+  await session.send(st().draft);
+  const id = (b.server.calls("chat.send")[0]!.params as { messageId: string }).messageId;
+  b.server.socket.close();
+  await until(() => st().draft === "not started yet", 2000, "words back");
+  await until(() => st().conn.kind === "open", 2000, "reconnected");
+  await session.send(st().draft);
+  expect(b.server.calls("chat.send").at(-1)?.params).toHaveProperty("messageId", id);
 });
 
 it.each(["timeout", "closed", "image-input"])("returns an unconfirmed %s send to view with its images", async code => {
@@ -239,9 +238,7 @@ it("keeps newer typing and puts an unconfirmed timeout in a visible held queue",
 });
 
 it.each([false, true])("late confirmation retires only the matching recovered copy (new draft: %s)", async newer => {
-  const realTimeout = globalThis.setTimeout;
-  const timer = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn, ms, ...args) => realTimeout(fn, ms === sendTimeout ? 15 : ms, ...args));
-  try {
+  {
     const images = ["data:image/png;base64,cGl4ZWw="];
     draftSource.replaceDraft(st().threadId, { text: "slow admission", images });
     const waiting = b.server.hold("chat.send");
@@ -249,6 +246,7 @@ it.each([false, true])("late confirmation retires only the matching recovered co
     const request = await waiting;
     const id = request.params.messageId!;
     if (newer) type("newer words");
+    request.fail("timeout", "not confirmed");
     await sent;
     expect(newer ? st().queued[0]?.text : st().draft).toBe("slow admission");
     chat("turn-A-1", "A", { type: "start", model: MODEL, userMessage: userMsg(id, "A", "slow admission") });
@@ -259,19 +257,16 @@ it.each([false, true])("late confirmation retires only the matching recovered co
     expect(sends()).toHaveLength(1);
     expect(b.server.calls("chat.cancel")).toHaveLength(0);
     expect(live()?.turnId).toBe("turn-A-1");
-  } finally { timer.mockRestore(); }
+  }
 });
 
 let created: string[];
 let turnsOf: Record<string, number>;
-/** How long chat.send waits for admission before its words come back (shortened to 15 ms where a test stalls it). */
-let sendTimeout: number;
 
 beforeEach(async () => {
   b = installBrowser();
   vi.resetModules();
   session = await import("../src/session.ts");
-  sendTimeout = (await import("../src/session/chat.ts")).SEND_TIMEOUT_MS;
   store = await import("../src/store.ts");
   draftSource = await import("../src/drafts.ts");
   created = ["A", "B", "C"];
@@ -335,16 +330,30 @@ async function stopped(words: string): Promise<void> {
   if (words !== "") chat(turn, "A", { type: "delta", text: words });
   await tick();
   session.stop();
-  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
   await tick();
 }
 
-const preempted = (partial?: Message): Payload<"chat.event">["event"] => ({
-  type: "error",
+/** A row as the server saves it when its turn ends: stamped with how and when (chat row 32). */
+const stampedRow = (m: Message, reason: ReplyTimes["ended"]["reason"], why?: ReplyTimes["why"]): Message =>
+  ({ ...m, times: { startedAt: 1_000, spans: [], callsAt: {}, ended: { reason, at: 4_000 }, ...(why === undefined ? {} : { why }) } });
+/** The note the timeline draws for a row, by id, in whichever chat holds it; "missing" when none does. */
+const noteOf = (id: string) => {
+  const m = Object.values(st().messages).flat().find((x) => x.id === id);
+  return m === undefined ? "missing" : drawTimes(m, undefined).note;
+};
+
+const preemptWhy = {
   code: "preempted",
   message: "qwen3:14b at num_ctx 16384 needed the GPU memory other was using, so this reply stopped. Send the message again.",
-  ...(partial ? { partial } : {}),
   neededBy: "qwen3:14b",
+};
+const preempted = (partial?: Message, question?: Message): Payload<"chat.event">["event"] => ({
+  type: "error",
+  ...preemptWhy,
+  ended: { reason: "preempted", at: 4_000 },
+  ...(partial ? { partial: stampedRow(partial, "preempted", preemptWhy) } : {}),
+  ...(question ? { question: stampedRow(question, "preempted", preemptWhy) } : {}),
 });
 
 it("keeps an off-screen partial reply that was cancelled", async () => {
@@ -352,7 +361,7 @@ it("keeps an off-screen partial reply that was cancelled", async () => {
   chat(turn, "A", { type: "delta", text: "Partial answer" });
   await tick();
   await answering("B");
-  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
   const saved = (st().messages["A"] ?? []).at(-1);
   expect(saved).toMatchObject({ content: "Partial answer" });
   expect(saved).not.toHaveProperty("contextNotice");
@@ -483,7 +492,7 @@ const ask = async (reply: Payload<"chat.event">["event"]) => {
   return st().messages["A"]?.find((m) => m.role === "user")?.id ?? "";
 };
 const saved = (id: string, content = "so far") => ({ ...asstMsg(id, "A", content), interrupted: true as const });
-const cancelledWith = (partial: Message): Payload<"chat.event">["event"] => ({ type: "error", code: "cancelled", message: "stopped", partial });
+const cancelledWith = (partial: Message): Payload<"chat.event">["event"] => ({ type: "error", code: "cancelled", message: "stopped", partial: stampedRow(partial, "stopped"), ended: { reason: "stopped", at: 4_000 } });
 const replies = () => (st().messages["A"] ?? []).filter((m) => m.role === "assistant").map((m) => m.content);
 
 describe("the chat that got stopped", () => {
@@ -495,7 +504,7 @@ describe("the chat that got stopped", () => {
     chat("turn-A-1", "A", preempted(asstMsg("p1", "A", "so far")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p1");
-    expect(st().stopNotes["p1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
+    expect(noteOf("p1")).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
     expect(live()?.threadId).toBe("B");
     expect(live()?.end).toBeUndefined();
   });
@@ -508,11 +517,11 @@ describe("the chat that got stopped", () => {
     await tick();
     expect(live()).toBeNull();
     expect(st().messages["A"]?.filter((m) => m.role === "assistant").map((m) => m.content)).toEqual(["so far"]);
-    expect(st().stopNotes["p1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
+    expect(noteOf("p1")).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
   });
 
   describe("Retry", () => {
-    const unfinished: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true } };
+    const unfinished: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p8", "A", "so far"), interrupted: true }, ended: { reason: "stopped", at: Date.now() } };
 
     it("of an unfinished reply names the question, and the old rows go once the server answers", async () => {
       const question = await ask(unfinished);
@@ -555,7 +564,7 @@ describe("the chat that got stopped", () => {
       await tick();
       expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p4"]).toEqual({ kind: "stopped", secs: expect.any(Number) });
+      expect(noteOf("p4")).toEqual({ kind: "stopped", secs: expect.any(Number) });
       expect(st().queued).toMatchObject([{ text: "next", held: true }]);
       expect(sends()).toHaveLength(1);
     });
@@ -581,7 +590,7 @@ describe("the chat that got stopped", () => {
       chat(turn, "A", done("whole", "A"));
       await tick();
       expect(live()).toBeNull();
-      expect(st().stopNotes["whole"]).toBeUndefined();
+      expect(noteOf("whole")).toBeUndefined();
       expect(st().queued).toMatchObject([{ text: "next", held: true }]);
       expect(sends()).toHaveLength(1);
     });
@@ -590,11 +599,12 @@ describe("the chat that got stopped", () => {
       const turn = await answering("A");
       chat(turn, "A", { type: "delta", text: "so far" });
       b.frame();
-      chat(turn, "A", { type: "error", code: "runtime-error", message: "the model crashed", partial: saved("p6") });
+      const why = { code: "runtime-error", message: "the model crashed" };
+      chat(turn, "A", { type: "error", ...why, partial: stampedRow(saved("p6"), "failed", why), ended: { reason: "failed", at: 4_000 } });
       await tick();
       expect(live()).toBeNull();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p6"]).toEqual({ kind: "said", words: "The reply didn't finish. The model crashed." });
+      expect(noteOf("p6")).toEqual({ kind: "said", words: "The reply didn't finish. The model crashed." });
     });
 
     it("a reply this window left running, stopped from elsewhere, still says it was stopped", async () => {
@@ -605,7 +615,7 @@ describe("the chat that got stopped", () => {
       chat(turn, "A", cancelledWith(saved("p7")));
       await tick();
       expect(replies()).toEqual(["so far"]);
-      expect(st().stopNotes["p7"]).toEqual({ kind: "stopped", secs: expect.any(Number) });
+      expect(noteOf("p7")).toEqual({ kind: "stopped", secs: expect.any(Number) });
     });
   });
 
@@ -621,18 +631,21 @@ describe("the chat that got stopped", () => {
     await warned();
     session.confirmStopAsk(false);
     await until(() => live()?.threadId === "B" && live()?.pendingUser === null, 2000, "turn B");
-    chat("turn-A-1", "A", preempted());
+    const question = st().messages["A"]?.find((m) => m.id === "u-A-1");
+    expect(question).toBeDefined();
+    chat("turn-A-1", "A", preempted(undefined, question));
     await tick();
-    expect(st().stopNotes["u-A-1"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
+    expect(noteOf("u-A-1")).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so .+ could load\.$/) });
   });
 
   it("a runtime switch reads the same way", async () => {
     const turn = await answering("A");
     chat(turn, "A", { type: "delta", text: "so far" });
-    chat(turn, "A", { type: "error", code: "runtime-changed", message: "The Ollama runtime changed while this reply was running, so it stopped. Send the message again.", partial: asstMsg("p2", "A", "so far") });
+    const why = { code: "runtime-changed", message: "The Ollama runtime changed while this reply was running, so it stopped. Send the message again." };
+    chat(turn, "A", { type: "error", ...why, partial: stampedRow(asstMsg("p2", "A", "so far"), "preempted", why), ended: { reason: "preempted", at: 4_000 } });
     await tick();
     expect(live()).toBeNull();
-    expect(st().stopNotes["p2"]).toEqual({ kind: "said", words: "Stopped when the Ollama runtime changed." });
+    expect(noteOf("p2")).toEqual({ kind: "said", words: "Stopped when the Ollama runtime changed." });
   });
 
   it("a turn this client never showed still leaves its partial in a thread it has", async () => {
@@ -643,7 +656,7 @@ describe("the chat that got stopped", () => {
     chat("elsewhere", "A", preempted(asstMsg("p3", "A", "from the phone")));
     await tick();
     expect(st().messages["A"]?.map((m) => m.id)).toContain("p3");
-    expect(st().stopNotes["p3"]).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so /) });
+    expect(noteOf("p3")).toEqual({ kind: "said", words: expect.stringMatching(/^Stopped so /) });
   });
 });
 
@@ -725,7 +738,7 @@ describe("picking a model while another is answering", () => {
     await answering("B");
     session.openThread("A");
     session.sendQueuedNow(id ?? "");
-    chat(a, "A", { type: "error", code: "cancelled", message: "stopped" });
+    chat(a, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await until(() => sends().length === 3, 1000, "the explicit Send now");
     expect(sends()[2]).toMatchObject({ threadId: "A", content: "send now" });
     expect(b.server.calls("chat.send")[2]?.params).toMatchObject({ images, messageId });
@@ -795,7 +808,7 @@ describe("messages typed while a reply is being written", () => {
     session.stop();
     await tick();
     expect(b.server.calls("chat.cancel")).toHaveLength(1);
-    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     expect(sends()).toHaveLength(1);
     expect(st().queued).toMatchObject([{ text: "next", held: true }]);
@@ -809,7 +822,7 @@ describe("messages typed while a reply is being written", () => {
     const turn = await answering("A");
     await session.send("next");
     session.stop();
-    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     const other = await answering("B");
     chat(other, "B", { type: "done", message: asstMsg("b1", "B"), stopReason: "stop" });
@@ -826,7 +839,7 @@ describe("messages typed while a reply is being written", () => {
     await tick();
     expect(b.server.calls("chat.cancel")).toHaveLength(1);
     expect(sends()).toHaveLength(1); // the server refuses a second turn until this one ends
-    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+    chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
     await until(() => sends().length === 2, 2000, "the interrupt");
     expect(sends()[1]?.content).toBe("urgent");
     expect(st().queued.map((q) => q.text)).toEqual(["first"]);
@@ -840,12 +853,12 @@ describe("messages typed while a reply is being written", () => {
       await tick();
       await session.send("urgent");
       session.sendQueuedNow(st().queued[0]?.id ?? "");
-      chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+      chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } });
       await until(() => sends().length === 2, 2000, "the interrupt");
       await tick();
       expect(roles()).toEqual(["user", "assistant", "user"]);
       expect(kept()?.content).toBe("words so far");
-      expect(st().stopNotes[kept()?.id ?? ""]).toEqual({ kind: "stopped", secs: expect.any(Number) });
+      expect(noteOf(kept()?.id ?? "")).toEqual({ kind: "stopped", secs: expect.any(Number) });
     });
 
     it("a later send keeps it too", async () => {
@@ -932,7 +945,7 @@ describe("messages typed while a reply is being written", () => {
   });
 });
 
-const CANCELLED: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped" };
+const CANCELLED: Payload<"chat.event">["event"] = { type: "error", code: "cancelled", message: "stopped", ended: { reason: "stopped", at: Date.now() } };
 const done = (id: string, threadId: string): Payload<"chat.event">["event"] => ({ type: "done", message: asstMsg(id, threadId), stopReason: "stop" });
 const texts = () => st().queued.map((q) => q.text);
 
@@ -1010,7 +1023,7 @@ async function refusedAfterSetup(): Promise<string> {
 function stoppedWords(threadId = "A"): void {
   const m = (st().messages[threadId] ?? []).find((x) => x.role === "assistant");
   expect(m?.content).toBe("words so far");
-  expect(st().stopNotes[m?.id ?? ""]).toEqual({ kind: "stopped", secs: expect.any(Number) });
+  expect(noteOf(m?.id ?? "")).toEqual({ kind: "stopped", secs: expect.any(Number) });
 }
 
 describe("a message the person typed is never lost", () => {

@@ -4,6 +4,7 @@
 // free memory moved by more than 64 MiB since the last push.
 import type { GpuStatus } from "@gates-local/contracts";
 import { MIB } from "./constants.ts";
+import { forgetGpuReadings } from "./gpu.ts";
 
 export const GPU_POLL_MS = 3000;
 export const GPU_CHANGE_BYTES = 64 * MIB;
@@ -63,6 +64,8 @@ export function createGpuWatcher(options: GpuWatcherOptions): GpuWatcher {
       .then((status) => {
         last = status;
         if (gpuChanged(pushed, status, threshold)) {
+          // memory moved: the fit and table read again rather than reuse a reading from before
+          forgetGpuReadings();
           pushed = status;
           options.push(status);
         }

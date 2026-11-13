@@ -20,7 +20,7 @@ test("Attach a file opens the chooser; an image becomes a chip and a document at
   await expect(page.locator(".att img")).toHaveCount(1);
   // Since "Attach any file" a document is kept and named on a chip, not refused.
   await chooseFiles(page, [{ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("some notes\n") }]);
-  const chip = page.locator(".att [data-testid=attached-file]");
+  const chip = page.locator(".att [data-testid='chat.attachment.file']");
   await expect(chip).toHaveCount(1);
   await expect(chip).toContainText("notes.txt");
   await chip.getByRole("button", { name: "Remove notes.txt" }).click();

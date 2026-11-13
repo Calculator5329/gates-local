@@ -159,6 +159,39 @@ it("each trigger builds once; a trigger during a load waits for the load to end"
   expect(smi.totals).toBe(3);
 });
 
+it("a build a send asks for right after its plan takes the plan's GPU reading; any other trigger reads again (chat row 33)", async () => {
+  const s = await ollama({ models: [SPILLED] });
+  const smi = card();
+  const { t } = table(s, smi);
+  // the send's plan
+  await planLoad({ baseUrl: s.baseUrl, model: GEMMA, numCtx: 16384, runNvidiaSmi: smi, readMeminfo: MEMINFO, busy: [] });
+  expect(smi.totals).toBe(1);
+  t.changed({ afterPlan: true });
+  await settled();
+  expect(smi.totals, "the table took the plan's reading").toBe(1);
+  t.changed();
+  await settled();
+  expect(smi.totals, "a plain trigger reads again").toBe(2);
+});
+
+it("triggers during a build: one plain trigger among a send's makes the next build read again (chat row 33)", async () => {
+  let release: (() => void) | undefined;
+  const s = await ollama({ models: [SPILLED] }, () => new Promise<void>((resolve) => { release = resolve; }));
+  const smi = card();
+  const { t } = table(s, smi);
+  t.changed();
+  await settled();
+  expect(smi.totals).toBe(1);
+  // the build waits on /api/ps; a plain trigger, then a send's, arrive meanwhile
+  t.changed();
+  t.changed({ afterPlan: true });
+  release?.();
+  await settled();
+  release?.();
+  await settled();
+  expect(smi.totals).toBe(2);
+});
+
 it("a table equal to the last one pushed is not pushed again, but fit.table answers the newest", async () => {
   const s = await ollama({ models: [SPILLED] });
   const { t, pushed } = table(s, card());

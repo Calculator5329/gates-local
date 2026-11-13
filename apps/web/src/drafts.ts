@@ -84,6 +84,13 @@ export function cancelQueuedDraft(key: DraftKey): void {
   changed();
 }
 
+/** The attached-file paths every slot names, its words before a queued edit included. */
+export function draftFilePaths(): Set<string> {
+  const paths = new Set<string>();
+  for (const draft of slots.values()) for (const f of [...draft.files ?? [], ...draft.beforeEdit?.files ?? []]) paths.add(f.path);
+  return paths;
+}
+
 /** Persist the 32 most recently edited nonempty slots, with images in the newest two. */
 export function savedDrafts(): readonly { key: DraftKey; draft: Draft }[] {
   const drafts = [...slots].filter(([, d]) => holds(d) || d.beforeEdit !== undefined).slice(-32);

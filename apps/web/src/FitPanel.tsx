@@ -122,14 +122,15 @@ function MemoryBar({ gpu, name, v, loaded }: { gpu: GpuStatus; name: string; v: 
   );
 }
 
-/** First-token time and speed of the latest reply by this model this session, if any. */
+/** First-token time and speed of the latest reply by this model in the chats loaded here, if any: the server's times on the row. */
 function speedOf(s: State, model: string): { ttft: number; tps: number | null } | null {
   for (const msgs of Object.values(s.messages)) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
       if (m?.role !== "assistant" || m.model !== model) continue;
-      const ft = s.firstToken[m.id];
-      if (ft === undefined) continue;
+      const first = m.times?.firstTokenAt;
+      if (first === undefined || m.times === undefined) continue;
+      const ft = first - m.times.startedAt;
       // Decode time only: the total includes loading the model and reading the prompt.
       return { ttft: ft, tps: decodeSpeed(m.stats) ?? null };
     }

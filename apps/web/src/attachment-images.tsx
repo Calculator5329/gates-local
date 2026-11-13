@@ -5,6 +5,7 @@ import { currentDraftKey, getDraft, replaceDraft } from "./drafts.ts";
 import { Icon } from "./icons.tsx";
 import { removeRefused, sizeOf, useRefused } from "./refused-files.ts";
 import { esc } from "./ui.tsx";
+import { releaseFiles } from "./file-holds.ts";
 
 /** Chosen or dropped files a message cannot carry: name, size, the reason in the tooltip, and a way out. */
 export function RefusedFiles() {
@@ -36,7 +37,7 @@ export function AttachedFiles({ files, removable = false }: { files: readonly At
         <Icon id="clip" />
         <span className="af-t"><b>{f.name}</b><small>{sizeOf(f.size)}{off ? " · tools off" : ""}</small></span>
         {off ? <><span className="vh" id={`attached-${i}`}>{tip}</span><button type="button" className="ibtn xs" data-testid="chat.attachment.tools-on" aria-label="Turn on tools" aria-describedby={`attached-${i}`} data-tip="Open Settings › Tools" onClick={() => openSettings("tools")}><Icon id="wrench" /></button></> : null}
-        {removable ? <button type="button" className="ibtn xs" data-testid="chat.attachment.remove-file" aria-label={`Remove ${f.name}`} onClick={() => { replaceDraft(currentDraftKey(), { files: (getDraft().files ?? []).filter(x => x.path !== f.path) }); setState({ stopAsk: null }); }}>×</button> : null}
+        {removable ? <button type="button" className="ibtn xs" data-testid="chat.attachment.remove-file" aria-label={`Remove ${f.name}`} onClick={() => { replaceDraft(currentDraftKey(), { files: (getDraft().files ?? []).filter(x => x.path !== f.path) }); setState({ stopAsk: null }); releaseFiles([f.path]); }}>×</button> : null}
       </span>
     );
   });

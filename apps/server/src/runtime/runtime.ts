@@ -35,6 +35,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { RuntimeMode } from "@gates-local/contracts";
+import { forgetGpuReadings } from "../fit/gpu.ts";
 import { PINNED_OLLAMA, pinnedOllamaFor } from "./manifest.ts";
 import { InstallError, findAnyInstalled, installPinned, isInstalled } from "./install.ts";
 import { listLoaded } from "./models.ts";
@@ -183,6 +184,7 @@ async function unloadAll(baseUrl: string): Promise<void> {
         ),
       ),
     );
+    forgetGpuReadings();
     const deadline = Date.now() + UNLOAD_WAIT_MS;
     while (Date.now() < deadline && (await listLoaded(baseUrl, 2000)).length > 0) await sleep(200);
   } catch {

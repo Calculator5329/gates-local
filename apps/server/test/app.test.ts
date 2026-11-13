@@ -11,7 +11,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { type Channel, type Client, type ImageEvent, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
+import { type Channel, type Client, type ImageEvent, type Message, type Params, type Payload, type SocketLike, WireError, createClient } from "@gates-local/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { type App, type AppDeps, createApp } from "../src/app.ts";
@@ -233,16 +233,30 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
 const events = (r: Rig, turnId: string) =>
   r.pushes.filter((p) => p.channel === "chat.event" && (p.payload as Payload<"chat.event">).turnId === turnId).map((p) => (p.payload as Payload<"chat.event">).event);
 
+/**
+ * chat.send over the socket, then the turn's start (chat row 32): the answer names the turn, its
+ * start brings the saved question, and a refusal after the answer is its error event, thrown here
+ * as the WireError a refused answer would be.
+ */
+async function sendStarted(r: Rig, params: Params<"chat.send">): Promise<{ turnId: string; userMessage: Message; replayed?: boolean }> {
+  const answer = await r.client.call("chat.send", params);
+  if (answer.userMessage !== undefined) return { ...answer, userMessage: answer.userMessage };
+  const first = await r.waitFor("chat.event", (p) => p.turnId === answer.turnId && (p.event.type === "start" || p.event.type === "error"), 10_000);
+  if (first.event.type === "error") throw new WireError(first.event.code, first.event.message, first.event.blocking);
+  if (first.event.type !== "start") throw new Error("unreachable");
+  return { turnId: answer.turnId, userMessage: first.event.userMessage };
+}
+
 it("vision paste reaches the model, saves paths, and survives Retry and thread reload", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = await r.client.call("threads.create", { title: "Pasted images" });
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  const first = await r.client.call("chat.send", { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  const first = await sendStarted(r, { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
   expect(first.userMessage.images?.[0]).toMatch(/^images\/paste-.*\.png$/);
   const loaded = await r.client.call("threads.get", { threadId: thread.id });
   expect(loaded.messages[0]?.images).toEqual(first.userMessage.images);
-  const again = await r.client.call("chat.send", { threadId: thread.id, content: "look again", model: MODEL, numCtx: 16384, images: first.userMessage.images });
+  const again = await sendStarted(r, { threadId: thread.id, content: "look again", model: MODEL, numCtx: 16384, images: first.userMessage.images });
   await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
   const body = r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body;
   expect(body).toMatchObject({ messages: [{ role: "user", content: "look", images: [png] }, { role: "assistant" }, { role: "user", content: "look again", images: [png] }], options: { num_ctx: 16384 } });
@@ -253,7 +267,7 @@ it("the server refuses pasted images on non-vision models before a load or saved
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] } });
   const thread = await r.client.call("threads.create", { title: "Pasted images" });
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  await expect(r.client.call("chat.send", { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("cannot see images") });
+  await expect(sendStarted(r, { threadId: thread.id, content: "look", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("cannot see images") });
   expect(r.store.getThread(thread.id).messages).toEqual([]);
   expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toEqual([]);
 });
@@ -262,7 +276,7 @@ it("an image-only turn uses T3's model prompt while the saved message stays imag
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  const sent = await r.client.call("chat.send", { threadId: thread.id, content: "", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  const sent = await sendStarted(r, { threadId: thread.id, content: "", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
   expect(sent.userMessage.content).toBe("");
   expect(r.ollama.requests.find(q => q.path === "/api/chat")?.body).toMatchObject({ messages: [{ content: "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]", images: [png] }] });
@@ -272,25 +286,25 @@ it.each([false, true])("PC-03: retrying after a lost acknowledgement returns the
   const r = await rig();
   const thread = r.store.createThread();
   const input = { threadId: thread.id, messageId: "public-lost-ack", content: "saved before disconnect", model: MODEL, numCtx: 16384 };
-  const first = await r.client.call("chat.send", input);
+  const first = await sendStarted(r, input);
   if (finished) await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
-  const retry = await r.client.call("chat.send", input);
+  const retry = await sendStarted(r, input);
   await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
   expect(r.store.getThread(thread.id).messages.filter(m => m.role === "user")).toHaveLength(1);
   expect(retry.userMessage.id).toBe(first.userMessage.id);
   expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toHaveLength(1);
-  await expect(r.client.call("chat.send", { ...input, content: "different words" })).rejects.toMatchObject({ code: "image-input" });
+  await expect(sendStarted(r, { ...input, content: "different words" })).rejects.toMatchObject({ code: "image-input" });
 });
 
 it("tells the model, and only the model, when a text-only follow-up omits earlier images", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  const first = await r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  const first = await sendStarted(r, { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === first.turnId && p.event.type === "done");
   r.setShow(res => json(res, 200, { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] }));
   r.setChat(slowReply);
-  const next = await r.client.call("chat.send", { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
+  const next = await sendStarted(r, { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
   await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "delta" && p.event.text !== "");
   const replayed: Payload<"chat.event">[] = [];
   r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
@@ -306,7 +320,7 @@ it("thread deletion removes its unshared pasted image file", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  const sent = await r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  const sent = await sendStarted(r, { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
   const filename = path.join(path.dirname(r.store.dbPath), sent.userMessage.images![0]!);
   expect(existsSync(filename)).toBe(true);
@@ -318,7 +332,7 @@ it("a shared image survives until the last saved message is removed", async () =
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const first = r.store.createThread(), second = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
-  const sent = await r.client.call("chat.send", { threadId: first.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
+  const sent = await sendStarted(r, { threadId: first.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] });
   await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
   const images = [...sent.userMessage.images!], filename = path.join(path.dirname(r.store.dbPath), images[0]!);
   const copy = r.store.appendMessage({ threadId: second.id, role: "user", content: "shared", images });
@@ -380,7 +394,7 @@ it("failed admission leaves no new image file", async () => {
   const thread = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
   const append = vi.spyOn(r.store, "appendMessage").mockImplementationOnce(() => { throw new Error("synthetic database write failure"); });
-  await expect(r.client.call("chat.send", { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toThrow("synthetic database write failure");
+  await expect(sendStarted(r, { threadId: thread.id, content: "chart", model: MODEL, numCtx: 16384, images: [`data:image/png;base64,${png}`] })).rejects.toThrow("synthetic database write failure");
   append.mockRestore();
   expect(readdirSync(path.join(path.dirname(r.store.dbPath), "images"))).toEqual([]);
 });
@@ -388,7 +402,7 @@ it("failed admission leaves no new image file", async () => {
 it("a draft referencing an image that is gone is refused in plain words before saving", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();
-  await expect(r.client.call("chat.send", { threadId: thread.id, content: "keep my words", model: MODEL, numCtx: 16384, images: ["images/paste-00000000-0000-4000-8000-000000000000.png"] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("Paste it again; your words are kept") });
+  await expect(sendStarted(r, { threadId: thread.id, content: "keep my words", model: MODEL, numCtx: 16384, images: ["images/paste-00000000-0000-4000-8000-000000000000.png"] })).rejects.toMatchObject({ code: "image-input", message: expect.stringContaining("Paste it again; your words are kept") });
   expect(r.store.getThread(thread.id).messages).toEqual([]);
   expect(r.ollama.requests.filter(q => q.path === "/api/chat")).toEqual([]);
 });
@@ -432,6 +446,19 @@ describe("threads.*", () => {
 });
 
 describe("chat.send", () => {
+  it("answers with the turn id before any event of that turn reaches the socket (chat row 32)", async () => {
+    const r = await rig();
+    const thread = await r.client.call("threads.create", { title: "answer first" });
+    let answered = false;
+    const firstEvent: Array<{ type: string; answered: boolean }> = [];
+    const off = r.client.subscribe("chat.event", (p) => { if (firstEvent.length === 0) firstEvent.push({ type: p.event.type, answered }); });
+    cleanups.push(off);
+    const answer = await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }).then((a) => { answered = true; return a; });
+    expect(answer).toEqual({ turnId: expect.any(String) });
+    await r.waitFor("chat.event", (p) => p.turnId === answer.turnId && p.event.type === "done");
+    expect(firstEvent).toEqual([{ type: "start", answered: true }]);
+  });
+
   it.each([false, true])("TE-02: a reply starting before the first request crosses the snapshot boundary once (already finished: %s)", async (finishedFirst) => {
     const r = await rig();
     let response: ServerResponse | undefined;
@@ -448,7 +475,7 @@ describe("chat.send", () => {
     newcomer.subscribe("chat.event", (event) => joined.push(event));
     await new Promise<void>((resolve) => socket.once("open", resolve));
     const receivedEarlierFrames = () => new Promise<void>((resolve) => { socket.once("pong", () => resolve()); socket.ping(); });
-    const sent = await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (event) => event.turnId === sent.turnId && event.event.type === "delta");
     await receivedEarlierFrames();
     expect.soft(joined.length).toBe(0);
@@ -482,7 +509,7 @@ describe("chat.send", () => {
     const r = await rig();
     r.setChat(slowReply);
     const thread = await r.client.call("threads.create", { title: "late join" });
-    await r.client.call("chat.send", { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
+    await sendStarted(r, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.event.type === "delta");
     const socket = new WebSocket(`ws://127.0.0.1:${r.server.port}/?token=${TOKEN}`);
     cleanups.push(() => socket.terminate());
@@ -515,7 +542,7 @@ describe("chat.send", () => {
       await stream(res, [piece("Two plus "), piece("two is four."), doneLine]);
     });
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "2+2?", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "2+2?", model: MODEL, numCtx: 16384 });
     expect(sent.userMessage).toMatchObject({ threadId: t.id, role: "user", content: "2+2?" });
     // returned before any reply byte; the start push came first, for every client (PH-02)
     expect(events(r, sent.turnId)).toEqual([{ type: "start", model: MODEL, userMessage: sent.userMessage }]);
@@ -563,9 +590,9 @@ describe("chat.send", () => {
       return stream(res, [piece("ok"), doneLine]);
     });
     const t = await r.client.call("threads.create", {});
-    const a = await r.client.call("chat.send", { threadId: t.id, content: "one", model: MODEL, numCtx: 16384 });
+    const a = await sendStarted(r, { threadId: t.id, content: "one", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === a.turnId && p.event.type === "done");
-    const b = await r.client.call("chat.send", { threadId: t.id, content: "two", model: MODEL, numCtx: 16384 });
+    const b = await sendStarted(r, { threadId: t.id, content: "two", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === b.turnId && p.event.type === "done");
     expect((bodies[1] as { messages: unknown }).messages).toEqual([
       { role: "user", content: "one" },
@@ -579,11 +606,11 @@ describe("chat.send", () => {
     r.setChat((res) => stream(res, [piece("a"), piece("b"), piece("c"), doneLine], 100));
     const t = await r.client.call("threads.create", {});
     const other = await r.client.call("threads.create", {});
-    const first = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
-    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 }));
+    const first = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const err = await rejection(sendStarted(r, { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("turn-active");
     expect(err.message).toContain(first.turnId);
-    const parallel = await r.client.call("chat.send", { threadId: other.id, content: "z", model: MODEL, numCtx: 16384 });
+    const parallel = await sendStarted(r, { threadId: other.id, content: "z", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
     await r.waitFor("chat.event", (p) => p.turnId === parallel.turnId && p.event.type === "done");
     // The refused send stored nothing.
@@ -594,8 +621,8 @@ describe("chat.send", () => {
     const r = await rig();
     const t = await r.client.call("threads.create", {});
     const results = await Promise.allSettled([
-      r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }),
-      r.client.call("chat.send", { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 }),
+      sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }),
+      sendStarted(r, { threadId: t.id, content: "y", model: MODEL, numCtx: 16384 }),
     ]);
     expect(results.map((x) => x.status).toSorted()).toEqual(["fulfilled", "rejected"]);
     const refused = results.find((x) => x.status === "rejected");
@@ -606,7 +633,7 @@ describe("chat.send", () => {
     const r = await rig({ ollamaUp: false });
     expect(r.runtime.status().state).toBe("missing");
     const t = await r.client.call("threads.create", {});
-    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    const err = await rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("runtime-not-ready");
     expect(err.message).toContain("missing");
     expect((await r.client.call("fit.table", {})).rows).toEqual([]);
@@ -621,7 +648,7 @@ describe("chat.send", () => {
     r.gpu.freeMib = 3000;
     r.gpu.memAvailableKb = 1_000_000;
     const report = await freshRow(r, MODEL, 16384, "refuse");
-    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    const err = await rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("wont-fit");
     expect(err.message).toBe(report.message);
     expect(err.message).toMatch(/refused, short by/);
@@ -631,7 +658,7 @@ describe("chat.send", () => {
     r.gpu.freeMib = 6000;
     r.gpu.memAvailableKb = 40_000_000;
     await freshRow(r, MODEL, 16384, "spills");
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
   });
 });
@@ -653,7 +680,7 @@ const sendWith = async (show: unknown, think: boolean) => {
     return quickReply(res, body);
   });
   const t = await r.client.call("threads.create", {});
-  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think });
+  const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, think });
   await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
   return bodies[0]!;
 };
@@ -683,7 +710,7 @@ describe("the fit table", () => {
     await fitSettled(r);
     const before = (await r.client.call("fit.table", {})).reading.seq;
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     await fitSettled(r);
     expect((await r.client.call("fit.table", {})).reading.seq).toBe(before + 2);
@@ -716,7 +743,7 @@ describe("a model with a 2,048 context window", () => {
     expect(await r.client.call("models.list", {})).toEqual([expect.objectContaining({ name: MODEL, maxContext: 2048 })]);
 
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const done = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(bodies[0]).toMatchObject({ options: { num_ctx: 2048 } });
     expect(done.event).toMatchObject({ message: { stats: { numCtx: 2048 } } });
@@ -813,7 +840,7 @@ async function stalledThinkTurn(more: Pick<Parameters<typeof rig>[0] & object, "
     if (shows === 1) json(res, 200, SHOW);
   });
   const t = await r.client.call("threads.create", {});
-  const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, ...(think === undefined ? {} : { think }) });
+  const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384, ...(think === undefined ? {} : { think }) });
   // The fit check, then the turn's start builds a fit table (its /api/show stalls too) beside the think probe.
   await until(() => shows === 3);
   expect(r.app.activeTurns()).toBe(1);
@@ -847,7 +874,7 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     r.gpu.memAvailableKb = 1_000_000;
     // The app's ComfyUI is listed holding what the turn needs beside the 3000 MiB free.
     r.gpu.apps = "4242, /usr/bin/python3 main.py --port 8188, 12000\n";
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(comfy.stops()).toBe(1);
   });
@@ -860,7 +887,7 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     const t = await r.client.call("threads.create", {});
     // An image job holds the GPU alone; no ComfyUI the app started is up yet.
     const releaseImage = await r.lease!.acquire("image");
-    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sending = sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await until(() => r.lease!.status().waiting.includes("chat"));
     // The job started ComfyUI and finished; it keeps its weights, so the turn would not fit beside it.
     comfy.setOwner("app");
@@ -877,7 +904,7 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     const comfy = idleComfy("app", () => undefined);
     const r = await rig({ image: comfy.build });
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(comfy.stops()).toBe(0);
   });
@@ -888,7 +915,7 @@ describe("chat.send frees an idle ComfyUI the app started", () => {
     const t = await r.client.call("threads.create", {});
     r.gpu.freeMib = 3000;
     r.gpu.memAvailableKb = 1_000_000;
-    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    const err = await rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("wont-fit");
     expect(comfy.stops()).toBe(0);
   });
@@ -1048,7 +1075,7 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     const a = await image.generate({ prompt: "a" });
     await until(() => comfy.states(a.jobId).includes("running"));
     const t = await r.client.call("threads.create", {});
-    const sending = r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sending = sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await until(() => r.lease!.status().waiting.includes("chat"));
     const b = await image.generate({ prompt: "b" });
     await until(() => r.lease!.status().waiting.length === 2);
@@ -1079,7 +1106,7 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
     comfy.ctl.busy = true;
     const mark = comfy.calls.length;
     const t = await r.client.call("threads.create", {});
-    const err = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
+    const err = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }), "chat.send"));
     expect(err.code).toBe("wont-fit");
     // Each stopIdle asks ComfyUI's queue once and declines.
     expect(comfy.calls.slice(mark).filter((c) => c === "/queue")).toHaveLength(3);
@@ -1116,7 +1143,7 @@ describe("chat.send reclaims an app-started ComfyUI until it fits or gives up", 
       json(res, 200, SHOW);
     });
     const t = await r.client.call("threads.create", {});
-    const sending = rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    const sending = rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     await until(() => shows === 2);
     expect(comfy.unit).toEqual(["start", "stop"]);
     expect(r.lease!.status().holder).toBe("chat");
@@ -1145,7 +1172,7 @@ describe("threads.delete marks the thread before it waits", () => {
     const t = await r.client.call("threads.create", {});
     // The first turn's image runs and stays running until cancelled.
     comfy.ctl.holdNext = gate().shut;
-    const first = await r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
+    const first = await sendStarted(r, { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
     await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
     const jobId = comfy.events.find((e) => e.threadId === t.id && e.state === "queued")?.jobId;
     if (jobId === undefined) throw new Error(`the turn queued no image; saw ${JSON.stringify(comfy.events)}`);
@@ -1159,7 +1186,7 @@ describe("threads.delete marks the thread before it waits", () => {
     await until(() => comfy.states(jobId).includes("cancelled"));
     expect(r.lease!.status().holders).toBe(0);
 
-    const send = await rejection(within(3000, r.client.call("chat.send", { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true }), "chat.send"));
+    const send = await rejection(within(3000, sendStarted(r, { threadId: t.id, content: "draw", model: MODEL, numCtx: 16384, tools: true }), "chat.send"));
     expect(send.code).toBe("thread-not-found");
     const generate = await rejection(within(3000, r.client.call("image.generate", { prompt: "another", threadId: t.id }), "image.generate"));
     expect(generate.code).toBe("thread-not-found");
@@ -1189,7 +1216,7 @@ describe("threads.delete marks the thread before it waits", () => {
     const drawing = await r.client.call("threads.create", {});
     const talking = await r.client.call("threads.create", {});
     // Another thread's turn holds its shared chat claim, so the image waits in the queue.
-    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const talk = await sendStarted(r, { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
     const { jobId } = await r.client.call("image.generate", { prompt: "a tree", threadId: drawing.id });
     await until(() => r.lease!.status().waiting.includes("image"));
 
@@ -1222,8 +1249,8 @@ describe("threads.delete and the image jobs its turns queued", () => {
     const drawing = await r.client.call("threads.create", {});
     const talking = await r.client.call("threads.create", {});
     // Another thread's turn streams the whole time and holds its shared chat claim.
-    const talk = await r.client.call("chat.send", { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
-    const draw = await r.client.call("chat.send", { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
+    const talk = await sendStarted(r, { threadId: talking.id, content: "talk", model: MODEL, numCtx: 16384 });
+    const draw = await sendStarted(r, { threadId: drawing.id, content: "draw", model: MODEL, numCtx: 16384, tools: true });
     await r.waitFor("chat.event", (p) => p.turnId === draw.turnId && p.event.type === "done");
     const jobId = comfy.events.find((e) => e.threadId === drawing.id && e.state === "queued")?.jobId;
     if (jobId === undefined) throw new Error(`the drawing turn queued no image; saw ${JSON.stringify(comfy.events)}`);
@@ -1264,13 +1291,13 @@ const onDisk = (r: Rig, threadId: string) => r.store.getThread(threadId).message
 const startReply = async (r: Rig, route: ChatRoute = slowReply) => {
   r.setChat(route);
   const t = await r.client.call("threads.create", {});
-  const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+  const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
   return { threadId: t.id, sent };
 };
 const stoppedReply = async (r: Rig) => {
   r.setChat(slowReply);
   const t = await r.client.call("threads.create", {});
-  const sent = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
+  const sent = await sendStarted(r, { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
   await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
   await r.client.call("chat.cancel", { turnId: sent.turnId });
   await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
@@ -1282,7 +1309,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
   it("AU-01 every client's chat.send passes the server admission boundary", async () => {
     const r = await rig({ admit: () => { throw Object.assign(new Error("Gates Local is closing to update. Try again after it reopens."), { code: "update-installing" }); } });
     const thread = await r.client.call("threads.create", {});
-    const error = await rejection(r.client.call("chat.send", { threadId: thread.id, content: "Do not start", model: MODEL, numCtx: 16384 }));
+    const error = await rejection(sendStarted(r, { threadId: thread.id, content: "Do not start", model: MODEL, numCtx: 16384 }));
     expect(error).toMatchObject({ code: "update-installing", message: expect.stringContaining("closing to update") });
     expect(r.app.activeTurns()).toBe(0);
     expect(r.store.getThread(thread.id).messages).toHaveLength(0);
@@ -1291,7 +1318,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const r = await rig();
     r.setChat(slowReply);
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
     expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: true });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
@@ -1308,7 +1335,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(await r.client.call("chat.cancel", { turnId: sent.turnId })).toEqual({ cancelled: false });
     expect(await r.client.call("chat.cancel", { turnId: "no-such-turn" })).toEqual({ cancelled: false });
     r.setChat((res) => stream(res, [piece("fine"), doneLine]));
-    const again = await r.client.call("chat.send", { threadId: t.id, content: "again", model: MODEL, numCtx: 16384 });
+    const again = await sendStarted(r, { threadId: t.id, content: "again", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
   });
 
@@ -1380,11 +1407,11 @@ describe("chat.cancel and threads.delete during a turn", () => {
       const r = await rig();
       r.setChat(quickReply);
       const t = await r.client.call("threads.create", {});
-      const older = await r.client.call("chat.send", { threadId: t.id, content: "earlier", model: MODEL, numCtx: 16384 });
+      const older = await sendStarted(r, { threadId: t.id, content: "earlier", model: MODEL, numCtx: 16384 });
       await r.waitFor("chat.event", (p) => p.turnId === older.turnId && p.event.type === "done");
       await vi.waitFor(() => expect(r.app.activeTurns()).toBe(0));
       r.setChat(heldReply().route);
-      const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+      const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
       await untilWords(r, sent.turnId);
       await r.client.call("messages.delete", { threadId: t.id, messageId: older.userMessage.id });
       const rows = r.store.getThread(t.id).messages;
@@ -1417,7 +1444,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
       await untilWords(r, sent.turnId);
       expect(onDisk(r, threadId)).toHaveLength(1);
       const asked = r.ollama.requests.filter((q) => q.path === "/api/chat").length;
-      expect((await rejection(r.client.call("chat.send", { threadId, content: "and?", model: MODEL, numCtx: 16384 }))).code).toBe("turn-active");
+      expect((await rejection(sendStarted(r, { threadId, content: "and?", model: MODEL, numCtx: 16384 }))).code).toBe("turn-active");
       expect(r.ollama.requests.filter((q) => q.path === "/api/chat")).toHaveLength(asked);
     });
   });
@@ -1426,7 +1453,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     it("replaces the question and the unfinished words instead of asking twice", async () => {
       const r = await rig();
       const { threadId, sent } = await stoppedReply(r);
-      const again = await r.client.call("chat.send", { threadId, content: "the question", model: MODEL, numCtx: 16384, retryOf: sent.userMessage.id });
+      const again = await sendStarted(r, { threadId, content: "the question", model: MODEL, numCtx: 16384, retryOf: sent.userMessage.id });
       await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
       const { messages } = await r.client.call("threads.get", { threadId });
       expect(messages.map((m) => [m.role, m.content])).toEqual([["user", "the question"], ["assistant", "hi"]]);
@@ -1440,9 +1467,9 @@ describe("chat.cancel and threads.delete during a turn", () => {
       const r = await rig();
       r.setChat(quickReply);
       const t = await r.client.call("threads.create", {});
-      const first = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
+      const first = await sendStarted(r, { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384 });
       await r.waitFor("chat.event", (p) => p.turnId === first.turnId && p.event.type === "done");
-      const again = await r.client.call("chat.send", { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384, retryOf: first.userMessage.id });
+      const again = await sendStarted(r, { threadId: t.id, content: "the question", model: MODEL, numCtx: 16384, retryOf: first.userMessage.id });
       await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
       expect((await r.client.call("threads.get", { threadId: t.id })).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
     });
@@ -1450,7 +1477,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     it("a send that is not a Retry keeps the unfinished words and leaves them out of the prompt", async () => {
       const r = await rig();
       const { threadId } = await stoppedReply(r);
-      const next = await r.client.call("chat.send", { threadId, content: "something else", model: MODEL, numCtx: 16384 });
+      const next = await sendStarted(r, { threadId, content: "something else", model: MODEL, numCtx: 16384 });
       await r.waitFor("chat.event", (p) => p.turnId === next.turnId && p.event.type === "done");
       expect((await r.client.call("threads.get", { threadId })).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
       const body = r.ollama.requests.filter((q) => q.path === "/api/chat").at(-1)?.body as { messages: Array<{ role: string }> };
@@ -1495,7 +1522,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     expect(raw.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     raw.close();
 
-    const again = await r.client.call("chat.send", { threadId, content: "second question", model: MODEL, numCtx: 16384, retryOf: questionId });
+    const again = await sendStarted(r, { threadId, content: "second question", model: MODEL, numCtx: 16384, retryOf: questionId });
     await r.waitFor("chat.event", (p) => p.turnId === again.turnId && p.event.type === "done");
     const retried = await r.client.call("threads.get", { threadId });
     expect(retried.messages.map((m) => [m.role, m.content])).toEqual([["user", "first question"], ["assistant", "first answer"], ["user", "second question"], ["assistant", "hi"]]);
@@ -1517,7 +1544,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
       res.end();
     });
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await reached.shut;
     await r.client.call("chat.cancel", { turnId: sent.turnId });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
@@ -1533,7 +1560,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     // One chunk: the last word and the done line are parsed with no await on the socket between them.
     r.setChat((res) => stream(res, [piece("all of it") + doneLine]));
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && (p.event.type === "done" || p.event.type === "error"));
     expect(end.event).toMatchObject({ type: "done", message: { role: "assistant", content: "all of it" } });
     const saved = r.store.getThread(t.id).messages.at(-1);
@@ -1553,7 +1580,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     // One chunk: the delete lands with the done line already parsed.
     r.setChat((res) => stream(res, [piece("all of it") + doneLine]));
     threadId = (await r.client.call("threads.create", {})).id;
-    const sent = await r.client.call("chat.send", { threadId, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId, content: "count", model: MODEL, numCtx: 16384 });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && (p.event.type === "done" || p.event.type === "error"));
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
     expect(end.event).not.toHaveProperty("partial");
@@ -1564,7 +1591,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const r = await rig();
     r.setChat(slowReply);
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
     expect(await r.client.call("threads.delete", { threadId: t.id })).toEqual({ threadId: t.id });
     // The cancelled event was pushed before delete answered.
@@ -1579,12 +1606,12 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const r = await rig();
     r.setChat(slowReply);
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.app.shutdown();
     expect(r.app.activeTurns()).toBe(0);
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "cancelled" });
-    const err = await rejection(r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
+    const err = await rejection(sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("shutting-down");
   });
 
@@ -1592,7 +1619,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     const r = await rig();
     r.setChat(slowReply);
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
     await r.app.shutdown();
     const shown = events(r, sent.turnId).filter((e) => e.type === "delta").map((e) => e.text).join("");
@@ -1609,7 +1636,7 @@ describe("chat.cancel and threads.delete during a turn", () => {
     r.store.appendMessage(partial);
     let requested: unknown;
     r.setChat((res, body) => { requested = body; quickReply(res, body); });
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "Continue with a fresh question", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "Continue with a fresh question", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     expect(JSON.stringify(requested)).toContain("An earlier question");
     expect(JSON.stringify(requested)).not.toContain("UNFINISHED_SENTINEL");
@@ -1713,7 +1740,7 @@ describe("turn failures", () => {
     const r = await rig();
     r.setChat((res) => stream(res, [piece("half "), line({ error: "model runner crashed" })]));
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(end.event).toMatchObject({ type: "error", code: "stream-error", message: "model runner crashed", partial: { content: "half ", interrupted: true } });
     expect(events(r, sent.turnId).filter((e) => e.type === "error")).toHaveLength(1);
@@ -1721,19 +1748,63 @@ describe("turn failures", () => {
     expect(r.app.activeTurns()).toBe(0);
   });
 
-  it("an error before any words saves nothing", async () => {
+  it("an error before any words saves no reply", async () => {
     const r = await rig();
     r.setChat((res) => stream(res, [line({ error: "model runner crashed" })]));
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
-    expect(end.event).toEqual({ type: "error", code: "stream-error", message: "model runner crashed" });
+    expect(end.event).toEqual({ type: "error", code: "stream-error", message: "model runner crashed", ended: { reason: "failed", at: expect.any(Number) }, question: expect.objectContaining({ role: "user" }) });
     expect(r.store.getThread(t.id).messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("chat row 32: the saved reply keeps its times, and a question whose turn saved nothing keeps how it ended", async () => {
+    const r = await rig();
+    const think = (text: string) => line({ model: MODEL, message: { role: "assistant", content: "", thinking: text }, done: false });
+    r.setChat((res) => stream(res, [think("let me see"), piece("hi"), doneLine], 150));
+    const t = await r.client.call("threads.create", {});
+    const before = Date.now();
+    const sent = await sendStarted(r, { threadId: t.id, content: "q", model: MODEL, numCtx: 16384 });
+    const fin = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
+    const times = fin.event.type === "done" ? fin.event.message.times : undefined;
+    expect(times).toMatchObject({ ended: { reason: "done" }, spans: [{ from: 0 }], callsAt: {} });
+    expect(times!.startedAt).toBeGreaterThanOrEqual(before);
+    expect(times!.firstTokenAt! - times!.startedAt).toBeGreaterThanOrEqual(140);
+    expect(times!.thoughtMs).toBeGreaterThanOrEqual(140);
+    expect(times!.spans[0]!.ms).toBeGreaterThanOrEqual(140);
+    // what every window reads after a reload
+    expect(r.store.getThread(t.id).messages.at(-1)?.times).toEqual(times);
+    r.setChat((res) => stream(res, [line({ error: "model runner crashed" })]));
+    const failed = await sendStarted(r, { threadId: t.id, content: "again", model: MODEL, numCtx: 16384 });
+    const end = await r.waitFor("chat.event", (p) => p.turnId === failed.turnId && p.event.type === "error");
+    const stamped = { role: "user", content: "again", times: { ended: { reason: "failed" }, spans: [], why: { code: "stream-error", message: "model runner crashed" } } };
+    expect(r.store.getThread(t.id).messages.at(-1)).toMatchObject(stamped);
+    // the open windows get the stamped question with the end, so none reloads the chat to say why
+    expect(end.event).toMatchObject({ question: stamped });
+  });
+
+  it("chat row 32: the terminal event says how the turn ended, and a Stop's time is when the cancel came", async () => {
+    const r = await rig();
+    const t = await r.client.call("threads.create", {});
+    const done = await sendStarted(r, { threadId: t.id, content: "hi", model: MODEL, numCtx: 16384 });
+    const fin = await r.waitFor("chat.event", (p) => p.turnId === done.turnId && p.event.type === "done");
+    expect(fin.event).toMatchObject({ type: "done", ended: { reason: "done", at: expect.any(Number) } });
+    r.setChat(slowReply);
+    const sent = await sendStarted(r, { threadId: t.id, content: "count", model: MODEL, numCtx: 16384 });
+    await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "delta");
+    const before = Date.now();
+    await r.client.call("chat.cancel", { turnId: sent.turnId });
+    const after = Date.now();
+    const end = await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
+    expect(end.event).toMatchObject({ type: "error", code: "cancelled", ended: { reason: "stopped" } });
+    const at = end.event.type === "error" ? end.event.ended?.at ?? 0 : 0;
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(after);
   });
 
   it("an unknown thread is thread-not-found and reserves nothing", async () => {
     const r = await rig();
-    const err = await rejection(r.client.call("chat.send", { threadId: "nope", content: "x", model: MODEL, numCtx: 16384 }));
+    const err = await rejection(sendStarted(r, { threadId: "nope", content: "x", model: MODEL, numCtx: 16384 }));
     expect(err.code).toBe("thread-not-found");
     expect(r.app.activeTurns()).toBe(0);
   });
@@ -1749,7 +1820,7 @@ describe("models.speed", () => {
     const reads = vi.spyOn(r.store, "modelSpeeds");
     r.setChat((res) => stream(res, [piece("one "), piece("two "), piece("three "), measured], 20));
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     const pushed = await r.waitFor("models.speed", (p) => p.length > 0);
     expect(pushed).toEqual([{ model: MODEL, tokensPerSecond: 120, replies: 1 }]);
     expect(events(r, sent.turnId).filter((e) => e.type === "delta")).toHaveLength(3);
@@ -1762,7 +1833,7 @@ describe("models.speed", () => {
     r.setChat((res) => stream(res, [piece("half "), line({ error: "model runner crashed" })]));
     const reads = vi.spyOn(r.store, "modelSpeeds");
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "error");
     expect(reads).not.toHaveBeenCalled();
     expect(r.pushes.filter((p) => p.channel === "models.speed")).toEqual([]);
@@ -1772,7 +1843,7 @@ describe("models.speed", () => {
     const r = await rig();
     r.setChat((res) => stream(res, [piece("hi"), measured]));
     const t = await r.client.call("threads.create", {});
-    const sent = await r.client.call("chat.send", { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
+    const sent = await sendStarted(r, { threadId: t.id, content: "x", model: MODEL, numCtx: 16384 });
     await r.waitFor("chat.event", (p) => p.turnId === sent.turnId && p.event.type === "done");
     await r.waitFor("models.speed", (p) => p.length === 1);
     await r.client.call("threads.delete", { threadId: t.id });
@@ -1848,13 +1919,54 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
 
     const second = await r.client.call("threads.create", {});
-    const refused = await rejection(r.client.call("chat.send", { threadId: second.id, content: "and here", model: MODEL, numCtx: 16384, files: [file] }));
-    expect(refused.message).toBe("plan.txt is attached in another chat. Attach it here again; your words are kept.");
+    // chat.send answers first (chat row 32): the refusal is the turn's error event, like every other refusal
+    const other = await r.client.call("chat.send", { threadId: second.id, content: "and here", model: MODEL, numCtx: 16384, files: [file] });
+    const refused = (await r.waitFor("chat.event", p => p.turnId === other.turnId && p.event.type === "error")).event;
+    expect(refused).toMatchObject({ code: "image-input", message: "plan.txt is attached in another chat. Attach it here again; your words are kept.", ended: { reason: "failed" } });
     expect((await r.client.call("threads.get", { threadId: second.id })).messages).toEqual([]);
 
     const again = await r.client.call("chat.send", { threadId: first.id, content: "once more", model: MODEL, numCtx: 16384, files: [file] });
     await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
     expect((await r.client.call("threads.get", { threadId: first.id })).messages.filter(m => m.files?.length)).toHaveLength(2);
+  });
+
+  // Chat row 35 (2): a chip removed from a draft gives its copy up; a send already carrying it keeps it.
+  it("files.release removes an unsent copy at once; a release that lands while a send carries the copy leaves it to the message", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const dataDir = path.dirname(r.store.dbPath);
+    const removed = await r.client.call("files.attach", { name: "removed.txt", type: "text/plain", data: body64("removed") });
+    await r.client.call("files.release", { paths: [removed.path] });
+    expect(existsSync(path.join(dataDir, removed.path))).toBe(false);
+
+    const sent = await r.client.call("files.attach", { name: "sent.txt", type: "text/plain", data: body64("sent") });
+    r.setChat(async res => stream(res, [piece("ok"), doneLine]));
+    const t = await r.client.call("threads.create", {});
+    const [turn] = await Promise.all([
+      r.client.call("chat.send", { threadId: t.id, content: "read this", model: MODEL, numCtx: 16384, files: [sent] }),
+      r.client.call("files.release", { paths: [sent.path] }),
+    ]);
+    await r.waitFor("chat.event", p => p.turnId === turn.turnId && p.event.type === "done");
+    expect((await r.client.call("threads.get", { threadId: t.id })).messages[0]?.files).toEqual([sent]);
+    expect(existsSync(path.join(dataDir, sent.path))).toBe(true);
+    expect(await r.client.call("files.keep", { paths: [sent.path, removed.path] })).toEqual({ missing: [removed.path] });
+  });
+
+  // Chat row 35 (2): a row a Retry replaces gives up its files.
+  it("a Retry without the file removes the copy the replaced question held; a Retry with it keeps it", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const dataDir = path.dirname(r.store.dbPath);
+    const kept = await r.client.call("files.attach", { name: "kept.txt", type: "text/plain", data: body64("kept") });
+    const dropped = await r.client.call("files.attach", { name: "dropped.txt", type: "text/plain", data: body64("dropped") });
+    r.setChat(async res => { res.writeHead(500).end("{\"error\":\"model failed\"}"); });
+    const t = await r.client.call("threads.create", {});
+    const sent = await sendStarted(r, { threadId: t.id, content: "read these", model: MODEL, numCtx: 16384, files: [kept, dropped] });
+    await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "error");
+    r.setChat(async res => stream(res, [piece("ok"), doneLine]));
+    const again = await sendStarted(r, { threadId: t.id, content: "read this", model: MODEL, numCtx: 16384, files: [kept], retryOf: sent.userMessage.id });
+    await r.waitFor("chat.event", p => p.turnId === again.turnId && p.event.type === "done");
+    expect((await r.client.call("threads.get", { threadId: t.id })).messages.map(m => m.files?.map(f => f.name))).toEqual([["kept.txt"], undefined]);
+    await vi.waitFor(() => expect(existsSync(path.join(dataDir, dropped.path))).toBe(false));
+    expect(existsSync(path.join(dataDir, kept.path))).toBe(true);
   });
 
   it("a link in the files folder is refused at send, and deleting never touches a file outside the folder", async () => {
@@ -1866,8 +1978,11 @@ describe("attached files (chat row 3: the model reads a copy by its label, never
     mkdirSync(path.join(dataDir, "files"), { recursive: true });
     symlinkSync(outside, path.join(dataDir, linked));
     const t = await r.client.call("threads.create", {});
-    const refused = await rejection(r.client.call("chat.send", { threadId: t.id, content: "read", model: MODEL, numCtx: 16384, files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] }));
-    expect(refused.message).toBe("outside.txt is no longer attached. Attach it again; your words are kept.");
+    // chat.send answers first (chat row 32): the refusal is the turn's error event
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "read", model: MODEL, numCtx: 16384, files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] });
+    const refused = (await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "error")).event;
+    expect(refused).toMatchObject({ code: "image-input", message: "outside.txt is no longer attached. Attach it again; your words are kept.", ended: { reason: "failed" } });
+    expect((await r.client.call("threads.get", { threadId: t.id })).messages, "the question was not saved").toEqual([]);
     // A row that names the link anyway: its delete removes the link in the folder, never what it points at.
     r.store.appendMessage({ threadId: t.id, role: "user", content: "linked", files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] });
     await r.client.call("threads.delete", { threadId: t.id });

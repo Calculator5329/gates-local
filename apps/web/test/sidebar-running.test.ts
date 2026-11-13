@@ -78,7 +78,9 @@ async function awaitingAcknowledgment(outcome: "accepted" | "turn-active" = "acc
   const held = b.server.hold("chat.send");
   const sending = session.send("Question awaiting its acknowledgment");
   const rpc = await held;
-  const userMessage = user("admitting-user", "A");
+  // accepted: the server saved the question under the id this send asked for, and its start can
+  // come before the answer is read; refused: the start is another client's turn in this chat
+  const userMessage = user(outcome === "accepted" ? rpc.params.messageId! : "admitting-user", "A");
   chat("admitting-A", "A", { type: "start", model: rpc.params.model, userMessage });
   return async () => {
     if (outcome === "accepted") rpc.respond({ turnId: "admitting-A", userMessage });
@@ -165,22 +167,22 @@ describe("sidebar running replies", () => {
   it("Stop before acknowledgment clears the acknowledged turn and replay cannot restore it", async () => {
     const acknowledge = await awaitingAcknowledgment();
     try {
+      // its start named the turn, so Stop cancels it now
       session.stop();
-      expect(marked(), "the server turn runs until its ID lets us cancel it").toEqual(["A"]);
+      expect(marked()).toEqual([]);
+      await tick();
+      expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([{ turnId: "admitting-A" }]);
     } finally {
       await acknowledge();
     }
     expect(marked()).toEqual([]);
   });
 
-  it("Stop before acknowledgment cannot hide another client's reply when this send is refused", async () => {
+  it("another client's reply starting while this send waits stays marked when this send is refused (chat row 32)", async () => {
+    // one turn per chat: another client's start here means this send will be refused
     const acknowledge = await awaitingAcknowledgment("turn-active");
-    try {
-      session.stop();
-      expect(marked()).toEqual(["A"]);
-    } finally {
-      await acknowledge();
-    }
+    expect(marked()).toEqual(["A"]);
+    await acknowledge();
     expect(marked()).toEqual(["A"]);
     session.stop();
     expect(marked()).toEqual([]);
@@ -192,12 +194,12 @@ describe("sidebar running replies", () => {
     const held = b.server.hold("chat.send");
     const sending = session.send("Another pending acknowledgment");
     const rpc = await held;
-    const userMessage = user("second-admitting-user", "B");
+    const userMessage = user(rpc.params.messageId!, "B");
     chat("admitting-B", "B", { type: "start", model: rpc.params.model, userMessage });
     let acknowledged = false;
     try {
       expect(marked()).toEqual(["A", "B"]);
-      chat("admitting-A", "A", { type: "error", code: "cancelled", message: "cancelled" });
+      chat("admitting-A", "A", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
       expect(marked()).toEqual(["B"]);
       await acknowledge();
       acknowledged = true;
@@ -248,7 +250,7 @@ describe("sidebar running replies", () => {
     chat("older-A", "A", { type: "start", model: MODEL, userMessage: user("older-user", "A") });
     chat("newer-A", "A", { type: "start", model: MODEL, userMessage: user("newer-user", "A") });
     expect(marked()).toEqual(["A"]);
-    chat("older-A", "A", { type: "error", code: "cancelled", message: "cancelled" });
+    chat("older-A", "A", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     expect(marked()).toEqual(["A"]);
     chat("newer-A", "A", { type: "done", message: reply("A"), stopReason: "stop" });
     expect(marked()).toEqual([]);

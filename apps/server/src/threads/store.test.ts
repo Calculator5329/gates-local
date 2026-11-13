@@ -299,6 +299,25 @@ describe("threads", () => {
 });
 
 describe("messages", () => {
+  it("chat row 32: a reply's times and a question's turn end survive a reopen", () => {
+    const path = join(dir, "times.db");
+    const s = store(path);
+    const t = s.createThread();
+    const q = s.appendMessage({ threadId: t.id, role: "user", content: "q", createdAt: 5_000 });
+    const times = { startedAt: 5_000, firstTokenAt: 6_500, thoughtMs: 1_200, spans: [{ from: 0, ms: 1_200 }], callsAt: { c1: 4 }, ended: { reason: "stopped" as const, at: 8_000 } };
+    const a = s.appendMessage({ threadId: t.id, role: "assistant", content: "half", interrupted: true, createdAt: 8_000, times });
+    expect(a.times).toEqual(times);
+    const lone = s.appendMessage({ threadId: t.id, role: "user", content: "q2", createdAt: 9_000 });
+    const failed = { startedAt: 9_000, spans: [], callsAt: {}, ended: { reason: "failed" as const, at: 9_400 } };
+    s.stampTimes(t.id, lone.id, failed);
+    s.close();
+    open.splice(open.indexOf(s), 1);
+    const again = store(path);
+    const { messages } = again.getThread(t.id);
+    expect(messages.map((m) => [m.id, m.times])).toEqual([[q.id, undefined], [a.id, times], [lone.id, failed]]);
+    expect(() => again.appendMessage({ threadId: t.id, role: "assistant", content: "x", times: { ...times, ended: { reason: "maybe", at: 1 } } as never })).toThrow(/times/);
+  });
+
   it("returns messages in time order, ties in write order, with optional fields round-tripped", () => {
     const s = store();
     const t = s.createThread();

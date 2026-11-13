@@ -381,10 +381,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .a-act.stop .stop-mark{margin-right:6px}
 .a-act.stop>:not(.stop-mark),.a-act.stop .s{opacity:0;transition:opacity .15s}
 .turn.a:hover .a-act.stop>*,.turn.a:hover .a-act.stop .s,.a-act.stop:focus-within>*,.a-act.stop:focus-within .s,.turn.a:focus-visible .a-act.stop>*,.turn.a:focus-visible .a-act.stop .s,.turn.a:has(:focus-visible) .a-act.stop>*,.turn.a:has(:focus-visible) .a-act.stop .s{opacity:1}
-/* messages waiting in this chat: a tray on the composer's top edge, inset by its corner, one line each */
-.qt{list-style:none;width:calc(min(100%,var(--composer-w)) - 24px);margin:0 auto;padding:0;border:1px solid var(--border-strong);border-bottom:0;border-radius:var(--r-sm) var(--r-sm) 0 0;background:var(--card)}
-.qt-r{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 4px 0 10px;font-size:13px;color:var(--muted-foreground)}
-.qt-r+.qt-r{border-top:1px solid var(--border)}
+/* messages waiting in this chat: a shelf inside the message box, at its width, one line each (chat row 36) */
+.qt{list-style:none;margin:0;padding:0;border-bottom:1px solid var(--border)}
+.qt-r{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 8px 0 16px;font-size:13px;color:var(--muted-foreground)}
+.qt-r+.qt-r,.qt-more{border-top:1px solid var(--border)}
+/* more than three: the next two, then a count that opens the rest */
+.qt-more{display:flex;min-height:32px;align-items:center;padding:0 8px 0 12px}
+.qt-more .ibtn{width:auto;min-width:24px;padding:0 6px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
+.qt-more .ic.up{transform:rotate(180deg)}
 .qt-k{flex:none;display:inline-flex}
 .qt-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--foreground)}
 .qt-s{flex:0 1 auto;min-width:0;max-width:50%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

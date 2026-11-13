@@ -98,6 +98,8 @@ export function ensureMessageColumns(db: DatabaseSync): void {
     addMessageColumns(db);
     const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
     if (!columns.has("interrupted")) db.exec("ALTER TABLE messages ADD COLUMN interrupted INTEGER CHECK (interrupted IS NULL OR interrupted = 1)");
+    // A reply's times (a ReplyTimes as JSON), or on a question whose turn saved no reply, how it ended (chat row 32).
+    if (!columns.has("times_json")) db.exec("ALTER TABLE messages ADD COLUMN times_json TEXT");
     // Each thread's image model and size (an ImageChoice as JSON); NULL follows the app's last pick.
     const threadColumns = new Set(db.prepare("PRAGMA table_info(threads)").all().map(row => row["name"]));
     if (!threadColumns.has("image_choice_json")) db.exec("ALTER TABLE threads ADD COLUMN image_choice_json TEXT");

@@ -12,6 +12,7 @@ import {
 import { modelChoice as pickChoice, newestOnly } from "./pick.ts";
 import { NA, type State, getState, overChat, setState } from "./store.ts";
 import { createChat } from "./session/chat.ts";
+import { KEEP_EVERY_MS, keepHeldFiles, setFileCalls } from "./file-holds.ts";
 import { createServerState } from "./session/server-state.ts";
 import { createSettings } from "./session/settings.ts";
 import { chooseModel, createModels, decided, modelChoice, reconcilePulls, settlePulls } from "./session/models.ts";
@@ -47,6 +48,8 @@ const connection = createConnection({ applyServerEvent,
 });
 export const { connect, call, libraryRequest } = connection;
 const { probe, act } = connection;
+setFileCalls(call);
+let keeping: ReturnType<typeof setInterval> | undefined;
 export const settingsReads = createSettingsReads({ readImports: () => libraryRequest("sources.imports", {}), readFolder: dataFolder });
 const updatesSession = createUpdates({ applyServerEvent, act });
 export const { checkForUpdates, downloadUpdate, dismissUpdateResult, readUpdateStatus, updateAndRestart } = updatesSession;
@@ -138,6 +141,9 @@ async function hydrate(c: Client): Promise<void> {
     release("none");
     settingsReads.end();
   }
+  // Chat row 35: the files this window's drafts and queue name stay on the server past a day.
+  void keepHeldFiles();
+  keeping ??= setInterval(() => void keepHeldFiles(), KEEP_EVERY_MS);
 }
 
 async function hydrateWith(

@@ -4,7 +4,7 @@ import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_
 import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit, planLoad } from "./fit.ts";
-import { createNvidiaSmiRunner, GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, parseMemTotal, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
+import { createNvidiaSmiRunner, forgetGpuReadings, GPU_APPS_ARGS, GPU_REUSE_MS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, parseMemTotal, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 import { readGpuStatus } from "./gpu-status.ts";
 
@@ -122,6 +122,17 @@ describe("a model's own context window", () => {
     expect(await fitOf(await oneModel(tinyShow(2048), ps), "tiny:2k", 16384)).toMatchObject({ source: "measured", numCtx: 2048 });
   });
 });
+
+/** A runner whose runs wait until released, counting runs and keeping each run's signal. */
+function held() {
+  const signals: Array<AbortSignal | undefined> = [];
+  const waiting: Array<() => void> = [];
+  const run = ((args: readonly string[], signal?: AbortSignal) => {
+    signals.push(signal);
+    return new Promise<string>((resolve) => waiting.push(() => resolve(args[0]?.startsWith("--query-gpu") ? MACHINE_GPU : MACHINE_APPS)));
+  }) as NvidiaSmiRunner;
+  return { run, signals, release: () => { for (const go of waiting.splice(0)) go(); } };
+}
 
 describe("nvidia-smi parsing", () => {
   it("keeps stdout from the real runner's non-zero exit for classification", async () => {
@@ -312,6 +323,81 @@ describe("nvidia-smi parsing", () => {
   it("refuses output with no memory line, and a runner failure, by code", async () => {
     expect(() => parseGpuTotals("NVIDIA-SMI has failed\n")).toThrow(/no GPU memory line/);
     await expect(readGpu(failing)).rejects.toMatchObject({ code: "gpu-unreadable" });
+  });
+
+  // Chat row 33: two sends starting at once each ran nvidia-smi twice; on one core that was 40% of Send to first word.
+  describe("one GPU reading is shared", () => {
+    it("callers at the same time share one run of each query", async () => {
+      const smiHeld = held();
+      const first = readGpu(smiHeld.run), second = readGpu(smiHeld.run);
+      await settle();
+      expect(smiHeld.signals).toHaveLength(2);
+      smiHeld.release();
+      expect(await second).toBe(await first);
+    });
+
+    it("a survey takes a finished reading under 500 ms old and not an older one; a send never takes a finished one", async () => {
+      vi.useFakeTimers({ toFake: ["performance"] });
+      try {
+        const run = smi(MACHINE_GPU, MACHINE_APPS);
+        const first = await readGpu(run);
+        vi.advanceTimersByTime(400);
+        expect(await readGpu(run, Date.now, undefined, GPU_REUSE_MS)).toBe(first);
+        expect(run.calls).toHaveLength(2);
+        expect(await readGpu(run)).not.toBe(first);
+        expect(run.calls).toHaveLength(4);
+        vi.advanceTimersByTime(600);
+        await readGpu(run, Date.now, undefined, GPU_REUSE_MS);
+        expect(run.calls).toHaveLength(6);
+      } finally { vi.useRealTimers(); }
+    });
+
+    it("a caller that gives up leaves the read to the others; the read stops only when every caller has gone", async () => {
+      const smiHeld = held();
+      const one = new AbortController(), two = new AbortController();
+      const first = readGpu(smiHeld.run, Date.now, one.signal), second = readGpu(smiHeld.run, Date.now, two.signal);
+      await settle();
+      const reason = new Error("first window closed");
+      one.abort(reason);
+      await expect(first).rejects.toBe(reason);
+      expect(smiHeld.signals.every(s => s?.aborted === false)).toBe(true);
+      two.abort(reason);
+      await expect(second).rejects.toBe(reason);
+      expect(smiHeld.signals.every(s => s?.aborted === true)).toBe(true);
+    });
+
+    it("after the app changes the GPU (a load, an unload), no caller gets a reading from before it", async () => {
+      const run = smi(MACHINE_GPU, MACHINE_APPS);
+      const first = await readGpu(run);
+      forgetGpuReadings();
+      expect(await readGpu(run, Date.now, undefined, GPU_REUSE_MS)).not.toBe(first);
+      expect(run.calls).toHaveLength(4);
+
+      const smiHeld = held();
+      const before = readGpu(smiHeld.run);
+      await settle();
+      forgetGpuReadings();
+      const after = readGpu(smiHeld.run);
+      await settle();
+      expect(smiHeld.signals).toHaveLength(4);
+      smiHeld.release();
+      await settle();
+      smiHeld.release();
+      expect(await after).not.toBe(await before);
+    });
+
+    it("a failed reading is not kept: the next caller reads again", async () => {
+      let runs = 0;
+      const flaky: NvidiaSmiRunner = async (args) => {
+        runs++;
+        // a timeout never retries: the first reading is these two runs
+        if (runs <= 2) throw Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+        return args[0]?.startsWith("--query-gpu") ? MACHINE_GPU : MACHINE_APPS;
+      };
+      await expect(readGpu(flaky)).rejects.toMatchObject({ code: "gpu-unreadable" });
+      await expect(readGpu(flaky)).resolves.toMatchObject({ totalBytes: 16303 * MIB });
+      expect(runs).toBe(4);
+    });
   });
 
   it("only ever runs the two query commands", async () => {

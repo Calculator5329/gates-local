@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../app.ts";
+import { sendStarted } from "../chat/send-started.ts";
 import { createSources } from "../sources/index.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createUsage, type Usage } from "./index.ts";
@@ -57,7 +58,7 @@ async function rig(chat: Chat) {
   });
   const read = async () => (await usage.handlers["usage.read"]({ since: 0 }, { clientId: 1 })).rows.map((r) => [r.model, r.promptTokens, r.completionTokens, r.replies]);
   const send = async (threadId: string, extra: Record<string, unknown> = {}) => {
-    const sent = await app.handlers["chat.send"]({ threadId, content: "hi", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
+    const sent = await sendStarted(app, { threadId, content: "hi", model: "m", numCtx: 16384, ...extra }, { clientId: 1 });
     return sent;
   };
   const settle = () => vi.waitFor(() => expect(app.activeTurns()).toBe(0));

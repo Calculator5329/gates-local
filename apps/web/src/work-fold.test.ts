@@ -4,9 +4,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, ToolStep } from "@gates-local/contracts";
+import type { Message, ReplyTimes, ToolStep } from "@gates-local/contracts";
 import { getState, type LiveTurn, setState, type State } from "./store.ts";
-import { type ChatEvent, reduceTurn, thoughtSecs, type TurnEvent } from "./session/turn.ts";
+import { type ChatEvent, reduceTurn, type TurnEvent, type WorkClock } from "./session/turn.ts";
 
 vi.mock("./store.ts", async (original) => {
   const actual = await original<typeof import("./store.ts")>();
@@ -14,7 +14,14 @@ vi.mock("./store.ts", async (original) => {
 });
 vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), reloadThread: vi.fn(), retry: vi.fn(), fileUrl: () => "/f" }));
 beforeEach(() => { vi.stubGlobal("matchMedia", () => ({ matches: true })); vi.stubGlobal("window", {}); vi.useFakeTimers(); });
-afterEach(() => { setState({ turns: {}, messages: {}, threadId: null, clocks: {}, firstToken: {}, stopNotes: {} }); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { setState({ turns: {}, messages: {}, threadId: null }); vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+/**
+ * The times the server stamps on the saved row (chat row 32), as the clock this turn kept gives
+ * them: the server keeps the same rounds (apps/server/src/chat/times.ts).
+ */
+const stamped = (clock: WorkClock | undefined, reason: ReplyTimes["ended"]["reason"], secs: number): ReplyTimes =>
+  ({ startedAt: 0, spans: clock?.spans ?? [], callsAt: clock?.at ?? {}, ended: { reason, at: secs * 1000 } });
 
 const T = "t";
 const user: Message = { id: "u", threadId: T, role: "user", createdAt: 1, content: "Check my notes" };
@@ -73,8 +80,8 @@ describe("the bulb's seconds are the turn's clock", () => {
     expect(bulb(await live(8000, t2))).toBe("6");
     const t3 = play(t2, [[10000, { type: "delta", text: "The" }]]);
     expect(bulb(await live(10400, t3))).toBe("8");
-    const saved: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "The", thinking: t3.thinking, tools: t3.tools };
-    expect(bulb(await render(99_000, { messages: { [T]: [user, saved] }, clocks: { a: t3.clock! } }))).toBe("8");
+    const saved: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "The", thinking: t3.thinking, tools: t3.tools, times: stamped(t3.clock, "done", 11) };
+    expect(bulb(await render(99_000, { messages: { [T]: [user, saved] } }))).toBe("8");
   });
 
   it("B: text before a call keeps the turn busy: words stay, no red mid-run, and the number ends at the true 5, never dropping", async () => {
@@ -91,8 +98,8 @@ describe("the bulb's seconds are the turn's clock", () => {
     expect(after).toContain('class="fold-now">Thinking<');
     const t3 = play(t2, [[10000, { type: "delta", text: " Done." }]]);
     expect(bulb(await live(10000, t3))).toBe("5");
-    const saved: Message = { id: "b", threadId: T, role: "assistant", createdAt: 2, content: t3.text, thinking: t3.thinking, tools: [step("a", "error", 5000), step("c", "done", 10)] };
-    expect(bulb(await render(99_000, { messages: { [T]: [user, saved] }, clocks: { b: t3.clock! } }))).toBe("5");
+    const saved: Message = { id: "b", threadId: T, role: "assistant", createdAt: 2, content: t3.text, thinking: t3.thinking, tools: [step("a", "error", 5000), step("c", "done", 10)], times: stamped(t3.clock, "done", 11) };
+    expect(bulb(await render(99_000, { messages: { [T]: [user, saved] } }))).toBe("5");
   });
 
   it("C: a turn not watched from its start shows the bulb with no number, and a remount reads the same number", async () => {
@@ -134,9 +141,9 @@ describe("the bulb's seconds are the turn's clock", () => {
 
 /** A stopped reply's bulb and square numbers, live at `now` and saved after. */
 async function both(turn: LiveTurn, now: number, secs: number) {
-  const saved: Message = { id: "s", threadId: T, role: "assistant", createdAt: 2, content: turn.text, thinking: turn.thinking, tools: turn.tools };
+  const saved: Message = { id: "s", threadId: T, role: "assistant", createdAt: 2, content: turn.text, thinking: turn.thinking, tools: turn.tools, times: stamped(turn.clock, "stopped", secs) };
   const shown = await live(now, turn);
-  const after = await render(99_000, { messages: { [T]: [user, saved] }, clocks: turn.clock === undefined ? {} : { s: turn.clock }, stopNotes: { s: { kind: "stopped", secs } } });
+  const after = await render(99_000, { messages: { [T]: [user, saved] } });
   return { live: [bulb(shown), square(shown)], saved: [bulb(after), square(after)] };
 }
 
@@ -238,37 +245,8 @@ describe("a turn this client did not see start has no number", () => {
   });
 });
 
-/**
- * The number a reply keeps once it ends, played in a chat on screen or not: thinks 0-3 s, writes "Let me check."
- * at 3 s, a call 3.5-8.5 s, thinks from 8.5 s; then answers at 10 s and ends at 12 s, or keeps thinking until
- * another device's Stop at 30 s.
- */
-async function kept(onScreen: boolean, end: "done" | "stopped elsewhere"): Promise<number | undefined> {
-  setState({ threadId: onScreen ? T : "other", turns: {}, messages: {} });
-  const c = await chat();
-  c.event(0, start());
-  c.event(0, { type: "thinking", text: "Hm." }); c.frame(100);
-  c.event(3000, { type: "delta", text: "Let me check." }); c.frame(3016);
-  c.event(3500, { type: "tool", step: step("a", "running") });
-  c.event(8500, { type: "tool", step: step("a", "done", 5000) });
-  c.event(8500, { type: "thinking", text: " Again." }); c.frame(8516);
-  const reply: Message = { id: "a", threadId: T, role: "assistant", createdAt: 2, content: "Let me check.", thinking: "Hm. Again.", tools: [step("a", "done", 5000)] };
-  if (end === "done") {
-    c.event(10_000, { type: "delta", text: " Done." }); c.frame(10_016);
-    c.event(12_000, { type: "done", message: { ...reply, content: "Let me check. Done." }, stopReason: "stop" });
-  } else {
-    c.event(30_000, { type: "error", code: "cancelled", message: "Stopped", partial: { ...reply, interrupted: true } });
-  }
-  const clock = getState().clocks.a;
-  return clock === undefined ? undefined : thoughtSecs(clock, 99_000);
-}
-
-describe("thinking that came while its chat was not on screen", () => {
-  it("is counted in the kept number as it is on screen, for a finished reply and a stopped one", async () => {
-    expect({ done: [await kept(true, "done"), await kept(false, "done")], stopped: [await kept(true, "stopped elsewhere"), await kept(false, "stopped elsewhere")] })
-      .toEqual({ done: [5, 5], stopped: [25, 25] });
-  });
-});
+// The number a reply keeps once it ends, whether its chat was on screen or not, is the server's
+// clock now (chat row 32): apps/server/src/chat/times.test.ts plays the same turn.
 
 describe("the red mark", () => {
   it("means only that the last call failed: not a turn that ended on an error, not a Stop", async () => {
@@ -287,7 +265,7 @@ describe("the red mark", () => {
 
   it("is not on a call the person stopped: the saved step says stopped after a reload, and a step that failed still says failed", async () => {
     const saved = (tools: ToolStep[]): Message => ({ id: "s", threadId: T, role: "assistant", createdAt: 2, content: "", thinking: "Hm.", tools, interrupted: true });
-    const stopped = await render(9000, { messages: { [T]: [user, saved([step("a", "done", 10), { ...step("b", "error", 900), stopped: true }])] }, stopNotes: { s: { kind: "stopped", secs: 3 } } });
+    const stopped = await render(9000, { messages: { [T]: [user, { ...saved([step("a", "done", 10), { ...step("b", "error", 900), stopped: true }]), times: stamped(undefined, "stopped", 3) }] } });
     expect(stopped).not.toContain("ch-p bad");
     expect(chipName(stopped)).toBe("Thinking, 2 tool calls");
     // the tool's label stays, as on a failed step

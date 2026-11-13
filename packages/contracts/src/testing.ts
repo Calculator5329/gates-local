@@ -186,6 +186,8 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
 
   "messages.delete": { params: { threadId: "t1", messageId: "m1" }, result: { messageId: "m1" } },
   "files.attach": { params: { name: "notes.txt", type: "text/plain", data: "aGVsbG8=" }, result: { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "notes.txt", size: 5, type: "text/plain" } },
+  "files.keep": { params: { paths: ["files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c"] }, result: { missing: [] } },
+  "files.release": { params: { paths: ["files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c"] }, result: {} },
   "turns.blocking": { params: { model: "qwen3:14b", numCtx: 16384 }, result: [{ threadId: "t1", title: "First", model: "qwen3.5:9b" }] },
   "settings.get": { params: {}, result: settings },
   "settings.update": { params: { thinking: false, defaultModel: null }, result: { ...settings, thinking: false } },

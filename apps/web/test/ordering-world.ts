@@ -107,13 +107,15 @@ export class OrderingServer extends FakeServer {
       respond({ thread: methodSamples["threads.create"].result, messages: this.messages });
     } else if (request.method === "chat.send") {
       this.log.push(request);
-      const { threadId, content } = request.params as { threadId: string; content: string };
+      const { threadId, content, messageId } = request.params as { threadId: string; content: string; messageId?: string };
       const turnId = `turn-${++this.nextTurn}`;
-      const userMessage: Message = { id: `user-${this.nextTurn}`, threadId, role: "user", content, createdAt: this.nextTurn };
+      // saved under the id the send asked for, as app.ts saves it
+      const userMessage: Message = { id: messageId ?? `user-${this.nextTurn}`, threadId, role: "user", content, createdAt: this.nextTurn };
       this.admissions.set(turnId, userMessage);
-      if (!this.deferAdmission) this.admit(turnId);
-      save(turnId, { turnId, userMessage });
+      // answered with the turn id once it is taken (chat row 32); the start brings the saved question
+      save(turnId, { turnId });
       if (!this.holdChat) this.response(turnId);
+      if (!this.deferAdmission) this.admit(turnId);
     } else if (request.method === "chat.cancel") {
       this.log.push(request);
       this.cancelled.push((request.params as { turnId: string }).turnId);
@@ -159,7 +161,7 @@ export class OrderingServer extends FakeServer {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
     const event: Payload<"chat.event">["event"] = ended
-      ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 } }
+      ? { type: "error", code: "cancelled", message: "stopped", partial: { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 }, ended: { reason: "stopped", at: Date.now() } }
       : { type: "delta", text };
     target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event } });
   }
@@ -168,8 +170,11 @@ export class OrderingServer extends FakeServer {
   chatFailed(turnId: string, target: FakeSocket, text: string, message: string): void {
     const userMessage = this.turns.get(turnId);
     if (!userMessage) throw new Error(`No admitted turn: ${turnId}`);
-    const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000 };
-    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial } } });
+    const ended = { reason: "failed", at: 2_000 } as const;
+    // the row carries how its turn ended, as the server stamps it (chat row 32)
+    const partial: Message = { id: `reply-${turnId}`, threadId: userMessage.threadId, role: "assistant", content: text, interrupted: true, createdAt: 1_000,
+      times: { startedAt: 1_000, spans: [], callsAt: {}, ended, why: { code: "runtime-error", message } } };
+    target.frame({ type: "push", channel: "chat.event", payload: { turnId, threadId: userMessage.threadId, event: { type: "error", code: "runtime-error", message, partial, ended } } });
   }
 
   admittedPush(turnId: string, label: string): void {

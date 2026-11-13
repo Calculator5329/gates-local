@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, type AppDeps } from "../app.ts";
+import { sendStarted } from "../chat/send-started.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import type { ImageModule } from "../image/module.ts";
 import { openThreadStore } from "../threads/store.ts";
@@ -395,7 +396,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
         json(res, 200, SHOW);
       },
     });
-    const { turnId } = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
+    const { turnId } = await sendStarted(r.app, { threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384, think: true }, { clientId: 1 });
     expect(turnId).toBeTruthy();
     expect(await settled(asked.promise, "held request readiness")).toEqual({ resolved: undefined });
     const switching = r.s.runtime.setMode("app");
@@ -435,7 +436,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       },
       { image },
     );
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    await sendStarted(r.app, { threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect([queued, r.chats()]).toEqual([1, 1]);
     const switching = r.s.runtime.setMode("app");
@@ -481,7 +482,7 @@ describe("R2-03: a runtime switch ends every turn reserved against the old runti
       },
       { image, lease, turnDrainMs: 15_000, onEvent: event => { if (event.type === "error") aborted.resolve(); } },
     );
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    await sendStarted(r.app, { threadId: r.thread.id, content: "draw a cat", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(queuedOnce.promise, "tool request readiness")).toEqual({ resolved: undefined });
     expect(lease.status().holders).toBe(1);
     // The held tool must be aborted before the 15-second turn-drain fallback.
@@ -592,7 +593,7 @@ describe("R3-02: a switch saves the reply streamed so far", () => {
         return new Promise<void>(() => undefined);
       },
     });
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    await sendStarted(r.app, { threadId: r.thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     expect(await settled(streaming.promise, "stream readiness")).toEqual({ resolved: undefined });
     await until(() => r.events.filter((e) => e.type === "delta").length >= 2);
     const sent = r.events.filter((e) => e.type === "delta").map((e) => e.text).join("");
@@ -618,7 +619,7 @@ describe("a turn's stream ends once", () => {
     );
     // A switch's first step, landing while the turn handles its error event.
     switchNow = () => r.s.loader.runtimeChanged();
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     await until(() => r.app.activeTurns() <= 0);
     expect(r.app.activeTurns()).toBe(0);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "error", code: "stream-error" }]);
@@ -636,7 +637,7 @@ describe("a turn's stream ends once", () => {
         return new Promise<void>(() => undefined);
       },
     });
-    await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
+    await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 });
     await until(() => r.app.activeTurns() <= 0);
     expect(r.events.filter((e) => e.type === "error" || e.type === "done")).toMatchObject([{ type: "done" }]);
     expect(await settled(closed.promise, "HTTP request socket closure")).toEqual({ resolved: undefined });
@@ -669,7 +670,7 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
       },
       { image: comfy.image, lease, fit: tight },
     );
-    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
     expect(await settled(asked.promise, "held request readiness")).toEqual({ resolved: undefined });
     expect(await settled(r.app.shutdown(), "application shutdown")).toEqual({ resolved: undefined });
     expect(await send).toMatchObject({ code: "cancelled" });
@@ -685,7 +686,7 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const comfy = await ownedIdleComfy(lease, work);
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
     const other = await lease.acquire("chat");
-    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
     await until(() => lease.status().waiting.length !== 0);
     expect(lease.status().waiting).toEqual(["image"]);
     expect(await settled(r.app.shutdown(), "application shutdown")).toEqual({ resolved: undefined });
@@ -705,7 +706,7 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const comfy = await ownedIdleComfy(lease, work);
     const r = await rig(cold, { image: comfy.image, lease, fit: tight });
     const inspect = comfy.hold("inspect");
-    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
     expect(await settled(inspect.asked, "ComfyUI inspection readiness")).toEqual({ resolved: undefined });
     expect(lease.status()).toMatchObject({ holder: "image" });
     const switched = r.s.runtime.setMode("app");
@@ -725,7 +726,7 @@ describe("R2-02: chat.send's ComfyUI reclaim ends with the turn", () => {
     const comfy = await ownedIdleComfy(lease, work);
     const r = await rig(cold, { image: comfy.image, lease, fit: tight, turnDrainMs: 200 });
     const stop = comfy.hold("stop");
-    const send = Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
+    const send = Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: MODEL, numCtx: 16384 }, { clientId: 1 })).catch((e: unknown) => e);
     expect(await settled(stop.asked, "ComfyUI stop readiness")).toEqual({ resolved: undefined });
     expect(await settled(r.s.runtime.setMode("app"), "runtime switch")).toMatchObject({ rejected: expect.objectContaining({ message: expect.stringMatching(/still running/) }) });
     expect(r.s.runtime.mode()).toBe("system");
@@ -787,7 +788,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   async function withX(fitDeps: AppDeps["fit"], options: RigOptions = {}, m = twoModels()) {
     const r = await rig(m.routes, { ...options, fit: fitDeps });
     const xThread = r.store.createThread({ title: "Long answer" });
-    const x = await r.app.handlers["chat.send"]({ threadId: xThread.id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    const x = await sendStarted(r.app, { threadId: xThread.id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settled(m.xStreaming.promise, "stream readiness")).toEqual({ resolved: undefined });
     await until(() => r.events.some((e) => e.turnId === x.turnId && e.type === "delta"));
     const of = (turnId: string) => r.events.filter((e) => e.turnId === turnId);
@@ -797,12 +798,12 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("stopOthers: X's turn ends now (partial saved, preempted, names Y) and Y's turn reaches its first token", async () => {
     const t = await withX(tight);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
     await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     const xEnd = t.terminal(t.x.turnId);
     expect(xEnd).toHaveLength(1);
-    expect(xEnd[0]).toMatchObject({ type: "error", code: "preempted", neededBy: Y, partial: { content: "X so far", model: MODEL } });
+    expect(xEnd[0]).toMatchObject({ type: "error", code: "preempted", neededBy: Y, partial: { content: "X so far", model: MODEL }, ended: { reason: "preempted" } });
     expect(xEnd[0]?.message).toContain(Y);
     expect(t.r.events.indexOf(xEnd[0]!)).toBeLessThan(t.r.events.findIndex((e) => e.turnId === y.turnId && e.type === "delta"));
     expect(t.r.store.getThread(t.xThread.id).messages.map((m) => [m.role, m.content])).toEqual([["user", "write a lot"], ["assistant", "X so far"]]);
@@ -816,7 +817,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const generates = () => t.r.old.requests.filter((q) => q.path === "/api/generate").length;
     expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }]);
     expect(generates()).toBe(0);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
     await sleep(300);
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.of(y.turnId).filter((e) => e.type === "delta")).toEqual([]);
@@ -829,7 +830,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("CFS-07, askFirst: a blocker comes back in the refusal, X keeps running and nothing is saved", async () => {
     const t = await withX(tight);
-    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
+    const send = sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
     const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
@@ -840,7 +841,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("CFT-04, stopTurns: the turn the person agreed to is stopped and Y starts", async () => {
     const t = await withX(tight);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
     await until(() => t.of(y.turnId).some((e) => e.type === "delta"));
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted", neededBy: Y }]);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
@@ -849,7 +850,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("CFT-04, stopTurns: a turn nobody agreed to is named and left running, and nothing is saved", async () => {
     const t = await withX(tight);
-    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: ["a-turn-that-has-ended"] }, ctx);
+    const send = sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: ["a-turn-that-has-ended"] }, ctx);
     const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ threadId: t.xThread.id, title: "Long answer", model: MODEL, turnId: t.x.turnId }] } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
@@ -861,9 +862,9 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("CFT-04, stopTurns: agreed to one of two turns in the way, nothing is stopped and both are named, so the next yes covers both", async () => {
     const t = await withX(tight);
     const second = t.r.store.createThread({ title: "Second answer" });
-    const x2 = await t.r.app.handlers["chat.send"]({ threadId: second.id, content: "more", model: MODEL, numCtx: 16384 }, ctx);
+    const x2 = await sendStarted(t.r.app, { threadId: second.id, content: "more", model: MODEL, numCtx: 16384 }, ctx);
     await until(() => t.of(x2.turnId).some((e) => e.type === "delta"));
-    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
+    const send = sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, stopTurns: [t.x.turnId] }, ctx);
     const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop" } });
     const named = ((sent as { rejected: { blocking: { turnId: string }[] } }).rejected.blocking).map((b) => b.turnId);
@@ -893,9 +894,9 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       },
       { fit: tight, lease },
     );
-    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    const x = await sendStarted(r.app, { threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
-    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), "chat send admission");
+    const sent = await settled(Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "would-stop", blocking: [{ model: MODEL }] } });
     r.app.handlers["chat.cancel"]({ turnId: x.turnId }, ctx);
     await r.done();
@@ -903,7 +904,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("CFS-07, askFirst: with room beside X the turn starts as usual", async () => {
     const t = await withX(roomy);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, askFirst: true }, ctx);
     expect(y.turnId).toEqual(expect.any(String));
     expect(t.terminal(t.x.turnId)).toEqual([]);
     t.r.app.handlers["chat.cancel"]({ turnId: t.x.turnId }, ctx);
@@ -912,7 +913,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
 
   it("CFS-07, askFirst: stopOthers wins, so a confirmed retry is never refused", async () => {
     const t = await withX(tight);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, askFirst: true }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true, askFirst: true }, ctx);
     await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.terminal(t.x.turnId)).toMatchObject([{ type: "error", code: "preempted" }]);
     await t.r.done();
@@ -922,7 +923,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     const t = await withX(tight, { image: comfy.image, lease });
-    const send = t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    const send = sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
     const sent = await settled(Promise.resolve(send), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
@@ -940,21 +941,22 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     let pause: Promise<void> | undefined;
     const paused = signalled();
     const resume = signalled();
-    const runNvidiaSmi = async (args: readonly string[]) => {
+    // Y's plan is held on its memory read, not nvidia-smi: a send at the same time shares that GPU reading (chat row 33).
+    const readMeminfo = async () => {
       const p = pause;
       pause = undefined;
       if (p) {
         paused.resolve();
         await p;
       }
-      return smi(1000)(args);
+      return fit.readMeminfo();
     };
-    const t = await withX({ ...fit, runNvidiaSmi });
+    const t = await withX({ ...fit, runNvidiaSmi: smi(1000), readMeminfo });
     pause = resume.promise;
-    const y = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx));
+    const y = Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx));
     expect(await settled(paused.promise, "held request readiness")).toEqual({ resolved: undefined });
     const x2Thread = t.r.store.createThread({});
-    const x2 = Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: x2Thread.id, content: "more", model: MODEL, numCtx: 16384 }, ctx));
+    const x2 = Promise.resolve(sendStarted(t.r.app, { threadId: x2Thread.id, content: "more", model: MODEL, numCtx: 16384 }, ctx));
     // Unless something holds it back, the second X turn is streaming before Y's plan goes on.
     await until(() => t.r.events.filter((e) => e.text === "X so far").length >= 2);
     resume.resolve();
@@ -993,7 +995,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       },
       { fit: tight },
     );
-    const sendOn = async (model: string) => (await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "hi", model, numCtx: 16384, stopOthers: true }, ctx)).turnId;
+    const sendOn = async (model: string) => (await sendStarted(r.app, { threadId: r.store.createThread({}).id, content: "hi", model, numCtx: 16384, stopOthers: true }, ctx)).turnId;
     const ids = await Promise.all([sendOn(Y), sendOn(Z)]);
     const delta = (id: string) => r.events.some((e) => e.turnId === id && e.type === "delta");
     await until(() => ids.every(delta));
@@ -1006,7 +1008,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
   it("R4-04: ~1 GB free, busy X at 4 GB, idle Z at 9 GB: Y loads in Z's memory and X keeps streaming", async () => {
     const t = await withX(tight, {}, twoModels(4e9, { name: "llama3.1:8b", vram: 9e9 }));
     expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
-    const y = await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    const y = await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
     await until(() => t.terminal(y.turnId).length !== 0);
     expect(t.of(y.turnId).find((e) => e.type === "delta")).toMatchObject({ text: "Y here" });
     expect(t.terminal(y.turnId)).toMatchObject([{ type: "done" }]);
@@ -1045,9 +1047,9 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       },
       { fit: tight, lease },
     );
-    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    const x = await sendStarted(r.app, { threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
-    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
+    const sent = await settled(Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
     const terminal = (turnId: string) => r.events.filter((e) => e.turnId === turnId && (e.type === "error" || e.type === "done"));
@@ -1067,7 +1069,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const comfy = await ownedIdleComfy(lease, work);
     // Y needs about 7830 MiB plus the 512 MiB margin: 1000 free + X's 1907 + ComfyUI's 6000, and neither alone is enough.
     const t = await withX(withComfyToo(comfy, 6000), { image: comfy.image, lease }, twoModels(2e9));
-    const sent = await settled(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
+    const sent = await settled(Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ resolved: { turnId: expect.any(String) } });
     const y = (sent as { resolved: { turnId: string } }).resolved;
     await until(() => t.terminal(y.turnId).length !== 0);
@@ -1083,7 +1085,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const lease = createGpuLease();
     const comfy = await ownedIdleComfy(lease, work);
     const t = await withX(withComfyToo(comfy, 1000), { image: comfy.image, lease }, twoModels(2e9));
-    const sent = await settled(Promise.resolve(t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
+    const sent = await settled(Promise.resolve(sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(comfy.stops()).toBe(0);
@@ -1113,9 +1115,9 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
       // 15000 MiB free until X loads, 1000 beside it: X fits, Y does not even in X's 2 GB.
       { fit: { runNvidiaSmi: (args) => (xResident ? smi(1000) : smi(15000))(args), readMeminfo: async () => "MemAvailable: 1000000 kB\n" }, lease },
     );
-    const x = await r.app.handlers["chat.send"]({ threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
+    const x = await sendStarted(r.app, { threadId: r.store.createThread({}).id, content: "write a lot", model: MODEL, numCtx: 16384 }, ctx);
     expect(await settled(xAsked.promise, "held request readiness")).toEqual({ resolved: undefined });
-    const sent = await settled(Promise.resolve(r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, ...consent }, ctx)), "chat send admission");
+    const sent = await settled(Promise.resolve(sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384, ...consent }, ctx)), "chat send admission");
     expect(sent).toMatchObject({ rejected: { code: "wont-fit" } });
     expect(r.events.filter((e) => e.turnId === x.turnId && (e.type === "error" || e.type === "done"))).toEqual([]);
     expect(yAsked).toBe(false);
@@ -1140,7 +1142,7 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     const table = await r.app.handlers["fit.table"]({}, ctx);
     expect(table.rows.find((row) => row.model === Y && row.numCtx === 16384)).toMatchObject({ verdict: "fits" });
     expect(await r.s.handlers["models.load"]!({ model: Y, numCtx: 16384 }, ctx)).toMatchObject({ state: "ready" });
-    const y = await r.app.handlers["chat.send"]({ threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
+    const y = await sendStarted(r.app, { threadId: r.thread.id, content: "hi", model: Y, numCtx: 16384 }, ctx);
     await until(() => r.events.some((e) => e.turnId === y.turnId && e.type === "done"));
     expect(r.events.filter((e) => e.turnId === y.turnId).map((e) => e.type)).toEqual(["start", "delta", "done"]);
     await r.done();
@@ -1151,8 +1153,8 @@ describe("a load that needs a busy model's GPU: turns.blocking and chat.send sto
     expect(await t.r.app.handlers["turns.blocking"]!({ model: Y, numCtx: 16384 }, ctx)).toEqual([]);
     expect(await t.r.app.handlers["turns.blocking"]!({ model: MODEL, numCtx: 16384 }, ctx)).toEqual([]);
     const other = t.r.store.createThread({});
-    await t.r.app.handlers["chat.send"]({ threadId: other.id, content: "hi", model: MODEL, numCtx: 16384, stopOthers: true }, ctx);
-    await t.r.app.handlers["chat.send"]({ threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
+    await sendStarted(t.r.app, { threadId: other.id, content: "hi", model: MODEL, numCtx: 16384, stopOthers: true }, ctx);
+    await sendStarted(t.r.app, { threadId: t.r.thread.id, content: "hi", model: Y, numCtx: 16384, stopOthers: true }, ctx);
     await sleep(200);
     expect(t.terminal(t.x.turnId)).toEqual([]);
     expect(t.r.app.activeTurns()).toBe(3);

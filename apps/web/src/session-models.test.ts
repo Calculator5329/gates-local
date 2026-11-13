@@ -554,7 +554,7 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
   it("a new chat's first Image send carries the pick, then the next new chat starts from Settings again", async () => {
     const sent = defer<unknown>();
     const draws: unknown[] = [];
-    const { session, store } = await onPhone({
+    const { session, store, push } = await onPhone({
       "threads.create": async () => methodSamples["threads.create"].result,
       "chat.send": (params) => { draws.push((params as { draw?: unknown }).draw); return sent.promise; },
     });
@@ -562,7 +562,12 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
     await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
     await vi.waitFor(() => expect(draws).toEqual([moss]));
-    sent.resolve(methodSamples["chat.send"].result);
+    const { turnId, userMessage } = methodSamples["chat.send"].result;
+    sent.resolve({ turnId });
+    await settled();
+    expect(store.getState().imagePick, "the pick stays until the server saved the send that carries it").toEqual(moss);
+    // the turn's start (chat row 32): the thread now keeps the pick
+    push("chat.event", { turnId, threadId: methodSamples["threads.create"].result.id, event: { type: "start", model: moss.preset, userMessage: { ...userMessage!, threadId: methodSamples["threads.create"].result.id }, image: true } });
     await vi.waitFor(() => expect(store.getState().imagePick).toBeUndefined());
     session.newThread();
     expect(store.getState().imagePick).toBeUndefined();

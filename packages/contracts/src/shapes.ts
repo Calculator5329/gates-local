@@ -101,6 +101,42 @@ export const ImageEvent = S.Struct({
 export type ImageEvent = typeof ImageEvent.Type;
 
 /**
+ * How a turn ended, as the server decided it (chat row 32): done; stopped by a person's Stop
+ * (chat.cancel), or by deleting its question; preempted, the server stopping it to make way for
+ * something (another model's load, a runtime change, the app closing); or failed. `at` is when it
+ * ended: for a Stop, when the cancel came. Rides on the one terminal event, done or error.
+ */
+export const TurnEnded = S.Struct({
+  reason: S.Literals(["done", "stopped", "preempted", "failed"]),
+  at: Millis,
+});
+export type TurnEnded = typeof TurnEnded.Type;
+
+/**
+ * A reply's times, stamped by the server from the events it sent (chat row 32), so every window
+ * and every reload shows the same seconds. Absent on rows saved before 2026-11-14 and on pictures.
+ */
+export const ReplyTimes = S.Struct({
+  /** When chat.send took the turn. */
+  startedAt: Millis,
+  /** The first word of the answer. */
+  firstTokenAt: S.optional(Millis),
+  /**
+   * "Thought for": from the model being ready (the start, or the first token of a cold load) to
+   * the first word of the answer, or to the end of a reply that never answered. Only with thinking.
+   */
+  thoughtMs: S.optional(Count),
+  /** Each closed span of thinking: where its words start in the thinking, and how long it ran. */
+  spans: S.Array(S.Struct({ from: Count, ms: Count })),
+  /** The thinking's length when each call first arrived: where the call came in the thinking. */
+  callsAt: S.Record(S.String, Count),
+  ended: TurnEnded,
+  /** Preempted or failed: the error the turn ended with, for the note under it. */
+  why: S.optional(S.Struct({ code: S.String, message: S.String, neededBy: S.optional(S.String) })),
+});
+export type ReplyTimes = typeof ReplyTimes.Type;
+
+/**
  * A non-image file attached to a message: the server's own copy in its data folder. The model
  * never gets its contents in the prompt, only a line naming it; with tools on it reads the copy
  * through the read tool, by its label, in this thread's turns only.
@@ -136,6 +172,11 @@ export const Message = S.Struct({
   /** Saved unfinished assistant text, not a completed answer. Absent on older messages. */
   interrupted: S.optional(S.Literal(true)),
   imageJob: S.optional(ImageEvent),
+  /**
+   * An assistant reply: its times. A question whose turn ended with no reply saved (stopped or
+   * failed before any words): how that turn ended, with no spans.
+   */
+  times: S.optional(ReplyTimes),
 });
 export type Message = typeof Message.Type;
 
@@ -289,33 +330,6 @@ export const FitTable = S.Struct({
 });
 export type FitTable = typeof FitTable.Type;
 
-export const ChatEvent = S.Union([
-  // The turn began: its model and saved user message, so a client that did not send it
-  // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
-  // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
-  // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
-  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
-  S.Struct({ type: S.Literal("delta"), text: S.String }),
-  S.Struct({ type: S.Literal("thinking"), text: S.String }),
-  // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
-  S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
-  S.Struct({
-    type: S.Literal("error"),
-    code: S.String,
-    message: S.String,
-    /**
-     * code "runtime-changed" or "preempted": the reply streamed so far (exactly the delta and
-     * thinking text sent), saved to the thread as a stopped reply. Absent when nothing was sent.
-     */
-    partial: S.optional(Message),
-    /** code "preempted": the model whose load needed the GPU this turn's model held. */
-    neededBy: S.optional(S.String),
-  }),
-  // A tool call started, finished or failed; the same callId updates one step row.
-  S.Struct({ type: S.Literal("tool"), step: ToolStep }),
-]);
-export type ChatEvent = typeof ChatEvent.Type;
-
 /** A running turn a load would have to stop (turns.blocking). */
 export const BlockingTurn = S.Struct({
   threadId: S.String,
@@ -325,6 +339,39 @@ export const BlockingTurn = S.Struct({
   turnId: S.optional(S.String),
 });
 export type BlockingTurn = typeof BlockingTurn.Type;
+
+export const ChatEvent = S.Union([
+  // The turn began: its model and saved user message, so a client that did not send it
+  // (the same thread open elsewhere) can stream the reply too. Added 2026-11-07 (PH-02).
+  // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
+  // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
+  S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
+  S.Struct({ type: S.Literal("delta"), text: S.String }),
+  S.Struct({ type: S.Literal("thinking"), text: S.String }),
+  // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
+  // `ended`: absent only from a server before 2026-11-13.
+  S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String, ended: S.optional(TurnEnded) }),
+  S.Struct({
+    type: S.Literal("error"),
+    code: S.String,
+    message: S.String,
+    ended: S.optional(TurnEnded),
+    /**
+     * code "runtime-changed" or "preempted": the reply streamed so far (exactly the delta and
+     * thinking text sent), saved to the thread as a stopped reply. Absent when nothing was sent.
+     */
+    partial: S.optional(Message),
+    /** No reply was saved: the question, which now keeps how its turn ended (Message.times). */
+    question: S.optional(Message),
+    /** code "preempted": the model whose load needed the GPU this turn's model held. */
+    neededBy: S.optional(S.String),
+    /** Refused before its start, code "would-stop" (chat.send askFirst or stopTurns): the running turns in the way. */
+    blocking: S.optional(S.Array(BlockingTurn)),
+  }),
+  // A tool call started, finished or failed; the same callId updates one step row.
+  S.Struct({ type: S.Literal("tool"), step: ToolStep }),
+]);
+export type ChatEvent = typeof ChatEvent.Type;
 
 export const NumCtx = PositiveInt;
 

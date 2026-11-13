@@ -206,8 +206,74 @@ export async function readNvidiaSmi<T>(run: NvidiaSmiRunner, totalsArgs: readonl
   return { kind: "unreadable", detail: gpuReadFailure(failed) };
 }
 
-/** `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
-export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal): Promise<GpuSnapshot> {
+/** A finished GPU reading this young (ms, from when it started) is handed to a survey that asks for it instead of running nvidia-smi again. */
+export const GPU_REUSE_MS = 500;
+
+/** Bumped by forgetGpuReadings: a reading from an earlier count is never handed out again. */
+let generation = 0;
+
+/**
+ * The GPU just changed in a way this app knows of (a model loaded or unloaded, the runtime
+ * stopped, the GPU watch saw memory move): no caller after this gets a reading taken before it.
+ */
+export function forgetGpuReadings(): void {
+  generation++;
+}
+
+interface SharedRead {
+  readonly generation: number;
+  readonly startedAt: number;
+  readonly work: Promise<GpuSnapshot>;
+  readonly stop: AbortController;
+  /** Callers still waiting that could give up; at 0 after one gives up, the read stops. */
+  waiting: number;
+  /** A caller with no signal never gives up, so the read always finishes for it. */
+  keep: boolean;
+}
+/** Per runner: the read in flight and the last good one. Keyed by the runner so each server (and each test) has its own. */
+const shared = new WeakMap<NvidiaSmiRunner, { live?: SharedRead; last?: { generation: number; startedAt: number; snapshot: GpuSnapshot } }>();
+
+/**
+ * The GPU's memory and tenants. Callers at the same time share one pair of nvidia-smi runs (chat
+ * row 33: two sends starting at once spent 40% of one core on these runs). A finished reading is
+ * handed out again only to a caller that passes `reuseMs` (the fit table and the model list's
+ * survey, GPU_REUSE_MS); a send plans on a reading that is in flight or starts now, since it plans
+ * again after something it changed (a ComfyUI stop, a claim it waited for). A caller's abort
+ * rejects it at once with its reason; the runs stop only when every caller that could give up has,
+ * and no caller without a signal is waiting.
+ */
+export async function readGpu(run: NvidiaSmiRunner = defaultNvidiaSmi, now: () => number = Date.now, signal?: AbortSignal, reuseMs = 0): Promise<GpuSnapshot> {
+  signal?.throwIfAborted();
+  const calledAt = performance.now();
+  let state = shared.get(run);
+  if (state === undefined) shared.set(run, state = {});
+  const last = state.last;
+  if (last !== undefined && last.generation === generation && calledAt - last.startedAt < reuseMs) return last.snapshot;
+  let live = state.live;
+  if (live === undefined || live.generation !== generation) {
+    const stop = new AbortController();
+    const entry = state;
+    const work = readGpuNow(run, now, stop.signal);
+    const started: SharedRead = { generation, startedAt: calledAt, work, stop, waiting: 0, keep: false };
+    work.then(snapshot => {
+      if (entry.last === undefined || entry.last.startedAt <= started.startedAt) entry.last = { generation: started.generation, startedAt: started.startedAt, snapshot };
+    }, () => undefined).finally(() => { if (entry.live === started) delete entry.live; });
+    state.live = live = started;
+  }
+  if (signal === undefined) { live.keep = true; return live.work; }
+  const mine = live;
+  mine.waiting++;
+  const giveUp = () => { if (--mine.waiting === 0 && !mine.keep) mine.stop.abort(signal.reason); };
+  signal.addEventListener("abort", giveUp, { once: true });
+  try {
+    return await untilAborted(mine.work, signal);
+  } finally {
+    signal.removeEventListener("abort", giveUp);
+  }
+}
+
+/** One reading of its own: `signal` reaches both nvidia-smi runs; an abort rejects with its reason. */
+async function readGpuNow(run: NvidiaSmiRunner, now: () => number, signal: AbortSignal): Promise<GpuSnapshot> {
   const read = await readNvidiaSmi(run, GPU_TOTALS_ARGS, parseGpuTotals, signal);
   if (read.kind === "unreadable") throw new FitError("gpu-unreadable", read.detail);
   if (read.kind === "none") return { totalBytes: 0, usedBytes: 0, freeBytes: 0, gpuCount: 0, ...(read.detail === undefined ? {} : { unavailableDetail: read.detail }), tenants: [], measuredAt: now() };

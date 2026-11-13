@@ -6,6 +6,7 @@ import * as toolTransport from "./tools.ts";
 import { estimateTokens, OMITTED_IMAGE } from "./window.ts";
 import { createSources } from "../sources/index.ts";
 import { createApp } from "../app.ts";
+import { sendStarted } from "./send-started.ts";
 import { openThreadStore, type ThreadStore } from "../threads/store.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import type { ImageModule } from "../image/module.ts";
@@ -240,7 +241,7 @@ describe("tool chat transport", () => {
     });
     try {
       const thread = await app.handlers["threads.create"]({ title: "tools" }, { clientId: 1 });
-      await app.handlers["chat.send"]({ threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
+      await sendStarted(app, { threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
       await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
       expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "hello library", tools: [{ name: "read", state: "done" }] });
       expect(JSON.stringify(pushed)).toContain('"state":"running"');
@@ -251,7 +252,7 @@ describe("tool chat transport", () => {
       const t = await imageApp(() => ndjson([{ message: { content: "Here's an image: ![Star Trek Ship](https://example.com/invented.png)" }, done: true }]), undefined, undefined, image);
       try {
         const thread = t.store.createThread();
-        await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
+        await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         // The turn holds a shared GPU claim to its end; a tool that waited for the picture would never get here.
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
         const offered = t.chatBodies[0]!.tools!.map(tool => tool.function.name);
@@ -281,7 +282,7 @@ describe("tool chat transport", () => {
       const t = await imageApp(hang, gate);
       try {
         const thread = t.store.createThread();
-        const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
+        const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384 }, { clientId: 1 });
         await vi.waitFor(() => expect(t.fake.generate).toHaveBeenCalledTimes(1));
         expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
         open?.();
@@ -303,7 +304,7 @@ describe("tool chat transport", () => {
       const t = await imageApp(hang, undefined, first);
       try {
         const thread = t.store.createThread();
-        const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
+        const { turnId } = await sendStarted(t.app, { threadId: thread.id, content: "draw", model: "m", numCtx: 16384, image: true }, { clientId: 1 });
         await vi.waitFor(() => expect(t.pushed).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ event: { type: "thinking", text: "drawing" } }) })));
         expect(await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 })).toEqual({ cancelled: true });
         await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
@@ -337,7 +338,7 @@ describe("tool chat transport", () => {
       });
       try {
         const thread = store.createThread();
-        await app.handlers["chat.send"]({ threadId: thread.id, content: "hello", model: "m", numCtx: 16384, think: false, ...(scenario === "tools explicitly off" ? { tools: false } : scenario === "empty Library" ? { tools: true } : {}) }, { clientId: 1 });
+        await sendStarted(app, { threadId: thread.id, content: "hello", model: "m", numCtx: 16384, think: false, ...(scenario === "tools explicitly off" ? { tools: false } : scenario === "empty Library" ? { tools: true } : {}) }, { clientId: 1 });
         await vi.waitFor(() => expect(app.activeTurns()).toBe(0));
         expect(store.getThread(thread.id).messages.at(-1)).toMatchObject({ role: "assistant", content: "plain reply" });
         expect(chatBodies).toEqual([{ model: "m", messages: [{ role: "user", content: "hello" }], stream: true, think: false, options: { num_ctx: 16384 } }]);

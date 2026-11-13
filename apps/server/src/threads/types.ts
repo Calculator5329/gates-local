@@ -1,6 +1,6 @@
 // Shared shapes for the thread store. Plain TypeScript; packages/contracts
 // mirrors Thread and Message as Effect Schemas for the wire.
-import type { AttachedFile, ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
+import type { AttachedFile, ImageChoice, ImageCount, ImageEvent, ReplyTimes } from "@gates-local/contracts";
 
 export type Role = "user" | "assistant" | "system";
 
@@ -60,6 +60,8 @@ export interface Message {
   files?: AttachedFile[];
   interrupted?: true;
   imageJob?: ImageEvent;
+  /** The reply's times, or on a question whose turn saved no reply, how that turn ended (chat row 32). */
+  times?: ReplyTimes;
 }
 
 export interface ThreadWithMessages {
@@ -85,4 +87,5 @@ export interface NewMessage {
   /** Files the person attached: copies under files/ in the app data dir. */
   files?: AttachedFile[];
   interrupted?: true;
+  times?: ReplyTimes;
 }

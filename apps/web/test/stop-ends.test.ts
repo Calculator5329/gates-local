@@ -1,8 +1,10 @@
-// What a Stop leaves behind when the server's end comes after it: only an
-// abort-shaped end is the Stop; a real failure that lands after it is said,
-// on screen or off it, and words that come after the Stop change no time.
+// What a Stop leaves behind when the server's end comes after it: the server
+// says how the turn ended (chat row 32), a real failure that lands after a
+// Stop is said, on screen or off it, and the rows it saved say it once the
+// turn leaves the screen, in place of the copies here.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Message, Payload } from "@gates-local/contracts";
+import type { Message, Payload, ReplyTimes } from "@gates-local/contracts";
+import { drawTimes } from "../src/session/times.ts";
 import { type Browser, installBrowser, tick, until } from "./harness.ts";
 
 let b: Browser;
@@ -14,7 +16,15 @@ let created: string[] = [];
 const st = () => store.getState();
 const userMsg = (id: string, threadId: string, content: string): Message => ({ id, threadId, role: "user", content, createdAt: 1 });
 const chat = (turnId: string, threadId: string, event: Payload<"chat.event">["event"]) => b.server.push("chat.event", { turnId, threadId, event });
-const notFound = { type: "error", code: "model-not-found", message: "HTTP 404: model 'x' not found" } as const;
+/** The times the server stamps on a row as its turn ends. */
+const stamped = (reason: ReplyTimes["ended"]["reason"], why?: ReplyTimes["why"]): ReplyTimes => ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason, at: 4_000 }, ...(why === undefined ? {} : { why }) });
+const notFoundWhy = { code: "model-not-found", message: "HTTP 404: model 'x' not found" };
+const notFound = { type: "error", ...notFoundWhy, ended: { reason: "failed", at: 4_000 }, question: { ...userMsg("u-A", "A", "hello A"), times: stamped("failed", notFoundWhy) } } as const;
+/** The note a row draws, as the timeline shows it; "missing" when the row is not in its chat here. */
+const noteOn = (threadId: string, id: string) => {
+  const m = st().messages[threadId]?.find((x) => x.id === id);
+  return m === undefined ? "missing" : drawTimes(m, undefined).note;
+};
 
 beforeEach(async () => {
   b = installBrowser();
@@ -54,6 +64,8 @@ it("a failure that lands after Stop, on screen, is the failure and not the Stop"
   chat(a, "A", notFound);
   await tick();
   expect(st().turns["A"]?.end).toEqual({ kind: "error", code: "model-not-found", message: notFound.message });
+  // the stamped question is in place, and its note waits while the turn shows its own error line
+  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
 });
 
 it("a failure that lands after Stop, off screen, leaves its note under the question", async () => {
@@ -65,18 +77,31 @@ it("a failure that lands after Stop, off screen, leaves its note under the quest
   await tick();
   expect(st().turns["A"]).toBeUndefined();
   // the note a failure off screen leaves without a Stop
-  expect(st().stopNotes["u-A"]).toEqual({ kind: "said", words: "The reply didn't finish." });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
 });
+
+const cancelled = { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", ended: { reason: "stopped", at: 4_000 }, question: { ...userMsg("u-A", "A", "hello A"), times: stamped("stopped") } } as const;
 
 it("the server's cancel after Stop, off screen, leaves no note: the Stop says it", async () => {
   const a = await answering("A");
   session.stop();
   await tick();
   await answering("B");
-  chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event" });
+  chat(a, "A", cancelled);
   await tick();
   expect(st().turns["A"]).toBeUndefined();
-  expect(st().stopNotes["u-A"]).toBeUndefined();
+  expect(noteOn("A", "u-A")).toBeUndefined();
+});
+
+it("a Retry took the question out: its turn's late end does not put it back", async () => {
+  const a = await answering("A");
+  session.stop();
+  await tick();
+  await answering("B");
+  store.setState((s) => ({ messages: { ...s.messages, A: [] } }));
+  chat(a, "A", notFound);
+  await tick();
+  expect(noteOn("A", "u-A")).toBe("missing");
 });
 
 // Leaving for a new chat without sending keeps the stopped turn: its end settles it off screen (`settle`).
@@ -87,10 +112,10 @@ it("leaving without a send: the server's cancel after Stop leaves no note", asyn
   session.newThread();
   await tick();
   expect(st().turns["A"]?.end).toMatchObject({ kind: "stopped" });
-  chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event" });
+  chat(a, "A", cancelled);
   await tick();
   expect(st().turns["A"]).toBeUndefined();
-  expect(st().stopNotes["u-A"]).toBeUndefined();
+  expect(noteOn("A", "u-A")).toBeUndefined();
 });
 
 it("leaving without a send: a failure after Stop leaves its note under the question", async () => {
@@ -102,7 +127,7 @@ it("leaving without a send: a failure after Stop leaves its note under the quest
   chat(a, "A", notFound);
   await tick();
   expect(st().turns["A"]).toBeUndefined();
-  expect(st().stopNotes["u-A"]).toEqual({ kind: "said", words: "The reply didn't finish." });
+  expect(noteOn("A", "u-A")).toEqual({ kind: "said", words: "The reply didn't finish." });
 });
 
 it("a failure with saved words after Stop keeps the failure's words, not Stop's seconds", async () => {
@@ -112,10 +137,11 @@ it("a failure with saved words after Stop keeps the failure's words, not Stop's 
   b.frame();
   session.stop();
   await tick();
-  const partial: Message = { id: "p-A", threadId: "A", role: "assistant", content: "Partly", interrupted: true, createdAt: 2 };
-  chat(a, "A", { type: "error", code: "stream-error", message: "stream broke", partial });
+  const why = { code: "stream-error", message: "stream broke" };
+  const partial: Message = { id: "p-A", threadId: "A", role: "assistant", content: "Partly", interrupted: true, createdAt: 2, times: stamped("failed", why) };
+  chat(a, "A", { type: "error", ...why, partial, ended: { reason: "failed", at: 4_000 } });
   await tick();
-  expect(st().stopNotes["p-A"]).toEqual({ kind: "said", words: "The reply didn't finish. Stream broke." });
+  expect(noteOn("A", "p-A")).toEqual({ kind: "said", words: "The reply didn't finish. Stream broke." });
 });
 
 it("a call cut by Stop, kept in this chat without a saved row, is kept as stopped, not failed", async () => {
@@ -125,7 +151,7 @@ it("a call cut by Stop, kept in this chat without a saved row, is kept as stoppe
   b.frame();
   session.stop();
   await tick();
-  chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event" });
+  chat(a, "A", cancelled);
   await tick();
   // the person moves on: the stopped reply leaves the map and its words stay in its chat
   await answering("B");
@@ -146,9 +172,11 @@ it("first words that come after Stop set no first-word time on the saved reply",
   chat(a, "A", { type: "delta", text: "Late" });
   await tick();
   const partial: Message = { id: "p-A", threadId: "A", role: "assistant", content: "", thinking: "Hmm", interrupted: true, createdAt: 2 };
-  chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", partial });
+  // the server's clock stopped at the Stop (apps/server/src/chat/times.test.ts): its row has no first-word time
+  chat(a, "A", { type: "error", code: "cancelled", message: "cancelled mid-stream; no done event", ended: { reason: "stopped", at: 4_000 },
+    partial: { ...partial, times: { ...stamped("stopped"), thoughtMs: 3_000, spans: [{ from: 0, ms: 3_000 }] } } });
   await tick();
   // the pill would read the late word's time; the square keeps Stop's seconds, the only time shown
-  expect(st().firstToken["p-A"]).toBeUndefined();
-  expect(st().stopNotes["p-A"]).toEqual(stopped);
+  const row = st().messages["A"]?.find((m) => m.id === "p-A");
+  expect(row === undefined ? "missing" : drawTimes(row, undefined)).toMatchObject({ firstTokenMs: undefined, thoughtSecs: 3, note: { kind: "stopped", secs: 3 } });
 });

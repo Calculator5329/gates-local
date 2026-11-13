@@ -19,7 +19,11 @@ vi.mock("./session.ts", () => ({ cancelImage: vi.fn(), retryImage: vi.fn(), relo
 import { Timeline } from "./Thread.tsx";
 import { setState } from "./store.ts";
 
-afterEach(() => { setState({ messages: {}, turns: {}, stopNotes: {} }); vi.unstubAllGlobals(); });
+afterEach(() => { setState({ messages: {}, turns: {} }); vi.unstubAllGlobals(); });
+
+/** The times the server saved on a row (chat row 32): a turn that started at 1 s and ended `secs` later. */
+const times = (reason: "done" | "stopped" | "preempted" | "failed", secs: number, more: object = {}) =>
+  ({ startedAt: 1_000, spans: [], callsAt: {}, ended: { reason, at: 1_000 + secs * 1_000 }, ...more });
 
 /** The stop square's name and tooltip: the one place the app says a stopped reply stays out of later prompts. */
 const UNSEEN = "Stopped. The model won&#x27;t see this reply.";
@@ -42,10 +46,10 @@ it("marks an interrupted reply whose cause this client does not know (a reload) 
   expect(html).not.toContain('class="turn a done"');
 });
 
-it("marks a reply the person stopped with the stop square and its seconds in its actions row, and no line of words", () => {
+it("marks a reply the person stopped with the stop square and its seconds in its actions row, and no line of words, from the row alone (a reload, a second window)", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "stopped", secs: 187 } } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true, times: times("stopped", 187) }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html.split(MARK)).toHaveLength(2);
   expect(html).toMatch(/<div class="a-act stop"><span class="stop-mark"><span [^>]*><\/span><span class="s">187 s<\/span><\/span>/);
@@ -53,10 +57,14 @@ it("marks a reply the person stopped with the stop square and its seconds in its
   expect(html).not.toContain('class="stop-note"');
 });
 
-it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime changed.", "The reply didn't finish. The model crashed."])("shows only the known stop reason, in its own words, with the stop square: %s", reason => {
+it.each([
+  ["Stopped so Qwen 3.5 9B could load.", "preempted", { code: "preempted", message: "Another model needed the memory", neededBy: "qwen3.5:9b" }],
+  ["Stopped when the Ollama runtime changed.", "preempted", { code: "runtime-changed", message: "The runtime changed" }],
+  ["The reply didn't finish. The model crashed.", "failed", { code: "model-error", message: "the model crashed" }],
+] as const)("shows only the known stop reason, in its own words, with the stop square: %s", (reason, ended, why) => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "said", words: reason } } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "A retained partial answer", createdAt: 1, interrupted: true, times: times(ended, 9, { why }) }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   expect(html.match(/class="stop-note"/g)).toHaveLength(1);
   expect(html).toMatch(new RegExp(`<div class="stop-note" role="status"><span class="stop-mark"><span ${MARK}></span></span>${reason.replace(/[.']/g, (c) => c === "." ? "\\." : "&#x27;")}</div>`));
@@ -70,7 +78,7 @@ it.each(["Stopped so Qwen 3.5 9B could load.", "Stopped when the Ollama runtime 
 it("keeps a reason under a question with no reply as words alone: there is no reply for the model not to see", () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
-  setState({ turns: {}, messages: { proof: [{ id: "q", threadId: "proof", role: "user", content: "A question", createdAt: 1 }] }, stopNotes: { q: { kind: "said", words: "Stopped so another model could load." } } });
+  setState({ turns: {}, messages: { proof: [{ id: "q", threadId: "proof", role: "user", content: "A question", createdAt: 1, times: times("preempted", 2, { why: { code: "preempted", message: "Another model needed the memory" } }) }] } });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   // under-u: the note starts below the message's action row, so the row's unseen Edit and Copy never sit over it
   expect(html).toContain('<div class="stop-note under-u" role="status">Stopped so another model could load.</div>');
@@ -96,15 +104,26 @@ it("a reply stopped while thinking keeps Stop's seconds on the thought's pill, n
   vi.stubGlobal("window", {});
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   const live = { threadId: "proof", gen: 1, model: "m", startedAt: 1, text: "", thinking: "The question is short", tools: [], pendingUser: null, end: { kind: "stopped", secs: 4 } };
-  setState({ messages: { proof: [] }, turns: { proof: live as never }, stopNotes: {} });
+  setState({ messages: { proof: [] }, turns: { proof: live as never } });
   const liveHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
-  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "", thinking: "The question is short", createdAt: 1, interrupted: true }] }, stopNotes: { partial: { kind: "stopped", secs: 4 } } });
+  setState({ turns: {}, messages: { proof: [{ id: "partial", threadId: "proof", role: "assistant", content: "", thinking: "The question is short", createdAt: 1, interrupted: true, times: times("stopped", 4, { thoughtMs: 4_000, spans: [{ from: 0, ms: 4_000 }] }) }] } });
   const savedHtml = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   for (const html of [liveHtml, savedHtml]) {
     expect(html).toContain("Thought for 4 s");
     expect(html.split(MARK)).toHaveLength(2);
     expect(html).not.toContain('class="s"');
   }
+});
+
+it("chat row 32: a finished reply's thought and first-token times come from its row, so a reload and a second window show what the first window showed", () => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  const reply = { id: "a", threadId: "proof", role: "assistant" as const, content: "The answer", thinking: "Short question", model: "qwen3.5:9b", createdAt: 1,
+    times: times("done", 5, { firstTokenAt: 4_200, thoughtMs: 2_600, spans: [{ from: 0, ms: 2_600 }] }) };
+  setState({ turns: {}, messages: { proof: [reply] } });
+  const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
+  expect(html).toContain("Thought for 3 s");
+  expect(html).toContain("3.2 s to first token");
 });
 
 const at = (id: string, role: "user" | "assistant", more: object = {}) => ({ id, threadId: "proof", role, content: `Words of ${id}`, createdAt: 1, ...more });
@@ -116,8 +135,9 @@ it("marks exactly the turns with a stop note under them, whatever state the turn
   vi.stubGlobal("matchMedia", () => ({ matches: false }));
   setState({
     turns: {},
-    messages: { proof: [at("u1", "user"), at("a1", "assistant"), at("u2", "user"), at("a2", "assistant"), at("u3", "user"), at("a3", "assistant", { interrupted: true }), at("u4", "user")] },
-    stopNotes: { a2: { kind: "said", words: "The reply didn't finish." }, a3: { kind: "stopped", secs: 3 }, u4: { kind: "said", words: "Stopped so another model could load." } },
+    messages: { proof: [at("u1", "user"), at("a1", "assistant", { times: times("done", 2) }), at("u2", "user"), at("a2", "assistant", { times: times("failed", 2, { why: { code: "model-error", message: "" } }) }),
+      at("u3", "user", { times: times("stopped", 3) }), at("a3", "assistant", { interrupted: true, times: times("stopped", 3) }),
+      at("u4", "user", { times: times("preempted", 1, { why: { code: "preempted", message: "Another model needed the memory" } }) })] },
   });
   const html = renderToStaticMarkup(createElement(Timeline, { threadId: "proof" }));
   const classes = [...html.matchAll(/<div class="(turn [^"]*|stop-note[^"]*)"/g)].map((m) => m[1]);

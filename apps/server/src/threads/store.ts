@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
-import { AttachedFile, ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
+import { AttachedFile, ImageChoice, ImageCount, ImageEvent, ReplyTimes } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 
 import {
@@ -58,6 +58,8 @@ export interface ThreadStore {
   deleteThread(threadId: string): void;
   /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
+  /** Keep how the turn that answers this question ended, when it saved no reply; a question already gone is left alone. */
+  stampTimes(threadId: string, messageId: string, times: ReplyTimes): void;
   /** `picture`: at done, what the job knew; the card's row in the pictures index is written in the same transaction. */
   saveImageJob(event: ImageEvent, prompt: string, picture?: PictureFacts): void;
   /** The finished pictures, for the Pictures screen (pictures/table.ts). */
@@ -149,15 +151,16 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
                              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice, files_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice, times_json, files_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, files_json
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, times_json, files_json
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
+    stampTimes: db.prepare("UPDATE messages SET times_json = ? WHERE id = ? AND thread_id = ?"),
     insertImageCard: db.prepare("INSERT INTO messages (id, thread_id, role, content, created_at, image_job_json) VALUES (?, ?, 'assistant', ?, ?, ?) ON CONFLICT(id) DO NOTHING"),
     updateImageCard: db.prepare("UPDATE messages SET image_job_json = ?, images_json = ? WHERE id = ? AND thread_id = ?"),
     unfinishedImages: db.prepare("SELECT image_job_json FROM messages WHERE json_extract(image_job_json, '$.state') IN ('queued', 'running')"),
@@ -356,11 +359,17 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           s?.promptEvalDurationMs ?? null,
           msg.interrupted === true ? 1 : null,
           msg.contextNotice ?? null,
+          msg.times === undefined ? null : JSON.stringify(msg.times),
           msg.files === undefined ? null : JSON.stringify(msg.files),
         );
         stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
       });
+    },
+
+    stampTimes(threadId, messageId, times) {
+      guard();
+      stmt.stampTimes.run(JSON.stringify(checkTimes(times)), messageId, threadId);
     },
 
     saveImageJob(event, prompt, picture) {
@@ -514,7 +523,18 @@ function checkNewMessage(input: unknown, now: () => number): Message {
     if (v["interrupted"] !== true || role !== "assistant") throw new InvalidInputError("interrupted", "only an unfinished assistant reply can be marked interrupted");
     msg.interrupted = true;
   }
+  if (v["times"] !== undefined) msg.times = checkTimes(v["times"]);
   return msg;
+}
+
+const decodeTimes = S.decodeUnknownSync(ReplyTimes);
+
+function checkTimes(value: unknown): ReplyTimes {
+  try {
+    return decodeTimes(value);
+  } catch (e) {
+    throw new InvalidInputError("times", (e as Error).message);
+  }
 }
 
 function checkTools(value: unknown): ToolStepRecord[] | undefined {
@@ -642,5 +662,7 @@ function messageFromRow(row: Row): Message {
   if (notice !== undefined) msg.contextNotice = notice;
   const job = optStr(row, "image_job_json");
   if (job !== undefined) msg.imageJob = S.decodeUnknownSync(ImageEvent)(JSON.parse(job));
+  const times = optStr(row, "times_json");
+  if (times !== undefined) msg.times = decodeTimes(JSON.parse(times));
   return msg;
 }

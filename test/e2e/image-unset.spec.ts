@@ -61,9 +61,12 @@ test("with no ComfyUI set up, Image opens a pop-up instead of Image mode, the se
     await expect(pop.getByRole("button", { name: "Check again" })).toBeVisible();
     // no service and no unit name anywhere a person reads
     await expect(page.locator("body")).not.toContainText(/service/i);
-    // the server refuses an image send: no card, no question kept
+    // the server refuses an image send: no card, no question kept; Send answers at once, and the refusal is the turn's end (chat row 32)
     const before = (await client.call("threads.get", { threadId })).messages.length;
-    await expect(client.call("chat.send", { threadId, content: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } })).rejects.toThrow("Images are not set up on this computer.");
+    const ends: string[] = [];
+    client.subscribe("chat.event", p => { if (p.threadId === threadId && p.event.type === "error") ends.push(p.event.message); });
+    await client.call("chat.send", { threadId, content: "a ship", model: "qwen3.5:9b", numCtx: 16384, draw: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
+    await expect.poll(() => ends).toEqual([expect.stringContaining("Images are not set up on this computer.")]);
     expect((await client.call("threads.get", { threadId })).messages).toHaveLength(before);
     // Check again while nothing answers: the pop-up stays, says so, and Image stays off
     await pop.getByRole("button", { name: "Check again" }).click();

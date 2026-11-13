@@ -169,6 +169,8 @@ export interface FitDeps {
   estimate?: EstimateOptions;
   /** Ends the check early: every Ollama request, both nvidia-smi runs and the meminfo read. */
   signal?: AbortSignal;
+  /** A survey (the fit table) may take a GPU reading this many ms old (gpu.ts GPU_REUSE_MS); a send never does. */
+  reuseGpuMs?: number;
   /**
    * Resident models no turn of this app is using (or whose turn was just stopped for this load):
    * Ollama unloads a model it is not serving to make room, so the VRAM /api/ps says they hold
@@ -210,7 +212,7 @@ export async function takeReadings(deps: FitDeps): Promise<Readings> {
   const { signal } = deps;
   const [gpu, { availableBytes: memAvailableBytes, totalBytes: memTotalBytes }, ps, tags] = await untilAborted(
     Promise.all([
-      readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, now, signal),
+      readGpu(deps.runNvidiaSmi ?? defaultNvidiaSmi, now, signal, deps.reuseGpuMs),
       readMemory(deps.readMeminfo ?? defaultMeminfo, signal),
       fetchPs(deps.baseUrl, signal),
       fetchTags(deps.baseUrl, signal),

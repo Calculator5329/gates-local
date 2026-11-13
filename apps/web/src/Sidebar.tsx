@@ -178,7 +178,7 @@ const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
 const notStarted = (s: ReturnType<typeof getState>): string => {
   const out: string[] = [];
   for (const t of Object.values(s.turns)) {
-    if (t.end !== undefined || t.early !== undefined || t.listed === true || t.image === true) continue;
+    if (t.end !== undefined || t.listed === true || t.image === true) continue;
     if (t.text === "" && t.thinking === "" && t.tools.length === 0) out.push(`${t.threadId}@${t.startedAt}`);
   }
   for (const q of s.queued) if (s.turns[q.threadId] === undefined && s.messages[q.threadId]?.length === 0) out.push(`${q.threadId}@${q.at}`);

@@ -5,7 +5,7 @@
 // (tiers.ts): picks by the GPU's memory, or by system memory with no GPU.
 import type { CatalogEntry, FitReport, ModelEstimate } from "@gates-local/contracts";
 import { cardRamBytes, decideFit, estimateBeforeDownload, surveyFit, type FitDeps, type FitSurvey } from "../fit/fit.ts";
-import { defaultMeminfo, defaultNvidiaSmi, readGpu, readMemory } from "../fit/gpu.ts";
+import { defaultMeminfo, defaultNvidiaSmi, GPU_REUSE_MS, readGpu, readMemory } from "../fit/gpu.ts";
 import type { RegistryLookup } from "./registry-size.ts";
 import type { SettingsReader } from "../settings/store.ts";
 import { canonicalTag, CURATED_MODELS, curated, modelLabel, OWN_MODEL_PURPOSE } from "./recommended.ts";
@@ -121,7 +121,7 @@ export async function estimateTyped(deps: EstimateDeps, name: string, numCtx: nu
   const fit = deps.fit;
   try {
     const [gpu, memory] = await Promise.all([
-      readGpu(fit?.runNvidiaSmi ?? defaultNvidiaSmi, fit?.now ?? Date.now, signal),
+      readGpu(fit?.runNvidiaSmi ?? defaultNvidiaSmi, fit?.now ?? Date.now, signal, GPU_REUSE_MS),
       readMemory(fit?.readMeminfo ?? defaultMeminfo, signal),
     ]);
     const report = estimateBeforeDownload({

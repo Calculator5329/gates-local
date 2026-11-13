@@ -123,6 +123,12 @@ export interface TurnReservation extends TurnLoad {
    */
   readonly signal: AbortSignal;
   /**
+   * After admit: /api/ps proved the model absent, so this turn loads it and it is ready at the
+   * turn's first token (models.load says "loading" until then). False when it was resident, or
+   * when residency could not be read.
+   */
+  readonly cold: boolean;
+  /**
    * Inside the load gate: read /api/ps (is this a cold load?), then fit.
    * Resolves with the fit report once the residency decision is made, before
    * any chat request. A refused or failed admit releases the reservation.
@@ -456,6 +462,9 @@ export function createModelLoader(deps: ModelLoaderDeps): ModelLoader {
       const reservation: TurnReservation = {
         baseUrl,
         signal: runtimeGone,
+        get cold() {
+          return notice !== undefined;
+        },
         admit(ctx, options = {}) {
           if (admitting) return Promise.reject(new Error("admit runs once per reservation"));
           admitting = true;

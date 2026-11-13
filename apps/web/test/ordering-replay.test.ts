@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { explore, replay, regression, schedules, type ReplayEvent, type ReplayFrame, type ReplayScenario } from "./ordering-replay.ts";
 import { OrderingWorld, SPEECH_URL, drain, runningIds } from "./ordering-world.ts";
 import { draftView } from "./draft-view.ts";
+import { drawTimes } from "../src/session/times.ts";
 
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -277,21 +278,25 @@ function chatFrames(turn: string, prefix: readonly string[], reconnecting = fals
   return [
     ...(target ? [frame(target, turn + ".push-to-A")] : []),
     frame("B", turn + ".push-to-B"),
-    frame("server:responses", turn + ".response.ready"),
   ];
 }
 
-function chatDeliveries(turn: string, admitted: string, reconnecting = false): Event[] {
+/**
+ * chat.send's answer (chat row 32): app.ts answers with the turn id once the request is taken,
+ * and its admission waits a turn of the event loop first, so on the sender's socket the answer
+ * always comes before the start. An admission depends on this event.
+ */
+function answered(turn: string, requested: string, reconnecting = false): Event {
+  return event(turn + ".response.ready", [requested], noop, { emit: (prefix) =>
+    !reconnecting || !prefix.includes("socket.drop") ? [frame(reconnecting ? "A1" : "A", turn + ".response")] : [] });
+}
+
+function chatDeliveries(turn: string, admitted: string): Event[] {
   return [
-    // app.ts returns after start broadcast; ws/server.ts emits its response
-    // from the await continuation. A later admission may broadcast in between.
-    event(turn + ".response.ready", [admitted], noop, { delivery: true, emit: (prefix) =>
-      !reconnecting || !prefix.includes("socket.drop") ? [frame(reconnecting ? "A1" : "A", turn + ".response")] : [] }),
     // A broadcast is emitted by admission, independently to each open socket.
     event(turn + ".push-to-A", [admitted], (w) => w.step(() => w.server.admittedPush(turn, "A")), { delivery: true }),
     event(turn + ".push-to-B", [admitted], (w) => w.step(() => w.server.admittedPush(turn, "B")), { delivery: true }),
-    // app.ts returns after broadcasting start. Per-socket FIFO adds the edge
-    // only when A's broadcast and response actually target the same socket.
+    // Per-socket FIFO puts it before A's start when both target the same socket.
     event(turn + ".response", [turn + ".response.ready"], (w) => w.step(() => w.server.response(turn)), { delivery: true }),
   ];
 }
@@ -311,8 +316,9 @@ export function sendReconnect(): ReplayScenario<World> {
       // session.loop waits for closed, then advances its reconnect backoff.
       event("socket.reconnect", ["socket.drop"], (w) => w.reconnect(), { emit: () => [frame("A2", "hydration.snapshot")] }),
       // app.ts's async admission can complete on either side of the drop.
-      event("server.admission.complete", ["A.send.request"], (w) => w.step(() => w.server.admit("turn-1")), { emit: (prefix) => chatFrames("turn-1", prefix, true) }),
-      ...chatDeliveries("turn-1", "server.admission.complete", true),
+      answered("turn-1", "A.send.request", true),
+      event("server.admission.complete", ["turn-1.response.ready"], (w) => w.step(() => w.server.admit("turn-1")), { emit: (prefix) => chatFrames("turn-1", prefix, true) }),
+      ...chatDeliveries("turn-1", "server.admission.complete"),
       ...hydrationEvents("socket.reconnect", "A2"),
     ],
     check(w, order) {
@@ -346,8 +352,10 @@ export function stopSend(): ReplayScenario<World> {
       })),
       // app.ts reserves turn ids on request, then awaits admission. Two chats'
       // admissions and start broadcasts can finish in either order.
-      event("server.first-admission.complete", ["A.first-send.request"], (w) => w.step(() => w.server.admit("turn-1")), { emit: (prefix) => chatFrames("turn-1", prefix) }),
-      event("server.next-admission.complete", ["A.next-send.request"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
+      answered("turn-1", "A.first-send.request"),
+      answered("turn-2", "A.next-send.request"),
+      event("server.first-admission.complete", ["turn-1.response.ready"], (w) => w.step(() => w.server.admit("turn-1")), { emit: (prefix) => chatFrames("turn-1", prefix) }),
+      event("server.next-admission.complete", ["turn-2.response.ready"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
       ...chatDeliveries("turn-1", "server.first-admission.complete"),
       ...chatDeliveries("turn-2", "server.next-admission.complete"),
     ],
@@ -385,7 +393,8 @@ export function stopSavedPartial(): ReplayScenario<World> {
       event("A.next-send.request", ["A.Stop"], (w) => w.step(() => {
         w.a.store.setState({ view: "thread", threadId: "t2" }); w.a.drafts.replaceDraft("t2", { text: "second" }); void w.a.session.send("second");
       })),
-      event("server.next-admission.complete", ["A.next-send.request"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
+      answered("turn-2", "A.next-send.request"),
+      event("server.next-admission.complete", ["turn-2.response.ready"], (w) => w.step(() => w.server.admit("turn-2")), { emit: (prefix) => chatFrames("turn-2", prefix) }),
       ...chatDeliveries("turn-2", "server.next-admission.complete"),
     ],
     check(w, order, complete) {
@@ -425,7 +434,8 @@ export function errorSavedPartial(): ReplayScenario<World> {
       const state = w.a.store.getState();
       expect(state.turns["t1"]).toBeUndefined();
       expect(state.messages["t1"]?.filter((m) => m.role === "assistant")).toMatchObject([{ id: "reply-turn-1", content: "so far", interrupted: true }]);
-      expect(state.stopNotes["reply-turn-1"]).toEqual({ kind: "said", words: "The reply didn't finish. The model runner crashed." });
+      const reply = state.messages["t1"]?.find((m) => m.id === "reply-turn-1");
+      expect(reply === undefined ? undefined : drawTimes(reply, undefined).note).toEqual({ kind: "said", words: "The reply didn't finish. The model runner crashed." });
     },
   };
 }
@@ -450,12 +460,15 @@ export function retryThroughHistory(): ReplayScenario<World> {
       event("A.Retry", [], (w) => w.step(() => w.a.session.retry())),
       event("A.history", ["A.Retry"], (w) => w.step(() => w.a.session.reloadThread("t1"))),
       // chat.send with retryOf drops the old question and its unfinished rows as it saves the new question.
-      event("server.retry.admitted", ["A.history"], (w) => w.step(() => { w.server.messages.length = 0; w.server.admit("turn-2"); })),
-      event("A.retry.response", ["server.retry.admitted"], (w) => w.step(() => w.server.response("turn-2"))),
+      // answered with the turn id once taken; the start with the saved question follows the admission
+      event("A.retry.response", ["A.Retry"], (w) => w.step(() => w.server.response("turn-2"))),
+      event("server.retry.admitted", ["A.history", "A.retry.response"], (w) => w.step(() => { w.server.messages.length = 0; w.server.admit("turn-2"); })),
+      event("A.retry.start", ["server.retry.admitted"], (w) => w.step(() => w.server.admittedPush("turn-2", "A"))),
     ],
     check(w, _order, complete) {
       if (!complete) return;
-      expect(w.a.store.getState().messages["t1"]?.map((m) => m.id)).toEqual(["user-2"]);
+      const asked = (w.server.calls("chat.send").at(-1)!.params as { messageId: string }).messageId;
+      expect(w.a.store.getState().messages["t1"]?.map((m) => m.id)).toEqual([asked]);
     },
   };
 }
@@ -520,8 +533,9 @@ it("audits Send and Stop samples against admission and socket guarantees", () =>
   expect(stopOrders.some((order) => before(order, "turn-2.response", "turn-1.response"))).toBe(true);
   expect(stopOrders.some((order) => before(order, "turn-1.response", "turn-1.push-to-B"))).toBe(true);
   for (const order of stopOrders) {
-    expect(before(order, "turn-1.push-to-A", "turn-1.response")).toBe(true);
-    expect(before(order, "turn-2.push-to-A", "turn-2.response")).toBe(true);
+    // chat row 32: on the sender's socket the answer always comes before the start
+    expect(before(order, "turn-1.response", "turn-1.push-to-A")).toBe(true);
+    expect(before(order, "turn-2.response", "turn-2.push-to-A")).toBe(true);
     expect(regression(stop.events, JSON.stringify(order))).toEqual(order);
   }
   const send = sendReconnect();

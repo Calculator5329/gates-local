@@ -5,6 +5,7 @@ import { ModelSettings, ModelSettingsPatch, Settings, SettingsPatch, decodeReque
 import { Schema as S } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
+import { sendStarted } from "../chat/send-started.ts";
 import { streamTurn } from "../chat/stream.ts";
 import { fitToWindow } from "../chat/window.ts";
 import { json, startFakeServer } from "../fit/fake-http.ts";
@@ -177,7 +178,7 @@ async function rig(native = true) {
   cleanups.push(() => app.shutdown());
   const send = async (tools = false) => {
     const thread = store.createThread();
-    await app.handlers["chat.send"]({ threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384, tools }, { clientId: 1 });
+    await sendStarted(app, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384, tools }, { clientId: 1 });
     return thread;
   };
   const finish = () => vi.waitFor(() => expect(app.activeTurns()).toBe(0));

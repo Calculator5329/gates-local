@@ -21,6 +21,8 @@ beforeEach(async () => {
   disconnect = session.connect();
   await until(() => store.getState().imageStatus !== undefined);
   await session.send(question.content);
+  // the turn's start, which the server sends after the answer and before any word
+  await tick();
   chat({ type: "thinking", text: "local thoughts" });
   chat({ type: "tool", step: { callId: "local-read", name: "read", state: "done", summary: "Read before disconnect" } });
   chat({ type: "delta", text: "one " });

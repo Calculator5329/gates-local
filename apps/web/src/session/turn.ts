@@ -3,7 +3,7 @@
 // runs the side effects (saved rows, notes, the queue) after it. The two ends
 // that save a row, done and an error with a partial, are applied in chat.ts
 // with that row in one store update; reduceTurn gives null for them too.
-import type { Payload, ToolStep } from "@gates-local/contracts";
+import type { Payload, ToolStep, TurnEnded } from "@gates-local/contracts";
 import type { LiveTurn, State } from "../store.ts";
 
 export type ChatEvent = Payload<"chat.event">["event"];
@@ -11,8 +11,8 @@ export type ChatEvent = Payload<"chat.event">["event"];
 /** The server's events for a turn, and this client's own. */
 export type TurnEvent =
   | ChatEvent
-  /** chat.send answered: the turn has its id and its saved question. */
-  | { readonly type: "sent"; readonly turnId: string; readonly userMessageId: string }
+  /** chat.send answered: the turn has its id; its start brings the saved question. */
+  | { readonly type: "sent"; readonly turnId: string }
   /** The person pressed Stop; the server's end is still to come. */
   | { readonly type: "stop" }
   /** chat.send was refused after the turn had ended here: it stays as it ended, without the question it was waiting to save. */
@@ -20,9 +20,7 @@ export type TurnEvent =
   /** The connection dropped: a reply still being written stops here, and a stopped one stops waiting for the server. */
   | { readonly type: "lost" }
   /** turns.active after a reconnect: the server is still writing this reply. */
-  | { readonly type: "running" }
-  /** While chat.send has not answered: the server started (or ended) a turn in this chat; its events wait for the answer. */
-  | { readonly type: "early"; readonly turnId: string; readonly ended: boolean };
+  | { readonly type: "running" };
 
 const CLOSED = { kind: "error", code: "closed", message: "The connection dropped while this reply was being written." } as const;
 
@@ -52,17 +50,10 @@ function readyOn(turn: LiveTurn, event: TurnEvent, now: number, loading: boolean
   return event.type === "tool" ? now : undefined;
 }
 
-/**
- * The server ended the turn on purpose: a cancel, or a halt to make way for
- * another model or runtime. After the person's Stop, such an end is the Stop;
- * any other code is a failure that happened anyway, and is said as one.
- */
-const ABORTS: ReadonlySet<string> = new Set(["cancelled", "preempted", "runtime-changed"]);
-export const aborted = (code: string): boolean => ABORTS.has(code);
+type TurnEnd = Extract<ChatEvent, { type: "done" | "error" }>;
 
-/** The person's Stop is how the turn ended only when the server's end `code` has an abort's shape. */
-export const stoppedBy = (end: LiveTurn["end"], code: string): end is Extract<NonNullable<LiveTurn["end"]>, { kind: "stopped" }> =>
-  end?.kind === "stopped" && aborted(code);
+/** How the server says the turn ended (chat row 32); an end without the word, from an older server, counts as a failure, which is said. */
+export const endReason = (event: TurnEnd): TurnEnded["reason"] => event.ended?.reason ?? (event.type === "done" ? "done" : "failed");
 
 /**
  * How long a reply thought, kept as its events arrive, so every screen that
@@ -159,6 +150,8 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
         ...turn,
         model: event.model,
         userMessageId: turn.userMessageId ?? event.userMessage.id,
+        // the saved question takes the place of the words shown while it waited
+        pendingUser: null,
         ...(event.image === true ? { image: true as const } : {}),
         ...(turn.end === undefined || closed(turn) ? { end: undefined, text: "", thinking: "", tools: [] } : {}),
       };
@@ -181,23 +174,21 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
     case "error": {
       if (event.partial !== undefined) return null;
       const ended = { ...turn, ending: undefined };
-      // the person's Stop is why it ended when the server's end is an abort; a failure that came anyway is said
-      if (stoppedBy(turn.end, event.code)) return { ...ended, end: turn.end };
-      if (event.code !== "cancelled") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
-      return turn.end !== undefined ? { ...ended, end: turn.end } : { ...ended, end: { kind: "stopped", secs: secsSince(turn, now) }, ...stoppedThinking(turn, now) };
+      // the server says why it ended: a Stop keeps the time this client's Stop showed, or is the time the server
+      // took it; a halt or a failure is said, also when it beat this client's Stop to the server
+      if (endReason(event) !== "stopped") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
+      if (turn.end?.kind === "stopped") return { ...ended, end: turn.end };
+      const at = event.ended?.at ?? now;
+      return { ...ended, end: { kind: "stopped", secs: secsSince(turn, at) }, ...stoppedThinking(turn, at) };
     }
     case "sent":
-      return { ...turn, turnId: event.turnId, userMessageId: event.userMessageId, pendingUser: null, early: undefined };
+      return { ...turn, turnId: event.turnId };
     case "stop":
       if (turn.end !== undefined) return turn;
       // stopped while thinking: the thought lasted until Stop, counted from the model being ready
       return { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true, ...stoppedThinking(turn, now) };
     case "refused":
-      return { ...turn, pendingUser: null, ending: undefined, early: undefined };
-    case "early":
-      // an end of some other turn than the one seen starting says nothing about this chat
-      if (event.ended && turn.early?.turnId !== event.turnId) return turn;
-      return { ...turn, early: { turnId: event.turnId, ended: event.ended } };
+      return { ...turn, pendingUser: null, ending: undefined };
     case "lost":
       if (turn.end === undefined) return { ...turn, end: CLOSED };
       return turn.ending === true ? { ...turn, ending: undefined } : turn;

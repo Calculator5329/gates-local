@@ -4,7 +4,7 @@
 // the few browser globals session.ts touches (location, history, document,
 // localStorage, requestAnimationFrame). Each test imports session.ts fresh.
 import { vi } from "vitest";
-import type { Channel, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
+import type { Channel, Message, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 
 type Listener = (event: { data?: unknown }) => void;
@@ -72,6 +72,23 @@ export class FakeSocket {
 
 type Answer = (params: never) => unknown;
 
+/**
+ * chat.send as the server answers it (chat row 32): the turn id at once, then the turn's start
+ * with the saved question on the same socket. A test gives the old answer, the turn id and the
+ * saved question together, and this splits it; a replayed answer, or one without the question
+ * (the test pushes the start itself), goes out as given.
+ */
+function sendAnswer(socket: FakeSocket, params: Params<"chat.send">, result: unknown, answer: (result: unknown) => void): void {
+  const r = result as { turnId?: string; userMessage?: Message; replayed?: boolean } | null;
+  if (r === null || typeof r !== "object" || r.userMessage === undefined || r.replayed === true || r.turnId === undefined) return answer(result);
+  answer({ turnId: r.turnId });
+  const event = params.draw !== undefined
+    ? { type: "start", model: params.draw.preset, userMessage: r.userMessage, image: true }
+    : { type: "start", model: params.model, userMessage: r.userMessage };
+  // its own task, as a browser delivers each frame: the answer's continuation runs first
+  setTimeout(() => socket.frame({ type: "push", channel: "chat.event", payload: { turnId: r.turnId, threadId: params.threadId, event } }), 0);
+}
+
 export class FakeServer {
   readonly sockets: FakeSocket[] = [];
   /** False refuses new connections (they close at once). */
@@ -108,7 +125,8 @@ export class FakeServer {
 
   handle(socket: FakeSocket, req: Request): void {
     this.log.push(req);
-    const ok = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
+    const answer = (result: unknown) => socket.frame({ type: "response", id: req.id, ok: true, result });
+    const ok = req.method === "chat.send" ? (result: unknown) => sendAnswer(socket, req.params as Params<"chat.send">, result, answer) : answer;
     const err = (code: string, message = code, blocking?: unknown) => socket.frame({ type: "response", id: req.id, ok: false, error: { code, message, ...(blocking === undefined ? {} : { blocking }) } });
     const waiting = this.holds.get(req.method);
     const next = waiting?.shift();

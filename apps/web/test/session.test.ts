@@ -7,6 +7,7 @@ import type { Message, Payload, RuntimeStatus } from "@gates-local/contracts";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { type Browser, type Held, installBrowser, tick, until } from "./harness.ts";
 import { draftView } from "./draft-view.ts";
+import { drawTimes } from "../src/session/times.ts";
 
 type Session = typeof import("../src/session.ts");
 type Store = typeof import("../src/store.ts");
@@ -233,7 +234,7 @@ describe("Stop then Retry (W-02)", () => {
     await boot();
     await startFirstTurn();
     const partial = { ...asstMsg("interrupted-reply", "t1", "Half an answer"), interrupted: true as const };
-    chat("turn-1", { type: "error", code: "cancelled", message: "Gates Local is closing", partial });
+    chat("turn-1", { type: "error", code: "cancelled", message: "Gates Local is closing", partial, ended: { reason: "preempted", at: Date.now() } });
     await tick();
     expect(store.getState().messages["t1"]?.at(-1)).toMatchObject({ id: partial.id, interrupted: true });
     expect(openTurn(store.getState())).toBeNull();
@@ -250,7 +251,7 @@ describe("Stop then Retry (W-02)", () => {
     expect(b.server.calls("chat.cancel")).toHaveLength(1);
     expect(b.server.calls("chat.send")).toHaveLength(1);
 
-    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled" });
+    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     const held = b.server.hold("chat.send");
     session.retry();
@@ -275,7 +276,7 @@ describe("Stop then Retry (W-02)", () => {
     void session.send("next question");
     const h = await held;
     // the old turn's terminal event arrives before the new send has its id
-    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled" });
+    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     h.respond({ turnId: "turn-2", userMessage: userMsg("m3", "t1", "next question") });
     await tick();
@@ -305,7 +306,7 @@ describe("Stop then Retry (W-02)", () => {
     await tick();
     expect(b.server.calls("chat.send")).toHaveLength(1);
     expect(session.canRetry(store.getState())).toBe(false);
-    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled" });
+    chat("turn-1", { type: "error", code: "cancelled", message: "cancelled", ended: { reason: "stopped", at: Date.now() } });
     await tick();
     expect(session.canRetry(store.getState())).toBe(true);
     session.retry();
@@ -446,14 +447,16 @@ describe("Retry after a reconnect (WF-01)", () => {
     session.retry();
     const pending = await send;
     const gen = openTurn(store.getState())?.gen;
-    // turn-1 kept running on the server; turn-2's first words beat its chat.send answer
+    // turn-1 kept running on the server; its late events come around the Retry's answer and start
     chat("turn-1", { type: "delta", text: "stale " });
-    chat("turn-2", { type: "delta", text: "Fresh " });
-    chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "the old reply"), stopReason: "stop" });
     await tick();
     expect(openTurn(store.getState())?.gen).toBe(gen);
     pending.respond({ turnId: "turn-2", userMessage: userMsg("m3", "t1", "hi") });
     await tick();
+    chat("turn-1", { type: "done", message: asstMsg("m2", "t1", "the old reply"), stopReason: "stop" });
+    chat("turn-2", { type: "delta", text: "Fresh " });
+    await tick();
+    expect(openTurn(store.getState())?.gen).toBe(gen);
     expect(b.server.calls("chat.cancel").map((c) => c.params)).toEqual([]);
     b.frame();
     expect(openTurn(store.getState())).toMatchObject({ turnId: "turn-2", text: "Fresh " });
@@ -477,18 +480,19 @@ describe("events while a send waits for its id (WF-01)", () => {
     void session.send("mine");
     const pending = await send;
     const gen = openTurn(store.getState())?.gen;
+    const loads = b.server.calls("threads.get").length;
     // another client's turn in this thread finishes before the server refuses this send
     chat("turn-9", { type: "delta", text: "theirs" });
     chat("turn-9", { type: "done", message: asstMsg("m9", "t1", "theirs"), stopReason: "stop" });
     await tick();
     expect(openTurn(store.getState())?.gen).toBe(gen);
     expect(openTurn(store.getState())?.text).toBe("");
-    const loads = b.server.calls("threads.get").length;
+    // its saved reply loads when it ends (chat row 32: no events wait for this send's answer)
+    expect(b.server.calls("threads.get").length).toBe(loads + 1);
     pending.fail("turn-active", "thread t1 already has turn turn-9 streaming");
     await tick();
     expect(draftView(store, await import("../src/drafts.ts"))).toMatchObject({ draft: "mine", notice: "A reply is still being written in this thread. Stop it or wait." });
     expect(store.getState().turns, "no reply is left waiting in any chat").toEqual({});
-    expect(b.server.calls("threads.get").length).toBe(loads + 1);
   });
 });
 
@@ -738,7 +742,8 @@ describe("background turn endings", () => {
     await tick();
     await session.send("queued after B");
     expect(store.getState().queued).toHaveLength(1);
-    chat("turn-A", { type: "start", model: a.params.model, userMessage: userMsg("uA", "t1", "A") });
+    // A's start, read before its answer: it names the question A's send asked the server to save
+    chat("turn-A", { type: "start", model: a.params.model, userMessage: userMsg(a.params.messageId!, "t1", "A") });
     chat("turn-A", { type: "delta", text: "one two" });
     expect.soft(running(store.getState(),"t1")).toBe(1);
     const finishA = () => chat("turn-A", { type: "done", message: asstMsg("aA", "t1", "one two"), stopReason: "stop" });
@@ -747,9 +752,10 @@ describe("background turn endings", () => {
     if (doneFirst) {
       finishA(); finishB();
       await tick();
-      expect(b.server.calls("chat.send")).toHaveLength(2);
+      // both ended: the queue goes, also before A's answer is read
+      expect(b.server.calls("chat.send")).toHaveLength(3);
     }
-    a.respond({ turnId: "turn-A", userMessage: userMsg("uA", "t1", "A") });
+    a.respond({ turnId: "turn-A" });
     await tick();
     if (!doneFirst) finishA();
     await tick();
@@ -832,13 +838,13 @@ describe("background turn endings", () => {
       const pending = await send;
       pending.respond({ turnId: "turn-2", userMessage: userMsg("other-user", "t2", "another thread") });
       await tick();
-      chat("turn-1", { type: "error", code, message: "The reply ended" });
+      chat("turn-1", { type: "error", code, message: "The reply ended", ended: { reason: code === "cancelled" ? "stopped" : "failed", at: Date.now() } });
       await tick();
       session.openThread("t1");
       await tick();
       const kept = store.getState().messages["t1"]?.find((m) => m.content === "Keep these partial words");
       expect(kept).toMatchObject({ thinking: "Reasoning before words" });
-      expect(kept === undefined ? undefined : store.getState().stopNotes[kept.id]).toEqual(code === "cancelled" ? { kind: "stopped", secs: expect.any(Number) } : { kind: "said", words: expect.stringMatching(/^The reply didn't finish\./) });
+      expect(kept === undefined ? undefined : drawTimes(kept, undefined).note).toEqual(code === "cancelled" ? { kind: "stopped", secs: expect.any(Number) } : { kind: "said", words: expect.stringMatching(/^The reply didn't finish\./) });
     });
   }
 

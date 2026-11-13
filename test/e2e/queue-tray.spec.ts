@@ -68,10 +68,12 @@ test.describe("a message queued while a picture is being made", () => {
       }
       seen.push([size.width, (await tray.boundingBox())!, (await page.locator(".composer").boundingBox())!]);
     }
+    // chat row 36, owner pick A: a shelf inside the message box, at its width, on its top
+    await expect(page.locator(".composer .qt"), "the shelf is in the box").toHaveCount(1);
     for (const [width, t, c] of seen) {
-      expect(t.x, `the tray starts inside the composer's width at ${width} px`).toBeGreaterThanOrEqual(c.x);
-      expect(t.x + t.width, `the tray ends inside the composer's width at ${width} px`).toBeLessThanOrEqual(c.x + c.width);
-      expect(Math.abs(t.y + t.height - c.y), `the tray sits on the composer's top edge at ${width} px`).toBeLessThanOrEqual(1);
+      expect(Math.abs(t.x - c.x), `the shelf starts at the box's left edge at ${width} px`).toBeLessThanOrEqual(1);
+      expect(Math.abs(t.width - c.width), `the shelf is the box's width at ${width} px`).toBeLessThanOrEqual(1);
+      expect(Math.abs(t.y - c.y), `the shelf is the box's top at ${width} px`).toBeLessThanOrEqual(1);
     }
     await page.setViewportSize(WIDE);
     await theme(page, "dark");
@@ -121,5 +123,25 @@ test.describe("editing a queued message while a reply runs", () => {
     await expect(stop).toHaveCount(0, { timeout: 15_000 });
     await expect(page.locator(".composer .voice")).toBeVisible();
     expect(await edges(), "the reply ending moves no control in the row").toEqual(running);
+  });
+
+  // Guards the owner's pick (chat row 36, A): more than three queued fold to the next two and a count.
+  test("more than three queued fold to the next two and a count that opens the rest", async ({ page, open }) => {
+    await open(); await waitReady(page);
+    await stack.scenario("slow-drip", { holdAfterTokens: 46 });
+    await sendMessage(page, "How do I check disk space before a download?");
+    await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
+    for (const n of [1, 2, 3, 4]) await sendMessage(page, `Queued ${n}`);
+    const rows = page.locator(".composer .qt-r");
+    const more = page.getByTestId("chat.queue.more");
+    await expect(rows).toHaveText(["Queued 1", "Queued 2"]);
+    await expect(more).toHaveText("+2");
+    const marks = { shelf: page.locator(".composer .qt"), more };
+    for (const scheme of ["dark", "light"] as const) { await theme(page, scheme); await shoot(page, `queue-folded-${scheme}`, marks); }
+    await more.click();
+    await expect(rows).toHaveText(["Queued 1", "Queued 2", "Queued 3", "Queued 4"]);
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    for (const scheme of ["dark", "light"] as const) { await theme(page, scheme); await shoot(page, `queue-open-${scheme}`, marks); }
+    await fetch(`${FAKE_URL}/__fake/release`, { method: "POST", body: "{}" });
   });
 });

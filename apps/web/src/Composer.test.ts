@@ -179,6 +179,38 @@ it("chat row 31: during setup the field keeps Ask anything…, and a queued mess
   expect(html.split("setup finishes").length - 1, "said once, in the row").toBe(2);
 });
 
+// Chat row 36, owner pick A (2026-11-13): the queue is a shelf inside the message box, three icons a row, more than three fold to a count.
+const queuedAt = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `q${i + 1}`, threadId: "thread", text: `message ${i + 1}`, at: i, waitFor: "reply" as const }));
+it("chat row 36: queued messages sit on a shelf inside the message box, above the field", () => {
+  setFixture({ ...ready, queued: queuedAt(2) });
+  const html = renderToStaticMarkup(createElement(Composer));
+  const form = html.match(/<form\b[^>]*class="composer[^"]*"[^>]*>([\s\S]*)<\/form>/)?.[1] ?? "";
+  expect(form, "the shelf is in the box").toMatch(/^<ul class="qt"/);
+  expect(form.indexOf('class="qt"'), "above the field").toBeLessThan(form.indexOf("<textarea"));
+  expect(html.match(/<li class="qt-r"/g)).toHaveLength(2);
+});
+
+it("chat row 36: three queued show as three rows; more fold to the next two and a count that opens the rest", () => {
+  setFixture({ ...ready, queued: queuedAt(3) });
+  let html = renderToStaticMarkup(createElement(Composer));
+  expect(html.match(/<li class="qt-r"/g)).toHaveLength(3);
+  expect(html).not.toMatch(/data-testid="chat\.queue\.more"/);
+  setFixture({ ...ready, queued: queuedAt(5) });
+  html = renderToStaticMarkup(createElement(Composer));
+  expect(html.match(/<li class="qt-r"/g), "the next two to go").toHaveLength(2);
+  expect(html).toMatch(/message 1[\s\S]*message 2/);
+  expect(html).not.toMatch(/message 3/);
+  const more = html.match(/<button\b[^>]*data-testid="chat\.queue\.more"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+  expect(more).toMatch(/aria-expanded="false"/);
+  expect(more).toMatch(/aria-label="Show 3 more queued messages"/);
+  expect(more.replace(/<[^>]+>/g, ""), "a count, no sentence").toBe("+3");
+  // the one being edited shows even when it is folded
+  setFixture({ ...ready, queued: queuedAt(5), editingQueued: "q4" });
+  html = renderToStaticMarkup(createElement(Composer));
+  expect(html).toMatch(/message 4/);
+  expect(html.match(/<li class="qt-r"/g)).toHaveLength(3);
+});
+
 it("after the two-second bound with nothing read, the composer says Connecting once and nothing about Ollama", () => {
   setFixture({ ...initial, conn: { kind: "open" }, runtime: undefined, models: undefined, model: undefined, hydrationSettled: false, bootWaited: true, view: "new", threadId: null });
   const html = renderToStaticMarkup(createElement(Composer));

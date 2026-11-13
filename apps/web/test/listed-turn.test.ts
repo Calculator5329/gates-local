@@ -1,13 +1,15 @@
 // A reply this client knows only from turns.active, with no event of its own
 // yet: it shows as running in the sidebar and nothing more. The server lists a
-// turn once its fit passes, before the question is saved; if saving fails, the
-// turn is dropped with no chat event at all, so nothing here may wait for it.
+// turn from the moment chat.send takes it, before the question is saved; if
+// saving fails, its error event ends it here too (chat row 32), and a
+// hydration that no longer lists it drops it as well.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Message, Payload } from "@gates-local/contracts";
 import { createApp } from "../../server/src/app.ts";
+import { sendStarted } from "../../server/src/chat/send-started.ts";
 import { openThreadStore } from "../../server/src/threads/store.ts";
 import { installBrowser, tick, until } from "./harness.ts";
 
@@ -35,7 +37,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-it("a turn the server listed but never started holds no queue, and the next hydration drops it", async () => {
+it("a listed turn that fails before its start puts the sidebar's dot out, holds no queue, and stays gone after hydration", async () => {
   const b = installBrowser();
   const db = openThreadStore(path.join(cacheTmp(), "threads.sqlite"));
   const a = db.createThread({ title: "A" });
@@ -58,7 +60,7 @@ it("a turn the server listed but never started holds no queue, and the next hydr
     push: (channel, payload) => { pushes.push({ channel, payload }); },
     fit: { runNvidiaSmi: async args => args[0]?.startsWith("--query-gpu") ? "16384, 1024, 15360\n" : "", readMeminfo: async () => "MemAvailable: 32000000 kB\n" },
     models: { handlers: {}, loader: { reserve: () => ({
-      baseUrl: "http://fake", signal, firstToken: () => {}, end: () => {},
+      baseUrl: "http://fake", signal, cold: false, firstToken: () => {}, end: () => {},
       admit: async (_ctx, options) => {
         if (options?.fit === undefined) throw new Error("missing app fit");
         const report = await options.fit(signal);
@@ -69,7 +71,7 @@ it("a turn the server listed but never started holds no queue, and the next hydr
   let disconnect: (() => void) | undefined;
   const rejected = new Error("disk full while saving the question");
   vi.spyOn(db, "appendMessage").mockImplementationOnce(() => { throw rejected; });
-  const sending = Promise.resolve(app.handlers["chat.send"]({ threadId: a.id, content: "A", model: "qwen3.5:9b", numCtx: 16384 }, { clientId: 1 })).catch((error: unknown) => error);
+  const sending = sendStarted(app, { threadId: a.id, content: "A", model: "qwen3.5:9b", numCtx: 16384 }).catch((error: unknown) => error);
   try {
     // another client sent in A; its fit passed, so the server lists the turn
     await admitted.promise;
@@ -93,11 +95,15 @@ it("a turn the server listed but never started holds no queue, and the next hydr
     await until(() => store.getState().imageStatus !== undefined);
     expect(store.runningThreads(store.getState()).has(a.id), "the sidebar shows A running").toBe(true);
     expect.soft(store.runningTurn(store.getState(), a.id), "A has no reply to stop yet").toBeUndefined();
-    // saving the question fails: the server drops the turn and says nothing
+    // saving the question fails: the server ends the turn and says so to every client (chat row 32)
     gate.resolve();
     expect(await sending).toBe(rejected);
     expect(app.activeTurns()).toBe(0);
-    expect(pushes).toEqual([]);
+    const said = pushes.filter((p): p is { channel: "chat.event"; payload: Payload<"chat.event"> } => (p as { channel: string }).channel === "chat.event");
+    expect(said.map((p) => p.payload.event)).toEqual([expect.objectContaining({ type: "error", code: "internal", ended: { reason: "failed", at: expect.any(Number) } })]);
+    b.server.push("chat.event", said[0]!.payload);
+    expect(store.runningThreads(store.getState()).has(a.id), "the sidebar's working dot goes out").toBe(false);
+    expect(store.getState().turns[a.id]).toBeUndefined();
     session.newThread();
     await session.send("B");
     await session.send("after B");
@@ -151,8 +157,8 @@ it("a listed turn's clock starts at its own start, not at the hydration that lis
     expect(store.getState().turns.A?.thinkingSecs, "it thought from its start to its first word").toBe(5);
     chat({ type: "done", message: answer, stopReason: "stop" });
     await tick();
-    expect(store.getState().firstToken[answer.id], "the first word came 5 s after the start").toBeGreaterThanOrEqual(5_000);
-    expect(store.getState().firstToken[answer.id]).toBeLessThan(6_000);
+    // the saved reply's first-token time is the server's, stamped on its row (chat row 32)
+    expect(store.getState().turns.A).toBeUndefined();
   } finally {
     disconnect(); b.server.accepting = false;
     for (const socket of b.server.sockets) socket.close();

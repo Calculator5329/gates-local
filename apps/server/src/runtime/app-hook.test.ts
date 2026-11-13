@@ -9,6 +9,7 @@ import path from "node:path";
 import type { Channel, ModelLoad } from "@gates-local/contracts";
 import { afterEach, expect, it } from "vitest";
 import { createApp } from "../app.ts";
+import { sendStarted } from "../chat/send-started.ts";
 import { createGpuLease, type GpuLease } from "../gpu/lease.ts";
 import { json, startFakeServer, type FakeServer, type Route } from "../fit/fake-http.ts";
 import { defaultSettings } from "../settings/store.ts";
@@ -109,7 +110,7 @@ async function setup(ps: string[], routes: Record<string, Route>, lease?: GpuLea
   cleanups.push(() => app.shutdown());
   const loads = () => pushes.filter((p) => p.channel === "models.load").map((p) => (p.payload as ModelLoad).state);
   const thread = store.createThread({});
-  const send = () => Promise.resolve(app.handlers["chat.send"]({ threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
+  const send = () => Promise.resolve(sendStarted(app, { threadId: thread.id, content: "hello", model: MODEL, numCtx: 16384 }, { clientId: 1 }));
   const remove = () => Promise.resolve(app.handlers["models.remove"]?.({ name: MODEL }, { clientId: 1 }));
   return { app, loader, ollama, loads, send, remove, pulls };
 }
