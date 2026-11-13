@@ -258,8 +258,9 @@ export class World {
       removeTree: wrap("removeTree", a => realFileOps.removeTree(a ?? ""), true),
       mkdir: (dir, mode) => wrap("mkdir", d => realFileOps.mkdir(d ?? "", mode))(dir),
       chmod: (file, mode) => wrap("chmod", f => realFileOps.chmod(f ?? "", mode))(file),
-      fsyncFile: wrap("fsyncFile", f => realFileOps.fsyncFile(f ?? "")),
-      fsyncDir: wrap("fsyncDir", d => realFileOps.fsyncDir(d ?? "")),
+      // A flush is logged and can be made to fail, but never waits for the disk: no test here cuts the power, and the waits were most of the matrix's time.
+      fsyncFile: wrap("fsyncFile", () => {}),
+      fsyncDir: wrap("fsyncDir", () => {}),
     };
   }
 

@@ -8,11 +8,13 @@ import path from "node:path";
 import { copyPath, STORE_NAME } from "./restore.ts";
 
 const SIDECARS = ["-wal", "-shm"] as const;
+// These fixtures are never read back after a power cut, so SQLite need not wait for the disk on every row.
+const NO_FLUSH = "PRAGMA synchronous = OFF";
 
 export function createStore(dataDir: string, version: number, ids: readonly string[]): void {
   mkdirSync(dataDir, { recursive: true });
   const db = new DatabaseSync(path.join(dataDir, STORE_NAME));
-  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY)");
+  db.exec(`${NO_FLUSH}; PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY)`);
   const insert = db.prepare("INSERT INTO threads (id) VALUES (?)");
   for (const id of ids) insert.run(id);
   db.exec(`PRAGMA user_version = ${version}`);
@@ -25,6 +27,7 @@ export function copyStore(dataDir: string, named = currentVersion(path.join(data
   mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   rmSync(target, { force: true });
   const db = new DatabaseSync(path.join(dataDir, STORE_NAME));
+  db.exec(NO_FLUSH);
   db.prepare("VACUUM INTO ?").run(target);
   db.close();
   return target;
@@ -38,7 +41,7 @@ export function migrateWithLiveWal(dataDir: string, version: number, addIds: rea
   const live = path.join(dataDir, STORE_NAME);
   const snapshot = mkdtempSync(path.join(path.dirname(dataDir), "iu-wal-"));
   const db = new DatabaseSync(live);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+  db.exec(`${NO_FLUSH}; PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0`);
   const insert = db.prepare("INSERT INTO threads (id) VALUES (?)");
   for (const id of addIds) insert.run(id);
   db.exec(`PRAGMA user_version = ${version}`);
