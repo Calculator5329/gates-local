@@ -9,7 +9,7 @@ test("switching model and context updates the fit verdict and the panel", async 
   const modelBtn = page.locator("#modelBtn");
   await expect(modelBtn).toContainText("Qwen 3.5 9B");
 
-  // the picker orders by verdict; the 27B cannot load at 16k. Its Context control says 16k runs on the GPU.
+  // the picker orders by verdict. Its Context control says 16k runs on the GPU.
   await modelBtn.click();
   const picker = page.locator("#picker");
   await expect(picker).toBeVisible();
@@ -20,7 +20,9 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(fits).toHaveCount(1);
   await expect(fits.locator("small")).toHaveText("Fits");
   await expect(fits).toHaveAttribute("aria-label", /GB (measured|estimated); Fits$/);
-  await expect(picker.locator('.pk-r[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");
+  // judged against the card's own memory (the owner's ruling, 2026-11-13): what other programs
+  // hold right now no longer turns the 27B's row off
+  await expect(picker.locator('.pk-r[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "false");
   await picker.locator("#pkSearch").fill("gemma");
   await picker.locator('.pk-r[data-m="gemma4:12b"]').click();
   await expect(picker).toBeHidden();
