@@ -21,7 +21,7 @@ Object.assign(env, {
   APPIMAGE_EXTRACT_AND_RUN: "1", TMPDIR: cache,
   GATES_LOCAL_USER_DATA: profile,
   GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
 });
 const electron = await _electron.launch({
   executablePath: path.resolve(artifact), args: ["--no-sandbox", "--disable-gpu"], env,

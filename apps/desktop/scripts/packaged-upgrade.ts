@@ -95,7 +95,7 @@ for (const [key, value] of Object.entries(process.env)) {
 Object.assign(env, {
   TMPDIR: work, XDG_DATA_HOME: dataHome, XDG_CONFIG_HOME: configHome,
   GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
 });
 expect(digest(before)).not.toBe(digest(after));
 
@@ -434,7 +434,7 @@ class Rig {
       PATH: `${run.bin}:${run.baseEnv["PATH"] ?? "/usr/bin:/bin"}`,
       XDG_DATA_HOME: path.join(this.home, "data"), XDG_CONFIG_HOME: path.join(this.home, "config"),
       GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-      GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+      GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
       GATES_LOCAL_UPDATE_FEED: run.feed.url,
       GATES_LOCAL_UPDATE_TEST_KEYS: run.key,
       [DEBUG_PORT_ENV]: String(ports.launched),

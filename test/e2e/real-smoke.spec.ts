@@ -17,7 +17,7 @@ async function productionServer(dataDir: string, ollamaUrl: string): Promise<{ c
   // In particular, do not inherit a fake measurement or a phone/voice setup.
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith("GATES_LOCAL_")) delete env[key];
-  Object.assign(env, { GATES_LOCAL_SERVER_TOKEN: token, GATES_LOCAL_OLLAMA_URL: ollamaUrl, GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN, XDG_DATA_HOME: path.join(dataDir, "xdg") });
+  Object.assign(env, { GATES_LOCAL_SERVER_TOKEN: token, GATES_LOCAL_OLLAMA_URL: ollamaUrl, GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1", GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN, XDG_DATA_HOME: path.join(dataDir, "xdg") });
   const child = spawn(process.execPath, ["apps/server/src/main.ts", "--port", "0", "--data-dir", dataDir], { cwd: ROOT, env, stdio: ["pipe", "pipe", "pipe"] });
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });

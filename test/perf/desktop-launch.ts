@@ -71,7 +71,7 @@ export async function desktopLaunchTimes(target: string, fixture: string, sample
         GL_PERF_TARGET: target, GL_PERF_DESKTOP_EVENTS: eventsFile, GL_PERF_DESKTOP_RENDERER: renderer,
         GL_PERF_DESKTOP_SERVER_PROBE: path.join(ROOT, "test/perf/server-entry.cjs"),
         GATES_LOCAL_USER_DATA: path.join(run, "profile"), GATES_LOCAL_DATA_DIR: path.join(run, "data"),
-        GATES_LOCAL_OLLAMA_URL: FAKE_URL, GATES_LOCAL_OLLAMA_BINARY: "none", GATES_LOCAL_RUNTIME: "discover-only",
+        GATES_LOCAL_OLLAMA_URL: FAKE_URL, GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1", GATES_LOCAL_OLLAMA_BINARY: "none", GATES_LOCAL_RUNTIME: "discover-only",
         GATES_LOCAL_NVIDIA_SMI: path.join(target, "test/fake-ollama/nvidia-smi.ts"), GATES_LOCAL_MEMINFO: path.join(target, "test/fake-ollama/meminfo.txt"),
         GATES_LOCAL_FAKE_GPU_STATE: gpu, GATES_LOCAL_UPDATE_TEST_ROOT: work, XDG_DATA_HOME: path.join(run, "xdg"),
       };

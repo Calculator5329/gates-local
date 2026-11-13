@@ -174,7 +174,7 @@ async function open(artifact: string, name: string, feed: Feed, automatic: boole
   const seeded = seedAutomatic(home, automatic);
   const app = await launchCopy(artifact, home, baseEnv, git, {
     GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-    GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+    GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
     GATES_LOCAL_UPDATE_FEED: feed.url,
     GATES_LOCAL_UPDATE_TEST_KEYS: publicBase64(testKey.publicKey),
   });

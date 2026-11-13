@@ -40,7 +40,8 @@ interface Launched {
 
 function launch(env: Record<string, string>, dataDir: string): Launched {
   const child = spawn(process.execPath, [ENTRY, "--port", "0", "--data-dir", dataDir], {
-    env: { PATH: process.env["PATH"] ?? "", HOME: os.homedir(), TMPDIR: process.env["TMPDIR"], TMP: process.env["TMP"], TEMP: process.env["TEMP"], ...env },
+    // never the machine's own ComfyUI (8188) or comfyui.service: a port nothing listens on
+    env: { PATH: process.env["PATH"] ?? "", HOME: os.homedir(), TMPDIR: process.env["TMPDIR"], TMP: process.env["TMP"], TEMP: process.env["TEMP"], GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1", ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>

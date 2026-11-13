@@ -59,6 +59,11 @@ export interface ImageDeps extends ComfyClientDeps {
   /** The nvidia-smi the default readGpu runs; the e2e stack's fake (GATES_LOCAL_NVIDIA_SMI), as every chat fit uses. */
   runNvidiaSmi?: NvidiaSmiRunner;
   service?: ComfyService;
+  /**
+   * Tests (GATES_LOCAL_COMFY_URL): the ComfyUI address when Settings has none, in place of the
+   * local 8188. Set, no address is managed: comfyui.service is never inspected, started or stopped.
+   */
+  defaultUrl?: string;
   requiredBytes?: number;
   idleMs?: number;
   startupTimeoutMs?: number;
@@ -277,10 +282,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const update = (next: ImageStatus): ImageStatus => { status = next; emit("image.status", status); return status; };
   const config = () => {
     const settings = deps.settings();
-    const url = new URL(settings.comfyUrl ?? DEFAULT_URL);
+    const url = new URL(settings.comfyUrl ?? deps.defaultUrl ?? DEFAULT_URL);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw imageError("image-config", "Set a ComfyUI HTTP address without credentials or query parameters in Settings.");
     const baseUrl = url.href.replace(/\/$/, "");
-    return { enabled: settings.imageGen, baseUrl, managed: baseUrl === DEFAULT_URL && settings.comfyUrl === undefined, hostname: url.hostname };
+    return { enabled: settings.imageGen, baseUrl, managed: deps.defaultUrl === undefined && baseUrl === DEFAULT_URL && settings.comfyUrl === undefined, hostname: url.hostname };
   };
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const filesPath = path.join(deps.dataDir, FILES_NAME);

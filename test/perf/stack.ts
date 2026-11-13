@@ -36,6 +36,7 @@ await start(["test/fake-ollama/main.ts", "--port", String(FAKE_PORT), "--gpu-sta
 await start(["test/e2e/library-server.ts", "--port", String(SERVER_PORT), "--data-dir", data], {
   ...process.env,
   GATES_LOCAL_OLLAMA_URL: FAKE_URL,
+  GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
   GATES_LOCAL_NVIDIA_SMI: path.join(target, "test/fake-ollama/nvidia-smi.ts"),
   GATES_LOCAL_FAKE_GPU_STATE: gpu,
   GATES_LOCAL_MEMINFO: path.join(target, "test/fake-ollama/meminfo.txt"),

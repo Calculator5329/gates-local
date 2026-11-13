@@ -68,6 +68,11 @@ let dataDir = "";
 /** Port 9 (discard) has no server on a test machine: a download there fails at once, on this computer. */
 const NO_DOWNLOADS = "http://127.0.0.1:9";
 let downloadOrigin = NO_DOWNLOADS;
+/**
+ * The ComfyUI address when a test sets none: port 1, where nothing listens. Without it the server
+ * would use the machine's own ComfyUI on 8188 and start or stop comfyui.service.
+ */
+const NO_COMFY = "http://127.0.0.1:1";
 /** The stand-in machine's shell sandbox (test/fake-ollama/systemd-run.ts); a reset's `sandbox: "off"` breaks it. */
 let sandbox: "ready" | "off" = "ready";
 
@@ -205,6 +210,8 @@ function serverEnv(): NodeJS.ProcessEnv {
     // Image model downloads come from the test's fake ComfyUI (it serves the files too), never
     // Hugging Face; with no fake, from a port nothing listens on.
     GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN: downloadOrigin,
+    // A reset's comfyUrl (the fake's) is saved in Settings and wins over this.
+    GATES_LOCAL_COMFY_URL: NO_COMFY,
     XDG_DATA_HOME: path.join(runDir, "xdg"),
     // The server runs from this checkout; with the root here, a Check for
     // updates in a test is refused before any git command runs on it.

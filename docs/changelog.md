@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: Tests never reach this computer's ComfyUI
+
+- A test that turned image generation on without naming a ComfyUI address
+  used this computer's own ComfyUI on port 8188, and could start or stop
+  comfyui.service. Every test launch now gives the server
+  `GATES_LOCAL_COMFY_URL`, an address where nothing listens, unless the test
+  names its fake ComfyUI. With that set, the app never touches
+  comfyui.service.
+- `test/e2e-env.test.ts` fails if any file that starts a server for a test
+  leaves the address unset or points it at 8188.
+
 ## 2026-11-13: Every image style has a default, also without a GPU
 
 - The image picker's Defaults menu has a setup for nine styles: General,

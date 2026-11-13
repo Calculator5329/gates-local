@@ -812,6 +812,14 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     expect(f.events.at(-1)?.state).toBe("cancelled");
   });
 
+  it("a test's address (GATES_LOCAL_COMFY_URL) with none in Settings: used, and comfyui.service is never inspected or started", async () => {
+    const f = await fixture({ defaultUrl: "http://127.0.0.1:1" }); f.configure({ answering: false, activeState: "inactive" });
+    expect((await f.module.status()).baseUrl).toBe("http://127.0.0.1:1");
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)?.state).not.toBe("done");
+    expect(f.calls.filter((c) => c === "inspect" || c === "start" || c === "stop")).toEqual([]);
+  });
+
   it("skips local GPU fit and service management for a remote Comfy", async () => {
     const f = await fixture(); f.configure({ comfyUrl: "http://remote-comfy:8188", gpuError: true });
     const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);

@@ -27,6 +27,9 @@
 //                                this computer, never Hugging Face (image/download.ts fetchFrom),
 //                                and are checked against their pins only, not the app's records
 //                                of each file's sha256; the e2e stack always sets it
+//   GATES_LOCAL_COMFY_URL        tests: the ComfyUI address when Settings has none, in place of
+//                                http://127.0.0.1:8188, and comfyui.service is never touched
+//                                (systemctl); every test launcher sets it (test/server-env.test.ts)
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
 //   GATES_LOCAL_INSTALLED_VERSION the packaged desktop app's version; set, Settings › Updates
@@ -188,6 +191,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
   const downloadOrigin = process.env["GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN"];
+  const comfyDefault = process.env["GATES_LOCAL_COMFY_URL"];
   // Windows runs no #! line: a script there (the tests' fake) goes through this runtime.
   const [smiFile, smiPre] =
     smiCommand !== undefined && process.platform === "win32" && /\.[cm]?[jt]s$/.test(smiCommand) ? [process.execPath, [smiCommand]] : [smiCommand, []];
@@ -253,6 +257,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
     ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),
     ...(downloadOrigin ? { download: { fetch: fetchFrom(downloadOrigin), records: false } } : {}),
+    ...(comfyDefault ? { defaultUrl: comfyDefault } : {}),
   });
   const imports = createImportActivity(admission);
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);

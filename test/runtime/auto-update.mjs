@@ -230,7 +230,7 @@ require("./out/main.cjs");
   writeFileSync(path.join(data, "settings.json"), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "dark", runtimeMode: "system", tools: true, imageGen: false, updateEveryChange: true } }));
   const gpuStateFile = path.join(scratch, "gpu-state.json");
   fake = await startFakeOllama({ port: 0, gpuStateFile });
-  Object.assign(env, { GATES_LOCAL_OLLAMA_URL: fake.url, GATES_LOCAL_NVIDIA_SMI: path.join(clone, "test/fake-ollama/nvidia-smi.ts"), GATES_LOCAL_FAKE_GPU_STATE: gpuStateFile, GATES_LOCAL_MEMINFO: path.join(clone, "test/fake-ollama/meminfo.txt") });
+  Object.assign(env, { GATES_LOCAL_OLLAMA_URL: fake.url, GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",GATES_LOCAL_NVIDIA_SMI: path.join(clone, "test/fake-ollama/nvidia-smi.ts"), GATES_LOCAL_FAKE_GPU_STATE: gpuStateFile, GATES_LOCAL_MEMINFO: path.join(clone, "test/fake-ollama/meminfo.txt") });
   const ports = new Set();
   while (ports.size < 12) ports.add(await freePort());
   env.GATES_LOCAL_PROOF_CDP_PORTS = JSON.stringify([...ports]);

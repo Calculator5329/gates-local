@@ -21,7 +21,7 @@ for (const [key, value] of Object.entries(process.env)) {
 Object.assign(env, {
   TMPDIR: work, XDG_DATA_HOME: path.join(work, "data"), XDG_CONFIG_HOME: path.join(work, "config"),
   GATES_LOCAL_RUNTIME: "discover-only", GATES_LOCAL_OLLAMA_BINARY: "none",
-  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750",
+  GATES_LOCAL_OLLAMA_URL: "http://127.0.0.1:19750", GATES_LOCAL_COMFY_URL: "http://127.0.0.1:1",
 });
 const port = await findFreePort();
 // Debugging allows observation only; neither switch disables the sandbox.
