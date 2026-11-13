@@ -1,0 +1,88 @@
+diff --git a/apps/web/src/FitPanel.tsx b/apps/web/src/FitPanel.tsx
+index be1b24f8..724b7b84 100644
+--- a/apps/web/src/FitPanel.tsx
++++ b/apps/web/src/FitPanel.tsx
+@@ -212,18 +212,16 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
+ }
+ 
+ /** The model's status, in the same words and the same dot as its row in Models. */
+-/** One verdict. `size` is named only when it is not the one the control above already shows. */
+-function FitLine({ r, size, cpu }: { r: FitReport; size: number | undefined; cpu: boolean }) {
++function FitLine({ r, ctx, cpu }: { r: FitReport; ctx: number; cpu: boolean }) {
+   const v = verdictOf(r);
+-  const at = size === undefined ? "" : `at ${k(size)}`;
+   return (
+     <div className="fp-v">
+       {v.k === "no" ? (
+-        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more ${at}`.trimEnd()}</Status>
++        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more at ${k(ctx)}`}</Status>
+       ) : (
+         <>
+           <Status dot={FIT_DOT[r.verdict]}>{fitLabel(r.verdict, v.measured, cpu)}</Status>
+-          {at === "" ? null : <span style={{ color: "var(--muted-foreground)" }}>{at}</span>}
++          <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
+         </>
+       )}
+     </div>
+@@ -273,14 +271,12 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
+   // Judged against the card's own memory (cardFit), whatever other programs hold right now.
+   const fit = gpuRaw === undefined ? undefined : cardFit(fitFor(table, model, ctx));
+   const defaultSize = saved ?? numCtx;
+-  // The row below carries the verdict; this line is only for a model that cannot take the saved default.
+-  const limited = max !== undefined && max < CONTEXT_SIZES[CONTEXT_SIZES.length - 1]!;
+-  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : undefined;
++  const defaultReport = fitFor(table, model, defaultSize);
++  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultReport === undefined ? undefined : `${defaultReport.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultReport, cpu).tip ?? ""}`;
+   return (
+     <>
+-      {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
+       {locked ? null : (
+-        <Row label="Default context" desc={`How much of the conversation the model keeps in view. One size for every chat; longer uses more ${memory}.`} err={err}>
++        <Row label="Default context" desc={`How many tokens of conversation the model keeps in view. It's one size for all your chats: Gates Local opens at this one, and changing it in a chat changes every chat until you reopen the app. Longer keeps more in view and uses more ${memory}.`} err={err}>
+           <div className="ctx-c">
+             <span className="mini-seg" role="group" aria-label="Default context">
+               {CONTEXT_SIZES.map((c) => {
+@@ -302,12 +298,12 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
+                 );
+               })}
+             </span>
+-            {limited ? <div className="ctx-line">{live}</div> : null}
++            {live === undefined ? null : <div className="ctx-line">{live}</div>}
+           </div>
+         </Row>
+       )}
+-      <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
+-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx === defaultSize ? undefined : ctx} cpu={cpu} />}
++      <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context{gpuNotice === undefined ? null : <><br />{gpuNotice}</>}</>}>
++        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} ctx={ctx} cpu={cpu} />}
+         {action}
+       </Row>
+       {fit === undefined ? null : (
+diff --git a/apps/web/src/Settings.tsx b/apps/web/src/Settings.tsx
+index 9e98b9ee..22a9eb86 100644
+--- a/apps/web/src/Settings.tsx
++++ b/apps/web/src/Settings.tsx
+@@ -268,9 +268,7 @@ function runTool(on: boolean, sources: readonly Source[] | "na" | undefined, she
+   if (shell === NA) return quiet("Not available");
+   // What the machine lacks comes first: adding to the Library would not fix it.
+   if (shell.state === "off") return quiet(shell.word ?? "Not available");
+-  const state = libraryTool(on, sources, "run", "Add something to your Library");
+-  // Ready, but short of something (no sqlite3: database reads fail): the server's own words, in amber.
+-  return shell.word !== undefined && state.word === "Ready" ? { ...state, word: shell.word, dot: "warn" } : state;
++  return libraryTool(on, sources, "run", "Add something to your Library");
+ }
+ 
+ function Tools() {
+diff --git a/apps/web/src/format.ts b/apps/web/src/format.ts
+index 6bbba23f..45927803 100644
+--- a/apps/web/src/format.ts
++++ b/apps/web/src/format.ts
+@@ -83,7 +83,7 @@ export function folderWords(userAgent: string = typeof navigator === "undefined"
+ export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+ 
+ /** What the app says when noGpu() holds. */
+-export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards). Replies are slower than on a GPU.";
++export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards), so models run in system memory. Replies are slower than on a GPU.";
+ 
+ export type VerdictKind = "gpu" | "spill" | "no";
+ 

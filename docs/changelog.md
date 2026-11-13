@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13: The bug finder keeps score against bugs the owner found
+
+- `node scripts/finder-board.ts` undoes twelve fixed bugs, one at a time,
+  each in a scratch copy, and checks whether the finder would have caught
+  it. It prints "caught N of 12" and how many findings on clean code are
+  not real bugs. A miss names the check that is still missing.
+- The finder has four new checks: a pop-up or menu that changes size
+  while it is open, text from the chat showing through a pop-up, a pop-up
+  with no Close button, and the first reply streaming in. It also walks
+  Settings while a reply is thinking, Settings on a computer with no GPU,
+  and the desktop window's title bar.
+- After a landing, the finder walks the screens the change touched, or the
+  whole app when it cannot tell. It writes `finder-report/rows.md`: one line
+  per new finding, with its screenshot and the area it belongs to. A
+  finding that is already known is not listed again.
+
 ## 2026-11-13: The queue is a shelf in the message box
 
 - Queued messages sit inside the message box, above the field, at its

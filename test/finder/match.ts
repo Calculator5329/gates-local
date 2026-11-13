@@ -1,6 +1,7 @@
 // Which screens a landing's changed files touch: each screen lists the source
-// globs it depends on (screens.ts). A web file no screen names still walks the
-// core screens, so a new component is never walked by nothing.
+// globs it depends on (screens.ts). App code no screen names (web, server or a
+// package) walks the whole app: when unsure, everything, so a new component is
+// never walked by nothing. Docs, scripts and tests walk nothing.
 
 /** `**` crosses folders, `*` stays inside one, anything else is literal. */
 export function globRegex(glob: string): RegExp {
@@ -20,17 +21,19 @@ export function globRegex(glob: string): RegExp {
 export interface Pick {
   /** Screen ids, in the table's order. */
   readonly screens: readonly string[];
-  /** Changed files no screen names (web files among them walked the core screens). */
+  /** Changed files no screen names. */
   readonly unmatched: readonly string[];
+  /** App code among them: every screen is walked. */
+  readonly whole: boolean;
 }
 
-export const CORE = ["chat", "composer", "sidebar"] as const;
-const WEB = /^apps\/web\/src\/.+\.(tsx?|css)$/;
+const APP = /^(apps\/(web|server)\/src|packages\/[^/]+\/src)\/.+\.(tsx?|css)$/;
 const TEST = /\.test\.tsx?$/;
 
 export function screensFor(changed: readonly string[], table: readonly { readonly id: string; readonly paths: readonly string[] }[]): Pick {
   const hit = new Set<string>();
   const unmatched: string[] = [];
+  let whole = false;
   const res = table.map((s) => ({ id: s.id, res: s.paths.map(globRegex) }));
   for (const raw of changed) {
     const file = raw.replace(/^\.\//, "");
@@ -38,9 +41,9 @@ export function screensFor(changed: readonly string[], table: readonly { readonl
     const mine = res.filter((s) => s.res.some((re) => re.test(file))).map((s) => s.id);
     if (mine.length === 0) {
       unmatched.push(file);
-      if (WEB.test(file)) for (const id of CORE) hit.add(id);
+      if (APP.test(file)) whole = true;
     }
     for (const id of mine) hit.add(id);
   }
-  return { screens: table.map((s) => s.id).filter((id) => hit.has(id)), unmatched };
+  return { screens: table.map((s) => s.id).filter((id) => whole || hit.has(id)), unmatched, whole };
 }

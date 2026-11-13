@@ -14,8 +14,8 @@ import { fakeComfy } from "../e2e/fake-comfy.ts";
 import { FAKE_URL } from "../e2e/env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "../e2e/fixtures.ts";
 import { type CutEl, type FinderFrame, type Finding, detect } from "./detectors.ts";
-import { type Shot, Screencast, burst, cutOff, extras, now, shotFor, twoFrames, watchScript } from "./page.ts";
-import { type Ctx, FINDER_TRACK, SCREENS, type Screen, type Step } from "./screens.ts";
+import { type Shot, Screencast, atEnd, burst, cutOff, extras, now, shotFor, twoFrames, watchScript } from "./page.ts";
+import { type Ctx, FINDER_TRACK, HOLD, SCREENS, type Screen, type Step } from "./screens.ts";
 import { FINDER_OUT } from "./out.ts";
 
 /** Long enough that every loading state shows on a fast machine (the audit's delay). */
@@ -53,6 +53,7 @@ for (const screen of chosen) {
       comfyUrl: "http://127.0.0.1:1",
       allowedErrors: [/./],
       ...(screen.viewport ? { viewport: screen.viewport } : {}),
+      ...(screen.installed ? { installed: screen.installed } : {}),
     });
     test(screen.name, async ({ page, open }, info) => {
       test.setTimeout(240_000);
@@ -63,6 +64,8 @@ for (const screen of chosen) {
       const comfy = screen.comfy ? await fakeComfy() : undefined;
       try {
         if (comfy) { comfy.gpu(); await stack.reset("models", 0, undefined, "system", undefined, comfy.url); }
+        if (screen.noGpu) await stack.computer(32, "none");
+        if (screen.titlebar) await page.addInitScript(desktopOverlay);
         const delay = await delayEverything(page, DELAY_MS);
         const cast = await Screencast.open(page);
         const size = page.viewportSize() ?? { width: 1440, height: 900 };
@@ -74,7 +77,7 @@ for (const screen of chosen) {
         if (screen.load) {
           const load = screen.load;
           steps.push(await run(page, screen, { name: load.name, root: load.root, ...(load.opens ? { opens: load.opens } : {}), act: async () => undefined }, cast, errors, delay, async () => {
-            await page.addInitScript({ content: watchScript(load.root, load.opens, FINDER_TRACK) });
+            await page.addInitScript({ content: watchScript(load.root, load.opens, FINDER_TRACK, HOLD) });
             await cast.start(size);
             const t = Date.now();
             await open();
@@ -92,7 +95,7 @@ for (const screen of chosen) {
               await step.before?.(ctx);
               await settled(delay, 4000);
               await cast.start(size);
-              await page.evaluate(watchScript(step.root, step.opens, [...FINDER_TRACK, ...step.track ?? []]));
+              await page.evaluate(watchScript(step.root, step.opens, [...FINDER_TRACK, ...step.track ?? []], HOLD));
               await twoFrames(page);
               const actAt = await now(page);
               const t = Date.now();
@@ -143,13 +146,24 @@ function desktopUpdates(ms: number): void {
   };
 }
 
+/** In the page: the desktop window's controls overlay, as sb-hairline.spec.ts stubs it, so the app takes the desktop titlebar layout. */
+function desktopOverlay(): void {
+  const overlay = new EventTarget();
+  Object.assign(overlay, { visible: true });
+  Object.defineProperty(navigator, "windowControlsOverlay", { value: overlay });
+  document.addEventListener("DOMContentLoaded", () => document.documentElement.style.setProperty("--window-controls-width", "138px"));
+}
+
 function broken(name: string, e: unknown): StepReport {
-  const why = e instanceof Error ? e.message.split("\n")[0]! : String(e);
+  // the first line and the locator it waited on, without the terminal's colours
+  // oxlint-disable-next-line no-control-regex
+  const lines = (e instanceof Error ? e.message : String(e)).replace(/\u001b\[[0-9;]*m/g, "").split("\n");
+  const why = [lines[0], lines.find((l) => l.startsWith("Locator:"))].filter(Boolean).join(" ");
   return { name, frames: 0, ms: 0, findings: [], burst: [], broken: why.slice(0, 300) };
 }
 
 /** The frames where a thing changed (a move's after, a flicker's gone and back, an arrival, words said twice) are shown once painted. */
-const changedAt = (f: Finding, j: number) => f.kind === "twice" || (j > 0 && f.kind !== "cut" && f.kind !== "error" && !(f.kind === "moves" && j === 2));
+const changedAt = (f: Finding, j: number) => f.kind === "twice" || (j > 0 && f.kind !== "cut" && f.kind !== "error" && !((f.kind === "moves" || f.kind === "resized") && j === 2));
 
 /** One step: watch from before the action until quiet, detect, keep frames and shots only when something was found. */
 async function run(page: Page, screen: Screen, step: Step, cast: Screencast, errors: string[], delay: Delay,
@@ -160,9 +174,10 @@ async function run(page: Page, screen: Screen, step: Step, cast: Screencast, err
     const probe = await collectWhole(page, delay, 1500, step.max ?? 6000);
     const extra = await extras(page);
     const cut: CutEl[] = await cutOff(page, step.root);
+    const ends = await atEnd(page);
     const shots = await cast.stop();
-    const frames: FinderFrame[] = probe.map((f, i) => ({ ...f, t: extra[i]?.t ?? 0, twice: extra[i]?.twice ?? [] }));
-    const found = detect({ screen: screen.id, step: step.name, frames, actAt, opens: step.opens !== undefined || screen.load !== undefined, free: step.free ?? [], cut, errors: errors.slice(before), kinds: [...TRACK.split(","), ...FINDER_TRACK, ...step.track ?? []].map((k) => k.trim()) });
+    const frames: FinderFrame[] = probe.map((f, i) => ({ ...f, t: extra[i]?.t ?? 0, twice: extra[i]?.twice ?? [], hold: extra[i]?.hold ?? [] }));
+    const found = detect({ screen: screen.id, step: step.name, frames, actAt, opens: step.opens !== undefined || screen.load !== undefined, free: step.free ?? [], cut, ends, errors: errors.slice(before), kinds: [...TRACK.split(","), ...FINDER_TRACK, ...step.track ?? []].map((k) => k.trim()) });
     const ms = Math.round(Date.now() - t);
     if (frames.findIndex((f) => f.arrived) < 0) return { ...broken(step.name, new Error(`the surface never showed: ${step.opens?.selector ?? step.root}`)), frames: frames.length, ms };
     if (found.length === 0 && !KEEP) return { name: step.name, frames: frames.length, ms, findings: [], burst: [] };

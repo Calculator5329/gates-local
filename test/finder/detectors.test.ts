@@ -3,9 +3,10 @@ import { type FinderFrame, type StepFrames, type Twin, detect } from "./detector
 
 type El = readonly [string, readonly number[]];
 /** One frame every 16 ms; `els` are the tracked boxes it shows. */
-const frame = (i: number, els: readonly El[], o: { arrived?: boolean; twice?: readonly Twin[] } = {}): FinderFrame => ({
+const frame = (i: number, els: readonly El[], o: { arrived?: boolean; twice?: readonly Twin[]; hold?: readonly El[] } = {}): FinderFrame => ({
   at: i * 16, t: 1_000_000 + i * 16, present: true, arrived: o.arrived ?? true, text: "", loose: 0,
   els: els.map(([key, box]) => ({ key, box })), twice: o.twice ?? [],
+  ...(o.hold ? { hold: o.hold.map(([sel, box]) => ({ sel, box })) } : {}),
 });
 const step = (frames: readonly FinderFrame[], o: Partial<StepFrames> = {}): StepFrames => ({ screen: "s", step: "a step", frames, actAt: 16, opens: false, ...o });
 const kinds = (s: StepFrames) => detect(s).map((f) => f.kind);
@@ -126,6 +127,36 @@ describe("cut off and errors", () => {
       ["error", undefined, "boom"],
     ]);
     expect(found.every((f) => f.frames[0] === 1)).toBe(true);
+  });
+});
+
+const dlg = (h: number) => [100, 50, 900, h] as const;
+describe("resized", () => {
+  it("reports a held frame whose size changes after the action: how much, when, first and last size", () => {
+    // Settings at 640 tall, the next section makes it 700 and then 812
+    const frames = [frame(0, [], { hold: [[".dlg", dlg(640)]] }), frame(1, [], { hold: [[".dlg", dlg(640)]] }),
+      frame(2, [], { hold: [[".dlg", dlg(700)]] }), frame(3, [], { hold: [[".dlg", dlg(812)]] })];
+    const found = detect(step(frames));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ kind: "resized", element: ".dlg", px: 172, ms: 16, frames: [0, 2, 3], detail: "h 640 → 812 (172 px at most)" });
+    expect(found[0]!.boxes).toEqual([dlg(640), dlg(812)]);
+  });
+  it("leaves a pixel of slack, and a frame that was not there before the action alone", () => {
+    const slack = [0, 1, 2].map((i) => frame(i, [], { hold: [[".dlg", dlg(i === 2 ? 641 : 640)]] }));
+    expect(kinds(step(slack))).toEqual([]);
+    const opened = [frame(0, []), frame(1, [], { hold: [["#picker", dlg(300)]] }), frame(2, [], { hold: [["#picker", dlg(500)]] })];
+    expect(kinds(step(opened))).toEqual([]);
+  });
+});
+
+describe("at the end of the step", () => {
+  it("turns what the page found at the end into findings on the last frame", () => {
+    const found = detect(step([frame(0, []), frame(1, []), frame(2, [])], {
+      ends: [{ key: "div.think-body", box: BOX, kind: "through", detail: "painted inside main.stage, which is hidden" },
+        { key: "div.dlg \"Usage\"", box: at(40), kind: "noclose", detail: "no Close, Back or Cancel button" }],
+    }));
+    expect(found.map((f) => [f.kind, f.element, f.frames])).toEqual([["through", "div.think-body", [2]], ["noclose", "div.dlg \"Usage\"", [2]]]);
+    expect(found[1]!.boxes).toEqual([at(40)]);
   });
 });
 

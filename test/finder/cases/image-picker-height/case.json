@@ -1,0 +1,9 @@
+{
+  "owner": "this things height changes on every categiorie anmd the categories are not great.",
+  "source": "image row 7",
+  "fix": "6bac7d49",
+  "undo": "by hand: the shown menu alone sets the list's height and the sizes set their own (the two menus no longer share one cell)",
+  "screens": ["image"],
+  "shows": "Image mode: open the image picker, switch between Defaults and Other models; the picker's height changes",
+  "catch": [{ "screen": "image", "kind": "resized", "element": "#imagePicker" }]
+}

@@ -1,0 +1,9 @@
+{
+  "owner": "there is a flicker when it goes from thinking to working. and it looks stalled sometimes. shouldn't one or the other icon be flashing if running?",
+  "source": "chat row 24",
+  "fix": "e4c31f58",
+  "undo": "by hand: nothing on the chip is lit while the model reads a tool's result (chipStep's reading branch removed)",
+  "screens": ["work-chip"],
+  "shows": "A reply that calls two tools: between a call's end and the next thought the lit icon goes out and comes back",
+  "catch": [{ "screen": "work-chip", "kind": "flicker" }]
+}

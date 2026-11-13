@@ -1,0 +1,10 @@
+{
+  "owner": "these still look really bad (Settings, Advanced, System memory on a computer with no supported GPU: the no-GPU fact said in several places)",
+  "source": "settings row 20",
+  "fix": "cef84b46",
+  "undo": "the fix's own diff reversed for FitPanel.tsx, format.ts and Settings.tsx",
+  "screens": ["settings-cpu"],
+  "shows": "A computer with no NVIDIA GPU: open Settings, then Advanced",
+  "catch": [{ "screen": "settings-cpu", "step": "Advanced section", "kind": "twice" }],
+  "detector": "a same-fact detector: one value with its unit (at 16k, system memory) said in three or more places of one settings group, in different sentences; the twice check matches whole phrases of two words or more and skips sizes"
+}

@@ -1,0 +1,13 @@
+diff --git a/apps/web/src/Thread.tsx b/apps/web/src/Thread.tsx
+index 5a3ebed7..39ab8a1f 100644
+--- a/apps/web/src/Thread.tsx
++++ b/apps/web/src/Thread.tsx
+@@ -313,7 +313,7 @@ export function chipStep(thinking: string, tools: readonly ToolStep[], clock: Wo
+   return {
+     think: thinking === "" ? null : clock === undefined ? undefined : thoughtSecs(clock, now),
+     calls: tools.length,
+-    lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : reading ? (thinking === "" ? "calls" : "think") : null,
++    lit: !busy ? null : running !== undefined ? "calls" : thinkingNow ? "think" : null, // finder case: the chat row 24 fix undone (nothing lit while the model reads a result)
+     failed: !busy && lastFailed(tools),
+     words: !busy ? "" : running !== undefined ? running.summary : thinkingNow ? "Thinking" : reading ? "Reading the result" : "",
+   };

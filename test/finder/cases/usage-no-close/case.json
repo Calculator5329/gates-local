@@ -1,0 +1,9 @@
+{
+  "owner": "ew what is this grey line. also no x in the top right in the usage pop up",
+  "source": "settings row 23",
+  "fix": "cef84b46",
+  "undo": "by hand: the pop-up's X shows on a phone only, as panel.css had it (the grey bar is not put back: it was a separate part of the row)",
+  "screens": ["usage", "models", "settings"],
+  "shows": "Open Usage from the footer: no X in its top right corner",
+  "catch": [{ "screen": "usage", "kind": "noclose" }]
+}

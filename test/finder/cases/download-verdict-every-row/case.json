@@ -1,0 +1,9 @@
+{
+  "owner": "this could probably look better (Models, Download: \"Uses system memory · slower\" repeated on every row)",
+  "source": "settings row 18",
+  "fix": "07796264",
+  "undo": "by hand: every row says its verdict again, not only the rows that are an exception to the line over the list",
+  "screens": ["models"],
+  "shows": "Models: open the Download tab; the same verdict is on every row",
+  "catch": [{ "screen": "models", "step": "Download tab", "kind": "twice" }]
+}

@@ -1,0 +1,9 @@
+{
+  "owner": "Today the pencil moves the action row 38 px (the coordinator's measure of the owner's report; the owner asked for Stop to hold still while a queued message is edited, and picked b: Stop takes Dictate's place)",
+  "source": "chat row 14",
+  "fix": "ac95b99d",
+  "undo": "by hand: stopForVoice is always false, so Stop stays beside Send and Dictate comes back while a queued message is edited",
+  "screens": ["queue"],
+  "shows": "Queue tray: a reply held part way, queue a message, press its pencil: the composer's action row moves",
+  "catch": [{ "screen": "queue", "step": "edit the queued message", "kind": "moves" }]
+}

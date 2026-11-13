@@ -8,14 +8,14 @@
 /* oxlint-disable unicorn/consistent-function-scoping */
 import type { CDPSession, Page } from "@playwright/test";
 import { TRACK, type WholeOptions, wholeSampler } from "../e2e/flicker-probe.ts";
-import type { CutEl, Twin } from "./detectors.ts";
+import type { CutEl, EndEl, HeldBox, Twin } from "./detectors.ts";
 
 /** Words that are the conversation, not the app: never "said twice". */
 export const IGNORE = [".md", ".think-body", "pre", "code", ".turn.u", "#tip", ".us-rows", "[data-finder-ignore]"].join(", ");
 
-interface HookOptions { readonly root: string; readonly ignore: string }
-interface Extra { readonly t: number; readonly twice: readonly Twin[] }
-interface FinderWindow { finderStart?: number; finderExtras?: Extra[]; wholeWatch?: { frames: { text: string }[] } }
+interface HookOptions { readonly root: string; readonly ignore: string; readonly hold?: readonly string[] }
+interface Extra { readonly t: number; readonly twice: readonly Twin[]; readonly hold: readonly HeldBox[] }
+interface FinderWindow { finderStart?: number; finderExtras?: Extra[]; finderHidden?: WeakSet<Element>; wholeWatch?: { frames: { text: string }[] } }
 
 /** Runs in the page right after wholeSampler: one extra sample per probe frame. Its helpers live inside it. */
 function finderHook(o: HookOptions): void {
@@ -25,6 +25,9 @@ function finderHook(o: HookOptions): void {
   const extras: Extra[] = [];
   w.finderStart = performance.now();
   w.finderExtras = extras;
+  // what was already hidden before the action: a layer the step hides is told from one hidden by
+  // design (none on a load step, whose document is still empty: through stays quiet there)
+  if (document.body) w.finderHidden = new WeakSet([...document.querySelectorAll("*")].filter((el) => !el.checkVisibility({ visibilityProperty: true })));
   const vis = (el: Element) => {
     const r = el.getBoundingClientRect();
     return r.width > 1 && r.height > 1 && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
@@ -44,6 +47,16 @@ function finderHook(o: HookOptions): void {
     if (r.right <= 0 || r.bottom <= 0 || r.left >= window.innerWidth || r.top >= window.innerHeight) return false;
     const top = document.elementFromPoint(x, y);
     return top !== null && (el.contains(top) || top.contains(el));
+  };
+  const cls = (el: Element) => `${el.tagName}.${typeof el.className === "string" ? el.className.split(/\s+/).find(Boolean) ?? "" : ""}`;
+  /** Each in its own row of one list, and the list has rows without one. */
+  const someRows = (els: readonly Element[]): boolean => {
+    let lca: Element | null = els[0]!.parentElement;
+    while (lca && !els.every((e) => lca!.contains(e))) lca = lca.parentElement;
+    if (!lca) return false;
+    const rows = els.map((e) => { let r: Element = e; while (r.parentElement && r.parentElement !== lca) r = r.parentElement; return r; });
+    if (new Set(rows).size !== rows.length || rows.some((r) => r === lca || cls(r) !== cls(rows[0]!))) return false;
+    return [...lca.children].filter((c) => cls(c) === cls(rows[0]!)).length > rows.length;
   };
   let lastText: string | null = null;
   let lastTwice: Twin[] = [];
@@ -84,19 +97,30 @@ function finderHook(o: HookOptions): void {
       // a label inside another label with the same words is one thing
       const kept = list.filter((u) => u.tip || !list.some((v) => !v.tip && v.el !== u.el && v.el.contains(u.el)));
       if (kept.length < 2) continue;
-      // one column of a list (same kind of element, same left edge, one per row) is a table's cells, each row's own
+      // one column of a list (same kind of element, same left edge, one per row) is a table's cells, each row's own;
+      // but three rows or more all saying the same words is the same thing said on every row (settings row 18)
       const kind = (u: { el: Element }) => name(u.el).split(" ")[0];
       const left = box(kept[0]!.el)[0]!;
-      if (kept.every((u) => u.tip === kept[0]!.tip && kind(u) === kind(kept[0]!) && Math.abs(box(u.el)[0]! - left) <= 1)) continue;
+      if (kept.length < 3 && kept.every((u) => u.tip === kept[0]!.tip && kind(u) === kind(kept[0]!) && Math.abs(box(u.el)[0]! - left) <= 1)) continue;
+      // each row's own tooltip shows one at a time (the image sizes' "Fits on the GPU"); two
+      // different controls with one tooltip still count
+      if (kept.every((u) => u.tip && kind(u) === kind(kept[0]!))) continue;
+      // a mark some rows of one list carry and others do not is each row's exception (the line over
+      // the list says what it means, settings row 18); every row carrying it is the same thing said again
+      if (kept.every((u) => !u.tip && kind(u) === kind(kept[0]!)) && someRows(kept.map((u) => u.el))) continue;
       // words under a drawer or a menu are not seen; it takes two seen to say a thing twice
       if (kept.filter((u) => seen(u.el)).length < 2) continue;
       out.push({ phrase, els: kept.slice(0, 4).map((u) => ({ key: name(u.el), box: box(u.el), tip: u.tip })) });
     }
     return (lastTwice = out);
   };
+  const held = (): HeldBox[] => (o.hold ?? []).flatMap((sel) => {
+    const el = document.querySelector(sel);
+    return el && vis(el) ? [{ sel, box: box(el) }] : [];
+  });
   const push = watch.frames.push;
   watch.frames.push = function (this: { text: string }[], ...items: { text: string }[]) {
-    for (const f of items) extras.push({ t: performance.timeOrigin + performance.now(), twice: sample(f.text) });
+    for (const f of items) extras.push({ t: performance.timeOrigin + performance.now(), twice: sample(f.text), hold: held() });
     return push.apply(this, items);
   };
 }
@@ -156,10 +180,57 @@ function finderCut(o: HookOptions): CutEl[] {
   return out.slice(0, 24);
 }
 
+/**
+ * Runs in the page once the step is quiet, over the whole page: words painted inside
+ * a layer that is hidden (a child that sets visibility:visible beats a hidden parent:
+ * a live thought drew over Settings, chat row 22), and a pop-up that holds the page
+ * with no Close or Back of its own (Usage had none on a computer, settings row 23).
+ */
+function finderEnd(): EndEl[] {
+  const out: EndEl[] = [];
+  const name = (el: Element) => {
+    const cls = typeof el.className === "string" ? el.className.split(/\s+/).find(Boolean) : undefined;
+    const said = el.getAttribute("aria-label") || ((el as HTMLElement).innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+    return `${el.tagName.toLowerCase()}${cls ? `.${cls}` : ""}${said ? ` "${said}"` : ""}`;
+  };
+  const box = (el: Element) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map((v) => Math.round(v)); };
+  const painted = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1 && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  };
+  const shown = (el: Element) => el.checkVisibility({ visibilityProperty: true });
+  const ownText = (el: Element) => [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.nodeValue ?? "").trim() !== "");
+  const through = new Set<Element>();
+  // A shown child of a hidden wrapper is also how the app keeps its sidebar (its wrapper hidden
+  // from the start), so it counts only under a layer this step hid: the chat that Settings hides
+  // on a phone, with an open thought still painting (chat row 22).
+  const modals = [...document.querySelectorAll('[aria-modal="true"]')].filter(painted);
+  const hiddenBefore = (window as unknown as FinderWindow).finderHidden;
+  for (const el of hiddenBefore ? document.body.querySelectorAll("*") : []) {
+    if (!ownText(el) || !painted(el)) continue;
+    // the highest ancestor still shown under a hidden one: the element that undid the hiding
+    let top: Element = el;
+    let hidden: Element | null = null;
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (!shown(p)) { hidden = p; break; }
+      top = p;
+    }
+    if (hidden && !hiddenBefore!.has(hidden) && !through.has(top)) {
+      through.add(top);
+      out.push({ key: name(top).slice(0, 60), box: box(top), kind: "through", detail: `painted inside ${name(hidden).slice(0, 60)}, which is hidden` });
+    }
+  }
+  for (const dlg of modals) {
+    const close = [...dlg.querySelectorAll("button, [role=button], a")].some((b) => painted(b) && /^(close|back|cancel)\b/i.test(b.getAttribute("aria-label") ?? (b as HTMLElement).innerText ?? ""));
+    if (!close) out.push({ key: name(dlg).slice(0, 60), box: box(dlg), kind: "noclose", detail: "a pop-up with no Close or Back button of its own" });
+  }
+  return out.slice(0, 12);
+}
+
 /** The probe's sampler and the finder's hook, as one script for the page (or an init script for a load). */
-export function watchScript(root: string, opens: WholeOptions["arrive"], track: readonly string[]): string {
+export function watchScript(root: string, opens: WholeOptions["arrive"], track: readonly string[], hold: readonly string[] = []): string {
   const whole = { root, ...(opens ? { arrive: opens } : {}), track: [TRACK, ...track].join(", ") };
-  const hook: HookOptions = { root, ignore: IGNORE };
+  const hook: HookOptions = { root, ignore: IGNORE, hold };
   return `(${wholeSampler.toString()})(${JSON.stringify(whole)});(${finderHook.toString()})(${JSON.stringify(hook)});`;
 }
 
@@ -172,6 +243,8 @@ export const now = (page: Page) => page.evaluate(() => performance.now() - ((win
 export const extras = (page: Page) => page.evaluate(() => (window as unknown as FinderWindow).finderExtras ?? []);
 
 export const cutOff = (page: Page, root: string) => page.evaluate(finderCut, { root, ignore: IGNORE });
+
+export const atEnd = (page: Page) => page.evaluate(finderEnd);
 
 export interface Shot { readonly t: number; readonly data: Buffer }
 

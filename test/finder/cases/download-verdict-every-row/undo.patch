@@ -1,0 +1,14 @@
+diff --git a/apps/web/src/ModelDownloads.tsx b/apps/web/src/ModelDownloads.tsx
+index 783ac1eb..739f4c77 100644
+--- a/apps/web/src/ModelDownloads.tsx
++++ b/apps/web/src/ModelDownloads.tsx
+@@ -187,7 +187,8 @@ function DlRow({ c, numCtx, report, mark, actions }: { c: CatalogEntry; numCtx:
+             <>
+               {c.purpose}
+               {/* only an exception to the line above the list (row 18) */}
+-              {mark && v ? <> · <VLabel v={v} /></> : null}
++              {/* finder case: the settings row 18 fix undone (every row says its verdict) */}
++              {v ? <> · <VLabel v={v} /></> : null}
+             </>
+           )}
+         </span>

@@ -8,16 +8,26 @@ import { type WholeFrame, wholeFindings } from "../e2e/flicker-probe.ts";
 /** One element in a phrase said twice: a visible label, or the tooltip of an element that has words of its own. */
 export interface TwinEl { readonly key: string; readonly box: readonly number[]; readonly tip: boolean }
 export interface Twin { readonly phrase: string; readonly els: readonly TwinEl[] }
+/** A surface's frame (a pop-up, a picker) by its selector, wherever it is in the page. */
+export interface HeldBox { readonly sel: string; readonly box: readonly number[] }
 /** A probe frame plus what the finder samples on the same animation frame. */
 export interface FinderFrame extends WholeFrame {
   /** Wall-clock ms (the page's), to line frames up with the screencast. */
   readonly t: number;
   readonly twice: readonly Twin[];
+  /** The frames that keep one size whatever is in them (HOLD in screens.ts), when shown. */
+  readonly hold?: readonly HeldBox[];
 }
 /** Text wider than its box, or a box past the viewport's edge, at the end of the step. */
 export interface CutEl { readonly key: string; readonly box: readonly number[]; readonly how: "text" | "edge"; readonly px: number }
+/**
+ * Read over the whole page once the step is quiet: words painted although a layer
+ * they sit in is hidden (`through`), and a pop-up that holds the page with no
+ * Close or Back of its own (`noclose`).
+ */
+export interface EndEl { readonly key: string; readonly box: readonly number[]; readonly kind: "through" | "noclose"; readonly detail: string }
 
-export type Kind = "moves" | "flicker" | "late" | "twice" | "cut" | "error";
+export type Kind = "moves" | "resized" | "flicker" | "late" | "twice" | "cut" | "through" | "noclose" | "error";
 export interface Finding {
   readonly screen: string;
   readonly step: string;
@@ -46,6 +56,7 @@ export interface StepFrames {
   /** Tracked kinds (selectors) that may move, come and go on this step. */
   readonly free?: readonly string[];
   readonly cut?: readonly CutEl[];
+  readonly ends?: readonly EndEl[];
   readonly errors?: readonly string[];
   /** The followed selectors: a key is "<selector> <label>", so two keys of one selector are siblings. */
   readonly kinds?: readonly string[];
@@ -70,6 +81,7 @@ export function detect(s: StepFrames): Finding[] {
   const base = s.opens ? s.frames[from]!.at : s.actAt;
   const whole = wholeFindings(s.step, s.frames);
   out.push(...moves(s, from, base, free, whole.filter((w) => w.kind === "moved").map((w) => w.what)));
+  out.push(...resized(s));
   if (s.opens) out.push(...late(s, from, free, whole.filter((w) => w.kind === "late").map((w) => w.what)));
   out.push(...flicker(s, from, base, free));
   out.push(...twice(s, from, base));
@@ -77,6 +89,7 @@ export function detect(s: StepFrames): Finding[] {
     out.push({ screen: s.screen, step: s.step, kind: "cut", element: c.key, px: r(c.px), frames: [s.frames.length - 1], boxes: [c.box],
       detail: c.how === "text" ? `its words are ${r(c.px)} px wider than its box` : `${r(c.px)} px past the window's edge` });
   }
+  for (const e of s.ends ?? []) out.push({ screen: s.screen, step: s.step, kind: e.kind, element: e.key, frames: [s.frames.length - 1], boxes: [e.box], detail: e.detail });
   for (const e of s.errors ?? []) out.push({ screen: s.screen, step: s.step, kind: "error", element: "console", frames: [s.frames.length - 1], boxes: [], detail: e.slice(0, 300) });
   return out;
 }
@@ -139,6 +152,40 @@ function moves(s: StepFrames, from: number, base: number, free: readonly string[
     });
   }
   return out.toSorted((a, b) => (b.px ?? 0) - (a.px ?? 0));
+}
+
+/**
+ * A frame that keeps one size whatever is in it (a pop-up, a picker: owner, settings
+ * row 26 and image row 7) and changed after the action: measured from the last frame
+ * before the action, so a step that swaps what is inside it counts, not only one
+ * that opens it. A frame that was not up before the action has nothing to change from.
+ */
+function resized(s: StepFrames): Finding[] {
+  const out: Finding[] = [];
+  const before = s.frames.findLastIndex((f) => f.at < s.actAt);
+  if (before < 0) return out;
+  for (const held of s.frames[before]!.hold ?? []) {
+    const at = s.frames.map((f, i) => ({ i, box: i > before ? f.hold?.find((h) => h.sel === held.sel)?.box : undefined }))
+      .filter((e): e is { i: number; box: readonly number[] } => e.box !== undefined);
+    let changed = -1, px = 0, axis = 0;
+    for (const e of at) {
+      for (let a = 0; a < 4; a++) {
+        const d = Math.abs((e.box[a] ?? 0) - (held.box[a] ?? 0));
+        if (d > SLACK && changed < 0) changed = e.i;
+        if (d > px) { px = d; axis = a; }
+      }
+    }
+    if (changed < 0) continue;
+    const last = at.at(-1)!;
+    out.push({
+      screen: s.screen, step: s.step, kind: "resized", element: held.sel, px: r(px), ms: r(s.frames[changed]!.at - s.actAt),
+      frames: [before, changed, last.i],
+      detail: `${AXES[axis]} ${r(held.box[axis] ?? 0)} → ${r(last.box[axis] ?? 0)} (${r(px)} px at most)`,
+      boxes: [held.box, last.box],
+      series: [[r(s.frames[before]!.at - s.actAt), r(held.box[axis] ?? 0)], ...at.map((e) => [r(s.frames[e.i]!.at - s.actAt), r(e.box[axis] ?? 0)] as const)],
+    });
+  }
+  return out;
 }
 
 /** Something that showed after the surface's first frame without a placeholder holding its place. */

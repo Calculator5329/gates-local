@@ -1,0 +1,10 @@
+{
+  "owner": "ew (on the filled Search box next to the bare pencil, then T3's own row sent as the answer)",
+  "source": "chat row 15",
+  "fix": "23a84f1b",
+  "undo": "the fix's styles.css reversed: Search has a filled box at rest and the thread list shows a scroll bar",
+  "screens": ["sidebar"],
+  "shows": "The sidebar at rest: the Search field is a filled box beside the bare New thread pencil",
+  "catch": [{ "screen": "sidebar" }],
+  "detector": "a reference compare: the same element measured against T3 Code's (fill at rest, padding), or a model reading the shot against the owner's picked T3 row"
+}

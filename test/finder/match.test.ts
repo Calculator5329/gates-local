@@ -24,11 +24,17 @@ describe("screensFor", () => {
   ];
 
   it("picks every screen a changed file names, in table order", () => {
-    expect(screensFor(["apps/web/src/Composer.tsx"], table)).toEqual({ screens: ["composer", "queue"], unmatched: [] });
+    expect(screensFor(["apps/web/src/Composer.tsx"], table)).toEqual({ screens: ["composer", "queue"], unmatched: [], whole: false });
   });
 
-  it("walks the core screens for a web file no screen names", () => {
-    expect(screensFor(["apps/web/src/New.tsx", "docs/x.md"], table)).toEqual({ screens: ["chat", "composer", "sidebar"], unmatched: ["apps/web/src/New.tsx", "docs/x.md"] });
+  it("walks the whole app for app code no screen names: unsure is everything", () => {
+    expect(screensFor(["apps/web/src/New.tsx", "docs/x.md"], table)).toEqual({ screens: ["chat", "composer", "sidebar", "queue"], unmatched: ["apps/web/src/New.tsx", "docs/x.md"], whole: true });
+    expect(screensFor(["apps/server/src/new/thing.ts"], table).whole).toBe(true);
+    expect(screensFor(["packages/harness/src/new.ts"], table).whole).toBe(true);
+  });
+
+  it("walks nothing for docs, scripts and tests no screen names", () => {
+    expect(screensFor(["docs/x.md", "scripts/x.ts", "test/e2e/x.spec.ts", "apps/desktop/scripts/x.ts"], table)).toEqual({ screens: [], unmatched: ["docs/x.md", "scripts/x.ts", "test/e2e/x.spec.ts", "apps/desktop/scripts/x.ts"], whole: false });
   });
 
   it("skips unit tests", () => {

@@ -1,0 +1,10 @@
+{
+  "owner": "I think its the gray line",
+  "source": "chat row 15",
+  "fix": "cb61371c",
+  "undo": "the fix's own diff reversed: a 1 px border under the sidebar head in the desktop titlebar layout",
+  "screens": ["desktop"],
+  "shows": "The desktop titlebar layout: a grey line under the sidebar's head",
+  "catch": [{ "screen": "desktop" }],
+  "detector": "a line detector: a border, shadow or pseudo-element that draws a rule where the web layout of the same screen has none (or a pixel diff of the desktop layout against the web one)"
+}

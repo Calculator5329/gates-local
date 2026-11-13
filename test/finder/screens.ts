@@ -17,7 +17,7 @@ export interface Ctx {
   /** Type into the composer and send with Enter. */
   send(text: string): Promise<void>;
   /** Switch the fake model's behaviour (test/fake-ollama). */
-  scenario(name: string, options?: Record<string, number>): Promise<void>;
+  scenario(name: string, options?: Record<string, number | readonly string[]>): Promise<void>;
   /** Let a held fake reply go on. */
   release(): Promise<void>;
   /** A Library file and tools on, so the fake model is offered a tool to call. */
@@ -61,6 +61,12 @@ export interface Screen {
   readonly comfy?: boolean;
   /** The desktop app's bridge and a stubbed update service whose check finds an update (as updates.spec.ts does). */
   readonly desktopUpdates?: boolean;
+  /** A computer with no NVIDIA GPU (everything runs in system memory). */
+  readonly noGpu?: boolean;
+  /** The desktop window's titlebar layout (its controls overlay stubbed, as sb-hairline.spec.ts does). */
+  readonly titlebar?: boolean;
+  /** The fake's installed models, when not its default set. */
+  readonly installed?: readonly string[];
   /** The first step is the page load itself, watched from before the app's first script. */
   readonly load?: { readonly name: string; readonly root: string; readonly opens?: { readonly selector: string; readonly text?: string } };
   /** Unwatched setup after the page is ready. */
@@ -84,23 +90,38 @@ export const NAMES: Readonly<Record<string, string>> = {
   ".snav button": "Settings nav item",
   "#modelBtn": "model button",
   ".sb-search": "sidebar search",
+  ".writing": "Writing label",
+  "#picker": "model picker",
+  "#imagePicker": "image picker",
 };
 
 /** Followed on every step. */
 export const FINDER_TRACK = [".cf-r > *", ".cf-l > *", ".composer button.send", ".qt-r", ".qt", ".sb-foot > *", ".hdr", ".dlg", "#modelBtn"];
+/**
+ * Frames that keep one size whatever is in them, wherever they are in the page: the
+ * pop-up (one size for Settings, Models and Usage and every Settings section, settings
+ * row 26) and the pickers (image row 7). A step that changes one is a finding.
+ */
+export const HOLD = [".dlg", "#picker", "#imagePicker"];
+
+/** Which area's queue a screen's finding goes to (the coordinator's area files: chat, settings, image, updates). */
+export const AREA: Readonly<Record<string, string>> = {
+  start: "chat", "first-run": "settings", chat: "chat", reply: "chat", "work-chip": "chat", composer: "chat", queue: "chat",
+  sidebar: "chat", footer: "settings", models: "settings", usage: "settings", picker: "chat", settings: "settings",
+  "settings-busy": "chat", "settings-cpu": "settings", desktop: "chat", updates: "updates", image: "image", phone: "chat",
+};
 
 const WEB = "apps/web/src";
-/** Files every screen draws with: a change here walks the core screens, not all of them. */
 /** The phone's thread drawer: its rows and its foot slide with it. */
 const DRAWER = [".sb-row", ".sb-foot > *"];
-const SHARED = [`${WEB}/styles.css`, `${WEB}/ui.tsx`, `${WEB}/icons.tsx`, `${WEB}/App.tsx`, `${WEB}/store.ts`, `${WEB}/main.tsx`, `${WEB}/session/connection.ts`, "packages/contracts/**"];
+/** Files the core screens draw with: a change here walks every screen that names them. */
+const SHARED =[`${WEB}/styles.css`, `${WEB}/ui.tsx`, `${WEB}/icons.tsx`, `${WEB}/App.tsx`, `${WEB}/store.ts`, `${WEB}/main.tsx`, `${WEB}/session/connection.ts`, "packages/contracts/**"];
 const STREAM = { holdAfterTokens: 46 };
 
 const openSettings = async (c: Ctx) => { await c.page.keyboard.press("Control+Comma"); await c.shows(".set .set-h h1"); };
 const section = (name: string) => ({ selector: ".set-h h1, .mp-head h1", text: name });
 const press = (key: string) => (c: Ctx) => c.page.keyboard.press(key);
 const click = (selector: string) => (c: Ctx) => c.page.locator(selector).first().click();
-/** A reply that is held part way, so Stop and the queue have something to act on. */
 /** Until the reply has started and ended: Stop came and went. */
 async function untilReplied(c: Ctx, timeout: number): Promise<void> {
   const stop = c.page.locator('.composer [aria-label="Stop"]');
@@ -108,10 +129,35 @@ async function untilReplied(c: Ctx, timeout: number): Promise<void> {
   await stop.first().waitFor({ state: "detached", timeout });
 }
 
+/** A reply that is held part way, so Stop and the queue have something to act on. */
 async function heldReply(c: Ctx): Promise<void> {
   await c.scenario("slow-drip", STREAM);
   await c.send("How do I check disk space before a download?");
   await c.shows(".turn.a .md ul li");
+}
+
+/**
+ * A reply that calls a tool and then thinks, held there, with its steps open: the live
+ * thought on screen (as settings-hides-chat.spec.ts sets it up).
+ */
+/** The reply screen's models: tiny-chat does not think, so Writing has no thought's line to sit on. */
+const REPLY_MODELS = ["tiny-chat:2k", "qwen3.5:9b"];
+
+async function liveThought(c: Ctx): Promise<void> {
+  await c.toolsOn();
+  await c.scenario("slow-drip", { toolCalls: 3, quietToolRounds: 1, tokenDelayMs: 1, firstTokenDelayMs: 0, holdThinkingAfterTokens: 4 });
+  await c.send("Use a tool to check my notes");
+  const chip = c.page.locator(".turn.a").last().locator("button.think");
+  for (let i = 0; i < 400 && !/\b1 tool call\b/.test((await chip.getAttribute("aria-label").catch(() => null)) ?? ""); i++) {
+    await c.release();
+    await c.page.waitForTimeout(50);
+  }
+  await chip.click();
+  // the steps list: round 1 closed, its call, round 2 open and growing; open round 1 too, as
+  // settings-hides-chat.spec.ts does, so a thought shows whether or not round 2 is still held
+  const reply = c.page.locator(".turn.a").last();
+  await reply.locator(".fold-list > li").first().locator(".th-line").click();
+  await reply.locator(".think-body:visible").first().waitFor();
 }
 
 export const SCREENS: readonly Screen[] = [
@@ -142,6 +188,31 @@ export const SCREENS: readonly Screen[] = [
       { name: "switch thread", root: ".main", opens: { selector: ".hdr h2", text: "Whisper latency check" }, act: (c) => c.page.locator(".sb-row").filter({ hasText: "Whisper latency check" }).click() },
       { name: "send a message", root: ".main", free: [".turn"], max: 8000, act: (c) => c.send("What changed since yesterday?") },
     ],
+  },
+  {
+    id: "reply",
+    name: "A reply streaming in",
+    paths: [`${WEB}/Thread.tsx`, `${WEB}/markdown.tsx`, `${WEB}/paced.ts`, `${WEB}/reveal.ts`, `${WEB}/styles.css`, `${WEB}/session/turn.ts`],
+    seed: 0,
+    installed: REPLY_MODELS,
+    viewport: { width: 1440, height: 1080 },
+    steps: [{
+      // a short first reply that never scrolls: what stays put while the words grow is the point (Writing above them, chat row 30)
+      name: "the first reply streams in",
+      root: ".main",
+      free: [".turn", ".composer", ".cf-l > *", ".cf-r > *", ".composer button.send"],
+      track: [".writing"],
+      max: 12_000,
+      // a model that does not think, so Writing is not on a thought's line (as the fix's own test runs it)
+      before: async (c) => {
+        await c.scenario("models", { installed: REPLY_MODELS, tokenDelayMs: 40, firstTokenDelayMs: 0 });
+        await c.page.locator("#modelBtn").click();
+        await c.page.locator("#pkSearch").fill("tiny-chat");
+        await c.page.locator('#picker .pk-r[data-m="tiny-chat:2k"]').click();
+        await c.page.locator("#picker").waitFor({ state: "hidden" });
+      },
+      act: async (c) => { await c.send("What should I check first?"); await untilReplied(c, 20_000); },
+    }],
   },
   {
     id: "work-chip",
@@ -263,6 +334,42 @@ export const SCREENS: readonly Screen[] = [
     ],
   },
   {
+    id: "settings-busy",
+    name: "Settings over a thinking reply",
+    paths: [`${WEB}/App.tsx`, `${WEB}/Panel.tsx`, `${WEB}/panel.css`, `${WEB}/Thread.tsx`, `${WEB}/styles.css`],
+    seed: 0,
+    // a phone, where Settings is a page over the hidden chat (App.tsx `under`), as the fix's own test runs it
+    viewport: { width: 390, height: 844 },
+    setup: liveThought,
+    steps: [
+      // nothing of the chat under Settings may paint (chat row 22)
+      { name: "open Settings while a reply thinks", root: ".set", opens: { selector: ".set" }, max: 4000, act: press("Control+Comma") },
+    ],
+  },
+  {
+    id: "settings-cpu",
+    name: "Settings with no GPU",
+    paths: [`${WEB}/Settings.tsx`, `${WEB}/FitPanel.tsx`, `${WEB}/fit-*.ts`, `${WEB}/format.ts`, "apps/server/src/fit/**"],
+    seed: "design",
+    noGpu: true,
+    steps: [
+      { name: "open Settings", root: ".set", opens: section("General"), act: press("Control+Comma") },
+      // each memory fact said once (settings row 20)
+      { name: "Advanced section", root: ".set", opens: section("Advanced"), act: (c) => c.page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click() },
+    ],
+  },
+  {
+    id: "desktop",
+    name: "Desktop titlebar layout",
+    paths: [`${WEB}/styles.css`, `${WEB}/titlebar.ts`, `${WEB}/Sidebar.tsx`, `${WEB}/App.tsx`],
+    seed: "design",
+    titlebar: true,
+    steps: [
+      { name: "open a thread", root: "#app", opens: { selector: ".hdr h2", text: "Fix the backup cron" }, act: (c) => c.page.locator(".sb-row").filter({ hasText: "Fix the backup cron" }).click() },
+      { name: "open Settings", root: "#app", opens: section("General"), act: press("Control+Comma") },
+    ],
+  },
+  {
     id: "updates",
     name: "Updates",
     paths: [`${WEB}/Updates.tsx`, `${WEB}/SettingsUpdates.tsx`, `${WEB}/UpdateNote.tsx`, `${WEB}/update-*.ts`, `${WEB}/session/updates.ts`, "apps/server/src/update/**"],
@@ -283,6 +390,10 @@ export const SCREENS: readonly Screen[] = [
     steps: [
       { name: "turn Image on", root: ".main", free: ["#modelBtn"], act: (c) => c.page.getByRole("button", { name: "Image", exact: true }).click() },
       { name: "open the image picker", root: "#imagePicker", opens: { selector: "#imagePicker.open" }, act: click("#modelBtn") },
+      // the picker keeps one height whichever menu shows (image row 7)
+      // the two menus' rows swap in: the n-th row is another model, not a row that moved
+      { name: "the other models menu", root: "#imagePicker", free: [".pk-r"], act: click('#imagePicker .pk-fam[aria-label="Other models"]') },
+      { name: "back to the defaults menu", root: "#imagePicker", free: [".pk-r"], act: click('#imagePicker .pk-fam[aria-label="Defaults"]') },
       { name: "close the image picker", root: ".main", act: press("Escape") },
       // a new thread's composer docks at the bottom on its first message by design; the composer screen watches it in a thread
       { name: "make a picture", root: ".main", free: [".turn", ".composer", ".cf-l > *", ".cf-r > *"], max: 10_000, act: (c) => c.send("A lighthouse on a cliff at dusk") },

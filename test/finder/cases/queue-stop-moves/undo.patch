@@ -1,0 +1,13 @@
+diff --git a/apps/web/src/Composer.tsx b/apps/web/src/Composer.tsx
+index 04fb1f34..b7b506fc 100644
+--- a/apps/web/src/Composer.tsx
++++ b/apps/web/src/Composer.tsx
+@@ -232,7 +232,7 @@ export function Composer() {
+   // their own slots for the whole reply, so the first character moves nothing under the finger.
+   const showStop = isStreaming && !editing && !touch;
+   // Editing a queued message on desktop: Stop leaves the main button for Dictate's square, so the row holds still.
+-  const stopForVoice = isStreaming && editing && !touch;
++  const stopForVoice = false as boolean; // finder case: the chat row 14 fix undone (Stop beside Send, Dictate back, while a queued message is edited)
+   // The note that said why Dictate waited is untrue once Dictate is back. Cleared here, not in Voice: Voice remounts when an edit is cancelled.
+   const wasStopForVoice = useRef(stopForVoice);
+   useEffect(() => {

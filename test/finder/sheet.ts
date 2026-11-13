@@ -25,6 +25,9 @@ export function headline(f: Finding): string {
   const name = nameOf(f.element);
   switch (f.kind) {
     case "moves": return `${name} moves ${f.px ?? 0} px`;
+    case "resized": return `${name} changes size by ${f.px ?? 0} px`;
+    case "through": return `${name} shows through a hidden layer`;
+    case "noclose": return `${name} has no Close`;
     case "flicker": return `${name} flickers: gone ${f.ms ?? 0} ms, then back`;
     case "late": return `${name} arrives ${f.ms ?? 0} ms after the rest`;
     case "twice": return `says ${f.element} twice`;
@@ -38,7 +41,7 @@ export function unique(screens: readonly SheetScreen[]): Found[] {
   const seen = new Set<string>();
   const out: Found[] = [];
   for (const s of screens) for (const step of s.steps) for (const f of step.findings) {
-    const key = f.kind === "twice" || f.kind === "cut" || f.kind === "error" ? `${s.id}|${f.kind}|${f.element}|${f.detail}` : `${s.id}|${f.step}|${f.kind}|${f.element}`;
+    const key = f.kind === "twice" || f.kind === "cut" || f.kind === "through" || f.kind === "noclose" || f.kind === "error" ?`${s.id}|${f.kind}|${f.element}|${f.detail}` : `${s.id}|${f.step}|${f.kind}|${f.element}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(f);
@@ -79,7 +82,7 @@ function card(f: Found, screen: SheetScreen): string {
   // before and after: the first and the frame it changed on (the last for a flicker's return)
   const shots = f.kind === "flicker"
     ? [frame(pics[0] ?? null, [f.boxes[0] ?? []], size, "shown"), frame(pics[1] ?? null, [f.boxes[0] ?? []], size, "gone"), frame(pics[2] ?? null, [f.boxes[1] ?? []], size, "back")]
-    : f.kind === "moves" || f.kind === "late"
+    : f.kind === "moves" || f.kind === "resized" || f.kind === "late"
       ? [frame(pics[0] ?? null, [f.boxes[0] ?? []], size, "before"), frame(pics[1] ?? null, [f.boxes[1] ?? f.boxes[0] ?? []], size, "after")]
       : [frame(pics[0] ?? null, f.boxes, size, "at the end of the step")];
   return `<article class="card k-${f.kind}">
@@ -112,7 +115,7 @@ h1{font-size:20px;margin:0 0 4px}
 .card header{display:flex;gap:10px;align-items:baseline}
 .card h2{font-size:16px;margin:0;font-weight:600}
 .kind{font:600 11px/1 ui-monospace,monospace;text-transform:uppercase;color:var(--bg);background:var(--accent);padding:3px 6px;border-radius:3px;flex:none}
-.k-moves .kind,.k-flicker .kind{background:var(--mark)}
+.k-moves .kind,.k-resized .kind,.k-flicker .kind,.k-through .kind{background:var(--mark)}
 .where{margin:6px 0 2px;color:var(--dim)}
 .detail{margin:0 0 10px;font:13px/1.4 ui-monospace,monospace;color:var(--fg);overflow-wrap:anywhere}
 .shots{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}

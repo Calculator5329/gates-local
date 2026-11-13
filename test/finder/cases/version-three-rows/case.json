@@ -1,0 +1,10 @@
+{
+  "owner": "this only needs two rows",
+  "source": "updates row 8",
+  "fix": "f29b1cd4",
+  "undo": "SettingsUpdates.tsx as it was before the fix, and the fix's styles.css lines reversed",
+  "screens": ["updates"],
+  "shows": "Settings, General: Version, Check for updates and the update state on three rows",
+  "catch": [{ "screen": "updates" }],
+  "detector": "a row-count rule for a settings group whose rows each carry a single word or value (the model read of row 2 would say it: three rows where two say it)"
+}

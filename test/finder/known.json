@@ -1,0 +1,18 @@
+[
+  {
+    "screen": "models", "kind": "twice", "element": "qwen 3 5 9b", "real": true, "area": "settings",
+    "wrong": "Models says the default model's name twice: in the Default for new chats menu and again on its row beside the Default badge."
+  },
+  {
+    "screen": "image", "kind": "twice", "element": "flux 2 klein 4b", "real": true, "area": "image",
+    "wrong": "The image picker says the pointed-at model's name twice: on its row and again as the heading of the sizes beside it."
+  },
+  {
+    "screen": "models", "step": "Download tab", "kind": "twice", "element": "uses system memory slower", "real": false, "area": "finder",
+    "wrong": "Not a bug: two rows each carry their own exception, which the line over the list points at (settings row 18, the owner's pick A)."
+  },
+  {
+    "screen": "desktop", "step": "open a thread", "kind": "twice", "element": "fix the backup cron", "real": false, "area": "finder",
+    "wrong": "Not a bug: the open thread's row in the sidebar and its title over the chat, as T3 Code shows them; the desktop screen watches the whole window, so both are in view."
+  }
+]

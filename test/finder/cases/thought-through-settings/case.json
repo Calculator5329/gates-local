@@ -1,0 +1,9 @@
+{
+  "owner": "going to settings while chat generating is bad not sure how we didn't catch this",
+  "source": "chat row 22",
+  "fix": "824be7a9",
+  "undo": "the fix's own diff reversed: the chat under a pop-up is only visibility:hidden again, which an open thought undoes",
+  "screens": ["settings-busy"],
+  "shows": "A reply that thinks after a tool call, held, its steps open; press Ctrl+, and the live thought's words draw over Settings",
+  "catch": [{ "screen": "settings-busy", "kind": "through" }]
+}

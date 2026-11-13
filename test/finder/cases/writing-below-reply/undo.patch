@@ -1,0 +1,17 @@
+diff --git a/apps/web/src/Thread.tsx b/apps/web/src/Thread.tsx
+index 5a3ebed7..56a0f72c 100644
+--- a/apps/web/src/Thread.tsx
++++ b/apps/web/src/Thread.tsx
+@@ -734,9 +734,11 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
+       {folded ? (
+         <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? thoughtOrigin(live) : undefined} thinkingNow={thinkingNow}
+           busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} writing={writing} />
+-      ) : writing ? <WritingLabel over /> : null}
++      ) : null}
+       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
+       {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
++      {/* finder case: the chat row 30 fix undone (Writing below the growing words) */}
++      {!folded && writing ? <WritingLabel /> : null}
+       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
+       {streaming && text === "" && calls.length === 0 && !thinkingNow ? <Working startedAt={live.startedAt} loading={loading} thinking={thinking !== ""} /> : null}
+       {end?.kind === "error" ? (
