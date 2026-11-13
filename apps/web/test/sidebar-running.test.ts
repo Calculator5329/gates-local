@@ -215,6 +215,11 @@ describe("sidebar running replies", () => {
   it("keeps every sidebar selector's snapshot unchanged during foreground and parked token updates", async () => {
     const a = await answering("A");
     const other = await answering("B");
+    // A reply's first word moves its thread in the list once (the thread that is working
+    // stays on top); every token after that word must change nothing the sidebar reads.
+    chat(a, "A", { type: "delta", text: "a" });
+    chat(other, "B", { type: "delta", text: "b" });
+    b.frame();
     capture = true;
     marked();
     capture = false;
@@ -233,7 +238,7 @@ describe("sidebar running replies", () => {
     } finally {
       off();
     }
-    expect(openTurn()?.text).toBe("b".repeat(100));
+    expect(openTurn()?.text).toBe("b".repeat(101));
     expect(changed, "token publishes change no slice read by the sidebar").toBe(0);
   });
 
