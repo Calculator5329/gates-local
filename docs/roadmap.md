@@ -900,8 +900,6 @@ RS-03 remains dropped.
 
 ## Next: test suite health
 
-- [ ] <!-- workspace:id=work:07648914-5be6-5230-91ad-f087acd92cbb --> A failed start-up image sweep is never handled (`app.ts`, `imageReady`): by reading, a sweep that rejects (the image folder unreadable, or a pasted file removed between the listing and its `stat`) leaves every thread delete and message delete rejecting until the server restarts, and nothing awaits the promise at start-up. Not reproduced.
-      *Accept:* a test whose sweep rejects: the failure is logged once, and a thread delete after it still removes the thread and its images.
 - [ ] <!-- workspace:id=work:59afc336-b09f-5253-9af1-a8b0ecee7160 --> Test audit 2026-11-11, breaks still caught by nothing: an outside Ollama shown with the wrong version (`runtime/runtime.ts`), a relative data folder accepted by the Linux install (`desktop/src/linux-install.ts`), the Regenerate spinner, a stale "check failed" message, "0 KB" chips. Removing the wait for the image sweep before a thread delete changes nothing a test can see, so that wait is either not needed or not testable as written: decide which.
       *Accept:* one unit test per break, each watched failing against the break.
 - [ ] <!-- workspace:id=work:8e68df74-337b-51af-bd80-94573ffc8d8d --> Test audit 2026-11-11, owner rulings held only by a browser spec (Copy code, the thread menu, queueing, the one Send button, Remove in the row menu, message Copy, the footer row, the pill label on hover and four more) and three held only by one (thoughts shown while thinking, a pasted file inserts its path, right-click opens the thread menu): a unit test where one is cheap, so a ruling does not depend on the slow suite alone.

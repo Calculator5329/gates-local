@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13: A failed image clean-up at start no longer blocks sends and deletes
+
+- At start the app clears pasted images that were never sent. If that
+  failed (an unreadable image folder, a file removed mid-read), every
+  later send and every thread or message delete failed with its error
+  until a restart. The failure is now logged once and no longer blocks them.
+
 ## 2026-11-13: Text size is gone from Settings, and so is the ? beside Instructions
 
 - Settings no longer offers Small, Medium and Large text. The setting did not

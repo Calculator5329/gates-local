@@ -230,7 +230,8 @@ export function createApp(deps: AppDeps): App {
   const log = deps.log ?? ((line: string) => console.error(`[app] ${line}`));
   const newId = deps.newId ?? randomUUID;
   const imageFiles = deps.dataDir ? imageLifecycle(deps.dataDir, store) : undefined;
-  const imageReady = imageFiles?.sweep() ?? Promise.resolve();
+  // A failed start-up sweep only leaves old pasted files behind; it must not fail every later send and delete that waits for it.
+  const imageReady = (imageFiles?.sweep() ?? Promise.resolve()).catch((error: unknown) => log(`image sweep at start-up failed: ${String(error)}`));
   const draftEveryMs = deps.draftEveryMs ?? 1000;
   const turns = new Map<string, Turn>();
   const byThread = new Map<string, Turn>();

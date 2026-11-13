@@ -327,6 +327,30 @@ it("a shared image survives until the last saved message is removed", async () =
   expect(existsSync(filename)).toBe(false);
 });
 
+it.each(["threads.delete", "messages.delete"] as const)("%s still removes its images after the start-up image sweep failed", async method => {
+  const lifecycle = imageFiles.imageLifecycle;
+  const sweep = vi.fn().mockRejectedValue(new Error("EACCES: image folder denied"));
+  const factory = vi.spyOn(imageFiles, "imageLifecycle").mockImplementation((...args) => ({ ...lifecycle(...args), sweep }));
+  try {
+    const logs: string[] = [];
+    const r = await rig({ log: message => logs.push(message) });
+    const thread = r.store.createThread();
+    const images = await saveAttachments(path.dirname(r.store.dbPath), ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg=="]);
+    const message = r.store.appendMessage({ threadId: thread.id, role: "user", content: "chart", images });
+    const filename = path.join(path.dirname(r.store.dbPath), images[0]!);
+    expect(existsSync(filename)).toBe(true);
+    const result = method === "threads.delete"
+      ? await r.client.call(method, { threadId: thread.id })
+      : await r.client.call(method, { threadId: thread.id, messageId: message.id });
+    expect(result).toEqual(method === "threads.delete" ? { threadId: thread.id } : { messageId: message.id });
+    expect(existsSync(filename)).toBe(false);
+    // every later wait on the same sweep stays quiet: one report, not one per call
+    const other = r.store.createThread();
+    await r.client.call("threads.delete", { threadId: other.id });
+    expect(logs.filter(entry => /image sweep.*EACCES/.test(entry))).toHaveLength(1);
+  } finally { factory.mockRestore(); }
+});
+
 it.each(["threads.delete", "messages.delete"] as const)("TT-01: %s succeeds and publishes after image collection fails", async method => {
   const lifecycle = imageFiles.imageLifecycle;
   const collect = vi.fn().mockRejectedValue(new Error("EACCES: image cleanup denied"));
