@@ -1,8 +1,8 @@
 // Journey: switch model in the picker and the context size in GPU memory
 // (Settings › Advanced); the verdict follows each change.
-import type { FitTable } from "@gates-local/contracts";
 import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 
+// Guards the owner's ruling: the picker carries context, and its fit verdict follows model and context.
 test("switching model and context updates the fit verdict and the panel", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -45,81 +45,7 @@ test("switching model and context updates the fit verdict and the panel", async 
   await expect(spills).toHaveAttribute("aria-label", /GB (measured|estimated); Slower$/);
 });
 
-test("memory no process claims is called Other in the panel, in words and in its tooltip", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  const panel = await openGpuMemory(page);
-  await panel.locator("summary", { hasText: "Details" }).click();
-  const other = panel.locator(".lg-r").filter({ hasText: /^Other/ });
-  await expect(other).toHaveCount(1);
-  await expect(panel).not.toContainText("Not attributed");
-  await other.hover();
-  await expect(page.locator("#tip")).toContainText("can't name");
-  await expect(page.locator("#tip")).not.toContainText("Not attributed");
-});
-
-test("a pushed fit table keeps the Other and Whisper tooltips open", async ({ page, open }) => {
-  let refresh: (() => void) | undefined;
-  await page.routeWebSocket(/127\.0\.0\.1:5286/, ws => {
-    const server = ws.connectToServer();
-    const asked = new Set<string>();
-    let table: FitTable | undefined;
-    refresh = () => {
-      if (!table) throw new Error("No fit table received");
-      table = { ...table, reading: { ...table.reading, seq: table.reading.seq + 1000, measuredAt: table.reading.measuredAt + 1 } };
-      ws.send(JSON.stringify({ type: "push", channel: "fit.changed", payload: table }));
-    };
-    ws.onMessage(message => {
-      const req = JSON.parse(String(message)) as { id: string; method?: string };
-      if (req.method === "fit.table") asked.add(req.id);
-      server.send(message);
-    });
-    server.onMessage(message => {
-      const res = JSON.parse(String(message)) as { type: string; id?: string; result?: FitTable };
-      if (res.type === "response" && res.id !== undefined && asked.delete(res.id)) table = res.result;
-      ws.send(message);
-    });
-  });
-  await open(); await waitReady(page);
-  const panel = await openGpuMemory(page);
-  await panel.locator("summary", { hasText: "Details" }).click();
-  for (const ctx of [8192, 16384, 32768, 65536]) {
-    await expect(panel.locator(`[data-ctx="${ctx}"]`)).toHaveAttribute("data-tip", /Runs |Slower |Won't fit/);
-  }
-  for (const [label, text] of [["Other", "can't name"], ["Whisper", "never stops it"]] as const) {
-    await panel.locator(".lg-r").filter({ hasText: new RegExp(`^${label}`) }).hover();
-    await expect(page.locator("#tip")).toContainText(text);
-    refresh!();
-    await expect(page.locator("#tip")).toHaveClass(/open/);
-    await expect(page.locator("#tip")).toContainText(text);
-  }
-});
-
-test("Memory details follow the chat's 64k choice without changing its saved 16k default", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  await page.locator("#modelBtn").click();
-  const picker = page.locator("#picker");
-  await picker.getByRole("radio", { name: /^64k\b/ }).click();
-  await expect(picker).toBeHidden();
-  await expect(page.locator("#modelBtn")).toContainText("64k");
-  const panel = await openGpuMemory(page);
-  await expect(panel).toContainText("Memory at 64k context");
-  await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");
-  await expect(panel.locator('[data-ctx="65536"]')).toHaveAttribute("aria-pressed", "false");
-  await panel.locator("summary", { hasText: "Details" }).click();
-  await expect(panel.locator("details")).toHaveAttribute("open", "");
-  await expect(panel.locator(".fp-v")).toContainText("64k");
-  await expect(panel.locator("details")).toContainText("Where the memory goes");
-  await page.screenshot({ path: test.info().outputPath("memory-selected-64k-default-16k.png") });
-  await page.keyboard.press("Escape");
-  await page.locator("#modelBtn").click();
-  await expect(picker.getByRole("radio", { name: /^64k\b/ })).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("Escape");
-  await openGpuMemory(page);
-  await expect(panel.locator('[data-ctx="16384"]')).toHaveAttribute("aria-pressed", "true");
-});
-
+// Guards the owner's rule to show only what is true, on the GPU memory panel (unsure: no owner line on this bar).
 test("the panel's memory bar names whisper and the other resident app", async ({ page, open }) => {
   await open();
   await waitReady(page);

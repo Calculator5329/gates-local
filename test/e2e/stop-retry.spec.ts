@@ -4,6 +4,7 @@ import { expect, sendMessage, test, waitReady, stack } from "./fixtures.ts";
 
 const UNSEEN = "Stopped. The model won't see this reply.";
 
+// Guards the owner's rule that Stop keeps the partial reply and never retries by itself.
 test("a stopped reply survives a reload and Regenerate replaces it without a second question", async ({ page, open }) => {
   await open();
   await waitReady(page);

@@ -18,6 +18,7 @@ const need = (text: string) => Number(/(\d+(?:\.\d+)?)\s*GB/u.exec(text)?.[1] ??
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+// Guards the owner's ruling (N08): one GPU reading and one basis across the picker.
 test("one reading and one basis across the picker while the GPU reading changes", async ({ page, open }, info) => {
   // The model's GPU part is capped at 10 GiB; the rest of its 17.4 GiB sits in system memory.
   await stack.scenario("models", { vramCapBytes: 10 * GIB });

@@ -208,6 +208,7 @@ test.describe("models page", () => {
         colorScheme: shot.theme,
         ...(shot.viewport ? { viewport: shot.viewport } : {}),
       });
+      // Not a regression test: a screenshot tool, run on its own.
       test("shot", async ({ page, open, seededThread }) => {
         await page.clock.setFixedTime(NOW);
         await open(`#thread=${seededThread ?? ""}`);
@@ -262,6 +263,7 @@ test.describe("settings sections", () => {
     for (const width of [1280, 360]) {
       test.describe(`s1 settings-${file}-${width}`, () => {
         test.use({ viewport: { width, height: 800 }, colorScheme: "dark", comfyUrl: "http://127.0.0.1:9" });
+        // Not a regression test: a screenshot tool, run on its own.
         test("shot", async ({ page, open, seededThread }) => {
           await page.clock.setFixedTime(NOW);
           await open(`#thread=${seededThread ?? ""}`);
@@ -293,6 +295,7 @@ for (const shot of SHOTS) {
         ...(shot.start === "firstrun" ? { seed: 0 } : shot.seed === undefined ? {} : { seed: shot.seed }),
         ...(shot.runtimeMode === undefined ? {} : { runtimeMode: shot.runtimeMode }),
       });
+      // Not a regression test: a screenshot tool, run on its own.
       test("shot", async ({ page, open, seededThread }) => {
         await page.clock.setFixedTime(NOW);
         await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");
@@ -399,6 +402,7 @@ for (const shot of MOBILE) {
           colorScheme: theme,
           ...(shot.start === "firstrun" ? { seed: 0 } : shot.seed === undefined ? {} : { seed: shot.seed }),
         });
+        // Not a regression test: a screenshot tool, run on its own.
         test("shot", async ({ page, open, seededThread }) => {
           await page.clock.setFixedTime(NOW);
           await open(shot.start === undefined || shot.start === "thread" ? `#thread=${seededThread ?? ""}` : "");

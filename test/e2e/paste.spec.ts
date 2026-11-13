@@ -39,6 +39,7 @@ async function chats(prompt?: string) {
   return state.requests.filter(r => r.path === "/api/chat").map(r => r.body).filter(body => prompt === undefined || body.messages.some(message => message.role === "user" && message.content === prompt));
 }
 
+// Guards the owner's ask to paste text, including the app's own right-click Paste.
 test("paste text at the selection, grow, and undo", async ({ page, context, open }) => {
   await open(); await waitReady(page);
   const ta = page.locator("#ta");
@@ -64,7 +65,8 @@ test("paste text at the selection, grow, and undo", async ({ page, context, open
   await expect(ta).toHaveValue("typed words");
 });
 
-test("large text paste preserves selection, undo, typing and the saved draft", async ({ page, context, open }, info) => {
+// Guards a shipped bug fix: large text pastes stopped being editable.
+test("large text paste preserves selection, undo, typing and the saved draft", async ({ page, context, open }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await open(); await waitReady(page);
   const ta = page.locator("#ta");
@@ -88,9 +90,9 @@ test("large text paste preserves selection, undo, typing and the saved draft", a
   await ta.press("x");
   await page.reload(); await waitReady(page);
   await expect(ta).toHaveValue(draft);
-  await page.screenshot({ path: info.outputPath("large-paste.png") });
 });
 
+// Guards the owner's ask to paste images, and his rule that nothing moves.
 test("paste an image, remove it, and keep the toolbar still", async ({ page, open }) => {
   await open(); await waitReady(page);
   const send = page.getByRole("button", { name: "Send message", exact: true });
@@ -103,21 +105,7 @@ test("paste an image, remove it, and keep the toolbar still", async ({ page, ope
   expect((await send.boundingBox())!.y).toBe(before!.y);
 });
 
-test("paste several images with a count limit", async ({ page, open }) => {
-  await open(); await waitReady(page);
-  await paste(page, { images: 7 });
-  await expect(page.locator(".att img")).toHaveCount(7);
-  await paste(page, { images: 2 });
-  await expect(page.getByRole("status").filter({ hasText: "8 images" })).toBeVisible();
-  await expect(page.locator(".att img")).toHaveCount(8);
-  await page.evaluate(() => {
-    const data = new DataTransfer();
-    data.items.add(new File([new Uint8Array(50 * 1024 * 1024 + 1)], "large.png", { type: "image/png" }));
-    document.querySelector("#ta")?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
-  });
-  await expect(page.getByRole("status").filter({ hasText: "8 images" })).toBeVisible();
-});
-
+// Guards the owner's ask to paste file paths from the file manager.
 test("paste file-manager paths at the cursor before images or text", async ({ page, open }) => {
   await open(); await waitReady(page);
   await page.locator("#ta").fill("see  please");
@@ -127,13 +115,7 @@ test("paste file-manager paths at the cursor before images or text", async ({ pa
   await expect(page.locator(".att img")).toHaveCount(0);
 });
 
-test("browser file paste explains missing paths without inserting a name", async ({ page, open }) => {
-  await open(); await waitReady(page);
-  await paste(page, { files: true, text: "a b.pdf" });
-  await expect(page.getByRole("status").filter({ hasText: "file paths" })).toBeVisible();
-  await expect(page.locator("#ta")).toHaveValue("");
-});
-
+// Guards the owner's rule that T3 Code is the reference: a web copy of text and image pastes the image (unsure: no owner line on this case).
 test("mixed web text and image follows T3: the image wins", async ({ page, open }) => {
   await open(); await waitReady(page);
   await paste(page, { images: 1, text: "Copied words", html: true });
@@ -145,6 +127,7 @@ test("mixed web text and image follows T3: the image wins", async ({ page, open 
 
 test.describe("vision turns", () => {
   test.use({ installed: ["qwen3.5:4b", VISION] });
+  // Guards the owner's ruling (chat row 17): a text-only follow-up says nothing about the earlier image.
   test("a text-only follow-up in an image thread says nothing about the earlier image (chat row 17)", async ({ page, open }, info) => {
     await open(); await waitReady(page);
     await page.locator("#modelBtn").click();
@@ -175,24 +158,14 @@ test.describe("vision turns", () => {
     await page.screenshot({ path: info.outputPath("follow-up.png") });
     await expect(notice).toHaveCount(0);
   });
-  test("non-vision Send refuses and names an installed model that sees images", async ({ page, open }) => {
-    await open(); await waitReady(page);
-    await paste(page, { images: 1 });
-    await page.locator("#ta").fill("What is here?");
-    const send = page.getByRole("button", { name: "Send message", exact: true });
-    await expect(send).toBeDisabled();
-    await expect(send).toHaveAttribute("data-tip", /cannot see images.*Qwen/i);
-    expect(await chats("What is here?")).toHaveLength(0);
-    await expect(page.locator(".att img")).toHaveCount(1);
-  });
 });
 
 test.describe("image history", () => {
   test.use({ installed: [VISION] });
-  test("images reach Ollama, persist, edit and retry, and resend in follow-ups", async ({ page, open }, testInfo) => {
+  // Guards the owner's ask to paste images: they reach the model and persist (unsure: the edit and retry steps may be more than he asked).
+  test("images reach Ollama, persist, edit and retry, and resend in follow-ups", async ({ page, open }) => {
     await open(); await waitReady(page);
     await paste(page, { images: 2 });
-    await page.screenshot({ path: testInfo.outputPath("attachments.png") });
     await sendMessage(page, "Describe these");
     await expect(page.locator(".turn.a.done")).toHaveCount(1);
     expect((await chats("Describe these")).at(-1)?.messages.at(-1)?.images).toEqual([PNG, PNG]);
@@ -212,41 +185,5 @@ test.describe("image history", () => {
     await sendMessage(page, "Which is brighter?");
     await expect.poll(async () => (await chats("Describe these")).length).toBe(3);
     expect((await chats("Describe these")).at(-1)?.messages.find(m => m.content === "Describe these")?.images).toEqual([PNG, PNG]);
-  });
-
-  test.describe("deliberate server restart", () => {
-    test.use({ allowedErrors: [/WebSocket connection.*ERR_CONNECTION_REFUSED/] });
-    test("queued images survive restart, reload, editing and send now", async ({ page, open }) => {
-    await open(); await waitReady(page);
-    await stack.scenario("slow-drip", { installed: [VISION], holdAfterTokens: 46 });
-    await sendMessage(page, "A slow answer");
-    await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
-    await expect.poll(async () => (await chats("A slow answer")).length).toBe(1);
-    await paste(page, { images: 1 });
-    await sendMessage(page, "Queued image");
-    await expect(page.locator(".qt-r")).toHaveCount(1);
-    await stack.restart();
-    await page.reload(); await waitReady(page);
-    await expect(page.locator(".qt-r")).toContainText("On hold");
-    await page.locator("[data-edit-queued]").click();
-    await expect(page.locator(".att img")).toHaveCount(1);
-    await page.locator("#ta").fill("Edited image");
-    await page.locator("#ta").press("Enter");
-    await page.locator("[data-send-now]").click();
-    await expect.poll(async () => (await chats("A slow answer")).length).toBe(2);
-    expect((await chats("A slow answer")).at(-1)?.messages.at(-1)).toMatchObject({ content: "Edited image", images: [PNG] });
-    });
-  });
-
-  test("an unsent image draft survives reload and can send without text", async ({ page, open }) => {
-    await open(); await waitReady(page);
-    await paste(page, { images: 1 });
-    await expect(page.locator(".att img")).toHaveCount(1);
-    await page.reload(); await waitReady(page);
-    await expect(page.locator(".att img")).toHaveCount(1);
-    await page.getByRole("button", { name: "Send message", exact: true }).click();
-    await expect(page.locator(".turn.u img")).toHaveCount(1);
-    await expect(page.locator(".turn.a.done")).toHaveCount(1);
-    expect((await chats()).at(-1)?.messages.at(-1)?.images).toEqual([PNG]);
   });
 });

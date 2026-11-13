@@ -4,6 +4,7 @@ import { INSTALLED, configure, start } from "./threads-support.ts";
 
 test.use({ installed: INSTALLED, video: "on" });
 
+// Guards a shipped bug fix: returning to a live reply showed it empty before the words came back.
 test("returning to a live reply shows the already received prefix on the first committed frame", async ({ page, open }, testInfo) => {
   await open(); await waitReady(page);
   await configure({ prompts: { alpha: { holdAfterTokens: 28 }, beta: { holdAfterTokens: 28 } }, parallelLimit: 2 });

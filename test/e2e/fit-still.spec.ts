@@ -15,6 +15,7 @@ interface StillWindow extends Window { stillFrames?: Sample[]; stillStop?: () =>
 // wider or narrower than its skeleton, so a value keeps its line: top and height.
 const shape = (key: string, b: number[] | undefined) => JSON.stringify(/^(value|cost|memory)\b/u.test(key) ? b && [b[1], b[3]] : b);
 
+// Guards the owner's ruling (N08): the picker's fit values fill and change in place.
 test("the picker's fit values fill and change in place: first table, then two pushes", async ({ page, open }) => {
   let holding = true;
   const held: (() => void)[] = [];

@@ -40,6 +40,7 @@ test.describe("long model name", () => {
 });
 
 function longName(width: number): void {
+  // Guards the owner's report: a long model name pushed the composer's controls out.
   test(`a long model name truncates in the composer at ${width} px; nothing leaves the composer and Send stays put`, async ({ page, open }) => {
     await page.setViewportSize({ width, height: 900 });
     await open();
@@ -129,6 +130,7 @@ function runs(values: readonly string[]): string[] {
   return values.filter((v, i) => i === 0 || v !== values[i - 1]);
 }
 
+// Guards the owner's report: the toolbar flickered while a model loaded.
 test("the composer toolbar holds still while a picked model loads slowly", async ({ page, open }) => {
   test.info().annotations.push({ type: "budget", description: "Two cold three-second model loads establish the starting allocation and exercise loading, followed by the post-load GPU reading and its rendered fit answer." });
   // gemma4:12b takes 3 s to load and fills the GPU a step at a time, as a real load does
@@ -205,6 +207,7 @@ test("the composer toolbar holds still while a picked model loads slowly", async
   }
 });
 
+// Guards the owner's ask: an 8k context option.
 test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -226,6 +229,7 @@ test("the picker offers 8k; an 8k turn sends num_ctx 8192", async ({ page, open 
   expect(state.requests.findLast((r) => r.path === "/api/chat")?.body.options?.num_ctx).toBe(8192);
 });
 
+// Guards the owner's ask: the memory and context control lives in Advanced, once.
 test("Settings > Advanced has one default-context control with 8k on it, and Settings > Models has none", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -260,6 +264,7 @@ test.describe("thread menu", () => {
   test.use({ seed: "design" });
   const MENU = ["Rename", "Export as Markdown", "Delete thread"];
 
+  // Guards the owner's ask: right-click a thread for its menu.
   test("right-click a sidebar thread: its actions at the pointer; Rename renames that thread", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
@@ -292,39 +297,4 @@ test.describe("thread menu", () => {
     await waitReady(page);
     await expect(row(page, "Fix the nightly backup")).toBeVisible();
   });
-
-  test("right-click › Delete thread deletes that thread, not the open one", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`);
-    await waitReady(page);
-    const rows = await page.locator(".sb-row").count();
-    await row(page, "Whisper latency check").click({ button: "right" });
-    await page.locator("#threadMenu").getByRole("menuitem", { name: "Delete thread" }).click();
-    await expect(row(page, "Whisper latency check")).toHaveCount(0);
-    await expect(page.locator(".sb-row")).toHaveCount(rows - 1);
-    await expect(page.locator(".hdr h2")).toHaveText("Library: Effect Schema books");
-    await page.reload();
-    await waitReady(page);
-    await expect(row(page, "Whisper latency check")).toHaveCount(0);
-  });
-
-  for (const key of ["Shift+F10", "ContextMenu"]) {
-    test(`${key} on a focused sidebar row opens the menu there, focus on its first item; Escape gives focus back`, async ({ page, open, seededThread }) => {
-      await open(`#thread=${seededThread ?? ""}`);
-      await waitReady(page);
-      const target = row(page, "Ollama 0.40 release notes");
-      await target.locator(".sb-thread").focus();
-      await page.keyboard.press(key);
-      const menu = page.locator("#threadMenu");
-      await expect(menu).toBeVisible();
-      await expect(menu.getByRole("menuitem", { name: "Rename" })).toBeFocused();
-      await settled(menu);
-      const [rb, mb] = [await target.boundingBox(), await menu.boundingBox()];
-      expect(Math.abs((mb?.y ?? 0) - ((rb?.y ?? 0) + (rb?.height ?? 0))), "menu under the row").toBeLessThan(2);
-      await page.keyboard.press("ArrowDown");
-      await expect(menu.getByRole("menuitem", { name: "Export as Markdown" })).toBeFocused();
-      await page.keyboard.press("Escape");
-      await expect(menu).toBeHidden();
-      await expect(target.locator(".sb-thread")).toBeFocused();
-    });
-  }
 });

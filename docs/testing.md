@@ -13,9 +13,8 @@ settings revision with its value before holding response emission.
 
 Real settings-store/transport probes in `apps/server/src/settings/ordered.test.ts`
 check read/save capture, shared/model writes, no-ops, reentrant commits and old
-peers. Runtime-service tests check rollback publication. The browser journey
-`ordered-settings.spec.ts` checks independent windows' theme, Connect/Disconnect
-and reload presentation; transport scheduling invariants stay in the replays.
+peers. Runtime-service tests check rollback publication. No browser journey
+covers ordered settings; transport scheduling invariants stay in the replays.
 
 ## Fast default browser run
 

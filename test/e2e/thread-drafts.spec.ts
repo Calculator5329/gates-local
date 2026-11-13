@@ -2,6 +2,7 @@ import { expect, sendMessage, test, waitReady } from "./fixtures.ts";
 
 declare global { interface Window { completeDraftPaste: () => Promise<void>; } }
 
+// Guards the owner's ask for a draft per thread, the way T3 Code keeps them.
 test("each thread keeps its draft across switches, reload and sending the other draft", async ({ page, open }, info) => {
   await open(); await waitReady(page);
   await sendMessage(page, "First chat");

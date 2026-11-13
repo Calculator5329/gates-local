@@ -18,6 +18,7 @@ async function shot(page: Page, info: TestInfo, name: string): Promise<void> {
   writeFileSync(info.outputPath(`${name}.json`), JSON.stringify({ button: await page.locator("#modelBtn").boundingBox(), reply: (await reply.count()) === 0 ? null : await reply.boundingBox() }));
 }
 
+// Guards the owner's rulings (chat rows 21 and 16): thinking time leaves out the load, and the model button shows it.
 test("a 5 s load and 2 s of thinking say Thought for 2 s, and the model button shows the load", async ({ page, open }, info) => {
   test.setTimeout(60_000);
   test.info().annotations.push({ type: "budget", description: "Two fake 5 s cold loads: a first, unmeasured one from the picker, then a measured one under a reply that thinks for 2 s." });

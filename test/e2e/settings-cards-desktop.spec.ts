@@ -57,6 +57,7 @@ async function desktop(info: TestInfo) {
 
 const section = (name: string): WholeOptions => ({ root: ".set", arrive: { selector: ".set-h h1, .mp-head h1", text: name } });
 
+// Guards the owner's ruling (N21): nothing moves; each Settings section is whole on its first frame.
 test("every Settings section is whole on its first frame", async ({ seededThread: _seeded }, info) => {
   test.setTimeout(180_000);
   const { app, page, delay } = await desktop(info);

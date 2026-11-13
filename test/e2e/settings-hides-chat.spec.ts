@@ -38,6 +38,7 @@ const painted = (page: Page) => page.locator(".stage").evaluate((stage) =>
     .filter((n) => n.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
     .map((n) => `${n.tagName.toLowerCase()}.${[...n.classList].join(".")} ${(n.textContent ?? "").trim().slice(0, 40)}`));
 
+// Guards a shipped bug fix (chat row 22): thoughts showed through Settings.
 test("a live thought and an opened one stay under Settings, and come back with the chat", async ({ page, open, seededThread }, info) => {
   await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
   await libraryOn(page, info);

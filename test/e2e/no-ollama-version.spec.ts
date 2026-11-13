@@ -8,6 +8,7 @@ test.use({ skipFirstRun: false });
 const FAKE_VERSION = "0.40.4";
 const noVersion = (page: Page) => expect(page.locator("body")).not.toContainText(FAKE_VERSION);
 
+// Guards the owner's ruling (R24): no screen shows the Ollama version.
 test("no screen prints the version of Ollama", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();

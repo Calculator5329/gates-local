@@ -50,6 +50,7 @@ async function stop(child: ChildProcess): Promise<void> {
   clearTimeout(kill);
 }
 
+// Release smoke against a real model, run by hand at release; not part of the e2e project.
 test("real model streams, stops, recalls the thread and survives a server restart", async ({ page }, info) => {
   test.setTimeout(180_000);
   const url = requireRealSmokeUrl(process.env["GATES_REAL_SMOKE_URL"]);

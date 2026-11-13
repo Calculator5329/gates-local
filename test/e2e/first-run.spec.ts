@@ -4,6 +4,7 @@ import { expect, sendMessage, test } from "./fixtures.ts";
 
 test.use({ skipFirstRun: false });
 
+// Guards the owner's ask for first run: it finds Ollama and its models and gets to a streamed reply.
 test("first run finds Ollama and its models, then a streamed reply shows thinking", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();

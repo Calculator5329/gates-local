@@ -11,6 +11,7 @@ import { FAKE_URL, ROOT } from "./env.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 import { seedLong } from "./seed.ts";
 
+// Guards the owner's report that the copy icons did not work in the desktop app.
 test("Electron's denied clipboard permission still copies messages and code", async ({ seededThread }, info) => {
   void seededThread;
   const work = mkdtempSync(path.join(tmpdir(), "gates-copy-desktop-"));

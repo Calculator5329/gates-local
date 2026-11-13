@@ -20,6 +20,7 @@ const calm = (text: string | null) => {
   expect(text?.trim()).toMatch(/^Couldn't [^.]+\.$/);
 };
 
+// Guards the owner's rule to show only what is true: a failed action says why beside its control (unsure: W-07 is an audit id, not his line).
 test("a Library add with a wrong path keeps the form, says why, and works once the path is right", async ({ page, open }) => {
   const real = path.join(CHECKOUT_CACHE, "e2e-library", "notes");
   mkdirSync(real, { recursive: true });
@@ -51,6 +52,7 @@ test.describe("while the server is down", () => {
   // the browser logs each refused WebSocket attempt while the server is down
   test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
 
+  // Guards the owner's rule to show only what is true: a save or Remove refused while the server is down says so (unsure: same as above).
   test("a theme save and a model removal each say they couldn't, and nothing changes", async ({ page, open }) => {
     await open();
     await waitReady(page);

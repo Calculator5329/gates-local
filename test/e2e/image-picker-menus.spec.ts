@@ -59,6 +59,7 @@ const paint = (page: Page, token: string) => page.evaluate((t) => {
   return c;
 }, token);
 
+// Guards the owner's report (a): the picker's rail named nothing.
 test("(a) the rail is two named menus, Defaults and Other models, and the popup's height holds on both and on every click", async ({ page, open }, info) => {
   comfy.withApp();
   const picker = await openPicker(page, open);
@@ -93,6 +94,7 @@ test("(a) the rail is two named menus, Defaults and Other models, and the popup'
   await shot(page, info, "menus-other.png", picker.locator(".pk-menu:not([inert])"));
 });
 
+// Guards the owner's report (b): a Defaults row said its group and model again.
 test("(b) a Defaults row is the style's name alone, its setup in the tip and the size pane; the rest is in Other models", async ({ page, open }, info) => {
   comfy.withApp();
   const picker = await openPicker(page, open);
@@ -128,6 +130,7 @@ test("(b) a Defaults row is the style's name alone, its setup in the tip and the
   await expect(other.locator('.pk-r[data-preset="moss-image"]')).toHaveAttribute("aria-selected", "true");
 });
 
+// Guards the owner's report (c): every size said the same number and a bar was green that did not fit.
 test("(c) with 3.0 GB free every size of an 8 GB setup is red and says Too big, the number is said once, and the server refuses it the same way", async ({ page, open }, info) => {
   comfy.withApp();
   const picker = await openPicker(page, open, THREE_GB_FREE);
@@ -160,6 +163,7 @@ test("(c) with 3.0 GB free every size of an 8 GB setup is red and says Too big, 
   await expect(page.locator("[data-image-job]")).toHaveAttribute("data-fit", "refuse", { timeout: 15_000 });
 });
 
+// Guards the owner's report (c), the other side: sizes that fit are green.
 test("(c) with room free the same sizes are green and fit", async ({ page, open }) => {
   comfy.withApp();
   const picker = await openPicker(page, open);
@@ -170,6 +174,7 @@ test("(c) with room free the same sizes are green and fit", async ({ page, open 
   for (const row of await sizes.locator(".pk-ctx-row").all()) await expect(row).toHaveAttribute("data-tip", "Fits on the GPU");
 });
 
+// Guards the owner's report (d): a greyed row's reason was cut off.
 test("(d) a greyed row's reason that does not fit shows whole in its tip", async ({ page, open }, info) => {
   comfy.bare();
   comfy.withFolders();
@@ -191,6 +196,7 @@ test("(d) a greyed row's reason that does not fit shows whole in its tip", async
 
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 412, height: 915 } });
+  // Guards the owner's rule that nothing moves: the picker keeps its height on a phone.
   test("the popup keeps its height across both menus and the size step", async ({ page, open }, info) => {
     comfy.withApp();
     const picker = await openPicker(page, open);

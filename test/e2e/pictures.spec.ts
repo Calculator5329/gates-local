@@ -45,6 +45,7 @@ async function picture(client: Client, threadId: string, prompt: string, choice:
   await expect.poll(async () => (await client.call("threads.get", { threadId })).messages.find((m) => m.id === jobId)?.imageJob?.state, { timeout: 30_000 }).toBe("done");
 }
 
+// Guards the owner's pick for Pictures (the contact sheet): grid, inspector, Again, phone sheet.
 test("pictures: the grid, a picture in the inspector, Again in its thread, and the phone sheet", async ({ page, open }, info) => {
   info.annotations.push({ type: "budget", description: "Six fake image jobs run to done one after another (five to fill the grid, one from Again), and four full-window screenshots." });
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);

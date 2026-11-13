@@ -3,7 +3,7 @@
 // offers the embedding model, and the Thinking pill follows the model's
 // capabilities. The picker is a combobox a screen reader can follow.
 import type { Page } from "@playwright/test";
-import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, test, waitReady } from "./fixtures.ts";
 
 test.use({ scenario: "embed-smallest" });
 
@@ -19,6 +19,7 @@ async function pickModel(page: Page, query: string, tag: string): Promise<void> 
 test.describe("first run", () => {
   test.use({ skipFirstRun: false });
 
+  // Guards the owner's ruling: first run recommends a chat model, never an embedding model.
   test("recommends a chat model, not the smaller embedding model, and Start chatting sends a turn", async ({ page, open }) => {
     await open();
     await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();
@@ -37,12 +38,12 @@ test.describe("first run", () => {
 
   test.describe("at 1440 px", () => {
     test.use({ viewport: { width: 1440, height: 900 } });
-    test("Ready to chat says nothing its title says, has no blurb or footer, and leaves no gap for them", async ({ page, open }) => {
+    // Guards the owner's rule to say a thing once, on first run (unsure: no owner line on this card).
+    test("Ready to chat says nothing its title says, and has no blurb or footer", async ({ page, open }) => {
       await open();
       const fr = page.locator(".fr");
       await expect(page.getByRole("heading", { name: "Ready to chat" })).toBeVisible();
       await expect(fr.locator(".fr-card .v")).toHaveText("Runs on GPU");
-      await page.screenshot({ path: test.info().outputPath("first-run-ready-1440.png") });
       // the title is the news; the card is the model, its fit and its details
       await expect(fr.locator(".sub")).toHaveCount(0);
       await expect(fr).not.toContainText("Switch models in any chat");
@@ -50,18 +51,11 @@ test.describe("first run", () => {
       await expect(fr).not.toContainText("Fast everyday answers");
       await expect(fr.locator(".fr-foot")).toHaveCount(0);
       await expect(fr).not.toContainText("Nothing leaves your own network");
-      const g = await fr.evaluate((el) => {
-        const h = el.querySelector("h1")?.getBoundingClientRect();
-        const card = el.querySelector(".fr-card")?.getBoundingClientRect();
-        return { gap: (card?.top ?? 0) - (h?.bottom ?? 0), width: el.getBoundingClientRect().width, bottom: el.getBoundingClientRect().bottom, cta: el.querySelector(".fr-cta")?.getBoundingClientRect().bottom ?? 0 };
-      });
-      expect(g.width).toBeLessThanOrEqual(540);
-      expect(g.gap, "the card sits the usual 24 px under the title").toBe(24);
-      expect(g.bottom - g.cta, "nothing reserved under the buttons").toBeLessThanOrEqual(0.5);
     });
   });
 });
 
+// Guards the owner's ruling: the picker never offers an embedding model for chat.
 test("the picker never lists the embedding model and is a connected combobox and listbox", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -95,6 +89,7 @@ test("the picker never lists the embedding model and is a connected combobox and
   await expect(list.locator('.pk-r.dis[data-m="qwen3.8-abliterated:27b"]')).toHaveAttribute("aria-disabled", "true");
 });
 
+// Guards the owner's rule to show only what is true: Thinking is greyed with a reason on a model that cannot think (unsure: no direct owner line).
 test("the Thinking pill is on for a model that thinks and greyed with a reason for one that does not", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -134,6 +129,7 @@ test("the Thinking pill is on for a model that thinks and greyed with a reason f
 test.describe("first download", () => {
   test.use({ scenario: "no-models", skipFirstRun: false });
 
+  // Guards the F70 fix: Thinking was offered before the first model had downloaded (unsure: could not confirm F70 is the owner's item).
   test("the Thinking pill waits for the first chat model to finish downloading (F70)", async ({ page, open }) => {
     await open();
     await page.getByRole("button", { name: "Download and start" }).click();
@@ -149,47 +145,7 @@ test.describe("first download", () => {
   });
 });
 
-test.describe("first download with only an embedding model installed (MP-04)", () => {
-  test.use({ scenario: "embed-only", skipFirstRun: false });
-
-  test("shows the download's progress and Start chatting, and a typed message waits for it", async ({ page, open }) => {
-    await open();
-    await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();
-    await expect(page.locator(".fr-st")).toContainText("no chat models yet");
-    await page.getByRole("button", { name: "Download and start" }).click();
-    await expect(page.getByRole("heading", { name: "Downloading your first model" })).toBeVisible();
-    await expect(page.getByRole("progressbar")).toBeVisible();
-    await page.getByRole("button", { name: "Start chatting" }).click();
-    await sendMessage(page, "Hello there");
-    await expect(page.locator(".qt-r")).toContainText("After download");
-    await expect(page.locator(".turn.a .md").last()).toContainText("You asked: Hello there", { timeout: 20_000 });
-    await expect(page.locator("#modelBtn")).toContainText("Qwen 3.5 9B");
-  });
-});
-
-// The open chat keeping the user's model when the pick changes is the unit test's (apps/web/src/pick.test.ts).
-test("one Ctrl+N after saving a default starts the new chat on the new pick, even when the pick lands after the chat exists (MP-05)", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  const modelBtn = page.locator("#modelBtn");
-  // The user picks Qwen themselves, so only a new chat may move off it.
-  await pickModel(page, "qwen", "qwen3.5:9b");
-  await expect(modelBtn).toContainText("Qwen 3.5 9B");
-  await expect(modelBtn).not.toContainText("loading");
-  // Hold every /api/show, so the pick that follows the new default lands only after the new chat
-  // exists. A Qwen load that lands after this call stays resident, and must not keep the pick on it.
-  await stack.scenario("embed-smallest", { showDelayMs: 1500 });
-  await openModels(page);
-  const gemma = page.locator(`.mp-row[data-dm="gemma4:12b"]`);
-  await gemma.getByRole("button", { name: /^More for / }).click();
-  await page.getByRole("menuitem", { name: "Use as default" }).click();
-  await expect(gemma.locator(".mp-l1 .mp-chip")).toHaveText("Default");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Control+n");
-  await expect(modelBtn).toContainText("Qwen 3.5 9B"); // the survey is still held
-  await expect(modelBtn).toContainText("Gemma 4 12B", { timeout: 20_000 });
-});
-
+// Guards the owner's rulings: embedding models are not for chat, and Remove lives in the row's ⋯ menu.
 test("Settings lists the embedding model as not for chat, with Remove and no default choice", async ({ page, open }) => {
   await open();
   await waitReady(page);

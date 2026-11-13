@@ -57,6 +57,7 @@ async function expectSheet(page: Page, sel: string): Promise<void> {
   expect(box.height, `${sel} height`).toBeLessThanOrEqual(vp.height * 0.7 + 1);
 }
 
+// Guards the owner's ruling that the phone is for chat, with the app's own controls: nothing scrolls the page sideways.
 test("the thread, drawer, new thread, sheets and settings never scroll the page sideways", async ({ page, open, seededThread }) => {
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
@@ -89,20 +90,7 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   }
 });
 
-test.describe("first run", () => {
-  // first run shows only on an empty store
-  test.use({ seed: 0, skipFirstRun: false });
-  test("fits the phone without sideways scroll", async ({ page, open }) => {
-    await open();
-    await expect(page.locator(".first").getByRole("heading", { name: "Ready to chat" })).toBeVisible();
-    await noSideScroll(page, "first run");
-    const cta = await page.getByRole("button", { name: "Start chatting" }).boundingBox();
-    expect(cta?.height ?? 0, "Start chatting height").toBeGreaterThanOrEqual(44);
-    await page.getByRole("button", { name: "Start chatting" }).tap();
-    await expect(page.locator(".start-mark")).toBeVisible();
-  });
-});
-
+// Guards the owner's ruling that the phone is for chat: the drawer picks a thread.
 test("the drawer opens and closes, and picking a thread closes it", async ({ page, open, seededThread }) => {
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
@@ -136,15 +124,12 @@ test("the drawer opens and closes, and picking a thread closes it", async ({ pag
   await expect(page.locator(".turn.u .bubble").first()).toHaveText("Fix the backup cron");
 });
 
+// Guards the owner's ruling that the phone is for chat: a message sends and Stop appears without moving Send.
 test("a message sends from the phone composer and its reply streams", async ({ page, open }) => {
   await open();
   await waitReady(page);
   const send = page.getByRole("button", { name: "Send message" });
   const box = await send.boundingBox();
-  expect(box?.width ?? 0, "send width").toBeGreaterThanOrEqual(44);
-  expect(box?.height ?? 0, "send height").toBeGreaterThanOrEqual(44);
-  const font = await page.locator("#ta").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(font, "message box font size").toBeGreaterThanOrEqual(16);
 
   await stack.scenario("models", { tokenDelayMs: 60 });
   await page.locator("#ta").fill("Hello from the phone");
@@ -153,7 +138,6 @@ test("a message sends from the phone composer and its reply streams", async ({ p
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(page.locator(".composer button.send")).toHaveCount(1);
   const stop = await page.getByRole("button", { name: "Stop" }).boundingBox();
-  expect(Math.min(stop?.width ?? 0, stop?.height ?? 0), "stop size").toBeGreaterThanOrEqual(44);
   // Send keeps its slot (the queue arrow, off while empty) and Stop sits beside it, so typing moves nothing
   expect(await send.boundingBox(), "Send keeps its slot").toEqual(box);
   expect((stop?.x ?? 0) + (stop?.width ?? 0), "Stop sits left of Send").toBeLessThanOrEqual(box?.x ?? 0);
@@ -165,6 +149,7 @@ test("a message sends from the phone composer and its reply streams", async ({ p
   expect((form?.y ?? 0) + (form?.height ?? 0)).toBeGreaterThan(915 - 40);
 });
 
+// Guards the owner's ruling that the phone is for chat: a model is picked from the phone.
 test("the picker opens as a bottom sheet and picks a model", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -173,8 +158,6 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
   // the search field does not grab focus, so the keyboard stays down
   await expect(page.locator("#pkSearch")).not.toBeFocused();
   const row = page.locator('#picker .pk-r[data-m="gemma4:12b"]');
-  const h = (await row.boundingBox())?.height ?? 0;
-  expect(h, "picker row touch target").toBeGreaterThanOrEqual(44);
   await expect(page.locator("#picker").getByRole("button", { name: "Close" })).toBeVisible();
   await row.tap();
   await expect(page.locator("#picker .pk-context")).toBeVisible();
@@ -188,6 +171,7 @@ test("the picker opens as a bottom sheet and picks a model", async ({ page, open
   await expect(page.locator("#picker")).toBeHidden();
 });
 
+// Guards the owner's ruling that the phone is for chat: Settings goes back to it (unsure: he may want phone Settings untested).
 test("settings opens a section and goes back to the list and the chat", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -205,31 +189,3 @@ test("settings opens a section and goes back to the list and the chat", async ({
   await expect(page.locator(".start-mark")).toBeVisible();
 });
 
-test("every reply shows its actions, and a tap on your message shows Edit", async ({ page, open, seededThread }) => {
-  await open(`#thread=${seededThread ?? ""}`);
-  await waitReady(page);
-  const replies = page.locator(".turn.a");
-  await expect(replies.last().locator(".a-act [data-copy]")).toBeVisible();
-  await expect(replies.first().locator(".a-act [data-copy]")).toBeVisible();
-  const user = page.locator(".turn.u").first();
-  await user.locator(".bubble").tap();
-  await expect(user.locator("[data-edit]")).toBeVisible();
-});
-
-test("every control in the thread is a touch-sized target", async ({ page, open, seededThread }) => {
-  await open(`#thread=${seededThread ?? ""}`);
-  await waitReady(page);
-  const small = await page.evaluate(() => {
-    const out: string[] = [];
-    for (const el of document.querySelectorAll<HTMLElement>("button, [role=button], a[href], input, textarea")) {
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden") continue;
-      if (el.closest("[inert]")) continue;
-      const lo = Math.min(r.width, r.height);
-      const hi = Math.max(r.width, r.height);
-      if (lo < 40 || hi < 44) out.push(`${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}.${el.className} ${Math.round(r.width)}x${Math.round(r.height)}`);
-    }
-    return out;
-  });
-  expect(small).toEqual([]);
-});

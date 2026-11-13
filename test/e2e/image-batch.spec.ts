@@ -33,6 +33,7 @@ async function outlined(page: Page, selector: string, path: string) {
   await marked.evaluateAll((els) => { for (const el of els) { (el as HTMLElement).style.outline = ""; (el as HTMLElement).style.outlineOffset = ""; } });
 }
 
+// Guards the owner's ask for image batches: Make images is on once a setup runs, and five asked for are five cards.
 test("Make images is on once a setup can run, and five images asked for are five cards in order, each with its own prompt", async ({ page, open }, info) => {
   const make = await imageGenOn(page, open);
   // soft: the five cards are checked whatever the switch said
@@ -46,6 +47,7 @@ test("Make images is on once a setup can run, and five images asked for are five
   await outlined(page, ".image-job-prompt", info.outputPath("image-9-after-five.png"));
 });
 
+// Guards the owner's ask: with Make images off, the reply names the setting, never another app.
 test("with Make images switched off, the reply names the setting, never another app", async ({ page, open }, info) => {
   const make = await imageGenOn(page, open);
   // switched off over the socket, so the test does not race the switch's first state

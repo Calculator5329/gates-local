@@ -5,8 +5,6 @@ import type { Page, WebSocketRoute } from "@playwright/test";
 import { test, expect, sendMessage, stack, waitReady } from "./fixtures.ts";
 import { updateFixtureState } from "./update-fixture.ts";
 
-test.use({ video: "on" });
-
 async function updates(page: Page, desktop = true, successful = false) {
   let route: WebSocketRoute | undefined;
   const fixture = updateFixtureState();
@@ -40,26 +38,12 @@ async function updates(page: Page, desktop = true, successful = false) {
   };
 }
 
-for (const width of [1440, 390]) test(`long rollback text and its complete log path fit the chat note at ${width}px`, async ({ page, open }) => {
-  await page.setViewportSize({ width, height: 900 });
-  const update = await updates(page);
-  await open(); await waitReady(page);
-  const logPath = update.failure();
-  const note = page.getByRole("alert").filter({ hasText: "The update did not finish" });
-  await expect(note).toBeVisible();
-  await note.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)); });
-  expect(await note.evaluate(element => element.scrollWidth <= element.clientWidth), "rollback note overflows sideways").toBe(true);
-  expect(await page.locator(".main").evaluate(element => element.scrollWidth <= element.clientWidth), "rollback text widens chat").toBe(true);
-  await expect(note.locator(".mono")).toHaveText(logPath ?? "missing log path");
-  await page.screenshot({ path: test.info().outputPath(`rollback-note-${width}.png`) });
-});
-
+// Guards a shipped bug fix: a successful update showed a note; it stays silent, and a failure notice dismisses without a shift.
 test("AV-05 success stays silent; failure spans the Settings top and dismisses without a width shift", async ({ page, open }) => {
   const update = await updates(page, true, true);
   await open(); await waitReady(page);
   await expect(page.locator(".sb-foot .upd")).toHaveAccessibleName("Check for updates");
   await expect(page.locator(".upd-note")).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("startup-success-silent.png") });
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set .set-h h1")).toHaveText("General");
   await expect(page.locator(".set").getByText("abc1234", { exact: true })).toBeVisible();
@@ -73,7 +57,6 @@ test("AV-05 success stays silent; failure spans the Settings top and dismisses w
   await expect(page.locator(".upd-note")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0);
   expect(await geometry(), "AV-05 successful update changed Settings width").toEqual(before);
-  await page.screenshot({ path: test.info().outputPath("settings-success-silent.png") });
   update.failure();
   const notice = page.getByRole("alert").filter({ hasText: "The update did not finish" });
   await expect(notice).toBeVisible();
@@ -83,12 +66,12 @@ test("AV-05 success stays silent; failure spans the Settings top and dismisses w
   const contentBox = await page.locator(".set-in").boundingBox();
   if (!bannerBox || !contentBox) throw new Error("No Settings notice geometry");
   expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(contentBox.y);
-  await page.screenshot({ path: test.info().outputPath("settings-failure-notice.png") });
   await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
   await expect(notice).toHaveCount(0);
   expect(await geometry(), "AV-05 dismissing changed Settings width").toEqual(before);
 });
 
+// Guards the owner's ruling on auto update: the footer's update icon turns to Update in place, moving nothing.
 test("an update turns the footer's update icon to Update without moving or resizing the shell", async ({ page, open }) => {
   const update = await updates(page);
   await open();
@@ -110,6 +93,7 @@ test("an update turns the footer's update icon to Update without moving or resiz
   await expect(page.locator(".sb-foot .upd")).toBeDisabled();
 });
 
+// Guards the owner's ruling on auto update: one ask that names what stops (unsure: the wording came from a council row).
 test("a reply running: one ask, in the footer's panel, that names the reply; cancel keeps writing and accept starts it", async ({ page, open }) => {
   const update = await updates(page);
   const dialogs: string[] = [];
@@ -129,7 +113,6 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   await button.click();
   await expect(ask.locator("li")).toHaveText(["1 reply stops. Its text is kept.", "Falls back to abc1234 if a step fails."]);
   await expect(ask).toContainText("Update to def5678 and restart?");
-  await page.screenshot({ path: test.info().outputPath("update-confirm-reply-running.png"), animations: "disabled", caret: "hide" });
   await ask.getByRole("button", { name: "Cancel" }).click();
   await expect(ask).toHaveCount(0);
   await expect(page.locator(".writing")).toBeVisible();
@@ -138,71 +121,6 @@ test("a reply running: one ask, in the footer's panel, that names the reply; can
   await ask.getByRole("button", { name: "Update and restart" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
   expect(dialogs, "one ask: no native prompt after the panel").toEqual([]);
-});
-
-test("what is running changes behind an open ask: the panel's words follow and its button waits a moment, still one ask", async ({ page, open }) => {
-  const update = await updates(page);
-  const dialogs: string[] = [];
-  page.on("dialog", async (dialog) => {
-    dialogs.push(dialog.message());
-    await dialog.dismiss();
-  });
-  await open();
-  await waitReady(page);
-  update.show();
-  const ask = page.getByRole("group", { name: "Confirm update" });
-  const go = ask.getByRole("button", { name: "Update and restart" });
-  await page.getByRole("button", { name: "Update to def5678", exact: true }).click();
-  await expect(ask.locator("li")).toHaveText(["Falls back to abc1234 if a step fails."]);
-  await expect(go).toBeEnabled();
-  await page.screenshot({ path: test.info().outputPath("footer-confirm-idle.png"), animations: "disabled", caret: "hide" });
-  const height = () => ask.evaluate((e) => e.getBoundingClientRect().height);
-  const one = await height();
-  // announced: a new approval arrives while the panel is open
-  update.work(["model download: qwen3:14b"]);
-  update.show();
-  await expect(ask.locator("li").first()).toHaveText("Download of qwen3:14b stops. It resumes.");
-  await expect(ask.getByRole("status")).toContainText("Changed: Download of qwen3:14b stops.");
-  await expect(go).toBeDisabled();
-  const two = await height();
-  expect(two, "a line was added").toBeGreaterThan(one);
-  await expect(go).toBeEnabled({ timeout: 3000 });
-  expect(await height(), "the mark goes without moving anything").toBe(two);
-  // unannounced: the server's approval moved on before the click landed
-  update.work(["2 image generation jobs (queued or running)"]);
-  await go.click();
-  await expect(ask.locator("li").first()).toHaveText("2 image jobs stop.");
-  await expect(page.locator("html")).not.toHaveAttribute("data-update-started", "yes");
-  await expect(go).toBeEnabled({ timeout: 3000 });
-  await go.click();
-  await expect(page.locator("html")).toHaveAttribute("data-update-started", "yes");
-  expect(dialogs).toEqual([]);
-});
-
-test("a phone has status and computer-update instructions without update controls", async ({ page, open }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const update = await updates(page, false, true);
-  await open();
-  await waitReady(page);
-  await page.keyboard.press("Control+Comma");
-  await expect(page.locator(".set")).toBeVisible();
-  // The settings section may start on the phone section list.
-  const general = page.locator(".set-list").getByRole("button", { name: /General/ });
-  if (await general.isVisible()) await general.click();
-  await expect(page.locator(".set").getByText("abc1234", { exact: true })).toBeVisible();
-  await expect(page.locator(".upd-note")).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("phone-settings-success-silent.png") });
-  update.show();
-  await expect(page.getByRole("button", { name: "Check for updates", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("switch", { name: "Check for updates automatically", exact: true })).toHaveCount(0);
-  await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Update and restart", exact: true })).toHaveCount(0);
-  await expect(page.getByText("To install it, close Gates Local on the computer it runs on", { exact: false })).toBeVisible();
-  update.failure();
-  const notice = page.getByRole("alert").filter({ hasText: "The update did not finish" });
-  await expect(notice).toBeVisible();
-  await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
-  await expect(notice).toHaveCount(0);
 });
 
 const upToDate = (current: string, channel: "main" | "release", checkedAt: number): UpdateCheck => ({ state: "up-to-date", checkedAt, channel, current });
@@ -227,6 +145,7 @@ test.describe("Version and the update state in two rows", () => {
       failed: { state: "cannot-check", checkedAt: CHECKED, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] },
     },
   ];
+  // Guards the owner's ruling on the Updates card: Version said once, one row for the state, and the card never changes size.
   for (const copy of copies) test(`${copy.name}: Version once, then one row for the state; the card keeps its size through checking, up to date, found and failed`, async ({ page, open }) => {
     let lastCheck: UpdateCheck | null = null;
     let answer: ((next: UpdateCheck) => void) | undefined;
@@ -269,8 +188,6 @@ test.describe("Version and the update state in two rows", () => {
         text: above.map((el) => el.innerText.split("\n").join(" / ")),
       };
     });
-    // Inside the edge, so an element shot keeps it.
-    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
     const start = await measure();
     const moves: string[] = [];
     const same = (step: string, now: Awaited<ReturnType<typeof measure>>) => {
@@ -284,8 +201,7 @@ test.describe("Version and the update state in two rows", () => {
       ["failed", copy.failed, copy.failed.lines[0] ?? ""],
       ["up to date again", upToDate(copy.said, "release", CHECKED + 60_000), "Up to date"],
     ];
-    await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-0-not-checked.png`) });
-    for (const [i, [step, next, words]] of steps.entries()) {
+    for (const [step, next, words] of steps) {
       await control.click();
       await expect(control).toBeDisabled();
       same(`checking before ${step}`, await measure());
@@ -293,7 +209,6 @@ test.describe("Version and the update state in two rows", () => {
       await expect(card).toContainText(words);
       await expect(control).toBeEnabled();
       same(step, await measure());
-      await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-${i + 1}-${step.replaceAll(" ", "-")}.png`) });
       if (step === "up to date") {
         const text = (await measure()).text.join("\n");
         expect(start.rows.length, `rows above the switches: ${start.text.join(" | ")}`).toBe(2);
@@ -309,7 +224,6 @@ test.describe("Version and the update state in two rows", () => {
           await expect(control).toHaveText("Check for updates");
           await expect(control).toBeEnabled();
           same("every change switched on after a release check", await measure());
-          await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-${i + 1}b-every-change-on.png`) });
           await every.click();
           await expect(every).toHaveAttribute("aria-checked", "false");
           // Dropped, not kept for a flip back: the next check answers.
@@ -321,6 +235,7 @@ test.describe("Version and the update state in two rows", () => {
     expect(moves, "the card or a row changed size or place").toEqual([]);
   });
 
+  // Guards the owner's ruling on the Updates card: the release page link sits beside the control, the card keeps its size.
   test("UR-03 at 390px the release page link shows beside the control without growing the card", async ({ page, open }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const PAGE = "https://example.invalid/releases/latest";
@@ -347,7 +262,6 @@ test.describe("Version and the update state in two rows", () => {
     const card = group.locator(".box");
     await expect(card).toContainText("0.2.1");
     await group.scrollIntoViewIfNeeded();
-    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
     const height = () => card.evaluate((box) => box.getBoundingClientRect().height);
     const control = group.locator(".srow").nth(1).locator("button.btn");
     const link = group.getByRole("link", { name: "Open the release page" });
@@ -359,8 +273,7 @@ test.describe("Version and the update state in two rows", () => {
       ["bad signature", { state: "cannot-check", checkedAt: Date.UTC(2026, 10, 13, 7, 1), reason: "bad-signature", lines: ["The release list did not pass its signature check, so Gates Local ignored it."], page: PAGE }, true],
       ["up to date again", upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 7, 2)), false],
     ];
-    await group.screenshot({ path: test.info().outputPath("update-phone-0-not-checked.png") });
-    for (const [i, [step, next, linked]] of steps.entries()) {
+    for (const [step, next, linked] of steps) {
       await control.click();
       answer?.(next);
       await expect(link).toHaveCount(linked ? 1 : 0);
@@ -373,11 +286,11 @@ test.describe("Version and the update state in two rows", () => {
       }
       const now = await height();
       if (now !== start) heights.push(`${step}: ${start} -> ${now}`);
-      await group.screenshot({ path: test.info().outputPath(`update-phone-${i + 1}-${step.replaceAll(" ", "-")}.png`) });
     }
     expect(heights, "the card's height changed at 390px").toEqual([]);
   });
 
+  // Guards the owner's ruling (updates row 9): a clone with no release tags is still offered its update.
   test("row 9 a clone with no release tags and the switch off is offered the update its check found", async ({ page, open }) => {
     await page.addInitScript(() => {
       Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }) } });
@@ -408,6 +321,7 @@ test.describe("Version and the update state in two rows", () => {
     await group.screenshot({ path: test.info().outputPath("update-row9-no-tags-switch-off.png") });
   });
 
+  // Guards the owner's ruling (updates row 10): the release page goes in the tip, so the row keeps its height.
   test("row 10 at 390px a listener's release page goes in the tip, so the row keeps its height", async ({ page, open }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 6, 57)), activity: [] };

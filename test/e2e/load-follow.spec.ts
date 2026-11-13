@@ -27,6 +27,7 @@ async function pick(page: Page, query: string, tag: string): Promise<void> {
   await expect(page.locator("#picker")).toBeHidden();
 }
 
+// Guards the owner's ask (R34): New thread starts on the last used model, already loaded.
 test("New thread starts on the model and context last used, already loaded, with no load asked", async ({ page, open }) => {
   const loadsAsked: string[] = [];
   page.on("websocket", (ws) => ws.on("framesent", (frame) => {
@@ -60,6 +61,7 @@ test("New thread starts on the model and context last used, already loaded, with
   expect(await fakeLoads(GEMMA), "Ollama loaded Gemma once").toHaveLength(1);
 });
 
+// Guards the owner's ask (R34): a model still loading follows New thread, with one load.
 test("a model still loading follows New thread, and a second pick joins its one load", async ({ page, open }) => {
   test.info().annotations.push({ type: "budget", description: "One eight-second cold load is the subject of the journey, after one ordinary reply." });
   const pushes: string[] = [];

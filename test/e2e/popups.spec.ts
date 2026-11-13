@@ -37,6 +37,7 @@ async function expectBackdrop(page: Page) {
   await expect(dim).toHaveCSS("backdrop-filter", "blur(4px)");
 }
 
+// Guards the owner's ruling (settings row 6): Models is its own pop-up, like T3 Code's dialogs.
 test("Models is its own pop-up over the chat: two-thirds wide, as tall as its list, tabs and Close in its header", async ({ page, open }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await open();

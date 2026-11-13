@@ -46,6 +46,7 @@ async function proof(page: import("@playwright/test").Page) {
   await page.addScriptTag({ content: script.text });
 }
 
+// Guards a shipped bug fix: an arriving image card replaced the live reply and lost its thinking.
 test("an arriving image card preserves the live reply node, thinking and reveal", async ({ page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -77,6 +78,7 @@ test("an arriving image card preserves the live reply node, thinking and reveal"
   expect(errors).toEqual([]);
 });
 
+// Guards a shipped bug fix: streamed text and pipe tables flashed out of view until they could render.
 for (const [label, reply, witness] of [
   ["prose", "Use A | B for piping.\nOrdinary next line.", "Use A"],
   ["pipe table", "| Model | Size |\n| --- | --- |\n| Small | 2 |\n\nNext", "Model"],

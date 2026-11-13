@@ -7,6 +7,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ seed: 2 });
 
+// Guards a reply streaming to a second open client (unsure: the only two-client journey; no ruling found).
 test("a reply sent from one client streams in a second client with the same thread open", async ({ page, open, seededThread, context }) => {
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);

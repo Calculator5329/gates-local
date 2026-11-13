@@ -6,6 +6,7 @@ import { expect, test, waitReady } from "./fixtures.ts";
 
 const bodyBg = () => getComputedStyle(document.body).backgroundColor;
 
+// Guards the dark-by-default theme (unsure: no ruling of the owner's found, only the shipped default).
 test("with no saved theme the app is dark whatever the OS says, and System follows the OS", async ({ page, open }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await open();

@@ -37,6 +37,7 @@ async function ready(page: Page, delay: Delay): Promise<void> {
 
 const section = (name: string): WholeOptions => ({ root: ".set", arrive: { selector: ".set-h h1, .mp-head h1", text: name } });
 
+// Guards the owner's ruling (N21): nothing pops in late; every Settings section is whole on its first frame.
 test("every Settings section is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(120_000);
   const delay = await delayEverything(page, DELAY_MS);
@@ -62,6 +63,7 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   expect(r.all, "Settings: what arrived late, moved or changed its words").toEqual([]);
 });
 
+// Guards the owner's ruling (N21) and report on the Library size jump: whole after a download.
 test("Library after a download is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(90_000);
   const delay = await delayEverything(page, DELAY_MS);
@@ -81,6 +83,7 @@ test("Library after a download is whole on its first frame", async ({ page, open
   expect(r.all, "Library after a download: what arrived late, moved or changed its words").toEqual([]);
 });
 
+// Guards the owner's ruling (N21): opening the app is whole on its first frame.
 test("app start is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
   await watchFromLoad(page, { root: "#app" });
@@ -92,6 +95,7 @@ test("app start is whole on its first frame", async ({ page, open }) => {
   expect(r.all, "app start: what arrived late, moved or changed its words").toEqual([]);
 });
 
+// Guards the owner's ruling (N21): switching threads is whole on its first frame.
 test("opening a thread is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
   const delay = await delayEverything(page, DELAY_MS);
@@ -106,6 +110,7 @@ test("opening a thread is whole on its first frame", async ({ page, open }) => {
   expect(r.all, "thread: what arrived late, moved or changed its words").toEqual([]);
 });
 
+// Guards the owner's ruling (N21): the model picker is whole on its first frame.
 test("the model picker is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
   const delay = await delayEverything(page, DELAY_MS);
@@ -116,6 +121,7 @@ test("the model picker is whole on its first frame", async ({ page, open }) => {
   expect(r.all, "picker: what arrived late, moved or changed its words").toEqual([]);
 });
 
+// Guards the owner's ruling (N21): the fit panel is whole on its first frame.
 test("the fit panel is whole on its first frame", async ({ page, open }) => {
   test.setTimeout(60_000);
   const delay = await delayEverything(page, DELAY_MS);
@@ -136,6 +142,7 @@ test("the fit panel is whole on its first frame", async ({ page, open }) => {
 
 test.describe("first run", () => {
   test.use({ skipFirstRun: false, seed: 0 });
+  // Guards the owner's ruling (N21): first run is whole on its first frame.
   test("first run is whole on its first frame", async ({ page, open }) => {
     test.setTimeout(60_000);
     await watchFromLoad(page, { root: ".first" });

@@ -3,6 +3,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 // A reply sent from the page becomes that model's measured speed, pushed to
 // every other connection (a second window, the phone) without a read of its own.
+// Guards the owner's ask for each model's speed (tok/s): a finished reply sets it.
 test("a finished reply sets its model's measured speed for every connection", async ({ page, open }) => {
   await stack.reset("models");
   await open(); await waitReady(page);

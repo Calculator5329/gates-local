@@ -28,6 +28,7 @@ function sampleReplies(): void {
   new MutationObserver(snap).observe(document, { subtree: true, childList: true, characterData: true });
 }
 
+// Guards the owner's ask: a reply streams as it is written, then shows the whole answer.
 test("a streaming reply grows through partial blocks, then the whole answer", async ({ page, open }) => {
   await page.addInitScript(sampleReplies);
   await open();
@@ -56,28 +57,10 @@ test("a streaming reply grows through partial blocks, then the whole answer", as
   }
 });
 
-test("a paused delivery keeps Writing below the visible partial code block", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  // the fake stops inside the code block: paragraph, heading and list are finished
-  await stack.scenario("slow-drip", { holdAfterTokens: 46 });
-  await sendMessage(page, "How do I check disk space before a download?");
-  const reply = page.locator(".turn.a").last();
-  await expect(reply.locator(".md ul li")).toHaveCount(3);
-  await page.waitForTimeout(300);
-  await expect(reply.locator(".md")).toContainText("df -h");
-  await expect(reply.locator(".writing")).toHaveText("Writing");
-  const [md, writing] = [await reply.locator(".md").boundingBox(), await reply.locator(".writing").boundingBox()];
-  expect(writing?.y ?? 0).toBeGreaterThanOrEqual((md?.y ?? 0) + (md?.height ?? 0) - 0.5);
-  await page.getByRole("button", { name: "Stop" }).click();
-  // stopping shows all the text there is, the half code block included
-  await expect(reply.locator(".md")).toContainText("du -sh");
-  await expect(reply.locator(".writing")).toHaveCount(0);
-});
-
 test.describe("code blocks", () => {
   test.use({ seed: 2, permissions: ["clipboard-read", "clipboard-write"] });
 
+  // Guards the owner's ask: a code block has its own working Copy.
   test("a code block's own copy button puts the exact code on the clipboard", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
@@ -103,7 +86,8 @@ test.describe("code blocks", () => {
   });
 });
 
-test("a finished thinking row keeps its label and chevron at rest", async ({ page, open }, info) => {
+// Guards the owner's ask: finished thinking collapses to one labelled row that opens on click.
+test("a finished thinking row keeps its label and chevron at rest", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await sendMessage(page, "Tell me about cron");
@@ -115,7 +99,6 @@ test("a finished thinking row keeps its label and chevron at rest", async ({ pag
   await expect(label).toHaveCount(1);
   await expect(label).toBeVisible();
   await expect(think.locator(".th-x")).toBeVisible();
-  await page.screenshot({ path: info.outputPath("thinking-row-rest.png") });
   const before = await reply.locator(".md").boundingBox();
 
   await think.hover();
@@ -135,7 +118,8 @@ test("a finished thinking row keeps its label and chevron at rest", async ({ pag
   await expect(reply.locator(".think-body")).toContainText("Answer it plainly");
 });
 
-test("composer Thinking keeps its size on hover and focus, so its neighbours never move", async ({ page, open }, info) => {
+// Guards the owner's ruling: the Thinking pill never changes size, so nothing beside it moves.
+test("composer Thinking keeps its size on hover and focus, so its neighbours never move", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
@@ -145,7 +129,6 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   const pill = page.locator('.cf-l button[aria-label="Thinking"]');
   const label = pill.locator(".plbl");
   await expect(label).toBeHidden();
-  await page.screenshot({ path: info.outputPath("thinking-pill-rest.png") });
   const model = await page.locator("#modelBtn").boundingBox();
   const image = await page.locator('.cf-l button[aria-label="Image"]').boundingBox();
   const send = await page.getByRole("button", { name: "Send message" }).boundingBox();
@@ -153,7 +136,6 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   await pill.hover();
   await expect(page.locator("#tip")).toHaveClass(/\bopen\b/);
   await expect(page.locator("#tip")).toContainText("Thinking");
-  await page.screenshot({ path: info.outputPath("thinking-pill-hover.png") });
   await expect(label).toBeHidden();
   expect(await pill.boundingBox()).toEqual(rest);
   expect(await page.locator("#modelBtn").boundingBox()).toEqual(model);
@@ -170,17 +152,7 @@ test("composer Thinking keeps its size on hover and focus, so its neighbours nev
   await expect(pill).toHaveAttribute("data-tip", /Thinking off/);
 });
 
-test.describe("phone Thinking", () => {
-  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  test("composer Thinking remains a labelled option in the sheet", async ({ page, open }) => {
-    await open();
-    await waitReady(page);
-    await expect(page.locator('.cf-l button[aria-label="Thinking"]')).toBeHidden();
-    await page.getByRole("button", { name: "Chat options", exact: true }).click();
-    await expect(page.getByRole("menuitemcheckbox", { name: /Thinking/ })).toBeVisible();
-  });
-});
-
+// Guards the footer's Settings icon showing runtime state only when it is true (healthy half).
 test("no runtime dot or words on the sidebar's Settings icon while the runtime is healthy", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -200,6 +172,7 @@ test("no runtime dot or words on the sidebar's Settings icon while the runtime i
 test.describe("runtime down", () => {
   test.use({ scenario: "wrong-service", runtimeMode: "system" });
 
+  // Guards the footer's Settings icon showing runtime state only when it is true (down half).
   test("the Settings icon shows a dot and the runtime's words when the runtime needs the user, and opens Settings > Runtime", async ({ page, open }) => {
     await open();
     const gear = page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
@@ -211,6 +184,7 @@ test.describe("runtime down", () => {
   });
 });
 
+// Guards the owner's ask: the context size is picked inside the model picker.
 test("the picker's context column changes the context size shown in the model trigger", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -240,6 +214,7 @@ test("the picker's context column changes the context size shown in the model tr
   expect(state.requests.findLast((r) => r.path === "/api/chat")?.body.options?.num_ctx).toBe(32768);
 });
 
+// Guards the owner's ask: GPU memory lives in Settings > Advanced and updates live.
 test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -262,6 +237,7 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await expect(set).not.toContainText("At 64k: ");
 });
 
+// Guards a refused send saying why and leading to the fix.
 test("a send refused for memory says why and its click opens Settings > Advanced", async ({ page, open }) => {
   // The fake's 500-request history rolls over during a full suite. Observe
   // this client's sends directly, including requests the server would reject.

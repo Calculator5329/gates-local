@@ -41,6 +41,7 @@ test.describe("a message queued while a picture is being made", () => {
   test.afterEach(async () => { await comfy.close(); });
   test.use({ viewport: WIDE });
 
+  // Guards the owner's ruling on the queue tray (chat row 19): one line on the composer's edge, icons with true tips.
   test("sits on the composer's top edge as one line: what it makes, its words, and three icons whose tips are true", async ({ page, open }) => {
     await stack.reset("image-turn", 0, undefined, "system", undefined, comfy.url);
     await open(); await waitReady(page);
@@ -91,6 +92,7 @@ test.describe("a message queued while a picture is being made", () => {
 test.describe("editing a queued message while a reply runs", () => {
   test.use({ viewport: WIDE });
 
+  // Guards the owner's decision (chat row 14): editing a queued message, Stop takes Dictate's square and nothing moves.
   test("moves nothing in the composer's row: Stop takes Dictate's square", async ({ page, open }) => {
     await open(); await waitReady(page);
     await stack.scenario("slow-drip", { holdAfterTokens: 46 });

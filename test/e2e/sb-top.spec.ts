@@ -50,6 +50,7 @@ const listState = (page: Page) => page.locator(".sb .sb-list").evaluate((el: HTM
   };
 });
 
+// Guards the owner's ruling (chat row 15): the sidebar top as T3 Code has it.
 test("row 15: Search rests with no box in line with the threads, New thread alone at the right, and the list fades instead of showing a bar", async ({ page, open }) => {
   await page.setViewportSize(SHORT);
   await open(); await waitReady(page);
@@ -120,6 +121,7 @@ test("row 15: Search rests with no box in line with the threads, New thread alon
   expect(await page.locator(".tl, .draft").first().evaluate((el) => getComputedStyle(el).scrollbarWidth)).toBe("thin");
 });
 
+// Guards the owner's ruling (chat row 15): the list fades only at an edge with more threads past it.
 test("row 15: when a search narrows the list until it fits, both fades go", async ({ page, open }) => {
   await page.setViewportSize(SHORT);
   await open(); await waitReady(page);

@@ -24,6 +24,7 @@ function watchReady(): void {
   new MutationObserver(seen).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
 }
 
+// Guards a shipped bug fix: a message sent the moment the app turned ready did not go out.
 test("the runtime turning ready and a chosen model appear in the same render, and a message sent at once goes out", async ({ page, open }) => {
   await page.addInitScript(watchReady);
   await open();
@@ -39,6 +40,7 @@ test("the runtime turning ready and a chosen model appear in the same render, an
 
 test.describe("the fixture's waitReady", () => {
   test.use({ seed: 2 });
+  // Guards the owner's decision (chat row 10): the ready wait returns once the app has its data.
   test("returns once the app has its data, so a spec may read it once right after", async ({ page, open }) => {
     // The thread list's answer is held for a second. The whole app and an
     // unblocked composer are drawn from the first frame, so only the first

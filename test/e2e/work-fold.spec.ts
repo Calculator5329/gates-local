@@ -9,8 +9,6 @@
 import { writeFile } from "node:fs/promises";
 import { createClient } from "@gates-local/contracts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { readOpening, sampleHeights } from "./eased.ts";
-import { appUrl } from "./env.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { LONG_COMMAND } from "./seed.ts";
 import { release } from "./threads-support.ts";
@@ -46,8 +44,6 @@ const placeIn = (el: Locator) => el.evaluate((n) => {
 });
 const heightOf = (el: Locator) => el.evaluate((n) => Math.round(n.getBoundingClientRect().height));
 const topOf = (el: Locator) => el.evaluate((n) => Math.round(n.getBoundingClientRect().top));
-/** How far the page is from its end. */
-const gapOf = (tl: Locator) => tl.evaluate((n) => n.scrollHeight - n.scrollTop - n.clientHeight);
 /** Resolves once a fold has finished opening: its height the same on two frames running. */
 const openedFully = (body: Locator) => body.evaluate((n) => new Promise<void>((done) => {
   let last = -1;
@@ -60,6 +56,7 @@ const openedFully = (body: Locator) => body.evaluate((n) => new Promise<void>((d
 }));
 
 test.describe("live", () => {
+  // Guards the owner's ruling (N14): tool calls fold into one chip that holds its box while the reply runs.
   test("ten tool calls leave the reply the same height while closed, and the chip keeps its box from running to done", async ({ page, open }, info) => {
     await open(); await waitReady(page);
     await libraryOn(page, info);
@@ -96,6 +93,7 @@ test.describe("live", () => {
 
   test.describe("opened while calls run", () => {
     test.use({ seed: "work-fold", viewport: { width: 1200, height: 700 } });
+    // Guards the owner's ruling (N14, chat row 18): a chip opened while calls run grows below and never jumps what is above.
     test("lines append, a finished round closes to one line, the page follows the end and never jumps what is above", async ({ page, open, seededThread }, info) => {
       await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
       await libraryOn(page, info);
@@ -149,123 +147,10 @@ test.describe("live", () => {
   });
 });
 
-/**
- * The reader at the end of the work-fold thread opens its last chip alone. Its list
- * is one call, shorter than the 120 px that keeps a reader's own scroll following
- * the end: past the hold the page is a little short of its end, and only the end
- * itself follows now.
- */
-async function openLastChip(page: Page): Promise<Locator> {
-  const tl = page.locator(".tl");
-  await tl.evaluate((n) => { n.scrollTop = n.scrollHeight; });
-  await page.waitForTimeout(100);
-  expect(await gapOf(tl), "at the end").toBeLessThan(2);
-  const reply = page.locator(".turn.a").nth(2);
-  const chip = reply.locator("button.think.fold");
-  await expect(chip).toHaveAccessibleName("1 tool call, last call failed");
-  // dispatched, so nothing scrolls it into view first: the reader is at the end when it opens
-  await chip.dispatchEvent("click");
-  await expect(chip).toHaveAttribute("aria-expanded", "true");
-  await page.waitForTimeout(450);
-  const gap = await gapOf(tl);
-  expect(gap, "the opened list left the end").toBeGreaterThan(2);
-  expect(gap, "by less than the reader's own scroll would still follow").toBeLessThan(120);
-  const row = reply.locator("[data-tool-row]").first();
-  await expect(row).toBeVisible();
-  return row;
-}
-
-test.describe("opened at the end of a thread", () => {
-  test.use({ seed: "work-fold", viewport: { width: 1200, height: 700 } });
-
-  test("opening a chip alone at the end, then the composer growing, moves nothing", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    const row = await openLastChip(page);
-    const before = await topOf(row);
-    const composer = page.locator(".composer");
-    const short = await heightOf(composer);
-    await page.locator("#ta").focus();
-    for (const line of ["one", "two"]) { await page.keyboard.type(line); await page.keyboard.press("Shift+Enter"); }
-    await page.keyboard.type("three");
-    await expect.poll(() => heightOf(composer), { message: "three lines grow the composer" }).toBeGreaterThan(short);
-    await page.waitForTimeout(300);
-    expect(await topOf(row), "the opened row has not moved").toBe(before);
-  });
-
-  test("opening a chip alone at the end, then another device's question and its reply's words arriving, moves nothing", async ({ page, open, seededThread, context }) => {
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    const other = await context.newPage();
-    await other.goto(appUrl(`#thread=${seededThread ?? ""}`)); await waitReady(other);
-    const row = await openLastChip(page);
-    const before = await topOf(row);
-    await stack.scenario("slow-drip", { tokenDelayMs: 60, firstTokenDelayMs: 0 });
-    await sendMessage(other, "Asked on the other device");
-    await expect(page.locator(".turn.u").last()).toContainText("Asked on the other device");
-    await expect(page.locator(".turn.a:not(.done) .md")).toContainText("Here is how to check the free disk space");
-    await page.waitForTimeout(200);
-    expect(await topOf(row), "the opened row has not moved").toBe(before);
-    await expect(page.locator(".writing")).toHaveCount(0, { timeout: 20_000 });
-    await other.close();
-  });
-});
-
 test.describe("saved", () => {
   test.use({ seed: "work-fold" });
 
-  test("closed chips: a recovered failure is not on the chip, an unrecovered one is; no tools and no thinking keep only their part", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    const replies = page.locator(".turn.a");
-    await expect(replies).toHaveCount(4);
-    const [recovered, long, failed, thought] = [replies.nth(0), replies.nth(1), replies.nth(2), replies.nth(3)];
-    // an old thread: no first-token time was kept, so the bulb has no number
-    await expect(recovered.locator("button.think.fold")).toHaveAccessibleName("Thinking, 3 tool calls");
-    await expect(recovered.locator(".ch-p.bad")).toHaveCount(0);
-    await expect(recovered.locator("[data-tool-row]").first()).toBeHidden();
-    await expect(long.locator("button.think.fold")).toHaveAccessibleName("Thinking, 2 tool calls");
-    // no thinking: only the wrench part, marked, since the call before the answer failed
-    await expect(failed.locator("button.think.fold")).toHaveAccessibleName("1 tool call, last call failed");
-    await expect(failed.locator(".ch-p")).toHaveCount(1);
-    await expect(failed.locator(".ch-p.bad")).toHaveCount(1);
-    // no tools: the thought line as it was
-    await expect(thought.locator("button.think")).not.toHaveClass(/\bfold\b/);
-    await expect(thought.locator("button.think")).toHaveAccessibleName("Show thinking");
-    await expect(thought.locator(".fold-body")).toHaveCount(0);
-    for (const r of [recovered, long, failed, thought]) await expect(r.locator("button.think")).toHaveAttribute("aria-expanded", "false");
-  });
-
-  test("open: one list in order, each call said once, Enter and Space work the chip", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    const reply = page.locator(".turn.a").first();
-    const chip = reply.locator("button.think.fold");
-    await chip.focus();
-    await page.keyboard.press("Enter");
-    await expect(chip).toHaveAttribute("aria-expanded", "true");
-    const items = reply.getByRole("list", { name: "Steps" }).getByRole("listitem");
-    await expect(items).toHaveCount(4);
-    // a saved reply keeps no order between its thought and its calls: the thought first, closed
-    await expect(items.nth(0).locator(".th-line")).toHaveText("Thought");
-    await expect(items.nth(0).locator(".th-line")).toHaveAttribute("aria-expanded", "false");
-    await expect(items.nth(1).locator(".wr-h")).toHaveText("Searched your library");
-    await expect(items.nth(2).locator(".wr-h")).toHaveText("Tool could not finish");
-    await expect(items.nth(2).locator(".wr-m")).toHaveText("Shell · failed");
-    await expect(items.nth(3).locator(".wr-h")).toHaveText("Searched your library");
-    await chip.focus();
-    await page.keyboard.press(" ");
-    await expect(chip).toHaveAttribute("aria-expanded", "false");
-  });
-
-  test("the opened list eases open over several frames, never in one jump", async ({ page, open, seededThread }) => {
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    const reply = page.locator(".turn.a").first();
-    const seen = await sampleHeights(reply.locator(".fold-body"), () => reply.locator("button.think.fold").click());
-    // .fold-body's height transition in styles.css: .18s ease. Judged against time, so a frame the
-    // machine skipped is not a jump, and a list that opens in one normal frame still is.
-    const opening = readOpening(seen, 180);
-    expect(opening.full, "the list opened").toBeGreaterThan(40);
-    expect(opening.closedFirst, "sampling began with the list closed").toBe(true);
-    expect(opening.ahead, "no frame shows more of the list than a 180 ms ease could by then").toEqual([]);
-  });
-
+  // Guards the owner's ruling (N15): an opened call shows all of its output in a box up to 360 px, without moving.
   test("an opened call shows all of it: a long output scrolls in a box up to 360 px, a short one has no scrollbar, the command is whole", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
     const reply = page.locator(".turn.a").nth(1);

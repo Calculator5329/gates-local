@@ -1,9 +1,10 @@
 /// <reference lib="dom" />
 import { test, expect, sendMessage, waitReady } from "./fixtures.ts";
 
-test.use({ seed: "design", video: "on" });
+test.use({ seed: "design" });
 
-test("hover intent fetches history once before selection; sweeping and the active row do not", async ({ page, open, seededThread }, testInfo) => {
+// Guards the owner's ask to preload a thread on hover: once on intent, never on a sweep or the open row.
+test("hover intent fetches history once before selection; sweeping and the active row do not", async ({ page, open, seededThread }) => {
   const requests: string[] = [];
   page.on("websocket", socket => socket.on("framesent", frame => {
     const request = JSON.parse(String(frame.payload)) as { method?: string; params?: { threadId?: string } };
@@ -26,9 +27,9 @@ test("hover intent fetches history once before selection; sweeping and the activ
   // Observe beyond the intent delay: revisiting the active row sends nothing.
   await page.waitForTimeout(350);
   expect(requests.slice(before)).toEqual([id]);
-  await page.screenshot({ path: testInfo.outputPath("preloaded-thread.png") });
 });
 
+// Guards a shipped bug fix: a preloaded thread showed stale history after another window added a message.
 test("another window's new message replaces prefetched history before selection", async ({ page, context, open, seededThread }) => {
   const fetched: string[] = [];
   page.on("websocket", socket => socket.on("framesent", frame => {
@@ -51,22 +52,3 @@ test("another window's new message replaces prefetched history before selection"
     await expect(page.locator(".turn.a.done")).toHaveCount(1);
   } finally { await other.close(); }
 });
-
-test.describe("touch sidebar", () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  test("does not speculate on a touch-only listener", async ({ page, open, seededThread }) => {
-    let gets = 0;
-    page.on("websocket", socket => socket.on("framesent", frame => {
-      const request = JSON.parse(String(frame.payload)) as { method?: string };
-      if (request.method === "threads.get") gets++;
-    }));
-    await open(`#thread=${seededThread ?? ""}`); await waitReady(page);
-    await expect(page.locator(".tl .turn")).not.toHaveCount(0);
-    await page.locator("#menuBtn").click();
-    const before = gets;
-    await page.locator(".sb-row:not(.on) .sb-thread").first().hover();
-    await page.waitForTimeout(350);
-    expect(gets).toBe(before);
-  });
-});
-

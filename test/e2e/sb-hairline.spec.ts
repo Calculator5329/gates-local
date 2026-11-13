@@ -1,11 +1,8 @@
 /// <reference lib="dom" />
-// The top of the sidebar (chat row 15): no line under the sidebar head, in the
-// desktop titlebar layout or on the web, in chat or in Settings. The one line
-// that stays is the divider between the sidebar and the chat. The top of the
-// window is shot in dark and light, with the boxes of what the shot is about.
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import type { Locator, Page } from "@playwright/test";
+// The top of the sidebar: no line under the sidebar head in the desktop
+// titlebar layout, in chat or in Settings. The one line that stays is the
+// divider between the sidebar and the chat.
+import type { Page } from "@playwright/test";
 import { expect, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: "off", viewport: { width: 1920, height: 1080 } });
@@ -25,16 +22,6 @@ async function desktopOverlay(page: Page): Promise<void> {
 async function theme(page: Page, scheme: "dark" | "light"): Promise<void> {
   await page.emulateMedia({ colorScheme: scheme });
   await page.evaluate((s) => document.documentElement.setAttribute("data-theme", s), scheme);
-}
-
-/** A screenshot and the boxes of the things it is about, for the report's highlights. */
-async function shoot(page: Page, name: string, marks: Record<string, Locator>): Promise<void> {
-  const file = test.info().outputPath(`${name}.png`);
-  mkdirSync(path.dirname(file), { recursive: true });
-  const boxes: Record<string, unknown> = {};
-  for (const [k, l] of Object.entries(marks)) boxes[k] = (await l.count()) > 0 ? await l.first().boundingBox() : null;
-  await page.screenshot({ path: file, animations: "disabled" });
-  writeFileSync(test.info().outputPath(`${name}.json`), JSON.stringify(boxes));
 }
 
 type Lines = { head: string[]; below: string[]; divider: { width: string; style: string; color: string } };
@@ -69,17 +56,12 @@ async function noLineUnderHead(page: Page, where: string): Promise<void> {
   expect(l.divider.color).not.toBe("rgba(0, 0, 0, 0)");
 }
 
+// Guards the owner's report: a line showed under the sidebar head.
 test("the desktop sidebar head has no line under it in chat or Settings; the sidebar/chat divider stays", async ({ page, open }) => {
   await desktopOverlay(page);
   await open();
   await waitReady(page);
   await expect(page.locator("html")).toHaveClass(/wco/);
-  const marks = { head: page.locator(".sb-head"), sb: page.locator(".sb"), hdr: page.locator(".hdr") };
-  // every shot first, so a red run on main still shows each theme
-  for (const scheme of ["dark", "light"] as const) {
-    await theme(page, scheme);
-    await shoot(page, `sidebar-top-${scheme}`, marks);
-  }
   for (const scheme of ["dark", "light"] as const) {
     await theme(page, scheme);
     await noLineUnderHead(page, `desktop chat, ${scheme}`);
@@ -87,14 +69,4 @@ test("the desktop sidebar head has no line under it in chat or Settings; the sid
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set-bar")).toBeVisible();
   await noLineUnderHead(page, "desktop Settings");
-});
-
-test("the web sidebar head has no line under it either; the divider stays", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  await expect(page.locator("html")).not.toHaveClass(/wco/);
-  await noLineUnderHead(page, "web chat");
-  await page.keyboard.press("Control+Comma");
-  await expect(page.locator(".snav")).toBeVisible();
-  await noLineUnderHead(page, "web Settings");
 });

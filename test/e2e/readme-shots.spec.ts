@@ -55,6 +55,7 @@ for (const shot of SHOTS) {
   test.describe(shot.name, () => {
     // first run shows only on an empty store, so its shot seeds nothing
     test.use({ colorScheme: shot.theme, skipFirstRun: shot.start !== "firstrun", ...(shot.start === "firstrun" ? { seed: 0 } : {}) });
+    // Not a regression test: takes the README screenshots the owner asked for.
     test("shot", async ({ page, open, seededThread }) => {
       await page.clock.setFixedTime(NOW);
       await open(shot.start === "firstrun" ? "" : `#thread=${seededThread ?? ""}`);

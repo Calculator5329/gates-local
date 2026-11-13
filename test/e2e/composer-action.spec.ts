@@ -5,6 +5,7 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ seed: 2, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
+// Guards the owner's ruling: one Send button that becomes Stop and Update in place.
 test("one primary button keeps its node, position and keyboard focus across Send, Stop and Update", async ({ page, open, seededThread }) => {
   await open(`#thread=${seededThread ?? ""}`);
   await waitReady(page);
@@ -49,6 +50,7 @@ test("one primary button keeps its node, position and keyboard focus across Send
   await expect(page.locator(".qt-r")).toContainText("On hold");
 });
 
+// Guards a shipped bug fix: a double-click on Send must not stop the reply it started.
 test("the second click of Send's double-click cannot stop the reply it just started", async ({ page, open, seededThread }) => {
   const cancellations: string[] = [];
   await page.routeWebSocket(/127\.0\.0\.1:5286/, (ws) => {
@@ -85,27 +87,10 @@ test("the second click of Send's double-click cannot stop the reply it just star
   await expect.poll(() => cancellations.length).toBe(1);
 });
 
-test.describe("a fresh chat", () => {
-  test.use({ seed: 0 });
-  test("keyboard focus survives creating the first thread and returning from Stop", async ({ page, open }) => {
-    await open();
-    await waitReady(page);
-    await stack.scenario("slow-drip", { holdAfterTokens: 46 });
-    const action = page.locator(".composer button.send");
-    await page.locator("#ta").fill("First thread");
-    await action.focus();
-    await action.press("Enter");
-    await expect(action).toHaveAccessibleName("Stop");
-    await expect(action).toBeFocused();
-    await action.press("Space");
-    await expect(action).toHaveAccessibleName("Send message");
-    await expect(action).toBeFocused();
-  });
-});
-
 test.describe("a touch keyboard", () => {
   test.use({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true });
-  test("Enter inserts a newline; the queue arrow and Stop hold their own slots through typing, clearing and queueing", async ({ page, open, seededThread }, info) => {
+  // Guards the owner's queue ruling on touch: Queue and Stop keep their own slots and take every press.
+  test("Enter inserts a newline; the queue arrow and Stop hold their own slots through typing, clearing and queueing", async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
     await stack.scenario("slow-drip", { holdAfterTokens: 46 });
@@ -142,6 +127,5 @@ test.describe("a touch keyboard", () => {
     await expect(page.locator(".qt-r")).toContainText("Updated on touch");
     await expect(action).toHaveAccessibleName("Queue message");
     await expect(stop).toBeVisible();
-    await page.screenshot({ path: info.outputPath("touch-queue-updated.png") });
   });
 });

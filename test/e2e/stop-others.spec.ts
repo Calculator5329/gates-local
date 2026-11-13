@@ -49,6 +49,7 @@ async function secondChatReady(page: Page): Promise<void> {
 
 const warning = (page: Page) => page.getByRole("alertdialog", { name: "Stop the other reply?" });
 
+// Guards the owner's ruling (R18): a send that needs the memory warns, then stops the other chat, which keeps its words.
 test("sending on a model that needs the memory warns, then stops the other chat, which keeps its words", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -77,6 +78,7 @@ test("sending on a model that needs the memory warns, then stops the other chat,
   await shot(page, "03-stopped-chat");
 });
 
+// Guards the owner's ruling (R18): "Don't show this again" sticks.
 test("'Don't show this again' survives a reload and later sends stop the other chat with no prompt", async ({ page, open }) => {
   const sends: Params<"chat.send">[] = [];
   page.on("websocket", (socket) => socket.on("framesent", (frame) => {

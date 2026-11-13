@@ -35,6 +35,7 @@ async function mount(page: Page) {
   await page.goto(`${WEB_ORIGIN}/boundary-probe`);
 }
 
+// Guards a shipped bug fix: a render crash blanked the app; it now shows a notice and keeps the draft.
 test("render recovery keeps the draft and escalates a failed app retry to Reload window", async ({ page }) => {
   test.setTimeout(10_000);
   const errors: string[] = [];

@@ -36,6 +36,7 @@ test.skip(process.platform !== "linux", "Run commands is the Linux shell tool");
 test.describe("with no working sandbox on this machine", () => {
   test.use({ sandbox: "off" });
 
+  // Guards a shipped bug fix (settings row 14): Run commands said Ready, but no command ran.
   test("Run commands says what is missing, the model gets no shell, and the chat says why", async ({ page, open }) => {
     await open();
     await waitReady(page);
@@ -58,6 +59,7 @@ test.describe("with no working sandbox on this machine", () => {
   });
 });
 
+// Guards a shipped bug fix (settings row 14): Ready means a command really runs.
 test("with a working sandbox, Run commands is Ready and the model gets the shell", async ({ page, open }) => {
   await open();
   await waitReady(page);

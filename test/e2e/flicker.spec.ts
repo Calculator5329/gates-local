@@ -5,6 +5,7 @@ import { expect, openGpuMemory, test, waitReady } from "./fixtures.ts";
 test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off" });
 
 for (const delay of [0, 150, 600]) {
+  // Guards the owner's ruling on GPU memory (R38): a context pick keeps its verdict and details, no flicker.
   test(`GPU memory context pick keeps its verdict and details at ${delay} ms`, async ({ page, open }) => {
     await delayedMemory(page, delay);
     await open();
@@ -22,6 +23,7 @@ for (const delay of [0, 150, 600]) {
     await expect(gpu.locator(".fp-v:visible")).toContainText("32k");
   });
 
+  // Guards a shipped bug fix: loading a model dropped the picker's earlier memory verdicts.
   test(`reopening the picker after loading keeps checked verdicts at ${delay} ms`, async ({ page, open }) => {
     await delayedMemory(page, delay);
     await open();

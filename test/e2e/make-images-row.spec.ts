@@ -20,6 +20,7 @@ const tabStops = async (page: Page, from: Locator, count: number) => {
   return stops;
 };
 
+// Guards the owner's rule that nothing moves, on the Tools screen (unsure: no line of his on this row).
 test("on touch the Make images row keeps its height when the switch above flips, and the hidden link takes no focus", async ({ page, open }) => {
   await open();
   await waitReady(page);

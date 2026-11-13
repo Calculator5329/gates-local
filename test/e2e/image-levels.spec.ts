@@ -49,6 +49,7 @@ const LEVELS: readonly { name: string; gpu?: { other: number; card?: number }; r
   { name: "the CPU", rows: NONE, shot: "image-5-after-cpu.png" },
 ];
 
+// Guards the owner's ask for image setups by card size: each tier's default, and no default without a GPU.
 for (const level of LEVELS) {
   test(`the picker on ${level.name}: ${level.button === undefined ? "no default, and it says a GPU is needed" : `${level.button} by default, each tier's setup tagged`}`, async ({ page, open }, info) => {
     await stack.reset("models", 0, undefined, "system", undefined, comfy.url);

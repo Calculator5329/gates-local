@@ -5,6 +5,7 @@ import { expect, sendMessage, test } from "./fixtures.ts";
 
 test.use({ scenario: "no-models", skipFirstRun: false });
 
+// Guards the owner's ask for first run with no models: download one, then chat.
 test("no models: download, cancel, download again, then chat", async ({ page, open }) => {
   await open();
   await expect(page.getByRole("heading", { name: "Download your first model" })).toBeVisible();

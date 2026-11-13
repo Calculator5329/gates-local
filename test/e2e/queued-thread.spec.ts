@@ -28,6 +28,7 @@ const B = "Use a tool for beta";
 const MODEL = "gemma4:12b";
 const rows = (page: Page) => page.locator(".sb-row").allInnerTexts();
 
+// Guards a shipped bug fix (chat row 23): a send that waited past 30 s behind another reply was dropped.
 test("a new thread's send that waits over 30 s behind another reply stays sent, sits under it, and shows its tool call live", async ({ page, open }, info) => {
   test.setTimeout(150_000);
   await open(); await waitReady(page);

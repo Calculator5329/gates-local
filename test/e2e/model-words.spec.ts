@@ -64,6 +64,7 @@ async function rowsOpenNoTip(page: Page): Promise<void> {
 }
 
 for (const width of [1440, 760]) {
+  // Guards the owner's rulings (N04, F72): picker rows open no tooltip, and the picker holds still through a refresh.
   test(`picker rows open no tooltip, and the picker holds still through a fit refresh at ${width} px (F72)`, async ({ page, open }) => {
     await page.setViewportSize({ width, height: 900 });
     const reports = await pickerReports(page);
@@ -88,6 +89,7 @@ for (const width of [1440, 760]) {
   });
 }
 
+// Guards the owner's rule to show only what is true on the GPU memory panel (unsure: no line of his on available vs free).
 test("GPU memory distinguishes available from free memory and leaves context fit on hover", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -117,6 +119,7 @@ test("GPU memory distinguishes available from free memory and leaves context fit
 test.describe("decode speed", () => {
   test.use({ scenario: "slow-first-token" });
 
+  // Guards the owner's ask for a model's tok/s as a number: it counts decode time only.
   test("tok/s counts decode time, not the 2.5 s wait for the first token", async ({ page, open }) => {
     await open();
     await waitReady(page);

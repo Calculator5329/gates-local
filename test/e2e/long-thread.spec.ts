@@ -36,6 +36,7 @@ declare global {
   interface Window { longProbe?: LongProbe }
 }
 
+// Guards the owner's ask that long conversations open fast, at their end, and hold still.
 test("a 2,000-message thread opens at its end, keeps the turn in view still, and mounts in full", async ({ page, open, seededThread }) => {
   // Seeding 2,000 messages alone takes 3 to 17 s on the test machine, depending on its load; the
   // journey checks counts and positions, never speed.

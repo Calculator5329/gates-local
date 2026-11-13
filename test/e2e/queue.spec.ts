@@ -14,6 +14,7 @@ async function answering(page: Page): Promise<void> {
   await expect(page.locator(".turn.a .md ul li")).toHaveCount(3, { timeout: 15_000 });
 }
 
+// Guards the owner's ask (R19): Enter while a reply runs queues the message.
 test("Enter while a reply runs queues the message and leaves the reply running; it sends itself when the reply ends", async ({ page, open }) => {
   await stack.scenario("slow-drip", { tokenDelayMs: 60, firstTokenDelayMs: 0 });
   await open();
@@ -36,6 +37,7 @@ test("Enter while a reply runs queues the message and leaves the reply running; 
   await expect(page.locator(".turn.u")).toHaveCount(2);
 });
 
+// Guards the owner's ask (R19): a queued message can be edited, removed or sent now.
 test("a queued message can be edited in the composer, removed, or sent now in place of the running reply", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -73,6 +75,7 @@ test("a queued message can be edited in the composer, removed, or sent now in pl
   await expect(page.locator(".stop-note")).toHaveCount(0);
 });
 
+// Guards the owner's rule that Stop never sends or retries anything by itself (unsure: his words were about retry).
 test("Stop leaves a queued message on hold instead of sending it", async ({ page, open }) => {
   await open();
   await waitReady(page);

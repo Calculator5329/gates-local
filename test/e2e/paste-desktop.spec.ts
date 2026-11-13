@@ -107,6 +107,7 @@ async function screen(app: ElectronApplication, info: TestInfo, name: string) {
   await writeFile(info.outputPath(name), Buffer.from(png, "base64"));
 }
 
+// Guards a shipped bug fix: a paste that had not arrived yet landed in the next thread after New thread.
 test("desktop clipboard paths cannot be read by a timer or a renderer keyboard event", async ({ seededThread }, info) => {
   void seededThread;
   const { app, page } = await desktop(info);
@@ -160,6 +161,7 @@ test("desktop clipboard paths cannot be read by a timer or a renderer keyboard e
   } finally { await app.close(); }
 });
 
+// Guards the owner's ask (U09) for right-click paste of text, paths and images in the desktop app.
 test("desktop paste: native menus, X11 clipboard, undo, toolbar and sidebar coexistence", async ({ seededThread }, info) => {
   void seededThread;
   // This is a new multi-step native journey, with one app launch and screen captures.

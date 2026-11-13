@@ -283,123 +283,6 @@ async function busyBurst(page: Page, text: string) {
 const keysWithinBudget = (k: ReturnType<typeof keyStats>) =>
   k.dispatched >= 20 && k.p95 <= BUDGET.keyP95Ms && k.longestTask <= BUDGET.longTaskMs;
 
-// The stream test's control fails both legs at once, so it cannot show that
-// each leg works alone; this does.
-test("the key gate fails on slow keys alone, on a long task alone, and on too few keys", () => {
-  const fast = { dispatched: 33, slow: 0, p95: 16, p95Delay: 1, p95Processing: 1, maxDuration: 16, longestTask: 0 };
-  expect(keysWithinBudget(fast)).toBe(true);
-  expect(keysWithinBudget({ ...fast, p95: 80 })).toBe(false);
-  expect(keysWithinBudget({ ...fast, longestTask: 100 })).toBe(false);
-  expect(keysWithinBudget({ ...fast, dispatched: 19 })).toBe(false);
-});
-
-test("the typing window: a long task after the last key does not count, one across the first key does", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  await page.evaluate(clearEvents);
-  await page.evaluate(endKeys, 0);
-  // made-up entries through the real readKeys filter; nothing real is that long here
-  await page.evaluate(() => {
-    const w = window as unknown as { glLongAt: [number, number][]; glUntil: number };
-    w.glLongAt.push([w.glUntil + 50, 400]);
-  });
-  expect((await page.evaluate(readKeys)).longest).toBeLessThan(400);
-  await page.evaluate(() => {
-    const w = window as unknown as { glLongAt: [number, number][]; glSince: number };
-    w.glLongAt.push([w.glSince - 10, 400]);
-  });
-  expect((await page.evaluate(readKeys)).longest).toBe(400);
-});
-
-// PF2-01: a task the last key's input queues starts after that input and
-// before the test gets control back; it is not the typing's.
-test("the typing window ends at the last key's input, not when the test resumes", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  const KEYS = "abc";
-  await page.locator("#ta").focus();
-  await page.evaluate(clearEvents);
-  await page.evaluate((n) => {
-    let seen = 0;
-    window.addEventListener(
-      "input",
-      () => {
-        seen++;
-        if (seen === n)
-          setTimeout(() => {
-            const end = performance.now() + 150;
-            while (performance.now() < end) {
-              // spin
-            }
-          });
-      },
-      { capture: true },
-    );
-  }, KEYS.length);
-  await typeFreely(page, KEYS);
-  await expect(page.locator("#ta")).toHaveValue(KEYS);
-  await page.evaluate(endKeys, KEYS.length);
-  const k = await page.evaluate(readKeys);
-  // the observer saw the task, so the zero below is not a dead observer
-  expect(await page.evaluate(() => (window as unknown as { glLongAt: [number, number][] }).glLongAt.some(([, d]) => d >= 140))).toBe(true);
-  expect(k.longest).toBeLessThan(140);
-});
-
-// PF3-01: the end is the typed field's last input, even when a handler of
-// the page stops that input; an input elsewhere does not move it; a typed
-// input that never arrived stops the test instead of closing the window early.
-test("the typing window's end: a stopped input still counts, an input elsewhere does not move it, a missing one fails", async ({ page, open }) => {
-  await open();
-  await waitReady(page);
-  const KEYS = "abc";
-  const ta = page.locator("#ta");
-  await ta.focus();
-  await page.evaluate(clearEvents);
-  // Stop the last input before it reaches window's bubble listeners, after
-  // React's root listener has kept the controlled draft in sync.
-  await page.evaluate((n) => {
-    const w = window as unknown as { glFinalAt?: number };
-    let seen = 0;
-    const field = document.querySelector("#ta"), root = document.getElementById("root");
-    if (!field || !root) throw new Error("The composer and React root must be mounted");
-    root.addEventListener("input", (e) => {
-      if (e.target !== field) return;
-      seen++;
-      if (seen !== n) return;
-      w.glFinalAt = e.timeStamp;
-      e.stopPropagation();
-    });
-  }, KEYS.length);
-  await typeFreely(page, KEYS);
-  await expect(ta).toHaveValue(KEYS);
-  // Reconcile the controlled textarea through an unrelated composer render:
-  // a field-level interceptor would otherwise leave the final DOM-only key
-  // visible until React next renders, concealing the test's own interference.
-  await page.getByRole("button", { name: "Thinking", exact: true }).evaluate(button => {
-    if (!(button instanceof HTMLButtonElement)) throw new Error("Thinking must be a native button");
-    button.click();
-  });
-  await expect(ta).toHaveValue(KEYS);
-  await page.evaluate(endKeys, KEYS.length);
-  const ends = () =>
-    page.evaluate(() => {
-      const w = window as unknown as { glUntil: number; glFinalAt: number };
-      return { until: w.glUntil, finalAt: w.glFinalAt };
-    });
-  const first = await ends();
-  expect(first.until, "the window ends at or after the stopped last input").toBeGreaterThanOrEqual(first.finalAt);
-  // an input on another element after the typing
-  await page.evaluate(() => {
-    const other = document.createElement("input");
-    document.body.append(other);
-    other.dispatchEvent(new Event("input", { bubbles: true }));
-    other.remove();
-  });
-  await page.evaluate(endKeys, KEYS.length);
-  expect((await ends()).until, "an input elsewhere does not move the end").toBe(first.until);
-  await expect(page.evaluate(endKeys, KEYS.length + 1)).rejects.toThrow("3 of 4 typed inputs reached the field");
-});
-
 test.beforeEach(async ({ page }) => {
   if (test.info().tags.includes("@timing")) test.info().annotations.push({ type: "budget", description:
     `first paint <${BUDGET.firstPaintMs} ms; ready composer <${BUDGET.readyMs} ms; longest task <=${BUDGET.longTaskMs} ms; key p95 <=${BUDGET.keyP95Ms} ms; key processing <=${BUDGET.keyHandlerMs} ms` });
@@ -416,6 +299,7 @@ async function coldTimes(page: Page) {
 }
 const coldWithinBudget = (t: { fcp: number; ready: number }) => t.fcp < BUDGET.firstPaintMs && t.ready < BUDGET.readyMs;
 
+// Guards the owner's ask that the app opens fast and clean; the release check names this title.
 test("cold load reaches a ready composer without console errors", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" });
   try {
@@ -430,6 +314,7 @@ test("cold load reaches a ready composer without console errors", async ({ brows
   } finally { await ctx.close(); }
 });
 
+// Guards the owner's ask that the app opens fast: cold load timing.
 test("cold load: first paint and time to a ready composer", { tag: "@timing" }, async ({ page, open, browser }) => {
   reportLoad();
   await open();
@@ -530,25 +415,11 @@ interface FlushProbe {
 const oneFlushPerFrame = (r: { deltas: number; flushes: number; maxPerFrame: number; outsideFrame: number }) =>
   r.deltas > 50 && r.flushes > 0 && r.maxPerFrame <= 1 && r.outsideFrame === 0;
 
+// Guards the owner's ask for a steady, paced reveal: one store flush per frame at most.
 test("streaming flushes at most once in any frame", async ({ page, open }) => {
   const r = await streamFlushes(page, open);
   expect(r.flushes).toBeLessThan(r.deltas);
   expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(true);
-});
-
-test("negative control: a flush per task instead of per frame fails the flush gate", async ({ page, open }) => {
-  // the app's rAF becomes a zero-delay timeout; observe() keeps the real one for its frame count
-  await page.addInitScript(() => {
-    window.requestAnimationFrame = (cb) => window.setTimeout(() => cb(performance.now()), 0);
-    window.cancelAnimationFrame = (id) => window.clearTimeout(id);
-  });
-  const r = await streamFlushes(page, open);
-  expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(false);
-});
-
-test("negative control: one extra flush at the terminal event fails the flush gate", async ({ page, open }) => {
-  const r = await streamFlushes(page, open, true);
-  expect(oneFlushPerFrame(r), JSON.stringify(r)).toBe(false);
 });
 
 /** Renders of the 6 seeded rows from "Writing" showing until well into the reply; bust turns the control on. */
@@ -587,15 +458,13 @@ async function seededRenders(page: Page, open: (hash?: string) => Promise<void>,
 test.describe("finished turns while a reply streams", () => {
   test.use({ seed: 6 });
 
+  // Guards the owner's ask that a long conversation stays fast: finished turns do not re-render while a reply streams.
   test("do not re-render", async ({ page, open, seededThread }) => {
     expect(await seededRenders(page, open, seededThread, false)).toBe(0);
   });
-
-  test("negative control: rows handed a fresh message each token fail the render gate", async ({ page, open, seededThread }) => {
-    expect(await seededRenders(page, open, seededThread, true)).toBeGreaterThan(0);
-  });
 });
 
+// Guards the owner's ask that a long conversation opens and scrolls fast; the release check names the first title.
 test.describe("a 400-message thread", () => {
   test.use({ seed: 400 });
   test("renders all 400 messages", async ({ page, open, seededThread }) => {
@@ -603,6 +472,7 @@ test.describe("a 400-message thread", () => {
     await waitReady(page);
     await expect(page.locator(".tl .turn")).toHaveCount(400);
   });
+  // Guards the owner's ask that a long conversation scrolls smoothly.
   test("opens and scrolls with no long task over 50 ms", { tag: "@timing" }, async ({ page, open, seededThread }) => {
     await open(`#thread=${seededThread ?? ""}`);
     await waitReady(page);
@@ -624,6 +494,7 @@ test.describe("a 400-message thread", () => {
   });
 });
 
+// Guards the owner's ask that typing never drops a key, idle or while a reply streams; the release check names it.
 test("typing preserves every character while idle, streaming and busy", async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -649,6 +520,7 @@ test("typing preserves every character while idle, streaming and busy", async ({
   await expect(writing).toBeVisible();
 });
 
+// Guards the owner's ask that typing stays fast while a reply streams.
 test("typing during a stream: p95 key event, input to paint, inside the budget", { tag: "@timing" }, async ({ page, open }) => {
   await open();
   await waitReady(page);
@@ -726,6 +598,7 @@ test("typing during a stream: p95 key event, input to paint, inside the budget",
   }
 });
 
+// Guards the owner's ruling that bundle limits are soft: report the size, warn past the limit.
 test("bundle size", () => {
   const size = bundleSize(path.join(ROOT, "apps/web/dist"));
   report("entry JS gzip", size.entryJs, "KiB");

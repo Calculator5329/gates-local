@@ -23,6 +23,7 @@ test.afterEach(async () => {
   await new Promise<void>((resolve) => silent.close(() => resolve()));
 });
 
+// Guards a shipped bug fix: with image generation on, the page waited on ComfyUI before it was ready.
 test("with image generation on, the page is ready within 5 s while ComfyUI does not answer", async ({ page, open }) => {
   await stack.reset("models", 0, undefined, "system", undefined, url);
   await open(); await waitReady(page);

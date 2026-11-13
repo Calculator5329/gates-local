@@ -5,6 +5,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 // the browser logs each refused WebSocket attempt while the server is down
 test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
 
+// Guards the owner's ask that the app reconnects after a server restart and keeps the thread.
 test("after a server restart the app reconnects, keeps the thread and chats again", async ({ page, open }) => {
   await open();
   await waitReady(page);
