@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: The start screen is the mark and the bar
+
+- A new thread opens on the gate mark above the chat bar. The headline, the
+  subline, the starter cards and the set-up links are gone.
+- Under the bar, a library icon shows while library search is not set up and
+  an image icon while image generation is not, each with an amber ring and
+  each opening its Settings section. Once both are set up, nothing shows
+  under the bar, and the bar stays where it was.
+- The mark takes the accent colour once Settings has one, and the theme's
+  text colour until then.
+
 ## 2026-11-13: No line under the sidebar head on desktop
 
 - The desktop app no longer draws a grey line under the sidebar's top row,

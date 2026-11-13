@@ -6,7 +6,7 @@
 // runtime confirm, the download page, then Settings itself.
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Banner, type Rt, booting, rtOf } from "./Banner.tsx";
+import { Banner, type Rt, rtOf } from "./Banner.tsx";
 import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
@@ -15,7 +15,6 @@ import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { imageMode } from "./image-choice.ts";
 import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
 import { SECTIONS, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
-import { startWith } from "./starter.ts";
 import { UpdateNote } from "./UpdateNote.tsx";
 import { PopPanel } from "./Panel.tsx";
 import { usageScreen } from "./screen-loaders.ts";
@@ -26,106 +25,66 @@ import { syncWindowTitle } from "./titlebar.ts";
 import { keepSheetFocus } from "./sheet-focus.ts";
 import { PHONE, POP_EL, SheetHead, Tip, TurnSkel, anchorOf, closePop, isPhone, isTouch, menuKeys, place, tabStops, useMedia } from "./ui.tsx";
 
-interface Card {
-  readonly icon: IconId;
-  readonly t: string;
-  readonly d: string;
-  readonly q: string;
-  readonly img?: boolean;
-}
+/** Which setup icons show under the start screen's bar: library search's and image generation's, each only while it is not set up. */
+interface Unset { readonly lib: boolean; readonly img: boolean }
 
-/** Which starter cards and set-up links show: the library's and image generation's, each a card once set up, a link before. */
-interface CardShape { readonly lib: boolean; readonly libLink: boolean; readonly img: boolean; readonly imgLink: boolean }
-
-/** This browser's last known shape, so the first frame has the cards before the reads land (docs/design.md). */
+/**
+ * This browser's last known setup, so the first frame has the icons before the reads land (docs/design.md).
+ * The key and its libLink/imgLink fields are the old starter cards', so an update keeps what was seen.
+ */
 const SHAPE_KEY = "gates-local:card-shape";
-/** No shape seen yet: a new install has neither set up, so both links. */
-const NEW_SHAPE: CardShape = { lib: false, libLink: true, img: false, imgLink: true };
+/** No setup seen yet: a new install has neither set up. */
+const NEW_UNSET: Unset = { lib: true, img: true };
 
-function savedShape(): CardShape {
+function savedUnset(): Unset {
   try {
-    const v = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null") as Partial<CardShape> | null;
-    return v !== null && typeof v === "object" ? { ...NEW_SHAPE, ...v } : NEW_SHAPE;
+    const v = JSON.parse(localStorage.getItem(SHAPE_KEY) ?? "null") as { libLink?: unknown; imgLink?: unknown } | null;
+    if (v === null || typeof v !== "object") return NEW_UNSET;
+    return { lib: typeof v.libLink === "boolean" ? v.libLink : true, img: typeof v.imgLink === "boolean" ? v.imgLink : true };
   } catch {
-    return NEW_SHAPE;
+    return NEW_UNSET;
   }
 }
 
-/** The shape from the reads that have landed, the saved one for the rest; `known` once both have. */
-function cardShape(s: State, saved: CardShape): CardShape & { readonly known: boolean } {
-  const lib = s.sources === undefined ? { lib: saved.lib, libLink: saved.libLink } : { lib: Array.isArray(s.sources) && s.sources.length > 0, libLink: Array.isArray(s.sources) && s.sources.length === 0 };
-  const img = s.settings === undefined ? { img: saved.img, imgLink: saved.imgLink } : { img: s.settings !== NA && s.settings.imageGen, imgLink: s.settings !== NA && !s.settings.imageGen };
-  return { ...lib, ...img, known: s.sources !== undefined && s.settings !== undefined };
+/** Setup from the reads that have landed, the saved one for the rest; `known` once both have. A failed read shows no ring. */
+function unsetNow(s: State, saved: Unset): Unset & { readonly known: boolean } {
+  return {
+    lib: s.sources === undefined ? saved.lib : Array.isArray(s.sources) && s.sources.length === 0,
+    img: s.settings === undefined ? saved.img : s.settings !== NA && !s.settings.imageGen,
+    known: s.sources !== undefined && s.settings !== undefined,
+  };
 }
 
-/** Starter cards under the new-thread composer (F43): inert while chat is blocked. */
-function Cards() {
-  const [saved] = useState(savedShape);
-  const lib = useStore((s) => cardShape(s, saved).lib);
-  const libLink = useStore((s) => cardShape(s, saved).libLink);
-  const img = useStore((s) => cardShape(s, saved).img);
-  const imgLink = useStore((s) => cardShape(s, saved).imgLink);
-  const known = useStore((s) => cardShape(s, saved).known);
+/**
+ * The start screen's setup icons (chat row 20): the library's while library search is not set up, the image's
+ * while image generation is not; each opens its Settings section and wears an amber ring. Empty, at its height,
+ * on a set-up machine, so the bar never moves when the reads land.
+ */
+function SetupIcons() {
+  const [saved] = useState(savedUnset);
+  const lib = useStore((s) => unsetNow(s, saved).lib);
+  const img = useStore((s) => unsetNow(s, saved).img);
+  const known = useStore((s) => unsetNow(s, saved).known);
   useEffect(() => {
     if (!known) return;
     try {
-      localStorage.setItem(SHAPE_KEY, JSON.stringify({ lib, libLink, img, imgLink }));
+      localStorage.setItem(SHAPE_KEY, JSON.stringify({ libLink: lib, imgLink: img }));
     } catch {
-      // no storage here: the next start shows the new-install shape until the reads land
+      // no storage here: the next start shows the new-install icons until the reads land
     }
-  }, [known, lib, libLink, img, imgLink]);
-  // dimmed only once a problem is known; before the first read the cards look as they will
-  const blocked = useStore((s) => rtOf(s) !== "ready");
-  const dim = useStore((s) => rtOf(s) !== "ready" && !booting(s));
-  const phone = useMedia(PHONE);
-  const cards: Card[] = [
-    { icon: "chat", t: "Explain something", d: "Plain answers, step by step.", q: "Explain how cron decides which programs it can find." },
-    { icon: "pencil", t: "Draft or rewrite", d: "Emails, notes and READMEs, written here.", q: "Rewrite this paragraph so it is shorter and clearer: " },
-  ];
-  if (lib) cards.push({ icon: "book", t: "Search my library", d: "Books and notes you added.", q: "Which books in the library are about databases?" });
-  if (img) cards.push({ icon: "image", t: "Generate an image", d: "ComfyUI on this GPU.", q: "Make an image of ", img: true });
-  const links: [Section, string][] = [];
-  if (libLink) links.push(["library", "Set up library search…"]);
-  if (imgLink) links.push(["images", "Set up image generation…"]);
+  }, [known, lib, img]);
+  const icons: [Section, IconId, string][] = [];
+  if (lib) icons.push(["library", "book", "Library search"]);
+  if (img) icons.push(["images", "image", "Image generation"]);
   return (
-    <>
-      <div className={`cards${cards.length === 3 ? " c3" : ""}${dim ? " off" : ""}`} inert={blocked}>
-        {cards.map((c) => (
-          <button
-            key={c.t}
-            type="button"
-            className="card"
-            onClick={() => startWith(c.q, c.img === true)}
-          >
-            <Icon id={c.icon} />
-            <span>
-              <span className="ct">{c.t}</span>
-              <span className="cd">{c.d}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-      <div className="card-links">
-        {phone && links.length === 2 ? (
-          <button
-            type="button"
-            className="link"
-            onClick={() => {
-              setState({ setList: true });
-              openSettings();
-            }}
-          >
-            Set up library and images…
-          </button>
-        ) : (
-          links.map(([go, label]) => (
-            <button key={go} type="button" className="link" data-go={go} onClick={() => openSettings(go)}>
-              {label}
-            </button>
-          ))
-        )}
-      </div>
-    </>
+    <div className="setup-row">
+      {icons.map(([go, icon, name]) => (
+        <button key={go} type="button" className="setup-ic" data-go={go} data-tip={name} aria-label={`Set up ${name.toLowerCase()}`} onClick={() => openSettings(go)}>
+          <Icon id={icon} />
+          <span className="unset" />
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -133,8 +92,11 @@ function Draft({ under }: { under: boolean }) {
   return (
     <div className="draft">
       <div className="draft-in">
-        <h1 className="hero">What would you like help with?</h1>
-        <p className="hero-sub">Runs on your computer. Nothing leaves your own network.</p>
+        <h1 className="start-mark">
+          <svg role="img" aria-label="Gates Local">
+            <use href="#i-mark" />
+          </svg>
+        </h1>
         <div className="banner-slot">
           {/* under Settings the note shows on Settings' own surface, once */}
           {under ? null : <UpdateNote />}
@@ -143,7 +105,7 @@ function Draft({ under }: { under: boolean }) {
         <div id="draftComposerSlot">
           <Composer />
         </div>
-        <Cards />
+        <SetupIcons />
       </div>
     </div>
   );

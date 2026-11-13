@@ -398,20 +398,17 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .draft{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;justify-content:center;padding:24px 24px 9vh}
 .draft-in{width:100%;max-width:var(--composer-w);margin:0 auto}
 .draft-in:has(.att:not(:empty)){transform:translateY(-38px)}
-.hero{font-size:24px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px;text-align:center}
-.hero-sub{font-size:15px;color:var(--muted-foreground);text-align:center;margin:0 0 24px}
-.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:16px}
-.card{text-align:left;border-radius:var(--r-xl);background:transparent;box-shadow:inset 0 0 0 1px var(--border);padding:14px 16px;transition:background-color .12s,box-shadow .12s;display:flex;align-items:flex-start;gap:12px}
-.card:hover{background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
-.card>.ic{color:var(--muted-foreground);margin-top:2px}
-.card .ct{display:block;font-size:14px;font-weight:500;color:var(--foreground)}
-.card .cd{display:block;font-size:13px;color:var(--muted-foreground);line-height:1.5;margin-top:2px}
-.cards.c3{grid-template-columns:repeat(3,1fr)}        /* three cards sit in one row, never 2 + an orphan */
-/* F43: while chat is blocked the cards are inert: dimmed, no hover, not clickable */
-.cards.off .card{opacity:.42;pointer-events:none}
-/* F47: setup lives in quiet links under the cards, not in cards that can't work yet */
-.card-links{display:flex;justify-content:center;gap:24px;margin-top:16px}
-.card-links:empty{display:none}
+/* chat row 20, direction Mark: the gate mark above the bar in the accent colour (settings row 8 defines
+   --accent; until then the theme's foreground), and under the bar only what is not set up yet */
+.start-mark{display:block;width:34px;height:34px;margin:0 auto 28px;color:var(--accent,var(--foreground))}
+.start-mark svg{display:block;width:100%;height:100%}
+.setup-row{display:flex;justify-content:center;gap:6px;margin-top:16px;min-height:36px}
+.setup-row:empty{visibility:hidden}
+.setup-ic{position:relative;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-ctl);color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border);transition:background-color .12s,color .12s,box-shadow .12s}
+.setup-ic:hover{color:var(--foreground);background:var(--hover);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.setup-ic .ic{width:17px;height:17px}
+/* not set up: a hollow amber ring (green means ready everywhere else) */
+.unset{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--amber)}
 
 /* ---------- composer (F01 F07 F08 F13) ---------- */
 .cw{position:relative;flex:none;padding:0 24px 16px}
@@ -871,10 +868,10 @@ a.btn{text-decoration:none}
 .cf-r>#modelBtn{min-width:80px;overflow:hidden}
 .draft{padding:16px 12px 0}
 .draft-in{flex:1 0 auto;display:flex;flex-direction:column}
-.hero{margin-top:auto;text-wrap:balance}
-.cards,.cards.c3{grid-template-columns:1fr;gap:8px;margin:0}
-.card-links{order:1;margin-top:8px}
-.card-links .link{min-height:44px}
+/* the mark sits low in the free space, the setup icons just above the docked bar, in thumb reach */
+.start-mark{margin:auto auto 24px}
+.setup-row{order:1;margin:0;min-height:44px}
+.setup-ic{width:44px;height:44px}
 .draft-in .banner-slot{order:2;padding:12px 0 0}
 #draftComposerSlot{order:3;position:sticky;bottom:0;margin-top:16px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:var(--background)}
 .pop{position:fixed;inset:auto 0 0!important;width:auto!important;max-height:70dvh;overflow-y:auto;z-index:50;border:0;border-top:1px solid var(--popover-border);border-radius:var(--r-lg) var(--r-lg) 0 0;background:var(--popover);padding-bottom:env(safe-area-inset-bottom)}
@@ -898,7 +895,6 @@ a.btn{text-decoration:none}
 .sl-r+.sl-r{border-top:1px solid var(--border)}
 .sl-r:hover{background:var(--hover)}
 .sl-r .mn{flex:1;font-size:14px;font-weight:500}
-.card-links{flex-wrap:wrap;gap:0 16px}.card-links>*{white-space:nowrap}
 .sv:empty{display:none}
 .ph-hide{display:none}
 /* a reply reads in 8/16/24 steps */
@@ -930,7 +926,7 @@ a.btn{text-decoration:none}
 .fr-m .v{flex:none;align-self:stretch;justify-content:flex-start}
 /* one secondary grey, nothing under 14 px */
 .af-t b,.af-t small{font-size:14px}
-.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.card .cd,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
+.sb-group,.sb-empty,.sb-row .ago,.u-act .tm,.a-act .meta,.stop-mark,.wr-m,.think,.qa,.mi small,.fp-n,.ctx-line,.fp-mt,.axis,.lg-r .nm small,.meas span,.grp-t,.sl .d,.dl-v small,.badge,.fr-st,.fr-sub,.fr-note,.na,.btn.ghost,.upd-res,.prog-l,.kl td.k,.mini-seg button,.seg2 button{font-size:14px}
 .ta::placeholder,.sb-search input::placeholder,.inp::placeholder{color:var(--muted-foreground)}
 }
 /* touch: hover-only things get a tap path and every target is at least 44 by 40 */

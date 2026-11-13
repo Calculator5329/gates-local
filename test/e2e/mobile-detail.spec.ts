@@ -382,7 +382,7 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
       const lefts = await page.locator(".fr-m > *").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
       expect(new Set(lefts).size, "the card is one left-aligned column").toBe(1);
       await expect(page.locator(".fr-m .rec"), "no separator left leading its own line").toHaveText("Recommended", { useInnerText: true });
-      // said once, under the new-chat heading, not on first run
+      // not on first run
       await expect(page.locator(".fr-foot")).toHaveCount(0);
       await expect(page.locator(".fr")).not.toContainText("Nothing leaves your own network");
     });
@@ -393,21 +393,17 @@ for (const [name, use] of [["360", NARROW], ["412", PHONE]] as const) {
 
 test.describe("a new thread at 360", () => {
   test.use(NARROW);
-  test("the headline and suggestions sit on the composer, one setup row, a quiet new-thread icon", async ({ page, open }) => {
+  test("the mark and the setup icons sit on the composer, a quiet new-thread icon", async ({ page, open }) => {
     await open();
     await waitReady(page);
-    // Library hydration replaces the initial image-only link with this combined setup row.
-    await expect(page.locator(".card-links").getByRole("button", { name: "Set up library and images…", exact: true })).toBeVisible();
-    const cards = await box(page, ".cards");
+    const icons = page.locator(".setup-row .setup-ic");
+    await expect(icons).toHaveCount(2);
+    const mark = await box(page, ".start-mark");
     const composer = await box(page, ".composer");
-    const setup = await box(page, ".card-links");
-    expect(setup.y - (cards.y + cards.height), "the setup row follows the suggestions").toBeLessThanOrEqual(16);
-    expect(composer.y - (setup.y + setup.height), "the suggestions end just above the composer").toBeLessThanOrEqual(24);
-    expect(await css(page, ".hero", "text-wrap")).toContain("balance");
-    await expect(page.locator(".hero-sub")).toHaveText("Runs on your computer. Nothing leaves your own network.");
-    const links = page.locator(".card-links button:visible");
-    await expect(links).toHaveCount(1);
-    await expect.poll(async () => (await links.first().boundingBox())?.height ?? 0, { message: "setup row height" }).toBeGreaterThanOrEqual(44);
+    const setup = await box(page, ".setup-row");
+    expect(setup.y - (mark.y + mark.height), "the setup icons follow the mark").toBeLessThanOrEqual(24);
+    expect(composer.y - (setup.y + setup.height), "the setup icons end just above the composer").toBeLessThanOrEqual(24);
+    for (const b of await icons.all()) expect((await b.boundingBox())?.height ?? 0, "setup icon height").toBeGreaterThanOrEqual(44);
     const nb = page.locator(".hdr").getByRole("button", { name: "New thread" });
     await expect(nb).toBeDisabled();
     await page.locator("#ta").fill("x");
@@ -619,7 +615,7 @@ test.describe("Settings on a phone", () => {
     expect(b?.height ?? 0, "back height").toBeGreaterThanOrEqual(44);
     await back.tap();
     await page.getByRole("button", { name: "Done" }).tap();
-    await expect(page.locator(".hero")).toBeVisible();
+    await expect(page.locator(".start-mark")).toBeVisible();
   });
 
   test("Runtime says the port once and its status card has no dead space", async ({ page, open }) => {

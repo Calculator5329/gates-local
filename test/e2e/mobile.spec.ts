@@ -65,7 +65,7 @@ test("the thread, drawer, new thread, sheets and settings never scroll the page 
   await noSideScroll(page, "drawer");
   await page.keyboard.press("Escape");
   await page.locator(".hdr").getByRole("button", { name: "New thread" }).tap();
-  await expect(page.locator(".hero")).toBeVisible();
+  await expect(page.locator(".start-mark")).toBeVisible();
   await noSideScroll(page, "new thread");
   await page.locator("#modelBtn").tap();
   await expectSheet(page, "#picker");
@@ -99,7 +99,7 @@ test.describe("first run", () => {
     const cta = await page.getByRole("button", { name: "Start chatting" }).boundingBox();
     expect(cta?.height ?? 0, "Start chatting height").toBeGreaterThanOrEqual(44);
     await page.getByRole("button", { name: "Start chatting" }).tap();
-    await expect(page.locator(".hero")).toBeVisible();
+    await expect(page.locator(".start-mark")).toBeVisible();
   });
 });
 
@@ -202,7 +202,7 @@ test("settings opens a section and goes back to the list and the chat", async ({
   await page.getByRole("button", { name: "Back to Settings" }).tap();
   await expect(list).toBeVisible();
   await page.getByRole("button", { name: "Done" }).tap();
-  await expect(page.locator(".hero")).toBeVisible();
+  await expect(page.locator(".start-mark")).toBeVisible();
 });
 
 test("every reply shows its actions, and a tap on your message shows Edit", async ({ page, open, seededThread }) => {

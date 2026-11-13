@@ -11,7 +11,7 @@ test("first run finds Ollama and its models, then a streamed reply shows thinkin
   await expect(page.locator(".fr-card .nm")).toHaveText("Qwen 3.5 9B");
   await page.getByRole("button", { name: "Start chatting" }).click();
 
-  await expect(page.getByRole("heading", { name: "What would you like help with?" })).toBeVisible();
+  await expect(page.locator(".draft").getByRole("heading", { name: "Gates Local" })).toBeVisible();
   await expect(page.locator("#ta")).toBeFocused();
   await sendMessage(page, "What is a context window");
 
