@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-13: The Library says when it is read, and that a clone is a copy
+
+- Settings › Library drops its subtitle, which said the model reads it "in
+  every chat"; with Tools off no chat reads it. With Tools off it now says
+  so, with a Turn on Tools link, and says nothing otherwise.
+- A cloned repository sits under Clone a repository and says "Copied from
+  owner/repo on Nov 13". Before, it was listed under Files and folders as if
+  the model saw it change; a clone is copied once and never refreshes. The
+  URL row no longer repeats "Ready in Library" under it.
+- Files and folders drops "The model always sees the latest version."
+- A sample download or a clone stopped by its time limit says "Timed out
+  after 60 seconds" instead of "took too long".
+
 ## 2026-11-13: A quick Library download is seen to happen
 
 - A sample database's Download button takes at least 0.8 s to fill, however

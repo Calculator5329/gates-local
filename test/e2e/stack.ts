@@ -214,6 +214,9 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_MEMINFO: meminfo,
     // The shell sandbox's probe sees a stand-in machine, never the runner's own bwrap.
     GATES_LOCAL_SYSTEMD_RUN: path.join(ROOT, "test/fake-ollama/systemd-run.ts"),
+    // bwrap and sqlite3 are checked by path; the stand-in's file is there on every runner.
+    GATES_LOCAL_BWRAP: path.join(ROOT, "test/fake-ollama/systemd-run.ts"),
+    GATES_LOCAL_SQLITE: path.join(ROOT, "test/fake-ollama/systemd-run.ts"),
     GL_FAKE_SANDBOX: sandbox,
     GATES_LOCAL_SERVER_TOKEN: TOKEN,
     GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN,

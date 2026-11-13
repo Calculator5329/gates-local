@@ -14,6 +14,9 @@ const SQLITE = "/usr/bin/sqlite3";
 const SYSTEMD_RUN = "/usr/bin/systemd-run";
 /** A test server points this at a stand-in (as GATES_LOCAL_NVIDIA_SMI does for nvidia-smi), to make the probe fail on any machine. */
 const systemdRun = () => process.env["GATES_LOCAL_SYSTEMD_RUN"] || SYSTEMD_RUN;
+/** The same for the paths the probe checks, so a test machine's own bwrap and sqlite3 never decide it. */
+const bwrap = () => process.env["GATES_LOCAL_BWRAP"] || BWRAP;
+const sqlite = () => process.env["GATES_LOCAL_SQLITE"] || SQLITE;
 /** Every tmpfs is 64 MiB; together with /dev they are charged to the scope's memory cap. */
 const TMPFS_BYTES = String(64 * 1024 * 1024);
 export const SCOPE_LIMITS = { memoryMaxBytes: 512 * 1024 * 1024, tasksMax: 64 } as const;
@@ -168,15 +171,15 @@ export async function probeSandboxWith(host: SandboxHost): Promise<SandboxProbe>
   if (host.platform !== "linux") return { available: false, word: "Linux only", reason: "The shell tool runs only on Linux." };
   if (!isSeccompArch(host.arch)) return { available: false, word: "Not on this processor", reason: ARCH_OFF };
   const arch = host.arch;
-  if (!host.exists(BWRAP)) return { available: false, word: "Needs bubblewrap", reason: "The shell tool needs bubblewrap (/usr/bin/bwrap); it is off on this machine." };
+  if (!host.exists(bwrap())) return { available: false, word: "Needs bubblewrap", reason: "The shell tool needs bubblewrap (/usr/bin/bwrap); it is off on this machine." };
   if (!host.exists(systemdRun())) return scopeOff(`${systemdRun()} is missing`);
   // The scope must exist and carry the caps, read back from its own cgroup files.
   const caps = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), "/usr/bin/sh", "-c",
     'cg=$(cut -d: -f3 /proc/self/cgroup); cat "/sys/fs/cgroup$cg/memory.max" "/sys/fs/cgroup$cg/memory.swap.max" "/sys/fs/cgroup$cg/pids.max"']);
   const expected = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
   if (caps.error || caps.code !== 0 || caps.output.trim() !== expected) return scopeOff((caps.error?.message ?? caps.output.trim()) || `exit ${caps.code}`);
-  const result = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), BWRAP, ...baseArgs(), ...finalMounts, "--", "/usr/bin/true"], sandboxFds(arch));
-  if (!result.error && result.code === 0) return { available: true, arch, sqlite: host.exists(SQLITE) };
+  const result = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), bwrap(), ...baseArgs(), ...finalMounts, "--", "/usr/bin/true"], sandboxFds(arch));
+  if (!result.error && result.code === 0) return { available: true, arch, sqlite: host.exists(sqlite()) };
   const message = result.output.trim() || result.error?.message || `exit ${result.code}`;
   if (/operation not permitted|permission denied|creating new namespace|no permissions to create/i.test(message)) {
     return { available: false, word: "Can't create its sandbox", reason: "The shell tool cannot create its sandbox on this machine; it is off.", detail: message };
@@ -242,7 +245,7 @@ export async function runSandbox(input: SandboxInput): Promise<string> {
   const unit = `gates-shell-${randomUUID()}`;
   input.beforeLaunch?.();
   return new Promise((resolve, reject) => {
-    const child = spawnScoped(input.launcher ?? systemdRun(),[...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch), 1);
+    const child = spawnScoped(input.launcher ?? systemdRun(),[...scopeArgs(unit), bwrap(), ...args], sandboxFds(probe.arch), 1);
     // Until the marker arrives, everything on stdout and stderr is systemd-run's or bwrap's.
     let started = false;
     const marker = (child.stdio as readonly unknown[])[MARKER_FD] as Readable;

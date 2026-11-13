@@ -133,7 +133,8 @@ export function createLibraryImports(deps: ImportsDeps) {
     jobs.set(slot.id, job);
     running.set(slot.id, controller);
     emit();
-    const timer = setTimeout(() => controller.abort(new Error("This import took too long. Check your connection and retry.")), deps.timeoutMs ?? IMPORT_MS);
+    const limit = deps.timeoutMs ?? IMPORT_MS;
+    const timer = setTimeout(() => controller.abort(new Error(`Timed out after ${Math.ceil(limit / 1000)} seconds. Check your connection and retry.`)), limit);
     let scanning = false;
     const monitor = kind === "repository" ? setInterval(() => {
       if (scanning || signal.aborted) return;

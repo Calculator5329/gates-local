@@ -112,6 +112,26 @@ describe("update admission integration", () => {
   });
 });
 
+// Settings row 13 (owner 2026-11-13): an import stopped by its time limit says it timed out.
+const hanging: typeof fetch = async (_input, init) => new Response(new ReadableStream({
+  start(controller) { init?.signal?.addEventListener("abort", () => controller.error(init.signal!.reason), { once: true }); },
+}));
+describe("an import that runs out of time", () => {
+  it.each(["sample", "repository"] as const)("a %s import says it timed out, and after how long", async kind => {
+    const s = setup();
+    const imports = createLibraryImports({ sources: s.sources, samples: [s.sample], fetch: hanging, git: pendingClone, timeoutMs: 60_000 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const job = kind === "sample" ? imports.handlers["sources.downloadSample"]({ id: s.sample.id }) : imports.handlers["sources.clone"]({ url: "https://github.com/example/slow" });
+      await vi.advanceTimersByTimeAsync(60_000);
+      vi.useRealTimers();
+      const end = await finished(imports, job.id);
+      expect(end.state).toBe("error");
+      expect(end.detail).toBe("Timed out after 60 seconds. Check your connection and retry.");
+    } finally { vi.useRealTimers(); imports.close(); await stopped(imports); }
+  });
+});
+
 describe("review round 1", () => {
   it("refuses a third active import before allocating work, and releases capacity after cancellation (DD-01)", async () => {
     const s = setup();
@@ -391,7 +411,7 @@ describe("sample downloads", () => {
     slow = true;
     const timed = createLibraryImports({ sources: s.sources, samples: [s.sample], fetch: get, timeoutMs: 10 });
     const job = timed.handlers["sources.downloadSample"]({ id: s.sample.id });
-    expect((await finished(timed, job.id)).detail).toMatch(/too long/);
+    expect((await finished(timed, job.id)).detail).toMatch(/^Timed out after/);
     expect(s.sources.list()).toEqual([]);
   });
   it("refuses non-HTTPS before invoking the download transport", async () => {

@@ -23,7 +23,8 @@
 //                     offered; without it, the reply says what the system prompt's image line says
 // A prompt with the word "tool" makes any scenario call the first offered tool
 // once (repeatToolCalls: every round; toolCalls: N, the first N rounds);
-// quietToolRounds ends such a round at the call, with no reply text.
+// quietToolRounds ends such a round at the call, with no reply text. When that prompt also names
+// a Library source by its label, the call reads that source and the reply quotes it (libraryRead).
 // An "installed": [names] option replaces the scenario's installed set (names
 // from models.ts; no-models stays empty).
 // GET /__fake/state returns installed and loaded models and the request log.
@@ -246,6 +247,23 @@ export function replyWords(prompt: string, count: number): string[] {
   const words = [...head];
   for (let i = 0; words.length < count; i++) words.push(LOREM[i % LOREM.length] ?? ".");
   return words.slice(0, Math.max(count, head.length));
+}
+
+/**
+ * A prompt that says "tool" and names a Library source by its label, as the system message lists
+ * them ("<id>: <label> (<kind>) at <where>", chat/tools.ts), reads that source: a database with
+ * the shell, a folder's README.md or a file with read. The reply after that round quotes what the
+ * tool returned, so a journey sees the source reach the answer (settings row 13).
+ */
+export function libraryRead(messages: unknown, prompt: string, offered: readonly string[]): { label: string; call: { name: string; arguments: Record<string, string> } } | undefined {
+  if (!/\btool\b/i.test(prompt) || !Array.isArray(messages)) return undefined;
+  const system = messages.filter((m) => field(m, "role") === "system").map((m) => str(m, "content") ?? "").join("\n");
+  for (const [, label, kind, where] of system.matchAll(/^[\w-]+: (.+) \((sqlite|folder|file)\) at (\S+)$/gm)) {
+    if (label === undefined || where === undefined || !prompt.includes(label)) continue;
+    if (kind === "sqlite" && offered.includes("shell")) return { label, call: { name: "shell", arguments: { command: `sqlite3 ${where} "SELECT name FROM sqlite_master WHERE type='table'"` } } };
+    if (kind !== "sqlite" && offered.includes("read")) return { label, call: { name: "read", arguments: { path: kind === "folder" ? `${where}/README.md` : where } } };
+  }
+  return undefined;
 }
 
 /** Multiple blocks make partial progress visible without waiting for completion. */
@@ -480,7 +498,13 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       const observed = Array.isArray(messages) ? messages.filter((msg) => field(msg, "role") === "tool").length : 0;
       const calls = Array.isArray(tools) && tools.length > 0 && /\btool\b/i.test(prompt)
         && (timing.toolCalls > 0 ? observed < timing.toolCalls : timing.repeatToolCalls > 0 || observed === 0);
-      if (calls) {
+      const offered = Array.isArray(tools) ? tools.map((tool) => str(field(tool, "function"), "name")).filter((n): n is string => n !== undefined) : [];
+      const library = libraryRead(messages, prompt, offered);
+      const toolResult = Array.isArray(messages) ? str(messages.findLast((msg) => field(msg, "role") === "tool"), "content") : undefined;
+      const echo = library !== undefined && observed > 0 && toolResult !== undefined ? `From ${library.label}: ${toolResult.trim().slice(0, 300)}`.match(/\s*\S+/g) ?? [] : undefined;
+      if (calls && library !== undefined) {
+        line({ ...base(), message: { role: "assistant", content: "", tool_calls: [{ function: library.call }] }, done: false });
+      } else if (calls) {
         const image = /\b(draw|image|ship)\b/i.test(prompt) ? tools.find((tool) => field(field(tool, "function"), "name") === "image") : undefined;
         const fn = field(field(image ?? tools[0], "function"), "name");
         // an attached file's line names where to read it ("read it with the read tool at /library/<id>")
@@ -491,7 +515,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
           done: false,
         });
       }
-      for (const t of calls && timing.quietToolRounds > 0 ? [] : mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords))) {
+      for (const t of calls && timing.quietToolRounds > 0 ? [] : echo ?? (mode === "slow-drip" ? (timing.longDrip ? STREAM_REPLY.match(/\s*\S+/g) ?? [] : dripTokens()) : mode === "threads" ? (threadReply(prompt).match(/\s*\S+/g) ?? []) : tokens(replyWords(prompt, timing.replyWords)))) {
         if (abort.signal.aborted) return;
         if ((mode === "slow-drip" || mode === "threads") && timing.holdAfterTokens > 0 && sent === timing.holdAfterTokens && !released.has(turn.id)) {
           await new Promise<void>((resolve) => {

@@ -463,6 +463,10 @@ const ADD_WORDS: Record<SourceKind, { noun: string; hint: string }> = {
 
 const KIND_ICON: Record<SourceKind, IconId> = { folder: "folder", file: "file", sqlite: "db" };
 
+/** A cloned repository's line: "Copied from owner/repo on Nov 13". The model reads that copy; it never refreshes. */
+export const copiedFrom = (key: string, at: number) =>
+  `Copied from ${key.replace(/^https:\/\/github\.com\//i, "").replace(/\.git\/?$|\/$/g, "")} on ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+
 function SourceRow({ src }: { src: Source }) {
   const locked = useStore((s) => s.unavailable["sources.remove"] === true);
   const [open, setOpen] = useState(false);
@@ -485,7 +489,7 @@ function SourceRow({ src }: { src: Source }) {
       <Icon id={KIND_ICON[src.kind]} cls="src-ic" />
       <div className="sl">
         <b>{name}</b>
-{src.managed ? <span className="d">{src.managed.kind === "sample" ? "Sample database" : "Public GitHub repository"}</span> : src.label && src.label !== src.path ? <span className="d"><PathText path={src.path} /></span> : null}
+        {src.managed ? <span className="d">{src.managed.kind === "sample" ? "Sample database" : copiedFrom(src.managed.key, src.addedAt)}</span> : src.label && src.label !== src.path ? <span className="d"><PathText path={src.path} /></span> : null}
         {broken ? <span className="act-err">{sourceDetail(src)}</span> : null}
         <Fail err={err} />
       </div>
@@ -575,8 +579,7 @@ function AddRow({ kind, close }: { kind: SourceKind; close: () => void }) {
   );
 }
 
-/** `note` is what sets this kind apart; it sits in the add row so the group stays a title and a card. */
-function SourceGroup({ title, note, kinds, items }: { title: string; note: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
+function SourceGroup({ title, kinds, items }: { title: string; kinds: readonly SourceKind[]; items: readonly Source[] }) {
   const locked = useStore((s) => s.unavailable["sources.add"] === true);
   const [adding, setAdding] = useState<SourceKind | null>(null);
   const entry = useRef<HTMLDivElement>(null);
@@ -598,7 +601,7 @@ function SourceGroup({ title, note, kinds, items }: { title: string; note: strin
       ))}
       <div className="src-entry" ref={entry}>
         {adding === null ? (
-          <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."} desc={<span className="src-help">{note}</span>}>
+          <Row label={items.length > 0 ? "Add another source" : "No folders or files yet."}>
             {locked ? <Na>{COMPUTER_ONLY}</Na> : action}
           </Row>
         ) : <AddRow key={adding} kind={adding} close={close} />}
@@ -635,14 +638,26 @@ function AddDatabase() {
 function Library() {
   const sources = useStore((s) => s.sources);
   const locked = useStore((s) => s.unavailable["sources.add"] === true);
+  // As the server reads it (app.ts): the Library reaches a turn only while Tools are on.
+  const tools = useStore((s) => s.settings === NA || s.settings?.tools === true);
   const list = sources === NA || sources === undefined ? [] : sources;
+  // A clone is a copy made once: it sits under Clone with where and when it came from, not among the folders the model sees change.
+  const clones = list.filter((x) => x.managed?.kind === "repository");
   return (
     <>
-      <Head title="Library">Folders, files and databases the model can read in every chat. Gates Local never changes them.</Head>
+      {/* Audit W07 and M04: no subtitle; only Tools off, which stops every read, is said, with its fix. */}
+      <Head title="Library">
+        {tools ? undefined : (
+          <>
+            Tools are off, so no chat reads these.{" "}
+            <button type="button" className="link" onClick={() => openSettings("tools")}>Turn on Tools</button>
+          </>
+        )}
+      </Head>
       {sources === NA ? null : (
         <>
-          <LibraryImports add={<AddDatabase />} clone={!locked} />
-          <SourceGroup title="Files and folders" note="The model always sees the latest version." kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite")} />
+          <LibraryImports add={<AddDatabase />} clone={!locked} clones={clones.map((x) => <SourceRow key={x.id} src={x} />)} />
+          <SourceGroup title="Files and folders" kinds={["folder", "file"]} items={list.filter((x) => x.kind !== "sqlite" && x.managed?.kind !== "repository")} />
         </>
       )}
     </>

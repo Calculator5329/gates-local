@@ -133,7 +133,7 @@ function FillButton({ name, handle, real, since, running, done, idle, blocked, o
 }
 
 /** Settings › Library: one list of databases with the samples in it, then Clone a repository. Polls only while open; remount and restart read the server's state. */
-export default function LibraryImports({ add, clone }: { add: ReactNode; clone: boolean }) {
+export default function LibraryImports({ add, clone, clones = [] }: { add: ReactNode; clone: boolean; clones?: readonly ReactNode[] }) {
   // Read before Settings opened (session/settings-reads.ts), so the rows are there on the first frame.
   const [value, setValue] = useState<SourceImports | undefined>(settingsReads.imports());
   const [error, setError] = useState<string | null>(null);
@@ -313,7 +313,8 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
     const shownKey = key.replace(/\.git\/?$|\/$/g, "");
     return list.some(s => s.managed?.kind === "repository" && s.managed.key.toLowerCase() === shownKey.toLowerCase());
   };
-  const repoAdded = repoJob !== undefined && repoReady(repoJob.key);
+  // Once the copy is listed above, its own row says so; the URL row goes back to its rest line.
+  const shownJob = repoJob !== undefined && repoReady(repoJob.key) ? undefined : repoJob;
   const cloneAdded = repoReady(url);
   return (
     <>
@@ -331,17 +332,18 @@ export default function LibraryImports({ add, clone }: { add: ReactNode; clone: 
         {rows.map(dbRow)}
         {add}
       </Grp>
-      {clone ? (
-        <Grp title="Clone a repository" tip="A public GitHub repository, read as a Library folder.">
-          <div className="srow">
-            <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", repoJob, repoAdded, repoJob ? `${repoJob.label} · ` : "")}</div>
+      {clone || clones.length > 0 ? (
+        <Grp title="Clone a repository" tip="A public GitHub repository, copied once and read as a Library folder.">
+          {clones}
+          {clone ? <div className="srow">
+            <div className="sl"><b>GitHub URL</b>{line("Up to 64 MiB and 10,000 files.", shownJob, false, shownJob ? `${shownJob.label} · ` : "")}</div>
             <div className="sv">
               <input className="inp import-url" data-testid="settings.clone.url" aria-label="Public GitHub repository URL" placeholder="https://github.com/owner/repo" value={url} disabled={busy(repoJob)} onChange={e => setUrl(e.target.value)} />
               <button type="button" className="btn outline import-action" data-testid="settings.clone.start" disabled={cloneAdded || pending !== undefined} onClick={() => repoJob && busy(repoJob) ? void cancel(repoJob) : (setUrl(repoUrl), void start("repository", () => libraryRequest("sources.clone", { url: repoUrl })))}>
                 {cloneAdded ? "Added" : busy(repoJob) ? "Cancel" : pending === "repository" ? "Starting…" : repoJob?.state === "error" || repoJob?.state === "cancelled" ? "Retry" : "Clone"}
               </button>
             </div>
-          </div>
+          </div> : null}
         </Grp>
       ) : null}
       <Fail err={error} line />
