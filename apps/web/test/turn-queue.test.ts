@@ -347,32 +347,15 @@ const preempted = (partial?: Message): Payload<"chat.event">["event"] => ({
   neededBy: "qwen3:14b",
 });
 
-it("keeps a terminal omission notice beside an off-screen partial reply", async () => {
+it("keeps an off-screen partial reply that was cancelled", async () => {
   const turn = await answering("A");
   chat(turn, "A", { type: "delta", text: "Partial answer" });
   await tick();
   await answering("B");
-  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", contextNotice: "Some earlier images are unavailable." });
-  expect((st().messages["A"] ?? []).at(-1)).toMatchObject({ content: "Partial answer", contextNotice: "Some earlier images are unavailable." });
-});
-
-it.each([false, true])("keeps omission notices beside stopped words (notice before stop: %s)", async earlyNotice => {
-  const turn = await answering("A");
-  if (earlyNotice) {
-    chat(turn, "A", { type: "delta", text: "", contextNotice: "Some earlier images are unavailable." });
-    await tick();
-    expect(live()?.firstTokenAt).toBeUndefined();
-  }
-  chat(turn, "A", { type: "delta", text: "Partial answer" });
-  await tick();
-  session.stop();
-  if (!earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", contextNotice: "Some earlier images are unavailable." });
-  await tick();
-  expect(live()).toHaveProperty("contextNotice", "Some earlier images are unavailable.");
-  await answering("B");
-  // the terminal of the earlier-notice case comes after the person moved on, with the saved row
-  if (earlyNotice) chat(turn, "A", { type: "error", code: "cancelled", message: "stopped", partial: { ...asstMsg("p-notice", "A", "Partial answer"), contextNotice: "Some earlier images are unavailable.", interrupted: true } });
-  expect((st().messages["A"] ?? []).at(-1)).toMatchObject({ content: "Partial answer", contextNotice: "Some earlier images are unavailable." });
+  chat(turn, "A", { type: "error", code: "cancelled", message: "stopped" });
+  const saved = (st().messages["A"] ?? []).at(-1);
+  expect(saved).toMatchObject({ content: "Partial answer" });
+  expect(saved).not.toHaveProperty("contextNotice");
 });
 
 /** Chat A is answering and a new chat's send is waiting on the warning. */

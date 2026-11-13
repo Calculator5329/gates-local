@@ -3,6 +3,7 @@
 // identity, so a token arriving re-renders the live turn and nothing else.
 import { useSyncExternalStore } from "react";
 import { dropDraft } from "./drafts.ts";
+import { readLoadTimes } from "./load-times.ts";
 import type { WorkClock } from "./session/turn.ts";
 import type {
   BlockingTurn,
@@ -43,7 +44,6 @@ export type Section = "general" | "models" | "instructions" | "library" | "tools
 
 /** A chat's reply being written now, or its last one that stopped before it finished. */
 export interface LiveTurn {
-  readonly contextNotice?: string;
   /** The client's own count of turns started this session; a response or event for an older one never touches this turn. */
   readonly gen: number;
   readonly threadId: string;
@@ -52,8 +52,15 @@ export interface LiveTurn {
   readonly userMessageId?: string;
   readonly model: string;
   readonly startedAt: number;
+  /**
+   * When the model could start on this reply: its start, or, when its model was still
+   * loading then, its first token or call (the server ends the load there). Thinking
+   * time counts from here, never the load (owner, chat row 21).
+   */
+  readonly readyAt?: number;
   readonly firstTokenAt?: number;
   readonly thinking: string;
+  /** "Thought for": from readyAt to the first answer word, or to Stop. */
   readonly thinkingSecs?: number;
   /** How long it thought, kept as its events arrive; absent when this client did not see it start. */
   readonly clock?: WorkClock;
@@ -135,6 +142,8 @@ export interface State {
   readonly messages: Readonly<Record<string, readonly Message[]>>;
   /** First-token times measured this session, by message id, for the meta line. */
   readonly firstToken: Readonly<Record<string, number>>;
+  /** "Thought for" seconds measured this session, by message id: from the model being ready, never its load. */
+  readonly thought: Readonly<Record<string, number>>;
   /** A finished reply's thinking clock, kept this session the way `firstToken` is, by message id. */
   readonly clocks: Readonly<Record<string, WorkClock>>;
   /** Each chat's reply, by thread id: being written, or ended here and still shown. The open chat shows `turns[threadId]`. */
@@ -188,6 +197,10 @@ export interface State {
   /** The server's last fit table (fit-table.ts): every fit value on screen is read from it; undefined before the first. */
   readonly fitTable: FitTable | undefined;
   readonly loads: Readonly<Record<string, ModelLoad>>;
+  /** When this client saw each running load start (its "loading" notice), by model. */
+  readonly loadSince: Readonly<Record<string, number>>;
+  /** Each model's last load on this machine, in milliseconds (load-times.ts). */
+  readonly loadTimes: Readonly<Record<string, number>>;
 
   readonly settings: Maybe<Settings>;
   readonly gpu: Maybe<GpuStatus>;
@@ -230,6 +243,7 @@ const initial: State = {
   threads: [],
   messages: {},
   firstToken: {},
+  thought: {},
   clocks: {},
   turns: {},
   queued: [],
@@ -258,6 +272,8 @@ const initial: State = {
   image: false,
   fitTable: undefined,
   loads: {},
+  loadSince: {},
+  loadTimes: readLoadTimes(),
   settings: undefined,
   gpu: undefined,
   catalog: undefined,

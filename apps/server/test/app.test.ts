@@ -282,7 +282,7 @@ it.each([false, true])("PC-03: retrying after a lost acknowledgement returns the
   await expect(r.client.call("chat.send", { ...input, content: "different words" })).rejects.toMatchObject({ code: "image-input" });
 });
 
-it("tells the model and person when a text-only follow-up omits earlier images", async () => {
+it("tells the model, and only the model, when a text-only follow-up omits earlier images", async () => {
   const r = await rig({ show: { ...(SHOW as Record<string, unknown>), capabilities: ["completion", "vision"] } });
   const thread = r.store.createThread();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOor6//DwAFewJ94ITM6gAAAABJRU5ErkJggg==";
@@ -291,13 +291,14 @@ it("tells the model and person when a text-only follow-up omits earlier images",
   r.setShow(res => json(res, 200, { ...(SHOW as Record<string, unknown>), capabilities: ["completion"] }));
   r.setChat(slowReply);
   const next = await r.client.call("chat.send", { threadId: thread.id, content: "read chart", model: MODEL, numCtx: 16384 });
-  await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "delta" && p.event.contextNotice !== undefined);
+  await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "delta" && p.event.text !== "");
   const replayed: Payload<"chat.event">[] = [];
   r.app.replayTurns((channel, payload) => { if (channel === "chat.event") replayed.push(payload as Payload<"chat.event">); });
-  expect(replayed).toContainEqual(expect.objectContaining({ turnId: next.turnId, event: expect.objectContaining({ type: "delta", contextNotice: expect.stringContaining("image") }) }));
   await r.waitFor("chat.event", p => p.turnId === next.turnId && p.event.type === "done");
   expect(JSON.stringify(r.ollama.requests.filter(q => q.path === "/api/chat").at(-1)?.body)).toContain("image was here and is unavailable");
-  expect(events(r, next.turnId)).toContainEqual(expect.objectContaining({ type: "done", message: expect.objectContaining({ contextNotice: expect.stringContaining("image") }) }));
+  // the person sees nothing of it (owner, chat row 17): not live, not replayed, not saved
+  expect(JSON.stringify([replayed, events(r, next.turnId)])).not.toContain("contextNotice");
+  expect(r.store.getThread(thread.id).messages.at(-1)).not.toHaveProperty("contextNotice");
   expect(r.store.getThread(thread.id).messages[0]?.content).toBe("chart");
 });
 

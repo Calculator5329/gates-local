@@ -18,7 +18,7 @@ import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
 import { AttachmentImages } from "./attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, turnOf, useStore } from "./store.ts";
-import { thoughtSecs, type WorkClock } from "./session/turn.ts";
+import { thoughtOrigin, thoughtSecs, thoughtSecsAt, type WorkClock } from "./session/turn.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
 import { TurnSkel, closeTip, esc } from "./ui.tsx";
 
@@ -27,8 +27,9 @@ const NO_TOOLS: readonly ToolStep[] = [];
 const catalogOf = (s: State) => (s.catalog === NA ? undefined : s.catalog);
 
 /** The times this session kept for finished replies, as one subscription: the same object until either map changes. */
-let times: Pick<State, "firstToken" | "clocks"> = { firstToken: {}, clocks: {} };
-const replyTimes = (s: State) => (s.firstToken === times.firstToken && s.clocks === times.clocks ? times : (times = { firstToken: s.firstToken, clocks: s.clocks }));
+let times: Pick<State, "firstToken" | "thought" | "clocks"> = { firstToken: {}, thought: {}, clocks: {} };
+const replyTimes = (s: State) => (s.firstToken === times.firstToken && s.thought === times.thought && s.clocks === times.clocks ? times
+  : (times = { firstToken: s.firstToken, thought: s.thought, clocks: s.clocks }));
 
 declare global {
   interface Window {
@@ -643,7 +644,6 @@ interface ReplyView extends Files {
   /** How long it thought, from the turn's events; undefined when this session did not watch it. */
   readonly clock: WorkClock | undefined;
   readonly secs: number | undefined;
-  readonly contextNotice: string | undefined;
   readonly allowedLinks: ReadonlySet<string> | undefined;
   /** Why this session saw the reply stop: Stop's seconds go in the actions row, a reason's words in the timeline's note under the turn. */
   readonly note: StopNote | undefined;
@@ -654,7 +654,7 @@ interface ReplyView extends Files {
   readonly loading: boolean;
 }
 
-function Reply({ msg, live, text, paced, thinking, tools, clock, secs, contextNotice, allowedLinks, note, meta, regen, thread, loading, origin, token }: ReplyView) {
+function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLinks, note, meta, regen, thread, loading, origin, token }: ReplyView) {
   const end = live?.end;
   const interrupted = msg?.interrupted === true;
   // a reason in words has its own note under the turn; otherwise a saved stopped reply carries the square, with Stop's seconds when this session saw them
@@ -676,12 +676,11 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, contextNo
   return (
     <div className={`turn a${interrupted ? " interrupted" : streaming || pending ? "" : " done"}${knownStop ? " noted" : ""}`} tabIndex={0} aria-label={interrupted ? "Interrupted reply" : "Reply"} data-received={text.length} data-revealed={paced.length}>
       {thinking !== "" || calls.length > 0 ? (
-        <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? live.startedAt : undefined} thinkingNow={thinkingNow}
+        <Fold thinking={thinking} tools={calls} secs={secs} since={thinkingNow ? thoughtOrigin(live) : undefined} thinkingNow={thinkingNow}
           busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} />
       ) : null}
       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
       {msg?.imageJob ? <ImageJob msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
-      {contextNotice ? <p className="na" role="status">{contextNotice}</p> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
       {(streaming || pending) && text !== "" ? (
         <div className="working writing" role="status">
@@ -721,6 +720,7 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const live = useStore((s) => (msg === undefined ? turnOf(s, threadId) ?? null : null));
   const catalog = useStore(catalogOf);
   const ft = useStore((s) => (msg === undefined ? undefined : s.firstToken[msg.id]));
+  const tt = useStore((s) => (msg === undefined ? undefined : s.thought[msg.id]));
   const clock = useStore((s) => (msg === undefined ? live?.clock : s.clocks[msg.id]));
   const loading = useStore((s) => live !== null && s.loads[live.model]?.state === "loading");
   const name = describeModel(msg?.model ?? live?.model ?? "", catalog).name;
@@ -731,10 +731,9 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   const allowedLinks = useMemo(() => imageTurnLinks(messages, tools), [messages, tools]);
   const note = useStore(s => msg === undefined ? undefined : s.stopNotes[msg.id]);
   const secs = live === null
-    ? savedThoughtSecs(ft, note, text, msg?.thinking ?? "")
-    // stopped while thinking: the thought lasted until Stop, not until this render
-    : live.thinkingSecs ?? (live.firstTokenAt === undefined && live.end?.kind === "stopped" ? Math.max(1, live.end.secs)
-      : Math.max(1, Math.round(((live.firstTokenAt ?? Date.now()) - live.startedAt) / 1000)));
+    ? savedThoughtSecs(tt, ft, note, text, msg?.thinking ?? "")
+    // set at the first word or at Stop; until then the time so far, from the model being ready
+    : live.thinkingSecs ?? thoughtSecsAt(live, live.firstTokenAt ?? Date.now());
   const paced = usePacedText(text, live !== null && live.end === undefined);
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
@@ -745,27 +744,31 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
     <>
       {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null}
       <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} clock={clock} secs={secs}
-        contextNotice={msg?.contextNotice ?? live?.contextNotice} allowedLinks={allowedLinks} note={note}
+        allowedLinks={allowedLinks} note={note}
         meta={msg === undefined ? replyMeta(name, {}, live?.end?.kind === "stopped" && live.firstTokenAt !== undefined ? live.firstTokenAt - live.startedAt : undefined) : replyMeta(name, msg, ft)}
         regen={msg === undefined ? live?.end?.kind === "stopped" : last} thread={messages} loading={loading} origin={origin} token={token} />
     </>
   );
 });
 
-/** A saved reply's "Thought for N s": until its first word, or, stopped while thinking, until Stop, as the live turn showed it. */
-function savedThoughtSecs(ft: number | undefined, note: StopNote | undefined, text: string, thinking: string): number | undefined {
+/**
+ * A saved reply's "Thought for N s", as the live turn showed it: from the model being ready until its
+ * first word, or, stopped while thinking, until Stop. Without that, from the send to the first word.
+ */
+function savedThoughtSecs(thought: number | undefined, ft: number | undefined, note: StopNote | undefined, text: string, thinking: string): number | undefined {
+  if (thought !== undefined) return thought;
   if (ft !== undefined) return Math.max(1, Math.round(ft / 1000));
   return note?.kind === "stopped" && text === "" && thinking !== "" ? Math.max(1, note.secs) : undefined;
 }
 
 /** A saved reply: props only, so a keystroke or a token elsewhere runs nothing here. */
-const SavedReply = memo(function SavedReply({ msg, last, thread, catalog, ft, clock, note, origin, token }: RowProps & { catalog: readonly CatalogEntry[] | undefined; ft: number | undefined; clock: WorkClock | undefined; note: StopNote | undefined }) {
+const SavedReply = memo(function SavedReply({ msg, last, thread, catalog, ft, tt, clock, note, origin, token }: RowProps & { catalog: readonly CatalogEntry[] | undefined; ft: number | undefined; tt: number | undefined; clock: WorkClock | undefined; note: StopNote | undefined }) {
   countRender(msg.id);
   const tools = msg.tools ?? NO_TOOLS;
   const allowedLinks = useMemo(() => imageTurnLinks(thread, tools), [thread, tools]);
   return (
     <Reply msg={msg} live={null} text={msg.content} paced={msg.content} thinking={msg.thinking ?? ""} tools={tools} clock={clock}
-      secs={savedThoughtSecs(ft, note, msg.content, msg.thinking ?? "")} contextNotice={msg.contextNotice} allowedLinks={allowedLinks}
+      secs={savedThoughtSecs(tt, ft, note, msg.content, msg.thinking ?? "")} allowedLinks={allowedLinks}
       note={note} meta={replyMeta(describeModel(msg.model ?? "", catalog).name, msg, ft)} regen={last} thread={thread} loading={false} origin={origin} token={token} />
   );
 });
@@ -836,7 +839,7 @@ export function Timeline({ threadId }: { threadId: string }) {
   const row = (m: Message) => (bust === 0 ? m : { ...m });
   // what saved rows need from the store, read once here and passed down as props
   const catalog = useStore(catalogOf);
-  const { firstToken, clocks } = useStore(replyTimes);
+  const { firstToken, thought, clocks } = useStore(replyTimes);
   const origin = useStore((s) => s.serverOrigin);
   const token = useStore((s) => s.fileToken);
   const tl = useRef<HTMLDivElement>(null);
@@ -1005,7 +1008,7 @@ export function Timeline({ threadId }: { threadId: string }) {
             <Fragment key={key}>
               {m?.role === "user" ? <UserTurn msg={row(m)} noted={why?.kind === "said"} />
                 : m === undefined || wasLive.has(key) ? <LiveReply threadId={threadId} msg={m === undefined ? undefined : row(m)} last={last} origin={origin} token={token} />
-                : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} clock={clocks[m.id]} note={why} origin={origin} token={token} />}
+                : <SavedReply msg={row(m)} last={last} thread={readsThread(m) ? messages : EMPTY} catalog={catalog} ft={firstToken[m.id]} tt={thought[m.id]} clock={clocks[m.id]} note={why} origin={origin} token={token} />}
               {/* a reason the person did not cause, in its own words; under a reply, the stop square says the model won't see it */}
               {m !== undefined && why?.kind === "said" ? (
                 <div className={m.role === "user" ? "stop-note under-u" : "stop-note"} role="status">

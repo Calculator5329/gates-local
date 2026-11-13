@@ -6,7 +6,7 @@
 // deltas to its turn buffer. Ends with exactly one done or one error event.
 import * as S from "effect/Schema";
 import type { ChatErrorCode, ChatEvent, Message, TurnMessage } from "./types.ts";
-import { fitToWindow, IMAGE_CONTEXT_NOTICE } from "./window.ts";
+import { fitToWindow } from "./window.ts";
 import { ollamaSettings, type TurnSettings } from "../settings/turn.ts";
 
 export interface StreamTurnInput {
@@ -24,8 +24,6 @@ export interface StreamTurnInput {
   newId?: () => string;
   now?: () => number;
   fetch?: typeof fetch;
-  /** The caller retains this notice even when the stream stops without a completed message. */
-  onImageOmitted?: () => void;
   /** Each model request's reported figures, once, as its done line arrives (usage). */
   onUsage?: (figures: UsageFigures) => void;
 }
@@ -110,7 +108,6 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
     yield fail("context-too-small", windowed.message);
     return;
   }
-  if (windowed.omittedImages) input.onImageOmitted?.();
   const { signal } = input;
   if (signal?.aborted) {
     yield fail("cancelled", "cancelled before the request was sent");
@@ -203,7 +200,6 @@ export async function* streamTurn(input: StreamTurnInput): AsyncGenerator<ChatEv
             threadId: input.threadId ?? "",
             role: "assistant",
             content,
-            ...(windowed.omittedImages ? { contextNotice: IMAGE_CONTEXT_NOTICE } : {}),
             ...(thinking ? { thinking } : {}),
             model: parsed.model ?? input.model,
             createdAt: (input.now ?? Date.now)(),

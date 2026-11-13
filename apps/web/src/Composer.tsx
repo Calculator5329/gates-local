@@ -9,6 +9,7 @@ import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { fitFor, stopsChat } from "./fit-table.ts";
 import { ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
+import { LoadBar, LoadTime } from "./LoadBar.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
@@ -121,6 +122,8 @@ export function Composer() {
     return p ? pctOf(p.completedBytes, p.totalBytes) : 0;
   });
   const loadState = useStore((s) => (s.model === undefined ? undefined : s.loads[s.model]?.state));
+  const loadSince = useStore((s) => (s.model === undefined ? undefined : s.loadSince[s.model]));
+  const loadMs = useStore((s) => (s.model === undefined ? undefined : s.loadTimes[s.model]));
   const used = useStore(usedTokens);
   const pop = useStore((s) => s.pop?.id ?? null);
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
@@ -158,6 +161,7 @@ export function Composer() {
   const info = models?.find((m) => m.name === shownTag);
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
+  const loadingNow = loading && first === undefined;
   // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
   const v = fit === undefined ? undefined : verdictOf(fit);
   const text = hasText || images.length > 0;
@@ -366,10 +370,11 @@ export function Composer() {
                 <span className="t">{named === undefined ? "Image model" : named.preset.short ?? named.preset.name}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
-                {/* loading shows in the tile, never in the label: the trigger keeps its width */}
-                {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loading && first === undefined} />}
+                {/* loading shows in the tile, the time slot and the bar, never in the label: the trigger keeps its width */}
+                {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loadingNow} />}
                 <span>{modelLbl}</span>
-                <small className="picker-trigger-ctx">{k(ctx)}</small>
+                <small className="picker-trigger-ctx">{loadingNow ? <LoadTime key={loadSince} since={loadSince} ms={loadMs} /> : k(ctx)}</small>
+                {loadingNow ? <LoadBar key={loadSince} since={loadSince} ms={loadMs} /> : null}
               </>}
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13: The model button shows a load, and thinking time leaves it out
+
+- While a model loads into memory, a 2 px bar runs along the bottom of the
+  model button. It fills over that model's last load on this computer, holds
+  at 90% until the load really ends, and `~N s` takes the context size's
+  place. A model's first load has no time to aim at, so a line moves along
+  the edge and the seconds count up. The button keeps its size.
+- "Thought for" starts when the model is ready: when the reply starts if the
+  model was already in memory, otherwise at its first token, where the
+  server ends the load. Until then the reply says it is loading. A 5 s load
+  and 2 s of thinking now say "Thought for 2 s", not 7.
+- A follow-up in a chat whose earlier images the model cannot see no longer
+  shows "Some earlier images are unavailable to this reply". The model is
+  still told an image was there. Old saved replies keep the field, and
+  nothing shows it.
+
 ## 2026-11-13: Ask for five pictures, get five; the picker is two menus
 
 - Make images (Settings › Tools) is on once image generation has a setup

@@ -31,6 +31,27 @@ const closed = (turn: LiveTurn) => turn.end?.kind === "error" && turn.end.code =
 
 const secsSince =(turn: LiveTurn, now: number) => Math.round((now - turn.startedAt) / 1000);
 
+/** Where "Thinking" counts from: the model ready for this reply, else (a turn that never said) its start. */
+export const thoughtOrigin = (turn: LiveTurn): number => turn.readyAt ?? turn.startedAt;
+
+/** "Thought for" at `at` (the first answer word, or Stop): whole seconds from the model being ready, at least one. */
+export const thoughtSecsAt = (turn: LiveTurn, at: number): number => Math.max(1, Math.round((at - thoughtOrigin(turn)) / 1000));
+
+/** Stopped while thinking, here or by another client: the thought lasted until the stop. */
+const stoppedThinking = (turn: LiveTurn, now: number) =>
+  turn.thinking !== "" && turn.thinkingSecs === undefined && turn.text === "" ? { thinkingSecs: thoughtSecsAt(turn, now) } : {};
+
+/**
+ * When the model is ready for this reply, if `event` says so first: the start, unless its
+ * model was loading then; otherwise the first token or call, where the server ends a load.
+ */
+function readyOn(turn: LiveTurn, event: TurnEvent, now: number, loading: boolean): number | undefined {
+  if (turn.readyAt !== undefined) return turn.readyAt;
+  if (event.type === "start") return loading ? undefined : now;
+  if (event.type === "thinking" || event.type === "delta") return event.text === "" || turn.end !== undefined ? undefined : now;
+  return event.type === "tool" ? now : undefined;
+}
+
 /**
  * The server ended the turn on purpose: a cancel, or a halt to make way for
  * another model or runtime. After the person's Stop, such an end is the Stop;
@@ -109,10 +130,12 @@ function upsertStep(steps: readonly ToolStep[], step: ToolStep): ToolStep[] {
 /**
  * The turn after `event` at time `now`; null when the turn is over and its
  * saved row takes its place. Words that come after the turn ended here are
- * dropped (W-05); a tool step still lands.
+ * dropped (W-05); a tool step still lands. `loading`: the turn's model was
+ * loading into memory when this event came (models.load said so).
  */
-export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null {
-  const advanced = advance(turn, event, now);
+export function reduceTurn(turn: LiveTurn, event: TurnEvent, now: number, loading = false): LiveTurn | null {
+  const readyAt = readyOn(turn, event, now, loading);
+  const advanced = advance(readyAt === turn.readyAt ? turn : { ...turn, readyAt }, event, now);
   if (advanced === null) return null;
   const clock = event.type === "start"
     // heard of at its start: watched from there; a start sent again to a client that connected
@@ -142,14 +165,13 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
     case "thinking":
       return turn.end !== undefined || event.text === "" ? turn : { ...turn, thinking: turn.thinking + event.text };
     case "delta": {
-      const noticed = event.contextNotice ? { ...turn, contextNotice: event.contextNotice } : turn;
-      if (turn.end !== undefined || event.text === "") return noticed;
+      if (turn.end !== undefined || event.text === "") return turn;
       return {
-        ...noticed,
+        ...turn,
         text: turn.text + event.text,
         ...(turn.firstTokenAt === undefined ? { firstTokenAt: now } : {}),
-        // Thought for: until the first word after thinking, measured when that word arrives
-        ...(turn.thinking !== "" && turn.thinkingSecs === undefined ? { thinkingSecs: Math.max(1, secsSince(turn, now)) } : {}),
+        // Thought for: from the model being ready until the first word after thinking, measured when that word arrives
+        ...(turn.thinking !== "" && turn.thinkingSecs === undefined ? { thinkingSecs: thoughtSecsAt(turn, now) } : {}),
       };
     }
     case "tool":
@@ -158,16 +180,18 @@ function advance(turn: LiveTurn, event: TurnEvent, now: number): LiveTurn | null
       return null;
     case "error": {
       if (event.partial !== undefined) return null;
-      const ended = { ...turn, ending: undefined, ...(event.contextNotice ? { contextNotice: event.contextNotice } : {}) };
+      const ended = { ...turn, ending: undefined };
       // the person's Stop is why it ended when the server's end is an abort; a failure that came anyway is said
       if (stoppedBy(turn.end, event.code)) return { ...ended, end: turn.end };
       if (event.code !== "cancelled") return { ...ended, end: { kind: "error", code: event.code, message: event.message } };
-      return { ...ended, end: turn.end ?? { kind: "stopped", secs: secsSince(turn, now) } };
+      return turn.end !== undefined ? { ...ended, end: turn.end } : { ...ended, end: { kind: "stopped", secs: secsSince(turn, now) }, ...stoppedThinking(turn, now) };
     }
     case "sent":
       return { ...turn, turnId: event.turnId, userMessageId: event.userMessageId, pendingUser: null, early: undefined };
     case "stop":
-      return turn.end !== undefined ? turn : { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true };
+      if (turn.end !== undefined) return turn;
+      // stopped while thinking: the thought lasted until Stop, counted from the model being ready
+      return { ...turn, end: { kind: "stopped", secs: secsSince(turn, now) }, ending: true, ...stoppedThinking(turn, now) };
     case "refused":
       return { ...turn, pendingUser: null, ending: undefined, early: undefined };
     case "early":

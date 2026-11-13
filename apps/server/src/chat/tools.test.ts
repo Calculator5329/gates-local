@@ -98,16 +98,13 @@ const system = async (platform: NodeJS.Platform) => {
 describe("tool chat transport", () => {
   it("does not treat a quoted marker in ordinary text as a dropped image", async () => {
     const bodies: Record<string, unknown>[] = [];
-    const omitted = vi.fn();
     const events = [];
-    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: `Explain this text: ${OMITTED_IMAGE}` }], numCtx: 16384, sources: [], fetch: answering(bodies), execute: noRun, onImageOmitted: omitted })) events.push(event);
-    expect(omitted).not.toHaveBeenCalled();
+    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: `Explain this text: ${OMITTED_IMAGE}` }], numCtx: 16384, sources: [], fetch: answering(bodies), execute: noRun })) events.push(event);
     expect(events.at(-1)).not.toHaveProperty("message.contextNotice");
   });
 
-  it("reports images dropped in a later round even when the reply then fails", async () => {
+  it("marks images dropped in a later round for the model, even when the reply then fails", async () => {
     const bodies: Record<string, unknown>[] = [];
-    const omitted = vi.fn();
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -115,37 +112,10 @@ describe("tool chat transport", () => {
       return ndjson([{ message: { tool_calls: [{ function: { name: "read", arguments: { path: "/library/docs" } } }] }, done: true }]);
     });
     const events = [];
-    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "old chart", images: ["aW1hZ2U="], imageTokens: [4096] }, { role: "assistant", content: "a".repeat(2000) }, { role: "user", content: "read it" }], numCtx: 8192, sources: [], fetch: fetcher, execute: async () => ({ output: "z".repeat(10000), summary: "Read" }), onImageOmitted: omitted })) events.push(event);
+    for await (const event of streamToolTurn({ baseUrl: "http://fake", model: "m", messages: [{ role: "user", content: "old chart", images: ["aW1hZ2U="], imageTokens: [4096] }, { role: "assistant", content: "a".repeat(2000) }, { role: "user", content: "read it" }], numCtx: 8192, sources: [], fetch: fetcher, execute: async () => ({ output: "z".repeat(10000), summary: "Read" }) })) events.push(event);
     expect(JSON.stringify(bodies[0])).toContain('"images"');
     expect(JSON.stringify(bodies[1])).toContain("image was here and is unavailable");
     expect(events.at(-1)).toMatchObject({ type: "error" });
-    expect(omitted).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a later image-omission notice on a stopped reply's terminal event", async () => {
-    let markReady: (() => void) | undefined;
-    const ready = new Promise<void>(resolve => { markReady = resolve; });
-    const stream = vi.spyOn(toolTransport, "streamToolTurn").mockImplementation(async function* (input) {
-      input.onImageOmitted?.();
-      yield { type: "delta", text: "Partial answer" } as const;
-      markReady?.();
-      await new Promise<void>(resolve => {
-        if (input.signal?.aborted) resolve();
-        else input.signal?.addEventListener("abort", () => resolve(), { once: true });
-      });
-      yield { type: "error", code: "cancelled", message: "stopped" } as const;
-    });
-    const t = await imageApp(() => ndjson([{ message: { content: "unused" }, done: true }]));
-    try {
-      const thread = t.store.createThread();
-      const { turnId } = await t.app.handlers["chat.send"]({ threadId: thread.id, content: "read", model: "m", numCtx: 16384 }, { clientId: 1 });
-      await ready;
-      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
-      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
-      expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "delta", text: "", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
-      expect(t.pushed).toContainEqual(expect.objectContaining({ channel: "chat.event", payload: expect.objectContaining({ event: expect.objectContaining({ type: "error", contextNotice: expect.stringContaining("images are unavailable") }) }) }));
-      expect(t.store.getThread(thread.id).messages.map(message => message.content)).toEqual(["read", "Partial answer"]);
-    } finally { await t.close(); stream.mockRestore(); }
   });
 
   it("chooses native tool_calls from /api/show and carries think and num_ctx", async () => {

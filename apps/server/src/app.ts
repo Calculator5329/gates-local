@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { readThumbnail } from "./pictures/thumbs.ts";
-import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
+import { fitToWindow, OMITTED_IMAGE } from "./chat/window.ts";
 import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
@@ -213,7 +213,6 @@ interface Turn {
   dropReply: boolean;
   text: string;
   thinking: string;
-  contextNotice?: string;
   readonly steps: Map<string, ToolStep>;
 }
 
@@ -372,19 +371,9 @@ export function createApp(deps: AppDeps): App {
     return job;
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; contextNotice?: string; settings?: TurnSettings } = {}) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; settings?: TurnSettings } = {}) => {
     const { turnId, threadId, controller } = turn;
-    // Exactly the text that reached the client: the reply a halted turn saves.
-    turn.contextNotice = options.contextNotice;
-    let noticeSent = false;
     let counted = false;
-    const imageOmitted = () => {
-      turn.contextNotice = IMAGE_CONTEXT_NOTICE;
-      if (noticeSent || turn.terminal || controller.signal.aborted) return;
-      noticeSent = true;
-      // Send metadata before words using the trimmed context, without marking a first token.
-      push("chat.event", { turnId, threadId, event: { type: "delta", text: "", contextNotice: turn.contextNotice } });
-    };
     const emit = (event: Exclude<WireEvent, TurnEnd>) => {
       if (turn.terminal) return;
       // Only text means the model answered; an error, cancel or end goes through end() below.
@@ -404,7 +393,7 @@ export function createApp(deps: AppDeps): App {
      */
     const unfinishedRow = (halted = false): NewMessage => {
       const tools = [...turn.steps.values()].map((t) => t.state === "running" ? { ...t, state: "error" as const, ...(halted ? { stopped: true as const } : {}) } : t);
-      return { threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx }, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) };
+      return { threadId, role: "assistant", content: turn.text, interrupted: true, ...(turn.thinking === "" ? {} : { thinking: turn.thinking }), ...(tools.length === 0 ? {} : { tools }), model, stats: { numCtx } };
     };
     let drafted = false;
     let draftTimer: ReturnType<typeof setTimeout> | undefined;
@@ -444,8 +433,7 @@ export function createApp(deps: AppDeps): App {
     /** The finished reply, saved complete. A store that refuses it keeps the words as an unfinished reply and ends the turn with that error. */
     const saveFinished = (done: StreamDone): TurnEnd => {
       try {
-        const notice = turn.contextNotice ?? done.message.contextNotice;
-        return { ...done, message: store.appendMessage({ ...done.message, ...(notice ? { contextNotice: notice } : {}) }, replacingDraft()) };
+        return { ...done, message: store.appendMessage(done.message, replacingDraft()) };
       } catch (e) {
         const code = (e as { code?: unknown }).code;
         return saveUnfinished({ type: "error", code: typeof code === "string" ? code : "internal", message: `the final save failed: ${(e as Error).message}` });
@@ -459,7 +447,7 @@ export function createApp(deps: AppDeps): App {
       // Done wins over a Stop, never over deleting the thread or the question.
       const dropped = outcome.type === "done" && turn.dropReply ? { type: "error" as const, code: "cancelled" as const, message: "cancelled: its question was deleted" } : outcome;
       const event = dropped.type === "done" ? saveFinished(dropped) : saveUnfinished(dropped);
-      push("chat.event", { turnId, threadId, event: event.type === "error" && turn.contextNotice ? { ...event, contextNotice: turn.contextNotice } : event });
+      push("chat.event", { turnId, threadId, event });
       if (event.type === "done" || event.partial !== undefined) push("threads.changed", { threadId });
       if (event.type === "done") pushSpeeds();
     };
@@ -506,7 +494,6 @@ export function createApp(deps: AppDeps): App {
         numCtx,
         signal: controller.signal,
         threadId,
-        onImageOmitted: imageOmitted,
         ...(think === undefined ? {} : { think }),
         // Each request once; the reply counts on its first reported request.
         ...(deps.usage ? { onUsage: (figures: UsageFigures) => {
@@ -515,7 +502,6 @@ export function createApp(deps: AppDeps): App {
           counted = true;
         } } : {}),
       };
-      if (turn.contextNotice) imageOmitted();
       const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
       const iterator = events[Symbol.asyncIterator]();
       let dropped = false;
@@ -901,12 +887,10 @@ export function createApp(deps: AppDeps): App {
         }
         if (report.verdict === "refuse") throw refusal(report);
         if (turnSignal.aborted) throw stoppedEarly();
-        let omitted = false;
         const history = [...prior.map((m): TurnMessage => {
           const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : m.content;
           if (!m.images?.length) return { role: m.role, content: priorContent };
           if (vision && m.role === "user") return { role: m.role, content: priorContent, images: m.images };
-          omitted = true;
           return { role: m.role, content: `${priorContent}\n${OMITTED_IMAGE}`, imageTokens: m.images.map(() => 0) };
         }), { role: "user" as const, content, ...(images.length ? { images } : {}) }].map(imagePrompt);
         // Preserve text-only streaming errors; images must fit before their bytes are saved.
@@ -917,7 +901,6 @@ export function createApp(deps: AppDeps): App {
         const accounted = vision && deps.dataDir ? await accountImages(deps.dataDir, firstWindow.messages, show?.model_info).catch(imageError) : { messages: firstWindow.messages, omitted: false };
         const windowed = imageContext ? fitToWindow(accounted.messages, report.numCtx) : { ok: true as const, messages: accounted.messages };
         if (!windowed.ok) throw new AppError("image-input", windowed.message);
-        const contextNotice = omitted || accounted.omitted || ("omittedImages" in firstWindow && firstWindow.omittedImages) || ("omittedImages" in windowed && windowed.omittedImages) ? IMAGE_CONTEXT_NOTICE : undefined;
         const savedImages = images.length && deps.dataDir ? await saveAttachments(deps.dataDir, images) : [];
         admissionImages = savedImages.filter(attachment => !images.includes(attachment));
         if (savedImages.length) windowed.messages[windowed.messages.length - 1] = { ...windowed.messages.at(-1)!, images: savedImages };
@@ -932,7 +915,7 @@ export function createApp(deps: AppDeps): App {
         turn.start = { type: "start", model, userMessage };
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
         fitTable.changed();
-        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, contextNotice, settings });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings });
         return { turnId: turn.turnId, userMessage };
       } finally {
         try {
@@ -966,7 +949,7 @@ export function createApp(deps: AppDeps): App {
         send({ ...turn.start, replayed: true });
         if (turn.thinking !== "") send({ type: "thinking", text: turn.thinking });
         for (const step of turn.steps.values()) send({ type: "tool", step });
-        if (turn.text !== "" || turn.contextNotice) send({ type: "delta", text: turn.text, ...(turn.contextNotice ? { contextNotice: turn.contextNotice } : {}) });
+        if (turn.text !== "") send({ type: "delta", text: turn.text });
       }
     },
     async shutdown() {

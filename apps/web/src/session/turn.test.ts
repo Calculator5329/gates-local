@@ -11,11 +11,24 @@ const at = (secs: number) => T0 + secs * 1000;
 
 describe("reduceTurn", () => {
   it("measures thinking from the start to the first word, when that word arrives", () => {
-    let t = reduceTurn(turn(), { type: "thinking", text: "hmm" }, at(1));
+    let t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0));
+    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(1));
     t = reduceTurn(t!, { type: "delta", text: "Hi" }, at(5));
     expect(t).toMatchObject({ thinking: "hmm", text: "Hi", firstTokenAt: at(5), thinkingSecs: 5 });
     t = reduceTurn(t!, { type: "delta", text: " there" }, at(65));
     expect(t).toMatchObject({ text: "Hi there", firstTokenAt: at(5), thinkingSecs: 5 });
+  });
+
+  it("leaves the model's load out of the thinking: it counts from the first token (owner, chat row 21)", () => {
+    let t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0), true);
+    expect(t?.readyAt).toBeUndefined();
+    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(5));
+    t = reduceTurn(t!, { type: "delta", text: "Hi" }, at(7));
+    expect(t).toMatchObject({ readyAt: at(5), thinkingSecs: 2 });
+    // stopped while still thinking after a load: the same origin
+    t = reduceTurn(turn(), { type: "start", model: "m", userMessage: question }, at(0), true);
+    t = reduceTurn(t!, { type: "thinking", text: "hmm" }, at(5));
+    expect(reduceTurn(t!, { type: "stop" }, at(8))?.thinkingSecs).toBe(3);
   });
 
   it("gives no thinking time to a reply that did not think, and at least one second to one that did", () => {
@@ -23,11 +36,10 @@ describe("reduceTurn", () => {
     expect(reduceTurn(turn({ thinking: "x" }), { type: "delta", text: "Hi" }, at(0.2))?.thinkingSecs).toBe(1);
   });
 
-  it("drops words after the turn ended here, but keeps a notice and a tool step", () => {
+  it("drops words after the turn ended here, but keeps a tool step", () => {
     const ended = turn({ text: "so far", end: { kind: "stopped", secs: 2 } });
     expect(reduceTurn(ended, { type: "delta", text: " more" }, at(3))).toBe(ended);
     expect(reduceTurn(ended, { type: "thinking", text: "more" }, at(3))).toBe(ended);
-    expect(reduceTurn(ended, { type: "delta", text: " more", contextNotice: "n" }, at(3))).toMatchObject({ text: "so far", contextNotice: "n" });
     const step = { callId: "c", name: "read", state: "done", summary: "Read" } as const;
     expect(reduceTurn(ended, { type: "tool", step }, at(3))?.tools).toEqual([step]);
   });

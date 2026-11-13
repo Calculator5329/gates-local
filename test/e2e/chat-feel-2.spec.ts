@@ -110,8 +110,9 @@ async function sampleToolbar(page: Page): Promise<void> {
           [...cf.querySelectorAll(".cf-l > *, .cf-r > *")].map((el) => {
             const r = el.getBoundingClientRect();
             const b = el as HTMLButtonElement;
-            // the model tile turning into a spinner and back is the load itself, a real change in a fixed-size tile
-            const text = [...el.childNodes].map((n) => (n instanceof Element && n.classList.contains("mmark") ? "" : n.textContent)).join("");
+            // the model tile turning into a spinner and back is the load itself, a real change in a fixed-size tile;
+            // so is the context slot showing the load's seconds and back (chat row 16), and its box is still checked
+            const text = [...el.childNodes].map((n) => (n instanceof Element && (n.classList.contains("mmark") || n.classList.contains("picker-trigger-ctx")) ? "" : n.textContent)).join("");
             const s = `${text}|pressed=${el.getAttribute("aria-pressed")}|aria-disabled=${el.getAttribute("aria-disabled")}|disabled=${b.disabled}|unavail=${el.classList.contains("unavail")}`;
             return { k: el.getAttribute("aria-label") ?? el.id, s, l: Math.round(r.left * 2) / 2, w: Math.round(r.width * 2) / 2 };
           }),

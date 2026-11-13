@@ -7,7 +7,7 @@ import { imageReason } from "../paste.ts";
 import { drawChoice, imageMode } from "../image-choice.ts";
 import { type Draft, beginQueuedDraft, cancelQueuedDraft, clearDraft, currentDraftKey, getDraft, moveDraft, replaceDraft } from "../drafts.ts";
 import type { ServerEvent } from "./server-state.ts";
-import { type ChatEvent, type TurnEvent, type WorkClock, aborted, leaveThinking, reduceTurn, startClock, stopThinking, stoppedBy, unfinished, withTurn } from "./turn.ts";
+import { type ChatEvent, type TurnEvent, type WorkClock, aborted, leaveThinking, reduceTurn, startClock, stopThinking, stoppedBy, thoughtSecsAt, unfinished, withTurn } from "./turn.ts";
 
 declare global {
   interface Window {
@@ -247,12 +247,27 @@ function withWaiting(turn: LiveTurn, w: Waiting, now: number, answerAt: number):
 }
 
 /** A turn's clock as it ends, with thinking still waiting for a frame counted: a chat not on screen has none. */
-const endClock = (turn: LiveTurn, w: Waiting | undefined, now: number): WorkClock | undefined =>
-  w === undefined || w.gen !== turn.gen ? turn.clock : withWaiting(turn, w, now, w.textAt ?? now).clock;
+const endClock = (turn: LiveTurn, w: Waiting | undefined, now: number): WorkClock | undefined => endTurn(turn, w, now).clock;
+
+/** A turn as it ends, with the words still waiting for a frame applied at the times they came. */
+const endTurn = (turn: LiveTurn, w: Waiting | undefined, now: number): LiveTurn =>
+  w === undefined || w.gen !== turn.gen ? turn : withWaiting(turn, w, now, w.textAt ?? now);
 
 /** A finished reply's clock, its thinking stopped at the end: kept by message id when the turn watched it. */
 const keptClock = (clocks: State["clocks"], id: string, clock: WorkClock | undefined, now: number): State["clocks"] =>
   clock === undefined ? clocks : { ...clocks, [id]: stopThinking(clock, now) };
+
+/** The model is loading into memory now, by the server's models.load: a turn starting on it is not ready yet. */
+const loadingNow = (s: State, model: string): boolean => s.loads[model]?.state === "loading";
+
+/**
+ * A finished or stopped reply's "Thought for", kept by message id: the live turn's, or, with its
+ * first words still waiting for a frame, until those words, from the model being ready.
+ */
+function keptThought(thought: State["thought"], id: string, turn: LiveTurn, firstAt: number | undefined): State["thought"] {
+  const secs = turn.thinkingSecs ?? (firstAt === undefined || turn.thinking === "" ? undefined : thoughtSecsAt(turn, firstAt));
+  return secs === undefined ? thought : { ...thought, [id]: secs };
+}
 
 /** History, navigation, fit and RPC operations are wired by session.ts. */
 export function createChat({ applyServerEvent, call, codeOf, createThread, creatingDraft, loadThread, loading, noteMessage, withMessage, untrackedDone, openThread, blockingFor }: ChatEffects) {
@@ -296,7 +311,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     applyServerEvent((s) => {
       const turn = s.turns[threadId];
       if (turn === undefined || turn.gen !== gen) return;
-      return { turns: withTurn(s.turns, threadId, reduceTurn(turn, event, Date.now())) };
+      return { turns: withTurn(s.turns, threadId, reduceTurn(turn, event, Date.now(), event.type === "start" && loadingNow(s, event.model))) };
     });
   }
 
@@ -440,7 +455,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     // a call the person's Stop cut short is kept as stopped, one that a failure cut as failed
     const stopped = l.end.kind === "stopped";
     const tools = l.tools.map((t) => t.state === "running" ? { ...t, state: "error" as const, ...(stopped ? { stopped: true as const } : {}) } : t);
-    const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), ...(tools.length === 0 ? {} : { tools }), ...(l.contextNotice ? { contextNotice: l.contextNotice } : {}), model: l.model, createdAt: Date.now() };
+    const msg: Message = { id: `stopped-${l.gen}`, threadId, role: "assistant", content: l.text, ...(l.thinking === "" ? {} : { thinking: l.thinking }), ...(tools.length === 0 ? {} : { tools }), model: l.model, createdAt: Date.now() };
     const note: StopNote = l.end.kind === "stopped" ? { kind: "stopped", secs: l.end.secs } : { kind: "said", words: "The reply didn't finish." };
     // A partial is not the whole history of a chat this client never opened.
     if (getState().messages[threadId] === undefined && !loading(threadId)) void loadThread(threadId);
@@ -450,6 +465,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       messages: withMessage(s, threadId, msg),
       stopNotes: { ...s.stopNotes, [msg.id]: note },
       ...(first === undefined ? {} : { firstToken: { ...s.firstToken, [msg.id]: first - l.startedAt } }),
+      thought: keptThought(s.thought, msg.id, l, first),
       clocks: keptClock(s.clocks, msg.id, l.clock, Date.now()),
     }));
   }
@@ -746,9 +762,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       case "thinking":
         return queueWords(turn, "thinking", event.text);
       case "delta":
-        if (event.contextNotice === undefined) return event.text === "" ? undefined : queueWords(turn, "text", event.text);
-        flushWords(threadId);
-        return update(threadId, turn.gen, event);
+        return event.text === "" ? undefined : queueWords(turn, "text", event.text);
       case "tool":
         flushWords(threadId);
         return update(threadId, turn.gen, event);
@@ -772,10 +786,12 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         const firstAt = turn.firstTokenAt ?? firstWordsAt;
         const now = Date.now();
         const clock = endClock(turn, w, now);
+        const ended = endTurn(turn, w, now);
         if (open) noteMessage(threadId, msg);
         applyServerEvent((s) => ({
           ...(open ? { messages: withMessage(s, threadId, msg) } : {}),
           ...(firstAt === undefined ? {} : { firstToken: { ...s.firstToken, [msg.id]: firstAt - turn.startedAt } }),
+          thought: keptThought(s.thought, msg.id, ended, firstAt),
           clocks: keptClock(s.clocks, msg.id, clock, now),
           turns: withTurn(s.turns, threadId, null),
         }));
@@ -797,6 +813,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
           waiting.delete(threadId);
           const now = Date.now();
           const clock = endClock(turn, w, now);
+          const ended = endTurn(turn, w, now);
           const { partial } = said;
           noteMessage(threadId, partial);
           // a reply stopped while not on screen says so; who stopped it is not known here
@@ -808,6 +825,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
             ...(note === undefined ? {} : { stopNotes: { ...s.stopNotes, [partial.id]: note } }),
             // the thought's length stays on the pill once the saved row takes over, as it does for a finished reply
             ...(firstAt === undefined ? {} : { firstToken: { ...s.firstToken, [partial.id]: firstAt - turn.startedAt } }),
+            thought: keptThought(s.thought, partial.id, ended, firstAt),
           }));
         } else {
           flushWords(threadId);
@@ -863,7 +881,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const startedAt = Date.now();
     // a start sent again to this client as it connected: the turn began before it was here
     const clock = event.replayed === true ? {} : { clock: startClock(startedAt) };
-    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt, ...clock, thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
+    // its model still loading: ready at its first token, as for a turn of this client's own
+    const ready = loadingNow(getState(), event.model) ? {} : { readyAt: startedAt };
+    const turn: LiveTurn = { gen: ++turnGen, threadId, turnId, userMessageId: event.userMessage.id, model: event.model, startedAt, ...clock, ...ready, thinking: "", text: "", tools: [], pendingUser: null, ...(event.image === true ? { image: true as const } : {}) };
     applyServerEvent((st) => ({
       ...(st.messages[threadId] !== undefined ? { messages: withMessage(st, threadId, event.userMessage) } : {}),
       turns: withTurn(st.turns, threadId, turn),

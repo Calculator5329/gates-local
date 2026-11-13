@@ -1,6 +1,7 @@
 // Runtime/model reads, local model choice, catalog and download actions.
 import type { BlockingTurn, MethodName, Params, Payload, ResultOf } from "@gates-local/contracts";
 import { type ModelDecision, modelChoice as pickChoice, modelNameKey, newestOnly } from "../pick.ts";
+import { saveLoadTimes } from "../load-times.ts";
 import { NA, type State, chatReady, getState, setState } from "../store.ts";
 
 type Request = <M extends MethodName>(method: M, params: Params<M>) => Promise<ResultOf<M>>;
@@ -180,7 +181,19 @@ export function createModels({ applyServerEvent, call, probe, act, isNA, restore
   }
 
   function loadChanged(l: Payload<"models.load">): void {
-      applyServerEvent((s) => ({ loads: { ...s.loads, [l.model]: l } }));
+      const now = Date.now();
+      applyServerEvent((s) => {
+        const loads = { ...s.loads, [l.model]: l };
+        const since = s.loadSince[l.model];
+        // a load opens at its first "loading" notice; only a "ready" that ends one this client saw start is a time
+        if (l.state === "loading") return { loads, ...(since === undefined ? { loadSince: { ...s.loadSince, [l.model]: now } } : {}) };
+        if (since === undefined) return { loads };
+        const { [l.model]: _done, ...loadSince } = s.loadSince;
+        if (l.state !== "ready") return { loads, loadSince };
+        const loadTimes = { ...s.loadTimes, [l.model]: now - since };
+        saveLoadTimes(loadTimes);
+        return { loads, loadSince, loadTimes };
+      });
   }
 
   return { modelsOrder, runtimeOrder, catalogOrder, catalogLands, refreshModels,

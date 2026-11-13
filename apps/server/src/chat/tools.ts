@@ -3,7 +3,7 @@ import { createTools, runLoop, toolBlock, type LibraryEntry, type ModelEvent, ty
 import { streamTurn, usageFigures, type StreamTurnInput } from "./stream.ts";
 import type { ChatEvent as PlainChatEvent } from "./types.ts";
 import type { ShellStatus } from "@gates-local/contracts";
-import { contextWords, estimateTokens, fitRound, fitToWindow, IMAGE_CONTEXT_NOTICE } from "./window.ts";
+import { contextWords, estimateTokens, fitRound, fitToWindow } from "./window.ts";
 import { ollamaSettings } from "../settings/turn.ts";
 type ChatEvent = PlainChatEvent | { type: "tool"; step: import("../../../../packages/harness/src/types.ts").ToolStep };
 
@@ -65,8 +65,6 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
     const prompt = windowed.messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
     const messages: ModelMessage[] = [{ role: "system", content: prompt ? `${prompt}\n\n${system}` : system }, ...windowed.messages.filter(m => m.role !== "system")];
     const turnStart = messages.length;
-    let omittedImages = Boolean(windowed.omittedImages);
-    if (omittedImages) input.onImageOmitted?.();
     // Every round is budgeted, not only the first: tool results grow the history the loop sends.
     // If the definitions are all that stand in the way, this request goes without them.
     // Each request gets the loop's own signal: the turn's cancel, the tool-phase deadline and the stall guard.
@@ -74,10 +72,6 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
       const withTools = native && options?.tools !== false ? fitRound(history, turnStart, input.numCtx, definitionTokens) : undefined;
       const fitted = withTools ?? fitRound(history, turnStart, input.numCtx);
       if (!fitted) return windowFull(input.numCtx);
-      if (!omittedImages && fitted.some(message => message.imageTokens?.includes(0))) {
-        omittedImages = true;
-        input.onImageOmitted?.();
-      }
       return ollamaStep({ input, fetcher, signal: options?.signal ?? signal, messages: fitted, definitions: withTools ? tools.definitions : undefined });
     };
     for await (const event of runLoop({ messages, stream, execute: input.execute ?? tools.execute, definitions: tools.definitions, signal, native, numCtx: input.numCtx })) {
@@ -86,7 +80,6 @@ export async function* streamToolTurn(input: ToolTurnInput): AsyncGenerator<Chat
       yield { type: "done", stopReason: event.stopReason, message: {
         id: (input.newId ?? (() => crypto.randomUUID()))(), threadId: input.threadId ?? "", role: "assistant", content: event.content,
         model: input.model, createdAt: (input.now ?? Date.now)(),
-        ...(omittedImages ? { contextNotice: IMAGE_CONTEXT_NOTICE } : {}),
         ...(event.thinking ? { thinking: event.thinking } : {}),
         ...(shellNote || event.tools.length ? { tools: shellNote ? [shellNote, ...event.tools] : event.tools } : {}),
         stats: { ...event.stats, numCtx: input.numCtx },

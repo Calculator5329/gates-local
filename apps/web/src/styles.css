@@ -458,6 +458,13 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* only the model trigger gives way: its name truncates at a fixed width, the full tag is its tooltip */
 .cf-r>#modelBtn{flex:0 1 auto;min-width:0;max-width:240px}
 #modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* a load (LoadBar.tsx): 2 px on the button's bottom edge, filling to 90% over the last load; a first load's line moves with no amount */
+#modelBtn{position:relative;overflow:hidden}
+.ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transform:scaleX(.9);animation:ldfill linear both;pointer-events:none}
+.ldbar.wait{width:30%;transform:none;animation:ldslide 1.4s ease-in-out infinite}
+@keyframes ldfill{from{transform:scaleX(0)}to{transform:scaleX(.9)}}
+@keyframes ldslide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+@media (prefers-reduced-motion:reduce){.ldbar{animation:none}.ldbar.wait{width:100%;opacity:.4}}
 .cf-r{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
 .cf-r>*{flex:none}
 .stop-sq .sqr{width:9px;height:9px;background:currentColor;display:block}
@@ -561,7 +568,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 /* Maker marks are inline vectors; the picker itself loads on demand. */
 .maker-mark{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;color:var(--foreground);font:500 11px/16px var(--font-mono)}
 .maker-mark svg{width:16px;height:16px;flex:none}
-.picker-trigger-ctx{font-size:12px;font-weight:400;color:var(--muted-foreground);flex:none;white-space:nowrap}
+.picker-trigger-ctx{font-size:12px;font-weight:400;color:var(--muted-foreground);flex:none;white-space:nowrap;min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
 .mini-seg,.seg2{display:inline-flex;padding:2px;border-radius:var(--r-ctl);background:var(--hover);gap:2px;box-shadow:inset 0 0 0 1px var(--border)}
 .mini-seg{flex:none}
 /* sweep: the panel's context control has the same size as Settings' (seg2): 28 px buttons, 13.5 px text */

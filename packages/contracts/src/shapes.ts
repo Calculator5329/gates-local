@@ -82,7 +82,7 @@ export const ImageEvent = S.Struct({
 export type ImageEvent = typeof ImageEvent.Type;
 
 export const Message = S.Struct({
-  /** Context omissions, outside the saved message text. */
+  /** Rows saved before 2026-11-13 may say that earlier images were left out; nothing shows it or writes it now. */
   contextNotice: S.optional(S.String),
   id: S.String,
   threadId: S.String,
@@ -234,14 +234,12 @@ export const ChatEvent = S.Union([
   // `image`: a direct Image turn; `model` is then the image preset id and no chat model runs.
   // `replayed`: sent again to a client that connected mid-reply, which did not see the turn begin.
   S.Struct({ type: S.Literal("start"), model: S.String, userMessage: Message, image: S.optional(S.Literal(true)), replayed: S.optional(S.Literal(true)) }),
-  // An empty delta can carry context metadata without becoming reply text.
-  S.Struct({ type: S.Literal("delta"), text: S.String, contextNotice: S.optional(S.String) }),
+  S.Struct({ type: S.Literal("delta"), text: S.String }),
   S.Struct({ type: S.Literal("thinking"), text: S.String }),
   // stopReason is Ollama's done_reason: "stop", or "length" when num_ctx or num_predict cut the reply.
   S.Struct({ type: S.Literal("done"), message: Message, stopReason: S.String }),
   S.Struct({
     type: S.Literal("error"),
-    contextNotice: S.optional(S.String),
     code: S.String,
     message: S.String,
     /**

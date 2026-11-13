@@ -145,7 +145,7 @@ test("mixed web text and image follows T3: the image wins", async ({ page, open 
 
 test.describe("vision turns", () => {
   test.use({ installed: ["qwen3.5:4b", VISION] });
-  test("image-omission notice arrives during a reply and survives Stop and leaving the chat", async ({ page, open }, info) => {
+  test("a text-only follow-up in an image thread says nothing about the earlier image (chat row 17)", async ({ page, open }, info) => {
     await open(); await waitReady(page);
     await page.locator("#modelBtn").click();
     await page.locator("#pkSearch").fill(VISION);
@@ -163,16 +163,17 @@ test.describe("vision turns", () => {
     await expect(page.locator("#picker")).toBeHidden();
     await stack.scenario("slow-drip", { installed: ["qwen3.5:4b", VISION], holdAfterTokens: 46 });
     await sendMessage(page, "Notice follow-up fixture");
-    const notice = page.locator('.turn.a [role="status"]').filter({ hasText: "earlier images" });
-    await expect(notice).toBeVisible();
+    // the model is told the image is gone (the server tests check the marker); the person is not
+    const notice = page.locator(".turn.a").filter({ hasText: "earlier images" });
     await expect(page.locator(".turn.a:not(.done) .md")).not.toBeEmpty();
+    await expect.soft(notice).toHaveCount(0);
     await page.getByRole("button", { name: "Stop", exact: true }).click();
-    await expect(notice).toBeVisible();
     const thread = page.url().split("#")[1]?.replace("thread=", "");
     await page.getByRole("complementary").getByRole("button", { name: /^New thread/ }).click();
     await page.locator(`.sb-row[data-thread="${thread}"]`).click();
-    await expect(notice).toBeVisible();
-    await page.screenshot({ path: info.outputPath("omission-notice.png") });
+    await expect(page.locator(".turn.a")).toHaveCount(2);
+    await page.screenshot({ path: info.outputPath("follow-up.png") });
+    await expect(notice).toHaveCount(0);
   });
   test("non-vision Send refuses and names an installed model that sees images", async ({ page, open }) => {
     await open(); await waitReady(page);

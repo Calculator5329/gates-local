@@ -15,7 +15,6 @@ const replyRoom = (numCtx: number) => Math.min(Math.ceil(numCtx / 4), REPLY_ROOM
 const MIN_OBSERVATION_CHARS = 200;
 const WINDOW_FULL = "\n[cut: this model's context window is full]";
 export const OMITTED_IMAGE = "[An image was here and is unavailable to this reply.]";
-export const IMAGE_CONTEXT_NOTICE = "Some earlier images are unavailable to this reply. Their places are marked in the context sent to the model.";
 
 export const estimateTokens = (text: string): number => Math.ceil(text.length / 4) + MESSAGE_FRAMING_TOKENS;
 /** Conservative reservation, not a measured tokenizer count; Ollama reports actual usage after the turn. */
