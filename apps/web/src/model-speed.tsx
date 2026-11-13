@@ -16,10 +16,14 @@ export function tpsText(value: unknown): string | undefined {
 export const speedTip = (replies: number): string =>
   `Measured on this computer over the last 14 days · ${replies} ${replies === 1 ? "reply" : "replies"}`;
 
-const speedOf = (s: State, tag: string) => {
-  const speeds = s.speeds;
-  return speeds === undefined || speeds === NA ? undefined : speeds[modelNameKey(tag)];
-};
+const speedIn = (speeds: State["speeds"], tag: string) => (speeds === undefined || speeds === NA ? undefined : speeds[modelNameKey(tag)]);
+const speedOf = (s: State, tag: string) => speedIn(s.speeds, tag);
+
+/** "102 tokens per second" for a row that announces its facts in words, or nothing. */
+export function speedWords(speeds: State["speeds"], tag: string): string | undefined {
+  const text = tpsText(speedIn(speeds, tag)?.tokensPerSecond);
+  return text === undefined ? undefined : `${text.slice(0, -4)} tokens per second`;
+}
 
 /** Renders nothing, and so takes no width, until the model has a measured speed. */
 export function ModelSpeed({ tag }: { tag: string }) {

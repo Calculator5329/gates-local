@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-13: Each model shows how fast it runs here
+
+- A model you have chatted with in the last two weeks shows its speed,
+  like "102 TPS" with a gauge, at the end of its name line in the model
+  picker and in Models. It is measured from your own replies on this
+  computer, never estimated; a model you have not run shows nothing.
+  Hover it for how many replies it comes from.
+
 ## 2026-11-13: The suggested chat models are one data file
 
 - The models the app suggests now come from one file. That covers the

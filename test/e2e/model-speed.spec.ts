@@ -1,5 +1,5 @@
 import { createClient, type ModelSpeed } from "@gates-local/contracts";
-import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
+import { expect, openModels, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 // A reply sent from the page becomes that model's measured speed, pushed to
 // every other connection (a second window, the phone) without a read of its own.
@@ -33,4 +33,29 @@ test("a finished reply sets its model's measured speed for every connection", as
     expect(pushed[0]!.tokensPerSecond).toBeCloseTo(tokens / (ms / 1000), 6);
     expect(await other.call("models.speed", {}), "a read agrees with the push").toEqual(pushed);
   } finally { other.close(); }
+});
+
+// Settings row 4, the owner: "just a number and TPS. maybe an icon", only for a model run here.
+// It shows on the model's name line in the picker and in the Models pop-up, at the line's end.
+test("a model that has replied shows its TPS in the picker and in Models, the others show none", async ({ page, open }, info) => {
+  await stack.reset("models");
+  await open(); await waitReady(page);
+  await sendMessage(page, "How fast is this model?");
+  await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+
+  await page.locator("#modelBtn").click();
+  const used = page.locator("#pkList .pk-r.sel");
+  const tag = await used.getAttribute("data-m");
+  if (!tag) throw new Error("No selected model in the picker");
+  const tps = /^\d+(?:\.\d)? TPS$/;
+  await expect(used.locator(".tps")).toHaveText(tps);
+  await expect(page.locator("#pkList .pk-r:not(.sel) .tps"), "a model never run here shows nothing").toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("tps-picker.png"), animations: "disabled" });
+  await page.keyboard.press("Escape");
+
+  await openModels(page);
+  const row = page.locator(`.mp-row[data-dm="${tag}"]`);
+  await expect(row.locator(".mp-l1 .tps")).toHaveText(tps);
+  await expect(page.locator(`.mp-row:not([data-dm="${tag}"]) .tps`)).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("tps-models.png"), animations: "disabled" });
 });

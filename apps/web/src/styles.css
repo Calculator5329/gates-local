@@ -1120,6 +1120,7 @@ a.btn{text-decoration:none}
 .mp-row.cant .mp-nmn{color:var(--muted-foreground)}
 .mp-p{color:var(--muted-foreground);font-size:13px;line-height:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mp-meta{display:none}
+.mp-l1 .tps{flex:none;margin-left:auto;padding-left:6px}
 .mp-chip{display:inline-flex;align-items:center;gap:4px;flex:none;padding:0 7px 0 5px;border-radius:var(--r-sm);background:var(--selected);font-size:12px;font-weight:600;line-height:18px;color:var(--foreground)}
 .mp-chip .ic{color:var(--green)}
 .mp-acts{position:relative;display:flex;justify-content:flex-end;align-items:center;gap:6px}

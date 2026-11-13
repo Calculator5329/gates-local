@@ -33,6 +33,7 @@ import {
 } from "./models-rules.ts";
 import { awaitingInstall, canChat, notForChat, pickedModel } from "./pick.ts";
 import { MakerMark } from "./MakerMark.tsx";
+import { ModelSpeed } from "./model-speed.tsx";
 import { DialogHead } from "./Panel.tsx";
 import { leaveSettings, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
@@ -262,6 +263,7 @@ function ModelRowView({ r, def, saved, onRemove }: { r: InstalledRow; def: strin
           <MakerMark tag={r.name} />
           <span className="mp-nmn">{r.label.text}</span>
           {chip}
+          <ModelSpeed tag={r.name} />
         </div>
         {r.label.purpose ? (
           <div className="mp-p">{r.label.purpose}</div>

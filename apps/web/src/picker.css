@@ -21,6 +21,8 @@
 .pk-name .pk-nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pk-name .pk-variant{flex:none;font-size:11px;font-weight:400;color:var(--muted-foreground);white-space:nowrap}
 .pk-name .ic{color:var(--muted-foreground)}
+/* the measured speed ends the name line, next to the size; a long name gives way, the row keeps its height */
+.pk-name .tps{flex:none;margin-left:auto;padding-left:6px}
 .model-picker .pk-v{overflow:hidden;white-space:nowrap;text-align:right;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
 .model-picker .pk-v.spill{color:var(--amber-fg)}
 .model-picker .pk-v.no{color:var(--red-fg)}

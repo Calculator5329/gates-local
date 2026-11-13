@@ -7,6 +7,7 @@ import { CONTEXT_SIZES, type Verdict, ctxFor, gb, k, noGpu, verdictOf } from "./
 import { openFit } from "./fit-actions.ts";
 import { answers, canPick, cardFit, fitFor, stopsChat } from "./fit-table.ts";
 import { MakerMark } from "./MakerMark.tsx";
+import { ModelSpeed, speedWords } from "./model-speed.tsx";
 import { Icon } from "./icons.tsx";
 import { activeEntry, contextRuler, MAKERS, makerOf, pickerEntries, type Maker } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
@@ -55,6 +56,7 @@ export function Picker() {
   const pulls = useStore(s => s.pulls);
   const numCtx = useStore(s => s.numCtx);
   const selected = useStore(s => s.model);
+  const speeds = useStore(s => s.speeds);
   const gpu = useStore(s => s.gpu);
   const settled = useStore(s => s.hydrationSettled), readyForFits = useStore(chatReady);
   const phone = useMedia(PHONE), cpu = table ? table.memory.kind === "cpu" : noGpu(gpu);
@@ -182,7 +184,9 @@ export function Picker() {
   const facts = (row: Row) => {
     const fit = !row.v ? answered ? "No memory reading" : "Checking memory"
       : `${gb(row.v.need)} ${row.v.measured ? "measured" : "estimated"}; ${row.frees ? "sending stops another chat first" : row.v.k === "no" ? "not enough memory" : cpu ? "runs in system memory" : row.v.k === "gpu" ? "fits on GPU" : `${gb(row.v.amt)} in system memory, slower`}`;
-    return row.downloading === undefined ? fit : `Downloading, ${row.downloading}%. ${fit}`;
+    const speed = speedWords(speeds, row.tag);
+    const said = speed === undefined ? fit : `${fit}; ${speed}`;
+    return row.downloading === undefined ? said : `Downloading, ${row.downloading}%. ${said}`;
   };
   if (!pop?.ready) return null;
   return <div ref={ref} id="picker" className={`model-picker${pop ? " open" : ""}${step === "context" ? " step-context" : ""}`} role="dialog" aria-label="Choose a model" aria-modal={phone} onKeyDown={keys}>
@@ -200,7 +204,7 @@ export function Picker() {
             {/* before the first table every row is busy and cannot be picked yet, with the look it keeps after; once the table is in, a row it cannot pick (no reading, or too big) is disabled, except on the phone, whose context step offers other sizes */}
             {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !pickable(r.tag) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !answered || undefined} aria-disabled={r.downloading !== undefined || !answered || (!phone && !pickable(r.tag))} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
               {/* a name cut by its row reads in full in a tip, and only then (data-tipt) */}
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}</span><span className={`pk-v ${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : answered ? "–" : <FitSkel />}</span></button>
+              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : answered ? "–" : <FitSkel />}</span></button>
               {/* after the row's name, so the option is announced name first */}
               <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>
