@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-13: Settings covers the chat completely
+
+- Opening Settings while a reply was thinking let the open thought's words
+  show through Settings. The chat under Settings now draws nothing and
+  takes no clicks, and its open thoughts are still there when you go back.
+
 ## 2026-11-13: A failed image clean-up at start no longer blocks sends and deletes
 
 - At start the app clears pasted images that were never sent. If that
