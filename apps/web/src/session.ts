@@ -298,6 +298,13 @@ function probeImageStatus(): void {
   });
 }
 
+/** Settings › Tools: Run commands says Ready only after the server's sandbox probe ran a command. */
+export function checkShell(): void {
+  void probe("tools.shell", {}).then((shellStatus) => {
+    if (shellStatus !== undefined) applyServerEvent({ shellStatus });
+  });
+}
+
 /** Ask ComfyUI again, so Settings says what it finds now. */
 export async function checkImageStatus(): Promise<ActionResult> {
   const ticket = imageOrder.next();

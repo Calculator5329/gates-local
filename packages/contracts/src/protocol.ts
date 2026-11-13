@@ -15,6 +15,7 @@ import {
   ImageDownload,
   ImagePresets,
   ImageStatus,
+  ShellStatus,
   Message,
   ModelInfo,
   ModelSpeed,
@@ -228,6 +229,8 @@ export const methods = {
   "sources.clone": { params: S.Struct({ url: S.String }), result: SourceImport, phone: "deny" },
   "sources.cancelImport": { params: SourceRef, result: S.Struct({ cancelled: S.Boolean }), phone: "deny" },
   "image.status": { params: NoParams, result: ImageStatus, phone: "allow" },
+  /** Whether Run commands can run here: the sandbox probe, asked again when it last failed (Settings › Tools). */
+  "tools.shell": { params: NoParams, result: ShellStatus, phone: "allow" },
   /** The presets ComfyUI has every file for, read from ComfyUI (or its last answer when it is not running). */
   "image.presets": { params: NoParams, result: ImagePresets, phone: "allow" },
   "image.generate": {

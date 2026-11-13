@@ -21,6 +21,7 @@ import type {
   PullProgress,
   RuntimeStatus,
   Settings,
+  ShellStatus,
   Source,
   Thread,
   ToolStep,
@@ -194,6 +195,8 @@ export interface State {
   readonly pulls: Readonly<Record<string, PullProgress>>;
   readonly sources: Maybe<readonly Source[]>;
   readonly imageStatus: Maybe<ImageStatus>;
+  /** The shell sandbox's probe (tools.shell), read when Settings › Tools opens. */
+  readonly shellStatus: Maybe<ShellStatus>;
   /** The image models ComfyUI has every file for, and what an Image send runs now. */
   readonly imagePresets: Maybe<ImagePresets>;
   /** A setup's download: the last image.download push, kept after it ends so its row can say how. */
@@ -260,6 +263,7 @@ const initial: State = {
   pulls: {},
   sources: undefined,
   imageStatus: undefined,
+  shellStatus: undefined,
   imagePresets: undefined,
   imageDownload: undefined,
   imagePick: undefined,

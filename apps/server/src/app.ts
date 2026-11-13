@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
-import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, SyncChange, ToolStep } from "@gates-local/contracts";
+import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -129,6 +129,8 @@ export interface AppDeps {
   readonly sources?: Sources;
   readonly libraryImports?: LibraryImports;
   readonly toolsEnabled?: () => boolean;
+  /** The shell sandbox's probe (cached; a failed one is asked again after a while). Unset: the shell is offered unchecked. */
+  readonly shellStatus?: () => Promise<ShellStatus>;
   readonly newId?: () => string;
   readonly log?: (line: string) => void;
   /** How often a streaming reply is rewritten on disk; a crash loses at most this much. Defaults to a second. */
@@ -467,6 +469,8 @@ export function createApp(deps: AppDeps): App {
       const imageChoice = toolChoice === undefined ? undefined : store.imageChoiceOf(threadId) ?? toolChoice;
       const image = imageChoice !== undefined;
       const useTools = (wantsTools && sources.length > 0) || image;
+      const shell = useTools && deps.shellStatus ? await untilHalted(deps.shellStatus()) : undefined;
+      if (shell === HALTED || turn.halted) { finish(haltedEnd(turn.halted!)); return; }
       // Ollama refuses think: true for a model that cannot think, so its turns go without the flag.
       const think = await untilHalted(thinkFlag(baseUrl, model, options.think ?? deps.think, controller.signal));
       if (think === HALTED || turn.halted) {
@@ -499,7 +503,7 @@ export function createApp(deps: AppDeps): App {
         } } : {}),
       };
       if (turn.contextNotice) imageOmitted();
-      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
+      const events = useTools ? streamToolTurn({ ...input, sources, image, ...(shell ? { shell } : {}), ...(imageChoice ? { queueImage: queueImageFor(threadId, controller.signal, imageChoice) } : {}) }) : streamTurn(input);
       const iterator = events[Symbol.asyncIterator]();
       let dropped = false;
       try {
@@ -654,6 +658,8 @@ export function createApp(deps: AppDeps): App {
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),
     ...deps.libraryImports?.handlers,
     ...(deps.update ? createUpdateHandlers(deps.update) : {}),
+    // Settings › Tools says Ready for Run commands only after this probe ran a command in the sandbox.
+    "tools.shell": async () => deps.shellStatus ? await deps.shellStatus() : { state: "off" as const, word: "Not checked" },
     "threads.list": () => store.listThreads(),
     "threads.create": ({ title }) => {
       const thread = store.createThread(title === undefined ? {} : { title });

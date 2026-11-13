@@ -10,6 +10,8 @@ import { isSeccompArch, lockFilter, type SeccompArch } from "./seccomp.ts";
 
 const BWRAP = "/usr/bin/bwrap";
 const SYSTEMD_RUN = "/usr/bin/systemd-run";
+/** A test server points this at a stand-in (as GATES_LOCAL_NVIDIA_SMI does for nvidia-smi), to make the probe fail on any machine. */
+const systemdRun = () => process.env["GATES_LOCAL_SYSTEMD_RUN"] || SYSTEMD_RUN;
 /** Every tmpfs is 64 MiB; together with /dev they are charged to the scope's memory cap. */
 const TMPFS_BYTES = String(64 * 1024 * 1024);
 export const SCOPE_LIMITS = { memoryMaxBytes: 512 * 1024 * 1024, tasksMax: 64 } as const;
@@ -61,7 +63,8 @@ const baseArgs = () => [
 // `/` is the last mount argument, which leaves only the capped /tmp (and /dev) writable.
 const finalMounts = ["--remount-ro", "/data", "--remount-ro", "/library", "--remount-ro", "/"];
 
-export type SandboxProbe = { available: true; arch: SeccompArch } | { available: false; reason: string; detail?: string };
+/** `word` is the few words Settings › Tools shows in place of Ready; `reason` the sentence a turn or log gives. */
+export type SandboxProbe = { available: true; arch: SeccompArch } | { available: false; word: string; reason: string; detail?: string };
 export interface SandboxHost {
   platform: NodeJS.Platform;
   arch: string;
@@ -153,35 +156,51 @@ const hostRun: SandboxHost["run"] = (command, args, fds = []) => new Promise(res
 });
 const realHost: SandboxHost = { platform: process.platform, arch: process.arch, exists: existsSync, run: hostRun };
 
-/** Checks, in order: Linux, a filter for this arch, bwrap, a working capped user scope, a working sandbox. */
+const scopeOff = (detail: string) => ({ available: false as const, word: "Needs a systemd user session", reason: SCOPE_OFF, detail });
+
+/**
+ * Checks, in order: Linux, a filter for this arch, bwrap, a working capped user scope, and a real
+ * command (/usr/bin/true) run in the full sandbox. Only that last one passing makes it available.
+ */
 export async function probeSandboxWith(host: SandboxHost): Promise<SandboxProbe> {
-  if (host.platform !== "linux") return { available: false, reason: "The shell tool runs only on Linux." };
-  if (!isSeccompArch(host.arch)) return { available: false, reason: ARCH_OFF };
+  if (host.platform !== "linux") return { available: false, word: "Linux only", reason: "The shell tool runs only on Linux." };
+  if (!isSeccompArch(host.arch)) return { available: false, word: "Not on this processor", reason: ARCH_OFF };
   const arch = host.arch;
-  if (!host.exists(BWRAP)) return { available: false, reason: "The shell tool needs bubblewrap (/usr/bin/bwrap); it is off on this machine." };
-  if (!host.exists(SYSTEMD_RUN)) return { available: false, reason: SCOPE_OFF, detail: `${SYSTEMD_RUN} is missing` };
+  if (!host.exists(BWRAP)) return { available: false, word: "Needs bubblewrap", reason: "The shell tool needs bubblewrap (/usr/bin/bwrap); it is off on this machine." };
+  if (!host.exists(systemdRun())) return scopeOff(`${systemdRun()} is missing`);
   // The scope must exist and carry the caps, read back from its own cgroup files.
-  const caps = await host.run(SYSTEMD_RUN, [...scopeArgs(`gates-shell-probe-${randomUUID()}`), "/usr/bin/sh", "-c",
+  const caps = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), "/usr/bin/sh", "-c",
     'cg=$(cut -d: -f3 /proc/self/cgroup); cat "/sys/fs/cgroup$cg/memory.max" "/sys/fs/cgroup$cg/memory.swap.max" "/sys/fs/cgroup$cg/pids.max"']);
   const expected = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
-  if (caps.error || caps.code !== 0 || caps.output.trim() !== expected) {
-    return { available: false, reason: SCOPE_OFF, detail: (caps.error?.message ?? caps.output.trim()) || `exit ${caps.code}` };
-  }
-  const result = await host.run(SYSTEMD_RUN, [...scopeArgs(`gates-shell-probe-${randomUUID()}`), BWRAP, ...baseArgs(), ...finalMounts, "--", "/usr/bin/true"], sandboxFds(arch));
+  if (caps.error || caps.code !== 0 || caps.output.trim() !== expected) return scopeOff((caps.error?.message ?? caps.output.trim()) || `exit ${caps.code}`);
+  const result = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), BWRAP, ...baseArgs(), ...finalMounts, "--", "/usr/bin/true"], sandboxFds(arch));
   if (!result.error && result.code === 0) return { available: true, arch };
   const message = result.output.trim() || result.error?.message || `exit ${result.code}`;
   if (/operation not permitted|permission denied|creating new namespace|no permissions to create/i.test(message)) {
-    return { available: false, reason: "The shell tool cannot create its sandbox on this machine; it is off.", detail: message };
+    return { available: false, word: "Can't create its sandbox", reason: "The shell tool cannot create its sandbox on this machine; it is off.", detail: message };
   }
-  // A broken mount or filter is a bug, never a quiet skip.
-  throw new Error(`bwrap probe failed: ${message}`);
+  // A broken mount or filter, or a bwrap this machine set up oddly: off, and Settings says so
+  // instead of Ready (the real-confinement tests below still fail on it rather than skip).
+  return { available: false, word: "Sandbox check failed", reason: "The shell tool's sandbox failed its check on this machine; it is off.", detail: `bwrap probe failed: ${message}` };
 }
 
-let probing: Promise<SandboxProbe> | undefined;
-/** One async probe per process, run at first use. */
-export function probeSandbox(): Promise<SandboxProbe> {
-  return probing ??= probeSandboxWith(realHost);
+/** How long a failed probe stands before the next use asks again (bubblewrap installed, a session started). */
+export const PROBE_RETRY_MS = 30_000;
+
+/** A probe kept for good once it passes; a failed one is asked again after PROBE_RETRY_MS. Calls during one share it. */
+export function createProbe(host: SandboxHost, now: () => number = Date.now): () => Promise<SandboxProbe> {
+  const once = () => probeSandboxWith(host).catch((e: unknown): SandboxProbe =>
+    ({ available: false, word: "Sandbox check failed", reason: "The shell tool's sandbox failed its check on this machine; it is off.", detail: (e as Error).message }));
+  let last: { at: number; probe: Promise<SandboxProbe> } | undefined;
+  return () => {
+    if (last === undefined) last = { at: now(), probe: once() };
+    else if (now() - last.at >= PROBE_RETRY_MS) last = { at: now(), probe: last.probe.then(p => p.available ? p : once()) };
+    return last.probe;
+  };
 }
+
+/** The process's probe: run at first use, kept once it passes. */
+export const probeSandbox = createProbe(realHost);
 
 /** Kills every process in the scope through its cgroup, then the process group. */
 function killScope(pid: number | undefined, unit: string): void {
@@ -221,7 +240,7 @@ export async function runSandbox(input: SandboxInput): Promise<string> {
   const unit = `gates-shell-${randomUUID()}`;
   input.beforeLaunch?.();
   return new Promise((resolve, reject) => {
-    const child = spawnScoped(input.launcher ?? SYSTEMD_RUN, [...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch), 1);
+    const child = spawnScoped(input.launcher ?? systemdRun(),[...scopeArgs(unit), BWRAP, ...args], sandboxFds(probe.arch), 1);
     // Until the marker arrives, everything on stdout and stderr is systemd-run's or bwrap's.
     let started = false;
     const marker = (child.stdio as readonly unknown[])[MARKER_FD] as Readable;

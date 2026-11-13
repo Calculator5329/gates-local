@@ -3,9 +3,10 @@
 // control endpoint the specs call between journeys.
 //
 //   GET  /health            200 once the fake and the server are up
-//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, comfyUrl?, imageTool?, phone?, ...fakeOptions}
+//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, comfyUrl?, imageTool?, phone?, sandbox?, ...fakeOptions}
 //                           (imageTool: true saves image generation and Tools ›
-//                           Make images on)
+//                           Make images on; sandbox: "off" makes the shell
+//                           sandbox's probe fail, as with no systemd user session)
 //                           set the fake's scenario, then restart the server
 //                           on a fresh data dir (rediscovers Ollama). seed: N
 //                           writes one thread of N messages, seed: "design" the
@@ -67,6 +68,8 @@ let dataDir = "";
 /** Port 9 (discard) has no server on a test machine: a download there fails at once, on this computer. */
 const NO_DOWNLOADS = "http://127.0.0.1:9";
 let downloadOrigin = NO_DOWNLOADS;
+/** The stand-in machine's shell sandbox (test/fake-ollama/systemd-run.ts); a reset's `sandbox: "off"` breaks it. */
+let sandbox: "ready" | "off" = "ready";
 
 const log = (line: string) => process.stderr.write(`[stack] ${line}\n`);
 
@@ -192,6 +195,9 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_NVIDIA_SMI: path.join(ROOT, "test/fake-ollama/nvidia-smi.ts"),
     GATES_LOCAL_FAKE_GPU_STATE: gpuState,
     GATES_LOCAL_MEMINFO: path.join(ROOT, "test/fake-ollama/meminfo.txt"),
+    // The shell sandbox's probe sees a stand-in machine, never the runner's own bwrap.
+    GATES_LOCAL_SYSTEMD_RUN: path.join(ROOT, "test/fake-ollama/systemd-run.ts"),
+    GL_FAKE_SANDBOX: sandbox,
     GATES_LOCAL_SERVER_TOKEN: TOKEN,
     GATES_LOCAL_ALLOWED_ORIGINS: WEB_ORIGIN,
     GATES_LOCAL_RUNTIME: "discover-only",
@@ -284,7 +290,8 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, imageTool, phone, controlledRuntimePorts, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, imageTool, phone, controlledRuntimePorts, sandbox: sandboxState, ...fakeBody } = body;
+        sandbox = sandboxState === "off" ? "off" : "ready";
         await stopChild(server);
         server = null;
         await controlledRuntime?.close();

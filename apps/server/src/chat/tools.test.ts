@@ -214,6 +214,21 @@ describe("tool chat transport", () => {
     expect(windows).toContain("notes: Notes (folder) at /library/notes");
     expect(await system("linux")).toContain("books: books.db (sqlite) at /data/books.db");
   });
+  it("leaves the shell out when its sandbox check failed, and the chat says why the database went unread", async () => {
+    const bodies: { tools?: { function: { name: string } }[]; messages: { content: string }[] }[] = [];
+    const fetcher = vi.fn(async (url, init) => {
+      if (String(url).endsWith("/api/show")) return Response.json({ capabilities: ["tools"] });
+      bodies.push(JSON.parse(String(init?.body)));
+      return ndjson([{ message: { content: "ok" }, done: true }]);
+    });
+    const sources = [{ id: "books", label: "books.db", path: "live", snapshotPath: "snap", kind: "sqlite" as const }];
+    const events = [];
+    for await (const e of streamToolTurn({ baseUrl: "http://fake", model: "qwen", messages: [{ role: "user", content: "albums?" }], numCtx: 16384, sources, platform: "linux", fetch: fetcher,
+      shell: { state: "off", word: "Sandbox check failed" } })) events.push(e);
+    expect(bodies[0]!.tools!.map(t => t.function.name)).toEqual(["read"]);
+    expect(bodies[0]!.messages[0]!.content).toContain("books: books.db (sqlite): can't be read, Run commands is off on this machine");
+    expect(events.at(-1)).toMatchObject({ type: "done", message: { content: "ok", tools: [{ name: "note", summary: "Run commands is off on this machine (sandbox check failed), so databases in your Library can't be read" }] } });
+  });
   it("uses text calls for gemma and refuses truncated native calls", async () => {
     for (const native of [true, false]) {
       const execute = vi.fn();

@@ -10,6 +10,7 @@ export type Scenario = "models" | "no-models" | "slow-first-token" | "mid-stream
 export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL; "usage" adds a week of three models' usage), the README's demo threads, saved tool turns ("work-fold"), or 0 for none. */
 export type Seed = number | "design" | "design-code" | "readme" | "usage" | "work-fold";
+export type Sandbox = "ready" | "off";
 
 /** What Chromium fails an in-flight request with when the host's addresses change under it. */
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
@@ -57,8 +58,9 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string, controlledRuntimePorts = false): Promise<string | null> {
+  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string, controlledRuntimePorts = false, sandbox: Sandbox = "ready"): Promise<string | null> {
     const r = await control("/reset", {
+      ...(sandbox === "off" ? { sandbox } : {}),
       scenario,
       seed,
       ...(seedAt === undefined ? {} : { seedAt }),
@@ -113,6 +115,8 @@ interface Fixtures {
   runtimePorts: Awaited<ReturnType<typeof stack.runtimePorts>>;
   /** Saved ComfyUI address, so a test never reaches the default port; undefined leaves it unset. */
   comfyUrl: string | undefined;
+  /** The stand-in machine's shell sandbox (test/fake-ollama/systemd-run.ts): "off" makes its probe fail. */
+  sandbox: Sandbox;
   /** Console errors this test expects, as patterns; anything else fails it. */
   allowedErrors: RegExp[];
   /** Mark first run done before load, so the app opens on a new thread. */
@@ -131,10 +135,11 @@ export const test = base.extend<Fixtures>({
   controlledRuntimePorts: [false, { option: true }],
   comfyUrl: [undefined, { option: true }],
   installed: [undefined, { option: true }],
+  sandbox: ["ready", { option: true }],
   allowedErrors: [[], { option: true }],
   skipFirstRun: [true, { option: true }],
-  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts }, use) => {
-    await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts)));
+  seededThread: async ({ scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts, sandbox }, use) => {
+    await use(await test.step("reset backend", () => stack.reset(scenario, seed, seedAt, runtimeMode, installed, comfyUrl, controlledRuntimePorts, sandbox)));
   },
   runtimePorts: async ({ seededThread }, use) => {
     void seededThread;

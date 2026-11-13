@@ -219,6 +219,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "sources.clone": { params: { url: "https://github.com/example/docs" }, result: { id: "i2", key: "https://github.com/example/docs", label: "example/docs", kind: "repository", state: "cloning", bytes: 0 } },
   "sources.cancelImport": { params: { id: "i1" }, result: { cancelled: true } },
   "image.status": { params: {}, result: imageReady },
+  "tools.shell": { params: {}, result: { state: "ready" } },
   "image.presets": {
     params: {},
     result: {

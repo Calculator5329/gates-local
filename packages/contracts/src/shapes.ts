@@ -500,6 +500,17 @@ export const ImageStatus = S.Struct({
 });
 export type ImageStatus = typeof ImageStatus.Type;
 
+/**
+ * Run commands on this machine. "ready" only once a real command ran in its sandbox; "off" says why
+ * in a few words (`word`, what Settings shows in place of Ready) and a sentence (`reason`).
+ */
+export const ShellStatus = S.Struct({
+  state: S.Literals(["ready", "off"]),
+  word: S.optional(S.String),
+  reason: S.optional(S.String),
+});
+export type ShellStatus = typeof ShellStatus.Type;
+
 /** One size of a preset and the GPU memory a job at that size needs. */
 export const ImageSize = S.Struct({ width: S.Int, height: S.Int, bytes: Count });
 export type ImageSize = typeof ImageSize.Type;

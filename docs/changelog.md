@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-13: Run commands says Ready only when a command can run
+
+- Settings › Tools › Run commands used to say Ready on a machine whose
+  sandbox could not start, and every command then failed. It now tries
+  the sandbox when Settings opens and says Ready only if that worked.
+  Otherwise it names the missing piece: Needs bubblewrap, Needs a systemd
+  user session, Can't create its sandbox, or Sandbox check failed.
+- Where the sandbox does not work, the model is not offered the command
+  tool, and a chat that would have read a Library database says Run
+  commands is off on this machine and why.
+- A sandbox that failed once is tried again after 30 seconds, instead of
+  staying broken until the app restarts.
+
+## 2026-11-13: Run commands says Ready only when a command can run
+
+- Settings › Tools › Run commands used to say Ready on a machine whose
+  sandbox could not start, and every command then failed. It now tries
+  the sandbox when Settings opens and says Ready only if that worked.
+  Otherwise it names the missing piece: Needs bubblewrap, Needs a systemd
+  user session, Can't create its sandbox, or Sandbox check failed.
+- Where the sandbox does not work, the model is not offered the command
+  tool, and a chat that would have read a Library database says Run
+  commands is off on this machine and why.
+- A sandbox that failed once is tried again after 30 seconds, instead of
+  staying broken until the app restarts.
+
 ## 2026-11-13: The sidebar's Search rests without a box, and the thread list has no scrollbar
 
 - At rest, the sidebar's Search is a magnifier and the word Search, in line

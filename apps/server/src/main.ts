@@ -63,6 +63,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
+import { createShellStatus } from "./chat/shell.ts";
+import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
 import { createNvidiaSmiRunner } from "./fit/gpu.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
@@ -314,6 +316,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     settings: services.settings,
     // A turn that does not say runs tools when Settings has them on.
     toolsEnabled: () => services.settings.get().tools,
+    shellStatus: createShellStatus(probeSandbox, (line) => log(line)),
     // Tools › Make images: off unless switched on; an unset choice is the first preset ComfyUI has.
     imageTool: () => {
       const settings = services.settings.get();

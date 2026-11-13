@@ -18,6 +18,8 @@ export interface ToolsDeps {
   queueImage?: (prompt: string, signal: AbortSignal) => Promise<{ jobId: string }>;
   /** The turn asked for images (`chat.send` `image: true`). The image tool exists only with this and `queueImage`. */
   image?: boolean;
+  /** false: the sandbox probe failed on this machine, so the shell tool is neither offered nor run. */
+  shell?: boolean;
   /** Tests inject a realpath; the app uses the native one from paths.ts. */
   realpath?: Realpath;
   /** Tests inject the read tool's filesystem calls to race them; the app uses node:fs/promises. */
@@ -40,13 +42,14 @@ export function createTools(deps: ToolsDeps) {
   const platform = deps.platform ?? process.platform;
   const queueImage = deps.image === true ? deps.queueImage : undefined;
   return {
-    definitions: toolDefinitions(platform, { image: queueImage !== undefined }),
+    definitions: toolDefinitions(platform, { image: queueImage !== undefined, ...(deps.shell === false ? { shell: false } : {}) }),
     async execute(call: ToolCall, signal: AbortSignal): Promise<ToolResult> {
       signal.throwIfAborted();
       switch (call.name) {
         case "read": return readLibrary(deps.sources, call.input, signal, deps.realpath ?? canonicalPath, platform, { stat, opendir, open, ...deps.fs });
         case "shell": {
           if (platform === "win32") throw new TypeError("Shell is unavailable on Windows; use sql or read");
+          if (deps.shell === false) throw new TypeError("Run commands is off on this machine; use read");
           const output = await runSandbox({ command: text(call.input, "command"), sources: deps.sources, signal, timeoutMs: integer(call.input, "timeoutMs", 10000, 30000) });
           return { output, summary: "Searched your library" };
         }

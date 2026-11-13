@@ -3,7 +3,7 @@ import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, read
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ARCH_OFF, probeSandbox, probeSandboxWith, runSandbox, SCOPE_OFF, type SandboxHost } from "./index.ts";
+import { ARCH_OFF, createProbe, PROBE_RETRY_MS, probeSandbox, probeSandboxWith, runSandbox, SCOPE_LIMITS, SCOPE_OFF, type SandboxHost } from "./index.ts";
 import type { LibraryEntry } from "../types.ts";
 
 const fakeHost = (over: Partial<SandboxHost>): SandboxHost => ({
@@ -18,7 +18,36 @@ describe("sandbox probe", () => {
     expect(await probeSandboxWith(fakeHost({ exists: file => !file.endsWith("systemd-run") }))).toMatchObject({ available: false, reason: SCOPE_OFF });
   });
   it("turns the shell off on an arch without a lock filter", async () => {
-    expect(await probeSandboxWith(fakeHost({ arch: "riscv64" }))).toEqual({ available: false, reason: ARCH_OFF });
+    expect(await probeSandboxWith(fakeHost({ arch: "riscv64" }))).toMatchObject({ available: false, reason: ARCH_OFF });
+  });
+  it("turns the shell off with a reason, never a throw, when bwrap fails its own check (seen on a WSL runner)", async () => {
+    const caps = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
+    const run: SandboxHost["run"] = async (_command, args) => args.includes("/usr/bin/true")
+      ? { code: 1, output: "bwrap: Unexpected capabilities but not setuid, old file caps config?" }
+      : { code: 0, output: caps };
+    const probe = await probeSandboxWith(fakeHost({ run }));
+    expect(probe).toMatchObject({ available: false, word: "Sandbox check failed", detail: expect.stringContaining("Unexpected capabilities") });
+  });
+  it("names each reason in a few words for Settings", async () => {
+    expect(await probeSandboxWith(fakeHost({ platform: "darwin" }))).toMatchObject({ word: "Linux only" });
+    expect(await probeSandboxWith(fakeHost({ exists: file => !file.endsWith("bwrap") }))).toMatchObject({ word: "Needs bubblewrap" });
+    expect(await probeSandboxWith(fakeHost({ run: async () => ({ code: 1, output: "Failed to connect to bus" }) }))).toMatchObject({ word: "Needs a systemd user session" });
+  });
+  it("asks again after a failed probe, but keeps a passed one", async () => {
+    let now = 0;
+    let works = false;
+    const caps = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
+    const run = vi.fn<SandboxHost["run"]>(async (_command, args) => args.includes("/usr/bin/true") ? { code: works ? 0 : 1, output: works ? "" : "bwrap: no permissions to create new namespace" } : { code: 0, output: caps });
+    const probe = createProbe(fakeHost({ run }), () => now);
+    expect(await probe()).toMatchObject({ available: false });
+    expect(await probe()).toMatchObject({ available: false });
+    expect(run).toHaveBeenCalledTimes(2); // one probe: the scope, then the sandbox
+    works = true;
+    now += PROBE_RETRY_MS;
+    expect(await probe()).toMatchObject({ available: true });
+    now += 10 * PROBE_RETRY_MS;
+    expect(await probe()).toMatchObject({ available: true });
+    expect(run).toHaveBeenCalledTimes(4);
   });
 });
 

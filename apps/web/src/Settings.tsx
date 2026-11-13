@@ -4,7 +4,7 @@
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { Accent, ImageStatus, Source, Theme } from "@gates-local/contracts";
+import type { Accent, ImageStatus, ShellStatus, Source, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, noGpu, sourceDetail } from "./format.ts";
@@ -12,7 +12,7 @@ import { Icon, type IconId } from "./icons.tsx";
 import LibraryImports from "./LibraryImports.tsx";
 import { ModelsPage } from "./Models.tsx";
 import { sizeText } from "./models-rules.ts";
-import { addSource, canOpenFolder, checkImageStatus, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, settingsReads, updateSettings } from "./session.ts";
+import { addSource, canOpenFolder, checkImageStatus, checkShell, dataFolder, openDataFolder, openSettings, refreshSource, removeSource, resetSettings, settingsReads, updateSettings } from "./session.ts";
 import { NA, setState, useStore } from "./store.ts";
 import { CopyButton, PathText, Status } from "./settings-controls.tsx";
 import { type LibraryTool, libraryToolCanUse } from "./settings-rules.ts";
@@ -261,6 +261,16 @@ function libraryTool(on: boolean, sources: readonly Source[] | "na" | undefined,
   return { ...(libraryToolCanUse(tool, sources) ? { word: "Ready", dot: "ok" } : quiet(missing)), go: () => openSettings("library") };
 }
 
+/** Run commands also needs its sandbox: Ready only after the server's probe ran a command in it (tools.shell). */
+function runTool(on: boolean, sources: readonly Source[] | "na" | undefined, shell: ShellStatus | "na" | undefined): ToolState {
+  if (!on) return quiet("Turned off");
+  if (shell === undefined) return { word: "Checking", dot: "run" };
+  if (shell === NA) return quiet("Not available");
+  // What the machine lacks comes first: adding to the Library would not fix it.
+  if (shell.state === "off") return quiet(shell.word ?? "Not available");
+  return libraryTool(on, sources, "run", "Add something to your Library");
+}
+
 function Tools() {
   const settings = useStore((s) => s.settings);
   const locked = useStore((s) => s.unavailable["settings.update"] === true);
@@ -269,6 +279,9 @@ function Tools() {
   const [err, run] = useAct();
   const on = settings === NA || settings?.tools === true;
   const windows = /\bWindows\b/.test(navigator.userAgent);
+  const shell = useStore((s) => s.shellStatus);
+  // Asked each time Tools opens: the server keeps a passed probe and asks a failed one again.
+  useEffect(() => { if (!windows) checkShell(); }, [windows]);
   const [imageErr, runImage] = useAct();
   // The chat model's image tool: app-wide, off by default, offered only with the master switch on.
   // The composer's Image button sends to the image model itself and never needs it.
@@ -303,7 +316,7 @@ function Tools() {
         {windows ? (
           <ToolRow name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "Add a SQLite database to your Library")} />
         ) : (
-          <ToolRow name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={libraryTool(on, sources, "run", "Add something to your Library")} />
+          <ToolRow name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={runTool(on, sources, shell)} />
         )}
         <div className={`srow tool${imageWhy === null ? "" : " dim"}`} data-tool="images">
           <span className="sl">
