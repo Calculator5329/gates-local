@@ -243,13 +243,13 @@ describe("threads", () => {
     const a = s.createThread({ title: "a" });
     const b = s.createThread({ title: "b" });
     expect(s.imageChoiceOf(a.id)).toBeUndefined();
-    const x = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+    const x = { preset: "moss-image", width: 1024, height: 1024 };
     const set = s.setImageChoice(a.id, x);
     expect(set).toEqual({ ...a, imageChoice: x });
     s.setImageChoice(b.id, { preset: "flux2-klein-4b", width: 768, height: 1024 });
     expect(s.imageChoiceOf(a.id)).toEqual(x);
     expect(s.getThread(a.id).thread).toEqual(set);
-    expect(s.listThreads().map((t) => [t.id, t.imageChoice?.preset])).toEqual([[b.id, "flux2-klein-4b"], [a.id, "sdxl-lightning"]]);
+    expect(s.listThreads().map((t) => [t.id, t.imageChoice?.preset])).toEqual([[b.id, "flux2-klein-4b"], [a.id, "moss-image"]]);
     expect(() => s.setImageChoice("00000000-0000-4000-8000-000000000000", x)).toThrow(ThreadNotFoundError);
     // a file from before the column: the next open adds it
     s.close();
@@ -434,7 +434,7 @@ describe("tool steps and images (schema step 2)", () => {
   it("a settled image card interrupted by a restart keeps the choice it was sent with, so its box keeps its shape", () => {
     const s = store();
     const t = s.createThread();
-    const settled = { preset: "sdxl-lightning", width: 768, height: 512 };
+    const settled = { preset: "z-image-int8", width: 1024, height: 768 };
     const sent = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
     s.saveImageJob({ jobId: "j1", threadId: t.id, state: "running", progress: 0, choice: settled, sent }, "a tree");
     s.interruptImageJobs();

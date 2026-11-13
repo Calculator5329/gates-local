@@ -9,7 +9,8 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-test.beforeEach(async () => { comfy = await fakeComfy(); });
+// a GPU: a job with nothing picked has no default on the CPU
+test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 
 type Client = ReturnType<typeof createClient>;

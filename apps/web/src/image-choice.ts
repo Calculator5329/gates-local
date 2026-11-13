@@ -11,7 +11,10 @@ export interface ImageView {
   readonly preset: ImagePreset;
   readonly width: number;
   readonly height: number;
-  /** A saved pick, or a default ComfyUI's last file list has: the button names only these. */
+  /**
+   * A saved pick, or a default ComfyUI's last file list has: the button names only these. Never a
+   * default when the server says this GPU has none (ImagePresets.noGpu).
+   */
   readonly listed: boolean;
 }
 
@@ -32,7 +35,7 @@ export function chosenImage(s: State): ImageView | undefined {
   const fits = saved !== undefined && preset !== undefined && preset.sizes.some((z) => z.width === saved.width && z.height === saved.height);
   const view = fits
     ? { preset, width: saved.width, height: saved.height, listed: true }
-    : { ...presets.current, listed: presets.presets.some((p) => p.id === presets.current.preset.id) };
+    : { ...presets.current, listed: presets.noGpu === undefined && presets.presets.some((p) => p.id === presets.current.preset.id) };
   lastView = { presets, saved, view };
   return view;
 }

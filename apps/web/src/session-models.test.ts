@@ -518,9 +518,9 @@ describe("Thinking at the start", () => {
 
 describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)", () => {
   const pixelPreset = methodSamples["image.presets"].result.presets[0]!;
-  const sdxlPreset = { id: "sdxl-lightning", name: "SDXL Lightning", family: "sdxl", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 9_663_676_416 }] };
-  const presets = { presets: [pixelPreset, sdxlPreset], readAt: 1, current: { preset: pixelPreset, width: 768, height: 512 } };
-  const sdxl = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+  const mossPreset = { id: "moss-image", name: "MOSS-Image", family: "moss", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 4_294_967_296 }] };
+  const presets = { presets: [pixelPreset, mossPreset], readAt: 1, current: { preset: pixelPreset, width: 1024, height: 1024 } };
+  const moss = { preset: "moss-image", width: 1024, height: 1024 };
   const imageAnswers = {
     "settings.get": async () => ({ ...(defaults["settings.get"] as object), imageGen: true }),
     "image.presets": async () => presets,
@@ -536,8 +536,8 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
 
   it("a pick in a new chat is that chat's alone: no Settings write, and its first send carries it", async () => {
     const { session, store, calls } = await onPhone();
-    expect(await session.pickImage(sdxl)).toBeNull();
-    expect(store.getState().imagePick).toEqual(sdxl);
+    expect(await session.pickImage(moss)).toBeNull();
+    expect(store.getState().imagePick).toEqual(moss);
     expect(calls).not.toContain("settings.update");
     expect(calls).not.toContain("threads.setImageChoice");
   });
@@ -545,7 +545,7 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
   it("a pick in an open chat is saved in that thread only", async () => {
     const { session, store, calls } = await onPhone({ "threads.setImageChoice": async () => ({ ...methodSamples["threads.setImageChoice"].result, id: "A" }) });
     session.openThread("A");
-    expect(await session.pickImage(sdxl)).toBeNull();
+    expect(await session.pickImage(moss)).toBeNull();
     expect(calls).toContain("threads.setImageChoice");
     expect(calls).not.toContain("settings.update");
     expect(store.getState().imagePick).toBeUndefined();
@@ -559,9 +559,9 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
       "chat.send": (params) => { draws.push((params as { draw?: unknown }).draw); return sent.promise; },
     });
     store.setState({ image: true });
-    await session.pickImage(sdxl);
+    await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
-    await vi.waitFor(() => expect(draws).toEqual([sdxl]));
+    await vi.waitFor(() => expect(draws).toEqual([moss]));
     sent.resolve(methodSamples["chat.send"].result);
     await vi.waitFor(() => expect(store.getState().imagePick).toBeUndefined());
     session.newThread();
@@ -574,10 +574,10 @@ describe("the phone's image pick, which cannot write Settings (IR3-62, IR3-63)",
       "chat.send": async () => { throw new Error("refused"); },
     });
     store.setState({ image: true });
-    await session.pickImage(sdxl);
+    await session.pickImage(moss);
     void session.send("a lighthouse").catch(noop);
     await vi.waitFor(() => expect(calls).toContain("chat.send"));
     await settled();
-    expect(store.getState().imagePick).toEqual(sdxl);
+    expect(store.getState().imagePick).toEqual(moss);
   });
 });

@@ -293,12 +293,12 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     writeGpu();
   });
 
-  /** Another program's GPU memory, set by POST /__fake/gpu: moves the GPU reading without touching the runtime. */
-  let otherMib = 0;
+  /** Another program's GPU memory and the card's size (0: nvidia-smi.ts's own), set by POST /__fake/gpu: moves the GPU reading without touching the runtime. */
+  let otherMib = 0, totalMib = 0;
   const onGpu = (l: LoadedEntry): number => (options.vramCapBytes > 0 ? Math.min(l.sizeBytes, options.vramCapBytes) : l.sizeBytes);
   const writeGpu = () => {
     if (!start.gpuStateFile) return;
-    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling].map((l) => ({ ...l, sizeBytes: onGpu(l) })), otherMib }));
+    writeFileSync(start.gpuStateFile, JSON.stringify({ loaded: [...loaded, ...filling].map((l) => ({ ...l, sizeBytes: onGpu(l) })), otherMib, ...totalMib > 0 ? { totalMib } : {} }));
   };
   writeGpu();
 
@@ -315,7 +315,7 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
     turns.length = 0;
     loads.length = 0;
     released.clear();
-    otherMib = 0;
+    otherMib = 0; totalMib = 0;
     writeGpu();
   };
   if (scenario === "slow-first-token" || scenario === "slow-drip" || scenario === "threads") setScenario(scenario, start.options);
@@ -549,11 +549,13 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       }
       if (route === "GET /__fake/state") return json(res, 200, api.state());
       if (route === "POST /__fake/gpu") {
-        const mib = field(body, "otherMib");
+        const mib = field(body, "otherMib"), total = field(body, "totalMib");
         if (typeof mib !== "number" || !Number.isInteger(mib) || mib < 0) return json(res, 400, { error: "otherMib must be a whole number of MiB, 0 or more" });
+        if (total !== undefined && (typeof total !== "number" || !Number.isInteger(total) || total < 1)) return json(res, 400, { error: "totalMib must be a whole number of MiB, 1 or more" });
         otherMib = mib;
+        if (typeof total === "number") totalMib = total;
         writeGpu();
-        return json(res, 200, { otherMib });
+        return json(res, 200, { otherMib, ...totalMib > 0 ? { totalMib } : {} });
       }
       if (route === "POST /__fake/release") {
         const id = field(body, "id");

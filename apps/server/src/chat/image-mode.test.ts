@@ -18,8 +18,8 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const CHOSEN: ImageChoice = { preset: "sdxl-lightning", width: 1024, height: 1024 };
-const DRAWN: ImageChoice = { preset: "sdxl-lightning-pixel", width: 512, height: 768 };
+const CHOSEN: ImageChoice = { preset: "moss-image", width: 1024, height: 1024 };
+const DRAWN: ImageChoice = { preset: "flux2-klein-4b-pixel", width: 512, height: 512 };
 const ndjson = (items: unknown[]) => new Response(items.map((i) => JSON.stringify(i)).join("\n") + "\n");
 
 async function rig(options: { imageTool?: ImageChoice; hold?: boolean } = {}) {

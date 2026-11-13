@@ -6,7 +6,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { imageFitVerdict, type ImageChoice, type ImageDownload, type ImageEvent, type ImagePresets, type ImageStatus, type Params, type PullProgress } from "@gates-local/contracts";
+import { imageFitVerdict, type GpuStatus, type ImageChoice, type ImageDownload, type ImageEvent, type ImagePresets, type ImageStatus, type Params, type PullProgress } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 import type { Push } from "../app.ts";
 import { readGpu, untilAborted } from "../fit/gpu.ts";
@@ -19,7 +19,7 @@ import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
-import { defaultChoice, describeChoice, isDefaultChoice, listPresets, PRESETS, resolveChoice, smallerFit, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
+import { cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, PRESETS, resolveChoice, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
 
 /**
@@ -51,6 +51,11 @@ export interface ImageDeps extends ComfyClientDeps {
   ollamaUrl(): string | undefined;
   onModelUnloaded?(model: string): void;
   readGpu?(): Promise<{ freeBytes: number; holders: string; tenants?: readonly GpuHolder[] }>;
+  /**
+   * The GPU as the picker sees it (the app's GPU watcher): what decides the default and the tiers
+   * (imageRoom). Absent (tests, the real check): the room is unknown and every setup counts as fitting.
+   */
+  gpuStatus?(): Promise<GpuStatus>;
   /** The nvidia-smi the default readGpu runs; the e2e stack's fake (GATES_LOCAL_NVIDIA_SMI), as every chat fit uses. */
   runNvidiaSmi?: NvidiaSmiRunner;
   service?: ComfyService;
@@ -226,6 +231,24 @@ export function imageFitError(estimatedBytes: number, creditedBytes: number, fre
   return Object.assign(imageError("wont-fit", `Image generation needs ${gib(needBytes)}, ${gib(freeBytes)} free, ${gib(shortfallBytes)} short (estimated total ${gib(estimatedBytes)}, credited ComfyUI resident ${gib(creditedBytes)}). Memory holders: ${holders}. Protected occupants are left running.`),
     { estimatedBytes, creditedBytes, needBytes, freeBytes, shortfallBytes, holders, said: said ?? fitSentence(needBytes, freeBytes, [], []) });
 }
+
+/**
+ * The card Image mode is judged by, for the default and the tiers: its memory to the nearest GB
+ * (cardBytes), never what is free now (owner ruling 2026-11-13). What other programs hold is the
+ * picker's information, and the job's own fit check judges it when the job runs.
+ * 0 when ComfyUI runs on the CPU (`cpuOnly`), or when there is no NVIDIA GPU and ComfyUI does not
+ * say it has another. Undefined (unknown) when nvidia-smi fails or ComfyUI reports a GPU nvidia-smi cannot read.
+ */
+export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefined): number | undefined {
+  if (cpuOnly === true) return 0;
+  if (gpu === undefined || gpu.vendor === "unreadable") return undefined;
+  if (gpu.vendor === "none") return cpuOnly === false ? undefined : 0;
+  if (gpu.totalBytes === undefined) return undefined;
+  return cardBytes(gpu.totalBytes);
+}
+
+/** The picker's words when no setup is a default at this room. */
+const roomWords = (room: number | undefined) => room !== undefined && room < MIN_ROOM ? { noGpu: NO_GPU } : {};
 
 export function createImageModule(deps: ImageDeps): ImageModule {
   const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
@@ -446,7 +469,22 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   /** The running download: its setup, and its last push until that push ends it. */
   let downloadOf: string | undefined, lastDownload: ImageDownload | undefined;
   const say = (p: ImageDownload) => { lastDownload = p; emit("image.download", p); };
-  const chooseDefault = () => defaultChoice(knownFiles(), extras());
+  /** The last room read (imageRoom), for the default between reads; undefined until one is. */
+  let lastRoom: number | undefined;
+  /** The room now, for a ComfyUI on this machine; unknown for one elsewhere (its GPU is not this one). */
+  const readRoom = async (signal?: AbortSignal): Promise<number | undefined> => {
+    if (deps.gpuStatus === undefined) return lastRoom = undefined;
+    let cfg: ReturnType<typeof config>;
+    try { cfg = config(); } catch { return lastRoom = undefined; }
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return lastRoom = undefined;
+    const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
+    signal?.throwIfAborted();
+    const gpu = await deps.gpuStatus().catch(() => undefined);
+    signal?.throwIfAborted();
+    return lastRoom = imageRoom(gpu, stats === undefined || stats.devices.length === 0 ? undefined : stats.devices.every((d) => d.type === "cpu"));
+  };
+  /** The default for the files and room last read; DEFAULT_CHOICE stands in where there is none, and the job refuses it (settle). */
+  const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom) ?? DEFAULT_CHOICE;
   /** What a send runs now: the saved choice, or the default for the files last read. */
   const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault(), extras());
   const module: ImageModule = {
@@ -462,11 +500,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
         try { const { lists, ...read } = await comfy.catalog(); remember(cfg.baseUrl, lists, read); }
         catch (error) { log(`ComfyUI file list not read: ${detail(error)}`); }
       }
+      const room = await readRoom();
       const last = knownFiles();
-      if (last === undefined) return { presets: [], current: currentChoice() };
+      if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room) };
       const { ready, others } = listPresets(last, extras());
+      const tiers = tiersFor(room);
+      const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => x.preset === p.id); return t === undefined ? p : { ...p, tier: t.tier }; };
       const download = lastDownload?.ended === true ? undefined : lastDownload;
-      return { presets: ready, ...others.length > 0 ? { others } : {}, readAt: last.readAt, current: currentChoice(), ...download === undefined ? {} : { download } };
+      return { presets: ready.map(tag), ...others.length > 0 ? { others: others.map(tag) } : {}, readAt: last.readAt, current: currentChoice(), ...roomWords(room), ...download === undefined ? {} : { download } };
     },
     async start() {
       if (closed) throw imageError("shutting-down", "Image generation is shutting down.");
@@ -554,8 +595,10 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               try { remember(cfg.baseUrl, await from.files(signal)); }
               catch (error) { signal.throwIfAborted(); log(`ComfyUI file list not read: ${detail(error)}`); }
             };
-            const settle = () => {
-              const settled = chooseDefault();
+            // With too little GPU room there is no default: the card says why, and no other setup runs.
+            const settle = async () => {
+              const settled = defaultChoice(knownFiles(), extras(), await readRoom(signal));
+              if (settled === undefined) throw Object.assign(imageError("wont-fit", NO_GPU), { said: NO_GPU });
               if (same(settled, choice)) return;
               choice = settled;
               ({ size } = resolveChoice(choice, extras()));
@@ -565,13 +608,13 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             stage = "image-missing";
             const early = unset && knownFiles() === undefined ? await ensure(cfg.baseUrl, cfg.managed, signal) : undefined;
             if (early) await read(early);
-            if (unset) settle();
+            if (unset) await settle();
             stage = "image-fit";
             await fit(cfg, size.bytes, signal, freeing);
             stage = "image-missing";
             const comfy = early ?? await ensure(cfg.baseUrl, cfg.managed, signal);
             // read before: the read now ComfyUI is up catches files gone since
-            if (unset && !early) { await read(comfy); settle(); }
+            if (unset && !early) { await read(comfy); await settle(); }
             stage = "image-render";
             const earlier = stuck.get(cfg.baseUrl);
             if (earlier) {
@@ -738,7 +781,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     // each file's size: the record's, then the file's own once its download says it; the setup's bar needs them all
     const { records, ...fetching } = deps.download ?? {};
     const sizes = plan.map((f) => records === false ? undefined : f.bytes);
-    downloading = (async () => {
+    const run: Promise<void> = (async () => {
       const pins = readPins();
       for (const [i, file] of plan.entries()) {
         const place = { preset: id, file: i + 1, files: plan.length };
@@ -765,8 +808,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
           break;
         }
       }
+      // The row offers Download as soon as the last file ends, so the lock goes then, not after
+      // the list is read again (that read waits on the GPU's).
+      unlock();
       await module.presets().catch(() => undefined);
-    })().finally(() => { downloading = undefined; downloads = undefined; downloadOf = undefined; });
+    })().finally(() => { unlock(); if (downloading === run) downloading = undefined; });
+    /** Frees the lock this download holds, and never one a later download took. */
+    function unlock() { if (downloads === controller) { downloads = undefined; downloadOf = undefined; } }
+    downloading = run;
     return { files: plan.map((f) => f.name) };
   }
   return module;

@@ -18,6 +18,8 @@ const safetensors = (tensors: Record<string, readonly number[]>, metadata: Recor
 };
 const header = (shapes: Record<string, readonly number[]>, metadata: Record<string, string> = {}): Header => ({ shapes, metadata });
 const range = (n: number) => Array.from({ length: n }, (_, i) => i);
+/** The LoRA rows these installed files make. */
+const styles = (list: Parameters<typeof installedWorkflows>[0]) => installedWorkflows(list).filter((w) => w.id.startsWith("file:loras/")).map(workflowPreset);
 /** An SD or SDXL UNet's first layer, taking this many channels in (an inpainting one takes 9). */
 const firstLayer = (channels: number) => ({ "model.diffusion_model.input_blocks.0.0.weight": [320, channels, 3, 3] });
 /** A safetensors header whose JSON is exactly this many bytes long. */
@@ -87,10 +89,8 @@ describe("the files in ComfyUI's folders", () => {
   const files: Record<string, Buffer> = {
     "checkpoints/xl/juggernaut.safetensors": safetensors(SDXL),
     "checkpoints/dreamshaper_lightning.safetensors": safetensors(SDXL, { "modelspec.title": "DreamShaper XL Lightning" }),
-    "checkpoints/sdxl_lightning_4step.safetensors": safetensors(SDXL),
     "checkpoints/inpaint.safetensors": safetensors(SDXL, { "modelspec.architecture": "stable-diffusion-xl-v1-inpainting" }),
     "loras/ink.safetensors": safetensors(SDXL_LORA),
-    "loras/RW_pixelart_XL_v1.safetensors": safetensors(SDXL_LORA),
     "loras/klein-pixel.safetensors": safetensors(kleinLora),
     "loras/old15.safetensors": safetensors(SD15_LORA),
     "loras/zi.safetensors": safetensors({}, { "modelspec.architecture": "z-image-turbo/lora" }),
@@ -140,14 +140,13 @@ describe("the files in ComfyUI's folders", () => {
   it("become setups in Your models: ready, needing the base's files, or refused with the reason", async () => {
     const extra = installedWorkflows(await readInstalled(folders(), lists().files)).map(workflowPreset);
     const { ready, others } = listPresets(lists(), extra);
-    expect(ready.filter((p) => p.group === "Your models").map((p) => p.name)).toEqual(["juggernaut", "dreamshaper_lightning", "linked", "base"]);
+    // an SDXL style runs on an SDXL checkpoint the person has: here juggernaut
+    expect(ready.filter((p) => p.group === "Your models").map((p) => p.name)).toEqual(["juggernaut", "dreamshaper_lightning", "linked", "base", "ink style"]);
     expect(others.filter((p) => p.group === "Your models")).toEqual([
-      // a style on the app's SDXL Lightning setup, whose checkpoint is not installed: 6.94 GB
-      expect.objectContaining({ id: "file:loras/ink.safetensors", name: "ink style", family: "sdxl", needs: { files: ["sdxl_lightning_4step.safetensors"], bytes: 6_938_040_682, download: true } }),
       // a style on Klein 4B, none of whose three files is installed: 4.07 + 8.04 + 0.34 GB
       expect.objectContaining({ id: "file:loras/klein-pixel.safetensors", family: "flux", needs: { files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"], bytes: 12_451_817_860, download: true } }),
       expect.objectContaining({ id: "file:loras/old15.safetensors", why: "A Stable Diffusion 1.5 LoRA; it needs a Stable Diffusion 1.5 model, and none is installed." }),
-      expect.objectContaining({ id: "file:loras/zi.safetensors", why: "A Z-Image Turbo LoRA; it needs a Z-Image Turbo model, and Image mode has no Z-Image Turbo setup." }),
+      expect.objectContaining({ id: "file:loras/zi.safetensors", why: "A Z-Image Turbo LoRA; it needs a Z-Image Turbo model, and Image mode has no Z-Image Turbo setup that takes a LoRA." }),
     ]);
   });
 
@@ -158,32 +157,28 @@ describe("the files in ComfyUI's folders", () => {
     expect(run("file:checkpoints/dreamshaper_lightning.safetensors")["6"]!.inputs).toMatchObject({ steps: 4, cfg: 1, sampler_name: "euler", scheduler: "sgm_uniform" });
   });
 
-  it("the app's SDXL Lightning setup runs its own 4 steps at cfg 1, euler on sgm_uniform", () => {
-    const preset = resolveChoice({ preset: "sdxl-lightning", width: 768, height: 512 }, []).preset;
-    const graph = jobGraph(preset, comfyInfo(SDXL_FILES), { prompt: "a fox", seed: 1, width: 768, height: 512 });
-    const sampler = Object.values(graph).find((n) => n.class_type === "KSampler");
-    expect(sampler?.inputs).toMatchObject({ steps: 4, cfg: 1, sampler_name: "euler", scheduler: "sgm_uniform", seed: 1 });
+  it("an SDXL LoRA runs on an installed SDXL checkpoint, a plain one before a few-step one, and is refused with none", () => {
+    const ink = { kind: "loras", name: "ink.safetensors", bytes: 1000, family: "sdxl" } as const;
+    const [style] = styles([
+      { kind: "checkpoints", name: "quick.safetensors", bytes: 7_000_000_000, family: "sdxl", fewStep: true },
+      { kind: "checkpoints", name: "plain.safetensors", bytes: 7_000_000_000, family: "sdxl" },
+      ink,
+    ]);
+    const graph = jobGraph(style!, comfyInfo({ checkpoints: ["quick.safetensors", "plain.safetensors"], loras: ["ink.safetensors"] }), { prompt: "a", seed: 1, width: 1024, height: 1024 });
+    expect([graph["1"]!.inputs["ckpt_name"], graph["6"]!.inputs["steps"]]).toEqual(["plain.safetensors", 28]);
+    expect(styles([ink])).toEqual([expect.objectContaining({ refused: "A SDXL LoRA; it needs a SDXL model, and none is installed." })]);
   });
 
   it("a LoRA is loaded at 0.8 on its base: model and text encoder on SDXL, model only on Klein", async () => {
     const extra = installedWorkflows(await readInstalled(folders(), lists().files)).map(workflowPreset);
-    const info = comfyInfo(SDXL_FILES, KLEIN_FILES, { loras: ["ink.safetensors", "styles/klein-pixel.safetensors"] });
+    const info = comfyInfo(SDXL_FILES, KLEIN_FILES, { checkpoints: ["xl/juggernaut.safetensors"], loras: ["ink.safetensors", "styles/klein-pixel.safetensors"] });
     const job = (id: string, width: number, height: number) => jobGraph(resolveChoice({ preset: id, width, height }, extra).preset, info, { prompt: "a fox", seed: 1, width, height });
-    const ink = job("file:loras/ink.safetensors", 768, 512);
+    const ink = job("file:loras/ink.safetensors", 1024, 1024);
     expect(ink["2"]).toEqual({ class_type: "LoraLoader", inputs: { lora_name: "ink.safetensors", strength_model: 0.8, strength_clip: 0.8, model: ["1", 0], clip: ["1", 1] } });
-    expect([ink["6"]!.inputs["model"], ink["3"]!.inputs["clip"]]).toEqual([["2", 0], ["2", 1]]);
+    expect([ink["1"]!.inputs["ckpt_name"], ink["6"]!.inputs["model"], ink["3"]!.inputs["clip"]]).toEqual(["xl/juggernaut.safetensors", ["2", 0], ["2", 1]]);
     const pixel = job("file:loras/klein-pixel.safetensors", 1024, 1024);
     expect(pixel["14"]).toEqual({ class_type: "LoraLoaderModelOnly", inputs: { lora_name: "styles/klein-pixel.safetensors", strength_model: 0.8, model: ["1", 0] } });
     expect(pixel["6"]!.inputs["model"]).toEqual(["14", 0]);
-  });
-
-  it("files the app's own setups load are left out: they are those setups already", () => {
-    const kept = installedWorkflows([
-      { kind: "checkpoints", name: "sdxl/sdxl_lightning_4step.safetensors", bytes: 1, family: "sdxl", fewStep: true },
-      { kind: "loras", name: "RW_pixelart_XL_v1.safetensors", bytes: 1, family: "sdxl" },
-      { kind: "loras", name: "ink.safetensors", bytes: 1, family: "sdxl" },
-    ]);
-    expect(kept.map((w) => w.id)).toEqual(["file:loras/ink.safetensors"]);
   });
 
   it("an SD 1.5 LoRA runs on the installed SD 1.5 checkpoint, at 512 x 512", () => {

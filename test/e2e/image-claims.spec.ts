@@ -7,6 +7,7 @@ test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASUR
 for (const [mode, model] of [["native", "qwen3.5:9b"], ["text", "mid-chat:32k"]] as const) {
   test(`fabricated image claims retain the report and true card but invented links stay inert (${mode})`, async ({ page, open }, info) => {
     const comfy = await fakeComfy();
+    comfy.gpu(); // the image tool's job has no default on the CPU
     let client: ReturnType<typeof createClient> | undefined;
     const remote: string[] = [];
     page.on("request", req => { if (/https:\/\/(invented|person|tool)\.example/.test(req.url())) remote.push(req.url()); });

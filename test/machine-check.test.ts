@@ -7,8 +7,10 @@ import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
 import { advise, formatReport, type GpuReading, type MachineReadings, readGpuReading } from "../scripts/machine-advice.ts";
 
 const GIB = 1024 ** 3;
-const CHECKPOINT = "sdxl_lightning_4step.safetensors";
-const LORA = "RW_pixelart_XL_v1.safetensors";
+const KLEIN = { tier: "Fast", name: "FLUX.2 Klein 4B", files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors", "flux2-vae.safetensors"] };
+const COMPACT = { tier: "Fast", name: "FLUX.2 Klein 4B compact", files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b_fp4_flux2.safetensors", "flux2-vae.safetensors"] };
+const Z_IMAGE = { tier: "Balanced", name: "Z-Image Turbo int8", files: ["qwen_3_4b_fp8_mixed.safetensors", "ae.safetensors", "z_image_turbo_int8_convrot.safetensors"] };
+const MOSS = { tier: "Best", name: "MOSS-Image", files: ["moss_image_sft_int8_convrot.safetensors", "qwen3.5_9b_w4a8_gptq.safetensors", "flux2-vae.safetensors"] };
 const root = path.resolve(import.meta.dirname, "..");
 
 const machine = (gpu: GpuReading, ramAvailable = 16 * GIB, diskFree = 200 * GIB): MachineReadings => ({
@@ -29,11 +31,20 @@ describe("what the machine check recommends", () => {
     expect(image).toMatchObject({ why: expect.stringContaining("no GPU") });
   });
 
-  it("a small GPU: the text model that fits it, and skip images because 9 GB will not fit", () => {
+  it("a small GPU: the text model that fits it, and Image mode's tiers for its memory", () => {
     const { text, image } = advise(machine(nvidia(6)));
     expect(text).toMatchObject({ use: true, model: "qwen3.5:4b", verdict: "fits" });
-    expect(image.use).toBe(false);
-    expect(image).toMatchObject({ why: expect.stringMatching(/6\.0 GB.*9\.0 GB/) });
+    expect(image).toMatchObject({ use: true, setups: [COMPACT, Z_IMAGE, MOSS] });
+  });
+
+  it("a GPU under 4 GB: skip images, with the picker's own reason", () => {
+    const { image } = advise(machine(nvidia(3)));
+    expect(image).toEqual({ use: false, why: "This GPU has 3.0 GB of memory. Image mode needs a GPU with 4 GB." });
+  });
+
+  it("an 8 GB card that reports 8188 MiB gets the 8 GB tiers: a card is its memory to the nearest GB", () => {
+    const { image } = advise(machine(nvidia(8188 / 1024)));
+    expect(image).toMatchObject({ use: true, setups: [KLEIN, Z_IMAGE, MOSS] });
   });
 
   it("a large GPU: the app's first recommended model, the others it recommends, and images on", () => {
@@ -42,13 +53,18 @@ describe("what the machine check recommends", () => {
     if (!text.use) throw new Error("expected a text model");
     expect(text.alsoRecommended).toContain("gemma4:12b");
     expect(text.alsoRecommended).not.toContain("qwen3.5:9b");
-    expect(image).toEqual({ use: true, checkpoint: CHECKPOINT, lora: LORA });
+    expect(image).toMatchObject({ use: true, setups: [KLEIN, Z_IMAGE, MOSS] });
+    // each file once, at the size the app's own record gives
+    if (!image.use) throw new Error("expected images");
+    expect(image.downloadBytes).toBeGreaterThan(20e9);
+    expect(image).not.toHaveProperty("note");
   });
 
-  it("a large GPU that is busy right now keeps images on and says memory is short at the moment", () => {
+  it("a large GPU that is busy right now keeps its card's tiers, and says what is free only as information", () => {
     const { text, image } = advise(machine(nvidia(16, 4)));
     expect(text).toMatchObject({ use: true, model: "qwen3.5:4b", verdict: "spills" });
-    expect(image).toMatchObject({ use: true, note: expect.stringContaining("4.0 GB free") });
+    // owner ruling 2026-11-13: what other programs hold never changes the tier
+    expect(image).toMatchObject({ use: true, setups: [KLEIN, Z_IMAGE, MOSS], note: "4.0 GB is free on the GPU right now; other programs hold the rest." });
   });
 
   it("too little memory for any model says so and names the lightest", () => {
@@ -77,7 +93,7 @@ describe("what the machine check recommends", () => {
   it("the report names every reading and both recommendations", () => {
     const m = machine(nvidia(24, 20));
     const report = formatReport(m, advise(m));
-    for (const expected of ["Linux 6.1 x64", "Example GPU", "24.0 GB", "20.0 GB", "Free disk", "qwen3.5:9b", CHECKPOINT, LORA]) expect(report).toContain(expected);
+    for (const expected of ["Linux 6.1 x64", "Example GPU", "24.0 GB", "20.0 GB", "Free disk", "qwen3.5:9b", "Fast: FLUX.2 Klein 4B", "Balanced: Z-Image Turbo int8", "Best: MOSS-Image", ...MOSS.files]) expect(report).toContain(expected);
     const none = machine({ kind: "none" });
     expect(formatReport(none, advise(none))).toMatch(/Skip/);
   });

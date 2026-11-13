@@ -66,20 +66,50 @@ saved beside that sample's downloaded database as
 
 ## Image workflow
 
-The built-in setups in `apps/server/src/image/setups/` are ported from the
-SDXL Lightning and FLUX.2 Klein workflows in local-ai-lab, Ethan Gates's own
-repository (commits `d2e58f5` and `fd7abb65` there; details in that folder's
-README). Same author, so they are covered by this repository's MIT license.
-The model files they name are not included: model weights are downloaded
-separately and come under their own licenses.
+The built-in setups in `apps/server/src/image/setups/` come from two places
+(details in that folder's README):
+
+- The FLUX.2 Klein graphs (`flux2-klein-4b*.json`) and the checkpoint graph
+  for a person's own SDXL files (`sdxl-checkpoint.json`) are ported from
+  workflows in local-ai-lab, Ethan Gates's own repository (commits
+  `fd7abb65` and `d2e58f5` there; the second was its SDXL Lightning
+  workflow, which the app no longer offers). Same author, so they are
+  covered by this repository's MIT license.
+- `z-image-turbo-int8.json` and `moss-image.json` are converted from Comfy
+  Org's Z-Image Turbo int8 and MOSS-Image workflow templates
+  (`comfyui-workflow-templates-json` 0.1.132). That package's metadata
+  says `License-Expression: MIT` and it ships no licence file of its own;
+  the MIT text, Copyright (c) 2023-present Comfy Org, from the main
+  `comfyui-workflow-templates` package is at
+  `apps/server/test/comfy/templates/LICENSE`, beside the trimmed copies of
+  both templates.
+
+The model files they name are not included. The picker downloads them on
+request from the revision-pinned Hugging Face addresses in
+`setups/files.json`, and they come under their own licenses. Those licenses
+are **unverified**: no licence text for any of these weights is in this
+repository or was read for it. `files.json` records what each model card
+states:
+
+| Model files | Card says |
+| --- | --- |
+| FLUX.2 Klein 4B fp8 (Black Forest Labs) | Apache License 2.0 |
+| Qwen3 4B text encoders, full and FP4, and the FLUX.2 VAE (Comfy-Org's FLUX.2 Klein 4B repackage) | Apache-2.0 |
+| Z-Image Turbo int8, its Qwen3 4B fp8 encoder and VAE (Comfy-Org's Z-Image Turbo repackage) | apache-2.0 |
+| MOSS-Image int8 and its Qwen3.5 9B w4a8 encoder (Comfy-Org's MOSS-Image repackage) | apache-2.0 |
 
 ## ComfyUI workflow templates (test fixtures)
 
-`apps/server/test/comfy/templates/` holds four of ComfyUI's workflow
-templates from the `comfyui-workflow-templates` package 0.11.106: MIT,
-Copyright (c) 2023-present Comfy Org, full text beside them in `LICENSE`.
-Three are copied unchanged; the MiniMax H3 one has its editor-only fields
-taken out. They are test inputs and are not shipped in the app.
+`apps/server/test/comfy/templates/` holds six of ComfyUI's workflow
+templates: four from the `comfyui-workflow-templates` package 0.11.106 and
+the Z-Image Turbo int8 and MOSS-Image ones from its
+`comfyui-workflow-templates-json` part 0.1.132 (MIT by its metadata). MIT,
+Copyright (c) 2023-present Comfy Org, full text beside them in `LICENSE`, from
+the main package. Three are copied
+unchanged; MiniMax H3, Z-Image Turbo int8 and MOSS-Image have their
+editor-only fields taken out, and MOSS's prompt-enhancer system prompt is cut
+to its first sentence. They are test inputs and are not shipped in the app;
+the two setups converted from them are (see "Image workflow").
 `apps/server/src/image/convert.ts`, which turns such files into the graphs
 ComfyUI runs, was written for this repository from the file format and
 ComfyUI's `/object_info` answer; no code from ComfyUI's GPL-3.0 frontend was

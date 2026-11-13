@@ -14,9 +14,9 @@
 import { open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { ApiGraph } from "./convert.ts";
-import { GROUPS, presetFiles, PRESETS, type KnownWorkflow, type ModelSource } from "./presets.ts";
+import { GROUPS, type KnownWorkflow, type ModelSource } from "./presets.ts";
 import klein from "./setups/flux2-klein-4b.json" with { type: "json" };
-import sdxlLightning from "./setups/sdxl-lightning.json" with { type: "json" };
+import checkpoint from "./setups/sdxl-checkpoint.json" with { type: "json" };
 import fileSources from "./setups/files.json" with { type: "json" };
 
 /** What a header says: its metadata, and each tensor's name and shape. */
@@ -28,7 +28,7 @@ export const FAMILY_NAMES: Readonly<Record<Family, string>> = {
   sdxl: "SDXL", sd15: "Stable Diffusion 1.5", "flux2-klein-4b": "FLUX.2 Klein 4B", flux1: "FLUX.1", "flux1-kontext": "FLUX.1 Kontext", zimage: "Z-Image Turbo", "qwen-image": "Qwen-Image",
 };
 
-/** An installed file as kept: its kind (ComfyUI folder), name as ComfyUI lists it, size, family and whether it is a few-step (Lightning or Turbo) model. */
+/** An installed file as kept: its kind (ComfyUI folder), name as ComfyUI lists it, size, family and whether it is a few-step model. */
 export interface InstalledFile { readonly kind: "checkpoints" | "loras"; readonly name: string; readonly bytes: number; readonly family: Family; readonly fewStep?: boolean }
 
 const MAX_HEADER = 8 * 1024 * 1024;
@@ -98,7 +98,7 @@ export function familyOf(header: Header, kind: InstalledFile["kind"]): Family | 
   return undefined;
 }
 
-/** Lightning or Turbo, by what the file says: its metadata, or its name. */
+/** A few-step distillation of a person's own checkpoint, by the words its metadata or name uses for one. */
 export const fewStep = (name: string, header: Header) => /lightning|turbo|hyper|lcm/i.test([name, ...Object.values(header.metadata).filter((v) => v.length < 400)].join(" "));
 
 /**
@@ -167,12 +167,12 @@ const MARK: Readonly<Record<Family, string>> = { sdxl: "sdxl", sd15: "sd15", "fl
 const APP_SOURCES: Readonly<Record<string, ModelSource>> = fileSources;
 
 /**
- * A checkpoint's graph: the SDXL Lightning setup's nodes with its file, at the family's plain
- * settings (SDXL 28 steps, cfg 5, dpmpp_2m karras at 1024 x 1024; SD 1.5 the same at 512 x 512,
- * cfg 7), or the Lightning setup's own 4 steps at cfg 1 when the file says it is a few-step model.
+ * A checkpoint's graph: setups/sdxl-checkpoint.json with its file, at the family's plain settings
+ * (SDXL 28 steps, cfg 5, dpmpp_2m karras at 1024 x 1024; SD 1.5 the same at 512 x 512, cfg 7), or
+ * the graph's own 4 steps at cfg 1, euler on sgm_uniform, when the file says it is a few-step model.
  */
 function checkpointGraph(file: InstalledFile): ApiGraph {
-  const graph = clone(sdxlLightning);
+  const graph = clone(checkpoint);
   graph["1"]!.inputs["ckpt_name"] = file.name;
   const side = file.family === "sd15" ? 512 : 1024;
   Object.assign(graph["5"]!.inputs, { width: side, height: side });
@@ -200,17 +200,15 @@ function kleinLora(lora: string): ApiGraph {
 
 /**
  * The installed files as setups, in the group "Your models": a checkpoint of SDXL or SD 1.5 with its
- * family's plain settings; a LoRA as a style on its family's base (the app's Klein 4B or SDXL
- * Lightning setup, or the first installed SD 1.5 checkpoint), which needs that base's files when
- * they are missing; a file of a family Image mode has no setup for, refused with that reason. Files
- * the app's own setups load are left out (they are those setups already).
+ * family's plain settings; a LoRA as a style on its family's base (the app's Klein 4B setup, which
+ * needs its files when they are missing, or the first installed SDXL or SD 1.5 checkpoint, a plain
+ * one before a few-step one); a file of a family Image mode has no setup for, refused with that reason.
  */
 export function installedWorkflows(files: readonly InstalledFile[]): KnownWorkflow[] {
-  const appFiles = new Set(PRESETS.flatMap(presetFiles).map(base));
   const out: KnownWorkflow[] = [];
-  const sd15 = files.find((f) => f.kind === "checkpoints" && f.family === "sd15");
+  const checkpoints = files.filter((f) => f.kind === "checkpoints").toSorted((a, b) => Number(a.fewStep ?? false) - Number(b.fewStep ?? false));
+  const baseOf = (family: Family) => checkpoints.find((f) => f.family === family);
   for (const file of files) {
-    if (appFiles.has(base(file.name))) continue;
     const own: Record<string, ModelSource> = { [file.name]: { directory: file.kind, bytes: file.bytes } };
     const kept = { id: `file:${file.kind}/${file.name}`, group: GROUPS.installed, family: MARK[file.family] };
     const familyName = FAMILY_NAMES[file.family];
@@ -220,10 +218,11 @@ export function installedWorkflows(files: readonly InstalledFile[]): KnownWorkfl
       continue;
     }
     const name = `${title(file.name)} style`;
+    const onCheckpoint = file.family === "sdxl" || file.family === "sd15";
+    const under = onCheckpoint ? baseOf(file.family) : undefined;
     if (file.family === "flux2-klein-4b") out.push({ ...kept, name, graph: kleinLora(file.name), sources: { ...APP_SOURCES, ...own } });
-    else if (file.family === "sdxl") out.push({ ...kept, name, graph: withLora(clone(sdxlLightning), file.name), sources: { ...APP_SOURCES, ...own } });
-    else if (file.family === "sd15" && sd15 !== undefined) out.push({ ...kept, name, graph: withLora(checkpointGraph(sd15), file.name), sources: { [sd15.name]: { directory: "checkpoints", bytes: sd15.bytes }, ...own } });
-    else out.push({ ...kept, name, why: `A ${familyName} LoRA; it needs a ${familyName} model, and ${file.family === "sd15" ? "none is installed" : `Image mode has no ${familyName} setup`}.` });
+    else if (under !== undefined) out.push({ ...kept, name, graph: withLora(checkpointGraph(under), file.name), sources: { [under.name]: { directory: "checkpoints", bytes: under.bytes }, ...own } });
+    else out.push({ ...kept, name, why: `A ${familyName} LoRA; it needs a ${familyName} model, and ${onCheckpoint ? "none is installed" : `Image mode has no ${familyName} setup that takes a LoRA`}.` });
   }
   return out;
 }

@@ -98,6 +98,58 @@ it("a bypassed node passes on the input of its output's type, not the one in the
   expect(convertWorkflow(workflow, info)).toEqual(fixture("api/image_sdxl_simple.json"));
 });
 
+describe("a switch set in the file passes on the input it selects", () => {
+  type Node = { id: number; type: string; mode: number; inputs: { name: string; type: string; link: number | null; widget?: { name: string } }[]; outputs: { name: string; type: string; links: number[] }[]; properties: object; widgets_values?: unknown[] };
+  // the checkpoint's MODEL reaches the sampler through a switch: off, the model itself; on, a patch of a class ComfyUI does not list
+  const switched = (on: boolean) => {
+    const workflow = sdxl() as unknown as { nodes: Node[]; links: unknown[][] };
+    workflow.links = workflow.links.map((l) => l[0] === 38 ? [38, 91, 0, 12, 0, "MODEL"] : l);
+    workflow.links.push([92, 15, 0, 91, 1, "MODEL"], [93, 90, 0, 91, 2, "MODEL"], [94, 15, 0, 90, 0, "MODEL"]);
+    workflow.nodes.push(
+      { id: 90, type: "SomePatch", mode: 0, inputs: [{ name: "model", type: "MODEL", link: 94 }], outputs: [{ name: "MODEL", type: "MODEL", links: [93] }], properties: {} },
+      { id: 91, type: "ComfySwitchNode", mode: 0, inputs: [{ name: "switch", type: "BOOLEAN", widget: { name: "switch" }, link: null }, { name: "on_false", type: "*", link: 92 }, { name: "on_true", type: "*", link: 93 }], outputs: [{ name: "output", type: "*", links: [38] }], properties: {}, widgets_values: [on] },
+    );
+    return workflow;
+  };
+
+  it("off: the branch it does not take needs neither its node classes nor its files", () => {
+    expect(convertWorkflow(switched(false), info)).toEqual(fixture("api/image_sdxl_simple.json"));
+  });
+
+  it("on: the branch it takes is converted, and refused by name when ComfyUI lacks its class", () => {
+    expect(refusal(() => convertWorkflow(switched(true), info))).toBe("Needs a node this ComfyUI does not have: SomePatch (a custom node, or one from a newer ComfyUI).");
+  });
+});
+
+const setup = (name: string): unknown => JSON.parse(readFileSync(new URL(`../../src/image/setups/${name}`, import.meta.url), "utf8"));
+// The edits setups/README.md lists, and no others: the app's own output prefix, and for MOSS the
+// prompt enhancer off (its switch, and its branch muted), the size its own (the resolution
+// selector gone) and the full FLUX.2 VAE the GPU matrix ran in place of the small one.
+const prefix = (graph: Record<string, { inputs: Record<string, unknown> }>, id: string) => { graph["9"]!.inputs["filename_prefix"] = `gates-local/${id}`; return graph; };
+
+describe("the app's Z-Image int8 and MOSS-Image setups are ComfyUI's own templates, converted", () => {
+  type Node = { id: number; mode: number; inputs: { name: string; link: number | null }[]; widgets_values: unknown[] };
+  type Workflow = { nodes: Node[]; links: number[][]; definitions: { subgraphs: { nodes: Node[] }[] } };
+
+  it("Z-Image Turbo int8", () => {
+    const graph = convertWorkflow(fixture("templates/image_z_image_turbo_int8.json"), info);
+    expect(prefix(graph, "z-image-int8")).toEqual(setup("z-image-turbo-int8.json"));
+  });
+
+  it("MOSS-Image", () => {
+    const workflow = fixture("templates/image_moss_image_t2i.json") as Workflow;
+    const instance = workflow.nodes.find((n) => n.id === 18)!;
+    instance.widgets_values[1] = false;
+    for (const n of workflow.definitions.subgraphs[0]!.nodes) if ([11, 13, 14].includes(n.id)) n.mode = 2;
+    for (const i of instance.inputs) if (i.name === "width" || i.name === "height") i.link = null;
+    workflow.nodes = workflow.nodes.filter((n) => n.id !== 19);
+    workflow.links = workflow.links.filter((l) => l[0] !== 40 && l[0] !== 41);
+    const graph = prefix(convertWorkflow(workflow, info), "moss-image");
+    graph["18:3"]!.inputs["vae_name"] = "flux2-vae.safetensors";
+    expect(graph).toEqual(setup("moss-image.json"));
+  });
+});
+
 describe("values set on a subgraph instance win over the inner node's own", () => {
   type Instance = { id: number; widgets_values: unknown[] };
   const minimax = () => fixture("templates/image_minimax_h3_t2i.json") as { nodes: Instance[] };
@@ -110,7 +162,9 @@ describe("values set on a subgraph instance win over the inner node's own", () =
     expect(graph["58:9"]).toEqual({ class_type: "BasicScheduler", inputs: { scheduler: "simple", steps: 30, denoise: 1, model: ["58:44", 0] } });
     expect(graph["58:15"]).toEqual({ class_type: "RandomNoise", inputs: { noise_seed: 697447143149280 } });
     expect(graph["58:12"]!.inputs["text"]).toBe(prompt);
-    expect(graph["58:52"]!.inputs["switch"]).toBe(false);
+    // the LoRA switch, off on the instance: the model comes straight from its loader, and the LoRA loader is not sent
+    expect(graph["58:44"]!.inputs["model"]).toEqual(["58:6", 0]);
+    expect([graph["58:52"], graph["58:41"]]).toEqual([undefined, undefined]);
     expect(graph["58:17"]!.inputs["sampler_name"]).toBe("res_multistep");
     expect(graph["58:44"]!.inputs["attention"]).toBe("comfy kitchen attention");
     // a widget socket with a link takes the link: the size comes from the selector

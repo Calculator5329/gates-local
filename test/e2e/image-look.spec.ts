@@ -1,5 +1,5 @@
 // How the image picker and its composer button look: the setup's name gets the room before it
-// is cut, two SDXL setups never look the same on the button, the button keeps its width on a
+// is cut, two Klein setups never look the same on the button, the button keeps its width on a
 // thread switch, and the GB number sits once per size row with a mark, not a word.
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
@@ -8,7 +8,8 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: "off" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-test.beforeEach(async () => { comfy = await fakeComfy(); comfy.withFlux(); });
+// Klein's files on a GPU: on the CPU Image mode has no default
+test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 
 const connect = (page: Page) => {
@@ -34,6 +35,7 @@ const cut = (page: Page) => page.locator("#modelBtn").evaluate((b) =>
 const width = async (page: Page) => Math.round((await page.locator("#modelBtn").boundingBox())?.width ?? 0);
 
 test("the picker's look: the button names the setup whole, the size rows carry the number once with a mark", async ({ page, open }, info) => {
+  comfy.withApp(); // every row ready: a row that needs files names their download size, which is not a fit number
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageOn(page);
@@ -54,23 +56,24 @@ test("the picker's look: the button names the setup whole, the size rows carry t
   for (const row of await picker.locator(".pk-ctx-row").all()) expect((await row.innerText()).match(/GB/g), "one number per size row").toHaveLength(1);
 });
 
-test("two SDXL setups never look the same on the button, wide or narrow", async ({ page, open }) => {
+test("two Klein setups never look the same on the button, wide or narrow", async ({ page, open }) => {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageOn(page);
   const client = connect(page);
   const button = page.locator("#modelBtn");
   try {
+    const tip = () => button.evaluate((b) => b.getAttribute("data-tip") ?? b.getAttribute("data-tipt"));
     const look = async (preset: string) => {
       await client.call("settings.update", { imageChoice: { preset, width: 1024, height: 1024 } });
-      await expect.poll(() => button.evaluate((b) => b.getAttribute("data-tip") ?? b.getAttribute("data-tipt"))).toContain(preset === "sdxl-lightning" ? "SDXL Lightning" : "pixel art");
-      if (preset === "sdxl-lightning") await expect.poll(() => button.evaluate((b) => b.getAttribute("data-tip") ?? b.getAttribute("data-tipt"))).not.toContain("pixel art");
+      await expect.poll(tip).toContain(preset === "flux2-klein-4b" ? "FLUX.2 Klein 4B" : "pixel art");
+      if (preset === "flux2-klein-4b") await expect.poll(tip).not.toContain("pixel art");
       await page.mouse.move(5, 5);
       return button.screenshot({ animations: "disabled" });
     };
     for (const size of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
       await page.setViewportSize(size);
-      expect((await look("sdxl-lightning")).equals(await look("sdxl-lightning-pixel")), `${size.width} px wide`).toBe(false);
+      expect((await look("flux2-klein-4b")).equals(await look("flux2-klein-4b-pixel")), `${size.width} px wide`).toBe(false);
     }
   } finally { client.close(); }
 });

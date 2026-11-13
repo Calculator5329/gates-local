@@ -54,7 +54,7 @@ const others = [
   off("flux2-klein-4b-portraits", "FLUX.2 Klein 4B portraits", KLEIN_FILES),
   off("other", "Other", ["other.safetensors"]),
 ];
-const ready: ImagePreset = { id: "sdxl-lightning", name: "SDXL Lightning", family: "sdxl", group: "General", measured: false, sizes };
+const ready: ImagePreset = { id: "moss-image", name: "MOSS-Image", family: "moss", group: "General", measured: false, sizes };
 const running: ImageDownload = { preset: "flux2-klein-4b", name: "qwen_3_4b.safetensors", file: 2, files: 3, state: "downloading", completedBytes: 5, totalBytes: 10, setupCompletedBytes: 30, setupTotalBytes: 120, bytesPerSecond: 9 };
 
 function picker(over: Record<string, unknown> = {}) {

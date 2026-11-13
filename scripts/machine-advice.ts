@@ -5,18 +5,10 @@ import type { CatalogEntry } from "@gates-local/contracts";
 import { estimateBeforeDownload } from "../apps/server/src/fit/fit.ts";
 import { defaultNvidiaSmi, readGpu } from "../apps/server/src/fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../apps/server/src/fit/types.ts";
-import { presetFiles, resolveChoice } from "../apps/server/src/image/presets.ts";
+import { cardBytes, NO_GPU, presetFiles, PRESETS, tiersFor } from "../apps/server/src/image/presets.ts";
 import { markRecommended } from "../apps/server/src/runtime/catalog.ts";
 import { CURATED_MODELS } from "../apps/server/src/runtime/recommended.ts";
 import { defaultSettings } from "../apps/server/src/settings/store.ts";
-
-/** The SDXL pixel-art setup: its checkpoint and LoRA, read from its workflow, and its estimate at 768x512. */
-const PIXEL = resolveChoice({ preset: "sdxl-lightning-pixel", width: 768, height: 512 });
-const [CHECKPOINT, LORA] = presetFiles(PIXEL.preset) as [string, string];
-const IMAGE_ESTIMATED_BYTES = PIXEL.size.bytes;
-
-/** ByteDance/SDXL-Lightning's file size, from docs/research/setup-tiers-2026-11.md. */
-const CHECKPOINT_DOWNLOAD_BYTES = 6_938_000_000;
 
 const GPU_NAME_ARGS = ["--query-gpu=name", "--format=csv,noheader"] as const;
 
@@ -35,7 +27,10 @@ export type TextAdvice =
   | { use: true; model: string; label: string; purpose: string; downloadBytes: number; verdict: "fits" | "spills"; needBytes: number; alsoRecommended: string[] }
   | { use: false; why: string };
 
-export type ImageAdvice = { use: true; checkpoint: string; lora: string; note?: string } | { use: false; why: string };
+/** One of Image mode's tier rows for this GPU: the setup and the files it loads. */
+export interface ImageSetup { tier: string; name: string; files: string[] }
+/** `downloadBytes`: every file the rows load, each once, at the app's recorded size. */
+export type ImageAdvice = { use: true; setups: ImageSetup[]; downloadBytes: number; note?: string } | { use: false; why: string };
 
 export interface Advice {
   numCtx: number;
@@ -83,16 +78,19 @@ function textAdvice(machine: MachineReadings, entries: readonly CatalogEntry[]):
   };
 }
 
+/** Image mode's own tier rows (presets.ts tiersFor) for the GPU's whole memory, so the two cannot disagree. */
 function imageAdvice(gpu: GpuReading): ImageAdvice {
-  const need = memory(IMAGE_ESTIMATED_BYTES);
-  if (gpu.kind === "none") {
-    return { use: false, why: `Found no GPU the app can read (it reads GPU memory with nvidia-smi, so NVIDIA only). On the CPU each image is slow, and its time through ComfyUI has not been measured.` };
-  }
+  if (gpu.kind === "none") return { use: false, why: `Found no GPU the app can read (it reads GPU memory with nvidia-smi, so NVIDIA only). ${NO_GPU}` };
   if (gpu.kind === "unreadable") return { use: false, why: gpu.reason };
-  if (gpu.totalBytes < IMAGE_ESTIMATED_BYTES) return { use: false, why: `This GPU has ${memory(gpu.totalBytes)} of memory and an image job wants about ${need}.` };
-  const base = { use: true as const, checkpoint: CHECKPOINT, lora: LORA };
-  if (gpu.freeBytes >= IMAGE_ESTIMATED_BYTES) return base;
-  return { ...base, note: `Only ${memory(gpu.freeBytes)} free on the GPU right now and an image job wants about ${need}. Other programs hold the rest.` };
+  const rows = tiersFor(cardBytes(gpu.totalBytes));
+  if (rows.length === 0) return { use: false, why: `This GPU has ${memory(gpu.totalBytes)} of memory. ${NO_GPU}` };
+  const presets = rows.map((r) => ({ tier: r.tier, preset: PRESETS.find((p) => p.id === r.preset)! }));
+  const setups = presets.map(({ tier, preset }) => ({ tier, name: preset.name, files: presetFiles(preset) }));
+  const sizes = new Map(presets.flatMap(({ preset }) => presetFiles(preset).map((f) => [f, preset.sources?.[f]?.bytes ?? 0] as const)));
+  const base = { use: true as const, setups, downloadBytes: [...sizes.values()].reduce((a, b) => a + b, 0) };
+  // what other programs hold never changes the tier (owner ruling 2026-11-13): it is said, as information, when the card's setups would not all fit in it now
+  if (tiersFor(gpu.freeBytes).map((r) => r.preset).join() === rows.map((r) => r.preset).join()) return base;
+  return { ...base, note: `${memory(gpu.freeBytes)} is free on the GPU right now; other programs hold the rest.` };
 }
 
 export function advise(machine: MachineReadings): Advice {
@@ -101,7 +99,7 @@ export function advise(machine: MachineReadings): Advice {
   const image = imageAdvice(machine.gpu);
   const warnings: string[] = [];
   if (machine.gpu.kind === "unreadable") warnings.push(`${machine.gpu.reason} The app will not start a chat until this is fixed, so the text pick below plans as if there were no GPU.`);
-  const total = (text.use ? text.downloadBytes : 0) + (image.use ? CHECKPOINT_DOWNLOAD_BYTES : 0);
+  const total = (text.use ? text.downloadBytes : 0) + (image.use ? image.downloadBytes : 0);
   if (total > machine.diskFreeBytes) warnings.push(`The downloads recommended here total ${download(total)}, before ComfyUI itself, and the disk has ${memory(machine.diskFreeBytes)} free.`);
   return { numCtx, text, image, warnings };
 }
@@ -137,8 +135,8 @@ function textLines({ text, numCtx }: Advice): string[] {
 function imageLines({ image }: Advice): string[] {
   if (!image.use) return [`Skip image generation. ${image.why}`];
   return [
-    `ComfyUI with checkpoint ${image.checkpoint} (${download(CHECKPOINT_DOWNLOAD_BYTES)} download)`,
-    `and LoRA ${image.lora}. The app installs neither.`,
+    `ComfyUI, with Image mode's setups for this GPU (${download(image.downloadBytes)} of files; the picker downloads them):`,
+    ...image.setups.map((s) => `${s.tier}: ${s.name} (${s.files.join(", ")})`),
     ...(image.note === undefined ? [] : [image.note]),
   ];
 }

@@ -148,22 +148,26 @@ tool still works.
 
 Image generation is off by default. While it is off the app does not
 contact ComfyUI. It needs a running ComfyUI. The app does not install
-ComfyUI or download image models.
+ComfyUI.
 
 - **Address:** `http://127.0.0.1:8188` by default. You can change it in
   Settings › Image generation. It can point to another machine, and the
   image prompt is then sent to that machine.
-- **Models:** ComfyUI must have the checkpoint
-  `sdxl_lightning_4step.safetensors` in its `models/checkpoints` folder and
-  the LoRA `RW_pixelart_XL_v1.safetensors` in its `models/loras` folder. The
-  app asks ComfyUI for its model lists before each job. If either file is
-  missing, the job fails with a message naming it.
-- **Memory:** for a ComfyUI on this machine that runs on the GPU, the app
-  reads free GPU memory with `nvidia-smi` before each job and wants about
-  9 GB, counting what ComfyUI already holds. If the GPU is short, it first
+- **Models:** the image picker offers three tiers by the card's memory.
+  Fast is FLUX.2 Klein 4B on an 8 GB card, or a compact Klein below that.
+  Balanced is Z-Image Turbo int8 on a 6 GB card, or the compact Klein. Best
+  is MOSS-Image on a 4 GB card. For a ComfyUI on this machine, the picker
+  downloads a setup's files into ComfyUI's model folders and checks each
+  one's SHA-256. The app asks ComfyUI for its model lists before each job.
+  If a file is missing, the job fails with a message naming it.
+- **Memory:** Image mode needs a GPU with 4 GB. What other programs hold
+  never changes the tier, but a job still needs the room. For a ComfyUI on this
+  machine, the app reads free GPU memory with `nvidia-smi` before each job,
+  counting what ComfyUI already holds. If the GPU is short, it first
   unloads the chat models it loaded itself. It never unloads models other
-  programs loaded. A ComfyUI that runs on the CPU, or on another machine,
-  skips this check.
+  programs loaded. With ComfyUI on the CPU, or a card under 4 GB, the picker says
+  it needs a GPU and the app picks no image setup for you. A ComfyUI on
+  another machine skips this check.
 - **Starting ComfyUI:** with the default address only, if ComfyUI is not
   answering and you have a `comfyui.service` systemd user unit, the app
   starts it with `systemctl --user start comfyui.service`. It stops the unit

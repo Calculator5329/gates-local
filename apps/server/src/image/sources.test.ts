@@ -44,6 +44,13 @@ describe("ComfyUI's templates", () => {
     expect((await readTemplates(comfy(templates).get, without))?.[0]).toMatchObject({ why: expect.stringContaining("EmptyFlux2LatentImage") });
   });
 
+  it("never offers Krea 2 or Qwen-Image 2.1, struck from the app: not even fetched", async () => {
+    const index = [{ templates: ["image_krea2_t2i", "image_qwen_image_2_1_t2i", "image_sdxl_simple"].map((name) => ({ name, title: name, mediaType: "image" })) }];
+    const { get, asked } = comfy({ ...templates, "/templates/index.json": index });
+    expect((await readTemplates(get, info))?.map((w) => w.id)).toEqual(["template:image_sdxl_simple"]);
+    expect(asked.toSorted()).toEqual(["/templates/image_sdxl_simple.json", "/templates/index.json"]);
+  });
+
   it("no template list (no templates package, or an older ComfyUI) is not an empty one", async () => {
     expect(await readTemplates(comfy({}).get, info)).toBeUndefined();
   });

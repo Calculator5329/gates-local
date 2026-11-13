@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-13: Image mode's new setups, picked by the card's memory
+
+- SDXL Lightning and its pixel-art setup are gone. Image mode runs FLUX.2
+  Klein 4B, a compact Klein for smaller cards, Z-Image Turbo and
+  MOSS-Image, each fetched by the picker with its files checked.
+- The default and the tiers (Fast, Fast and balanced, Balanced, Best) go
+  by how much memory the card has, not by what is free right now. A 16 GB
+  card keeps its 16 GB setups while another program holds part of it;
+  what is free shows in the picker's footer, and a job still checks the
+  fit when it runs.
+- The picker lists this card's tier rows first, each with its tier after
+  the name.
+- Under 4 GB, or with ComfyUI on the CPU, there is no default: the button
+  names no model and the footer says "Image mode needs a GPU with 4 GB."
+  A setup you picked yourself still runs.
+- After you stop a download, Download works again straight away; it was
+  refused as "already running" for a moment.
+- `pnpm machine-check` and the setup guides list Image mode's tiers for
+  your card.
+
 ## 2026-11-13: Updates found on a clone without releases show again
 
 - A clone whose remote has no releases yet follows the main branch even

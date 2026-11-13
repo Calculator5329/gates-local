@@ -50,7 +50,7 @@ const fakeImage = (lease: GpuLease, store: ThreadStore, gate?: Promise<void>) =>
   return { image: { current: noComfy, generate, cancel, wait } as unknown as ImageModule, generate, cancel, ran };
 };
 /** A tool turn whose first reply calls the image tool (or is `first`); `second` answers the request after the tool ran. */
-const TOOL_CHOICE = { preset: "sdxl-lightning-pixel", width: 768, height: 512 };
+const TOOL_CHOICE = { preset: "flux2-klein-4b-pixel", width: 768, height: 768 };
 /** `imageTool` is Tools › Make images; on unless a test turns it off. */
 const imageApp = async (second: (signal: AbortSignal | undefined) => Response | Promise<Response>, gate?: Promise<void>, first?: (signal: AbortSignal | undefined) => Response, imageTool = true) => {
   const root = scratch("gl-app-image-");

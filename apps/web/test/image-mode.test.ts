@@ -20,7 +20,7 @@ let created: string[];
 let turnsOf: Record<string, number>;
 
 const GIB = 1024 ** 3;
-const PIXEL: ImagePreset = { id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9 * GIB }, { width: 1024, height: 1024, bytes: 10 * GIB }] };
+const PIXEL: ImagePreset = { id: "flux2-klein-4b-pixel", name: "FLUX.2 Klein 4B pixel art", family: "flux", measured: false, sizes: [{ width: 768, height: 512, bytes: 9 * GIB }, { width: 1024, height: 1024, bytes: 10 * GIB }] };
 const FLUX: ImagePreset = { id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", family: "flux", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10 * GIB }, { width: 1024, height: 768, bytes: 10 * GIB }] };
 const PRESETS: ImagePresets = { presets: [PIXEL, FLUX], readAt: 1, current: { preset: PIXEL, width: 768, height: 512 } };
 const SETTINGS: Settings = { ...methodSamples["settings.get"].result, imageGen: true };

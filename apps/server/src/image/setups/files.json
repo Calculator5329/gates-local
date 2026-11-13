@@ -13,6 +13,13 @@
     "url": "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B/resolve/5b3abca5c0dc1ecd4eaf3340868d09063fc1c965/split_files/text_encoders/qwen_3_4b.safetensors",
     "licence": "Apache-2.0"
   },
+  "qwen_3_4b_fp4_flux2.safetensors": {
+    "directory": "text_encoders",
+    "bytes": 3848213998,
+    "sha256": "3eab03a77adb0ee5304a4e677d5c10ac22f9049c1d7c894adca4f8bb39206ca8",
+    "url": "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B/resolve/5b3abca5c0dc1ecd4eaf3340868d09063fc1c965/split_files/text_encoders/qwen_3_4b_fp4_flux2.safetensors",
+    "licence": "Apache-2.0"
+  },
   "flux2-vae.safetensors": {
     "directory": "vae",
     "bytes": 336211292,
@@ -20,11 +27,39 @@
     "url": "https://huggingface.co/Comfy-Org/Flux-2-Klein-4B/resolve/5b3abca5c0dc1ecd4eaf3340868d09063fc1c965/split_files/vae/flux2-vae.safetensors",
     "licence": "Apache-2.0"
   },
-  "sdxl_lightning_4step.safetensors": {
-    "directory": "checkpoints",
-    "bytes": 6938040682,
-    "sha256": "e0d996ee0013e79d9d3561f50fcafb9a17e3ff07b780358e3b66d67932c4d490",
-    "url": "https://huggingface.co/ByteDance/SDXL-Lightning/resolve/c9a24f48e1c025556787b0c58dd67a091ece2e44/sdxl_lightning_4step.safetensors",
-    "licence": "CreativeML Open RAIL++-M License (dated July 26, 2023)"
+  "z_image_turbo_int8_convrot.safetensors": {
+    "directory": "diffusion_models",
+    "bytes": 6201001296,
+    "sha256": "be517ebd47c912a5626a588e1aeea43e6be4a43c0cdcd2b48a2a780d9f358635",
+    "url": "https://huggingface.co/Comfy-Org/Z-Image-Turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+    "licence": "apache-2.0"
+  },
+  "qwen_3_4b_fp8_mixed.safetensors": {
+    "directory": "text_encoders",
+    "bytes": 5631994051,
+    "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+    "url": "https://huggingface.co/Comfy-Org/Z-Image-Turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
+    "licence": "apache-2.0"
+  },
+  "ae.safetensors": {
+    "directory": "vae",
+    "bytes": 335304388,
+    "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+    "url": "https://huggingface.co/Comfy-Org/Z-Image-Turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/vae/ae.safetensors",
+    "licence": "apache-2.0"
+  },
+  "moss_image_sft_int8_convrot.safetensors": {
+    "directory": "diffusion_models",
+    "bytes": 5413698958,
+    "sha256": "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f",
+    "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/2929efe3cdd506c0a430bcfca70a9a8d805cc095/diffusion_models/moss_image_sft_int8_convrot.safetensors",
+    "licence": "apache-2.0"
+  },
+  "qwen3.5_9b_w4a8_gptq.safetensors": {
+    "directory": "text_encoders",
+    "bytes": 7343591088,
+    "sha256": "4cc6a1543ad2061806da46f35f90cadb4801dcba246c44782cf42ec0feb6407c",
+    "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/2929efe3cdd506c0a430bcfca70a9a8d805cc095/text_encoders/qwen3.5_9b_w4a8_gptq.safetensors",
+    "licence": "apache-2.0"
   }
 }

@@ -158,9 +158,8 @@ this OS, and report what you saw.
 
 ## 6. Image generation, if they said yes
 
-The app does not install ComfyUI or download image models. You do that here,
-with the person's say-so. Image generation is off until they turn it on in
-the app.
+The app does not install ComfyUI. You do that here, with the person's
+say-so. Image generation is off until they turn it on in the app.
 
 1. **ComfyUI.** Install it in a folder of the person's choosing as this
    project's README says: <https://github.com/Comfy-Org/ComfyUI>.
@@ -170,25 +169,23 @@ the app.
    - On Windows the portable build for NVIDIA is 2.1 GB
      (`ComfyUI_windows_portable_nvidia.7z`). Image generation has not been
      tested on Windows.
-2. **The checkpoint**, 6.94 GB, licence openrail++. Put it in ComfyUI's
-   `models/checkpoints` folder as `sdxl_lightning_4step.safetensors`. It is
-   at <https://huggingface.co/ByteDance/SDXL-Lightning>. Check its SHA-256:
-   `e0d996ee0013e79d9d3561f50fcafb9a17e3ff07b780358e3b66d67932c4d490`.
-3. **The LoRA**, `RW_pixelart_XL_v1.safetensors`, in `models/loras`. The app
-   needs this exact file, and a job fails with a message naming it when it is
-   missing. **This repository does not record who published it.** The only
-   public copy found (2026-11-08) is in a Hugging Face Space,
-   <https://huggingface.co/spaces/zac/ComfyUI/blob/main/RW_pixelart_XL_v1.safetensors>,
-   with no model card or licence. Tell the person exactly that and let them
-   decide. If they say no, image generation stays unfinished; report it that
-   way.
-4. **Start ComfyUI** on its default address, `http://127.0.0.1:8188`. The app
+2. **Start ComfyUI** on its default address, `http://127.0.0.1:8188`. The app
    starts it only on Linux, and only if a `comfyui.service` systemd user unit
    exists. Do not create one without asking. Otherwise the person starts
    ComfyUI before generating an image; tell them the command.
-5. **Turn it on.** Ask the person to open Settings › Image generation, switch
-   it on and generate one image. An image job wants about 9 GB of free GPU
-   memory, so other programs on the GPU count against it.
+3. **The models.** Image mode has three tiers, picked by the card's memory,
+   never by what is free now: Fast is FLUX.2 Klein 4B on an 8 GB card, or a
+   compact Klein below that; Balanced is Z-Image Turbo int8 on a 6 GB card,
+   or the compact Klein; Best is MOSS-Image on a 4 GB card. `pnpm machine-check` lists the setups
+   for this GPU, the files each one loads and their total size. Do not
+   download them yourself: the app's image picker fetches a setup's files
+   into ComfyUI's model folders and checks each one's SHA-256 against the
+   app's record. Ask the person before they press it.
+4. **Turn it on.** Ask the person to open Settings › Image generation, switch
+   it on and generate one image. Image mode needs a GPU with 4 GB. Other
+   programs on the GPU do not change the tier, but a job still needs the
+   room they leave. Under that, or with ComfyUI on the CPU, the picker says
+   so and makes no image.
 
 ## 7. Tell the person what happened
 

@@ -16,16 +16,17 @@ import { applyControls, findControls } from "./controls.ts";
 import { convertWorkflow, WorkflowRefusal, type ApiGraph, type ObjectInfo } from "./convert.ts";
 import { huggingFace } from "./download.ts";
 import klein from "./setups/flux2-klein-4b.json" with { type: "json" };
-import sdxlPixel from "./setups/sdxl-lightning-pixel.json" with { type: "json" };
+import kleinCompact from "./setups/flux2-klein-4b-compact.json" with { type: "json" };
 import kleinPixel from "./setups/flux2-klein-4b-pixel.json" with { type: "json" };
-import sdxl from "./setups/sdxl-lightning.json" with { type: "json" };
+import moss from "./setups/moss-image.json" with { type: "json" };
+import zImage from "./setups/z-image-turbo-int8.json" with { type: "json" };
 import fileSources from "./setups/files.json" with { type: "json" };
 
 export interface Preset {
   readonly id: string;
   readonly name: string;
   /**
-   * The composer button's name, beside the family's mark (which says FX or XL already): its first
+   * The composer button's name, beside the family's mark (which says FX or ZI already): its first
    * letter is no other preset's, so however narrow the button, two presets never cut to the same text.
    */
   readonly short: string;
@@ -57,32 +58,26 @@ const APP_FILES: Readonly<Record<string, ModelSource>> = fileSources;
 
 const GIB = 1024 ** 3;
 
-// SDXL: 9 GiB at 768x512 is a conservative estimate above the lab's 7.86 GiB warm reading there,
-// not a measured peak; the portrait turn has the same pixel count. 1024x1024 has 2.7 times the
-// pixels: a guess of one more GiB for the larger latent and VAE decode, not measured.
-const sdxlSizes = [
-  { width: 768, height: 512, bytes: 9 * GIB },
-  { width: 512, height: 768, bytes: 9 * GIB },
-  { width: 1024, height: 1024, bytes: 10 * GIB },
-];
-
-/**
- * The picker's rows, in the order of DEFAULT_ORDER and then the rows only used when picked. The
- * pixel-art row is offered but never a default: its LoRA turns every picture into pixel art.
- */
-// The lab's rough floor for Klein 4B is 7000 MiB (its gen.md: "not benchmarks"); 10 GiB leaves
-// room for the text encoder and the decode, at every size. The GPU matrix of 2026-11-12 ran it,
-// with this full text encoder, under an 8 GiB cap, and it ran out of memory under 6. The estimate
-// stays 10 GiB, so no Klein row is offered below 10 GiB free (a smaller card needs the FP4
-// encoder, not a setup here yet; sizing it from the matrix is for later).
-const kleinSizes = (sizes: readonly (readonly [number, number])[]) => sizes.map(([width, height]) => ({ width, height, bytes: 10 * GIB }));
+// The memory each of the app's setups needs is the smallest cap the GPU matrix of 2026-11-12 ran
+// it under (ComfyUI 0.45.0, every size at most 1024x1024 pixels, warm): a cap it ran under, not a
+// measured peak, so `measured` stays false. Klein with the full text encoder ran under 8 GiB and
+// ran out of memory under 6; with the compact FP4 encoder it ran under 4. Z-Image Turbo int8 ran
+// under 6, MOSS-Image under 4. The backgrounds' wide sizes have the same pixel count or fewer.
+const sized = (gib: number) => (sizes: readonly (readonly [number, number])[]) => sizes.map(([width, height]) => ({ width, height, bytes: gib * GIB }));
+const kleinSizes = sized(8);
+const square = [[1024, 1024], [1024, 768], [768, 1024]] as const;
 const klein4b = { family: "flux", sources: APP_FILES, measured: false } as const;
 
+/**
+ * The picker's rows: the General group's tier setups (TIERS) first, then the themes, which are
+ * never a default.
+ */
 export const PRESETS: readonly Preset[] = [
-  { ...klein4b, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: klein, sizes: kleinSizes([[1024, 1024], [1024, 768], [768, 1024]]) },
-  // Two SDXL rows, because the LoRA turns every picture into pixel art: a person asking the
-  // plain row for a photo gets one, and the pixel-art row says what it does.
-  { id: "sdxl-lightning", name: "SDXL Lightning", short: "Lightning", family: "sdxl", group: GROUPS.general, workflow: sdxl, sizes: sdxlSizes, sources: APP_FILES, measured: false },
+  { ...klein4b, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: klein, sizes: kleinSizes(square) },
+  // The same model with the FP4 text encoder and 12 steps (the matrix's compact-12): for a card with under 8 GiB free.
+  { ...klein4b, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact", short: "Compact", group: GROUPS.general, workflow: kleinCompact, sizes: sized(4)(square) },
+  { id: "z-image-int8", name: "Z-Image Turbo int8", short: "Z-Image", family: "zimage", group: GROUPS.general, workflow: zImage, sizes: sized(6)(square), sources: APP_FILES, measured: false },
+  { id: "moss-image", name: "MOSS-Image", short: "MOSS", family: "moss", group: GROUPS.general, workflow: moss, sizes: sized(4)(square), sources: APP_FILES, measured: false },
   // The themes, on the model the 16 GB level uses for all five (the image-themes research,
   // 2026-11-12): its prompt wrapping and sizes; no quality or timing claim is measured.
   {
@@ -97,7 +92,6 @@ export const PRESETS: readonly Preset[] = [
     wrap: { prefix: "Pixel art, ", suffix: ". Crisp square pixel clusters, limited 32-color palette, simple readable shapes, deliberate hard edges, no lettering." },
     sizes: kleinSizes([[768, 768], [512, 512], [1024, 1024]]),
   },
-  { id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", short: "Pixel art", family: "sdxl", group: GROUPS.pixel, workflow: sdxlPixel, sizes: sdxlSizes, sources: APP_FILES, measured: false },
   // A sprite comes back on a flat magenta field; cutting it out is not done here.
   {
     ...klein4b, id: "flux2-klein-4b-sprites", name: "FLUX.2 Klein 4B game sprites", short: "Sprites", group: GROUPS.sprites, workflow: kleinPixel,
@@ -112,14 +106,61 @@ export const PRESETS: readonly Preset[] = [
 ];
 
 /**
- * What an unset Settings choice runs: the first of these that is ready. A saved choice is never
- * replaced by one of these. Its own rule, not "the first row", so a row added to PRESETS never
- * becomes the default by its place.
+ * What an unset Settings choice runs: the first of these that fits the GPU room and is ready
+ * (defaultChoice). Klein first, its compact setup standing in below 8 GiB (the Fast tier's own
+ * swap), then Z-Image Turbo int8, then MOSS-Image. A saved choice is never replaced by one of
+ * these. Its own rule, not "the first row", so a row added to PRESETS never becomes the default by
+ * its place.
  */
 export const DEFAULT_ORDER: readonly ImageChoice[] = [
   { preset: "flux2-klein-4b", width: 1024, height: 1024 },
-  { preset: "sdxl-lightning", width: 768, height: 512 },
+  { preset: "flux2-klein-4b-compact", width: 1024, height: 1024 },
+  { preset: "z-image-int8", width: 1024, height: 1024 },
+  { preset: "moss-image", width: 1024, height: 1024 },
 ];
+
+/** On a card smaller than this no setup of the app's runs: there is no default and the picker says so. */
+export const MIN_ROOM = 4 * GIB;
+export const NO_GPU = "Image mode needs a GPU with 4 GB.";
+
+/**
+ * A card's size from nvidia-smi's total, to the nearest GB as cards are sold: 8188 MiB is an 8 GB
+ * card, 16303 MiB a 16 GB one. The tiers and the default go by it, never by what is free now
+ * (owner ruling 2026-11-13); the job's own fit check judges what is free when it runs.
+ */
+export const cardBytes = (totalBytes: number): number => Math.round(totalBytes / GIB) * GIB;
+
+/**
+ * The quality tiers of the owner's picks (2026-11-13): each takes the first of its setups whose
+ * first size fits the card (cardBytes). Fast: Klein on an 8 GB card, compact below. Balanced:
+ * Z-Image Turbo int8 on 6 GB, Klein compact on 4. Best: MOSS-Image on 4.
+ */
+export const TIERS: readonly { readonly name: string; readonly presets: readonly string[] }[] = [
+  { name: "Fast", presets: ["flux2-klein-4b", "flux2-klein-4b-compact"] },
+  { name: "Balanced", presets: ["z-image-int8", "flux2-klein-4b-compact"] },
+  { name: "Best", presets: ["moss-image"] },
+];
+
+const firstBytes = (id: string): number => PRESETS.find((p) => p.id === id)!.sizes[0]!.bytes;
+/** Room unknown (no reading, or a ComfyUI on another machine) fits everything; the job's own check still runs. */
+const fits = (bytes: number, room: number | undefined): boolean => room === undefined || bytes <= room;
+
+/**
+ * Each tier's setup for a card of `room` bytes (cardBytes), in tier order, with its label ("Fast",
+ * or "Fast and balanced" when one setup is two tiers' pick). Empty below MIN_ROOM.
+ */
+export function tiersFor(room: number | undefined): { preset: string; tier: string }[] {
+  if (room !== undefined && room < MIN_ROOM) return [];
+  const out: { preset: string; names: string[] }[] = [];
+  for (const t of TIERS) {
+    const id = t.presets.find((p) => fits(firstBytes(p), room));
+    if (id === undefined) continue;
+    const seen = out.find((o) => o.preset === id);
+    if (seen === undefined) out.push({ preset: id, names: [t.name] });
+    else seen.names.push(t.name.toLowerCase());
+  }
+  return out.map((o) => ({ preset: o.preset, tier: o.names.join(" and ") }));
+}
 
 /** Absent, or one of DEFAULT_ORDER. */
 export const isDefaultChoice = (c: ImageChoice | undefined): boolean =>
@@ -272,7 +313,7 @@ export function jobGraph(preset: Preset, info: ObjectInfo, values: { prompt: str
 /**
  * A refusal's way out: the first setup and size in the picker's list (availablePresets) that needs
  * less than `needBytes` and fits in `roomBytes`, named as the picker names it. Undefined when none
- * would (Klein needs the same at every size; SDXL 768×512 is the smallest need there is).
+ * would (each of the app's setups needs the same at every size; 4 GiB is the smallest need there is).
  */
 export function smallerFit(lists: ComfyLists | undefined, needBytes: number, roomBytes: number, extra: readonly Preset[] = []): string | undefined {
   for (const p of lists === undefined ? [] : availablePresets(lists, extra)) {
@@ -296,22 +337,23 @@ export function describeChoice(choice: ImageChoice, fallback: ImageChoice, extra
  * off. It needs image generation on too. Unset (every settings file from before the switch) is off.
  */
 export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool" | "imageChoice">, lists?: ComfyLists, extra: readonly Preset[] = []): ImageChoice | undefined {
-  return settings.imageGen && settings.imageTool === true ? (settings.imageChoice ?? defaultChoice(lists, extra)) : undefined;
+  // with no default (no GPU room), DEFAULT_CHOICE: the job's own check then refuses it in words
+  return settings.imageGen && settings.imageTool === true ? (settings.imageChoice ?? defaultChoice(lists, extra) ?? DEFAULT_CHOICE) : undefined;
 }
 
 /**
- * The default for an unset choice: the first of DEFAULT_ORDER that is ready. A default that is
- * not is skipped without a word. When no DEFAULT_ORDER preset is ready, the first ready row at
- * its first size that is not Z-Image Turbo; when none is (or the lists were never read), DEFAULT_CHOICE.
+ * The default for an unset choice, for a card of `room` bytes (cardBytes; undefined: unknown, so any):
+ * undefined below MIN_ROOM (no CPU default; NO_GPU says why). Else the first of DEFAULT_ORDER that
+ * fits and is ready, else the first that fits even when not ready, so the send says which files
+ * are missing (and the picker offers the download) rather than running some other row. Only
+ * DEFAULT_ORDER's setups are ever a default, never a template or a person's own.
  */
-export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = []): ImageChoice {
-  if (lists === undefined) return DEFAULT_CHOICE;
+export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = [], room?: number): ImageChoice | undefined {
+  if (room !== undefined && room < MIN_ROOM) return undefined;
+  const fitting = DEFAULT_ORDER.filter((c) => fits(firstBytes(c.preset), room));
+  if (lists === undefined) return fitting[0];
   const available = availablePresets(lists, extra);
-  const listed = DEFAULT_ORDER.find((choice) => available.some((p) => p.id === choice.preset));
-  if (listed !== undefined) return listed;
-  // never Z-Image Turbo: its template runs the BF16 model, which the GPU matrix ruled out as a default
-  const first = available.find((p) => p.family !== "zimage");
-  return first === undefined ? DEFAULT_CHOICE : { preset: first.id, width: first.sizes[0]!.width, height: first.sizes[0]!.height };
+  return fitting.find((c) => available.some((p) => p.id === c.preset)) ?? fitting[0];
 }
 
 /**
@@ -332,8 +374,10 @@ export interface KnownWorkflow {
 /** Guessed from the files it loads, for the mark beside its name; "comfy" when none is known. */
 function familyOf(graph: ApiGraph): string {
   const names = graphFiles(graph).map((f) => f.name.toLowerCase()).join(" ");
-  if (/flux/.test(names)) return "flux";
+  // MOSS-Image loads FLUX.2's VAE: a model's own name goes before the VAE it borrows
+  if (/moss[_-]?image/.test(names)) return "moss";
   if (/z[_-]?image/.test(names)) return "zimage";
+  if (/flux/.test(names)) return "flux";
   if (/sd_?xl/.test(names)) return "sdxl";
   if (/qwen[_-]?image/.test(names)) return "qwen";
   return "comfy";

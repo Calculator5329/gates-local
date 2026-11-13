@@ -20,7 +20,9 @@ import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "./ui.tsx
 
 /** Below this height the list and the sizes stop being usable. */
 const CRAMPED = 280;
-const FAMILY: Readonly<Record<string, string>> = { sdxl: "SDXL", flux: "FLUX" };
+const FAMILY: Readonly<Record<string, string>> = { sdxl: "SDXL", flux: "FLUX", zimage: "Z-Image", moss: "MOSS" };
+/** The server's tier labels in their order (presets.ts TIERS); one setup can be two tiers' pick. */
+const TIER_ORDER = ["Fast", "Fast and balanced", "Balanced", "Best"];
 const familyName = (family: string) => FAMILY[family] ?? family;
 /** The server's groups, theme defaults first (presets.ts GROUPS); one it names that is not here goes last. */
 const GROUP_ORDER = ["General", "Portraits and people", "Pixel art", "Game sprites", "Backgrounds", "ComfyUI templates", "Your workflows", "Your models"];
@@ -32,12 +34,21 @@ const baseName = (file: string) => file.slice(Math.max(file.lastIndexOf("/"), fi
 
 const rank = (group: string) => { const i = GROUP_ORDER.indexOf(group); return i < 0 ? GROUP_ORDER.length : i; };
 
-/** Rows in their groups: groups in GROUP_ORDER, then as first seen; ready rows first in each. */
+const tierRank = (r: Row) => { const i = TIER_ORDER.indexOf(r.tier ?? ""); return r.tier === undefined ? TIER_ORDER.length + 1 : i < 0 ? TIER_ORDER.length : i; };
+
+/**
+ * Rows in their groups: groups in GROUP_ORDER, then as first seen; in each, this GPU's tier rows
+ * first in tier order (ready or still to download), then ready rows, then the rest.
+ */
 function grouped(rows: readonly Row[]): { name: string; rows: Row[] }[] {
   const by = new Map<string, Row[]>();
   for (const r of rows) by.set(r.group ?? "", [...by.get(r.group ?? "") ?? [], r]);
-  return [...by.entries()].toSorted(([a], [b]) => rank(a) - rank(b)).map(([name, list]) => ({ name, rows: [...list.filter((r) => r.ready), ...list.filter((r) => !r.ready)] }));
+  const order = (list: Row[]) => [...list.filter((r) => r.tier !== undefined).toSorted((a, b) => tierRank(a) - tierRank(b)), ...list.filter((r) => r.tier === undefined && r.ready), ...list.filter((r) => r.tier === undefined && !r.ready)];
+  return [...by.entries()].toSorted(([a], [b]) => rank(a) - rank(b)).map(([name, list]) => ({ name, rows: order(list) }));
 }
+
+/** A tier row's quiet label after its name, as the chat picker shows a variant. */
+const tierTag = (p: Row) => p.tier === undefined ? null : <span className="pk-variant">{p.tier}</span>;
 
 /** Why a greyed row cannot run: what ComfyUI lacks, in words, or the files it needs and their size. */
 function needsText(p: ImagePreset): string {
@@ -96,7 +107,8 @@ export function ImagePicker() {
   const presets = useStore((s) => s.imagePresets);
   const status = useStore((s) => s.imageStatus);
   const pushed = useStore((s) => s.imageDownload);
-  const chosen = useStore(chosenImage);
+  // the picked setup; a default the server says this GPU cannot run is not shown as one
+  const view = useStore(chosenImage), chosen = view?.listed === true ? view : undefined;
   const gpu = useStore((s) => s.gpu);
   const phone = useMedia(PHONE), cpu = noGpu(gpu);
   const [family, setFamily] = useState<string | "all">("all");
@@ -226,7 +238,7 @@ export function ImagePicker() {
     return <div key={p.id} className={`pk-r off${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={false} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
       <button type="button" className="pk-select" tabIndex={-1} aria-disabled="true" aria-label={p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>
         <ImageMark family={p.family} />
-        <span className="pk-name"><span className="pk-nm">{p.name}</span></span>
+        <span className="pk-name"><span className="pk-nm">{p.name}</span>{tierTag(p)}</span>
       </button>
       {running
         ? canStop ? <button type="button" className="pk-act" aria-label={`Stop downloading ${p.name}`} data-tip="Stop" onClick={() => void stopSetup(p)}><Icon id="x" /></button> : null
@@ -275,7 +287,7 @@ export function ImagePicker() {
                 ? <div key={p.id} className={`pk-r${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
                   <button type="button" className="pk-select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={p.name} onClick={() => choose(p)}>
                     <ImageMark family={p.family} />
-                    <span className="pk-name"><span className="pk-nm">{p.name}</span>{p.id === chosen?.preset.id ? <Icon id="check" cls="s12" /> : null}</span>
+                    <span className="pk-name"><span className="pk-nm">{p.name}</span>{tierTag(p)}{p.id === chosen?.preset.id ? <Icon id="check" cls="s12" /> : null}</span>
                   </button>
                 </div>
                 : offRow(p))}
@@ -305,6 +317,7 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    <footer className="pk-bottom"><span /><span>{cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
+    {/* under 4 GB or on the CPU: no default, said once; the free figure stays when there is one */}
+    <footer className="pk-bottom"><span className="pk-nogpu" role={known?.noGpu === undefined ? undefined : "status"}>{known?.noGpu}</span><span>{known?.noGpu !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
   </div>;
 }

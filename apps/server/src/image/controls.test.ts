@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { applyControls, findControls } from "./controls.ts";
 import { WorkflowRefusal, type ApiGraph } from "./convert.ts";
 import klein from "./setups/flux2-klein-4b.json" with { type: "json" };
-import pixel from "./setups/sdxl-lightning-pixel.json" with { type: "json" };
+import compact from "./setups/flux2-klein-4b-compact.json" with { type: "json" };
+import moss from "./setups/moss-image.json" with { type: "json" };
+import zImage from "./setups/z-image-turbo-int8.json" with { type: "json" };
 
 const api = (name: string): ApiGraph => JSON.parse(readFileSync(new URL(`../../test/comfy/api/${name}.json`, import.meta.url), "utf8")) as ApiGraph;
 const refusal = (graph: ApiGraph) => {
@@ -57,13 +59,18 @@ describe("the app's own setups", () => {
     expect((klein as ApiGraph)["4"]!.inputs["text"]).toBe("a red fox asleep in fresh snow"); // the file's own graph is left as it was
   });
 
-  it("SDXL pixel art: only the prompt, size, seed and batch change", () => {
-    const graph = applyControls(pixel as ApiGraph, findControls(pixel as ApiGraph), { prompt: "a tree", width: 512, height: 768, seed: 42 });
-    const expected = structuredClone(pixel as ApiGraph);
-    expected["3"]!.inputs["text"] = "a tree";
-    Object.assign(expected["5"]!.inputs, { width: 512, height: 768 });
-    expected["6"]!.inputs["seed"] = 42;
+  it("MOSS-Image: only the prompt, size and seed change; its written negative stays", () => {
+    const graph = applyControls(moss as ApiGraph, findControls(moss as ApiGraph), { prompt: "a tree", width: 768, height: 1024, seed: 42 });
+    const expected = structuredClone(moss as ApiGraph);
+    expected["18:4"]!.inputs["text"] = "a tree";
+    Object.assign(expected["18:6"]!.inputs, { width: 768, height: 1024 });
+    expected["18:7"]!.inputs["seed"] = 42;
     expect(graph).toEqual(expected);
+  });
+
+  it("Z-Image Turbo int8 and Klein compact: the prompt and seed are found where their templates put them", () => {
+    expect(findControls(zImage as ApiGraph)).toMatchObject({ prompt: { node: "57:27", input: "text" }, seed: { node: "57:3", input: "seed" }, latent: "57:13", output: "9" });
+    expect(findControls(compact as ApiGraph)).toMatchObject({ prompt: { node: "4", input: "text" }, seed: { node: "7", input: "noise_seed" }, latent: "10" });
   });
 
   it("a batch of four in the file still runs one picture", () => {

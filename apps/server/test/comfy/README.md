@@ -9,6 +9,14 @@
   `localized_name`); every node, link and value is kept. Its subgraph instance is in the older
   format, with no `proxyWidgets`: the instance's own values (30 steps, its prompt and seed) must
   win over the inner nodes' (8 steps, a red panda, seed 0).
+- `templates/image_z_image_turbo_int8.json` and `image_moss_image_t2i.json` are the same
+  package's Z-Image Turbo int8 and MOSS-Image templates (its `comfyui-workflow-templates-json`
+  part, 0.1.132), trimmed the same way. One value is cut: MOSS's prompt-enhancer system prompt
+  keeps its first sentence and ends `[cut]`, since that branch is muted in the app's setup and
+  the text never reaches a graph. MOSS has two switches (prompt enhancer on, skip-layer guidance
+  off) and a resolution selector feeding the instance's size. The app's
+  `src/image/setups/z-image-turbo-int8.json` and `moss-image.json` are these converted, with the
+  edits `convert.test.ts` makes and `setups/README.md` lists.
 - `templates/subgraph-case.json` was written for these tests: a subgraph nested in a subgraph,
   two instances of one subgraph, a value promoted onto an instance, a reroute, a note, a text box,
   a bypassed LoRA loader and a muted preview.

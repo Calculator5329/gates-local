@@ -17,10 +17,10 @@ vi.mock("../src/session.ts", async (original) => ({ ...(await original<object>()
 import { setState } from "../src/store.ts";
 
 const GIB = 1024 ** 3;
-const PIXEL: ImagePreset = { id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9 * GIB }, { width: 1024, height: 1024, bytes: 10 * GIB }] };
-const PLAIN: ImagePreset = { ...PIXEL, id: "sdxl-lightning", name: "SDXL Lightning" };
-const FLUX: ImagePreset = { id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", family: "flux", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10 * GIB }, { width: 1024, height: 768, bytes: 10 * GIB }] };
-const presetsOf = (...presets: ImagePreset[]): ImagePresets => ({ presets, readAt: 1, current: { preset: presets[0] ?? PIXEL, width: 768, height: 512 } });
+const PIXEL: ImagePreset = { id: "flux2-klein-4b-pixel", name: "FLUX.2 Klein 4B pixel art", family: "flux", measured: false, sizes: [{ width: 768, height: 768, bytes: 9 * GIB }, { width: 1024, height: 1024, bytes: 10 * GIB }] };
+const PLAIN: ImagePreset = { ...PIXEL, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact" };
+const MOSS: ImagePreset = { id: "moss-image", name: "MOSS-Image", family: "moss", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 10 * GIB }, { width: 1024, height: 768, bytes: 10 * GIB }] };
+const presetsOf = (...presets: ImagePreset[]): ImagePresets => ({ presets, readAt: 1, current: { preset: presets[0] ?? PIXEL, width: 768, height: 768 } });
 const SETTINGS: Settings = { ...methodSamples["settings.get"].result, imageGen: true };
 const CHAT: ModelInfo = methodSamples["models.list"].result[0]!;
 
@@ -39,28 +39,28 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.stubGlobal("window", { innerWidth: 1280, innerHeight: 800 });
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  setState({ settings: SETTINGS, models: [CHAT], model: CHAT.name, image: false, imagePresets: presetsOf(PIXEL, FLUX), pop: null });
+  setState({ settings: SETTINGS, models: [CHAT], model: CHAT.name, image: false, imagePresets: presetsOf(PIXEL, MOSS), pop: null });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 it("Image off: the button names the chat model", () => {
   const html = button();
   expect(html).not.toContain(PIXEL.name);
-  expect(html).not.toContain("768×512");
+  expect(html).not.toContain("768×768");
 });
 
 it("Image on: the button names the image model and the size, and opens the image picker", () => {
   setState({ image: true });
   const html = button();
   expect(html).toContain(`<span class="t">${PIXEL.name}</span>`);
-  expect(html).toContain('<small class="picker-trigger-ctx">768×512</small>');
+  expect(html).toContain('<small class="picker-trigger-ctx">768×768</small>');
   expect(html, "no chat-model readiness on the image button").not.toContain("aria-busy");
 });
 
 it("Image on: the button follows the saved choice", () => {
-  setState({ image: true, settings: { ...SETTINGS, imageChoice: { preset: FLUX.id, width: 1024, height: 768 } } });
+  setState({ image: true, settings: { ...SETTINGS, imageChoice: { preset: MOSS.id, width: 1024, height: 768 } } });
   const html = button();
-  expect(html).toContain(`<span class="t">${FLUX.name}</span>`);
+  expect(html).toContain(`<span class="t">${MOSS.name}</span>`);
   expect(html).toContain("1024×768");
 });
 
@@ -70,11 +70,11 @@ it("Image on with image generation off in Settings: the button stays the chat mo
 });
 
 it("the picker lists only the presets the server read, with their sizes", () => {
-  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, FLUX) });
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, MOSS) });
   const html = picker();
-  expect(rowNames(html)).toEqual([PIXEL.name, FLUX.name]);
+  expect(rowNames(html)).toEqual([PIXEL.name, MOSS.name]);
   expect(html).not.toContain(`data-preset="${PLAIN.id}"`);
-  expect(html).toContain("768×512");
+  expect(html).toContain("768×768");
   expect(html).toContain("1024×1024");
   expect(html, "two families get the rail").not.toContain("no-rail");
   expect(html, "no search box for a short list").not.toContain("<input");
@@ -95,13 +95,13 @@ it("ComfyUI has none of the files: the picker says so and lists nothing", () => 
 });
 
 it.each([
-  ["the file list was never read", { presets: [], current: { preset: FLUX, width: 1024, height: 1024 } }],
-  ["ComfyUI has none of the files", { presets: [], readAt: 1, current: { preset: FLUX, width: 1024, height: 1024 } }],
+  ["the file list was never read", { presets: [], current: { preset: MOSS, width: 1024, height: 1024 } }],
+  ["ComfyUI has none of the files", { presets: [], readAt: 1, current: { preset: MOSS, width: 1024, height: 1024 } }],
 ] satisfies [string, ImagePresets][])("%s: the button never names the default it would fall to", (_, imagePresets) => {
   setState({ image: true, imagePresets });
   const html = button();
   expect(html).toContain('<span class="t">Image model</span>');
-  expect(html).not.toContain(FLUX.name);
+  expect(html).not.toContain(MOSS.name);
   expect(html).not.toContain("1024×1024");
 });
 
@@ -116,7 +116,7 @@ it.each(imageFitEdges)("the picker's answer at the fit's edge, $name: $verdict, 
 });
 
 it("Image on: the button says the short name beside the family mark, its tip the full name", () => {
-  setState({ image: true, imagePresets: presetsOf({ ...PIXEL, short: "Pixel art" }, { ...PLAIN, short: "Lightning" }) });
+  setState({ image: true, imagePresets: presetsOf({ ...PIXEL, short: "Pixel art" }, { ...PLAIN, short: "Compact" }) });
   const html = button();
   expect(html).toContain('<span class="t">Pixel art</span>');
   expect(html).toContain(`data-tip="${PIXEL.name}"`);
@@ -124,7 +124,7 @@ it("Image on: the button says the short name beside the family mark, its tip the
 });
 
 it("the picker says each size's GB once, on its size row, with a mark and no word", () => {
-  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, PLAIN, FLUX), gpu: methodSamples["gpu.status"].result });
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: presetsOf(PIXEL, PLAIN, MOSS), gpu: methodSamples["gpu.status"].result });
   const html = picker();
   const models = html.slice(html.indexOf('role="listbox"'), html.indexOf('class="pk-context"'));
   expect(models).not.toContain("GB");
@@ -154,8 +154,57 @@ it("a warm chat model a turn answered on: the status calls it unprotected, so th
 });
 
 it("the default ComfyUI lists is named, as the first row", () => {
-  setState({ image: true, imagePresets: { presets: [FLUX, PLAIN, PIXEL], readAt: 1, current: { preset: FLUX, width: 1024, height: 1024 } } });
-  expect(button()).toContain(`<span class="t">${FLUX.name}</span>`);
+  setState({ image: true, imagePresets: { presets: [MOSS, PLAIN, PIXEL], readAt: 1, current: { preset: MOSS, width: 1024, height: 1024 } } });
+  expect(button()).toContain(`<span class="t">${MOSS.name}</span>`);
   setState({ pop: { id: "images", kb: false } });
-  expect(rowNames(picker())).toEqual([FLUX.name, PLAIN.name, PIXEL.name]);
+  expect(rowNames(picker())).toEqual([MOSS.name, PLAIN.name, PIXEL.name]);
+});
+
+const KLEIN: ImagePreset = { ...PIXEL, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", group: "General" };
+const ZIMAGE: ImagePreset = { ...MOSS, id: "z-image-int8", name: "Z-Image Turbo int8", family: "zimage", group: "General" };
+
+it("General shows this GPU's tier rows first, in tier order, each with its tier; a tier row still to download keeps its place", () => {
+  // the server's order is not the tier order, and Z-Image's files are not there yet
+  const imagePresets: ImagePresets = {
+    presets: [{ ...MOSS, group: "General", tier: "Best" }, { ...PIXEL, group: "Pixel art" }, { ...PLAIN, group: "General" }, { ...KLEIN, tier: "Fast" }],
+    others: [{ ...ZIMAGE, tier: "Balanced", needs: { files: ["z_image_turbo_int8.safetensors"], download: true } }],
+    readAt: 1, current: { preset: KLEIN, width: 1024, height: 1024 },
+  };
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets });
+  const html = picker();
+  expect(rowNames(html)).toEqual([KLEIN.name, ZIMAGE.name, MOSS.name, PLAIN.name, PIXEL.name]);
+  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast", "Balanced", "Best"]);
+  expect(html, "the rail names the new families").toContain('aria-label="Z-Image"');
+});
+
+it("one setup that is two tiers' pick says both once", () => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: { presets: [{ ...PLAIN, group: "General", tier: "Fast and balanced" }, { ...MOSS, group: "General", tier: "Best" }], readAt: 1, current: { preset: PLAIN, width: 768, height: 768 } } });
+  expect([...picker().matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast and balanced", "Best"]);
+});
+
+const NO_GPU = "Image mode needs a GPU with 4 GB.";
+it.each([
+  ["on the CPU", { ...methodSamples["gpu.status"].result, vendor: "none" } as GpuStatus, ""],
+  ["with 3 GB free", { ...methodSamples["gpu.status"].result, freeBytes: 3 * GIB, occupants: [] } as GpuStatus, "3.0 GB free"],
+])("%s: no default is named or marked, and the picker says why once", (_, gpu, figure) => {
+  // what the server answers below 4 GB: Klein listed by its files, no tier rows, the reason
+  const imagePresets: ImagePresets = { presets: [KLEIN, MOSS], readAt: 1, current: { preset: KLEIN, width: 1024, height: 1024 }, noGpu: NO_GPU };
+  setState({ image: true, imagePresets, gpu, pop: null });
+  expect(button()).toContain('<span class="t">Image model</span>');
+  expect(button()).not.toContain(KLEIN.name);
+  setState({ pop: { id: "images", kb: false } });
+  const html = picker();
+  expect(html).not.toContain('aria-selected="true"');
+  expect(html).not.toContain('aria-checked="true"');
+  const footer = html.slice(html.indexOf('class="pk-bottom"'));
+  expect(footer).toContain(NO_GPU);
+  expect(html.split(NO_GPU)).toHaveLength(2);
+  expect(footer, "not a second line saying the opposite").not.toContain("Runs in system memory");
+  // gb() joins the number and its unit with a no-break space
+  if (figure !== "") expect(footer.replace(/\s/g, " ")).toContain(figure);
+});
+
+it("a saved pick on a machine with no default is still named: an explicit pick runs", () => {
+  setState({ image: true, imagePresets: { presets: [KLEIN, MOSS], readAt: 1, current: { preset: KLEIN, width: 1024, height: 1024 }, noGpu: NO_GPU }, settings: { ...SETTINGS, imageChoice: { preset: MOSS.id, width: 1024, height: 768 } } });
+  expect(button()).toContain(`<span class="t">${MOSS.name}</span>`);
 });

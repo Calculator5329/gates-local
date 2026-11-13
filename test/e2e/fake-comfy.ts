@@ -1,9 +1,11 @@
 // Fake ComfyUI on an ephemeral port, CPU-only unless gpu() is called. The real
 // client polls history; the WebSocket upgrade stays open and sends nothing but
 // the progress frames a test asks for with progress().
-// gpu(): /system_stats names a CUDA device, so the image fit runs. Use it only
-// with the e2e stack, whose server reads the fake nvidia-smi
-// (GATES_LOCAL_NVIDIA_SMI), never the real one.
+// Its file list is FLUX.2 Klein 4B's (the Fast default) unless withApp(), only() or bare()
+// says otherwise; missing() drops every diffusion model, so no built-in setup can run.
+// gpu(): /system_stats names a CUDA device, so the image fit runs and Image mode has a
+// default (on the CPU it has none). Use it only with the e2e stack, whose server reads the
+// fake nvidia-smi (GATES_LOCAL_NVIDIA_SMI), never the real one.
 // withFolders(): it names model folders of its own (under ~/.cache, never a real ComfyUI's) and
 // lists what a download put in their gates-local/ folders. It also serves every Hugging Face
 // path the app downloads from (the e2e stack points GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN here):
@@ -14,14 +16,17 @@ import { createServer, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
-import { comfyInfo, KLEIN_FILES, SDXL_FILES, type FakeFiles } from "../../apps/server/test/comfy/info.ts";
+import { APP_FILES, comfyInfo, KLEIN_FILES, type FakeFiles } from "../../apps/server/test/comfy/info.ts";
 
 const KINDS = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"] as const;
 /** Each served file's size: enough for a progress bar to move. */
 const FILE_BYTES = 4 * 1024 * 1024;
 
 export async function fakeComfy() {
-  let complete = false, missingModel = false, flux = false, cuda = false, unlisted = false, down = false;
+  let complete = false, missingModel = false, cuda = false, unlisted = false, down = false;
+  /** The file sets /object_info lists, besides what a download put in its folders. */
+  let listed: readonly FakeFiles[] = [KLEIN_FILES];
+  const lists = () => missingModel ? listed.map((f) => ({ ...f, diffusion_models: [] })) : listed;
   let folders: string | undefined, slow = false, slowFile: string | undefined;
   /** Held downloads: each ends its response when released. */
   const held = new Set<() => void>();
@@ -63,7 +68,7 @@ export async function fakeComfy() {
     let body: unknown = {};
     switch (url.pathname) {
       case "/system_stats": body = { system: {}, devices: [cuda ? { type: "cuda", torch_vram_total: 0 } : { type: "cpu" }] }; break;
-      case "/object_info": if (unlisted) { res.writeHead(500); res.end("{}"); return; } body = comfyInfo({ checkpoints: missingModel ? [] : SDXL_FILES.checkpoints, loras: SDXL_FILES.loras }, flux ? KLEIN_FILES : {}, downloaded()); break;
+      case "/object_info": if (unlisted) { res.writeHead(500); res.end("{}"); return; } body = comfyInfo(...lists(), downloaded()); break;
       case "/internal/folder_paths": body = folders === undefined ? {} : Object.fromEntries(KINDS.map((kind) => [kind, [path.join(folders!, kind)]])); break;
       case "/prompt": {
         const id = `p${++n}`; active.add(id); runs.push({ id, startedAt: Date.now() });
@@ -105,8 +110,12 @@ export async function fakeComfy() {
     url: `http://127.0.0.1:${address.port}`,
     state: () => runs.map((run) => ({ ...run })),
     prompts: () => prompts.map((p) => p.prompt),
-    /** Also list the FLUX.2 Klein files, so a second family of image model is installed. */
-    withFlux: () => { flux = true; },
+    /** List every built-in setup's files: Klein, its compact encoder, Z-Image int8 and MOSS-Image. */
+    withApp: () => { listed = APP_FILES; },
+    /** List these file sets and nothing else. */
+    only: (...files: FakeFiles[]) => { listed = files; },
+    /** List none of the built-in setups' files: each offers its download. */
+    bare: () => { listed = []; },
     /** Report a CUDA device: the image fit then measures the (fake) GPU. */
     gpu: () => { cuda = true; },
     /** Send a progress frame for the newest running prompt to every open socket. */

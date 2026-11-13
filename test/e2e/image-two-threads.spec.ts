@@ -7,7 +7,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] ? "on" : "off" });
 
-const X: ImageChoice = { preset: "sdxl-lightning", width: 1024, height: 1024 };
+const X: ImageChoice = { preset: "z-image-int8", width: 1024, height: 1024 };
 const Y: ImageChoice = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
 const red = process.env["GL_IMAGE_TWO_THREADS_RED"] === "1";
 
@@ -15,7 +15,7 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
   test.setTimeout(60_000);
   info.annotations.push({ type: "budget", description: "Three fake image jobs across two threads, each finished by hand." });
   const comfy = await fakeComfy();
-  comfy.withFlux();
+  comfy.withApp();
   comfy.gpu();
   const button = page.locator("#modelBtn");
   const cards = page.locator("[data-image-job]");
@@ -41,12 +41,12 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await sendMessage(page, "IR320 A default");
     await run(0);
     expect(weights(0)).toBe("flux-2-klein-4b-fp8.safetensors");
-    // B picks SDXL and sends
+    // B picks Z-Image and sends
     await page.getByRole("button", { name: "New thread" }).click();
     await button.click();
     await page.locator(`#imagePicker .pk-r[data-preset="${X.preset}"] .pk-select`).click();
-    await expect(button).toContainText("Lightning");
-    await sendMessage(page, "IR320 B picks SDXL");
+    await expect(button).toContainText("Z-Image");
+    await sendMessage(page, "IR320 B picks Z-Image");
     await run(1);
     // back in A: the composer and the next send are still Klein
     await page.locator(".sb-row", { hasText: "IR320 A default" }).click();
@@ -55,7 +55,7 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await page.screenshot({ path: info.outputPath("a-after-b-picks.png"), animations: "disabled" });
     await sendMessage(page, "IR320 A again");
     await run(2);
-    expect(weights(2), "A's next send loads Klein, not B's SDXL").toBe("flux-2-klein-4b-fp8.safetensors");
+    expect(weights(2), "A's next send loads Klein, not B's Z-Image").toBe("flux-2-klein-4b-fp8.safetensors");
   } finally {
     await comfy.close();
   }
@@ -65,7 +65,7 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
   test.setTimeout(90_000);
   info.annotations.push({ type: "budget", description: "One dependent journey holds six fake image jobs and checks a failed job's retry across two threads." });
   const comfy = await fakeComfy();
-  comfy.withFlux();
+  comfy.withApp();
   comfy.gpu(); // Only the stack's fake nvidia-smi is read.
   const observations: Record<string, unknown> = {};
   // Opt-in mutation run makes every routing/order/completion assertion wrong while
@@ -108,7 +108,7 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
     const nodes = Object.values(comfy.prompts()[index]!);
     const actual = nodes.find(n => n.class_type === "CheckpointLoaderSimple")?.inputs["ckpt_name"]
       ?? nodes.find(n => n.class_type === "UNETLoader")?.inputs["unet_name"];
-    const x = "sdxl_lightning_4step.safetensors", y = "flux-2-klein-4b-fp8.safetensors";
+    const x = "z_image_turbo_int8_convrot.safetensors", y = "flux-2-klein-4b-fp8.safetensors";
     check(actual, preset === X.preset ? x : y, preset === X.preset ? y : x, `job ${index + 1} workflow weights`);
     check(nodes.some(n => n.class_type === "LoraLoader"), false, true, `job ${index + 1} has no unpicked LoRA`);
   };
@@ -125,8 +125,8 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Image", exact: true }).click();
 
-    await test.step("A makes SDXL, then B makes FLUX after A releases the GPU", async () => {
-      await pick(X, "Lightning");
+    await test.step("A makes Z-Image, then B makes FLUX after A releases the GPU", async () => {
+      await pick(X, "Z-Image");
       await sendMessage(page, "IPT A lighthouse");
       await started(1);
       graph(0, X.preset);
@@ -167,15 +167,15 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
       await shot("a-later-card-composer");
     });
 
-    await test.step("A's failed SDXL retries SDXL while the composer says FLUX; B queues behind it", async () => {
-      await pick(X, "Lightning");
+    await test.step("A's failed Z-Image retries Z-Image while the composer says FLUX; B queues behind it", async () => {
+      await pick(X, "Z-Image");
       comfy.missing();
-      await sendMessage(page, "IPT A failed SDXL");
+      await sendMessage(page, "IPT A failed Z-Image");
       const retryCard = cards.last();
       await expect(retryCard).toHaveAttribute("data-image-job", "error");
-      await expect(retryCard).toContainText("sdxl_lightning_4step.safetensors");
-      check(comfy.state().length, 3, 4, "missing SDXL submits no workflow");
-      await shot("a-failed-sdxl");
+      await expect(retryCard).toContainText("z_image_turbo_int8_convrot.safetensors");
+      check(comfy.state().length, 3, 4, "missing Z-Image submits no workflow");
+      await shot("a-failed-zimage");
       comfy.restore(false);
       await page.locator(".sb-row", { hasText: "IPT B mountains" }).click();
       await pick(Y, "Klein 4B");
@@ -185,7 +185,7 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
       await started(4);
       graph(3, X.preset);
       observations["A composer during retry"] = await button.innerText();
-      await shot("a-retry-sdxl-composer-flux");
+      await shot("a-retry-zimage-composer-flux");
       await page.locator(".sb-row", { hasText: "IPT B mountains" }).click();
       await sendMessage(page, "IPT B impatient FLUX");
       await expect(cards.last()).toContainText("Waiting for the GPU");
@@ -220,10 +220,10 @@ test("two threads: sequential models, an impatient send, and a retry keep their 
     observations["runs"] = comfy.state();
     await info.attach("observations", { body: JSON.stringify(observations, null, 2), contentType: "application/json" });
     // IPT-01 (each thread keeps its model) and IPT-02 (each card names its model), after the runtime checks.
-    expect(aAfterB, "IPT-01 A retains its own composer choice after B picks FLUX").toContain("Lightning");
-    expect(aLater, "IPT-01 A's later send retains SDXL").toEqual(X);
-    expect(aLaterWeights, "IPT-01 A's later workflow loads SDXL weights").toEqual("sdxl_lightning_4step.safetensors");
-    expect(observations["A initial card words"], "IPT-02 A card names its actual model").toContain("SDXL Lightning");
+    expect(aAfterB, "IPT-01 A retains its own composer choice after B picks FLUX").toContain("Z-Image");
+    expect(aLater, "IPT-01 A's later send retains Z-Image").toEqual(X);
+    expect(aLaterWeights, "IPT-01 A's later workflow loads Z-Image weights").toEqual("z_image_turbo_int8_convrot.safetensors");
+    expect(observations["A initial card words"], "IPT-02 A card names its actual model").toContain("Z-Image Turbo int8");
     expect(observations["B initial card words"], "IPT-02 B card names its actual model").toContain("FLUX.2 Klein 4B");
   } finally {
     client?.close();

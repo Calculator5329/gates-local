@@ -128,12 +128,12 @@ const probe: SetupProbe = {
 
 const plan: SetupPlan = {
   text: { tier: "nvidia-16gb", model: "qwen3.5:9b", numCtx: 32768, think: true, reason: "Fits 9.7 GB free with room for 32k" },
-  image: { tier: "nvidia-16gb", model: "sdxl-lightning-4step", enabled: true, secondsPerImage: 4, reason: "Fits beside the text model when it unloads" },
+  image: { tier: "nvidia-16gb", model: "flux2-klein-4b", enabled: true, secondsPerImage: 4, reason: "Fits beside the text model when it unloads" },
   downloads: [
     { what: "qwen3.5:9b", bytes: 6_600_000_000, source: "ollama", installed: true },
-    { what: "sdxl_lightning_4step.safetensors", bytes: 6_940_000_000, source: "https://huggingface.co/ByteDance/SDXL-Lightning", installed: false },
+    { what: "flux-2-klein-4b-fp8.safetensors", bytes: 4_070_624_520, source: "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8", installed: false },
   ],
-  totalBytes: 6_940_000_000,
+  totalBytes: 4_070_624_520,
 };
 
 const pull: PullProgress = {
@@ -168,7 +168,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "threads.create": { params: { title: "First" }, result: thread },
   "threads.get": { params: { threadId: "t1" }, result: { thread, messages: [userMessage, assistantMessage] } },
   "threads.rename": { params: { threadId: "t1", title: "Renamed" }, result: { ...thread, title: "Renamed" } },
-  "threads.setImageChoice": { params: { threadId: "t1", choice: { preset: "sdxl-lightning", width: 1024, height: 1024 } }, result: { ...thread, imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 } } },
+  "threads.setImageChoice": { params: { threadId: "t1", choice: { preset: "moss-image", width: 1024, height: 1024 } }, result: { ...thread, imageChoice: { preset: "moss-image", width: 1024, height: 1024 } } },
   "threads.delete": { params: { threadId: "t1" }, result: { threadId: "t1" } },
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },
@@ -223,9 +223,9 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "image.presets": {
     params: {},
     result: {
-      presets: [{ id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9_663_676_416 }] }],
+      presets: [{ id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", family: "flux", group: "General", tier: "Fast", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 8_589_934_592 }] }],
       readAt: 1_762_500_006_000,
-      current: { preset: { id: "sdxl-lightning-pixel", name: "SDXL Lightning pixel art", family: "sdxl", measured: false, sizes: [{ width: 768, height: 512, bytes: 9_663_676_416 }] }, width: 768, height: 512 },
+      current: { preset: { id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", family: "flux", group: "General", measured: false, sizes: [{ width: 1024, height: 1024, bytes: 8_589_934_592 }] }, width: 1024, height: 1024 },
     },
   },
   "image.generate": { params: { prompt: "a gate at dusk", threadId: "t1" }, result: { jobId: "j1" } },

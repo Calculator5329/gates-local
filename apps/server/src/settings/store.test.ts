@@ -37,10 +37,10 @@ describe("settings store", () => {
     expect(s.loadNote).toBeUndefined();
     expect(s.get().imageTool).toBeUndefined();
     expect(imageToolChoice(s.get())).toBeUndefined();
-    s.update({ imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 }, imageTool: true });
+    s.update({ imageChoice: { preset: "moss-image", width: 1024, height: 1024 }, imageTool: true });
     const again = await open(dir);
-    expect(again.get()).toMatchObject({ imageChoice: { preset: "sdxl-lightning", width: 1024, height: 1024 }, imageTool: true });
-    expect(imageToolChoice(again.get())).toEqual({ preset: "sdxl-lightning", width: 1024, height: 1024 });
+    expect(again.get()).toMatchObject({ imageChoice: { preset: "moss-image", width: 1024, height: 1024 }, imageTool: true });
+    expect(imageToolChoice(again.get())).toEqual({ preset: "moss-image", width: 1024, height: 1024 });
     again.update({ imageChoice: null, imageGen: false });
     expect(again.get()).not.toHaveProperty("imageChoice");
     // Image generation off turns the tool off with it, whatever the switch says.

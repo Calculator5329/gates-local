@@ -17,27 +17,28 @@ const RESIDENT = [
   { pid: 3388, name: "/opt/media-vault/bin/media-vault-vision", mib: 1822 },
 ];
 
-/** The runner's MiB (loaded models' GPU parts) and another program's MiB, from the fake Ollama's state file. */
-function fakeState(): { runner: number; other: number } {
+/** The runner's MiB (loaded models' GPU parts), another program's MiB and the card's size, from the fake Ollama's state file. */
+function fakeState(): { runner: number; other: number; total: number } {
   const file = process.env["GATES_LOCAL_FAKE_GPU_STATE"];
-  if (!file) return { runner: 0, other: 0 };
+  if (!file) return { runner: 0, other: 0, total: TOTAL };
   try {
     const state: unknown = JSON.parse(readFileSync(file, "utf8"));
-    const s = typeof state === "object" && state !== null ? (state as { loaded?: unknown; otherMib?: unknown }) : {};
+    const s = typeof state === "object" && state !== null ? (state as { loaded?: unknown; otherMib?: unknown; totalMib?: unknown }) : {};
     const other = typeof s.otherMib === "number" ? s.otherMib : 0;
-    if (!Array.isArray(s.loaded)) return { runner: 0, other };
+    const total = typeof s.totalMib === "number" ? s.totalMib : TOTAL;
+    if (!Array.isArray(s.loaded)) return { runner: 0, other, total };
     const runner = s.loaded.reduce((sum: number, l: unknown) => {
       const size = typeof l === "object" && l !== null ? (l as { sizeBytes?: unknown }).sizeBytes : 0;
       return sum + (typeof size === "number" ? Math.round(size / MIB) : 0);
     }, 0);
-    return { runner, other };
+    return { runner, other, total };
   } catch {
-    return { runner: 0, other: 0 };
+    return { runner: 0, other: 0, total: TOTAL };
   }
 }
 
 const query = process.argv.slice(2).find((a) => a.startsWith("--query-"));
-const { runner, other } = fakeState();
+const { runner, other, total } = fakeState();
 const apps = [
   ...RESIDENT,
   ...(other > 0 ? [{ pid: 3902, name: "/usr/bin/blender", mib: other }] : []),
@@ -46,7 +47,7 @@ const apps = [
 const used = apps.reduce((s, a) => s + a.mib, 0) + 210;
 
 const NAME = "NVIDIA GeForce RTX 5070 Ti";
-const totals = `${TOTAL}, ${used}, ${Math.max(0, TOTAL - used)}`;
+const totals = `${total}, ${used}, ${Math.max(0, total - used)}`;
 
 if (query === "--query-gpu=memory.total,memory.used,memory.free") {
   process.stdout.write(`${totals}\n`);

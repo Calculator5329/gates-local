@@ -1,7 +1,7 @@
 // The workflows ComfyUI has, read through its own HTTP routes and kept as setups:
 // - its template list: GET /templates/index.json, then /templates/<name>.json for each picture
 //   template that starts from words (no input files) and runs on this machine (not a paid
-//   cloud node: `openSource: false`);
+//   cloud node: `openSource: false`), less the ones struck for their licences (STRUCK);
 // - the person's saved workflows: GET /userdata?dir=workflows, then /userdata/workflows%2F<name>.
 // Each is converted with this ComfyUI's /object_info (convert.ts) and kept as its API graph, or
 // as the reason it cannot run. A loader node's `properties.models` says where its file comes from.
@@ -44,6 +44,9 @@ async function each<T, R>(items: readonly T[], limit: number, read: (item: T) =>
   return out;
 }
 
+/** Templates the app never lists: Krea 2 and Qwen-Image 2.1, out for their licences (owner, 2026-11-13). */
+const STRUCK = /krea[-_]?2|qwen[-_]?image[-_]?2[-_]1/i;
+
 /** ComfyUI's picture templates that start from words and run here. Undefined when the list cannot be read. */
 export async function readTemplates(get: ComfyGet, info: ObjectInfo): Promise<KnownWorkflow[] | undefined> {
   let index: unknown;
@@ -53,7 +56,7 @@ export async function readTemplates(get: ComfyGet, info: ObjectInfo): Promise<Kn
     for (const t of isObject(category) ? array(category["templates"]) : []) {
       if (!isObject(t) || typeof t["name"] !== "string" || entries.has(t["name"])) continue;
       const io = isObject(t["io"]) ? t["io"] : {};
-      if (t["mediaType"] !== "image" || t["openSource"] === false || array(io["inputs"]).length > 0) continue;
+      if (t["mediaType"] !== "image" || t["openSource"] === false || array(io["inputs"]).length > 0 || STRUCK.test(t["name"])) continue;
       entries.set(t["name"], typeof t["title"] === "string" ? t["title"] : t["name"]);
     }
   }

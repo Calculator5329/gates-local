@@ -39,3 +39,5 @@
 .image-picker .pk-search{display:flex;justify-content:flex-end}
 .image-picker .pk-blank{flex-wrap:wrap}
 }
+/* the footer's reason there is no default: read first, so left and in the text colour */
+.image-picker .pk-bottom>.pk-nogpu{text-align:left;color:var(--foreground)}

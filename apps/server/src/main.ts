@@ -240,6 +240,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     // The loader forgets a model the image module unloaded (keep_alive 0).
     onModelUnloaded: (model) => services.loader.unloaded(model),
     ollamaUrl: () => runtime.baseUrl(),
+    // The default and the picker's tiers read the GPU as the picker does.
+    gpuStatus: () => services.gpu.read(),
     // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
     ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),
     ...(downloadOrigin ? { download: { fetch: fetchFrom(downloadOrigin), records: false } } : {}),

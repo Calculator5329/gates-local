@@ -19,7 +19,7 @@ import * as imageFiles from "../src/chat/image-lifecycle.ts";
 import { saveAttachments } from "../src/chat/attachments.ts";
 import { createGpuLease, type GpuLease } from "../src/gpu/lease.ts";
 import { createImageModule, type ImageModule } from "../src/image/module.ts";
-import { comfyInfo, SDXL_FILES } from "./comfy/info.ts";
+import { comfyInfo, ZIMAGE_FILES } from "./comfy/info.ts";
 import { json, startFakeServer, type FakeServer } from "../src/fit/fake-http.ts";
 import { createModelCatalog } from "../src/runtime/models.ts";
 import { createOllamaRuntime, type OllamaRuntime } from "../src/runtime/runtime.ts";
@@ -165,7 +165,7 @@ async function rig(opts: { ollamaUp?: boolean; image?: (lease: GpuLease, store: 
     ...(opts.draftEveryMs === undefined ? {} : { draftEveryMs: opts.draftEveryMs }),
     ...(opts.settings === undefined ? {} : { settings: opts.settings }),
     // Tools › Make images on: a send with tools: true offers the chat model the image tool.
-    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir), imageTool: () => ({ preset: "sdxl-lightning-pixel", width: 768, height: 512 }) } : {}),
+    ...(lease && opts.image ? { lease, image: opts.image(lease, store, dir), imageTool: () => ({ preset: "z-image-int8", width: 1024, height: 1024 }) } : {}),
     push: (c, p) => {
       if (c === "chat.event") {
         const { turnId, threadId, event } = p as Payload<"chat.event">;
@@ -923,7 +923,7 @@ function fakeComfyImage() {
         const { pathname } = new URL(String(input));
         comfyCalls.push(pathname);
         if (pathname === "/system_stats") return Response.json({ system: {}, devices: [] });
-        if (pathname === "/object_info") return Response.json(comfyInfo(SDXL_FILES));
+        if (pathname === "/object_info") return Response.json(comfyInfo(ZIMAGE_FILES));
         if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: [] });
         if (pathname === "/prompt") {
           queueMicrotask(() => socket?.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "executing", data: { prompt_id: "p1", node: null } }) })));
@@ -988,7 +988,7 @@ function managedComfy(hooks: { onStart?: () => void; onStop?: () => void } = {})
           if (ctl.health) await ctl.health;
           return up ? Response.json({ system: {}, devices: [] }) : new Response("down", { status: 503 });
         }
-        if (pathname === "/object_info") return Response.json(comfyInfo(SDXL_FILES));
+        if (pathname === "/object_info") return Response.json(comfyInfo(ZIMAGE_FILES));
         if (pathname === "/queue") return Response.json({ queue_running: [], queue_pending: ctl.busy ? [[0, "someone-else"]] : [] });
         if (pathname === "/prompt") {
           prompts += 1;

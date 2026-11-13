@@ -3,7 +3,8 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-test.beforeEach(async () => { comfy = await fakeComfy(); });
+// a GPU: the image call's job has no default on the CPU
+test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 
 // A local model wrote its image call as the reply's text, { "action": "image", "action_input": "..." },

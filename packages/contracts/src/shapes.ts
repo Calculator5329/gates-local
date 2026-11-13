@@ -525,6 +525,8 @@ export const ImagePreset = S.Struct({
   family: S.String,
   /** The picker's group: a theme (General, Pixel art…) for the app's own setups, where it came from for ComfyUI's. Absent from older servers. */
   group: S.optional(S.String),
+  /** The quality tier this setup is for this GPU's free memory ("Fast", "Balanced", "Best", or two joined); absent for the rest. */
+  tier: S.optional(S.String),
   sizes: S.Array(ImageSize),
   /** False: the bytes are an estimate, not a measured peak. */
   measured: S.Boolean,
@@ -565,6 +567,8 @@ export const ImagePresets = S.Struct({
    * server knows, so the composer can say it before ComfyUI has listed its files.
    */
   current: S.Struct({ preset: ImagePreset, width: S.Int, height: S.Int }),
+  /** Set when this machine has too little GPU memory for any default (or none): why, in words. An unset send is then refused. */
+  noGpu: S.optional(S.String),
   /** The download running now, as its last image.download push said. */
   download: S.optional(ImageDownload),
 });

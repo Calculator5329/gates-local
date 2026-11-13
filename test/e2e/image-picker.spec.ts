@@ -5,13 +5,15 @@
 import type { Page } from "@playwright/test";
 import { createClient } from "@gates-local/contracts";
 import { CONTROL_URL } from "./env.ts";
+import { ZIMAGE_FILES } from "../../apps/server/test/comfy/info.ts";
 import { fakeComfy } from "./fake-comfy.ts";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { state } from "./threads-support.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] ? "on" : "off" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-test.beforeEach(async () => { comfy = await fakeComfy(); comfy.withFlux(); });
+// FLUX.2 Klein 4B's files on a GPU: on the CPU Image mode has no default
+test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 
 async function shot(page: Page, name: string, info: { outputPath: (n: string) => string }, clip?: { x: number; y: number; width: number; height: number }) {
@@ -41,6 +43,7 @@ const boxes = async (page: Page) => {
 };
 
 test("Image on: the button names the image model and size where the chat model was, and its picker lists what ComfyUI has", async ({ page, open }, info) => {
+  comfy.withApp(); // every setup's files: each row is ready, so none carries a Download button or its tip
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
@@ -57,56 +60,58 @@ test("Image on: the button names the image model and size where the chat model w
   await button.click();
   const picker = page.locator("#imagePicker");
   await expect(picker).toBeVisible();
-  await expect(picker.locator(".pk-r")).toHaveCount(7);
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "sdxl-lightning", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "sdxl-lightning-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
-  await expect(picker.locator(".pk-rail"), "two families: the rail shows").toBeVisible();
+  await expect(picker.locator(".pk-r")).toHaveCount(8);
+  // the tier setups first in tier order, then the rest of General, then the themes
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
+  await expect(picker.locator(".pk-rail"), "three families: the rail shows").toBeVisible();
   await expect(picker.locator("input"), "the image picker has no search box").toHaveCount(0);
   await expect(picker.locator(".pk-r[data-tip], .pk-r [data-tip]"), "no row tooltips").toHaveCount(0);
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
   await shot(page, "image-after-picker.png", info);
 
   // a row picks that model at the size nearest the current one, as the chat picker picks a model
-  await picker.locator('.pk-r[data-preset="sdxl-lightning-pixel"] .pk-select').click();
+  await picker.locator('.pk-r[data-preset="flux2-klein-4b-pixel"] .pk-select').click();
   await expect(picker).toBeHidden();
-  await expect(button).toContainText("Pixel art");
+  await expect(button).toContainText("Retro pixel");
   await expect(button).toContainText("1024×1024");
   // a size row picks that size
   await button.click();
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
-  await picker.locator('.pk-ctx-row[data-size="512x768"]').click();
+  await picker.locator('.pk-ctx-row[data-size="512x512"]').click();
   await expect(picker).toBeHidden();
-  await expect(button).toContainText("Pixel art");
-  await expect(button).toContainText("512×768");
+  await expect(button).toContainText("Retro pixel");
+  await expect(button).toContainText("512×512");
   expect(await boxes(page)).toEqual(before);
 
   // Image off: the chat model again, at the same right edge
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(button).not.toContainText("SDXL Lightning");
+  await expect(button).not.toContainText("Retro pixel");
   expect(await boxes(page)).toEqual(before);
 });
 
 test("the picker lists only presets whose files ComfyUI reports", async ({ page, open }) => {
   await comfy.close();
-  comfy = await fakeComfy(); // the SDXL files only, no FLUX
+  comfy = await fakeComfy();
+  comfy.only(ZIMAGE_FILES); // Z-Image's files only, no FLUX
+  comfy.gpu();
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageGenOn(page);
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  // the default falls to plain SDXL without naming Klein; pixel art stays a pick, never the default
-  await expect(page.locator("#modelBtn")).toContainText("Lightning768×512");
-  await expect(page.locator("#modelBtn")).not.toContainText("pixel art");
+  // the default falls past Klein to the first setup ComfyUI has every file for, without naming Klein
+  await expect(page.locator("#modelBtn")).toContainText("Z-Image1024×1024");
   await expect(page.locator("#modelBtn")).not.toContainText("Klein");
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
   // the rest are listed greyed out, each with its reason: a pick only for what ComfyUI has
-  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(2);
-  expect(await picker.locator(".pk-r:not(.off)").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["sdxl-lightning", "sdxl-lightning-pixel"]);
+  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(1);
+  expect(await picker.locator(".pk-r:not(.off)").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8"]);
   await expect(picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select')).toHaveAttribute("aria-disabled", "true");
   // its Download button stays a button: the row itself is not marked disabled, only its pick
   await expect(picker.locator('.pk-r.off[aria-disabled]')).toHaveCount(0);
   await picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select').click({ force: true });
   await expect(picker, "a greyed row picks nothing").toBeVisible();
-  await expect(page.locator("#modelBtn")).toContainText("Lightning768×512");
+  await expect(page.locator("#modelBtn")).toContainText("Z-Image1024×1024");
   await expect(picker.locator(".pk-ctx-row:enabled"), "its sizes show, not pickable").toHaveCount(0);
 });
 
@@ -115,7 +120,9 @@ const groups = (page: Page) => page.locator("#imagePicker [role=group]").evaluat
 
 test("the picker groups setups by theme, greys what ComfyUI lacks with the reason, and downloads one with progress and Stop", async ({ page, open }, info) => {
   await comfy.close();
-  comfy = await fakeComfy(); // the SDXL files only: every FLUX setup needs files
+  comfy = await fakeComfy();
+  comfy.bare(); // no model files: every setup needs files
+  comfy.gpu();
   comfy.withFolders();
   comfy.slowDownloads(true);
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
@@ -128,18 +135,19 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-groups.png", info);
   expect(await groups(page)).toEqual([
-    ["General", "sdxl-lightning", "flux2-klein-4b"],
+    ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
     ["Portraits and people", "flux2-klein-4b-portraits"],
-    ["Pixel art", "sdxl-lightning-pixel", "flux2-klein-4b-pixel"],
+    ["Pixel art", "flux2-klein-4b-pixel"],
     ["Game sprites", "flux2-klein-4b-sprites"],
     ["Backgrounds", "flux2-klein-4b-backgrounds"],
   ]);
+  // each tier's setup says its tier, downloaded or not
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual(["Fast", "Balanced", "Best", null, null, null, null, null]);
   await expect(picker.locator(".pk-title"), "no heading saying the button's name again").toHaveCount(0);
   await expect(picker).not.toContainText("Image model");
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   await expect(klein).toHaveClass(/\boff\b/);
   await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
-  await expect(picker.locator('.pk-r[data-preset="sdxl-lightning"]')).not.toHaveClass(/\boff\b/);
 
   // refused (ComfyUI is not answering): the row says why, and no bar is left from the press
   comfy.down(true);
@@ -169,16 +177,20 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   comfy.slowDownloads(false);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
   await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
-  await expect(picker.locator(".pk-r.off"), "every FLUX setup loads the same three files").toHaveCount(0);
+  // the themes load Klein's three files; compact, Z-Image and MOSS need their own
+  await expect(picker.locator(".pk-r.off")).toHaveCount(3);
+  expect(await picker.locator(".pk-r.off").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
   await klein.locator(".pk-select").click();
   await expect(picker).toBeHidden();
   await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
 });
 
-/** The SDXL files only, model folders of its own: every FLUX setup offers its download. */
+/** No model files, model folders of its own: every setup offers its download. */
 async function downloadable(page: Page, open: () => Promise<void>) {
   await comfy.close();
   comfy = await fakeComfy();
+  comfy.bare();
+  comfy.gpu();
   comfy.withFolders();
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
@@ -229,7 +241,9 @@ test.describe("on the phone", () => {
 
   test("the picker offers no Download, Stop or Start the phone cannot do, and a pick saves the thread's choice alone with no error", async ({ page }, info) => {
     await comfy.close();
-    comfy = await fakeComfy(); // the SDXL files only: every FLUX setup needs files
+    comfy = await fakeComfy();
+    comfy.only(ZIMAGE_FILES); // Z-Image's files only: every FLUX setup needs files
+    comfy.gpu();
     comfy.withFolders();
     const r = await fetch(`${CONTROL_URL}/reset`, { method: "POST", body: JSON.stringify({ scenario: "models", phone: true, seed: "design", comfyUrl: comfy.url, imageTool: true }) });
     expect(r.ok, await r.clone().text()).toBe(true);
@@ -249,16 +263,16 @@ test.describe("on the phone", () => {
     await shot(page, "image-picker-phone.png", info);
     await expect(picker.getByRole("button", { name: /^(Download|Stop downloading)/ })).toHaveCount(0);
     // a ready row, then its size: the thread keeps it; Settings is the computer's, so it is not written
-    await picker.locator('.pk-r[data-preset="sdxl-lightning-pixel"] .pk-select').click();
+    await picker.locator('.pk-r[data-preset="z-image-int8"] .pk-select').click();
     await picker.locator(".pk-ctx-row").first().click();
     await expect(picker).toBeHidden();
-    await expect(page.locator("#modelBtn")).toContainText("Pixel art");
+    await expect(page.locator("#modelBtn")).toContainText("Z-Image");
   });
 });
 
 test("ComfyUI not answering and never listed: one full-width row says so with Check again, and there is no Size pane", async ({ page, open }, info) => {
   await comfy.close();
-  comfy = await fakeComfy(); // the SDXL files only
+  comfy = await fakeComfy(); // Klein's files
   comfy.down(true);
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
@@ -280,14 +294,17 @@ test("ComfyUI not answering and never listed: one full-width row says so with Ch
   await expect(blank).toContainText("ComfyUI did not answer.");
   comfy.down(false);
   await check.click();
-  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(2);
+  // Klein and the four themes on its files
+  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(5);
   await expect(picker.locator(".pk-blank")).toHaveCount(0);
   await expect(picker.locator(".pk-context")).toBeVisible();
 });
 
 test("a first send whose default settles to other files: the card keeps the box it was first drawn with, and the button names what ran", async ({ page, open }) => {
   await comfy.close();
-  comfy = await fakeComfy(); // the SDXL files only, no FLUX
+  comfy = await fakeComfy();
+  comfy.only(ZIMAGE_FILES); // Z-Image's files only, no FLUX
+  comfy.gpu();
   comfy.unlisted(true); // ComfyUI is up but its file list has never been read
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
@@ -310,10 +327,10 @@ test("a first send whose default settles to other files: the card keeps the box 
   await sendMessage(page, "a tree");
   const card = page.locator("[data-image-job]");
   await expect(card).toContainText("Making image");
-  // the job settled to SDXL 768×512 and runs it
+  // the job settled to Z-Image 1024×1024 and runs it
   await expect.poll(() => comfy.prompts().length).toBe(1);
-  expect(Object.values(comfy.prompts()[0]!).map((n) => n.class_type)).toContain("CheckpointLoaderSimple");
-  await expect(page.locator("#modelBtn"), "the button names what ran, without opening the picker").toContainText("Lightning768×512");
+  expect(JSON.stringify(comfy.prompts()[0])).toContain("z_image_turbo_int8_convrot.safetensors");
+  await expect(page.locator("#modelBtn"), "the button names what ran, without opening the picker").toContainText("Z-Image1024×1024");
   const size = async () => { const b = await card.boundingBox(); return b && { width: Math.round(b.width), height: Math.round(b.height) }; };
   const before = await size();
   expect(before && Math.abs(before.width / before.height - 1), "drawn square, the sent default's shape").toBeLessThan(0.02);

@@ -59,21 +59,31 @@ its own meanwhile.
 
 The presets are in `presets.ts`. With no choice saved, a job runs the
 first of `DEFAULT_ORDER` whose files ComfyUI's own `/object_info` list
-names: FLUX.2 Klein 4B at 1024x1024 (eight steps),
-then SDXL Lightning without the LoRA at 768x512. The default settles before
+names and whose memory fits the card: FLUX.2 Klein 4B, then its compact
+setup, then Z-Image Turbo int8, then MOSS-Image, each at 1024x1024. The card
+is the GPU's total memory to the nearest GB, as cards are sold (`imageRoom`,
+`cardBytes`: 8188 MiB is an 8 GB card), never what is free now; what other
+programs hold is shown, and the job's own fit check judges it when the job
+runs. Under a 4 GB card, or with ComfyUI on the CPU, there is no default:
+`image.presets` says "Image mode needs a GPU with 4 GB" and an unset send is
+refused with that reason; a picked setup still runs. The picker's General
+group shows each tier's setup for the card (`tiersFor`): Fast is Klein from
+8 GB, else compact; Balanced is Z-Image from 6 GB, else compact; Best is
+MOSS from 4 GB. The default settles before
 the first fit, so the fit and any unload judge the setup that will run; when
 the list has never been read, the job starts (or finds) ComfyUI and reads it
 first. The job reads the list again before it renders, so a default whose
 files went missing is passed over without a word; a saved choice is never
 swapped. A job that settles to another choice keeps the one it was sent with
-as `sent`, and the card's box keeps that shape. The pixel-art row
-(SDXL with the LoRA) runs only when picked. Each setup is a
+as `sent`, and the card's box keeps that shape. The theme rows (portraits,
+pixel art, sprites, backgrounds) run only when picked. Each setup is a
 ComfyUI workflow file in `setups/` (origins and adaptations in its README),
 filled in by graph shape (see "Workflows" below). Missing files produce an install-and-retry
-message naming the file. No models are downloaded. The **9 GiB image
-budget is an estimate**, conservatively above the lab's 7.86 GiB warm
-reading at 768x512. It is not a measured peak; the coordinator must measure
-the real preset before treating its fit as proven. When ComfyUI answers
+message naming the file; the picker can download a built-in setup's files,
+each checked against its SHA-256 in `setups/files.json`. The **memory figures
+are caps, not measurements**: 8 GiB for Klein, 6 GiB for Z-Image int8, 4 GiB
+for compact and MOSS, the owner's tier thresholds. None is a measured peak;
+the coordinator must measure a setup before treating its fit as proven. When ComfyUI answers
 healthy, fit credits memory it already holds: remaining need is
 `max(0, estimate - comfyResident)`. For the local unit with a known
 MainPID, resident bytes are the sum of compute entries matching that PID

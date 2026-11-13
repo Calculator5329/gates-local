@@ -146,7 +146,6 @@ test("the phone reads, sends, stops and switches models, and nothing it offers i
   test.setTimeout(120_000);
   // image generation set up on the computer, with Tools › Make images on
   comfy = await fakeComfy();
-  comfy.withFlux();
   const { port } = await phoneReset("design", { comfyUrl: comfy.url });
   const { open, refused } = watchRequests(page);
   await page.addInitScript(() => localStorage.setItem("gates-local.first-run-done", "1"));

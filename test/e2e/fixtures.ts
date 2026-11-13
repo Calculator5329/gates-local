@@ -94,8 +94,8 @@ export const stack = {
   },
   /** Switch the fake's behaviour mid-test (options such as tokenDelayMs; without `installed` the scenario's own models return). */
   scenario: (scenario: Scenario, options: Record<string, number | readonly string[]> = {}) => control("/scenario", { scenario, ...options }),
-  /** Put another program's MiB on the fake GPU: a new GPU reading, with the runtime and its loaded models untouched. */
-  gpu: (otherMib: number) => control("/gpu", { otherMib }),
+  /** Put another program's MiB on the fake GPU, and give the card `totalMib` (16303 until a reset): a new GPU reading, with the runtime and its loaded models untouched. */
+  gpu: (otherMib: number, totalMib?: number) => control("/gpu", { otherMib, ...totalMib === undefined ? {} : { totalMib } }),
 };
 
 interface Fixtures {

@@ -370,7 +370,7 @@ async function rig(routes: Record<string, Route>, options: RigOptions = {}) {
     models: { handlers: s.handlers, loader: s.loader },
     fit: options.fit ?? fit,
     // With an image module the chat model is offered the image tool (Tools › Make images on).
-    ...(options.image ? { image: options.image, toolsEnabled: () => true, imageTool: () => ({ preset: "sdxl-lightning-pixel", width: 768, height: 512 }) } : {}),
+    ...(options.image ? { image: options.image, toolsEnabled: () => true, imageTool: () => ({ preset: "flux2-klein-4b-pixel", width: 768, height: 768 }) } : {}),
     ...(options.lease ? { lease: options.lease } : {}),
     log: () => undefined,
   });

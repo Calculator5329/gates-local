@@ -28,6 +28,9 @@
 //   written into the input it feeds.
 // - A bypassed node (mode 4) passes each output's matching input through; a muted one (mode 2)
 //   gives nothing. Either one on a subgraph instance covers everything inside it.
+// - A switch (ComfySwitchNode) whose setting is fixed in the file (its own value, or one set on its
+//   subgraph's instance) passes on the input it selects, as ComfyUI runs only that branch. One set
+//   by another node stays a node.
 // - Only nodes an output node (`output_node` in /object_info) reads from are kept, so a branch
 //   switched off in the editor needs neither its files nor its node classes. A node of a class
 //   ComfyUI does not list that reads from others and that nothing reads from is kept too, as it
@@ -312,6 +315,16 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
 
   const fromInput = (scope: Scope, node: UiNode, index: number): Source | undefined => fromLink(scope, node.inputs[index]?.link);
 
+  /** A switch's setting when the file fixes it: what feeds it, a value set on its instance, else its own; undefined when a node computes it. */
+  const switchOf = (scope: Scope, node: UiNode): boolean | undefined => {
+    const fed = fromInput(scope, node, node.inputs.findIndex((i) => (i.widget?.name ?? i.name) === "switch"));
+    if (fed !== undefined) return "value" in fed && typeof fed.value === "boolean" ? fed.value : undefined;
+    const set = scope.inside === undefined ? undefined : promotedOf(scope.inside.instance, scope.inside.definition).byWidget.get(`${node.id}:switch`);
+    const own = Array.isArray(node.values) ? node.values[0] : (node.values as Readonly<Record<string, unknown>>)["switch"];
+    const value = set ?? own;
+    return typeof value === "boolean" ? value : undefined;
+  };
+
   /** What output `slot` of node `id` gives once subgraphs, reroutes, text boxes and bypasses are seen through. */
   const fromOutput = (scope: Scope, id: number, slot: number): Source | undefined => {
     const node = scope.nodes.get(id);
@@ -335,6 +348,8 @@ export function convertWorkflow(workflow: unknown, info: ObjectInfo): ApiGraph {
       return undefined;
     }
     if (node.type === "Reroute") return fromInput(scope, node, 0);
+    const on = node.type === "ComfySwitchNode" ? switchOf(scope, node) : undefined;
+    if (on !== undefined) return fromInput(scope, node, node.inputs.findIndex((i) => i.name === (on ? "on_true" : "on_false")));
     if (INLINED.has(node.type)) {
       const fed = node.inputs.findIndex((i) => (i.widget?.name ?? i.name) === "value" && i.link !== null);
       if (fed >= 0) return fromInput(scope, node, fed);
