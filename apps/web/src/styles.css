@@ -846,7 +846,7 @@ a.btn{text-decoration:none}
 .image-group{width:768px;max-width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card)}
 .image-group-head{margin:0 0 8px;color:var(--muted-foreground);font-size:12px;line-height:16px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .image-tiles{display:grid;grid-template-columns:1fr 1fr;gap:4px}
-.image-tiles .image-job{width:100%;border-radius:calc(var(--r-sm) - 2px)}
+.image-tiles .image-job{width:100%;border-radius:var(--r-picker)}
 .image-tiles .image-job-state{padding:12px;gap:8px;font-size:13px}
 .image-job-fig{margin:0;max-width:100%}
 .image-job-prompt{margin:6px 0 0;max-width:768px;color:var(--muted-foreground);font-size:12px;line-height:18px;overflow-wrap:anywhere}
