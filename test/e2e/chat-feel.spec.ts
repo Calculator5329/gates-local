@@ -229,9 +229,15 @@ test("Settings > Advanced shows GPU memory, live", async ({ page, open }) => {
   await set.getByText("Details", { exact: true }).click();
   await expect(set.getByText("In use right now")).toBeVisible();
   await expect(set).toContainText("Qwen 3.5 9B");
-  // live: a context change elsewhere shows here
-  await set.getByRole("button", { name: "32k" }).first().click();
-  await expect(set.locator(".fp-v:visible")).toContainText("at 32k");
+  // live: a new size is what the control, the verdict and Details all speak about
+  const size32 = set.locator('[data-ctx="32768"]');
+  await expect(size32).toHaveAttribute("aria-pressed", "false");
+  await expect(set.locator(".fp-more")).not.toContainText("32k");
+  await size32.click();
+  await expect(size32).toHaveAttribute("aria-pressed", "true");
+  await expect(set.locator(".fp-more")).toContainText("Not measured at 32k yet.");
+  // the control already says 32k, so the verdict does not say it again
+  await expect(set.locator(".fp-v:visible")).not.toContainText("32k");
   // each size's fit is on its own segment, never in a sentence about a size not chosen
   await expect(set.locator('[data-ctx="65536"]')).toHaveAttribute("data-tip", /at 64k/);
   await expect(set).not.toContainText("At 64k: ");
