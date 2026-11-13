@@ -27,13 +27,16 @@ function savedFavorites(): string[] {
   } catch { return []; }
 }
 
+/** A memory need as shown: an estimate carries a ~, a reading from a real load does not (audit T03). */
+const shownNeed = (v: Verdict) => `${v.measured ? "" : "~"}${gb(v.need)}`;
+
 /** Swappable presentation only. The verdict and all byte counts come from the fit table; before the first one, a same-size skeleton. */
 export function ContextMemory({ v, cpu, frees = false, ready = true }: { v: Verdict | undefined; cpu: boolean; frees?: boolean; ready?: boolean }) {
   if (!v) return ready ? <span className="pk-cost none">–</span> : <span className="pk-cost"><FitSkel w="104px" /></span>;
   const ruler = contextRuler(v);
   const word = frees ? "Stops chat" : v.k === "no" ? "Too big" : cpu ? "System memory" : v.k === "gpu" ? "Fits" : "Slower";
   return <span className={`pk-cost ${v.k}`} role="img" aria-label={`${gb(v.need)} ${v.measured ? "measured" : "estimated"}; ${word}`}>
-    <span className="pk-cost-caption"><span>{gb(v.need)}</span><small>{word}</small></span>
+    <span className="pk-cost-caption"><span>{shownNeed(v)}</span><small>{word}</small></span>
     {cpu ? null : <span className="pk-cost-track"><i className="pk-cost-room" /><i className="pk-cost-fill" style={{ width: `${ruler.fill}%` }} />{ruler.overflow > 0 ? <i className="pk-cost-over" style={{ width: `${ruler.overflow}%` }} /> : null}<i className="pk-cost-edge" />{ruler.continues ? <b>→</b> : null}</span>}
   </span>;
 }
@@ -204,7 +207,7 @@ export function Picker() {
             {/* before the first table every row is busy and cannot be picked yet, with the look it keeps after; once the table is in, a row it cannot pick (no reading, or too big) is disabled, except on the phone, whose context step offers other sizes */}
             {visible.map((r, i) => <div key={r.tag} className={`pk-r${r.tag === selected ? " sel" : ""}${r.tag === highlight ? " hl" : ""}${r.downloading !== undefined || !pickable(r.tag) ? " dis" : ""}`} id={`pk-opt-${i}`} role="option" aria-selected={highlight ? r.tag === highlight : r.tag === selected} aria-busy={r.downloading === undefined && !answered || undefined} aria-disabled={r.downloading !== undefined || !answered || (!phone && !pickable(r.tag))} data-m={r.tag} data-i={i} onMouseMove={() => setHighlight(r.tag)}>
               {/* a name cut by its row reads in full in a tip, and only then (data-tipt) */}
-              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? gb(r.v.need) : answered ? "–" : <FitSkel />}</span></button>
+              <button type="button" className="pk-select" tabIndex={-1} aria-label={r.label} aria-describedby={`pk-facts-${i}`} data-tipt={r.name} onClick={() => choose(r)}><MakerMark tag={r.tag} busy={r.downloading !== undefined} /><span className="pk-name pk-n"><span className="pk-nm">{r.name}</span>{r.variant ? <small className="pk-variant">{r.variant}</small> : null}{r.tag === selected ? <Icon id="check" cls="s12" /> : null}<ModelSpeed tag={r.tag} /></span><span className={`pk-v${r.v?.k ?? ""}`}>{r.downloading !== undefined ? `${r.downloading}%` : r.v ? shownNeed(r.v) : answered ? "–" : <FitSkel />}</span></button>
               {/* after the row's name, so the option is announced name first */}
               <span className="vh" id={`pk-facts-${i}`}>{facts(r)}</span>
               <button className="pk-favorite" aria-label={`${favorites.includes(r.tag) ? "Unfavorite" : "Favorite"} ${r.label}`} aria-pressed={favorites.includes(r.tag)} onClick={() => toggleFavorite(r.tag)}><Icon id="star" /></button>

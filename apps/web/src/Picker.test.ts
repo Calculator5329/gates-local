@@ -20,6 +20,8 @@ function markup(tabled = true) {
   };
   return renderToStaticMarkup(createElement(Picker));
 }
+/** The memory figure under the context bar. */
+const caption = (html: string) => /class="pk-cost-caption"><span>([^<]*)</.exec(html)?.[1];
 describe("approved model picker", () => {
   it("before the first table every fit value is a skeleton, with no Fits, tint or settled tooltip", () => {
     const html = markup(false);
@@ -50,6 +52,13 @@ describe("approved model picker", () => {
     expect(html).not.toContain('class="pk-cost-over"');
     expect(html).toContain("measured; Fits");
   });
+  // Audit T03: a memory guess is marked as one; a reading from a real load is plain.
+  it("marks an estimated memory need with ~ and leaves a measured one plain", () => {
+    const gib = 1024 ** 3;
+    const v = { k: "gpu" as const, chip: "on GPU", word: "Runs on GPU", detail: "", amt: 0, need: 7 * gib, avail: 9 * gib, measured: false };
+    expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v, cpu: false })))).toMatch(/^~7\.0\sGB$/u);
+    expect(caption(renderToStaticMarkup(createElement(ContextMemory, { v: { ...v, measured: true }, cpu: false })))).toMatch(/^7\.0\sGB$/u);
+  });
   it("offers a Context length column and an actual Download models control", () => {
     const html = markup();
     // the size group is named for its model; the wide header itself is just "Context length"
@@ -62,6 +71,7 @@ describe("approved model picker", () => {
     expect(html).toContain("Milo E4B v4");
     const row = html.slice(html.indexOf('data-m="milo-e4b-v4:latest"'));
     const metric = /class="pk-v[^"]*">([^<]+)/.exec(row)?.[1];
-    expect(metric).toMatch(/^6\.9(?:&#160;| | )GB$/);
+    // the row's need is an estimate (source "estimate"), so it carries the ~ (audit T03)
+    expect(metric).toMatch(/^~6\.9(?:&#160;| | )GB$/);
   });
 });

@@ -42,7 +42,8 @@ function versionText(v: UpdateVersion, channel: UpdateChannel): { value: string;
       return { value: v.commit, desc: channel === "main" ? `${when} on the main branch.` : `${when}, between releases.` };
     }
     case "not-a-clone":
-      return { value: "Not a git clone", desc: "This copy was not downloaded with git clone, so it cannot check for updates or update itself." };
+      // One line, not a sentence and a chip saying it twice (audit W09); there is no version to show.
+      return { value: "", desc: "Can't update: not a git clone." };
     case "unreadable":
       return { value: "Unknown", desc: `Could not read the version: ${v.detail}.` };
     case "installed":

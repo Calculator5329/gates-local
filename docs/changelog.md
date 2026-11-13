@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-13: Settings says each thing once
+
+- Tools: the switch that lets the model use tools sits on the Tools card's
+  title. Its own row, and the On and Off sentences under it, are gone, and
+  so is the page subtitle. An empty Library reads "Library empty" on every
+  tool row. Otherwise a row names the missing item: "No folders or files"
+  or "No databases".
+- Runtime: the "Ollama is the program that runs your models" subtitle is
+  gone.
+- Image generation:
+  - "Turn Image on in a chat's message box" moved into the Generate images
+    tooltip.
+  - Set up ComfyUI and ComfyUI address lost the lines under them.
+  - Not connected no longer repeats the address that is already in the
+    field.
+- General: a copy that isn't a git clone says "Can't update: not a git
+  clone." in one line.
+- Voice: the Speech server row says "Connected" when it is, and nothing
+  when it is off. The Connect button already says what to do.
+- The GPU memory panel's Default context line is one sentence: "Tokens the
+  model keeps in view, in every chat. Longer uses more memory."
+- The model picker marks an estimated memory need with ~ (for example
+  ~6.9 GB). A need measured from a real load stays plain.
+- Instructions:
+  - "Use custom instructions" is the app's own switch, no longer the
+    browser's checkbox.
+  - The number fields lost the browser's spin arrows.
 ## 2026-11-13: The bug finder keeps score against bugs the owner found
 
 - `node scripts/finder-board.ts` undoes twelve fixed bugs, one at a time,

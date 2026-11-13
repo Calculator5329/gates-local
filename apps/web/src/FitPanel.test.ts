@@ -103,6 +103,6 @@ it("with a GPU the card is named once and the verdict does not repeat the size t
 
 it("Default context is explained in one line", () => {
   const text = shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "spills", { kind: "cpu" });
-  expect(text).toContain("How much of the conversation the model keeps in view. One size for every chat; longer uses more memory.");
+  expect(text).toContain("Tokens the model keeps in view, in every chat. Longer uses more memory.");
   expect(text).not.toContain("until you reopen the app");
 });

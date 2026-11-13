@@ -10,7 +10,7 @@ async function instructions(page: Page) {
   await expect(page.getByRole("heading", { name: "Instructions", exact: true })).toBeVisible();
 }
 async function prompt(page: Page, text: string) {
-  const custom = page.locator(".inst-check input");
+  const custom = page.locator(".inst-check [role=switch]");
   await custom.check();
   await page.getByTestId("settings.instructions.prompt").fill(text);
   await page.getByTestId("settings.instructions.save").click();
@@ -59,9 +59,9 @@ test("Instructions saves shared and per-model settings, sends them to Ollama, an
   await page.getByTestId("settings.advanced.reset-confirm").click();
   await expect(page.getByTestId("settings.advanced.reset-confirm")).toHaveCount(0);
   await page.getByTestId("settings.nav.open-instructions").click();
-  await expect(page.locator(".inst-check input")).not.toBeChecked();
+  await expect(page.locator(".inst-check [role=switch]")).not.toBeChecked();
   await page.getByTestId("settings.instructions.scope-model").click();
-  await expect(page.locator(".inst-check input")).not.toBeChecked();
+  await expect(page.locator(".inst-check [role=switch]")).not.toBeChecked();
   await expect(mode(page, "temperature", "default")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape"); await waitReady(page); await sendMessage(page, "reset question"); await replies(page, 3);
   const cleared = (await bodies()).at(-1)!;

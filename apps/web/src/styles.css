@@ -1297,12 +1297,14 @@ button.dl-btn:disabled,button.dl-btn:disabled:hover{opacity:.45;cursor:not-allow
 
 /* Instructions (layout A): use the Settings shell; reserve space during save/read state changes. */
 .inst-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;gap:16px}
-.inst-prompt{padding:16px}.inst-check{display:flex;align-items:center;gap:8px;font-size:14px}.inst-check input{accent-color:var(--muted-foreground)}
+.inst-prompt{padding:16px}.inst-check{display:flex;align-items:center;gap:8px;font-size:14px}
 .inst-text.inp{display:block;width:100%;height:144px;resize:none;margin-top:16px;padding:8px 12px;line-height:1.5}
 .inst-actions{display:flex;align-items:center;gap:8px;margin-top:12px;min-width:0}.inst-actions .btn{flex:none;white-space:nowrap}
 .inst-status{flex:1;min-width:0;height:40px;margin:0;overflow:auto;font-size:14px;line-height:20px;color:var(--muted-foreground)}.inst-status.act-err{color:var(--red-fg)}
 .inst-controls,.inst-defaults{margin-top:24px}.inst-controls .srow{min-height:64px}
-.inst-number.inp{width:88px;flex:none}.inst-reset{width:52px;flex:none}
+.inst-number.inp{width:88px;flex:none;appearance:textfield}
+/* no browser spinner (audit W14); the arrow keys still step the number */
+.inst-number::-webkit-inner-spin-button,.inst-number::-webkit-outer-spin-button{appearance:none;margin:0}.inst-reset{width:52px;flex:none}
 .inst-pick{position:relative;max-width:100%}.inst-pick .mp-select{width:280px;max-width:100%}
 .inst-pick .mp-dd{right:0;top:calc(100% + 4px);width:320px;max-width:calc(100vw - 32px)}.inst-pick .mp-opt{grid-template-columns:16px minmax(0,1fr)}
 .inst-defaults details{padding:16px}.inst-defaults summary{cursor:pointer;font-size:14px}.inst-defaults b{font-size:13px;font-weight:500}.inst-shipped{height:96px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:12px;background:var(--code-bg);border-radius:var(--r-ctl);margin:8px 0 16px}

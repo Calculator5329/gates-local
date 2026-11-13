@@ -315,7 +315,7 @@ test("priority journeys with costs", async ({ browser }) => {
           await page.keyboard.press("Control+Comma");
           await page.getByRole("textbox", { name: "whisper.cpp address" }).fill(voice.url);
           await page.getByRole("button", { name: "Connect", exact: true }).click();
-          await expect(page.getByText("Connected for dictation.", { exact: false })).toBeVisible(); await page.keyboard.press("Escape");
+          await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible(); await page.keyboard.press("Escape");
           await timing("voice-start-recording", await clicking(page.getByRole("button", { name: "Dictate", exact: true })), "click", ".voice.listening", "Listening");
           // Dictate is one icon: its seconds are on the control, not in its text
           await expect(page.locator(".voice.listening")).toHaveAttribute("data-elapsed", "1");

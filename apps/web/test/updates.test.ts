@@ -60,7 +60,7 @@ const withCheck = (lastCheck: UpdateCheck) => ({ status: { ...CLONE, lastCheck }
 /** An installed copy offered 1.2.4, checked at `checkedAt`, optionally downloading it. */
 const offer = (checkedAt: number, download?: "downloading") => ({ status: { version: { kind: "installed" as const, version: "1.2.3" }, result: null, lastCheck: { state: "newer" as const, checkedAt, current: "1.2.3", target: "1.2.4", forThisCopy: true, lines: ["Version 1.2.4 is available."], page: "https://example.invalid/releases/latest", ...(download === undefined ? {} : { download }) }, activity: [] } });
 /** The markup with tags dropped, for reading the words. */
-const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ");
 const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 /** Everything a person can read: the words, and each label's tip (hover or keyboard focus). */
 const said = (html: string) => `${text(html)} ${[...html.matchAll(/aria-description="([^"]*)"/g)].map((m) => unescape(m[1] ?? "")).join(" ")}`;
@@ -127,8 +127,7 @@ describe("the Updates group", () => {
 
   it("shows only the version for a copy that is not a clone, or when the server has no updates", () => {
     const plain = text(view({ status: { ...CLONE, version: { kind: "not-a-clone" } } }));
-    expect(plain).toContain("Not a git clone");
-    expect(plain).toContain("check for updates or update itself");
+    expect(plain).toContain("Can't update: not a git clone.");
     expect(plain).not.toContain("Check for updates");
     const na = text(view({ status: "na" }));
     expect(na).toContain("To update, run pnpm run app-update in the Gates Local folder.");

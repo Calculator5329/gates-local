@@ -189,7 +189,7 @@ test("focused priority production journeys", async ({ browser }) => {
           await page.keyboard.press("Control+Comma");
           await page.getByRole("textbox", { name: "whisper.cpp address" }).fill(voice.url);
           await page.getByRole("button", { name: "Connect", exact: true }).click();
-          await expect(page.getByText("Connected for dictation.", { exact: false })).toBeVisible(); await page.keyboard.press("Escape");
+          await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible(); await page.keyboard.press("Escape");
           await timing(page, "voice-start-recording", () => page.getByRole("button", { name: "Dictate", exact: true }).click(), "click", ".voice.listening", "Listening");
           await expect(page.locator(".voice")).toContainText("1s");
           await timing(page, "voice-stop-to-transcript", () => page.getByRole("button", { name: "Stop dictation" }).click(), "click", "#ta", "spoken words", "value");

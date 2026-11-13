@@ -132,7 +132,7 @@ function Runtime() {
   const switchable = !locked && !nothingToSwitchTo && canSwitch && rt !== "installing" && rt !== "starting" && rt !== "offline";
   return (
     <>
-      <Head title="Runtime">Ollama is the program that runs your models.</Head>
+      <Head title="Runtime" />
       <Grp>
         <Row label={<Status dot={info.dot}>{stat}</Status>} desc={statD} err={err}>
           {switchable ? (
@@ -260,7 +260,8 @@ function libraryTool(on: boolean, sources: readonly Source[] | "na" | undefined,
   if (!on) return quiet("Turned off");
   if (sources === undefined) return { word: "Checking", dot: "run" };
   if (sources === NA) return quiet("Not available");
-  return { ...(libraryToolCanUse(tool, sources) ? { word: "Ready", dot: "ok" } : quiet(missing)), go: () => openSettings("library") };
+  // One word for one state (audit W03): an empty Library reads the same on every row.
+  return { ...(libraryToolCanUse(tool, sources) ? { word: "Ready", dot: "ok" } : quiet(sources.length === 0 ? "Library empty" : missing)), go: () => openSettings("library") };
 }
 
 /** Run commands also needs its sandbox: Ready only after the server's probe ran a command in it (tools.shell). */
@@ -270,7 +271,7 @@ function runTool(on: boolean, sources: readonly Source[] | "na" | undefined, she
   if (shell === NA) return quiet("Not available");
   // What the machine lacks comes first: adding to the Library would not fix it.
   if (shell.state === "off") return quiet(shell.word ?? "Not available");
-  const state = libraryTool(on, sources, "run", "Add something to your Library");
+  const state = libraryTool(on, sources, "run", "Library empty");
   // Ready, but short of something (no sqlite3: database reads fail): the server's own words, in amber.
   return shell.word !== undefined && state.word === "Ready" ? { ...state, word: shell.word, dot: "warn" } : state;
 }
@@ -307,21 +308,14 @@ function Tools() {
   const imageWhy = on ? onWhy : "Needs the switch above.";
   return (
     <>
-      <Head title="Tools">What the model can do in a chat beyond writing a reply.</Head>
-      {settings === NA || settings === undefined ? null : (
-        <Grp>
-          <Row label="Let the model use tools" desc={<span className="steady">
-            <span aria-hidden={!on}>On. It can use the tools below when a chat needs them.</span>
-            <span aria-hidden={on}>Off. It answers from the conversation alone.</span>
-          </span>} err={err}>
-            {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}
-          </Row>
-        </Grp>
-      )}
-      <Grp>
-        <ToolRow tool="read" name="Read files" desc="Reads the folders and files in your Library. It can't change them." state={libraryTool(on, sources, "read", "Add a folder or file to your Library")} />
+      <Head title="Tools" />
+      {/* Audit W03 (B1): the switch sits on the title of the one card it turns on; off dims the rows. */}
+      <Grp title="Tools" action={settings === NA || settings === undefined ? undefined
+        : locked ? <Status dot={on ? "ok" : "off"}>{on ? "On" : "Off"}</Status>
+        : <button type="button" className="switch" role="switch" data-testid="settings.tools.enable" aria-checked={on} aria-label="Let the model use tools" data-tip="Let the model use tools" onClick={() => void run(updateSettings({ tools: !on }))} />}>
+        <ToolRow tool="read" name="Read files" desc="Reads the folders and files in your Library. It can't change them." state={libraryTool(on, sources, "read", "No folders or files")} />
         {windows ? (
-          <ToolRow tool="query" name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "Add a SQLite database to your Library")} />
+          <ToolRow tool="query" name="Query databases" desc="Looks things up in a copy of the SQLite databases in your Library." state={libraryTool(on, sources, "query", "No databases")} />
         ) : (
           <ToolRow tool="run" name="Run commands" desc="Runs Linux commands in a sandbox that sees your Library read-only, with no home folder and no network." state={runTool(on, sources, shell)} />
         )}
@@ -343,6 +337,7 @@ function Tools() {
           </span>
         </div>
       </Grp>
+      <Fail err={err} line />
     </>
   );
 }
@@ -372,10 +367,9 @@ function ImageState({ address }: { address: string }) {
   const [err, run] = useAct();
   if (status === NA) return null;
   const { state, word, dot } = imageFace(status);
+  // Not connected says no more: the address it tried is in the field below (audit W08).
   const desc =
-    state === "missing"
-      ? `ComfyUI did not answer at ${address}.`
-      : state === "stopped"
+    state === "stopped"
         ? "It starts when a chat asks for an image."
         : state === "error"
           ? (status?.detail ?? "ComfyUI reported a problem.")
@@ -423,10 +417,10 @@ function Images() {
       <Head title="Image generation" />
       {settings === NA || settings === undefined ? null : (
         <Grp>
-          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "Then turn Image on in a chat's message box. If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer." err={genErr}>
+          <Row label="Generate images" desc={locked ? `${on ? "On" : "Off"}. ${COMPUTER_ONLY}` : "If the GPU is short, the chat model is unloaded while an image renders."} tip="Images are made on this computer. Turn Image on in a chat's message box." err={genErr}>
             {locked ? null : <button type="button" className="switch" role="switch" data-testid="settings.images.enable" aria-checked={on} aria-label="Generate images" onClick={() => void runGen(updateSettings({ imageGen: !on }))} />}
           </Row>
-          <Row label="Set up ComfyUI" desc="A separate free program you install yourself.">
+          <Row label="Set up ComfyUI">
             <SetupLink />
           </Row>
         </Grp>
@@ -435,7 +429,7 @@ function Images() {
         <Grp title="Connection">
           <ImageState address={address} />
           {locked ? null : (
-            <Row label="ComfyUI address" desc="Only change this if ComfyUI runs somewhere else." err={urlErr}>
+            <Row label="ComfyUI address" err={urlErr}>
               <input className="inp" data-testid="settings.images.address" aria-label="ComfyUI address" placeholder="http://127.0.0.1:8188" value={url ?? comfy ?? ""} onChange={(e) => setUrl(e.target.value)} onBlur={() => void save()} />
               <button type="button" className="btn outline" data-testid="settings.images.test-connection" disabled={testing} onClick={() => void test()}>
                 <span className="steady">

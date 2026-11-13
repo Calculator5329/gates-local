@@ -54,10 +54,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-/** The GB numbers in the context rows, in order. */
+/** The GB numbers in the context rows, in order; an estimate carries a ~ in front. */
 function contextValues(): string[] {
   const html = renderToStaticMarkup(createElement(Picker));
-  return CONTEXTS.map((c) =>/<span>(\d+\.\d)\sGB<\/span>/.exec(html.split(`data-ctx="${c}"`)[1]?.split("</button>")[0] ?? "")?.[1] ?? "none");
+  return CONTEXTS.map((c) =>/<span>~?(\d+\.\d)\sGB<\/span>/.exec(html.split(`data-ctx="${c}"`)[1]?.split("</button>")[0] ?? "")?.[1] ?? "none");
 }
 
 it("after a newer reading has been shown, no context row still shows the older reading's number", async () => {

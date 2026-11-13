@@ -34,7 +34,8 @@ function PromptEditor({ value, inherited, model, locked }: { value: string | und
   return <Grp title="System prompt">
     <div className="inst-prompt" aria-busy={busy}>
       <label className="inst-check" data-tip={esc(PROMPT_TIP)}>
-        <input type="checkbox" data-testid="settings.instructions.custom" checked={custom} disabled={busy || locked} onChange={e => { setDraft({ custom: e.target.checked, text }); setStatus({ text: "", error: false }); }} />
+        {/* the app's own switch, not the browser's checkbox (audit W14); the label still toggles it */}
+        <button type="button" className="switch" role="switch" data-testid="settings.instructions.custom" aria-checked={custom} disabled={busy || locked} onClick={() => { setDraft({ custom: !custom, text }); setStatus({ text: "", error: false }); }} />
         {model === undefined ? "Use custom instructions for all chats" : "Override all-chat instructions for this model"}
       </label>
       <textarea aria-label="System prompt" className="inp inst-text" data-testid="settings.instructions.prompt" value={custom ? text : inherited} placeholder={custom ? "Leave empty for no user or model prompt" : model === undefined ? "Use each model's own instructions" : "Use all-chat instructions, or the model's own"} disabled={!custom || busy || locked} onChange={e => { setDraft({ custom: true, text: e.target.value }); setStatus({ text: "", error: false }); }} />

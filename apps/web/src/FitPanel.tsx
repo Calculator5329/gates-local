@@ -281,7 +281,7 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
     <>
       {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
       {locked ? null : (
-        <Row label="Default context" desc={`How much of the conversation the model keeps in view. One size for every chat; longer uses more ${memory}.`} err={err}>
+        <Row label="Default context" desc={`Tokens the model keeps in view, in every chat. Longer uses more ${memory}.`} err={err}>
           <div className="ctx-c">
             <span className="mini-seg" role="group" aria-label="Default context">
               {CONTEXT_SIZES.map((c) => {
