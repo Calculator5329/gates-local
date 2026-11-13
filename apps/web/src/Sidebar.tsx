@@ -169,7 +169,38 @@ function marked(title: string, q: string): ReactNode {
 /** Widths of the placeholder rows: varied like titles, never a full-width block. */
 const SKEL_ROWS = ["72%", "56%", "80%", "64%", "48%", "70%"] as const;
 
+/** How far the list runs past each edge, for its fade (styles.css .sb-list): px above the view and below it. */
+function measureFade(el: HTMLElement): void {
+  const end = Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop);
+  el.style.setProperty("--fade-top", `${Math.max(0, el.scrollTop)}px`);
+  el.style.setProperty("--fade-end", `${end}px`);
+}
+
+/** Keeps the thread list's edge fades true while it scrolls or resizes; a ref callback, so it follows the node. */
+function fadeEdges(el: HTMLElement | null): (() => void) | undefined {
+  if (!el) return undefined;
+  const update = () => measureFade(el);
+  update();
+  el.addEventListener("scroll", update, { passive: true });
+  const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+  ro?.observe(el);
+  return () => {
+    el.removeEventListener("scroll", update);
+    ro?.disconnect();
+  };
+}
+
 function ThreadList() {
+  const list = useRef<HTMLElement | null>(null);
+  // threads arriving, leaving or filtered change how far the list runs without a scroll or a resize
+  useLayoutEffect(() => {
+    if (list.current) measureFade(list.current);
+  });
+  // one callback for the list's life: a new one each render would re-attach the listeners every render
+  const ref = useRef((el: HTMLElement | null) => {
+    list.current = el;
+    return fadeEdges(el);
+  }).current;
   useEffect(() => () => preloadThread(null), []);
   const threads = useStore((s) => s.threads);
   const q = useStore((s) => s.search.trim().toLowerCase());
@@ -185,7 +216,7 @@ function ThreadList() {
   if (boot && threads.length === 0) {
     // the list's shape is the data's: row-shaped placeholders until the first read lands
     return (
-      <nav className="sb-list" aria-busy="true">
+      <nav className="sb-list" aria-busy="true" ref={ref}>
         <div className="sb-skel" data-skel="" aria-hidden="true">
           {SKEL_ROWS.map((w, i) => (
             <div key={i} className="sb-skel-r"><span className="skel" style={{ width: w }} /></div>
@@ -195,11 +226,11 @@ function ThreadList() {
     );
   }
   if (shown.length === 0) {
-    return <nav className="sb-list">{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
+    return <nav className="sb-list" ref={ref}>{threads.length > 0 ? <div className="sb-empty">No thread matches.</div> : null}</nav>;
   }
   let last = "";
   return (
-    <nav className="sb-list">
+    <nav className="sb-list" ref={ref}>
       {/* while searching, one heading counts the matches in place of the date groups */}
       {q === "" ? null : <div className="sb-group">{shown.length} {shown.length === 1 ? "thread" : "threads"}</div>}
       {shown.map((t) => {

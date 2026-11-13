@@ -242,7 +242,8 @@ test("the Search field is always there and never moves: rest, pointer, focus, ty
   for (const [name, at] of [["hover", hover], ["focus", focused], ["typing", typing]] as const) {
     expect(at, `the field and its text hold still at ${name}`).toEqual(rest);
   }
-  expect(hoverFill, "the fill brightens under the pointer").not.toBe(restFill);
+  expect(restFill, "no box at rest").toBe("rgba(0, 0, 0, 0)");
+  expect(hoverFill, "the box fills in under the pointer").not.toBe(restFill);
   expect(focusFill, "focus keeps the brighter fill").toBe(hoverFill);
 
   // the list narrows: one heading with the count, the matched words brighter
@@ -278,7 +279,7 @@ test("the Search field is always there and never moves: rest, pointer, focus, ty
 
 test.describe("light theme", () => {
   test.use({ colorScheme: "light" });
-  test("the Search field rests on its own quiet fill", async ({ page, open }, info) => {
+  test("the Search field rests with no box and fills in under the pointer", async ({ page, open }, info) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await open();
     await waitReady(page);
@@ -286,7 +287,7 @@ test.describe("light theme", () => {
     const restFill = await fill(page);
     await page.locator(".sb .sb-search").hover();
     expect(await fill(page), "the pointer brightens it in light too").not.toBe(restFill);
-    expect(restFill).not.toBe("rgba(0, 0, 0, 0)");
+    expect(restFill, "no box at rest").toBe("rgba(0, 0, 0, 0)");
     await page.mouse.move(900, 600);
     await page.locator(".sb").screenshot({ path: info.outputPath("trim-search-light-rest.png") });
   });

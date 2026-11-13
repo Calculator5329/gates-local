@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: The sidebar's Search rests without a box, and the thread list has no scrollbar
+
+- At rest, the sidebar's Search is a magnifier and the word Search, in line
+  with the thread names. Under the pointer or with focus it fills in at the
+  same place; nothing moves. New thread is the only button beside it.
+- The thread list hides its scrollbar and fades softly at an edge only when
+  more threads run past it. The wheel, trackpad and keys scroll it as
+  before, and the rest of the app keeps its thin scrollbar.
+
 ## 2026-11-13: Settings › Updates is two rows that never move
 
 - Version says the version or commit once, with what this copy follows.
