@@ -10,7 +10,7 @@ const usageIcon = (page: Page) => page.locator(".sb-foot .usage");
 // the footer icons by their label's first word: Settings and Models add a state after it
 const settingsIcon = (page: Page) => page.locator('.sb-foot button[aria-label^="Settings"]');
 const modelsIcon = (page: Page) => page.locator('.sb-foot button[aria-label^="Models"]');
-/** A click where the icon sits: under an open pop-up that is the dim layer, which closes it. */
+/** A click where the icon sits: under an open pop-up that is the dim layer, which does what the icon does. */
 async function clickSpot(page: Page, icon: Locator): Promise<void> {
   const box = (await icon.boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -210,11 +210,13 @@ test.describe("closing a screen gives the chat back as it was", () => {
     await expect(page.locator(".set")).toHaveCount(0);
     await expect(dialog(page)).toHaveCount(0);
     expect(page.url()).toBe(url);
-    // Settings is a pop-up: a click on Usage's spot lands on the dim and closes Settings, nothing opens
+    // Settings is a pop-up: a click on Usage's spot switches straight to Usage (settings row 25)
     await settingsIcon(page).click();
     await expect(page.locator(".set")).toBeVisible();
     await clickSpot(page, usageIcon(page));
     await expect(page.locator(".set")).toHaveCount(0);
+    await expect(dialog(page)).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(dialog(page)).toHaveCount(0);
     // Models opens its pop-up, and its icon's spot closes it again
     await modelsIcon(page).click();

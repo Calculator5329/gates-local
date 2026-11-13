@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-13: Models, Usage and Settings are one pop-up of one size
+
+- The three open in the same box, as T3 Code's Settings does: 40 px in from
+  the window's edges, up to 1280 by 960, in the middle of the window. It
+  keeps its size whatever is in it and whichever Settings section is open;
+  only the content scrolls.
+- Each header is one 48 px row: the title at the left, Close at the right.
+- With one pop-up open, the Settings, Models and Usage icons in the footer
+  switch straight to theirs, and the lit one closes its own. Before, the
+  click only closed what was open.
+- Settings' sections are 240 px wide; in a window narrower than 768 px they
+  are a row of icons, each named in its tooltip.
+- On a phone Usage fills the screen.
+
 ## 2026-11-13: Models › Download recommends for your computer and says each thing once
 
 - Recommended lists the picks for your computer's memory: a set per GPU

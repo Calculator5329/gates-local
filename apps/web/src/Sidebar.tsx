@@ -385,9 +385,10 @@ export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
         </button>
       )}
       {SECTIONS.filter(([id]) => !inDialog || id !== "models").map(([id, label, icon]) => (
-        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
+        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} data-tipt={inDialog ? label : undefined} onClick={() => closeDrawer(() => openSettings(id), true)}>
           <Icon id={icon} />
-          <span className="grow">{label}</span>
+          {/* in a narrow pop-up the sections are an icon rail (panel.css): the hidden name shows as the tip */}
+          <span className="grow t">{label}</span>
         </button>
       ))}
     </div>
@@ -430,7 +431,9 @@ function SettingsButton() {
       dot={g.dot}
       onClick={() =>
         closeDrawer(() => {
-          if (getState().view === "settings") return leaveSettings();
+          // closes only what it lights: from Models (a Settings section, its own pop-up) it opens Settings
+          const s = getState();
+          if (s.view === "settings" && s.section !== "models") return leaveSettings();
           if (g.runtime) return openSettings("runtime");
           // a phone opens Settings on its section list
           setState({ setList: true });
