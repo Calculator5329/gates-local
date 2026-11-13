@@ -32,7 +32,8 @@ test("Instructions saves shared and per-model settings, sends them to Ollama, an
   await expect(page.getByLabel("When changes apply", { exact: true })).toHaveCount(0);
   await prompt(page, "Shared instructions");
   await page.keyboard.press("Escape"); await waitReady(page); await sendMessage(page, "shared question"); await replies(page, 1);
-  expect((await bodies()).at(-1)?.messages[0]?.content).toBe("Shared instructions");
+  // the system prompt is the instructions, then the app's own lines (the image line since the image batch landing)
+  expect((await bodies()).at(-1)?.messages[0]?.content).toMatch(/^Shared instructions(\n|$)/);
   await instructions(page);
   await page.getByRole("button", { name: "Per model", exact: true }).click();
   await expect(page.getByRole("button", { name: /^Installed model: / })).toHaveAccessibleName("Installed model: Qwen 3.5 9B");
@@ -51,7 +52,7 @@ test("Instructions saves shared and per-model settings, sends them to Ollama, an
   await expect(page.getByRole("spinbutton", { name: "Temperature", exact: true })).toHaveValue("0.25");
   await page.keyboard.press("Escape"); await waitReady(page); await sendMessage(page, "model question"); await replies(page, 2);
   const body = (await bodies()).at(-1)!;
-  expect(body.messages[0]?.content).toBe("Model instructions"); expect(body.options.temperature).toBe(0.25); expect(body.keep_alive).toBe(0); expect(body.options).not.toHaveProperty("num_gpu");
+  expect(body.messages[0]?.content).toMatch(/^Model instructions(\n|$)/); expect(body.options.temperature).toBe(0.25); expect(body.keep_alive).toBe(0); expect(body.options).not.toHaveProperty("num_gpu");
   await page.keyboard.press("Control+Comma");
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("button", { name: "Reset…", exact: true }).click();

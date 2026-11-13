@@ -214,6 +214,9 @@ async function hydrateWith(
   // The fit table waits for nothing and nothing waits for it: until it lands every fit value is a
   // skeleton, and a pushed table that is newer wins whichever arrives first.
   void probe("fit.table", {}).then((fitTable) => { if (fitTable !== undefined && fitTable !== NA) fitTableArrived(fitTable); });
+  // Settings › Tools opens with Run commands' own word: the sandbox probe runs now, not on the first
+  // visit, so the row never says Checking and then changes its words (owner: nothing arrives late).
+  if (!/\bWindows\b/.test(globalThis.navigator?.userAgent ?? "")) checkShell();
   // update.status reads local files; the desktop server owns automatic checks.
   // Measured speeds are a saved-reply read the model list's first frame never waits on.
   // The image reads wait for nothing and nothing waits for them: both ask ComfyUI first (and the

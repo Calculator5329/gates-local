@@ -1,4 +1,4 @@
-// The sidebar footer is one row of four icon buttons: Settings, Models, Usage and,
+// The sidebar footer is one row of five icon buttons: Settings, Models, Usage, Pictures and,
 // in the desktop app, the update icon at the far right. Its boxes never move
 // between states or between chat and Settings, it holds no words, and every
 // word it has to say is in a tooltip (data-tip) and the accessible name.
@@ -9,18 +9,18 @@ const settings = (page: import("@playwright/test").Page) => page.locator(".sb-fo
 const models = (page: import("@playwright/test").Page) => page.locator(".sb-foot").getByRole("button", { name: /^Models/ });
 
 // Guards the owner's ruling on the footer: one row of icon buttons that never move.
-test("one row of four icon buttons whose boxes never move, in any state or in Settings", async ({ page, open }) => {
+test("one row of five icon buttons whose boxes never move, in any state or in Settings", async ({ page, open }) => {
   await desktopBridge(page);
   const s = await footerSocket(page);
   await open();
   await waitReady(page);
   const buttons = page.locator(".sb-foot button.ibtn");
-  await expect(buttons).toHaveCount(4);
+  await expect(buttons).toHaveCount(5);
   const first = await footerBoxes(page);
   // one row: every button on the same line, the update icon at the far right
   expect(new Set(first.buttons.map((b) => b[1])).size).toBe(1);
   const [fx, , fw] = first.foot as [number, number, number, number];
-  const last = first.buttons[3] as [number, number, number, number];
+  const last = first.buttons[4] as [number, number, number, number];
   expect(fx + fw - (last[0] + last[2])).toBeLessThanOrEqual(9);
   expect(await footerWords(page)).toEqual([]);
 
@@ -126,9 +126,9 @@ test("a clone's update asks once in the footer, and Cancel puts focus back", asy
 });
 
 // Guards the owner's ruling to show only what is true: a browser tab cannot update, so it shows no update icon.
-test("in a browser tab the footer is Settings, Models and Usage, no update", async ({ page, open }) => {
+test("in a browser tab the footer is Settings, Models, Usage and Pictures, no update", async ({ page, open }) => {
   await open();
   await waitReady(page);
-  await expect(page.locator(".sb-foot button.ibtn")).toHaveCount(3);
+  await expect(page.locator(".sb-foot button.ibtn")).toHaveCount(4);
   await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
 });
