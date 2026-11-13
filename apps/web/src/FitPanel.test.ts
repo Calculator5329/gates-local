@@ -40,7 +40,9 @@ it.each(["No devices were found", "NVIDIA-SMI has failed because it couldn't com
   expect.soft(visible).toContain("If this computer has an NVIDIA card, its driver is not answering: fix or reinstall the NVIDIA driver.");
   expect.soft(visible).toContain("Until then models run in system memory.");
   expect(visible).not.toContain("No supported GPU");
-  expect.soft(html).toContain("NVIDIA GPU unavailable");
+  // the advice is the whole statement: no second heading repeats that the card is unavailable
+  expect.soft(html.split("its driver is not answering")).toHaveLength(2);
+  expect.soft(html).not.toContain("NVIDIA GPU unavailable");
   expect.soft(html).not.toContain("no supported GPU");
 });
 
@@ -65,4 +67,42 @@ it("waits for the GPU reading before showing a row, so Details never grows when 
 it("keeps the existing no-GPU wording when nvidia-smi is absent", async () => {
   const gpu = await readGpuStatus({ platform: "win32", freemem: () => 16e9, runNvidiaSmi: async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); } });
   expect(panel(gpu, true).split("<details")[0]).toContain(NO_GPU_TEXT);
+});
+
+// Owner 2026-11-13, a no-GPU laptop: the page said "system memory" and "16k" five times over.
+const GB = 1024 ** 3;
+const shown = (gpu: GpuStatus, verdict: "fits" | "spills", memory: object): string => {
+  store.state = {
+    model: "chat", numCtx: 16384, fitPanel: { model: null }, settings: { defaultNumCtx: 16384 },
+    gpu, models: [], catalog: [], loads: {}, messages: {}, firstToken: {}, unavailable: {},
+    fitTable: { reading: { boot: "b", seq: 1, measuredAt: 1 }, memory, rows: [{ model: "chat", numCtx: 16384, freeVramBytes: 12 * GB, needVramBytes: 5 * GB, spillRamBytes: verdict === "spills" ? 5 * GB : 0, verdict, source: "estimate", stops: [] }] },
+  };
+  // what a person reads before opening Details: tags and their attributes (tooltips) are not on the page
+  return renderToStaticMarkup(createElement(GpuMemory)).split("<details")[0]!.replace(/<[^>]+>/g, " ");
+};
+const times = (text: string, part: string) => text.split(part).length - 1;
+
+it("with no GPU the page says so once, and the model row is its name and one verdict", () => {
+  const text = shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "spills", { kind: "cpu" });
+  expect(times(text, "No supported GPU")).toBe(1);
+  expect(times(text, "system memory")).toBe(1);
+  expect(text).toContain("Should run in system memory");
+  expect(text).not.toContain("16k context");
+  expect(text).not.toContain("at 16k");
+  expect(text).not.toContain("Estimated.");
+});
+
+it("with a GPU the card is named once and the verdict does not repeat the size the control shows", () => {
+  const text = shown({ vendor: "nvidia", name: "NVIDIA GeForce RTX 5070 Ti", totalBytes: 16 * GB, freeBytes: 12 * GB, occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "fits", { kind: "gpu", freeBytes: 12 * GB, usableBytes: 11 * GB });
+  expect(times(text, "RTX 5070 Ti")).toBe(1);
+  expect(text).toContain("Should run well");
+  expect(text).not.toContain("16k context");
+  expect(text).not.toContain("at 16k");
+  expect(text).not.toContain("Estimated.");
+});
+
+it("Default context is explained in one line", () => {
+  const text = shown({ vendor: "none", occupants: [], systemMemoryAvailableBytes: 16 * GB, measuredAt: 1 }, "spills", { kind: "cpu" });
+  expect(text).toContain("How much of the conversation the model keeps in view. One size for every chat; longer uses more memory.");
+  expect(text).not.toContain("until you reopen the app");
 });

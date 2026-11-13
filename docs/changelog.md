@@ -1,5 +1,31 @@
 # Changelog
 
+
+## 2026-11-13: Usage has an X in its corner and no bar under a model's name
+
+- The Usage pop-up showed its close button on a phone only; on a desktop
+  the footer icon, Esc or a click outside closed it. The X is now in the
+  top right corner at every width.
+- Each model's row drew a thin grey bar under the name for that model's
+  share of the tokens. It had no label, and with one model it was a full
+  grey line. It is gone; the In and Out columns carry the figures.
+
+## 2026-11-13: Advanced says each memory fact once; Run commands names a missing sqlite3
+
+- Settings › Advanced: the memory group said the same thing up to five
+  times on a machine with no supported GPU ("System memory", "No supported
+  GPU", "Memory at 16k context", the no-GPU sentence, "Should run in system
+  memory at 16k", "Estimated. Runs in system memory at 16k."). Now the
+  no-GPU sentence is one line at the top of the group, Default context is
+  explained in one line, and the model's row is its name and one verdict.
+  The verdict names a size only when the model runs at a different one
+  than the control shows. With a GPU the card is named once under the
+  model.
+- Settings › Tools: on a Linux machine with bubblewrap and no `sqlite3`,
+  Run commands said "Ready" and every database read then failed. It now
+  says "Ready, without sqlite3" in amber. Commands still run; the server
+  log says database reads will fail.
+
 ## 2026-11-13: Model downloads show their real size; the name field has one ring
 
 - Typing in a field such as "Model name" on Models › Download drew two

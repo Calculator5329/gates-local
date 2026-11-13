@@ -118,7 +118,6 @@ export function Usage() {
   const top = niceCeil(Math.max(0, ...drawn.flatMap((l) => values(l, prefs.metric).filter((v): v is number => v !== null))));
   const n = view.periods.length;
   const rows = view.lines.map((l) => ({ l, f: figuresAt(l, at) }));
-  const scopeTokens = rows.reduce((a, { f }) => a + f.prompt + f.completion, 0);
   const t = view.totals;
 
   const onChartKey = (e: KeyboardEvent) => {
@@ -198,8 +197,6 @@ export function Usage() {
         </thead>}
         <tbody>
           {rows.map(({ l, f }) => {
-            const tokens = f.prompt + f.completion;
-            const share = scopeTokens === 0 ? 0 : tokens / scopeTokens;
             const name = l.model === null ? "Other" : labels.get(l.model) ?? l.model;
             return (
               <tr key={l.model ?? "other"}>
@@ -209,7 +206,6 @@ export function Usage() {
                     <i className="us-key" style={{ background: l.colour === "other" ? "var(--muted-foreground)" : `var(--u${l.colour})` }} />
                     <span className="us-label t">{name}</span>
                   </span>
-                  <span className="us-share" aria-hidden="true"><i style={{ width: `${(share * 100).toFixed(1)}%` }} /></span>
                 </th>
                 <td data-tip={esc(`${exact(f.prompt)} tokens in`)}>{compact(f.prompt)}</td>
                 <td data-tip={esc(`${exact(f.completion)} tokens out`)}>{compact(f.completion)}</td>

@@ -49,10 +49,10 @@ export function PopPanel({ label, onClose, children }: { label: string; onClose:
   );
 }
 
-/** A phone has no footer icon in sight and a thin dim edge: its close button. Hidden on wider screens. */
+/** The pop-up's X, last in its header row: the top right corner. */
 export function PanelClose({ onClose }: { onClose: () => void }) {
   return (
-    <button type="button" className="ibtn panel-x" aria-label="Close" onClick={onClose}>
+    <button type="button" className="ibtn panel-x" aria-label="Close" data-tip="Close · Esc" onClick={onClose}>
       <Icon id="x" />
     </button>
   );

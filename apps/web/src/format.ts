@@ -83,7 +83,7 @@ export function folderWords(userAgent: string = typeof navigator === "undefined"
 export const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** What the app says when noGpu() holds. */
-export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards), so models run in system memory. Replies are slower than on a GPU.";
+export const NO_GPU_TEXT = "No supported GPU was found (Gates Local reads NVIDIA cards). Replies are slower than on a GPU.";
 
 export type VerdictKind = "gpu" | "spill" | "no";
 

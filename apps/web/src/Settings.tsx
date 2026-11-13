@@ -268,7 +268,9 @@ function runTool(on: boolean, sources: readonly Source[] | "na" | undefined, she
   if (shell === NA) return quiet("Not available");
   // What the machine lacks comes first: adding to the Library would not fix it.
   if (shell.state === "off") return quiet(shell.word ?? "Not available");
-  return libraryTool(on, sources, "run", "Add something to your Library");
+  const state = libraryTool(on, sources, "run", "Add something to your Library");
+  // Ready, but short of something (no sqlite3: database reads fail): the server's own words, in amber.
+  return shell.word !== undefined && state.word === "Ready" ? { ...state, word: shell.word, dot: "warn" } : state;
 }
 
 function Tools() {

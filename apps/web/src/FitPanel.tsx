@@ -230,16 +230,18 @@ function Breakdown({ model, name, numCtx, gpuRaw, report, loaded }: { model: str
 }
 
 /** The model's status, in the same words and the same dot as its row in Models. */
-function FitLine({ r, ctx, cpu }: { r: FitReport; ctx: number; cpu: boolean }) {
+/** One verdict. `size` is named only when it is not the one the control above already shows. */
+function FitLine({ r, size, cpu }: { r: FitReport; size: number | undefined; cpu: boolean }) {
   const v = verdictOf(r);
+  const at = size === undefined ? "" : `at ${k(size)}`;
   return (
     <div className="fp-v">
       {v.k === "no" ? (
-        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more at ${k(ctx)}`}</Status>
+        <Status dot={FIT_DOT.refuse}>{`Needs ${gb(v.amt)} more ${at}`.trimEnd()}</Status>
       ) : (
         <>
           <Status dot={FIT_DOT[r.verdict]}>{fitLabel(r.verdict, v.measured, cpu)}</Status>
-          <span style={{ color: "var(--muted-foreground)" }}>at {k(ctx)}</span>
+          {at === "" ? null : <span style={{ color: "var(--muted-foreground)" }}>{at}</span>}
         </>
       )}
     </div>
@@ -288,12 +290,14 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
   // Details needs the GPU reading too, so the row waits for it rather than growing when it lands.
   const fit = gpuRaw === undefined ? undefined : fitFor(table, model, ctx);
   const defaultSize = saved ?? numCtx;
-  const defaultReport = fitFor(table, model, defaultSize);
-  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : defaultReport === undefined ? undefined : `${defaultReport.source === "measured" ? "" : "Estimated. "}${ctxFit(defaultSize, max, defaultReport, cpu).tip ?? ""}`;
+  // The row below carries the verdict; this line is only for a model that cannot take the saved default.
+  const limited = max !== undefined && max < CONTEXT_SIZES[CONTEXT_SIZES.length - 1]!;
+  const live = max !== undefined && defaultSize > max ? runsAtMost(max) : undefined;
   return (
     <>
+      {gpuNotice === undefined ? null : <div className="fp-n fp-note">{gpuNotice}</div>}
       {locked ? null : (
-        <Row label="Default context" desc={`How many tokens of conversation the model keeps in view. It's one size for all your chats: Gates Local opens at this one, and changing it in a chat changes every chat until you reopen the app. Longer keeps more in view and uses more ${memory}.`} err={err}>
+        <Row label="Default context" desc={`How much of the conversation the model keeps in view. One size for every chat; longer uses more ${memory}.`} err={err}>
           <div className="ctx-c">
             <span className="mini-seg" role="group" aria-label="Default context">
               {CONTEXT_SIZES.map((c) => {
@@ -315,12 +319,12 @@ function SettingsBody({ model, title, head, action }: { model: string; title: st
                 );
               })}
             </span>
-            {live === undefined ? null : <div className="ctx-line">{live}</div>}
+            {limited ? <div className="ctx-line">{live}</div> : null}
           </div>
         </Row>
       )}
-      <Row label={title} desc={<>{head}<br />Memory at {k(ctx)} context{gpuNotice === undefined ? null : <><br />{gpuNotice}</>}</>}>
-        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} ctx={ctx} cpu={cpu} />}
+      <Row label={title} {...(gpuNotice === undefined && head !== "" ? { desc: head } : {})}>
+        {fit === undefined ? gpu?.vendor === "unreadable" ? null : table && gpuRaw !== undefined ? <span className="fp-n">{`No ${memory} reading for ${name}.`}</span> : <span className="fp-n" aria-busy="true"><FitSkel w="120px" /></span> : <FitLine r={fit} size={ctx === defaultSize ? undefined : ctx} cpu={cpu} />}
         {action}
       </Row>
       {fit === undefined ? null : (

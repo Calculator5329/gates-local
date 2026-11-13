@@ -44,8 +44,6 @@
 .us-name{display:flex;align-items:center;gap:8px;min-width:0}
 .us-key{flex:none;width:12px;height:3px;border-radius:1px}
 .us-label{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:500}
-.us-share{display:block;height:2px;margin-top:6px;background:var(--track)}
-.us-share i{display:block;height:100%;background:var(--muted-foreground)}
 
 /* 320 px: the controls take a second line under the title and its close button,
    the numbers go three and two, and the model column gives way to the figures. */

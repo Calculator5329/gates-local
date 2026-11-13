@@ -236,6 +236,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .stage{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-direction:column}
 /* GPU memory in Settings › Advanced */
 .fp-set>.fp-n{padding:14px 16px;margin:0}
+.fp-set>.fp-note{border-bottom:1px solid var(--border)}
 .sh-h{height:var(--header-h);flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px;border-bottom:1px solid var(--border)}
 .sh-h .fp-h{flex:1;min-width:0}
 .sh-h .fp-t{line-height:1.3}
@@ -604,9 +605,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .meas{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 /* Warnings under the default-context control. */
 .ctx-line{font-size:13px;line-height:1.5;color:var(--muted-foreground);margin-top:6px;text-wrap:pretty}
-/* Room for the longest verdict's warning, so switching context never moves the panel. */
+/* Only a model with a size limit has this line; its room is kept so switching context never moves the panel. */
 #gpuMemory .ctx-line{min-height:3em}
-@media(min-width:641px){.ctx-c{width:min-content}#gpuMemory .ctx-line{min-height:6em;align-self:stretch}}
+@media(min-width:641px){.ctx-c{width:min-content}#gpuMemory .ctx-line{align-self:stretch}}
 @media(max-width:640px){.fp-numbers{min-height:7.5em}.lg-r:has(>.sw-chat){min-height:calc(2lh + 8px)}}
 .meas div{display:flex;flex-direction:column}
 .meas b{font-size:15px;font-weight:500;font-variant-numeric:tabular-nums}

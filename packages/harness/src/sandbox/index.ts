@@ -9,6 +9,8 @@ import type { LibraryEntry } from "../types.ts";
 import { isSeccompArch, lockFilter, type SeccompArch } from "./seccomp.ts";
 
 const BWRAP = "/usr/bin/bwrap";
+/** The wrapper inside the sandbox execs this path. Without it the shell still runs, but every database read exits 127. */
+const SQLITE = "/usr/bin/sqlite3";
 const SYSTEMD_RUN = "/usr/bin/systemd-run";
 /** A test server points this at a stand-in (as GATES_LOCAL_NVIDIA_SMI does for nvidia-smi), to make the probe fail on any machine. */
 const systemdRun = () => process.env["GATES_LOCAL_SYSTEMD_RUN"] || SYSTEMD_RUN;
@@ -64,7 +66,7 @@ const baseArgs = () => [
 const finalMounts = ["--remount-ro", "/data", "--remount-ro", "/library", "--remount-ro", "/"];
 
 /** `word` is the few words Settings › Tools shows in place of Ready; `reason` the sentence a turn or log gives. */
-export type SandboxProbe = { available: true; arch: SeccompArch } | { available: false; word: string; reason: string; detail?: string };
+export type SandboxProbe = { available: true; arch: SeccompArch; sqlite: boolean } | { available: false; word: string; reason: string; detail?: string };
 export interface SandboxHost {
   platform: NodeJS.Platform;
   arch: string;
@@ -174,7 +176,7 @@ export async function probeSandboxWith(host: SandboxHost): Promise<SandboxProbe>
   const expected = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
   if (caps.error || caps.code !== 0 || caps.output.trim() !== expected) return scopeOff((caps.error?.message ?? caps.output.trim()) || `exit ${caps.code}`);
   const result = await host.run(systemdRun(), [...scopeArgs(`gates-shell-probe-${randomUUID()}`), BWRAP, ...baseArgs(), ...finalMounts, "--", "/usr/bin/true"], sandboxFds(arch));
-  if (!result.error && result.code === 0) return { available: true, arch };
+  if (!result.error && result.code === 0) return { available: true, arch, sqlite: host.exists(SQLITE) };
   const message = result.output.trim() || result.error?.message || `exit ${result.code}`;
   if (/operation not permitted|permission denied|creating new namespace|no permissions to create/i.test(message)) {
     return { available: false, word: "Can't create its sandbox", reason: "The shell tool cannot create its sandbox on this machine; it is off.", detail: message };

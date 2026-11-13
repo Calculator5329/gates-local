@@ -20,7 +20,9 @@ for (const delay of [0, 150, 600]) {
     expect(metrics.transients, "settled GPU memory must not disappear or return to a skeleton after a pick").toBe(0);
     expect(metrics.shiftPx, "context selection must not collapse the expanded details").toBeLessThanOrEqual(0.5);
     await expect(gpu.locator('[data-ctx="32768"]')).toHaveAttribute("aria-pressed", "true");
-    await expect(gpu.locator(".fp-v:visible")).toContainText("32k");
+    // the pressed size says 32k; the verdict under it does not say it again
+    await expect(gpu.locator(".fp-v:visible")).toHaveText(/\S/);
+    await expect(gpu.locator(".fp-v:visible")).not.toContainText("32k");
   });
 
   // Guards a shipped bug fix: loading a model dropped the picker's earlier memory verdicts.

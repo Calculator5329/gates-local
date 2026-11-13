@@ -39,7 +39,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("describes the selected chat's 64k breakdown while the saved default stays 16k", () => {
   setState({ fitTable: tableOf([at(16384), at(65536, { verdict: "refuse", needVramBytes: row.freeVramBytes + 1024 ** 3 })]) });
-  expect(text()).toContain("Memory at 64k context");
   expect(text()).toContain("Needs");
   expect(text()).toContain("more at 64k");
   expect(text()).toContain("needs an estimated");
@@ -60,8 +59,8 @@ it("shows a skeleton, not words, before the first table", () => {
 
 it("labels the clamped size that will actually be sent", () => {
   setState(s => ({ models: s.models?.map(m => ({ ...m, maxContext: 32768 })), fitTable: tableOf([at(32768)]) }));
-  expect(text()).toContain("Memory at 32k context");
-  expect(text()).not.toContain("Memory at 64k context");
+  expect(text()).toContain("at 32k");
+  expect(text()).not.toContain("at 64k");
 });
 
 it("a pushed table changes the verdict in place, with no checking state between", async () => {
@@ -76,7 +75,8 @@ it("a pushed table changes the verdict in place, with no checking state between"
     expect(text()).toContain("Should run well");
     b.server.push("fit.changed", tableOf([at(65536, { verdict: "refuse", needVramBytes: row.freeVramBytes + 1024 ** 3 })], 2));
     await until(() => getState().fitTable?.reading.seq === 2);
-    expect(text()).toContain("more at 64k");
+    // the default is 64k too, so the control above already names the size
+    expect(text()).toMatch(/Needs [\d.]+\sGB more(?! at)/);
     expect(text()).not.toContain("run well");
   } finally {
     disconnect();

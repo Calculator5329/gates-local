@@ -33,6 +33,13 @@ describe("sandbox probe", () => {
     expect(await probeSandboxWith(fakeHost({ exists: file => !file.endsWith("bwrap") }))).toMatchObject({ word: "Needs bubblewrap" });
     expect(await probeSandboxWith(fakeHost({ run: async () => ({ code: 1, output: "Failed to connect to bus" }) }))).toMatchObject({ word: "Needs a systemd user session" });
   });
+  // Seen 2026-11-13: a machine with bubblewrap and no sqlite3 said Ready, then every database read exited 127.
+  it("stays on without sqlite3 and reports that it is missing", async () => {
+    const caps = `${SCOPE_LIMITS.memoryMaxBytes}\n0\n${SCOPE_LIMITS.tasksMax}`;
+    const run: SandboxHost["run"] = async (_command, args) => ({ code: 0, output: args.includes("/usr/bin/true") ? "" : caps });
+    expect(await probeSandboxWith(fakeHost({ run }))).toMatchObject({ available: true, sqlite: true });
+    expect(await probeSandboxWith(fakeHost({ run, exists: file => file !== "/usr/bin/sqlite3" }))).toMatchObject({ available: true, sqlite: false });
+  });
   it("asks again after a failed probe, but keeps a passed one", async () => {
     let now = 0;
     let works = false;

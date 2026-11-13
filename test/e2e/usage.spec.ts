@@ -46,8 +46,17 @@ test.describe("a week of three models", () => {
     await expect(dialog(page)).toBeVisible();
     await expect(usageIcon(page)).toHaveAttribute("aria-pressed", "true");
     expect((await frames()).filter((f) => f !== "none" && f !== "complete"), "every frame of the pop-up is complete").toEqual([]);
-    // the icon closes it here; the close button is the phone's
-    await expect(dialog(page).getByRole("button", { name: "Close" })).toBeHidden();
+    // Guards the owner's ruling (2026-11-13): an X in the pop-up's top right corner closes it; a model's row has no bar under its name.
+    const x = dialog(page).getByRole("button", { name: "Close" });
+    await expect(x).toBeVisible();
+    const [xb, db] = [(await x.boundingBox())!, (await dialog(page).boundingBox())!];
+    expect(db.x + db.width - (xb.x + xb.width), "Close is at the right edge").toBeLessThan(56);
+    expect(xb.y - db.y, "Close is on the top row").toBeLessThan(40);
+    await expect(page.locator(".us-share")).toHaveCount(0);
+    await x.click();
+    await expect(dialog(page)).toHaveCount(0);
+    await usageIcon(page).click();
+    await expect(dialog(page)).toBeVisible();
     // over the chat: the dim layer and the chat still there under it, inert
     await expect(page.locator(".panel-dim")).toBeVisible();
     await expect(page.locator(".turn").first()).toBeVisible();
