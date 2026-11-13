@@ -86,6 +86,9 @@ probe. Legacy migration and the bounded metadata-only single-tab path remain.
 - [ ] Settings › Updates: a failed Download stays shown over a newer check (`outdated()` covers only a failed check).
 - [ ] Settings: an accent name this version does not know (a file written by a newer version) fails the whole settings decode, so every setting goes back to its default. Drop the unknown value and keep the rest; the same holds for any later choice list.
 - [ ] The desktop app keeps no server log: the server's output is thrown away, so a reply that failed cannot be looked into afterwards. Keep a small rolling log in the app's data folder.
+- [ ] Pictures: the thumbnail encoder (WebAssembly) is proved in the packaged Linux build only. Run the packaged Windows build once and ask for a thumbnail before the Pictures screen ships.
+- [ ] Pictures: `THIRD_PARTY_NOTICES.md` in the repo does not list the WebP encoder and the PNG reader yet; only the packaged notices file does.
+- [ ] Pictures: backfill time on a large library is not measured, and the phone listener's thumbnail route has no test.
 - [ ] <!-- workspace:id=work:ac0688c8-5c8a-5e45-9db3-ff28388854c2 --> A tooltip that kept its left edge while its anchor's words changed can end up no longer over its anchor when the anchor moved a long way. Keep the old edge only while it still overlaps the anchor.
 - [ ] <!-- workspace:id=work:8f735c71-ed2b-50ce-af38-4f7fb674a909 --> An installed copy with a bad release signature: the footer's click that opens the release page is not built; it opens Settings.
 - [ ] <!-- workspace:id=work:fc4fd672-4932-5890-95b8-e2804d8dcdb5 --> Footer browser specs for the fix rounds (errors cleared by good news, the ask re-read at Go, Escape order) were written with their fixes and were not each watched failing in a browser first; the unit tests for the same rules were.

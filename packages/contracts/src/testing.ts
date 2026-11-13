@@ -242,6 +242,13 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
       download: { preset: "flux2-klein-4b", file: 1, files: 1, name: "qwen_3_4b.safetensors", state: "downloading", completedBytes: 1_000_000, totalBytes: 8_044_982_048 },
     },
   },
+  "pictures.list": {
+    params: { limit: 120, q: "space battle" },
+    result: {
+      pictures: [{ jobId: "j1", threadId: "t1", threadTitle: "First", prompt: "a space battle", preset: "flux2-klein-4b", width: 1344, height: 768, seed: 4_120_331, steps: 8, queuedAt: 1_762_500_003_000, doneAt: 1_762_500_006_000, runMs: 2_900, bytes: 1_603_112, imagePath: "images/j1.png" }],
+      count: 1,
+    },
+  },
   "setup.probe": { params: {}, result: probe },
   "setup.plan": {
     params: { images: false },

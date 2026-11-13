@@ -32,6 +32,7 @@ import {
 } from "@gates-local/contracts";
 import { type WebSocket, WebSocketServer } from "ws";
 import { serveImage } from "../image/files.ts";
+import { isThumbnailRequest, serveThumbnail } from "../pictures/serve.ts";
 import { SECURITY_HEADERS, phoneGate } from "../web/phone.ts";
 import { listenOwnerSocket } from "../web/socket.ts";
 import { serveClient } from "../web/static.ts";
@@ -74,6 +75,8 @@ export interface WsServerOptions {
   /** Synchronous snapshot at the first request, before this client receives chat broadcasts. */
   readonly onClientReady?: (push: <C extends Channel>(channel: C, payload: Payload<C>) => void) => void;
   readonly dataDir?: string;
+  /** A picture's thumbnail by job id (pictures/thumbs.ts), served at /files/thumbs/<jobId>.webp; 404 when absent. */
+  readonly thumbnails?: (jobId: string) => Promise<Buffer | undefined>;
   /** A second listener for the phone through Tailscale Serve (apps/server/src/web/phone.ts); off when absent. */
   readonly phone?: PhoneListenerOptions;
 }
@@ -162,7 +165,9 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
     if (options.dataDir && (req.url ?? "").startsWith("/files/")) {
       const verdict = admits(req);
       if (!verdict.ok) { res.writeHead(verdict.status).end(); return; }
-      void serveImage(req, res, options.dataDir).catch(() => { if (!res.headersSent) res.writeHead(500).end(); });
+      const fail = () => { if (!res.headersSent) res.writeHead(500).end(); };
+      if (isThumbnailRequest(req)) { void serveThumbnail(req, res, options.thumbnails ?? (async () => undefined)).catch(fail); return; }
+      void serveImage(req, res, options.dataDir).catch(fail);
       return;
     }
     res.writeHead(426, { "Content-Type": "text/plain" }).end("WebSocket only\n");
@@ -211,6 +216,7 @@ export async function startWsServer(options: WsServerOptions): Promise<WsServer>
       const fail = () => { if (!res.headersSent) res.writeHead(500, { "Content-Length": 0 }).end(); };
       if ((req.url ?? "").startsWith("/files/")) {
         if (options.dataDir === undefined) { res.writeHead(404, { "Content-Length": 0 }).end(); return; }
+        if (isThumbnailRequest(req)) { void serveThumbnail(req, res, options.thumbnails ?? (async () => undefined)).catch(fail); return; }
         void serveImage(req, res, options.dataDir).catch(fail);
         return;
       }

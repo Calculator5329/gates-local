@@ -307,6 +307,29 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
     release(); await f.module.wait(jobId);
     expect(f.store.getThread(thread.id).messages).toMatchObject([{ id: jobId, imageJob: { state: "done" }, images: [`images/${jobId}.png`] }]);
   });
+  it("indexes a finished picture with the seed it drew and its run time, and makes its thumbnail before done", async () => {
+    const seenAtThumbnail: string[] = [];
+    const thumbnail = vi.fn(async (_jobId: string, _png: Buffer) => { seenAtThumbnail.push(f.events.at(-1)?.state ?? "none"); });
+    const f = await fixture({ thumbnail }); const thread = f.store.createThread({ title: "trees" });
+    const { jobId } = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(jobId);
+    const sampler = Object.values(f.graphs[0]!).find((node) => typeof node.inputs["seed"] === "number" || typeof node.inputs["noise_seed"] === "number")!;
+    const drawn = sampler.inputs["seed"] ?? sampler.inputs["noise_seed"];
+    expect(thumbnail).toHaveBeenCalledExactlyOnceWith(jobId, png);
+    expect(seenAtThumbnail).toEqual(["running"]);
+    const { pictures } = f.store.pictures.list({ limit: 10 });
+    // The fake's PNG has no size of its own, so the size is the one the job ran.
+    const ran = f.events.at(-1)!.choice!;
+    expect(pictures).toEqual([{
+      jobId, threadId: thread.id, threadTitle: "trees", prompt: "a tree", preset: ran.preset, width: ran.width, height: ran.height,
+      seed: drawn, steps: sampler.inputs["steps"], queuedAt: expect.any(Number), doneAt: expect.any(Number), runMs: expect.any(Number), bytes: png.length, imagePath: `images/${jobId}.png`,
+    }]);
+    expect(typeof drawn).toBe("number");
+    // A thumbnail that fails leaves the picture made.
+    const failing = await fixture({ thumbnail: async () => { throw new Error("encoder failed"); } }); const other = failing.store.createThread();
+    const second = await failing.module.generate({ prompt: "a tree", threadId: other.id }); await failing.module.wait(second.jobId);
+    expect(failing.events.at(-1)).toMatchObject({ state: "done" });
+    expect(failing.store.pictures.list({ limit: 10 }).count).toBe(1);
+  });
   it.each(["fit", "missing", "model", "disconnected", "timeout", "off", "cancelled", "busy", "workflow", "invalid", "save", "config"] as const)("persists the %s end state with an actionable reason", async (kind) => {
     const log = vi.fn();
     const f = await fixture({ jobTimeoutMs: kind === "timeout" ? 40 : 1000, log });

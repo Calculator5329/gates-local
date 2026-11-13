@@ -5,6 +5,7 @@ import type { ObjectInfo as Info } from "./convert.ts";
 import { comfyLists, DEFAULT_CHOICE, jobGraph, resolveChoice, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { comfyFolders, readInstalledSetups } from "./installed.ts";
 import { readSaved, readTemplates } from "./sources.ts";
+import { graphFacts } from "../pictures/png.ts";
 
 const Device = S.Struct({ type: S.optional(S.String), torch_vram_total: S.optional(S.Finite) });
 const Stats = S.Struct({ system: S.Record(S.String, S.Unknown), devices: S.Array(Device) });
@@ -69,9 +70,12 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       catch { return undefined; }
     },
     /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. */
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = []): Promise<Buffer> {
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = []): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
       const { preset, size } = resolveChoice(choice, extra);
-      const graph = jobGraph(preset, await this.info(signal), { prompt, seed: Math.floor(Math.random() * 2 ** 32), width: size.width, height: size.height });
+      const seed = Math.floor(Math.random() * 2 ** 32);
+      const graph = jobGraph(preset, await this.info(signal), { prompt, seed, width: size.width, height: size.height });
+      // The steps the graph asks for, for the Pictures screen; a graph with none or several gives none.
+      const { steps } = graphFacts(graph);
       // Do not submit into another client's queue.
       if (!await this.idle()) throw failure("image-busy", "ComfyUI is busy with another job. Wait for it to finish, then retry.");
       signal.throwIfAborted();
@@ -146,7 +150,7 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
         if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw failure("image-result", "ComfyUI returned a result that is not a PNG.");
         success = true;
         fetched();
-        return bytes;
+        return { bytes, seed, ...steps === undefined ? {} : { steps } };
       } catch (error) {
         renderFailure = error instanceof Error ? error : new Error(String(error));
         throw renderFailure;

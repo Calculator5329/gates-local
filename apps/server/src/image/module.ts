@@ -13,6 +13,8 @@ import { readGpu, untilAborted } from "../fit/gpu.ts";
 import type { NvidiaSmiRunner } from "../fit/types.ts";
 import type { GpuLease } from "../gpu/lease.ts";
 import { canonicalTag } from "../runtime/recommended.ts";
+import { pngFacts } from "../pictures/png.ts";
+import type { PictureFacts } from "../pictures/table.ts";
 import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, type DownloadOptions } from "./download.ts";
@@ -38,6 +40,8 @@ export interface ImageDeps extends ComfyClientDeps {
   lease: GpuLease;
   store: ThreadStore;
   push: Push;
+  /** The finished picture's thumbnail (pictures/thumbs.ts), made before done; a failure is logged and the picture kept. */
+  thumbnail?(jobId: string, png: Buffer): Promise<void>;
   settings(): { imageGen: boolean; comfyUrl?: string; imageChoice?: ImageChoice };
   /**
    * The chat models this app may unload for an image (the loader's imageMayUnload()): ones it
@@ -519,9 +523,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       let timedOut = false;
       let stage = "image-config";
-      const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => {
+      const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}, picture?: PictureFacts) => {
         const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...rest };
-        deps.store.saveImageJob(payload, prompt);
+        deps.store.saveImageJob(payload, prompt, picture);
         emit("image.event", payload);
       };
       event("queued");
@@ -578,20 +582,25 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             await fit(cfg, size.bytes, signal, freeing); // startup or another GPU app may have changed the room
             stage = "image-render";
             update({ state: "busy", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
-            const bytes = await comfy.render(prompt, jobId, signal, (progress) => event("running", { progress }), () => {
+            // The run time is ComfyUI's time making the picture, not the wait before it.
+            const started = performance.now();
+            const { bytes, seed, steps } = await comfy.render(prompt, jobId, signal, (progress) => event("running", { progress }), () => {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
             }, choice, extras());
+            const runMs = Math.round(performance.now() - started);
             const imagePath = `images/${jobId}.png`;
             stage = "image-save";
             await mkdir(path.join(deps.dataDir, "images"), { recursive: true });
             const pendingPath = path.join(deps.dataDir, "images", `${jobId}.pending`);
             await writeFile(pendingPath, bytes, { flag: "wx" });
             await rename(pendingPath, path.join(deps.dataDir, imagePath));
+            await deps.thumbnail?.(jobId, bytes).catch((error: unknown) => log(`thumbnail for ${jobId} not made: ${detail(error)}`));
             // a default is kept as settled once it has made a picture; the threads.changed below says so
             if (unset && pinIn !== undefined) deps.store.fillImageChoice(pinIn, choice);
-            event("done", { progress: 1, imagePath });
+            const made = await pngFacts(bytes) ?? size;
+            event("done", { progress: 1, imagePath }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
             if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
           });

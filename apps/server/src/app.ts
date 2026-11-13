@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
+import { readThumbnail } from "./pictures/thumbs.ts";
 import { fitToWindow, IMAGE_CONTEXT_NOTICE, OMITTED_IMAGE } from "./chat/window.ts";
 import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
@@ -170,6 +171,8 @@ export interface App {
   readonly fitTable: Pick<FitTableSource, "changed" | "load">;
   /** Refuse new turns, cancel the active ones and wait for them to end. Idempotent. */
   shutdown(): Promise<void>;
+  /** A picture's thumbnail, made in the image files' queue when missing (pictures/thumbs.ts). */
+  thumbnail(jobId: string): Promise<Buffer | undefined>;
 }
 
 interface Turn {
@@ -944,6 +947,7 @@ export function createApp(deps: AppDeps): App {
   return {
     handlers,
     fitTable,
+    thumbnail: async (jobId) => (deps.dataDir && imageFiles ? readThumbnail(deps.dataDir, jobId, imageFiles.queue) : undefined),
     activeTurns: () => turns.size,
     replayTurns(target) {
       for (const turn of turns.values()) {

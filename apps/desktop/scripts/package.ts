@@ -29,9 +29,16 @@ cpSync(path.join(repo, "LICENSE"), path.join(appDir, "LICENSE"));
 const serverRequire = createRequire(path.join(repo, "apps/server/package.json"));
 const webRequire = createRequire(path.join(repo, "apps/web/package.json"));
 const domRequire = createRequire(webRequire.resolve("react-dom/package.json"));
-const notices = [[serverRequire, "effect"], [serverRequire, "ws"], [webRequire, "react"], [webRequire, "react-dom"], [domRequire, "scheduler"]] as const;
-writeFileSync(path.join(appDir, "THIRD-PARTY-NOTICES.txt"), notices.map(([resolveFrom, name]) => `${name}\n${readFileSync(path.join(path.dirname(resolveFrom.resolve(`${name}/package.json`)), "LICENSE"), "utf8")}`).join("\n\n"));
+const notices = [[serverRequire, "effect"], [serverRequire, "ws"], [serverRequire, "@jsquash/webp"], [serverRequire, "pngjs"], [webRequire, "react"], [webRequire, "react-dom"], [domRequire, "scheduler"]] as const;
+// The thumbnail encoder is libwebp compiled to WebAssembly: one .wasm for every platform, read from beside
+// the bundle (apps/server/src/pictures/thumbs.ts), with libwebp's own notice.
+const webp = path.dirname(serverRequire.resolve("@jsquash/webp/package.json"));
+writeFileSync(path.join(appDir, "THIRD-PARTY-NOTICES.txt"), [
+  ...notices.map(([resolveFrom, name]) => `${name}\n${readFileSync(path.join(path.dirname(resolveFrom.resolve(`${name}/package.json`)), "LICENSE"), "utf8")}`),
+  `libwebp (in @jsquash/webp)\n${readFileSync(path.join(webp, "codec", "LICENSE.codec.md"), "utf8")}`,
+].join("\n\n"));
 writeFileSync(path.join(server, "package.json"), '{"type":"module"}\n');
+cpSync(path.join(webp, "codec", "enc", "webp_enc_simd.wasm"), path.join(server, "webp_enc_simd.wasm"));
 // GATES_LOCAL_TEST_BUILD=1 marks a test build: only a copy holding
 // resources/test-build.json reads GATES_LOCAL_UPDATE_TEST_KEYS and accepts a
 // loopback update feed (apps/server/src/update/installed/module.ts).

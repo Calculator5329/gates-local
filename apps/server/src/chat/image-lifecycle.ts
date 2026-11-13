@@ -20,11 +20,17 @@ export function imageLifecycle(dataDir: string, store: References) {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     for (const image of new Set(images)) {
       if (!safeImage(image) || (store.imageReferences().get(image) ?? 0) > 0) continue;
-      try { await unlink(path.join(root, path.basename(image))); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      // A picture's thumbnail (pictures/thumbs.ts) goes with it.
+      const base = path.basename(image);
+      for (const file of [base, `thumbs/${base.replace(/\.[a-z]+$/, "")}.webp`]) {
+        try { await unlink(path.join(root, file)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
     }
   };
   return {
+    /** The one queue collection runs in: work here cannot pass a collect. */
+    queue: serial,
     collect: (images: readonly string[]) => serial(() => collect(images)),
     // Collection and the synchronous row insert cannot pass one another.
     save: <T>(images: readonly string[], append: () => T): Promise<T> => serial(async () => {

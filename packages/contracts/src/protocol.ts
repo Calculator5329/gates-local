@@ -29,6 +29,8 @@ import {
   SettingsPatch,
   ModelDefaults,
   ModelSettingsPatch,
+  PictureList,
+  PictureListParams,
   Source,
   SourceKind,
   SourceImport,
@@ -246,6 +248,8 @@ export const methods = {
   "image.stopDownload": { params: S.Struct({ preset: S.String }), result: S.Struct({ stopped: S.Boolean }), phone: "deny" },
   /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer what it has; the idle stop still applies. */
   "image.start": { params: NoParams, result: ImagePresets, phone: "deny" },
+  /** The Pictures screen: finished pictures, newest first, a page at a time. */
+  "pictures.list": { params: PictureListParams, result: PictureList, phone: "allow" },
   // ---- setup (2026-11-07): read the machine, then plan models for it
   "setup.probe": { params: NoParams, result: SetupProbe, phone: "deny" },
   "setup.plan": { params: S.Struct({ images: S.optional(S.Boolean) }), result: SetupPlan, phone: "deny" },

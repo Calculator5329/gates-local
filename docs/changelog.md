@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: Pictures are indexed and get thumbnails (no screen yet)
+
+- Every finished picture is recorded with its seed, steps, size, setup and
+  how long it took to make. Pictures made before this are recorded when the
+  app next starts; their making time was never kept, so it stays empty.
+- Each picture gets a small thumbnail when it is saved, or on first use for
+  an earlier picture. Deleting a message or a thread removes its pictures'
+  records and thumbnails with it.
+- Nothing on screen changes yet. The Pictures screen comes next and reads
+  from this.
+
 ## 2026-11-13: Run commands says Ready only when a command can run
 
 - Settings › Tools › Run commands used to say Ready on a machine whose

@@ -751,3 +751,50 @@ export const UpdatePreparation = S.Union([
   S.Struct({ state: S.Literal("blocked"), message: S.String }),
 ]);
 export type UpdatePreparation = typeof UpdatePreparation.Type;
+
+// ---- Pictures: an index of the finished image cards. The card is the picture; this only finds it.
+
+/** One finished picture. Its job id is its card's message id. */
+export const Picture = S.Struct({
+  jobId: S.String,
+  threadId: S.String,
+  /** The thread's title now. */
+  threadTitle: S.String,
+  /** The person's words, as on the card. */
+  prompt: S.String,
+  /** The setup it ran (ImageChoice.preset). Absent on cards saved before setups. */
+  preset: S.optional(S.String),
+  /** The file's own size in pixels. */
+  width: PositiveInt,
+  height: PositiveInt,
+  /** Absent when not known: a picture from before the index whose file does not say. */
+  seed: S.optional(Count),
+  steps: S.optional(PositiveInt),
+  /** When it was sent, and when its file was saved. */
+  queuedAt: Millis,
+  doneAt: Millis,
+  /** ComfyUI's time making it. Absent on pictures made before it was kept. */
+  runMs: S.optional(Count),
+  /** The file's size in bytes. */
+  bytes: Count,
+  /** The full picture, relative to the data dir; the thumbnail is /files/thumbs/<jobId>.webp. */
+  imagePath: S.String,
+});
+export type Picture = typeof Picture.Type;
+
+/** `before`: the previous page's `next`. `q`: words in the prompt. `setup`: a preset id. */
+export const PictureListParams = S.Struct({
+  before: S.optional(S.String.check(S.isMaxLength(40))),
+  q: S.optional(S.String.check(S.isMaxLength(500))),
+  setup: S.optional(S.String.check(S.isMaxLength(100))),
+  limit: PositiveInt.check(S.isLessThanOrEqualTo(500)),
+});
+export type PictureListParams = typeof PictureListParams.Type;
+
+/** Newest first. `count`: every picture the filter matches. `next`: absent on the last page. */
+export const PictureList = S.Struct({
+  pictures: S.Array(Picture),
+  count: Count,
+  next: S.optional(S.String),
+});
+export type PictureList = typeof PictureList.Type;

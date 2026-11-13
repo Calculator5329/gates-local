@@ -78,6 +78,8 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule } from "./image/module.ts";
+import { createPicturesModule } from "./pictures/handlers.ts";
+import { makeThumbnail } from "./pictures/thumbs.ts";
 import { fetchFrom } from "./image/download.ts";
 import { imageToolChoice } from "./image/presets.ts";
 import { phoneConfig } from "./web/config.ts";
@@ -232,6 +234,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     dataDir, store, lease: gpuLease,
     log: (line) => log(`image ${line}`),
     push: (channel, payload, changes) => server?.push(channel, payload, changes),
+    thumbnail: (jobId, png) => makeThumbnail(dataDir, jobId, png),
     settings: () => services.settings.get(),
     imageMayUnload: () => services.loader.imageMayUnload(),
     // The loader forgets a model the image module unloaded (keep_alive 0).
@@ -333,6 +336,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     log,
   });
   fitTable = app.fitTable;
+  // Indexes pictures made before the index, in the background; pictures.list waits for it.
+  const pictures = createPicturesModule({ store, dataDir, log: (line) => log(`pictures ${line}`) });
   const stopAutomatic = automaticChecks({
     desktop: process.env["GATES_LOCAL_DESKTOP"] === "1",
     enabled: () => services.settings.get().updateAutomatic !== false,
@@ -359,7 +364,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       token,
       ordered: ORDERED_DOMAINS,
       allowedOrigins: [...DEFAULT_ORIGINS, ...extraOrigins],
-      handlers: { ...app.handlers, ...usage.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers },
+      handlers: { ...app.handlers, ...usage.handlers, ...createVoiceModule({ settings: () => services.settings.get() }).handlers, ...pictures.handlers },
+      thumbnails: (jobId) => app.thumbnail(jobId),
       onClientCount: (n) => services.gpu.clientsChanged(n),
       onClientReady: (push) => app.replayTurns(push),
       dataDir,

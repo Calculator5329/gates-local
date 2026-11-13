@@ -16,6 +16,7 @@ import {
   ThreadNotFoundError,
 } from "./errors.ts";
 import { ensureMessageColumns, migrate } from "./migrations.ts";
+import { createPictureIndex, ensurePicturesTable, type PictureFacts, type PictureIndex } from "../pictures/table.ts";
 import { ROLES, TOOL_STATES, type Message, type MessageStats, type NewMessage, type Role, type Thread, type ThreadWithMessages, type ToolStepRecord } from "./types.ts";
 
 export interface ThreadStoreOptions {
@@ -51,7 +52,10 @@ export interface ThreadStore {
   deleteThread(threadId: string): void;
   /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
-  saveImageJob(event: ImageEvent, prompt: string): void;
+  /** `picture`: at done, what the job knew; the card's row in the pictures index is written in the same transaction. */
+  saveImageJob(event: ImageEvent, prompt: string, picture?: PictureFacts): void;
+  /** The finished pictures, for the Pictures screen (pictures/table.ts). */
+  readonly pictures: PictureIndex;
   /** Links the failed attempt and creates its retry card in one write transaction. */
   /** `choice` is the retry's when the failed card has none (cards saved before presets). */
   claimImageRetry(threadId: string, previousJobId: string, jobId: string, choice: ImageChoice): { jobId: string; prompt: string; choice: ImageChoice; created: boolean };
@@ -112,6 +116,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     db.exec("PRAGMA foreign_keys = ON");
     migrate(db, dbPath);
     ensureMessageColumns(db);
+    ensurePicturesTable(db);
   } catch (err) {
     db.close();
     throw err;
@@ -152,6 +157,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     getImageCard: db.prepare("SELECT content, image_job_json FROM messages WHERE id = ? AND thread_id = ? AND image_job_json IS NOT NULL"),
     speeds: db.prepare(SPEED_SQL),
   } satisfies Record<string, StatementSync>;
+  const pictures = createPictureIndex(db);
 
   let open = true;
   const guard = (): void => {
@@ -178,6 +184,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
 
   return {
     dbPath,
+    pictures,
 
     getMessage(messageId) {
       guard(); checkId("messageId", messageId);
@@ -320,7 +327,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       });
     },
 
-    saveImageJob(event, prompt) {
+    saveImageJob(event, prompt, picture) {
       guard();
       const clean = S.decodeUnknownSync(ImageEvent)(event);
       const threadId = clean.threadId;
@@ -330,6 +337,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         if (!stmt.getThread.get(threadId)) return;
         stmt.insertImageCard.run(clean.jobId, threadId, prompt, now(), JSON.stringify(clean));
         stmt.updateImageCard.run(JSON.stringify(clean), clean.imagePath ? JSON.stringify([clean.imagePath]) : null, clean.jobId, threadId);
+        if (clean.state === "done" && clean.imagePath && picture) pictures.record(clean.jobId, picture, now());
         stmt.touchThread.run(now(), threadId);
       });
     },
