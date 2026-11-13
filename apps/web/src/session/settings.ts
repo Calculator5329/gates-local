@@ -12,10 +12,11 @@ interface SettingsEffects {
   readonly sync: () => ClientSync | undefined;
   readonly act: Act;
   readonly applyTheme: (theme: Settings["theme"]) => void;
+  readonly applyAccent: (accent: Settings["accent"]) => void;
   readonly refreshImageStatus: () => void;
 }
 
-export function createSettings({ applyServerEvent, authority, sync, act, applyTheme, refreshImageStatus }: SettingsEffects) {
+export function createSettings({ applyServerEvent, authority, sync, act, applyTheme, applyAccent, refreshImageStatus }: SettingsEffects) {
   let staging = false;
   // A close may clear transport state while the accepted bootstrap batch is
   // still finishing. Keep its confirmed mode until this hydration is cleaned up.
@@ -66,6 +67,7 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     whisperUrl: "save voice to text",
     updateEveryChange: "save the update setting",
     updateAutomatic: "save automatic update checks",
+    accent: "save the accent",
     systemPrompt: "save the system prompt",
     modelSettings: "reset model settings",
   };
@@ -84,6 +86,7 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
     whisperUrl: null,
     updateEveryChange: false,
     updateAutomatic: true,
+    accent: "neutral",
     systemPrompt: null,
     modelSettings: null,
   } as const satisfies SettingsPatch;
@@ -108,6 +111,7 @@ export function createSettings({ applyServerEvent, authority, sync, act, applyTh
       ...(preserveVoiceIntent ? { voiceConnectionVersion: s.voiceConnectionVersion } : {}),
     }));
     applyTheme(settings.theme);
+    applyAccent(settings.accent);
     // The server reads ComfyUI only when asked: image generation or its address changing, from this
     // window or any other, asks, so Settings says what it finds now and not what it had before.
     if (shown !== NA && shown !== undefined && (shown.imageGen !== settings.imageGen || shown.comfyUrl !== settings.comfyUrl)) refreshImageStatus();

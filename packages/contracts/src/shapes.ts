@@ -285,6 +285,10 @@ export type Theme = typeof Theme.Type;
 export const RuntimeMode = S.Literals(["system", "app"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
+/** The one colour the person picks (styles.css --accent). Neutral is the theme foreground. */
+export const Accent = S.Literals(["neutral", "green", "blue", "violet", "amber", "red"]);
+export type Accent = typeof Accent.Type;
+
 /** Product limits, shared by update validation, numeric inputs and legacy-value normalization. */
 export const MODEL_CONTROL_BOUNDS = {
   temperature: { min: 0, max: 5, integer: false },
@@ -358,6 +362,8 @@ export const Settings = S.Struct({
   /** Desktop-only automatic git checks. Unset means on. Never installs automatically. */
   updateAutomatic: S.optional(S.Boolean),
   // textSize was removed 2026-11-13: a stored value is dropped on decode, so old files still load.
+  /** Unset means "neutral". */
+  accent: S.optional(Accent),
   /** Unset uses the installed model's system prompt. */
   systemPrompt: S.optional(S.String),
   modelSettings: S.optional(S.Record(S.String, ModelSettings)),
@@ -379,6 +385,7 @@ export const SettingsPatch = S.Struct({
   updateEveryChange: S.optional(S.Boolean),
   updateAutomatic: S.optional(S.Boolean),
   // An older app still sends textSize; unknown keys are dropped on decode, so that is no error.
+  accent: S.optional(Accent),
   systemPrompt: S.optional(S.NullOr(S.String)),
   /** Reset all model overrides in one atomic settings update. Individual edits use settings.model.update. */
   modelSettings: S.optional(S.Null),

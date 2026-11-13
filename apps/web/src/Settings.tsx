@@ -3,8 +3,8 @@
 // control idioms only: a secondary button, a right-aligned value, and a ⋯ menu
 // for what is rare or destructive. A control the server cannot back is left
 // out instead of being shown switched off.
-import { useEffect, useRef, useState } from "react";
-import type { ImageStatus, Source, Theme } from "@gates-local/contracts";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
+import type { Accent, ImageStatus, Source, Theme } from "@gates-local/contracts";
 import { portOf, rtInfo, rtOf } from "./Banner.tsx";
 import { GpuMemory } from "./FitPanel.tsx";
 import { count, folderWords, noGpu, sourceDetail } from "./format.ts";
@@ -33,11 +33,32 @@ const THEMES: readonly (readonly [Theme, string])[] = [
   ["system", "System"],
 ];
 
+const ACCENTS: readonly (readonly [Accent, string])[] = [
+  ["neutral", "Neutral"],
+  ["green", "Green"],
+  ["blue", "Blue"],
+  ["violet", "Violet"],
+  ["amber", "Amber"],
+  ["red", "Red"],
+];
+
+/** One dot per accent in this theme's own step of it; the picked one is ringed. */
+function Swatches({ value, onPick }: { value: Accent | undefined; onPick: (a: Accent) => void }) {
+  return (
+    <span className="swatches" role="group" aria-label="Accent">
+      {ACCENTS.map(([a, name]) => (
+        <button key={a} type="button" className="swatch" aria-label={name} aria-pressed={a === value} data-tip={name} style={{ "--sw": a === "neutral" ? "var(--foreground)" : `var(--accent-${a})` } as CSSProperties} onClick={() => onPick(a)} />
+      ))}
+    </span>
+  );
+}
+
 function General() {
   const settings = useStore((s) => s.settings);
   const unavailable = useStore((s) => s.unavailable["settings.update"] === true);
   const current = settings === NA ? undefined : settings;
   const [themeErr, runTheme] = useAct();
+  const [accentErr, runAccent] = useAct();
   return (
     <>
       <Head title="General" />
@@ -45,6 +66,9 @@ function General() {
         <Grp title="Appearance">
           <Row label="Theme" tip="System follows your desktop's light or dark setting." err={themeErr}>
             <Seg2 label="Theme" value={current?.theme} options={THEMES} onPick={(t) => void runTheme(updateSettings({ theme: t }))} />
+          </Row>
+          <Row label="Accent" tip="The colour of the mark on the start screen." err={accentErr}>
+            <Swatches value={current === undefined ? undefined : (current.accent ?? "neutral")} onPick={(a) => void runAccent(updateSettings({ accent: a }))} />
           </Row>
         </Grp>
       )}
@@ -641,7 +665,7 @@ function ResetSettings() {
         <div className="cfm" role="group" aria-label="Confirm reset">
           <b>Reset every setting?</b>
           <ul>
-            <li>Theme, default model, context, tools and image generation go back to how they started.</li>
+            <li>Theme, accent, text size, default model, context, tools and image generation go back to how they started.</li>
             <li>Shared instructions, model instructions and reply controls are cleared.</li>
             <li>Your chats, Library and downloaded models stay.</li>
             <li>Which Ollama Gates Local uses stays as it is.</li>

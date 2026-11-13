@@ -69,6 +69,11 @@
   /* red: not enough memory, wrong service, deleted diff lines, destructive menu items */
   --red:#e03131;
   --red-fg:#e03131;
+  /* accent: the one colour the person picks (Settings › General › Accent); Neutral is the
+     foreground. Only the start-screen mark uses it. Green, amber and red above never follow it.
+     Each step clears 3:1 on its theme's background, and --on-accent reads on all of them (styles.test.ts). */
+  --accent:var(--foreground); --on-accent:var(--background);
+  --accent-green:#15803d; --accent-blue:#2563eb; --accent-violet:#7c3aed; --accent-amber:#b45309; --accent-red:#dc2626;
 
   /* send / stop / primary */
   --send-off-bg:#e4e4e4; --send-off-fg:#a3a3a3;
@@ -96,6 +101,7 @@
     --green:hsl(150 58% 48%); --green-fg:hsl(150 62% 58%); --on-green:#03140b; --knob:#9a9a9a;
     --amber:#f59e0b; --amber-fg:#fbbf24;
     --red:#e03131; --red-fg:#e03131;
+    --accent-green:#22c55e; --accent-blue:#3b82f6; --accent-violet:#8b5cf6; --accent-amber:#e8a33d; --accent-red:#ef4444;
     --send-off-bg:#262626; --send-off-fg:#666666;
     --stop-bg:#e6e6e6; --stop-fg:#0a0a0a;
     --primary-bg:#ededed; --primary-fg:#0a0a0a; --primary-hover:#ffffff;
@@ -115,11 +121,17 @@
   --green:hsl(150 58% 48%); --green-fg:hsl(150 62% 58%); --on-green:#03140b; --knob:#9a9a9a;
   --amber:#f59e0b; --amber-fg:#fbbf24;
   --red:#e03131; --red-fg:#e03131;
+  --accent-green:#22c55e; --accent-blue:#3b82f6; --accent-violet:#8b5cf6; --accent-amber:#e8a33d; --accent-red:#ef4444;
   --send-off-bg:#262626; --send-off-fg:#666666;
   --stop-bg:#e6e6e6; --stop-fg:#0a0a0a;
   --primary-bg:#ededed; --primary-fg:#0a0a0a; --primary-hover:#ffffff;
   --seg-whisper:#575757; --seg-occupant:#b3b3b3; --seg-other:#858585; --sb-selected:rgb(255 255 255 / 12%); --snav-on:var(--selected);
 }
+:root[data-accent="green"]{--accent:var(--accent-green)}
+:root[data-accent="blue"]{--accent:var(--accent-blue)}
+:root[data-accent="violet"]{--accent:var(--accent-violet)}
+:root[data-accent="amber"]{--accent:var(--accent-amber)}
+:root[data-accent="red"]{--accent:var(--accent-red)}
 
 /* ---------- base ---------- */
 *{box-sizing:border-box}
@@ -680,6 +692,11 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .set .seg2 button.on,.set .mini-seg button.on{position:relative}
 .set .seg2 button.on::after,.set .mini-seg button.on::after{content:"";position:absolute;left:4px;right:4px;bottom:0;height:2px;background:var(--green)}
 .set .mini-seg button.dim{color:var(--faint)}
+.swatches{display:inline-flex;gap:4px}
+.swatch{width:32px;height:32px;border-radius:50%;display:grid;place-items:center}
+.swatch::before{content:"";width:18px;height:18px;border-radius:50%;background:var(--sw)}
+.swatch:hover{background:var(--hover)}
+.swatch[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--sw)}
 .set :focus-visible,.snav :focus-visible{outline-color:var(--green)}
 .switch{width:38px;height:22px;border-radius:999px;background:var(--track);position:relative;flex:none;transition:background-color .15s;box-shadow:inset 0 0 0 1px var(--border)}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--knob);transition:transform .15s,background-color .15s}

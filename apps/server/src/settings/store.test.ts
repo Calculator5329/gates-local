@@ -66,6 +66,16 @@ describe("settings store", () => {
     expect(readdirSync(dir)).toEqual([SETTINGS_FILE_NAME]);
   });
 
+  it("the accent saves, survives a reopen, and a first run has none (Neutral)", async () => {
+    const dir = dataDir();
+    const s = await open(dir);
+    expect(s.get()).not.toHaveProperty("accent");
+    s.update({ accent: "violet" });
+    expect((await open(dir)).get().accent).toBe("violet");
+    s.update({ accent: "neutral" });
+    expect((await open(dir)).get().accent).toBe("neutral");
+  });
+
   it("a file from when Text size existed loads at the default size, and an old client's text size is ignored without an error", async () => {
     const dir = dataDir();
     writeFileSync(fileIn(dir), JSON.stringify({ version: 1, settings: { defaultNumCtx: 16384, thinking: true, theme: "light", runtimeMode: "system", tools: true, imageGen: false, textSize: "large" } }));

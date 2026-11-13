@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Journeys: the Settings sections the S1 council asked for. The Tools switch
 // really changes what a chat is offered, the Shortcuts page lists bindings
-// that work, Theme applies at once and persists (Text size is gone), Reset puts the
+// that work, Theme and Accent apply at once and persist (Text size is gone), Reset puts the
 // settings back, and no section scrolls sideways at 1280 or 360 px.
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -180,12 +180,46 @@ test("Theme applies the moment it is picked, and says only what the choice does"
   await expect(theme.getByRole("button", { name: "System" })).toHaveAttribute("aria-pressed", "true");
 });
 
+test("Accent starts Neutral, a pick sets --accent at once in this theme's step, the semantic colours stay, and it survives a reload", async ({ page, open }) => {
+  await open();
+  await waitReady(page);
+  const token = (name: string) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
+  const semantic = async () => [await token("--green"), await token("--amber"), await token("--red")];
+  await section(page, "General");
+  const accent = page.getByRole("group", { name: "Accent" });
+  await expect(accent.getByRole("button")).toHaveCount(6);
+  for (const [i, name] of ["Neutral", "Green", "Blue", "Violet", "Amber", "Red"].entries()) await expect(accent.getByRole("button").nth(i)).toHaveAccessibleName(name);
+  await expect(accent.getByRole("button", { name: "Neutral" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("html")).not.toHaveAttribute("data-accent", /./);
+  expect(await token("--accent")).toBe(await token("--foreground"));
+  const before = await semantic();
+
+  await accent.getByRole("button", { name: "Blue" }).click();
+  await expect(accent.getByRole("button", { name: "Blue" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "blue");
+  expect(await token("--accent")).toBe("#3b82f6");
+  expect(await semantic()).toEqual(before);
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await token("--accent")).toBe("#2563eb");
+
+  await page.reload();
+  await waitReady(page);
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "blue");
+  await section(page, "General");
+  await expect(page.getByRole("group", { name: "Accent" }).getByRole("button", { name: "Blue" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("group", { name: "Accent" }).getByRole("button", { name: "Neutral" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-accent", /./);
+  expect(await token("--accent")).toBe(await token("--foreground"));
+});
+
 test("Reset settings asks first, then puts the settings back and leaves who runs Ollama alone", async ({ page, open }) => {
   await open();
   await waitReady(page);
   await section(page, "General");
   await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("group", { name: "Accent" }).getByRole("button", { name: "Violet" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-accent", "violet");
 
   await page.locator(".snav").getByRole("button", { name: "Advanced", exact: true }).click();
   await page.getByRole("button", { name: "Reset…" }).click();
@@ -197,6 +231,7 @@ test("Reset settings asks first, then puts the settings back and leaves who runs
   await page.getByRole("button", { name: "Reset…" }).click();
   await page.getByRole("group", { name: "Confirm reset" }).getByRole("button", { name: "Reset", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator("html")).not.toHaveAttribute("data-accent", /./);
   await expect(page.getByRole("group", { name: "Confirm reset" })).toHaveCount(0);
 });
 

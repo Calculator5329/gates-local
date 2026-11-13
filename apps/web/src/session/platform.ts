@@ -66,6 +66,13 @@ export function fileUrl(origin: string, token: string | null, path: string): str
   return `${origin}/files/${path.split("/").map(encodeURIComponent).join("/")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
 
+/** A colour on the root; Neutral has no attribute, so --accent stays the theme foreground (styles.css). */
+export function applyAccent(accent: Settings["accent"]): void {
+  const root = document.documentElement;
+  if (accent === undefined || accent === "neutral") root.removeAttribute("data-accent");
+  else root.setAttribute("data-accent", accent);
+}
+
 /** Dark or light on the root; "system" removes the attribute so the OS decides (styles.css). */
 export function applyTheme(theme: Settings["theme"]): void {
   const root = document.documentElement;

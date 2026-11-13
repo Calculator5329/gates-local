@@ -131,6 +131,7 @@ export function applyPatch(current: Settings, patch: SettingsPatch): Settings {
     ...(patch.imageTool === undefined ? {} : { imageTool: patch.imageTool }),
     ...(patch.updateEveryChange === undefined ? {} : { updateEveryChange: patch.updateEveryChange }),
     ...(patch.updateAutomatic === undefined ? {} : { updateAutomatic: patch.updateAutomatic }),
+    ...(patch.accent === undefined ? {} : { accent: patch.accent }),
   };
 }
 
