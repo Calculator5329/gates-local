@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-13: Trying the real image setup before a release offers it
+
+- Set up images stays off in releases until the real install has run
+  once. To try that install on purpose, start the app with
+  `GATES_LOCAL_OFFER_ENGINE=1`: the pop-up then offers the real pinned
+  engine and model. Any other value stops the app at startup with the
+  reason, so a typo never reads as a broken button.
+
 ## 2026-11-13: An attached file stays with the chat it was sent in
 
 - A message that names a file another chat already holds is refused:

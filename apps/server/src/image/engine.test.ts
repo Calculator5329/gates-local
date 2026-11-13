@@ -10,7 +10,17 @@ import { InstallError } from "../runtime/install.ts";
 import type { InstallManifest } from "../runtime/schemas.ts";
 import { removeDir, startReleaseServer, tmpDir, type ReleaseServer } from "../runtime/test-fakes.ts";
 import type { InstallProgress } from "../runtime/types.ts";
-import { engineDir, engineRoot, installEngine } from "./engine.ts";
+import { ENGINE_OFFERED, engineDir, engineOffered, engineRoot, installEngine } from "./engine.ts";
+
+describe("engineOffered, the release switch and the owner's try-it switch", () => {
+  it("follows ENGINE_OFFERED unless GATES_LOCAL_OFFER_ENGINE is 1, and refuses any other value", () => {
+    expect(engineOffered(undefined)).toBe(ENGINE_OFFERED);
+    expect(engineOffered("")).toBe(ENGINE_OFFERED);
+    expect(engineOffered("1")).toBe(true);
+    // a typo is an error at startup, never a silent "off" the owner then reads as a broken button
+    for (const bad of ["true", "yes", "0", " 1"]) expect(() => engineOffered(bad), bad).toThrow(/GATES_LOCAL_OFFER_ENGINE/);
+  });
+});
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "fake-portable.7z");
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");

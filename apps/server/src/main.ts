@@ -35,6 +35,9 @@
 //                                the app's own ComfyUI is read at `address`, and before it is
 //                                installed the app reads `address` in place of GATES_LOCAL_COMFY_URL
 //                                and looks for no systemd unit (image/engine.ts engineKnob)
+//   GATES_LOCAL_OFFER_ENGINE     "1": Set up images offers the real pinned engine although
+//                                ENGINE_OFFERED is off, for trying the real install before a
+//                                release offers it (image/engine.ts engineOffered)
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
 //   GATES_LOCAL_INSTALLED_VERSION the packaged desktop app's version; set, Settings › Updates
@@ -93,7 +96,7 @@ import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
 import { createImageModule, type ImageModule } from "./image/module.ts";
-import { ENGINE_OFFERED, engineFor, engineKnob, type EngineKnob } from "./image/engine.ts";
+import { engineFor, engineKnob, engineOffered, type EngineKnob } from "./image/engine.ts";
 import { LINUX_ENGINE, linuxBuild, linuxPinned } from "./image/linux-build.ts";
 import { createOwnComfy, freePort, writeDevice } from "./image/own.ts";
 import { createImageSetup, type ImageSetupModule } from "./image/setup.ts";
@@ -211,8 +214,11 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
   const downloadOrigin = process.env["GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN"];
   let engineTest: EngineKnob | undefined;
-  try { engineTest = engineKnob(process.env["GATES_LOCAL_IMAGE_ENGINE"]); }
-  catch (e) { store.close(); die((e as Error).message); }
+  let offered = false;
+  try {
+    engineTest = engineKnob(process.env["GATES_LOCAL_IMAGE_ENGINE"]);
+    offered = engineOffered(process.env["GATES_LOCAL_OFFER_ENGINE"]);
+  } catch (e) { store.close(); die((e as Error).message); }
   // a test's fake engine is read at its address before it is installed, in place of the test's ComfyUI address
   const comfyDefault = engineTest?.address ?? process.env["GATES_LOCAL_COMFY_URL"];
   // Windows runs no #! line: a script there (the tests' fake) goes through this runtime.
@@ -302,8 +308,9 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   imageSetup = createImageSetup({
     appDataDir: dataDir, own, image,
     engine: (gpuName) => {
-      // the release switch (engine.ts): off until the pinned engine has been installed once for real
-      if (engineTest === undefined && !ENGINE_OFFERED) return undefined;
+      // the release switch (engine.ts): off until the pinned engine has been installed once for real,
+      // unless the person running the app asked to try it (GATES_LOCAL_OFFER_ENGINE=1)
+      if (engineTest === undefined && !offered) return undefined;
       const pick = engineTest ?? engineFor(process.platform, process.arch, gpuName);
       // an engine whose size and digest are not confirmed is not offered: the installer would refuse it at the click
       if (pick !== undefined) return pick.manifest.verified ? { kind: "archive", manifest: pick.manifest, layout: pick.layout } : undefined;

@@ -57,6 +57,17 @@ export const PINNED_ENGINE_WINDOWS_CU126: InstallManifest = {
  */
 export const ENGINE_OFFERED = false;
 
+/**
+ * Set up images with the real pinned engine: ENGINE_OFFERED, or GATES_LOCAL_OFFER_ENGINE=1 for a
+ * person who chooses to try the real install before a release offers it (step 5). Any other
+ * non-empty value is an error at startup.
+ */
+export function engineOffered(text: string | undefined): boolean {
+  if (text === undefined || text === "") return ENGINE_OFFERED;
+  if (text === "1") return true;
+  throw new Error(`GATES_LOCAL_OFFER_ENGINE must be unset or "1", got "${text}"`);
+}
+
 /** Cards CUDA 13 no longer runs: Pascal and older (GTX 10-series, TITAN X/Xp, Quadro P, Tesla P). */
 const OLD_CARD = /\b(GTX\s?(9|10)\d0|TITAN X|Quadro [MP]\d|Tesla [KMP]\d)/i;
 
