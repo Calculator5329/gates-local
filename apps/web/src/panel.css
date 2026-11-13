@@ -22,23 +22,31 @@
 .dlg-head:has(.mp-tabs){padding-top:0;padding-bottom:0}
 .dlg-head .mp-tabs{align-self:stretch;height:auto;margin:0 0 -1px;border:0}
 .dlg-body>.mp{max-width:1040px;margin:0 auto}
-/* Models' body keeps Settings' .set for its controls' look; as tall as its content, and no empty gutter when it does not scroll */
+/* Models' and Settings' bodies keep .set for their controls' look; as tall as their content, and no empty gutter when they do not scroll */
 .dlg-body.set{flex:0 1 auto;scrollbar-gutter:auto}
-
-/* The footer's Usage pop-up over the chat area. Flat: no shadow, no gradient, no motion. */
-.panel-dim{position:absolute;inset:0;z-index:20;background:var(--scrim)}
-.panel{position:absolute;z-index:21;top:24px;bottom:24px;left:50%;transform:translateX(-50%);width:min(960px,calc(100% - 48px));overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain;background:var(--popover);color:var(--foreground);border:1px solid var(--popover-border);border-radius:var(--r-lg);padding:20px 24px;outline:none}
-/* Settings over the chat (App.tsx): the chat keeps its box, so its scroll position and a
+/* Settings: its sections at the left, the section at the right. The row is as tall as the taller
+   of the two, up to the window's room; then each scrolls on its own. */
+.dlg-cols{flex:0 1 auto;min-height:0;display:flex}
+.dlg-nav{flex:none;width:208px;overflow-y:auto;overscroll-behavior:contain;padding:12px 0;border-right:1px solid var(--border)}
+.dlg-nav .snav{flex:none;overflow:visible}
+.dlg-cols>.set{flex:1 1 0;padding:0}
+.dlg .set-in{max-width:none;padding:20px 24px 24px}
+.dlg .set>.banner{margin:16px 24px 0}
+/* the section's name is the lit row at the left: its heading stays for screen readers only */
+.dlg .set-h h1{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.dlg .set-h:not(:has(p)){margin:0}
+.dlg .set-h p{margin-top:0}
+/* Close is a 44 px target where there is no pointer to aim */
+@media (hover:none){.dlg .dlg-x{width:44px;height:44px}}
+/* Settings over the chat on a phone (App.tsx): the chat keeps its box, so its scroll position and a
    reply that follows the bottom carry on unseen; hidden keeps layout where display:none would not.
    A child can undo visibility:hidden (an open thought sets visible), but not an ancestor's opacity
    or pointer-events: so nothing of the chat paints over Settings or takes its clicks. */
 .work{position:relative}
 .stage.under{position:absolute;inset:0;visibility:hidden;opacity:0;pointer-events:none}
 @media (max-width:640px){
-  .panel{top:12px;bottom:12px;width:calc(100% - 24px);padding:14px 12px}
-  /* .panel raises this over .ibtn's own size in styles.css */
-  .panel .panel-x{width:44px;height:44px;margin:-8px -6px -8px 0}
+  .dlg-body{padding:14px 12px 16px}
   .dlg{top:12px;width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}
   .dlg-head{padding:4px 4px 4px 14px}
-  .dlg-x{width:44px;height:44px}
+  .dlg .dlg-x{width:44px;height:44px}
 }

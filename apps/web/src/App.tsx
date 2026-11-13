@@ -15,9 +15,9 @@ import { describeModel } from "./format.ts";
 import { Icon, type IconId, Sprite } from "./icons.tsx";
 import { imageMode } from "./image-choice.ts";
 import { ScreenError, firstRunScreen, imagePickerScreen, pickerScreen, preloadScreens, settingsScreen, threadScreen, useScreen } from "./screens.tsx";
-import { SECTIONS, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
+import { SECTIONS, SettingsNav, Sidebar, closeDrawer, goNew, onDrawerPop, openDrawer, openSearch } from "./Sidebar.tsx";
 import { UpdateNote } from "./UpdateNote.tsx";
-import { Dialog, DialogHead, PopPanel } from "./Panel.tsx";
+import { Dialog, DialogHead } from "./Panel.tsx";
 import { picturesScreen, usageScreen } from "./screen-loaders.ts";
 import { call, cancelPendingSettings, closeUsage, deleteThread, leavePictures, leaveSettings, pictures, togglePictures, newThread, onScreenPop, openSettings, openThread, preloadThread, renameThread, threadFromHash, threadMarkdown, waitForThreadDeletion } from "./session.ts";
 import { NA, type Section, type State, getState, overChat, setState, useStore } from "./store.ts";
@@ -355,14 +355,13 @@ function ThreadMenu() {
   );
 }
 
-/** Wider than a phone, Settings › Models is a pop-up of its own over the chat. */
-export const modelsDialog = (s: Pick<State, "view" | "section">, phone: boolean) => s.view === "settings" && s.section === "models" && !phone;
+/** Wider than a phone, Settings is a pop-up over the chat, and Settings › Models a pop-up of its own. */
+const settingsDialog = (s: Pick<State, "view">, phone: boolean) => s.view === "settings" && !phone;
 
-/** What Tab must stay inside right now: a phone's sheet, a pop-up (Usage, Models) or the drawer. */
+/** What Tab must stay inside right now: a phone's sheet, a pop-up (Usage, Settings, Models) or the drawer. */
 function modalBox(s: State): HTMLElement | null {
   if (s.pop !== null) return isPhone() ? document.getElementById(POP_EL[s.pop.id]) : null;
-  if (s.panel !== null) return document.querySelector<HTMLElement>(".panel");
-  if (modelsDialog(s, isPhone())) return document.querySelector<HTMLElement>(".dlg");
+  if (s.panel !== null || settingsDialog(s, isPhone())) return document.querySelector<HTMLElement>(".dlg");
   if (s.drawer) return document.querySelector<HTMLElement>(".sb");
   return null;
 }
@@ -524,9 +523,10 @@ export function App() {
     };
   }, []);
   // A cold click keeps the existing chat layout until the whole screen is ready.
-  const models = useStore((s) => modelsDialog(s, phone));
-  // Settings as a page over the chat; Models, wider than a phone, is a pop-up and leaves the chat in view
-  const isSet = view === "settings" && !models;
+  const dialog = useStore((s) => settingsDialog(s, phone));
+  const section = useStore((s) => s.section);
+  // Settings as a page over the chat on a phone; wider, a pop-up that leaves the chat in view
+  const isSet = view === "settings" && !dialog;
   const isPics = view === "pictures";
   const under = isSet || isPics;
   // the section list is a phone's Settings home; leaving Settings forgets it
@@ -539,22 +539,20 @@ export function App() {
   return (
     <>
       <Sprite />
-      {/* under the Models pop-up the whole window stays mounted and takes no focus, keys or clicks */}
-      <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={(popOpen && phone) || models}>
+      {/* under a pop-up (Settings, Models, Usage) the whole window stays mounted and takes no focus, keys or clicks, and is out of the accessibility tree */}
+      <div className={`app${drawer ? " drawer" : ""}`} id="app" data-ready={hydrated ? "" : undefined} inert={(popOpen && phone) || dialog || panel !== null}>
         <div style={{ display: "contents" }} inert={covered}>
           <Sidebar />
         </div>
         {drawer ? <div className="scrim" aria-hidden="true" onClick={() => { cancelPendingSettings(); closeDrawer(); }} /> : null}
         <main className="main" inert={covered || drawer}>
-          {/* under the pop-up the chat stays mounted and takes no focus, keys or clicks */}
-          <div style={{ display: "contents" }} inert={panel !== null}>
           {/* Pictures draws its own bar, in its own chunk */}
           {isSet ? <SettingsBar /> : isPics ? null : <Header isNew={isNew} />}
           <div className="work">
-            {/* Settings lies over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
-            <div className={`stage${under ? " under" : ""}`} inert={under || models}>
+            {/* a phone's Settings and Pictures lie over the chat, which stays mounted and hidden: closing gives back its scroll, draft, caret and a reply still following */}
+            <div className={`stage${under ? " under" : ""}`} inert={under}>
                 {isNew || threadId === null ? (
-                  <Draft under={under} />
+                  <Draft under={under || view === "settings"} />
                 ) : (
                   <>
                     <ErrorBoundary key={threadId} scope="thread">
@@ -566,7 +564,7 @@ export function App() {
                     </ErrorBoundary>
                     <div className="cw">
                       <div className="banner-slot">
-                        {under ? null : <UpdateNote />}
+                        {under || view === "settings" ? null : <UpdateNote />}
                         <Banner />
                       </div>
                       <Composer />
@@ -585,12 +583,6 @@ export function App() {
             ) : null}
             {isPics ? pics.kind === "ready" ? <pics.value.Pictures /> : <div className="pics"><ScreenError /></div> : null}
           </div>
-          </div>
-          {panel === "usage" && usage.kind !== "pending" ? (
-            <PopPanel label="Usage" onClose={() => closeUsage()}>
-              {usage.kind === "ready" ? <usage.value.Usage /> : <ScreenError />}
-            </PopPanel>
-          ) : null}
         </main>
         {covered ? (
           <div className="first">
@@ -598,10 +590,26 @@ export function App() {
           </div>
         ) : null}
       </div>
-      {models ? (
+      {dialog && section === "models" ? (
         <Dialog label="Models" onClose={leaveSettings}>
           {/* Models brings its own header row: its tabs are the header's controls */}
           {settings.kind === "ready" ? <settings.value.SettingsView /> : <><DialogHead title="Models" onClose={leaveSettings} /><ScreenError /></>}
+        </Dialog>
+      ) : dialog ? (
+        <Dialog label="Settings" onClose={leaveSettings}>
+          <DialogHead title="Settings" onClose={leaveSettings} />
+          <div className="dlg-cols">
+            <SettingsNav inDialog />
+            <div className="dlg-body set">
+              <UpdateNote />
+              <div className="set-in">{settings.kind === "ready" ? <settings.value.SettingsView /> : <ScreenError />}</div>
+            </div>
+          </div>
+        </Dialog>
+      ) : null}
+      {panel === "usage" && usage.kind !== "pending" ? (
+        <Dialog label="Usage" onClose={() => closeUsage()}>
+          {usage.kind === "ready" ? <usage.value.Usage /> : <><DialogHead title="Usage" onClose={() => closeUsage()} /><ScreenError /></>}
         </Dialog>
       ) : null}
       {/* a phone's sheets sit over a scrim; on the desktop it is not drawn */}

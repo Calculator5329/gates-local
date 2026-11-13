@@ -749,6 +749,9 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .ctx-c{display:flex;flex-direction:column;align-items:flex-end}
 .srow.tool{width:100%;text-align:left}
 .tool .sv{color:var(--muted-foreground)}
+/* the status slot is as wide as its longest words (Add a folder or file to your Library), so the
+   description wraps the same whether a row says Checking, Ready or Turned off: nothing moves */
+@media (min-width:641px){.tool>.sv{min-width:276px;justify-content:flex-end}}
 .tool.dim .sl b{color:var(--muted-foreground)}
 @media (hover:hover){button.tool:hover{background:var(--hover)}}
 .kl{width:100%;border-collapse:collapse;font-size:14px}

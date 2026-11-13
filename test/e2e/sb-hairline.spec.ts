@@ -67,6 +67,6 @@ test("the desktop sidebar head has no line under it in chat or Settings; the sid
     await noLineUnderHead(page, `desktop chat, ${scheme}`);
   }
   await page.keyboard.press("Control+Comma");
-  await expect(page.locator(".set-bar")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await noLineUnderHead(page, "desktop Settings");
 });

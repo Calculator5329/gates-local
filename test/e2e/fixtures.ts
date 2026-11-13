@@ -225,6 +225,11 @@ export async function openModels(page: Page): Promise<void> {
     await page.locator(".set-list").getByRole("button", { name: "Models" }).click();
     return;
   }
+  // the footer is under the Settings pop-up's blur: close it first
+  if (await page.getByRole("dialog", { name: "Settings" }).count() > 0) {
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+  }
   await page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click();
   await expect(page.getByRole("dialog", { name: "Models" }).locator(".mp")).toBeVisible();
 }

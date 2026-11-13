@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-13: Usage and Settings are pop-ups like Models
+
+- Usage opens in the middle of the window, two-thirds of its width and only
+  as tall as its rows, over the same light blur as Models. The empty space
+  under the table is gone. Its title, the 24 h to All range, Tokens and
+  Speed, and Close share one row at the top.
+- Settings (the gear, or Ctrl+,) is the same pop-up. Its sections are a
+  list at its left; the thread list and the chat stay in view under the
+  blur and are there as they were when it closes. Esc or Close closes it.
+- On a phone, Settings is still a full page with its list of sections.
+- Settings › Tools: a row no longer grows or shrinks when its status changes
+  (Checking, Ready, Turned off). The status has a slot as wide as its
+  longest words, so the description wraps the same way each time.
+
 ## 2026-11-13: Image stays off until there is a ComfyUI to draw with
 
 - With image generation on and no ComfyUI answering at its address (and

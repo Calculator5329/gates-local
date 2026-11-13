@@ -18,9 +18,7 @@
 /* Every box has a fixed height, so a read landing or a turn ending changes figures, never the layout. */
 .us{display:flex;flex-direction:column;gap:16px;min-width:0}
 .us .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.us-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
-.us-bar h2{margin:0;font-size:16px;font-weight:600;line-height:30px}
-.us-ctl{margin-left:auto;display:flex;flex-wrap:wrap;gap:8px}
+.us-ctl{display:flex;flex-wrap:wrap;gap:8px}
 .us-nums{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
 .us-num{min-width:0}
 .us-num b{display:block;font-size:20px;line-height:26px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -45,11 +43,10 @@
 .us-key{flex:none;width:12px;height:3px;border-radius:1px}
 .us-label{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 
-/* 320 px: the controls take a second line under the title and its close button,
+/* 320 px: the controls take a second line under the title and Close,
    the numbers go three and two, and the model column gives way to the figures. */
 @media (max-width:640px){
-  .us-bar .panel-x{order:1;margin-left:auto}
-  .us-ctl{order:2;flex-basis:100%;margin-left:0}
+  .us-ctl{order:1;flex-basis:100%}
   .us-nums{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 8px}
   .us-num:last-child{grid-column:span 2}
   .us-num b{font-size:18px}

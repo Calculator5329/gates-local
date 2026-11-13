@@ -235,7 +235,7 @@ const SETTINGS_PAGES: readonly (readonly [string, string, ((page: Page) => Promi
       mkdirSync(folder, { recursive: true });
       await p.getByRole("button", { name: "Add folder…" }).click();
       await p.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
-      await p.getByRole("button", { name: "Add", exact: true }).click();
+      await p.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
       await expect(p.locator(".srow.src")).toHaveCount(1);
     },
   ],

@@ -31,7 +31,7 @@ test("a Library add with a wrong path keeps the form, says why, and works once t
   await page.getByRole("button", { name: "Add folder…" }).click();
   const input = page.getByRole("textbox", { name: "Add a folder path" });
   await input.fill(wrong);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
 
   const alert = page.getByRole("alert");
   await expect(alert).toHaveText("Couldn't add this folder because nothing is at that path; check it and try again.");
@@ -39,7 +39,7 @@ test("a Library add with a wrong path keeps the form, says why, and works once t
   await expect(input).toHaveValue(wrong);
 
   await input.fill(real);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
   await expect(input).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
   // the new source's row, by its label (the folder name), with its own actions

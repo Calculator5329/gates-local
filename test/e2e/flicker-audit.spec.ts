@@ -54,6 +54,9 @@ test("every Settings section is whole on its first frame", async ({ page, open }
   }
   await settled(delay, 3000);
   r.check("General, second visit", await watchWhole(page, section("General"), () => page.locator(".snav").getByRole("button", { name: "General", exact: true }).click(), delay));
+  // Settings is a pop-up: it closes before the footer's Models opens its own
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".dlg")).toHaveCount(0);
   await settled(delay, 3000);
   r.check("open Models", await watchWhole(page, { root: ".dlg", arrive: { selector: ".dlg-head h2", text: "Models" } }, () => page.locator(".sb-foot").getByRole("button", { name: /^Models/ }).click(), delay));
   await settled(delay, 3000);

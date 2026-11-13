@@ -372,25 +372,27 @@ function ChatNav() {
   );
 }
 
-/** Settings' sections. Wider than a phone Models is a pop-up of its own (the footer's bot), so it is not among them there. */
-function SettingsNav({ phone }: { phone: boolean }) {
+/** Settings' sections: on a phone in the drawer under Back to chat; wider, at the left of the Settings pop-up (App.tsx), without Models, which is a pop-up of its own (the footer's bot). */
+export function SettingsNav({ inDialog = false }: { inDialog?: boolean }) {
   const section = useStore((s) => s.section);
-  return (
-    <nav className="sb-body">
-      <div className="snav">
+  const list = (
+    <div className="snav">
+      {/* the pop-up has its own Close */}
+      {inDialog ? null : (
         <button type="button" className="sb-act back" data-tip="Back to chat · Esc" onClick={() => closeDrawer(leaveSettings, true)}>
           <Icon id="left" />
           <span className="grow">Back to chat</span>
         </button>
-        {SECTIONS.filter(([id]) => phone || id !== "models").map(([id, label, icon]) => (
-          <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
-            <Icon id={icon} />
-            <span className="grow">{label}</span>
-          </button>
-        ))}
-      </div>
-    </nav>
+      )}
+      {SECTIONS.filter(([id]) => !inDialog || id !== "models").map(([id, label, icon]) => (
+        <button key={id} type="button" className={`sb-act${section === id ? " on" : ""}${id === "runtime" ? " gap" : ""}`} onClick={() => closeDrawer(() => openSettings(id), true)}>
+          <Icon id={icon} />
+          <span className="grow">{label}</span>
+        </button>
+      ))}
+    </div>
   );
+  return inDialog ? <nav className="dlg-nav" aria-label="Settings sections">{list}</nav> : <nav className="sb-body">{list}</nav>;
 }
 
 // ---------------------------------------------------------------- the footer
@@ -506,9 +508,9 @@ function PicturesButton() {
 }
 
 export function Sidebar() {
-  // under the Models pop-up (wider than a phone) the sidebar keeps its threads
+  // wider than a phone Settings is a pop-up, and the sidebar under it keeps its threads
   const phone = useMedia(PHONE);
-  const inSettings = useStore((s) => s.view === "settings" && (phone || s.section !== "models"));
+  const inSettings = useStore((s) => s.view === "settings") && phone;
   return (
     <aside className="sb">
       {/* the same head in chat and Settings, so the first row below it never moves between the two */}
@@ -521,7 +523,7 @@ export function Sidebar() {
           <Icon id="x" />
         </button>
       </div>
-      {inSettings ? <SettingsNav phone={phone} /> : <ChatNav />}
+      {inSettings ? <SettingsNav /> : <ChatNav />}
       <div className="sb-foot">
         <SettingsButton />
         <ModelsButton />

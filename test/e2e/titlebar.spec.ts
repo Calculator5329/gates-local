@@ -22,8 +22,11 @@ test("desktop overlay reserves native controls, follows geometry and keeps heade
   const header = page.locator(".hdr");
   await expect(header).toHaveCSS("app-region", "drag");
   await expect.poll(() => header.evaluate((el) => parseFloat(getComputedStyle(el).paddingRight))).toBe(150);
+  // Settings is a pop-up over the window: the chat's header stays, no Settings bar of its own
   await page.keyboard.press("Control+Comma");
-  await expect(page.locator(".set-bar")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await expect(page.locator(".hdr")).toHaveCSS("app-region", "drag");
+  await expect(page.locator(".set-bar")).toHaveCount(0);
   await expect(page.locator(".sb-head")).toBeVisible();
   await page.keyboard.press("Escape");
   for (const width of [900, 600]) {

@@ -1,15 +1,16 @@
 /// <reference lib="dom" />
-// Settings lies over the chat, which stays mounted under it so closing gives back
-// its scroll and a reply still following. Nothing of the chat may paint through:
+// On a phone Settings lies over the chat, which stays mounted under it so closing gives
+// back its scroll and a reply still following. Nothing of the chat may paint through:
 // an open thought sets visibility:visible on itself, which beats a hidden parent,
-// so a live thought once drew its words over Settings (chat row 22).
+// so a live thought once drew its words over Settings (chat row 22). Wider than a phone
+// Settings is a pop-up and the chat shows under its blur (popups.spec.ts).
 import { writeFile } from "node:fs/promises";
 import { createClient } from "@gates-local/contracts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 import { release } from "./threads-support.ts";
 
-test.use({ screenshot: "only-on-failure", seed: "work-fold", viewport: { width: 1200, height: 700 } });
+test.use({ screenshot: "only-on-failure", seed: "work-fold", viewport: { width: 390, height: 844 } });
 
 /** A Library file and tools on, so the fake model is offered a tool to call. */
 async function libraryOn(page: Page, info: TestInfo): Promise<void> {
@@ -56,14 +57,14 @@ test("a live thought and an opened one stay under Settings, and come back with t
   const live = await items.nth(2).locator(".think-body").boundingBox();
   if (live === null) throw new Error("No live thought on screen");
 
-  await page.locator(".sb-foot").getByRole("button", { name: "Settings", exact: true }).click();
+  await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set")).toBeVisible();
   expect(await painted(page), "nothing of the chat paints through Settings").toEqual([]);
   // what is under the pointer where the live thought was is Settings, not the thought
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".stage") !== null, { x: live.x + live.width / 2, y: live.y + live.height / 2 });
   expect(hit, "the live thought's place belongs to Settings").toBe(false);
 
-  await page.locator(".sb").getByRole("button", { name: "Back to chat" }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator(".set")).toHaveCount(0);
   await expect(items.nth(2).locator(".think-body")).toBeVisible();
   await expect(items.nth(0).locator(".think-body")).toBeVisible();

@@ -134,20 +134,19 @@ for (const overlay of [false, true]) {
     await expect(page.locator(".tip.open")).toHaveCount(0);
     await shot(page, info, `desktop${overlay ? "-app" : ""}-chat`);
 
-    // Settings: Back to chat on the same line, icon and text at the same left edges
+    // Settings is a pop-up: the sidebar under it keeps Search on the same row; Close names Esc
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".snav")).toBeVisible();
-    const back = page.locator(".snav").getByRole("button", { name: "Back to chat", exact: true });
-    await expect(back).toBeVisible();
+    const close = page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeVisible();
     await expectNoShortcutText(page);
     expectSameRow(chat, await firstRow(page), where);
-    await back.hover();
-    await expect(page.locator(".tip.open")).toHaveText("Back to chat · Esc");
+    await close.hover();
+    await expect(page.locator(".tip.open")).toHaveText("Close · Esc");
     await page.mouse.move(900, 600);
     await expect(page.locator(".tip.open")).toHaveCount(0);
-    await expect(back, "hover state clears").toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await shot(page, info, `desktop${overlay ? "-app" : ""}-settings`);
-    await back.click();
+    await close.click();
     await expect(page.locator(".snav")).toHaveCount(0);
     await expect(input).toBeVisible();
   });
@@ -344,34 +343,29 @@ test.describe("phone drawer", () => {
 
 test.describe("tablet drawer", () => {
   test.use(TABLET);
-  test("Back to chat sits where Search sits, and the drawer keeps its close button in Settings", async ({ page, open }, info) => {
+  test("the drawer keeps its close button, and Settings is a pop-up with its sections and Close at touch size", async ({ page, open }, info) => {
     await open();
     await waitReady(page);
     const sb = page.locator(".sb");
     await page.getByRole("button", { name: "Open threads" }).tap();
     await expect(sb.locator(".sb-row").first()).toBeInViewport({ ratio: 1 });
     await settled(page);
-    const chat = await firstRow(page);
+    await expect(sb.getByRole("button", { name: "Close threads", exact: true })).toBeVisible();
     await sb.getByRole("button", { name: "Close threads", exact: true }).tap();
     await expect(page.locator("#app")).not.toHaveClass(/drawer/);
+    // wider than a phone Settings is a pop-up: its sections are inside it, not in the drawer
     await page.keyboard.press("Control+Comma");
-    await expect(page.locator(".set")).toBeVisible();
-    await page.getByRole("button", { name: "Open threads" }).tap();
-    await expect(sb.locator(".snav .sb-act").first()).toBeInViewport({ ratio: 1 });
-    await settled(page);
-    const settings = await firstRow(page);
-    console.log(`ROWS tablet drawer: chat ${JSON.stringify(chat)} settings ${JSON.stringify(settings)}`);
-    expectSameRow(chat, settings, "tablet drawer");
-    await expect(sb.getByRole("button", { name: "Close threads", exact: true })).toBeVisible();
-    const back = sb.getByRole("button", { name: "Back to chat", exact: true });
-    expect((await back.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const set = page.getByRole("dialog", { name: "Settings" });
+    await expect(set.locator(".snav .sb-act").first()).toBeInViewport({ ratio: 1 });
+    expect((await set.locator(".snav .sb-act").first().boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect((await set.getByRole("button", { name: "Close", exact: true }).boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await shot(page, info, "tablet-settings-drawer");
   });
 });
 
 test.describe("drawer with a keyboard and pointer", () => {
   test.use({ viewport: { width: 800, height: 1000 } });
-  test("opening it focuses the Search field, in Settings Back to chat, never Close threads or the footer", async ({ page, open }) => {
+  test("opening it focuses the Search field, never Close threads or the footer; Settings takes focus into its pop-up", async ({ page, open }) => {
     await open();
     await waitReady(page);
     const sb = page.locator(".sb");
@@ -382,7 +376,6 @@ test.describe("drawer with a keyboard and pointer", () => {
     await expect(page.locator("#app"), "one Escape from the empty field closes the drawer").not.toHaveClass(/drawer/);
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set")).toBeVisible();
-    await page.getByRole("button", { name: "Open threads" }).click();
-    await expect(sb.getByRole("button", { name: "Back to chat", exact: true })).toBeFocused();
+    await expect(page.locator(".dlg")).toBeFocused();
   });
 });

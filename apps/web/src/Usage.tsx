@@ -1,9 +1,9 @@
-// The Usage pop-up's content, its own chunk: the range and Tokens / Speed
-// switches, five numbers, a hand-drawn line per model from a zero baseline,
+// The Usage pop-up's content (App puts it in Panel.tsx's Dialog), its own chunk: the
+// header row with the range and Tokens / Speed switches, five numbers, a hand-drawn line per model from a zero baseline,
 // and one row per model that follows the point in focus. The rows are the
 // chart's text for screen readers. Figures change in place when a turn ends.
 import { type KeyboardEvent, type PointerEvent, useMemo, useState, useSyncExternalStore } from "react";
-import { PanelClose } from "./Panel.tsx";
+import { DialogHead } from "./Panel.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { closeUsage, usageData } from "./session.ts";
 import { NA, useStore } from "./store.ts";
@@ -138,15 +138,14 @@ export function Usage() {
   const markX = at === null ? null : n === 1 ? W / 2 : (at / (n - 1)) * W;
 
   return (
-    <div className="us">
-      <div className="us-bar">
-        <h2>Usage</h2>
-        <div className="us-ctl">
-          <Seg label="Range" value={prefs.range} options={RANGES} onPick={(range: UsageRange) => pick({ range })} />
-          <Seg label="Chart" value={prefs.metric} options={METRICS} onPick={(metric: UsageMetric) => pick({ metric })} />
-        </div>
-        <PanelClose onClose={() => closeUsage()} />
+    <>
+    <DialogHead title="Usage" onClose={() => closeUsage()}>
+      <div className="us-ctl">
+        <Seg label="Range" value={prefs.range} options={RANGES} onPick={(range: UsageRange) => pick({ range })} />
+        <Seg label="Chart" value={prefs.metric} options={METRICS} onPick={(metric: UsageMetric) => pick({ metric })} />
       </div>
+    </DialogHead>
+    <div className="dlg-body us">
       <div className="us-nums">
         <Num ph={ph} value={compact(t.promptTokens + t.completionTokens)} label="tokens" tip={`${exact(t.promptTokens + t.completionTokens)} tokens`} />
         <Num ph={ph} value={compact(t.promptTokens)} label="in" tip={`${exact(t.promptTokens)} tokens in`} />
@@ -217,5 +216,6 @@ export function Usage() {
         </tbody>
       </table>
     </div>
+    </>
   );
 }

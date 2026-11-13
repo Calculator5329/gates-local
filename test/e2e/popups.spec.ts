@@ -80,3 +80,59 @@ test("Models is its own pop-up over the chat: two-thirds wide, as tall as its li
   await close.click();
   await expect(models).toHaveCount(0);
 });
+
+test.describe("Usage", () => {
+  test.use({ seed: "usage", timezoneId: "UTC" });
+
+  test("Usage is the same pop-up: two-thirds wide, as tall as its rows, range, chart and Close in its header", async ({ page, open, seededThread }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await open(`#thread=${seededThread ?? ""}`);
+    await waitReady(page);
+    const icon = page.locator(".sb-foot .usage");
+    await icon.click();
+    const usage = page.getByRole("dialog", { name: "Usage" });
+    await expect(usage.locator(".us-rows tbody tr").first()).toBeVisible();
+    await expectShape(page, usage);
+    await expectOneRow(
+      usage.getByRole("heading", { name: "Usage", exact: true }),
+      usage.getByRole("group", { name: "Range" }),
+      usage.locator(".us-ctl").getByRole("group", { name: "Chart" }),
+      usage.getByRole("button", { name: "Close", exact: true }),
+    );
+    const b = await box(usage);
+    const rows = await box(usage.locator(".us-rows"));
+    expect(b.y + b.height - (rows.y + rows.height), "no empty space under the last row").toBeLessThan(40);
+    await expectBackdrop(page);
+    await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
+    await expect(icon).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+    await expect(usage).toHaveCount(0);
+    await expect(icon, "focus back on its icon").toBeFocused();
+  });
+});
+
+test("Settings is the same pop-up: its sections at its left, the chat and threads in view under the blur", async ({ page, open }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await open();
+  await waitReady(page);
+  await page.keyboard.press("Control+Comma");
+  const set = page.getByRole("dialog", { name: "Settings" });
+  await expect(set.getByText("Theme", { exact: true })).toBeVisible();
+  await expectShape(page, set);
+  await expectOneRow(set.getByRole("heading", { name: "Settings", exact: true }), set.getByRole("button", { name: "Close", exact: true }));
+  const b = await box(set);
+  expect(b.y + b.height, "General is short: no window-tall box").toBeLessThan(800 - 120);
+  await expectBackdrop(page);
+  await expect(page.locator(".sb #searchIn"), "the sidebar keeps its threads").toBeVisible();
+  await expect(page.locator("#ta"), "the chat stays in view under the blur").toBeVisible();
+  await expect(page.locator(".sb-foot .ibtn").first(), "the gear is lit").toHaveAttribute("aria-pressed", "true");
+
+  // the sections are inside the pop-up; picking one keeps its top in place
+  const nav = set.locator(".snav");
+  await nav.getByRole("button", { name: "Tools", exact: true }).click();
+  await expect(nav.locator(".sb-act.on")).toHaveText("Tools");
+  expect((await box(set)).y).toBe(b.y);
+  await page.keyboard.press("Escape");
+  await expect(set).toHaveCount(0);
+  await expect(page.locator("#ta"), "the caret back in the message box").toBeFocused();
+});

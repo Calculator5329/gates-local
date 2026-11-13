@@ -7,8 +7,14 @@ import { burst, transitionMetrics } from "./flicker-probe.ts";
 import { expect, test, waitReady } from "./fixtures.ts";
 
 const usageIcon = (page: Page) => page.locator(".sb-foot .usage");
-const settingsIcon = (page: Page) => page.locator(".sb-foot").getByRole("button", { name: /^Settings/ });
-const modelsIcon = (page: Page) => page.locator(".sb-foot").getByRole("button", { name: /^Models/ });
+// the footer icons by their label's first word: Settings and Models add a state after it
+const settingsIcon = (page: Page) => page.locator('.sb-foot button[aria-label^="Settings"]');
+const modelsIcon = (page: Page) => page.locator('.sb-foot button[aria-label^="Models"]');
+/** A click where the icon sits: under an open pop-up that is the dim layer, which closes it. */
+async function clickSpot(page: Page, icon: Locator): Promise<void> {
+  const box = (await icon.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Usage" });
 const range = (page: Page, name: string) => page.getByRole("group", { name: "Range" }).getByRole("button", { name, exact: true });
 const metric = (page: Page, name: string) => page.getByRole("group", { name: "Chart" }).getByRole("button", { name, exact: true });
@@ -21,7 +27,7 @@ async function watchPanel(page: Page): Promise<() => Promise<string[]>> {
     const w = window as FrameWindow;
     w.usageFrames = [];
     const tick = () => {
-      const p = document.querySelector(".panel");
+      const p = document.querySelector(".dlg");
       w.usageFrames?.push(p === null ? "none" : p.querySelector(".us-ph") !== null ? "placeholder" : p.querySelector(".us-nums") !== null ? "complete" : "empty");
       requestAnimationFrame(tick);
     };
@@ -47,6 +53,7 @@ test.describe("a week of three models", () => {
     await expect(usageIcon(page)).toHaveAttribute("aria-pressed", "true");
     expect((await frames()).filter((f) => f !== "none" && f !== "complete"), "every frame of the pop-up is complete").toEqual([]);
     // Guards the owner's ruling (2026-11-13): an X in the pop-up's top right corner closes it; a model's row has no bar under its name.
+    // Close is in the header row, as in Models and Settings.
     const x = dialog(page).getByRole("button", { name: "Close" });
     await expect(x).toBeVisible();
     const [xb, db] = [(await x.boundingBox())!, (await dialog(page).boundingBox())!];
@@ -57,10 +64,10 @@ test.describe("a week of three models", () => {
     await expect(dialog(page)).toHaveCount(0);
     await usageIcon(page).click();
     await expect(dialog(page)).toBeVisible();
-    // over the chat: the dim layer and the chat still there under it, inert
-    await expect(page.locator(".panel-dim")).toBeVisible();
+    // over the whole window: the dim layer, and the chat still there under it, inert
+    await expect(page.locator(".dlg-dim")).toBeVisible();
     await expect(page.locator(".turn").first()).toBeVisible();
-    expect(await page.locator(".main > div").first().evaluate((d) => (d as HTMLElement).inert)).toBe(true);
+    expect(await page.locator("#app").evaluate((d) => (d as HTMLElement).inert)).toBe(true);
 
     await expect(range(page, "7 d")).toHaveAttribute("aria-pressed", "true");
     const rows = page.locator(".us-rows tbody tr");
@@ -127,13 +134,14 @@ test.describe("a week of three models", () => {
     await expect(dialog(page)).toHaveCount(0);
     await expect(usageIcon(page)).toBeFocused();
     await expect(usageIcon(page)).toHaveAttribute("aria-pressed", "false");
-    // the dim layer closes it too, and the icon is a toggle
+    // the dim layer closes it too, and a second click on the icon (under the dim) closes it
     await usageIcon(page).click();
-    await page.locator(".panel-dim").click({ position: { x: 8, y: 8 } });
+    await page.locator(".dlg-dim").click({ position: { x: 8, y: 8 } });
     await expect(dialog(page)).toHaveCount(0);
     await usageIcon(page).click();
     await expect(dialog(page)).toBeVisible();
-    await usageIcon(page).click();
+    const icon = (await usageIcon(page).boundingBox())!;
+    await page.mouse.click(icon.x + icon.width / 2, icon.y + icon.height / 2);
     await expect(dialog(page)).toHaveCount(0);
   });
 });
@@ -164,10 +172,10 @@ test.describe("closing a screen gives the chat back as it was", () => {
     await page.keyboard.press("Control+Comma");
     await expect(page.locator(".set")).toBeVisible();
     await expect(settingsIcon(page)).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator(".stage")).toHaveCSS("visibility", "hidden");
+    await expect(page.locator("#app")).toHaveAttribute("inert", "");
     await page.keyboard.type("zz");
     await page.keyboard.press("Control+Shift+Space");
-    const frames = await burst(page, "overlay-settings-close", ".work", () => settingsIcon(page).click());
+    const frames = await burst(page, "overlay-settings-close", ".work", () => clickSpot(page, settingsIcon(page)));
     expect(frames.filter((f) => /Loading conversation/.test(f.text)), "no frame shows the loading placeholder").toEqual([]);
     expect(transitionMetrics(frames).transientText, "no frame between Settings and the chat").toEqual([]);
     await expect(page.locator(".set")).toHaveCount(0);
@@ -196,25 +204,24 @@ test.describe("closing a screen gives the chat back as it was", () => {
     await expect(page.locator(".set")).toHaveCount(0);
     await settingsIcon(page).click();
     await expect(page.locator(".set")).toBeVisible();
-    await settingsIcon(page).click();
+    await clickSpot(page, settingsIcon(page));
     await expect(page.locator(".set")).toHaveCount(0);
     await page.goBack();
     await expect(page.locator(".set")).toHaveCount(0);
     await expect(dialog(page)).toHaveCount(0);
     expect(page.url()).toBe(url);
-    // Settings and Usage swap straight to each other
+    // Settings is a pop-up: a click on Usage's spot lands on the dim and closes Settings, nothing opens
     await settingsIcon(page).click();
-    await usageIcon(page).click();
-    await expect(dialog(page)).toBeVisible();
+    await expect(page.locator(".set")).toBeVisible();
+    await clickSpot(page, usageIcon(page));
     await expect(page.locator(".set")).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    // Models is its own pop-up; its Close gives the chat back
-    const models = page.getByRole("dialog", { name: "Models" });
+    await expect(dialog(page)).toHaveCount(0);
+    // Models opens its pop-up, and its icon's spot closes it again
     await modelsIcon(page).click();
-    await expect(models).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Models" })).toBeVisible();
     await expect(modelsIcon(page)).toHaveAttribute("aria-pressed", "true");
-    await models.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(models).toHaveCount(0);
+    await clickSpot(page, modelsIcon(page));
+    await expect(page.locator(".dlg")).toHaveCount(0);
     expect(await tl.evaluate((el) => el.scrollTop)).toBe(top);
   });
 });

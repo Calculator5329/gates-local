@@ -41,7 +41,7 @@ test("the Tools switch decides whether a chat is offered tools", async ({ page, 
   await section(page, "Library");
   await page.getByRole("button", { name: "Add folder…" }).click();
   await page.getByRole("textbox", { name: "Add a folder path" }).fill(folder);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.locator(".set").getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.locator(".srow .sl b", { hasText: "tools-notes" })).toBeVisible();
   await page.keyboard.press("Escape");
   await waitReady(page);
