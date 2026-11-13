@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-13: Setup says when a message goes once
+
+- While Ollama installs, the message box says "Ask anything…" like any
+  other time. A message you send then waits in the queue with a clock;
+  its tip says it sends when setup finishes. The queue row no longer
+  says "After setup" beside it.
+
+## 2026-11-13: Attach any file; the model reads it with its tools
+
+- Drop a file on the chat, pick it from + › Attach a file, or paste a
+  copied file, and it attaches even when it is not a picture: a text
+  file, a CSV, a PDF, a log. It shows as a chip with its name and size.
+- Gates Local keeps its own copy. The model is told the file's name,
+  size and type, and reads it with its read tool when it needs to, a
+  page at a time, so a long file does not fill the conversation.
+- Reading it needs tools on. With tools off the chip says "tools off",
+  its tip says the model can't open the file until tools are on, and
+  the wrench beside it opens Settings › Tools. You can still send.
+- Only that chat can read the file. Deleting the chat deletes the copy.
+- A file over 50 MB is not attached; its chip says so. A folder still
+  goes to your Library instead.
+- The chip stays on your message after a reload, and on a draft or a
+  queued message.
+
 ## 2026-11-13: A loading model is a ring on Send, and the model button stays still
 
 - While a model loaded, the model button showed it three ways: a spinner

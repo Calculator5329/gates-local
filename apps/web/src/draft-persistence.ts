@@ -1,4 +1,5 @@
 // IndexedDB can hold image drafts larger than localStorage's small text quota.
+import type { AttachedFile } from "@gates-local/contracts";
 import { getState, setState, subscribe, type Queued } from "./store.ts";
 import { type DraftKey, type DraftWords, cancelQueuedDraft, draftRevision, restoreDrafts, savedDrafts, subscribeDrafts } from "./drafts.ts";
 
@@ -6,6 +7,14 @@ interface Slot { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords };
 interface Saved { draft: string; images: readonly string[]; queued: readonly Queued[]; editing: string | null; sendId?: string; sendThreadId?: string; threadId?: DraftKey; slots?: readonly Slot[]; }
 const record = (v: unknown): Record<string, unknown> | undefined => typeof v === "object" && v !== null ? v as Record<string, unknown> : undefined;
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 8 && v.every(i => typeof i === "string" && i.length <= 14 * 1024 * 1024);
+/** Attached files are small references to the server's copies; anything malformed is dropped, never sent. */
+const attachedFiles = (v: unknown): AttachedFile[] => Array.isArray(v) ? v.flatMap(i => {
+  const f = record(i);
+  return f && typeof f["path"] === "string" && /^files\/att-[a-f0-9-]{36}$/.test(f["path"]) && typeof f["name"] === "string" && f["name"] !== ""
+    && typeof f["size"] === "number" && Number.isInteger(f["size"]) && f["size"] >= 0 && typeof f["type"] === "string"
+    ? [{ path: f["path"], name: f["name"], size: f["size"], type: f["type"] }] : [];
+}).slice(0, 8) : [];
+const withFiles = (v: unknown) => { const files = attachedFiles(v); return files.length ? { files } : {}; };
 const attachmentRevision = (value: unknown): string | undefined => {
   const saved = record(value);
   return saved?.["format"] === 2 && typeof saved["attachmentsRevision"] === "string" ? saved["attachmentsRevision"] : undefined;
@@ -19,13 +28,13 @@ export function recoverDraft(value: unknown): Saved | undefined {
   for (const item of saved["queued"]) {
     const q = record(item);
     if (!q || typeof q["id"] !== "string" || typeof q["threadId"] !== "string" || typeof q["text"] !== "string" || typeof q["at"] !== "number" || !Number.isFinite(q["at"]) || (q["images"] !== undefined && !strings(q["images"]))) return;
-    queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], waitFor: "reply", held: true, ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
+    queued.push({ id: q["id"], threadId: q["threadId"], text: q["text"], at: q["at"], images: q["images"] ?? [], ...withFiles(q["files"]), waitFor: "reply", held: true, ...(typeof q["messageId"] === "string" ? { messageId: q["messageId"] } : {}), ...(typeof q["model"] === "string" ? { model: q["model"] } : {}) });
   }
   const editing = typeof saved["editing"] === "string" && queued.some(q => q.id === saved["editing"]) ? saved["editing"] : null;
   const words = (input: unknown): DraftWords | undefined => {
     const w = record(input);
     if (!w || typeof w["text"] !== "string" || !strings(w["images"]) || w["sendId"] !== null && typeof w["sendId"] !== "string") return;
-    return { text: w["text"], images: w["images"], sendId: w["sendId"] };
+    return { text: w["text"], images: w["images"], ...withFiles(w["files"]), sendId: w["sendId"] };
   };
   let slots: Slot[] | undefined;
   if (saved["slots"] !== undefined) {
@@ -137,7 +146,8 @@ export async function watchDraft(key: string): Promise<() => void> {
             if (reuse && cachedRevision !== undefined) revision = cachedRevision;
             else store.put({ images: snapshot.images, slots: snapshot.slots?.map(slot => ({ images: slot.key === snapshot.threadId ? [] : slot.draft.images, before: slot.draft.beforeEdit?.images ?? [] })), queued: Object.fromEntries(snapshot.queued.filter(q => q.images?.length).map(q => [q.id, q.images])) }, [key, "attachments"]);
             const { images: _images, queued, slots, ...text } = snapshot;
-            const metadata = slots?.map(slot => ({ key: slot.key, draft: { ...(slot.key === snapshot.threadId ? {} : { text: slot.draft.text }), sendId: slot.draft.sendId, ...(slot.draft.beforeEdit ? { beforeEdit: { text: slot.draft.beforeEdit.text, sendId: slot.draft.beforeEdit.sendId } } : {}) } }));
+            const metadata = slots?.map(slot => ({ key: slot.key, draft: { ...(slot.key === snapshot.threadId ? {} : { text: slot.draft.text }), ...(slot.draft.files?.length ? { files: slot.draft.files } : {}), sendId: slot.draft.sendId,
+              ...(slot.draft.beforeEdit ? { beforeEdit: { text: slot.draft.beforeEdit.text, ...(slot.draft.beforeEdit.files?.length ? { files: slot.draft.beforeEdit.files } : {}), sendId: slot.draft.beforeEdit.sendId } } : {}) } }));
             store.put({ format: 2, attachmentsRevision: revision, ...text, slots: metadata, queued: queued.map(({ images: _queuedImages, ...q }) => q) }, key);
             writesQueued = true;
             if (commitRequested) requestCommit?.();

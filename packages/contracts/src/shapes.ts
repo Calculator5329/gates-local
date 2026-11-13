@@ -100,6 +100,22 @@ export const ImageEvent = S.Struct({
 });
 export type ImageEvent = typeof ImageEvent.Type;
 
+/**
+ * A non-image file attached to a message: the server's own copy in its data folder. The model
+ * never gets its contents in the prompt, only a line naming it; with tools on it reads the copy
+ * through the read tool, by its label, in this thread's turns only.
+ */
+export const AttachedFile = S.Struct({
+  /** Relative to the server data dir, `files/att-<uuid>`: a generated name, never the person's file name. */
+  path: S.String.check(S.isPattern(/^files\/att-[a-f0-9-]{36}$/)),
+  /** The original file name: the chip shows it and the model reads the file by it. */
+  name: S.String.check(S.isMinLength(1), S.isMaxLength(255)),
+  size: Count,
+  /** The browser's type for it, or "" when it gave none. */
+  type: S.String.check(S.isMaxLength(200)),
+});
+export type AttachedFile = typeof AttachedFile.Type;
+
 export const Message = S.Struct({
   /** Rows saved before 2026-11-13 may say that earlier images were left out; nothing shows it or writes it now. */
   contextNotice: S.optional(S.String),
@@ -115,6 +131,8 @@ export const Message = S.Struct({
   tools: S.optional(S.Array(ToolStep)),
   /** Attached user images or generated assistant images, relative to the server data dir; served over authenticated HTTP. */
   images: S.optional(S.Array(S.String)),
+  /** Files the person attached to this message (AttachedFile). Absent when none. */
+  files: S.optional(S.Array(AttachedFile)),
   /** Saved unfinished assistant text, not a completed answer. Absent on older messages. */
   interrupted: S.optional(S.Literal(true)),
   imageJob: S.optional(ImageEvent),

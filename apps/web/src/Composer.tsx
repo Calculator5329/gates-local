@@ -3,7 +3,7 @@
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
 import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
+import { type AttachedFile, IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
@@ -19,7 +19,7 @@ import { ImageMark } from "./ImageMark.tsx";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
 import { focusComposer } from "./Sidebar.tsx";
-import { AttachmentImages, RefusedFiles } from "./attachment-images.tsx";
+import { AttachedFiles, AttachmentImages, RefusedFiles } from "./attachment-images.tsx";
 import { DropMarker } from "./file-drop.tsx";
 import { attachFiles, imageReason, paste } from "./paste.ts";
 import { useRefused } from "./refused-files.ts";
@@ -50,6 +50,7 @@ const pctOf = (done: number, total: number | undefined) => (total ? Math.round((
 // The first send replaces Draft's composer with the thread's in the same commit.
 // Transfer primary-action focus only to that immediate replacement.
 let primaryFocus = false;
+const NO_FILES: readonly AttachedFile[] = [];
 
 /** Tokens the open thread holds: the last reply's prompt plus its answer. */
 function usedTokens(s: State): number {
@@ -103,6 +104,7 @@ export function Composer() {
   const image = useStore((s) => s.image);
   const hasText = useDraft(d => d.text.trim() !== "");
   const images = useDraft(d => d.images);
+  const files = useDraft(d => d.files ?? NO_FILES);
   const refused = useRefused().length;
   const replacement = useDraft(d => d.version);
   const pasting = useStore((s) => s.pasting);
@@ -144,8 +146,8 @@ export function Composer() {
   // Preparing a reply is user intent, not an idle startup download. The
   // renderer can arrive while the person types, before the first Send.
   useEffect(() => {
-    if (hasText || images.length) void threadScreen.load();
-  }, [hasText, images.length]);
+    if (hasText || images.length || files.length) void threadScreen.load();
+  }, [hasText, images.length, files.length]);
   useLayoutEffect(() => {
     const button = primary.current;
     if (primaryFocus) button?.focus();
@@ -171,7 +173,7 @@ export function Composer() {
   const waitsOnLoad = loadingNow && isStreaming && !drawingNow;
   // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
   const v = fit === undefined ? undefined : verdictOf(fit);
-  const text = hasText || images.length > 0;
+  const text = hasText || images.length > 0 || files.length > 0;
   const imageNo = imageReason(models, model, images, tag => describeModel(tag, catalog).name);
   const why = chatBlockedReason(models, model); // a download would not help: old Ollama, or the model is still being checked
   const noModel = (model === undefined || why !== undefined) && !queueable;
@@ -215,10 +217,10 @@ export function Composer() {
   else if (!text) sendTip = "Type a message to send";
   else if (freed) sendTip = `Send${enter}. Another chat's reply is using this memory, so it stops first`;
   if (imageNo !== null) sendTip = esc(imageNo);
-  if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first. A message carries text and images only.`;
-  if (pasting) sendTip = "Preparing pasted images. They will be ready in a moment.";
+  if (refused) sendTip = `Remove the file${refused === 1 ? "" : "s"} marked not sent first.`;
+  if (pasting) sendTip = "Attaching. It will be ready in a moment.";
   // Image on: the words go to the image model, so the chat model's readiness, memory and sight do not count.
-  const drawNo = !drawing ? null : images.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : unset ? "Images are not set up on this computer." : pictured === undefined ? "Reading the image models…" : null;
+  const drawNo = !drawing ? null : images.length > 0 || files.length > 0 ? "Image makes a picture from words alone. Remove the attachments, or turn Image off." : !online ? "Gates Local isn't answering." : unset ? "Images are not set up on this computer." : pictured === undefined ? "Reading the image models…" : null;
   if (drawing && !editing && !isStreaming && !refused && !pasting) sendTip = drawNo ?? (text ? `Make the image${enter}` : "Describe the image to make");
   const sendDisabled = drawing ? !text || drawNo !== null || refused > 0 || pasting > 0
     : (blocked && !queueable) || (!blocked && memNo) || noModel || !text || imageNo !== null || refused > 0 || pasting > 0;
@@ -273,7 +275,7 @@ export function Composer() {
           submit();
         }}
       >
-        <div className="att"><AttachmentImages images={images} removable /><RefusedFiles /></div>
+        <div className="att"><AttachmentImages images={images} removable /><AttachedFiles files={files} removable /><RefusedFiles /></div>
         {/* "+ › Attach a file" opens this; like T3 Code's paperclip it takes any file, and each is sorted at its chip */}
         <input
           type="file"
@@ -281,9 +283,9 @@ export function Composer() {
           multiple
           hidden
           onChange={(e) => {
-            const files = Array.from(e.currentTarget.files ?? []);
+            const chosen = Array.from(e.currentTarget.files ?? []);
             e.currentTarget.value = "";
-            void attachFiles(files);
+            void attachFiles(chosen);
           }}
         />
         <DraftTextarea key={voiceThread} textarea={ta} placeholder={placeholder} submit={submit} />
@@ -464,7 +466,7 @@ export const DOWNLOAD_STOPPED_TIP = "Download stopped. Download a model to send 
 export function queueWords(q: Queued, editing: boolean, first: string | undefined, model: string | undefined): string | null {
   if (editing) return "Editing";
   if (q.waitFor === "download") return first === undefined && (q.model ?? model) === undefined ? "Download stopped" : AFTER_DOWNLOAD;
-  if (q.waitFor === "setup") return "After setup";
+  if (q.waitFor === "setup") return AFTER_SETUP;
   if (q.retry === "running") return RETRYING;
   if (q.retry === "failed") return RETRY_FAILED;
   return q.held ? "On hold" : null;
@@ -475,7 +477,10 @@ const RETRYING = "Retrying the reply before it";
 const RETRY_FAILED = "On hold: the reply before it didn't finish";
 /** A message waiting for the first download: the row shows a clock, and this is its tip and its spoken words (chat row 29). */
 export const AFTER_DOWNLOAD = "Sends when the download finishes";
-const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED || words === AFTER_DOWNLOAD ? words : undefined;
+/** The same clock for a message waiting for setup (chat row 31). */
+export const AFTER_SETUP = "Sends when setup finishes";
+const CLOCKED = new Set<string | null>([AFTER_DOWNLOAD, AFTER_SETUP]);
+const tipFor = (words: string | null) => words === "Download stopped" ? DOWNLOAD_STOPPED_TIP : words === RETRYING || words === RETRY_FAILED || CLOCKED.has(words) ? words ?? undefined : undefined;
 
 /** What is running in the open chat, as a word, so a reader re-renders when that changes and not at every token. */
 const runningKind = (s: State): "image" | "reply" | null => {
@@ -516,10 +521,10 @@ function QueueTray() {
         return (
           <li key={q.id} className="qt-r" aria-label={`Queued ${q.draw === undefined ? "message" : "image"} ${i + 1} of ${n}`}>
             <span className="qt-k" data-tip={q.draw === undefined ? "Chat" : "Image"}><Icon id={q.draw === undefined ? "chat" : "image"} cls="s14" /></span>
-            <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}</span>
+            <span className="qt-t">{q.text}{q.images?.length ? ` · ${q.images.length} image${q.images.length === 1 ? "" : "s"}` : ""}{q.files?.length ? ` · ${q.files.length} file${q.files.length === 1 ? "" : "s"}` : ""}</span>
             {/* always there, empty while the message just waits, so a reader announces the word when it appears */}
             <span className="qt-s" role="status" data-tip={tipFor(words)}>
-              {words === AFTER_DOWNLOAD ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
+              {CLOCKED.has(words) ? <><Icon id="clock" cls="s14" /><span className="vh">{words}</span></> : words ?? ""}
             </span>
             {q.waitFor === "reply" && !editing ? (
               <button type="button" className="ibtn xs" aria-label="Send now" data-send-now data-tip={nowTip} onClick={andFocus(() => sendQueuedNow(q.id))}>

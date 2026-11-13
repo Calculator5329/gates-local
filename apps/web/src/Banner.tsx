@@ -71,7 +71,8 @@ export function portOf(baseUrl: string | undefined): string {
 
 export const PLACEHOLDER: Record<Rt, string> = {
   ready: "Ask anything…",
-  installing: "Type now; it sends when setup finishes",
+  // a message typed during setup says when it goes once, in its queue row (chat row 31)
+  installing: "Ask anything…",
   starting: "Chat starts when Ollama is running…",
   missing: "Install Ollama to start chatting",
   wrong: "Chat starts when Ollama answers on its port",

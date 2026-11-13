@@ -1,6 +1,6 @@
 // Shared shapes for the thread store. Plain TypeScript; packages/contracts
 // mirrors Thread and Message as Effect Schemas for the wire.
-import type { ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
+import type { AttachedFile, ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
 
 export type Role = "user" | "assistant" | "system";
 
@@ -56,6 +56,8 @@ export interface Message {
   tools?: ToolStepRecord[];
   /** Paths of images the turn made, inside the app data dir. */
   images?: string[];
+  /** Files the person attached: copies under files/ in the app data dir. */
+  files?: AttachedFile[];
   interrupted?: true;
   imageJob?: ImageEvent;
 }
@@ -80,5 +82,7 @@ export interface NewMessage {
   tools?: ToolStepRecord[];
   /** Paths of images the turn made, inside the app data dir. */
   images?: string[];
+  /** Files the person attached: copies under files/ in the app data dir. */
+  files?: AttachedFile[];
   interrupted?: true;
 }

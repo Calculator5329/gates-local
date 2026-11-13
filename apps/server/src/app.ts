@@ -9,9 +9,11 @@
 import { randomUUID } from "node:crypto";
 import { accountImages, checkAttachments, imagePrompt, saveAttachments, visionHistory } from "./chat/attachments.ts";
 import { imageLifecycle } from "./chat/image-lifecycle.ts";
+import { checkFiles, fileLifecycle, fileLine, fileSources, saveFile } from "./chat/files.ts";
+import type { LibraryEntry } from "../../../packages/harness/src/index.ts";
 import { readThumbnail } from "./pictures/thumbs.ts";
 import { fitToWindow, OMITTED_IMAGE } from "./chat/window.ts";
-import type { BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep } from "@gates-local/contracts";
+import type { AttachedFile, BlockingTurn, Channel, ImageChoice, Message, Params, Payload, ShellStatus, SyncChange, ToolStep } from "@gates-local/contracts";
 import { streamTurn, type UsageFigures } from "./chat/stream.ts";
 import { streamToolTurn } from "./chat/tools.ts";
 import type { Sources } from "./sources/index.ts";
@@ -241,6 +243,9 @@ export function createApp(deps: AppDeps): App {
   const imageFiles = deps.dataDir ? imageLifecycle(deps.dataDir, store) : undefined;
   // A failed start-up sweep only leaves old pasted files behind; it must not fail every later send and delete that waits for it.
   const imageReady = (imageFiles?.sweep() ?? Promise.resolve()).catch((error: unknown) => log(`image sweep at start-up failed: ${String(error)}`));
+  // Attached files' copies: the same rules as pasted images, in their own queue.
+  const attachedFiles = deps.dataDir ? fileLifecycle(deps.dataDir, store) : undefined;
+  void attachedFiles?.sweep().catch((error: unknown) => log(`attached-file sweep at start-up failed: ${String(error)}`));
   const draftEveryMs = deps.draftEveryMs ?? 1000;
   const turns = new Map<string, Turn>();
   const byThread = new Map<string, Turn>();
@@ -371,7 +376,7 @@ export function createApp(deps: AppDeps): App {
     return job;
   };
 
-  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; settings?: TurnSettings } = {}) => {
+  const runTurn = async (turn: Turn, end: () => void, baseUrl: string, model: string, numCtx: number, messages: TurnMessage[], load?: TurnLoad, options: { tools?: boolean; think?: boolean; settings?: TurnSettings; files?: readonly LibraryEntry[] } = {}) => {
     const { turnId, threadId, controller } = turn;
     let counted = false;
     const emit = (event: Exclude<WireEvent, TurnEnd>) => {
@@ -458,7 +463,8 @@ export function createApp(deps: AppDeps): App {
     };
     try {
       const wantsTools = options.tools ?? deps.toolsEnabled?.() ?? false;
-      const sources = wantsTools ? deps.sources?.entries() ?? [] : [];
+      // This thread's attached files join the Library for its own turns only.
+      const sources = wantsTools ? [...deps.sources?.entries() ?? [], ...options.files ?? []] : [];
       // The image tool is offered only while Tools › Make images is on, with this thread's preset and
       // size, else the app's last pick.
       const toolChoice = wantsTools && deps.image !== undefined ? deps.imageTool?.() : undefined;
@@ -717,9 +723,12 @@ export function createApp(deps: AppDeps): App {
         // After the turn: its cancel takes back what it queued, and a finished turn's jobs are still here.
         await cancelThreadImages(threadId);
         await imageReady;
-        const files = store.getThread(threadId).messages.flatMap(message => message.images ?? []);
+        const messages = store.getThread(threadId).messages;
+        const files = messages.flatMap(message => message.images ?? []);
+        const attached = messages.flatMap(message => message.files ?? []).map(file => file.path);
         store.deleteThread(threadId);
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after thread deletion failed: ${String(error)}`));
+        await attachedFiles?.collect(attached).catch((error: unknown) => log(`attached-file cleanup after thread deletion failed: ${String(error)}`));
       } finally {
         if (marked) deleting.delete(threadId);
       }
@@ -734,13 +743,22 @@ export function createApp(deps: AppDeps): App {
         // Deleting any other message stops the reply and keeps its words.
         await cancelThreadTurn(threadId, byThread.get(threadId)?.start?.userMessage.id === messageId);
         await imageReady;
-        const files = store.getThread(threadId).messages.find(message => message.id === messageId)?.images ?? [];
+        const message = store.getThread(threadId).messages.find(m => m.id === messageId);
+        const files = message?.images ?? [];
+        const attached = (message?.files ?? []).map(file => file.path);
         store.deleteMessage(threadId, messageId);
         await imageFiles?.collect(files).catch((error: unknown) => log(`image cleanup after message deletion failed: ${String(error)}`));
+        await attachedFiles?.collect(attached).catch((error: unknown) => log(`attached-file cleanup after message deletion failed: ${String(error)}`));
       } finally { if (marked) deleting.delete(threadId); }
       push("threads.changed", { threadId });
       pushSpeeds();
       return { messageId };
+    },
+
+    "files.attach": async (params) => {
+      if (deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
+      try { return await saveFile(deps.dataDir, params); }
+      catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : `${params.name} could not be attached.`); }
     },
 
     "models.list": async () => catalog.current() ?? (await catalog.refresh()).models,
@@ -765,7 +783,7 @@ export function createApp(deps: AppDeps): App {
     },
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
-    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], files: attaching = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
@@ -784,10 +802,12 @@ export function createApp(deps: AppDeps): App {
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
       if (draw !== undefined) {
         const kept = loaded.thread.imageCount ?? 1;
-        return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0);
+        return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0 || attaching.length > 0);
       }
       try { checkAttachments(images); }
       catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
+      if (attaching.length && deps.dataDir === undefined) throw new AppError("image-input", "File storage is not available.");
+      const attachError = (e: unknown): never => { throw new AppError("image-input", e instanceof Error ? e.message : "An attached file is no longer available. Attach it again; your words are kept."); };
       const settings = turnSettings(deps.settings?.get(), model);
       const { turn, end: endTurn } = reserve(threadId, model);
       let releaseGpu: (() => void) | undefined;
@@ -803,6 +823,11 @@ export function createApp(deps: AppDeps): App {
         // Before the first await, so models.remove sees this turn at once (throws while a removal runs).
         load = deps.models?.loader?.reserve(model);
         await imageReady;
+        const files = deps.dataDir ? await checkFiles(deps.dataDir, attaching).catch(attachError) : [];
+        // The thread's files, this message's included, open by label in this turn when tools are on.
+        const wantsTools = tools ?? deps.toolsEnabled?.() ?? false;
+        const fileEntries = wantsTools && deps.dataDir ? await fileSources(deps.dataDir, [...prior.flatMap(m => m.files ?? []), ...files], deps.sources?.entries() ?? []).catch(attachError) : new Map<string, LibraryEntry>();
+        const withFiles = (text: string, attached: readonly AttachedFile[] | undefined) => attached?.length ? [text, ...attached.map(f => fileLine(f, fileEntries.get(f.path)))].filter(Boolean).join("\n") : text;
         // A runtime switch ends this turn now, at every phase; the switch waits for its end().
         // The loader's close (shutdown) cancels it the way chat.cancel does.
         const reservation = load;
@@ -920,11 +945,11 @@ export function createApp(deps: AppDeps): App {
         if (report.verdict === "refuse") throw refusal(report);
         if (turnSignal.aborted) throw stoppedEarly();
         const history = [...prior.map((m): TurnMessage => {
-          const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : m.content;
+          const priorContent = m.imageJob ? `Image job ${m.imageJob.state}${m.imageJob.message ? `: ${m.imageJob.message}` : ""}` : withFiles(m.content, m.files);
           if (!m.images?.length) return { role: m.role, content: priorContent };
           if (vision && m.role === "user") return { role: m.role, content: priorContent, images: m.images };
           return { role: m.role, content: `${priorContent}\n${OMITTED_IMAGE}`, imageTokens: m.images.map(() => 0) };
-        }), { role: "user" as const, content, ...(images.length ? { images } : {}) }].map(imagePrompt);
+        }), { role: "user" as const, content: withFiles(content, files), ...(images.length ? { images } : {}) }].map(imagePrompt);
         // Preserve text-only streaming errors; images must fit before their bytes are saved.
         const imageContext = images.length > 0 || prior.some(m => m.images?.length);
         const firstWindow = imageContext ? fitToWindow(history, report.numCtx) : { ok: true as const, messages: history };
@@ -938,8 +963,10 @@ export function createApp(deps: AppDeps): App {
         if (savedImages.length) windowed.messages[windowed.messages.length - 1] = { ...windowed.messages.at(-1)!, images: savedImages };
         const modelHistory = vision && deps.dataDir ? await visionHistory(deps.dataDir, windowed.messages).catch(imageError) : windowed.messages;
         if (turnSignal.aborted) throw stoppedEarly();
-        const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}) }, replaced);
-        const userMessage = imageFiles ? await imageFiles.save(savedImages, append).catch(imageError) : append();
+        const append = () => store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content, ...(savedImages.length ? { images: savedImages } : {}), ...(files.length ? { files } : {}) }, replaced);
+        const withImages = () => imageFiles ? imageFiles.save(savedImages, append).catch(imageError) : append();
+        // A file removed since the check above (its day ran out) is said, not saved as a dead reference.
+        const userMessage = attachedFiles && files.length ? await attachedFiles.save(files, withImages).catch(attachError) : await withImages();
         push("threads.changed", { threadId });
         started = true;
         turn.started = true;
@@ -947,7 +974,7 @@ export function createApp(deps: AppDeps): App {
         turn.start = { type: "start", model, userMessage };
         push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
         fitTable.changed();
-        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings });
+        void runTurn(turn, end, baseUrl, model, report.numCtx, modelHistory, load, { tools, think, settings, files: [...fileEntries.values()] });
         return { turnId: turn.turnId, userMessage };
       } finally {
         try {

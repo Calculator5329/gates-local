@@ -4,7 +4,7 @@
 // real Ollama, and the runtime only ever runs discover() (never ensure()).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -1778,5 +1778,82 @@ describe("models.speed", () => {
     await r.client.call("threads.delete", { threadId: t.id });
     await r.waitFor("models.speed", (p) => p.length === 0);
     expect(await r.client.call("models.speed", {})).toEqual([]);
+  });
+});
+
+const body64 = (text: string) => Buffer.from(text).toString("base64");
+describe("attached files (chat row 3: the model reads a copy by its label, never the whole file in the prompt)", () => {
+  type Sent = { messages: Array<{ role: string; content: string }> };
+  /** A tool model that reads /library/<id> once, then answers; the prompts and the tool results it saw. */
+  function reader(r: Rig, id: string) {
+    const prompts: string[] = [], results: string[] = [];
+    r.setChat(async (res, body) => {
+      const last = (body as Sent).messages.at(-1)!;
+      if (last.role === "tool") { results.push(last.content); return stream(res, [piece("Read it."), doneLine]); }
+      prompts.push(last.content);
+      return stream(res, [line({ model: MODEL, message: { role: "assistant", content: "", tool_calls: [{ function: { name: "read", arguments: { path: `/library/${id}` } } }] }, done: true, done_reason: "stop" })]);
+    });
+    return { prompts, results };
+  }
+
+  it("the copy has a generated name, the prompt names it in one line, the read tool opens it by label, a reload keeps it, the thread's delete removes it", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const dataDir = path.dirname(r.store.dbPath);
+    const file = await r.client.call("files.attach", { name: "Notes 2026.txt", type: "text/plain", data: body64("SECRET-WORDS in the file") });
+    expect(file).toMatchObject({ name: "Notes 2026.txt", size: 24, type: "text/plain" });
+    expect(file.path).toMatch(/^files\/att-[a-f0-9-]{36}$/);
+    const copy = path.join(dataDir, file.path);
+    expect(readFileSync(copy, "utf8")).toBe("SECRET-WORDS in the file");
+
+    const seen = reader(r, "notes-2026-txt");
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "what does it say?", model: MODEL, numCtx: 16384, tools: true, files: [file] });
+    await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+    expect(seen.prompts[0]).toContain('[Attached file "Notes 2026.txt" (24 B, text/plain): read it with the read tool at /library/notes-2026-txt.]');
+    expect(seen.prompts[0]).not.toContain("SECRET-WORDS");
+    expect(seen.results[0]).toContain("SECRET-WORDS in the file");
+    // Saved as the person wrote it; the line is the model's only.
+    const saved = (await r.client.call("threads.get", { threadId: t.id })).messages[0]!;
+    expect(saved).toMatchObject({ content: "what does it say?", files: [file] });
+
+    // Another thread, with tools on through a file of its own, cannot read it.
+    const other = await r.client.call("threads.create", {});
+    const own = await r.client.call("files.attach", { name: "other.txt", type: "text/plain", data: body64("other") });
+    const elsewhere = reader(r, "notes-2026-txt");
+    const nope = await r.client.call("chat.send", { threadId: other.id, content: "and here?", model: MODEL, numCtx: 16384, tools: true, files: [own] });
+    await r.waitFor("chat.event", p => p.turnId === nope.turnId && p.event.type === "done");
+    expect(elsewhere.results).toEqual([expect.stringContaining("Path is outside your Library")]);
+
+    await r.client.call("threads.delete", { threadId: t.id });
+    expect(existsSync(copy)).toBe(false);
+  });
+
+  it("with tools off the line says the model cannot open it, and the send still goes", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const file = await r.client.call("files.attach", { name: "data.csv", type: "text/csv", data: body64("a,b\n1,2\n") });
+    const prompts: string[] = [];
+    r.setChat(async (res, body) => { prompts.push((body as Sent).messages.at(-1)!.content); return stream(res, [piece("ok"), doneLine]); });
+    const t = await r.client.call("threads.create", {});
+    const sent = await r.client.call("chat.send", { threadId: t.id, content: "", model: MODEL, numCtx: 16384, tools: false, files: [file] });
+    await r.waitFor("chat.event", p => p.turnId === sent.turnId && p.event.type === "done");
+    expect(prompts[0]).toBe('[Attached file "data.csv" (8 B, text/csv): you cannot open it in this reply, because tools are off.]');
+  });
+
+  it("a link in the files folder is refused at send, and deleting never touches a file outside the folder", async () => {
+    const r = await rig({ show: caps(["completion", "tools"]) });
+    const dataDir = path.dirname(r.store.dbPath);
+    const outside = path.join(dataDir, "outside.txt");
+    writeFileSync(outside, "keep me");
+    const linked = `files/att-${randomUUID()}`;
+    mkdirSync(path.join(dataDir, "files"), { recursive: true });
+    symlinkSync(outside, path.join(dataDir, linked));
+    const t = await r.client.call("threads.create", {});
+    const refused = await rejection(r.client.call("chat.send", { threadId: t.id, content: "read", model: MODEL, numCtx: 16384, files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] }));
+    expect(refused.message).toBe("outside.txt is no longer attached. Attach it again; your words are kept.");
+    // A row that names the link anyway: its delete removes the link in the folder, never what it points at.
+    r.store.appendMessage({ threadId: t.id, role: "user", content: "linked", files: [{ path: linked, name: "outside.txt", size: 7, type: "" }] });
+    await r.client.call("threads.delete", { threadId: t.id });
+    expect(readFileSync(outside, "utf8")).toBe("keep me");
+    expect(existsSync(path.join(dataDir, linked))).toBe(false);
   });
 });

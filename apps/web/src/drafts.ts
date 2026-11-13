@@ -1,12 +1,16 @@
 import { useSyncExternalStore } from "react";
+import type { AttachedFile } from "@gates-local/contracts";
 import { getState, setState, useStore } from "./store.ts";
 
 export type DraftKey = string | null;
 export interface DraftWords {
   readonly text: string;
   readonly images: readonly string[];
+  /** Non-image files already copied to the server; the draft keeps only their names. */
+  readonly files?: readonly AttachedFile[];
   readonly sendId: string | null;
 }
+const holds = (d: DraftWords) => d.text !== "" || d.images.length > 0 || (d.files?.length ?? 0) > 0;
 export interface Draft extends DraftWords {
   /** Replacement identity: typing keeps it; clears, queued edits and restores replace it. */
   readonly version: number;
@@ -33,7 +37,8 @@ function changed(): void { revision++; for (const listener of listeners) listene
 
 export function replaceDraft(key: DraftKey, patch: Partial<DraftWords>, typing = false): void {
   const previous = getDraft(key);
-  const edited = patch.text !== undefined && patch.text !== previous.text || patch.images !== undefined && patch.images !== previous.images;
+  const edited = patch.text !== undefined && patch.text !== previous.text || patch.images !== undefined && patch.images !== previous.images
+    || patch.files !== undefined && patch.files !== previous.files;
   slots.delete(key); // insertion order is last edit order, never navigation order
   slots.set(key, { ...previous, ...patch, sendId: patch.sendId !== undefined ? patch.sendId : edited ? null : previous.sendId,
     version: typing && patch.text !== "" ? previous.version : ++version });
@@ -59,16 +64,17 @@ export function renewDraft(key: DraftKey): void {
 export function moveDraft(from: DraftKey, to: DraftKey): void {
   const draft = getDraft(from);
   slots.delete(from);
-  if (draft.text !== "" || draft.images.length > 0 || draft.beforeEdit) {
+  if (holds(draft) || draft.beforeEdit) {
     slots.delete(to);
     slots.set(to, { ...draft, version: ++version });
   }
   changed();
 }
-export function beginQueuedDraft(key: DraftKey, text: string, images: readonly string[], sendId: string | null): void {
+export function beginQueuedDraft(key: DraftKey, text: string, images: readonly string[], sendId: string | null, files?: readonly AttachedFile[]): void {
   const old = getDraft(key);
   slots.delete(key);
-  slots.set(key, { text, images, sendId, version: ++version, beforeEdit: old.beforeEdit ?? { text: old.text, images: old.images, sendId: old.sendId } });
+  slots.set(key, { text, images, ...(files?.length ? { files } : {}), sendId, version: ++version,
+    beforeEdit: old.beforeEdit ?? { text: old.text, images: old.images, ...(old.files?.length ? { files: old.files } : {}), sendId: old.sendId } });
   changed();
 }
 export function cancelQueuedDraft(key: DraftKey): void {
@@ -80,7 +86,7 @@ export function cancelQueuedDraft(key: DraftKey): void {
 
 /** Persist the 32 most recently edited nonempty slots, with images in the newest two. */
 export function savedDrafts(): readonly { key: DraftKey; draft: Draft }[] {
-  const drafts = [...slots].filter(([, d]) => d.text !== "" || d.images.length > 0 || d.beforeEdit !== undefined).slice(-32);
+  const drafts = [...slots].filter(([, d]) => holds(d) || d.beforeEdit !== undefined).slice(-32);
   let imageSlots = 0;
   return drafts.toReversed().map(([key, draft]) => {
     const keep = draft.images.length > 0 || (draft.beforeEdit?.images.length ?? 0) > 0 ? ++imageSlots <= 2 : true;
@@ -89,7 +95,7 @@ export function savedDrafts(): readonly { key: DraftKey; draft: Draft }[] {
   }).toReversed();
 }
 export function restoreDrafts(drafts: readonly { key: DraftKey; draft: DraftWords & { beforeEdit?: DraftWords } }[]): ReadonlySet<DraftKey> {
-  const memory = new Map([...slots].filter(([, draft]) => draft.text !== "" || draft.images.length > 0 || draft.beforeEdit !== undefined));
+  const memory = new Map([...slots].filter(([, draft]) => holds(draft) || draft.beforeEdit !== undefined));
   const restored = new Set<DraftKey>();
   slots.clear();
   for (const { key, draft } of drafts) if (!memory.has(key)) {

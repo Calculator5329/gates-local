@@ -27,6 +27,7 @@ import type {
   Thread,
   ToolStep,
   UpdateStatus,
+  AttachedFile,
 } from "@gates-local/contracts";
 
 /** A v2 surface the server answers "not-implemented" for: the client hides it or says so. */
@@ -71,6 +72,7 @@ export interface LiveTurn {
   /** The user's text, shown until chat.send returns the saved message. */
   readonly pendingUser: string | null;
   readonly pendingImages?: readonly string[];
+  readonly pendingFiles?: readonly AttachedFile[];
   /** Set once the turn ended without a saved message. */
   readonly end?: { readonly kind: "stopped"; readonly secs: number } | { readonly kind: "error"; readonly code: string; readonly message: string };
   /** Stopped here, but the server has not ended the turn yet (no terminal event, or chat.send still unanswered); Retry waits. */
@@ -91,6 +93,7 @@ export interface LiveTurn {
 export interface Queued {
   readonly messageId?: string;
   readonly images?: readonly string[];
+  readonly files?: readonly AttachedFile[];
   readonly id: string;
   readonly threadId: string;
   readonly text: string;
@@ -112,6 +115,7 @@ export interface Queued {
 export interface StopAsk {
   readonly messageId?: string;
   readonly images?: readonly string[];
+  readonly files?: readonly AttachedFile[];
   readonly blocking: readonly BlockingTurn[];
   readonly content: string;
   readonly model: string;

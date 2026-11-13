@@ -5,7 +5,7 @@
 // thread opens with its last turns mounted and adds the older ones when idle.
 import { Fragment, memo, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { CatalogEntry, ImageEvent, Message, ToolStep } from "@gates-local/contracts";
+import type { AttachedFile, CatalogEntry, ImageEvent, Message, ToolStep } from "@gates-local/contracts";
 import { useCopy } from "./copy.ts";
 import { describeModel, noGpu, replyMeta, turnTime } from "./format.ts";
 import { Icon } from "./icons.tsx";
@@ -16,7 +16,7 @@ import { reveal } from "./reveal.ts";
 import { usePacedText } from "./paced.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { cancelImage, fileUrl, reloadThread, retry, retryImage } from "./session.ts";
-import { AttachmentImages } from "./attachment-images.tsx";
+import { AttachedFiles, AttachmentImages } from "./attachment-images.tsx";
 import { type LiveTurn, NA, type State, type StopNote, turnOf, useStore } from "./store.ts";
 import { thoughtOrigin, thoughtSecs, thoughtSecsAt, type WorkClock } from "./session/turn.ts";
 import { currentDraftKey, replaceDraft } from "./drafts.ts";
@@ -105,12 +105,12 @@ function ActRow({ text, meta, regen, regenOff = false, stop }: { text: string; m
   );
 }
 
-function UserBubble({ text, time, images = [], noted = false }: { text: string; time: string; images?: readonly string[] | undefined; noted?: boolean }) {
+function UserBubble({ text, time, images = [], files = [], noted = false }: { text: string; time: string; images?: readonly string[] | undefined; files?: readonly AttachedFile[] | undefined; noted?: boolean }) {
   return (
     <div className={noted ? "turn u noted" : "turn u"} tabIndex={0} aria-label="Your message">
       {/* the bubble, then its actions under it at its right edge; their row's space is always kept, so showing it moves nothing */}
       <div className="u-row">
-        <div className="bubble">{images.length ? <div className="user-images"><AttachmentImages images={images} /></div> : null}{text}</div>
+        <div className="bubble">{images.length || files.length ? <div className="user-images"><AttachmentImages images={images} /><AttachedFiles files={files} /></div> : null}{text}</div>
         <div className="u-act">
           <span className="tm">{time}</span>
           <button
@@ -120,7 +120,7 @@ function UserBubble({ text, time, images = [], noted = false }: { text: string; 
             data-tip="Edit"
             aria-label="Edit"
             onClick={() => {
-              replaceDraft(currentDraftKey(), { text, images });
+              replaceDraft(currentDraftKey(), { text, images, files });
               focusComposer(true);
             }}
           >
@@ -649,7 +649,7 @@ function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; 
 
 const UserTurn = memo(function UserTurn({ msg, noted }: { msg: Message; noted: boolean }) {
   countRender(msg.id);
-  return <UserBubble text={msg.content} images={msg.images} time={turnTime(msg.createdAt)} noted={noted} />;
+  return <UserBubble text={msg.content} images={msg.images} files={msg.files} time={turnTime(msg.createdAt)} noted={noted} />;
 });
 
 /** The status row before the first token (F50): "Thinking · 3 s", counting from 1 s. While the model reasons, its icon is the thinking row's bulb. */
@@ -791,11 +791,11 @@ const LiveReply = memo(function LiveReply({ threadId, msg, last, origin, token }
   if (msg === undefined && live === null) return null;
   // An Image turn's reply is its picture card, a row of its own with its progress and Cancel:
   // the turn shows its question until that is saved, and nothing of a chat reply.
-  if (msg === undefined && live?.image === true) return live.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null;
+  if (msg === undefined && live?.image === true) return live.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} files={live.pendingFiles} time={turnTime(live.startedAt)} /> : null;
   if (msg !== undefined) countRender(msg.id);
   return (
     <>
-      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} time={turnTime(live.startedAt)} /> : null}
+      {live?.pendingUser != null ? <UserBubble text={live.pendingUser} images={live.pendingImages} files={live.pendingFiles} time={turnTime(live.startedAt)} /> : null}
       <Reply msg={msg} live={live} text={text} paced={paced} thinking={msg?.thinking ?? live?.thinking ?? ""} tools={tools} clock={clock} secs={secs}
         allowedLinks={allowedLinks} note={note}
         meta={msg === undefined ? replyMeta(name, {}, live?.end?.kind === "stopped" && live.firstTokenAt !== undefined ? live.firstTokenAt - live.startedAt : undefined) : replyMeta(name, msg, ft)}

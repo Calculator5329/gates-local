@@ -166,6 +166,19 @@ it("F6: before the first read, Send claims nothing about Ollama or models and th
   expect(model).toMatch(/aria-label="Model"/);
 });
 
+it("chat row 31: during setup the field keeps Ask anything…, and a queued message says when it goes once, as a clock with a tip", () => {
+  const installing: State = { ...ready, runtime: { state: "installing", owner: "app", baseUrl: "http://127.0.0.1:5288", version: "test" } };
+  setFixture(installing);
+  expect(renderToStaticMarkup(createElement(Composer)), "the field is the ready field").toMatch(/placeholder="Ask anything…"/);
+  setFixture({ ...installing, queued: [{ id: "q", threadId: "thread", text: "hello", at: 1, waitFor: "setup" }] });
+  const html = renderToStaticMarkup(createElement(Composer));
+  const row = html.match(/<ul class="qt"[\s\S]*?<\/ul>/)?.[0] ?? "";
+  expect(row).toMatch(/data-tip="Sends when setup finishes"/);
+  expect(row).toMatch(/<span class="vh">Sends when setup finishes<\/span>/);
+  expect(row, "no word beside the clock").not.toMatch(/After setup/);
+  expect(html.split("setup finishes").length - 1, "said once, in the row").toBe(2);
+});
+
 it("after the two-second bound with nothing read, the composer says Connecting once and nothing about Ollama", () => {
   setFixture({ ...initial, conn: { kind: "open" }, runtime: undefined, models: undefined, model: undefined, hydrationSettled: false, bootWaited: true, view: "new", threadId: null });
   const html = renderToStaticMarkup(createElement(Composer));

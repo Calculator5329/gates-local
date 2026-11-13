@@ -5,6 +5,7 @@ import * as Result from "effect/Result";
 import * as S from "effect/Schema";
 import { SyncDomain, SyncMetadata, SyncNegotiation } from "./sync.ts";
 import {
+  AttachedFile,
   BlockingTurn,
   CatalogEntry,
   ChatEvent,
@@ -135,6 +136,15 @@ export const methods = {
   "threads.setImageCount": { params: S.Struct({ threadId: S.String, count: ImageCount }), result: Thread, phone: "allow" },
   "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny" },
   "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
+  /**
+   * Copy a non-image file the person attached into the server's data folder (up to 50 MB, base64 `data`).
+   * The answer goes in chat.send's `files`; a copy no message holds is removed after a day.
+   */
+  "files.attach": {
+    params: S.Struct({ name: S.String.check(S.isMinLength(1), S.isMaxLength(255)), type: S.String.check(S.isMaxLength(200)), data: S.String }),
+    result: AttachedFile,
+    phone: "allow",
+  },
   "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
   "models.refresh": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
   "runtime.status": { params: NoParams, result: RuntimeStatus, phone: "allow" },
@@ -157,6 +167,8 @@ export const methods = {
       retryOf: S.optional(S.String.check(S.isMaxLength(200))),
       /** Up to eight pasted image data URLs (10 MiB each), or this thread's saved user-image paths for Retry. */
       images: S.optional(S.Array(S.String).check(S.isMaxLength(8))),
+      /** Up to eight files copied by files.attach. The model gets a line naming each; with tools on it can read them in this thread. */
+      files: S.optional(S.Array(AttachedFile).check(S.isMaxLength(8))),
       /** Thinking for this turn; omitted means the settings default. */
       think: S.optional(S.Boolean),
       /** Tool calls for this turn; omitted means the settings default. */

@@ -1,11 +1,12 @@
 // Behavior follows T3 Code chat/ChatComposer.tsx at d137c5081ac5efb2b8ea9aec8b334e1bb4d0182a (MIT).
 // Native file-manager paths are the owner's explicit exception to image-first paste.
+// Other files attach by path (chat row 3): the server keeps a copy the model reads with its tools.
 import type { ClipboardEvent } from "react";
 import type { ModelInfo } from "@gates-local/contracts";
 import { setState } from "./store.ts";
 import { insertAtCursor } from "./draft-insertion.ts";
 import { type DraftKey, currentDraftKey, getDraft, replaceDraft } from "./drafts.ts";
-import { type RefusedFile, refuseFiles, sizeOf } from "./refused-files.ts";
+import { type RefusedFile, refuseFiles } from "./refused-files.ts";
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") window.addEventListener("gates-local:native-paste", event => {
   const ta = event.target;
@@ -22,10 +23,14 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
-export function pasteKind(paths: readonly string[], files: readonly Pick<File, "type">[]): "paths" | "images" | "unavailable" | "text" {
+export const MAX_FILES = 8;
+/** The server's cap (apps/server/src/chat/files.ts): larger files are refused at their chip, never read. */
+export const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+export function pasteKind(paths: readonly string[], files: readonly Pick<File, "type">[]): "paths" | "images" | "files" | "text" {
   if (paths.length) return "paths";
   if (files.some(f => f.type.startsWith("image/"))) return "images";
-  return files.length ? "unavailable" : "text";
+  return files.length ? "files" : "text";
 }
 
 export function imageReason(models: readonly ModelInfo[] | undefined, model: string | undefined, images: readonly string[], label: (tag: string) => string = tag => tag): string | null {
@@ -48,13 +53,13 @@ export function paste(e: ClipboardEvent<HTMLTextAreaElement>): void {
   // emits thousands of input events for a large paste.
   if (!files.length) return;
   e.preventDefault();
+  // a copied file attaches as a drop does; a clipboard with a picture in it pastes only its pictures
+  if (pasteKind([], files) === "files") { void attachFiles(files); return; }
   const key = currentDraftKey();
   const version = getDraft(key).version;
   setState(s => ({ pasting: s.pasting + 1 }));
-  void (async () => {
-    if (pasteKind([], files) === "unavailable") { setState({ notice: "This browser cannot provide file paths. Paste the full path as text." }); return; }
-    await addImages(key, version, files.filter(f => f.type.startsWith("image/")));
-  })().catch(() => setState({ notice: "The clipboard could not be read. Try pasting again." })).finally(() => setState(s => ({ pasting: s.pasting - 1 })));
+  addImages(key, version, files.filter(f => f.type.startsWith("image/")))
+    .catch(() => setState({ notice: "The clipboard could not be read. Try pasting again." })).finally(() => setState(s => ({ pasting: s.pasting - 1 })));
 }
 
 const SENDABLE = /^image\/(png|jpeg|webp|gif)$/;
@@ -92,30 +97,61 @@ export function splitDropped(data: { readonly files: ArrayLike<File>; readonly i
 }
 
 /**
- * Files from the "+" menu's chooser or a drop. Images take the pasted-image
- * path (same limits, compression and chips). Anything else is refused at a
- * chip that says why: messages carry text and images only.
+ * Files from the "+" menu's chooser, a drop or a paste. Images the model reads
+ * take the pasted-image path (same limits, compression and chips). Any other
+ * file is copied to the server and the message names it; the model opens it
+ * with its read tool (chat row 3). A folder or an over-50 MB file is refused
+ * at a chip that says why.
  */
 export function attachFiles(files: readonly File[], folders: readonly string[] = []): Promise<void> {
   if (!files.length && !folders.length) return Promise.resolve();
   const key = currentDraftKey();
   const version = getDraft(key).version;
   const images: File[] = [];
-  const refused: Omit<RefusedFile, "id">[] = folders.map(name => ({ name, size: 0, folder: true, library: true, reason: `${name} is a folder. A message carries text and images only, so its files cannot be sent. Add the folder to your Library and the model can read its files with its tools.` }));
+  const others: File[] = [];
+  const refused: Omit<RefusedFile, "id">[] = folders.map(name => ({ name, size: 0, folder: true, library: true, reason: `${name} is a folder, so it was not attached. Add the folder to your Library and the model can read its files with its tools.` }));
   for (const file of files) {
     const type = imageTypeOf(file);
     if (SENDABLE.test(type) && file.size === 0) refused.push({ name: file.name, size: 0, library: false, reason: `${file.name} is empty (0 bytes), so there is no image to send.` });
     else if (SENDABLE.test(type)) images.push(type === file.type ? file : new File([file], file.name, { type }));
-    else if (type.startsWith("image/")) refused.push({ name: file.name, size: file.size, library: false, reason: `${file.name} is not an image type the model can read. Attach GIF, JPEG, PNG or WebP images.` });
-    else refused.push({ name: file.name, size: file.size, library: true, reason: `Messages carry text and images only, so ${file.name} (${sizeOf(file.size)}) cannot be sent. Add it to your Library and the model can read it with its tools.` });
+    else if (file.size > MAX_FILE_BYTES) refused.push({ name: file.name, size: file.size, library: false, reason: `${file.name} is over 50 MB, so it was not attached.` });
+    else others.push(file);
   }
   refuseFiles(key, refused);
-  if (!images.length) return Promise.resolve();
+  if (!images.length && !others.length) return Promise.resolve();
   setState(s => ({ pasting: s.pasting + 1 }));
-  return addImages(key, version, images)
+  return Promise.all([
+    images.length ? addImages(key, version, images) : undefined,
+    others.length ? addFiles(key, version, others) : undefined,
+  ]).then(() => undefined)
     .catch(() => setState({ notice: "The files could not be read. Try again." }))
     .finally(() => setState(s => ({ pasting: s.pasting - 1 })));
 }
+
+async function readBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer().catch(() => { throw new Error(`${file.name} could not be read.`); }));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/** Non-image files: each is copied to the server now, and the draft keeps the reference the server gives back. */
+async function addFiles(key: DraftKey, version: number, candidates: readonly File[]): Promise<void> {
+  const room = MAX_FILES - (getDraft(key).files?.length ?? 0) - reservedFiles;
+  const accepted = candidates.slice(0, Math.max(0, room));
+  if (accepted.length < candidates.length) setState({ notice: `Attach up to ${MAX_FILES} files per message.` });
+  reservedFiles += accepted.length;
+  try {
+    const { call } = await import("./session.ts");
+    for (const file of accepted) {
+      try {
+        const attached = await call("files.attach", { name: file.name || "file", type: file.type, data: await readBase64(file) });
+        if (getDraft(key).version === version) replaceDraft(key, { files: [...getDraft(key).files ?? [], attached] }, true);
+      } catch (error) { setState({ notice: error instanceof Error ? error.message : `${file.name} could not be attached.` }); }
+    }
+  } finally { reservedFiles -= accepted.length; }
+}
+let reservedFiles = 0;
 
 /** The one image path for paste, the chooser and drops. */
 async function addImages(key: DraftKey, version: number, candidates: readonly File[]): Promise<void> {

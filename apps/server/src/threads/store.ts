@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
-import { ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
+import { AttachedFile, ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 
 import {
@@ -30,6 +30,8 @@ export interface ThreadStore {
   getMessage(messageId: string): Message | undefined;
   deleteMessage(threadId: string, messageId: string): void;
   imageReferences(): Map<string, number>;
+  /** How many messages hold each attached file's copy (AttachedFile.path). */
+  fileReferences(): Map<string, number>;
   /** Every stored reply's model, time and reported tokens, for usage's one-time fill; `lacking` counts replies with no figures. */
   replyUsage(): {
     replies: Array<{ model: string; at: number; promptTokens: number | undefined; completionTokens: number | undefined; evalDurationMs: number | undefined; promptEvalDurationMs: number | undefined; durationMs: number | undefined }>;
@@ -145,13 +147,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     insertMessage: db.prepare(
       `INSERT INTO messages (id, thread_id, role, content, thinking, model, created_at,
                              prompt_tokens, completion_tokens, duration_ms, num_ctx,
-                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, context_notice, files_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     listMessages: db.prepare(
       `SELECT id, thread_id, role, content, thinking, model, created_at,
               prompt_tokens, completion_tokens, duration_ms, num_ctx,
-              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice
+              tools_json, images_json, eval_duration_ms, prompt_eval_duration_ms, interrupted, image_job_json, context_notice, files_json
        FROM messages WHERE thread_id = ? ORDER BY created_at, seq`,
     ),
     insertImageCard: db.prepare("INSERT INTO messages (id, thread_id, role, content, created_at, image_job_json) VALUES (?, ?, 'assistant', ?, ?, ?) ON CONFLICT(id) DO NOTHING"),
@@ -207,6 +209,14 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
         const value: unknown = JSON.parse(str(row, "images_json"));
         if (!Array.isArray(value) || !value.every((item): item is string => typeof item === "string")) throw new Error("Stored image references could not be read.");
         for (const image of value) add(image);
+      }
+      return refs;
+    },
+    fileReferences() {
+      guard();
+      const refs = new Map<string, number>();
+      for (const row of db.prepare("SELECT files_json FROM messages WHERE files_json IS NOT NULL").all()) {
+        for (const file of decodeFiles(JSON.parse(str(row, "files_json")))) refs.set(file.path, (refs.get(file.path) ?? 0) + 1);
       }
       return refs;
     },
@@ -335,6 +345,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
           s?.promptEvalDurationMs ?? null,
           msg.interrupted === true ? 1 : null,
           msg.contextNotice ?? null,
+          msg.files === undefined ? null : JSON.stringify(msg.files),
         );
         stmt.touchThread.run(Math.max(now(), msg.createdAt), msg.threadId);
         return msg;
@@ -483,6 +494,11 @@ function checkNewMessage(input: unknown, now: () => number): Message {
   if (tools !== undefined) msg.tools = tools;
   const images = checkImages(v["images"]);
   if (images !== undefined) msg.images = images;
+  if (v["files"] !== undefined) {
+    if (role !== "user") throw new InvalidInputError("files", "only a person's message carries attached files");
+    const files = decodeFiles(v["files"]);
+    if (files.length) msg.files = files;
+  }
   if (v["interrupted"] !== undefined) {
     if (v["interrupted"] !== true || role !== "assistant") throw new InvalidInputError("interrupted", "only an unfinished assistant reply can be marked interrupted");
     msg.interrupted = true;
@@ -519,6 +535,9 @@ function checkTools(value: unknown): ToolStepRecord[] | undefined {
     return step;
   });
 }
+
+/** The contract's own check: a stored path is only ever a generated `files/att-<uuid>`. */
+const decodeFiles = (value: unknown): AttachedFile[] => [...S.decodeUnknownSync(S.Array(AttachedFile))(value)];
 
 function checkImages(value: unknown): string[] | undefined {
   if (value === undefined) return undefined;
@@ -606,6 +625,8 @@ function messageFromRow(row: Row): Message {
   if (tools !== undefined) msg.tools = JSON.parse(tools) as ToolStepRecord[];
   const images = optStr(row, "images_json");
   if (images !== undefined) msg.images = JSON.parse(images) as string[];
+  const files = optStr(row, "files_json");
+  if (files !== undefined) msg.files = decodeFiles(JSON.parse(files));
   const notice = optStr(row, "context_notice");
   if (notice !== undefined) msg.contextNotice = notice;
   const job = optStr(row, "image_job_json");

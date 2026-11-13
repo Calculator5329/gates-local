@@ -1,5 +1,6 @@
+import type { AttachedFile } from "@gates-local/contracts";
 import { fileUrl, openSettings } from "./session.ts";
-import { setState, useStore } from "./store.ts";
+import { NA, setState, useStore } from "./store.ts";
 import { currentDraftKey, getDraft, replaceDraft } from "./drafts.ts";
 import { Icon } from "./icons.tsx";
 import { removeRefused, sizeOf, useRefused } from "./refused-files.ts";
@@ -19,6 +20,26 @@ export function RefusedFiles() {
       <button type="button" className="ibtn xs" aria-label={`Remove ${f.name}`} aria-describedby={`refused-${f.id}`} onClick={() => removeRefused(currentDraftKey(), f.id)}>×</button>
     </span>
   ));
+}
+
+/**
+ * Files the message names (chat row 3): the server holds the copy, the chip shows the name and
+ * size. In the composer with tools off, the chip says the model cannot open it yet.
+ */
+export function AttachedFiles({ files, removable = false }: { files: readonly AttachedFile[]; removable?: boolean }) {
+  const toolsOff = useStore(s => s.settings !== NA && s.settings?.tools === false);
+  const off = removable && toolsOff;
+  return files.map((f, i) => {
+    const tip = off ? `The model can't open ${f.name} until tools are on.` : undefined;
+    return (
+      <span className={off ? "attachment file off" : "attachment file"} key={f.path} data-tip={tip === undefined ? undefined : esc(tip)} data-testid="attached-file">
+        <Icon id="clip" />
+        <span className="af-t"><b>{f.name}</b><small>{sizeOf(f.size)}{off ? " · tools off" : ""}</small></span>
+        {off ? <><span className="vh" id={`attached-${i}`}>{tip}</span><button type="button" className="ibtn xs" aria-label="Turn on tools" aria-describedby={`attached-${i}`} data-tip="Open Settings › Tools" onClick={() => openSettings("tools")}><Icon id="wrench" /></button></> : null}
+        {removable ? <button type="button" className="ibtn xs" aria-label={`Remove ${f.name}`} onClick={() => { replaceDraft(currentDraftKey(), { files: (getDraft().files ?? []).filter(x => x.path !== f.path) }); setState({ stopAsk: null }); }}>×</button> : null}
+      </span>
+    );
+  });
 }
 
 /** Data URLs while composing; authenticated server paths after the turn is saved. */

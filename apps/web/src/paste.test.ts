@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { methodSamples } from "@gates-local/contracts/testing";
 import { attachFiles, imageReason, pasteKind, splitDropped } from "./paste.ts";
 import { getRefused, removeRefused } from "./refused-files.ts";
+import { getDraft, replaceDraft } from "./drafts.ts";
 import { compressImage } from "./image-compression.ts";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -10,7 +11,7 @@ it("uses file paths first, then T3's image-first mixed clipboard behavior", () =
   const image = { type: "image/png" };
   expect(pasteKind(["/srv/pictures/雪.png"], [image])).toBe("paths");
   expect(pasteKind([], [image, { type: "text/plain" }])).toBe("images");
-  expect(pasteKind([], [{ type: "application/pdf" }])).toBe("unavailable");
+  expect(pasteKind([], [{ type: "application/pdf" }])).toBe("files");
   expect(pasteKind([], [])).toBe("text");
 });
 
@@ -30,6 +31,28 @@ it("refuses a folder and an empty image at their chips with reasons true for eac
   expect(folder!.reason).toContain("x.png is a folder");
   expect(blank).toMatchObject({ name: "blank.png", size: 0, library: false });
   expect(blank!.reason).toBe("blank.png is empty (0 bytes), so there is no image to send.");
+  for (const f of getRefused()) removeRefused(null, f.id);
+});
+
+it("a file that is not an image is copied to the server and the draft names it (chat row 3)", async () => {
+  const attached = { path: "files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7c", name: "notes.txt", size: 5, type: "text/plain" };
+  const call = vi.fn().mockResolvedValue(attached);
+  vi.doMock("./session.ts", () => ({ call }));
+  await attachFiles([new File(["hello"], "notes.txt", { type: "text/plain" })]);
+  expect(call).toHaveBeenCalledWith("files.attach", { name: "notes.txt", type: "text/plain", data: "aGVsbG8=" });
+  expect(getDraft().files).toEqual([attached]);
+  expect(getRefused()).toEqual([]);
+  replaceDraft(null, { files: [] });
+  vi.doUnmock("./session.ts");
+});
+
+it("a file over 50 MB is refused at its chip in plain words and never read", async () => {
+  const big = new File([new Uint8Array(50 * 1024 * 1024 + 1)], "big.log", { type: "" });
+  const read = vi.spyOn(big, "arrayBuffer");
+  await attachFiles([big]);
+  const [chip] = getRefused();
+  expect(chip).toMatchObject({ name: "big.log", library: false, reason: "big.log is over 50 MB, so it was not attached." });
+  expect(read).not.toHaveBeenCalled();
   for (const f of getRefused()) removeRefused(null, f.id);
 });
 

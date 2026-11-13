@@ -481,9 +481,11 @@ export async function startFakeOllama(start: StartOptions = {}): Promise<FakeOll
       if (calls) {
         const image = /\b(draw|image|ship)\b/i.test(prompt) ? tools.find((tool) => field(field(tool, "function"), "name") === "image") : undefined;
         const fn = field(field(image ?? tools[0], "function"), "name");
+        // an attached file's line names where to read it ("read it with the read tool at /library/<id>")
+        const attached = /read tool at (\/library\/[\w-]+)/.exec(prompt)?.[1];
         line({
           ...base(),
-          message: { role: "assistant", content: "", tool_calls: [{ function: { name: typeof fn === "string" ? fn : "read", arguments: fn === "image" ? { prompt } : { path: "~/docs" } } }] },
+          message: { role: "assistant", content: "", tool_calls: [{ function: { name: typeof fn === "string" ? fn : "read", arguments: fn === "image" ? { prompt } : { path: attached ?? "~/docs" } } }] },
           done: false,
         });
       }

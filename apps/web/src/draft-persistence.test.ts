@@ -291,6 +291,28 @@ it("format-2 drafts without a revision migrate before metadata-only reuse", asyn
   stopReloaded();
 });
 
+const file = (n: number) => ({ path: `files/att-0f8b5c1e-3a2d-4c7e-9b1a-2d3e4f5a6b7${n}`, name: `notes-${n}.txt`, size: n, type: "text/plain" });
+it("attached files reload in the open draft, another chat's draft and a queued message (chat row 3)", async () => {
+  const fixture = draftDatabase(), a = await freshWatcher();
+  a.replaceDraft("B", { text: "other", files: [file(2)] }); a.setState({ threadId: "A" });
+  const stop = await a.watchDraft("files");
+  a.replaceDraft("A", { text: "open", files: [file(1)] });
+  a.setState({ queued: [{ id: "q", threadId: "A", text: "queued", at: 1, waitFor: "reply", files: [file(3)] }] });
+  while (fixture.pending.length) { fixture.pending[0]!.finish(); await settled(); }
+  stop();
+  const b = await freshWatcher(); b.setState({ threadId: "A" });
+  const resume = await b.watchDraft("files");
+  expect(b.getDraft("A").files).toEqual([file(1)]);
+  expect(b.getDraft("B").files).toEqual([file(2)]);
+  expect(b.getState().queued.map(q => q.files)).toEqual([[file(3)]]);
+  resume();
+});
+
+it("a stored attached file that is not one of the server's own names is dropped, never sent", () => {
+  const recovered = recoverDraft({ draft: "", images: [], queued: [{ id: "q", threadId: "A", text: "x", at: 1, files: [{ path: "../secret", name: "s", size: 1, type: "" }] }] });
+  expect(recovered?.queued[0]?.files).toBeUndefined();
+});
+
 it("a lifecycle commit waits for the metadata read to submit its writes", async () => {
   const fixture = draftDatabase();
   const a = await freshWatcher();

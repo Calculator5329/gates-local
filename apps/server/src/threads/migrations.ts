@@ -15,7 +15,7 @@ export interface Migration {
 // shape arrived first. Repair them under the same write lock on every open.
 function addMessageColumns(db: DatabaseSync): void {
   const columns = new Set(db.prepare("PRAGMA table_info(messages)").all().map(row => row["name"]));
-  for (const name of ["image_job_json", "context_notice"]) {
+  for (const name of ["image_job_json", "context_notice", "files_json"]) {
     if (!columns.has(name)) db.exec(`ALTER TABLE messages ADD COLUMN ${name} TEXT`);
   }
 }

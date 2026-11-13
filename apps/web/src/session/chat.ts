@@ -204,7 +204,7 @@ export function removeQueued(id: string): void {
 export function editQueued(id: string): void {
   const q = getState().queued.find((x) => x.id === id);
   if (q) {
-    beginQueuedDraft(q.threadId, q.text, q.images ?? [], q.messageId ?? null);
+    beginQueuedDraft(q.threadId, q.text, q.images ?? [], q.messageId ?? null, q.files);
     setState({ editingQueued: id, notice: null, stopAsk: null });
   }
 }
@@ -356,8 +356,10 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const apart = opts.keepDraft === true;
     const draft = apart ? APART : getDraft(key);
     const images = draft.images;
+    const files = draft.files ?? [];
+    const attached = files.length ? { files } : {};
     if (creatingDraft(draft.version)) return;
-    if ((content === "" && images.length === 0) || asking) return;
+    if ((content === "" && images.length === 0 && files.length === 0) || asking) return;
     if (s.pasting) return;
     // Image on: the words go to the image model, so no chat model has to be ready, see the attachments or fit.
     // `draw`: a picture's own setup (Pictures' Again), whatever the composer is set to.
@@ -371,7 +373,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       const id = s.editingQueued;
       if (!s.queued.some(q => q.id === id)) { setState({ editingQueued: null, notice: "Your edited words are still in the composer. Send them as a new message." }); return; }
       cancelQueuedDraft(key);
-      setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content, images, messageId } : q)), editingQueued: null, notice: null }));
+      setState((st) => ({ queued: st.queued.map((q) => (q.id === id ? { ...q, text: content, images, files, messageId } : q)), editingQueued: null, notice: null }));
       flushQueued();
       return;
     }
@@ -381,14 +383,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (model === undefined && draw === undefined && wait === null) return;
     const drawing = draw === undefined ? {} : { draw };
 
-    if (wait === null) return admit({ content, images, messageId, model: model ?? "", threadId, keepDraft: apart, ...drawing });
+    if (wait === null) return admit({ content, images, ...attached, messageId, model: model ?? "", threadId, keepDraft: apart, ...drawing });
     // Keep the draft visible while a first thread is being created.
     const queueIn = threadId ?? (await createThread(content, model, !apart));
     if (queueIn === null) return;
-    const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }), ...drawing };
+    const q: Queued = { id: queueId(), messageId, threadId: queueIn, text: content, images, ...attached, at: Date.now(), waitFor: wait, ...(model === undefined ? {} : { model }), ...drawing };
     // Unchanged since Send, by its words: New thread during the creation gives the same draft a new identity.
     const now = getDraft(key);
-    if (!apart && now.text === draft.text && now.images === draft.images && now.sendId === draft.sendId) clearDraft(key);
+    if (!apart && now.text === draft.text && now.images === draft.images && now.files === draft.files && now.sendId === draft.sendId) clearDraft(key);
     if (key === null && !apart) moveDraft(null, queueIn);
     settleEnded();
     setState((st) => ({ notice: null, stopAsk: null, queued: [...st.queued, q] }));
@@ -425,7 +427,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (threadId === null) return;
     const draftKey = out.threadId;
     const draft = getDraft(draftKey);
-    if (!out.keepDraft && draft.text.trim() === out.content && draft.images === out.images) clearDraft(draftKey);
+    if (!out.keepDraft && draft.text.trim() === out.content && draft.images === out.images && (draft.files ?? []).length === (out.files ?? []).length) clearDraft(draftKey);
     // A new chat for words from elsewhere leaves the new-chat draft where it was.
     if (out.threadId === null && !out.keepDraft) moveDraft(null, threadId);
     setState((s) => ({
@@ -476,6 +478,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     // a stopped reply's words stay in its chat, unless this is a Retry there, which is asking to replace them
     retire(s.turns[threadId], opts.out?.regenerate !== true);
     const images = opts.out?.images ?? opts.from?.q.images ?? [];
+    const files = opts.out?.files ?? opts.from?.q.files ?? [];
     const gen = ++turnGen;
     const replacing = opts.out?.regenerate === true ? retriedRows(s.messages[threadId] ?? []) : [];
     // the server has taken the old rows out in the same write that saved the new question
@@ -488,7 +491,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const fresh = opts.out?.threadId === null;
     const drawCount = draw === undefined ? undefined : fresh ? s.imageCountNew : s.threads.find((t) => t.id === threadId)?.imageCount ?? 1;
     const startedAt = Date.now();
-    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, clock: startClock(startedAt), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(draw === undefined ? {} : { image: true as const }) };
+    const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, clock: startClock(startedAt), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(files.length ? { pendingFiles: files } : {}), ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
     // The next new chat starts on this model (navigation.ts newThread). An Image send uses no chat model.
     setState(st => ({ ...(opts.from ? { queued: st.queued.filter(q => q.id !== opts.from?.q.id) } : {}), turns: withTurn(st.turns, threadId, turn), ...(model === "" || draw !== undefined ? {} : { chosen: model }) }));
@@ -502,6 +505,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         numCtx: s.numCtx,
         think: s.think,
         ...(images.length ? { images } : {}),
+        ...(files.length ? { files: [...files] } : {}),
         ...(draw === undefined ? {} : { draw, drawCount }),
         ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
       }, { timeoutMs: SEND_TIMEOUT_MS });
@@ -563,6 +567,8 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
   function notSent(e: unknown, gen: number, threadId: string, content: string, model: string, { from, out, messageId }: TurnOptions): void {
     const st = getState();
     const images = out?.images ?? from?.q.images ?? [];
+    const files = out?.files ?? from?.q.files ?? [];
+    const attached = files.length ? { files } : {};
     const code = codeOf(e);
     const turn = st.turns[threadId];
     const owner = turn?.gen === gen ? turn : null;
@@ -570,14 +576,14 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const halted = owner === null || owner.end?.kind === "stopped";
     const here = st.view === "thread" && st.threadId === threadId;
     const draft = getDraft(threadId);
-    const where = out?.regenerate === true ? null : from === undefined && draft.text === "" && draft.images.length === 0 ? "box" : "queue";
+    const where = out?.regenerate === true ? null : from === undefined && draft.text === "" && draft.images.length === 0 && !draft.files?.length ? "box" : "queue";
     const blocking = e instanceof WireError ? e.blocking : undefined;
     // halted: the person has already said no; a message that went to the queue instead of the box would warn about words not in view
     const ask = code === "would-stop" && blocking !== undefined && out !== undefined && here && !halted && (from !== undefined || where !== "queue") ? { ...out, threadId, blocking } : null;
     const draw = out?.draw ?? from?.q.draw;
-    const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, at: Date.now(), waitFor: "reply", model, held: true, ...(draw === undefined ? {} : { draw }) };
+    const typed: Queued = { id: queueId(), ...(messageId ? { messageId } : {}), threadId, text: content, images, ...attached, at: Date.now(), waitFor: "reply", model, held: true, ...(draw === undefined ? {} : { draw }) };
     const consented = ask !== null && stopOthersOk();
-    if (where === "box") replaceDraft(threadId, { text: content, images, sendId: messageId ?? null });
+    if (where === "box") replaceDraft(threadId, { text: content, images, ...attached, sendId: messageId ?? null });
     const title = st.threads.find(t => t.id === threadId)?.title;
     const restoredElsewhere = where === "box" && !here ? `Your message didn't send. Your words are in the draft in ${title ? `“${title}”` : "another chat"}.` : undefined;
     applyServerEvent({
@@ -621,7 +627,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (!last) return;
     // sent again the way Send would send it now: with Image on, to the image model
     const draw = drawChoice(s);
-    void admit({ content: last.content, images: last.images, model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true, ...(draw === undefined ? {} : { draw }) });
+    void admit({ content: last.content, images: last.images, ...(last.files ? { files: last.files } : {}), model: s.model ?? last.model ?? "", threadId: s.threadId, keepDraft: true, regenerate: true, ...(draw === undefined ? {} : { draw }) });
   }
 
   /**
@@ -645,7 +651,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         return;
       }
       // the model that failed, as Retry would send it from that chat
-      await admit({ content: last.content, images: last.images, model: model !== "" ? model : last.model ?? s.model ?? "", threadId, keepDraft: true, regenerate: true });
+      await admit({ content: last.content, images: last.images, ...(last.files ? { files: last.files } : {}), model: model !== "" ? model : last.model ?? s.model ?? "", threadId, keepDraft: true, regenerate: true });
     })();
     return true;
   }
@@ -913,7 +919,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     if (next === undefined || model === undefined) return;
     if (next.now === true) {
       if (unfinished(s.turns[next.threadId])) return;
-      void admit({ content: next.text, images: next.images, messageId: next.messageId, model, threadId: next.threadId, keepDraft: true, queuedId: next.id, ...(next.draw === undefined ? {} : { draw: next.draw }) });
+      void admit({ content: next.text, images: next.images, ...(next.files ? { files: next.files } : {}), messageId: next.messageId, model, threadId: next.threadId, keepDraft: true, queuedId: next.id, ...(next.draw === undefined ? {} : { draw: next.draw }) });
       return;
     }
     // one reply at a time: a queued message waits while any reply this client knows of, in any chat, is unfinished
@@ -939,7 +945,7 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
       stop(q.threadId);
       return;
     }
-    void admit({ content: q.text, images: q.images, messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id, ...(q.draw === undefined ? {} : { draw: q.draw }) });
+    void admit({ content: q.text, images: q.images, ...(q.files ? { files: q.files } : {}), messageId: q.messageId, model: q.model ?? s.model ?? "", threadId: q.threadId, keepDraft: true, queuedId: q.id, ...(q.draw === undefined ? {} : { draw: q.draw }) });
   }
 
   function cancelQueuedEdit(): void {

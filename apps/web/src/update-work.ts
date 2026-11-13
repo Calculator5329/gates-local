@@ -9,7 +9,7 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 export function updateWork(activity: readonly string[] | undefined): string[] | undefined {
   if (activity === undefined) return undefined;
   const queued = getState().queued.length;
-  const drafts = savedDrafts().filter(({ draft }) => draft.text.trim() || draft.images.length).length;
+  const drafts = savedDrafts().filter(({ draft }) => draft.text.trim() || draft.images.length || draft.files?.length).length;
   return [
     ...activity,
     ...(queued ? [`${count(queued, "queued message", "queued messages")} in this window`] : []),
