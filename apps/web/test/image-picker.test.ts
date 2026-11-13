@@ -183,7 +183,7 @@ it("Defaults runs the server's setup for each style and names it by the style al
   // Defaults, then Other models: the styles by name, then the rest by their own
   expect(rowNames(html)).toEqual(["General", "Pixel art", KLEIN.name, ZIMAGE.name, MOSS.name, PLAIN.name]);
   expect(html.match(/<div class="pk-r style[^"]*"[^>]*data-preset="([^"]*)"/g)?.map((r) => /data-preset="([^"]*)"/.exec(r)?.[1])).toEqual([GENERAL.id, PIXEL_CELL.id]);
-  expect(html, "the style row's setup is in its tip").toContain(`data-tip="${GENERAL.name}"`);
+  expect(html, "a Defaults row has no tip: the size pane already names its setup").not.toMatch(/class="pk-select"[^>]*data-tip=/);
   expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast", "Balanced", "Best"]);
   expect(html.match(/class="maker-mark"/g), "the four Other models rows keep their family marks; the rail and the styles have none").toHaveLength(4);
 });
