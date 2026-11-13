@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-13: No line under the sidebar head on desktop
+
+- The desktop app no longer draws a grey line under the sidebar's top row,
+  in chat or in Settings. The line between the sidebar and the chat stays.
+
 ## 2026-11-13: Queued messages sit on the composer, and Stop holds still while one is edited
 
 - Messages waiting in a chat sit in a tray on the composer's top edge, as
