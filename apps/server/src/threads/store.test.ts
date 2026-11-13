@@ -259,6 +259,26 @@ describe("threads", () => {
     expect(store(path).getThread(a.id).thread).toEqual(a);
   });
 
+  it("keeps each thread's image count, one left out, without moving it up the list", () => {
+    const path = join(dir, "threads.db");
+    const s = store(path);
+    const a = s.createThread({ title: "a" });
+    const b = s.createThread({ title: "b" });
+    expect(s.getThread(a.id).thread.imageCount).toBeUndefined();
+    expect(s.setImageCount(a.id, 3)).toEqual({ ...a, imageCount: 3 });
+    expect(s.listThreads().map((t) => [t.id, t.imageCount])).toEqual([[b.id, undefined], [a.id, 3]]);
+    expect(s.setImageCount(a.id, 1)).toEqual(a);
+    expect(() => s.setImageCount(a.id, 5)).toThrow();
+    expect(() => s.setImageCount("00000000-0000-4000-8000-000000000000", 2)).toThrow(ThreadNotFoundError);
+    s.setImageCount(b.id, 4);
+    // a file from before the column: the next open adds it, and every thread makes one
+    s.close();
+    const db = raw(path);
+    db.exec("ALTER TABLE threads DROP COLUMN image_count");
+    db.close();
+    expect(store(path).getThread(b.id).thread.imageCount).toBeUndefined();
+  });
+
   it("deletes a thread and cascades its messages, leaving other threads alone", () => {
     const path = join(dir, "threads.db");
     const s = store(path);

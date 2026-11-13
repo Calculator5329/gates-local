@@ -484,6 +484,9 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
     const messageId = opts.out?.messageId ?? opts.from?.q.messageId ?? queueId();
     opts = { ...opts, messageId, ...(opts.from ? { from: { ...opts.from, q: { ...opts.from.q, messageId } } } : {}) };
     const draw = opts.out?.draw ?? opts.from?.q.draw;
+    // a new thread's first send carries the count picked before it existed; a thread keeps its own
+    const fresh = opts.out?.threadId === null;
+    const drawCount = draw === undefined ? undefined : fresh ? s.imageCountNew : s.threads.find((t) => t.id === threadId)?.imageCount ?? 1;
     const startedAt = Date.now();
     const turn: LiveTurn = { gen, threadId, turnId: null, model: draw?.preset ?? model, startedAt, clock: startClock(startedAt), thinking: "", text: "", tools: [], pendingUser: content, pendingImages: images, ...(draw === undefined ? {} : { image: true as const }) };
     // Using is a turn that starts: a send, a queued send, Retry or Regenerate, after any warning was answered.
@@ -499,13 +502,18 @@ export function createChat({ applyServerEvent, call, codeOf, createThread, creat
         numCtx: s.numCtx,
         think: s.think,
         ...(images.length ? { images } : {}),
-        ...(draw === undefined ? {} : { draw }),
+        ...(draw === undefined ? {} : { draw, drawCount }),
         ...(opts.stopOthers ? { stopOthers: true, ...(opts.stopTurns === undefined ? {} : { stopTurns: opts.stopTurns }) } : opts.out === undefined ? {} : { askFirst: true }),
       }, { timeoutMs: SEND_TIMEOUT_MS });
       confirmCopy(r.userMessage);
       // the phone's pick for a new chat went with its first send, which the thread keeps; the next new chat starts from Settings
-      if (draw !== undefined && opts.out?.threadId === null) {
-        applyServerEvent((st) => st.imagePick?.preset === draw.preset && st.imagePick.width === draw.width && st.imagePick.height === draw.height ? { imagePick: undefined } : {});
+      if (draw !== undefined && fresh) {
+        // the thread keeps the count now (the server saved it with this send), so the button does not blink back to 1 before the list says so
+        applyServerEvent((st) => ({
+          ...st.imagePick?.preset === draw.preset && st.imagePick.width === draw.width && st.imagePick.height === draw.height ? { imagePick: undefined } : {},
+          imageCountNew: 1,
+          threads: st.threads.map((t) => (t.id === threadId && drawCount !== undefined && drawCount > 1 ? { ...t, imageCount: drawCount } : t)),
+        }));
       }
       if (r.replayed) {
         noteMessage(threadId, r.userMessage);

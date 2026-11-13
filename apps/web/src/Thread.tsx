@@ -512,11 +512,55 @@ export function chainEnd(first: ImageEvent, thread: readonly Message[], accepted
   }
 }
 
-/** Card messages that are a retry of another card in the thread: their box is the first card's. */
+/**
+ * Card messages drawn in another card's box, so the Timeline gives them no row: a retry (the first
+ * card's box), and every picture of a several-picture send after its first (a tile of that card).
+ */
 export function retryRows(thread: readonly Message[]): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const m of thread) if (m.imageJob?.retryJobId !== undefined) ids.add(m.imageJob.retryJobId);
+  for (const m of thread) {
+    if (m.imageJob?.retryJobId !== undefined) ids.add(m.imageJob.retryJobId);
+    if (m.imageJob?.group !== undefined && m.imageJob.group.index > 0) ids.add(m.id);
+  }
   return ids;
+}
+
+/** The cards of `first`'s group, in picture order; just `first` when it is a picture of its own. */
+export function groupCards(first: Message, thread: readonly Message[]): readonly Message[] {
+  const group = first.imageJob?.group;
+  if (group === undefined) return [first];
+  return thread.filter((m) => m.imageJob?.group?.id === group.id).toSorted((a, b) => a.imageJob!.group!.index - b.imageJob!.group!.index);
+}
+
+/** A several-picture card's top line: "1 of 2 making…" while any runs, "4 of 4 · 23 s" (ComfyUI's time for all) once none does. */
+export function groupWords(jobs: readonly ImageEvent[], of: number): string {
+  const done = jobs.filter((j) => j.state === "done");
+  if (jobs.some((j) => j.state === "queued" || j.state === "running")) return `${done.length} of ${of} making…`;
+  const ms = done.reduce((sum, j) => sum + (j.runMs ?? Number.NaN), 0);
+  return Number.isNaN(ms) || done.length === 0 ? `${done.length} of ${of}` : `${done.length} of ${of} · ${Math.max(1, Math.round(ms / 1000))} s`;
+}
+
+/** One card per send: a picture of its own, or the tiles of a send that made several (2 side by side, 3 or 4 two by two). */
+function ImageCard({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {
+  const group = msg.imageJob!.group;
+  if (group === undefined) return <ImageJob msg={msg} thread={thread} origin={origin} token={token} />;
+  return <ImageGroup first={msg} thread={thread} origin={origin} token={token} />;
+}
+
+function ImageGroup({ first, thread, origin, token }: { first: Message; thread: readonly Message[] } & Files) {
+  const cards = groupCards(first, thread);
+  const of = first.imageJob!.group!.of;
+  const jobs = cards.map((m) => chainEnd(m.imageJob!, thread));
+  const choice = first.imageJob!.sent ?? first.imageJob!.choice;
+  const model = useStore((s) => (choice === undefined ? undefined : presetName(s, choice.preset)));
+  return (
+    <div className="image-group" data-image-group={first.imageJob!.group!.id} data-n={of}>
+      <p className="image-group-head">{model === undefined ? null : <>{model} · {sizeLabel(choice!.width, choice!.height)} · </>}{groupWords(jobs, of)}</p>
+      <div className="image-tiles">
+        {cards.map((m) => <ImageJob key={m.id} msg={m} thread={thread} origin={origin} token={token} tile />)}
+      </div>
+    </div>
+  );
 }
 
 /** What a pending card is doing, as a screen reader hears it; on screen a running job is the spinner and its numbers. */
@@ -541,7 +585,8 @@ function turnCard(thread: readonly Message[], userMessageId: string): string | u
   return at < 0 ? undefined : thread.slice(at + 1).find((m) => m.imageJob !== undefined)?.id;
 }
 
-function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readonly Message[] } & Files) {
+/** `tile`: one picture of a several-picture card, whose top line names the model and size once for all. */
+function ImageJob({ msg, thread, origin, token, tile = false }: { msg: Message; thread: readonly Message[]; tile?: boolean } & Files) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState<Accepted>();
@@ -552,14 +597,16 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
   // and the box never changes when a retry takes over; that picture is fitted inside. A job that
   // settles to another size keeps the shape it was first drawn with (`sent`) the same way.
   const choice = msg.imageJob!.sent ?? msg.imageJob!.choice ?? job.choice;
-  const size = choice ? { aspectRatio: `${choice.width} / ${choice.height}`, width: `${choice.width}px` } : undefined;
+  const size = choice ? { aspectRatio: `${choice.width} / ${choice.height}`, ...tile ? {} : { width: `${choice.width}px` } } : undefined;
   // what the job runs (or ran): the end of its retry chain, after any settling
   const ran = job.choice ?? msg.imageJob!.choice;
   const model = useStore((s) => (ran === undefined ? undefined : presetName(s, ran.preset)));
   // An Image turn's own card is cancelled by the composer's Stop, so the card offers no second way;
   // a card the chat model's tool or a retry started has no Stop and keeps its Cancel.
   const turn = useStore((s) => turnOf(s, msg.threadId));
-  const stopCovers = pending && turn?.image === true && turn.end === undefined && turn.userMessageId !== undefined && turnCard(thread, turn.userMessageId) === msg.id;
+  const head = turn?.image === true && turn.end === undefined && turn.userMessageId !== undefined ? turnCard(thread, turn.userMessageId) : undefined;
+  // every tile of the turn's card: Stop cancels those not done
+  const stopCovers = pending && head !== undefined && (head === msg.id || (msg.imageJob!.group !== undefined && thread.find((m) => m.id === head)?.imageJob?.group?.id === msg.imageJob!.group.id));
   const since = thread.find((m) => m.id === job.jobId)?.createdAt ?? msg.createdAt;
   // A prompt the chat model wrote is said under its card; an Image turn's prompt is the person's own
   // message just above, so it is not said twice.
@@ -578,7 +625,7 @@ function ImageJob({ msg, thread, origin, token }: { msg: Message; thread: readon
   };
   const card = <div className="image-job" style={size} data-job={job.jobId} data-image-job={job.state} data-fit={job.state === "error" && job.errorKind === "wont-fit" ? "refuse" : undefined}>
     {/* the model and size belong to the result: while it runs the composer already names them */}
-    {ran === undefined || pending ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
+    {ran === undefined || pending || tile ? null : <span className="image-job-model">{model} · {sizeLabel(ran.width, ran.height)}</span>}
     {job.state === "done" && job.imagePath ? <ImageOut path={job.imagePath} origin={origin} token={token} /> : <div className="image-job-state" role="status" aria-label={pending ? jobWords(job) : undefined}>
       <Icon id={pending ? "spin" : "alert"} cls={pending ? "spin" : undefined} />
       {job.state === "running" && job.phase === undefined ? <RunningNumbers job={job} since={since} /> : <p>{pending ? jobWords(job) : job.message ?? "The image did not finish; try again."}</p>}
@@ -674,7 +721,7 @@ function Reply({ msg, live, text, paced, thinking, tools, clock, secs, allowedLi
           busy={streaming} answering={text !== ""} stopped={end !== undefined || interrupted} clock={clock} />
       ) : null}
       {notes.map((t) => <ToolRow key={t.callId} step={t} stopped={end !== undefined || interrupted} />)}
-      {msg?.imageJob ? <ImageJob msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
+      {msg?.imageJob ? <ImageCard msg={msg} thread={thread} origin={origin} token={token} /> : shown !== "" ? <Markdown text={shown} live={streaming || pending} allowedLinks={allowedLinks} /> : null}
       {(msg?.imageJob ? [] : msg?.images ?? []).map((p) => <ImageOut key={p} path={p} origin={origin} token={token} />)}
       {(streaming || pending) && text !== "" ? (
         <div className="working writing" role="status">

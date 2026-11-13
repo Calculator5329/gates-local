@@ -101,6 +101,8 @@ export function ensureMessageColumns(db: DatabaseSync): void {
     // Each thread's image model and size (an ImageChoice as JSON); NULL follows the app's last pick.
     const threadColumns = new Set(db.prepare("PRAGMA table_info(threads)").all().map(row => row["name"]));
     if (!threadColumns.has("image_choice_json")) db.exec("ALTER TABLE threads ADD COLUMN image_choice_json TEXT");
+    // How many pictures an Image-mode send in this thread makes; NULL is one.
+    if (!threadColumns.has("image_count")) db.exec("ALTER TABLE threads ADD COLUMN image_count INTEGER");
     // Each model's measured speed (store.ts SPEED_SQL) reads only this: finished replies with a decode time.
     // An index is not a schema version; a previous build opens the file and ignores it.
     db.exec(`CREATE INDEX IF NOT EXISTS messages_speed ON messages (created_at, model, completion_tokens, eval_duration_ms, role)

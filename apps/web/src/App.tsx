@@ -7,7 +7,7 @@
 import type { Message } from "@gates-local/contracts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Banner, type Rt, rtOf } from "./Banner.tsx";
-import { Composer, OptsMenu, PlusMenu } from "./Composer.tsx";
+import { Composer, CountMenu, OptsMenu, PlusMenu } from "./Composer.tsx";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { FirstRunLoading, NoServer } from "./FirstRunShell.tsx";
 import { describeModel } from "./format.ts";
@@ -608,6 +608,7 @@ export function App() {
       {popId === "picker" ? picker.kind === "ready" ? <picker.value.Picker /> : picker.kind === "error" ? <div id="picker" className="model-picker open picker-error" role="dialog" aria-label="Choose a model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       {popId === "images" ? imagePicker.kind === "ready" ? <imagePicker.value.ImagePicker /> : imagePicker.kind === "error" ? <div id="imagePicker" className="model-picker open picker-error" role="dialog" aria-label="Choose an image model"><button className="btn" onClick={() => closePop(true)}>Back to chat</button><ScreenError /></div> : null : null}
       <PlusMenu />
+      <CountMenu />
       <OptsMenu />
       <ThreadMenu />
       <Tip />

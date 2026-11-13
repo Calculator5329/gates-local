@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
-import { ImageChoice, ImageEvent } from "@gates-local/contracts";
+import { ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
 import * as S from "effect/Schema";
 
 import {
@@ -49,6 +49,8 @@ export interface ThreadStore {
   fillImageChoice(threadId: string, choice: ImageChoice): boolean;
   /** The thread's own image choice, or undefined while it has none. Throws for an unknown thread. */
   imageChoiceOf(threadId: string): ImageChoice | undefined;
+  /** Keep how many pictures this thread's Image-mode sends make; the list order stays (it is not an edit). */
+  setImageCount(threadId: string, count: ImageCount): Thread;
   deleteThread(threadId: string): void;
   /** `replacing`: rows of this thread that go in the same transaction, so a reader never sees both or neither. */
   appendMessage(input: NewMessage, replacing?: readonly string[]): Message;
@@ -128,12 +130,13 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
     WHERE m.thread_id = threads.id AND json_extract(m.image_job_json, '$.state') = 'done'
     ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1)) AS image_choice_json`;
   const stmt = {
-    listThreads: db.prepare(`SELECT id, title, created_at, updated_at, ${choiceColumn} FROM threads ORDER BY updated_at DESC, id`),
-    getThread: db.prepare(`SELECT id, title, created_at, updated_at, ${choiceColumn} FROM threads WHERE id = ?`),
+    listThreads: db.prepare(`SELECT id, title, created_at, updated_at, image_count, ${choiceColumn} FROM threads ORDER BY updated_at DESC, id`),
+    getThread: db.prepare(`SELECT id, title, created_at, updated_at, image_count, ${choiceColumn} FROM threads WHERE id = ?`),
     insertThread: db.prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"),
     renameThread: db.prepare("UPDATE threads SET title = ?, updated_at = MAX(updated_at, ?) WHERE id = ?"),
     setImageChoice: db.prepare("UPDATE threads SET image_choice_json = ? WHERE id = ?"),
     fillImageChoice: db.prepare("UPDATE threads SET image_choice_json = ? WHERE id = ? AND image_choice_json IS NULL"),
+    setImageCount: db.prepare("UPDATE threads SET image_count = ? WHERE id = ?"),
     deleteThread: db.prepare("DELETE FROM threads WHERE id = ?"),
     touchThread: db.prepare("UPDATE threads SET updated_at = MAX(updated_at, ?) WHERE id = ?"),
     messageExists: db.prepare("SELECT 1 AS hit FROM messages WHERE id = ?"),
@@ -288,6 +291,17 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       return loadThread(threadId).imageChoice;
     },
 
+    setImageCount(threadId, count) {
+      guard();
+      checkId("threadId", threadId);
+      const clean = S.decodeUnknownSync(ImageCount)(count);
+      return transaction(() => {
+        const res = stmt.setImageCount.run(clean, threadId);
+        if (Number(res.changes) === 0) throw new ThreadNotFoundError(threadId);
+        return loadThread(threadId);
+      });
+    },
+
     deleteThread(threadId) {
       guard();
       checkId("threadId", threadId);
@@ -368,7 +382,7 @@ export function openThreadStore(dbPath: string, options: ThreadStoreOptions = {}
       return transaction(() => stmt.unfinishedImages.all().map((row) => {
         const old = S.decodeUnknownSync(ImageEvent)(JSON.parse(str(row, "image_job_json")));
         if (!old.threadId) throw new Error("Saved image job is missing its thread");
-        const event: ImageEvent = { jobId: old.jobId, threadId: old.threadId, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again.", ...(old.choice ? { choice: old.choice } : {}), ...(old.sent ? { sent: old.sent } : {}) };
+        const event: ImageEvent = { jobId: old.jobId, threadId: old.threadId, state: "error", errorKind: "restarted", message: "The app restarted before this image finished; try again.", ...(old.choice ? { choice: old.choice } : {}), ...(old.sent ? { sent: old.sent } : {}), ...(old.group ? { group: old.group } : {}) };
         stmt.updateImageCard.run(JSON.stringify(event), null, old.jobId, old.threadId);
         return event;
       }));
@@ -547,6 +561,9 @@ function threadFromRow(row: Row): Thread {
     // A choice this build cannot read is dropped: the thread then follows the app's last pick.
     try { thread.imageChoice = S.decodeUnknownSync(ImageChoice)(JSON.parse(choice)); } catch { /* left out */ }
   }
+  // One is the default and is left out; a count this build cannot read is dropped the same way.
+  const count = opt(row["image_count"]);
+  if (count !== undefined && count !== 1 && S.is(ImageCount)(count)) thread.imageCount = count;
   return thread;
 }
 

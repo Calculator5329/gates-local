@@ -1,6 +1,6 @@
 // Shared shapes for the thread store. Plain TypeScript; packages/contracts
 // mirrors Thread and Message as Effect Schemas for the wire.
-import type { ImageChoice, ImageEvent } from "@gates-local/contracts";
+import type { ImageChoice, ImageCount, ImageEvent } from "@gates-local/contracts";
 
 export type Role = "user" | "assistant" | "system";
 
@@ -13,6 +13,8 @@ export interface Thread {
   updatedAt: number; // ms since epoch
   /** The image model and size this thread sends with; absent until a pick or an image send in it. */
   imageChoice?: ImageChoice;
+  /** How many pictures an Image-mode send makes; absent is 1. */
+  imageCount?: ImageCount;
 }
 
 export interface MessageStats {

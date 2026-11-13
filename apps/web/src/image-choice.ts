@@ -47,6 +47,12 @@ export function drawChoice(s: State): ImageChoice | undefined {
   return view === undefined ? undefined : { preset: view.preset.id, width: view.width, height: view.height };
 }
 
+/** How many pictures an Image send makes: the open thread's count, a new thread's pick, else 1. */
+export function imageCount(s: State): number {
+  const open = s.view === "thread" && s.threadId !== null ? s.threads.find((t) => t.id === s.threadId) : undefined;
+  return open === undefined ? s.imageCountNew : open.imageCount ?? 1;
+}
+
 export const sizeLabel = (width: number, height: number): string => `${width}×${height}`;
 
 /** A setup's full name as the server last listed it, else its id (a setup ComfyUI no longer has). */

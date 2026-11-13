@@ -168,7 +168,7 @@ export interface State {
   /** The open popover. A thread menu belongs to its row and opens at its button or a right-click point. */
   readonly pop:
     | { readonly id: "picker"; readonly kb: boolean; readonly ready?: true }
-    | { readonly id: "plus" | "opts" | "images"; readonly kb: boolean }
+    | { readonly id: "plus" | "opts" | "images" | "count"; readonly kb: boolean }
     | { readonly id: "thread"; readonly kb: boolean; readonly thread: string; readonly at?: { readonly x: number; readonly y: number } }
     | null;
   /** The pop-up over the chat area (the footer's Usage); the chat stays mounted under it. */
@@ -220,6 +220,8 @@ export interface State {
   readonly imageDownload: ImageDownload | undefined;
   /** A new thread's pick where Settings cannot be written (the phone): its first send carries it, the computer's Settings keep theirs. */
   readonly imagePick: ImageChoice | undefined;
+  /** A new thread's picture count (the count menu before its first send), which that send carries; then back to 1. */
+  readonly imageCountNew: number;
   /** Settings › Updates: the version, the last check and the last update's result. Read at hydrate; no git runs for it. */
   readonly update: Maybe<UpdateStatus>;
   /** A "Check for updates" click waiting for its answer. */
@@ -287,6 +289,7 @@ const initial: State = {
   imagePresets: undefined,
   imageDownload: undefined,
   imagePick: undefined,
+  imageCountNew: 1,
   update: undefined,
   updateChecking: false,
   updateInstalling: false,

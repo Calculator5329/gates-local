@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13: Image mode makes 1 to 4 pictures per send
+
+- In Image mode the Thinking circle shows how many pictures a send makes.
+  Click it for a menu of 1 to 4 images. Keys 1 to 4 pick while it is open.
+  Each row shows about how long that many took on this computer, once this
+  setup has made a picture here.
+- Turn Image off and the Thinking bulb is back.
+- Each thread keeps its own count. A new thread starts at 1.
+- A send of several is one card. Two pictures sit side by side, three or
+  four two by two. Each tile fills in when it is done, and the top line
+  says "1 of 2 making…", then "2 of 2 · 9 s".
+- The pictures are made one after another, each with the next seed. Stop
+  keeps the ones already done, and Try again on a tile remakes only that
+  tile.
+
 ## 2026-11-13: Tests never reach this computer's ComfyUI
 
 - A test that turned image generation on without naming a ComfyUI address

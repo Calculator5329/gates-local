@@ -169,6 +169,7 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "threads.get": { params: { threadId: "t1" }, result: { thread, messages: [userMessage, assistantMessage] } },
   "threads.rename": { params: { threadId: "t1", title: "Renamed" }, result: { ...thread, title: "Renamed" } },
   "threads.setImageChoice": { params: { threadId: "t1", choice: { preset: "moss-image", width: 1024, height: 1024 } }, result: { ...thread, imageChoice: { preset: "moss-image", width: 1024, height: 1024 } } },
+  "threads.setImageCount": { params: { threadId: "t1", count: 3 }, result: { ...thread, imageCount: 3 } },
   "threads.delete": { params: { threadId: "t1" }, result: { threadId: "t1" } },
   "models.list": { params: {}, result: models },
   "models.refresh": { params: {}, result: models },

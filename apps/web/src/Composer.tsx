@@ -2,8 +2,8 @@
 // The composer (shell.md F01, F02, F15, F28-F31, F34, F37b, F43b): the text
 // box, model and context chips, Thinking and Image pills, the context meter,
 // Send or Stop, and the popovers it opens (model picker, + menu).
-import { type FocusEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ModelInfo } from "@gates-local/contracts";
+import { type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type RefObject, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { IMAGE_COUNT_MAX, type ModelInfo } from "@gates-local/contracts";
 import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
@@ -13,7 +13,7 @@ import { LoadBar, LoadTime } from "./LoadBar.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
-import { chosenImage, imageMode, sizeLabel } from "./image-choice.ts";
+import { chosenImage, imageCount, imageMode, sizeLabel } from "./image-choice.ts";
 import { ImageMark } from "./ImageMark.tsx";
 import { Icon, SendArrow } from "./icons.tsx";
 import { canThink, chatBlockedReason, chatModels } from "./pick.ts";
@@ -28,7 +28,9 @@ import {
   confirmStopAsk,
   editQueued,
   firstPull,
+  lastImageRunMs,
   openSettings,
+  pickImageCount,
   queueReason,
   removeQueued,
   send,
@@ -319,7 +321,8 @@ export function Composer() {
                 <span>Context {Math.round(pct * 100)}% used</span>
               </button>
             )}
-            <button
+            {/* Image on: the Thinking circle's place holds how many pictures a send makes; off, the bulb is back */}
+            {drawing ? <CountButton open={pop === "count"} /> : <button
               type="button"
               className={`pill gate thinking${thinkNa !== null ? " unavail" : ""}`}
               aria-pressed={thinkNa !== null ? false : think}
@@ -339,7 +342,7 @@ export function Composer() {
             >
               <Icon id="bulb" cls="lead" />
               <span className="plbl">Thinking</span>
-            </button>
+            </button>}
           </div>
           <div className="cf-r">
             {/* Stop takes Dictate's square while a queued message is edited; Dictate stays mounted under it, so its shortcut still answers */}
@@ -564,6 +567,106 @@ function StopWarning() {
           Stop and send
         </button>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- picture count (Image on)
+
+const images = (n: number) => (n === 1 ? "1 image" : `${n} images`);
+
+/** About how long `n` pictures take at `ms` each: seconds, minutes from 90 s. */
+function about(ms: number, n: number): string {
+  const secs = (ms * n) / 1000;
+  return secs < 90 ? `~${Math.max(1, Math.round(secs))} s` : `~${Math.round(secs / 60)} min`;
+}
+
+/** This computer's last time for the setup the menu was opened on: read before it opens, so its rows never change under the pointer. */
+let lastRun: { key: string; ms: number | undefined } | undefined;
+const runKey = (c: { preset: string; width: number; height: number }) => `${c.preset}:${c.width}x${c.height}`;
+const READ_WAIT_MS = 400;
+
+function pickCount(n: number): void {
+  closePop(true);
+  void pickImageCount(n).then((error) => { if (error !== null) setState({ notice: error }); });
+}
+
+/** Up and Down move between the counts. */
+function countArrows(e: ReactKeyboardEvent<HTMLDivElement>): void {
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const to = e.key === "ArrowDown" ? at + 1 : e.key === "ArrowUp" ? at - 1 : null;
+  if (to === null) return;
+  e.preventDefault();
+  items[(to + items.length) % items.length]?.focus();
+}
+
+function CountButton({ open }: { open: boolean }) {
+  const count = useStore(imageCount);
+  const pictured = useStore(chosenImage);
+  const toggle = async (kb: boolean) => {
+    if (!open && pictured !== undefined) {
+      const choice = { preset: pictured.preset.id, width: pictured.width, height: pictured.height };
+      const key = runKey(choice);
+      // never longer than a moment: without an answer the rows show no times
+      const ms = await Promise.race([lastImageRunMs(choice), new Promise<undefined>((done) => setTimeout(done, READ_WAIT_MS))]);
+      lastRun = { key, ms: ms ?? (lastRun?.key === key ? lastRun.ms : undefined) };
+    }
+    togglePop("count", kb);
+  };
+  return (
+    <button
+      type="button"
+      className={`pill gate thinking count${count > 1 ? " on" : ""}`}
+      id="countBtn"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label={`Pictures per send: ${count}`}
+      data-tip="Pictures per send"
+      onClick={(e) => void toggle(e.detail === 0)}
+    >
+      <span className="lead cnt" aria-hidden="true">{count}</span>
+      <span className="plbl">{images(count)}</span>
+    </button>
+  );
+}
+
+/** One to four pictures per send, each with this computer's time for the setup Send uses; keys 1 to 4 pick while it is open. */
+export function CountMenu() {
+  const open = useStore((s) => s.pop?.id === "count");
+  const kb = useStore((s) => s.pop?.id === "count" && s.pop.kb);
+  const count = useStore(imageCount);
+  const pictured = useStore(chosenImage);
+  const drawing = useStore(imageMode);
+  const ref = useRef<HTMLDivElement>(null);
+  // Image off takes the button away, and its menu with it
+  useEffect(() => { if (open && !drawing) closePop(); }, [open, drawing]);
+  const ms = pictured !== undefined && lastRun?.key === runKey({ preset: pictured.preset.id, width: pictured.width, height: pictured.height }) ? lastRun.ms : undefined;
+  useLayoutEffect(() => {
+    const anchor = document.getElementById("countBtn");
+    if (open && ref.current && anchor) place(ref.current, anchor, "start");
+    if (open && kb) ref.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+  }, [open, kb]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = Number(e.key);
+      if (e.ctrlKey || e.metaKey || e.altKey || !Number.isInteger(n) || n < 1 || n > IMAGE_COUNT_MAX) return;
+      e.preventDefault();
+      pickCount(n);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <div className={`pop menu count-menu${open ? " open" : ""}`} id="countMenu" role="menu" aria-label="Pictures per send" ref={ref} onKeyDown={countArrows}>
+      {Array.from({ length: IMAGE_COUNT_MAX }, (_, i) => i + 1).map((n) => (
+        <button key={n} type="button" className="mi" role="menuitemradio" aria-checked={n === count} onClick={() => pickCount(n)}>
+          <Icon id="check" cls="chk" />
+          <b>{images(n)}</b>
+          {ms === undefined ? null : <small>{about(ms, n)}</small>}
+        </button>
+      ))}
     </div>
   );
 }

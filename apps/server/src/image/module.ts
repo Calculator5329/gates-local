@@ -561,6 +561,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       } else resolveChoice(choice, extras()); // an unknown preset or size is refused before any card
       if (!prompt.trim()) throw imageError("bad-params", "Describe the image you want to make.");
       const sent = choice; // the card's box keeps this shape whatever the job settles to
+      // A retry is its own card that takes over the failed one's place (and tile), so it is in no group.
+      const group = params.retryOf === undefined ? params.group : undefined;
       // The thread sends with this from now on, whatever another thread picks. A choice someone made is
       // kept at send. An unset default is kept only once it has made a picture, as settled from ComfyUI's
       // files, and only while the thread still has none: a pick or a send since then stays. A failed
@@ -580,7 +582,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       let timedOut = false;
       let stage = "image-config";
       const event = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}, picture?: PictureFacts) => {
-        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...rest };
+        const payload: ImageEvent = { jobId, ...params.threadId ? { threadId: params.threadId } : {}, state, choice, ...same(choice, sent) ? {} : { sent }, ...group ? { group } : {}, ...rest };
         deps.store.saveImageJob(payload, prompt, picture);
         emit("image.event", payload);
       };
@@ -646,7 +648,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
               const job = jobs.get(jobId);
               if (job) job.committing = true;
               clearTimeout(timeout);
-            }, choice, extras());
+            }, choice, extras(), params.seed);
             const runMs = Math.round(performance.now() - started);
             const imagePath = `images/${jobId}.png`;
             stage = "image-save";
@@ -658,7 +660,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             // a default is kept as settled once it has made a picture; the threads.changed below says so
             if (unset && pinIn !== undefined) deps.store.fillImageChoice(pinIn, choice);
             const made = await pngFacts(bytes) ?? size;
-            event("done", { progress: 1, imagePath }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
+            event("done", { progress: 1, imagePath, runMs }, { width: made.width, height: made.height, seed, ...steps === undefined ? {} : { steps }, runMs, bytes: bytes.length });
             if (params.threadId) emit("threads.changed", { threadId: params.threadId });
             update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
           });

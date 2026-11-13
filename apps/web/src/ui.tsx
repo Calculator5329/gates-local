@@ -10,9 +10,9 @@ import { type State, getState, setState } from "./store.ts";
 type PopId = NonNullable<State["pop"]>["id"];
 type FixedPopId = Exclude<PopId, "thread">;
 /** The control each popover opens from; Escape and outside clicks return focus there. */
-const POP_ANCHOR: Record<FixedPopId, string> = { picker: "modelBtn", images: "modelBtn", plus: "plusBtn", opts: "optBtn" };
+const POP_ANCHOR: Record<FixedPopId, string> = { picker: "modelBtn", images: "modelBtn", plus: "plusBtn", opts: "optBtn", count: "countBtn" };
 /** The popover each element is drawn as. */
-export const POP_EL: Record<PopId, string> = { picker: "picker", images: "imagePicker", plus: "plusMenu", thread: "threadMenu", opts: "optsMenu" };
+export const POP_EL: Record<PopId, string> = { picker: "picker", images: "imagePicker", plus: "plusMenu", thread: "threadMenu", opts: "optsMenu", count: "countMenu" };
 
 /** A phone-width window (styles.css: 640 px and below), where popovers are bottom sheets. */
 export const PHONE = "(max-width: 640px)";

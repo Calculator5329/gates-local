@@ -14,6 +14,19 @@ export const ImageChoice = S.Struct({
 });
 export type ImageChoice = typeof ImageChoice.Type;
 
+/** How many pictures one Image-mode send makes, one after another. */
+export const IMAGE_COUNT_MAX = 4;
+export const ImageCount = S.Int.check(S.isBetween({ minimum: 1, maximum: IMAGE_COUNT_MAX }));
+export type ImageCount = typeof ImageCount.Type;
+
+/** One picture of a send that makes several: they share `id`, and this is number `index` (from 0) of `of`. */
+export const ImageGroup = S.Struct({
+  id: S.String.check(S.isMaxLength(200)),
+  index: S.Int.check(S.isBetween({ minimum: 0, maximum: IMAGE_COUNT_MAX - 1 })),
+  of: ImageCount,
+});
+export type ImageGroup = typeof ImageGroup.Type;
+
 export const Thread = S.Struct({
   id: S.String,
   title: S.String,
@@ -21,6 +34,8 @@ export const Thread = S.Struct({
   updatedAt: Millis,
   /** The image model and size this thread sends with (threads.setImageChoice, or its last image send); absent follows Settings' imageChoice. */
   imageChoice: S.optional(ImageChoice),
+  /** How many pictures an Image-mode send in this thread makes (threads.setImageCount, or its last image send); absent is 1. */
+  imageCount: S.optional(ImageCount),
 });
 export type Thread = typeof Thread.Type;
 
@@ -78,6 +93,10 @@ export const ImageEvent = S.Struct({
   choice: S.optional(ImageChoice),
   /** The choice the card was first drawn with, when the job settled to another (an unset default passed over for the files ComfyUI has). The card's box keeps this shape. */
   sent: S.optional(ImageChoice),
+  /** One of several pictures from one Image-mode send; they show as tiles of one card. Absent: a picture of its own. */
+  group: S.optional(ImageGroup),
+  /** Done: ComfyUI's time making the picture. Absent on cards saved before it was kept. */
+  runMs: S.optional(Count),
 });
 export type ImageEvent = typeof ImageEvent.Type;
 

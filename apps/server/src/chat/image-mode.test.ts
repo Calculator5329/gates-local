@@ -22,7 +22,7 @@ const CHOSEN: ImageChoice = { preset: "moss-image", width: 1024, height: 1024 };
 const DRAWN: ImageChoice = { preset: "flux2-klein-4b-pixel", width: 512, height: 512 };
 const ndjson = (items: unknown[]) => new Response(items.map((i) => JSON.stringify(i)).join("\n") + "\n");
 
-async function rig(options: { imageTool?: ImageChoice; hold?: boolean } = {}) {
+async function rig(options: { imageTool?: ImageChoice; hold?: boolean; firstDone?: boolean } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "gl-image-mode-"));
   dirs.push(root);
   const sources = createSources({ dataDir: path.join(root, "data") });
@@ -35,13 +35,13 @@ async function rig(options: { imageTool?: ImageChoice; hold?: boolean } = {}) {
   let n = 0;
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
-  const generate = vi.fn(async (params: { prompt: string; threadId?: string; choice?: ImageChoice }) => {
+  const generate = vi.fn(async (params: { prompt: string; threadId?: string; choice?: ImageChoice; group?: ImageEvent["group"]; seed?: number }) => {
     const jobId = `job-${++n}`;
     const controller = new AbortController();
-    const card = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => store.saveImageJob({ jobId, ...(params.threadId ? { threadId: params.threadId } : {}), state, ...(params.choice ? { choice: params.choice } : {}), ...rest }, params.prompt);
+    const card = (state: ImageEvent["state"], rest: Partial<ImageEvent> = {}) => store.saveImageJob({ jobId, ...(params.threadId ? { threadId: params.threadId } : {}), state, ...(params.choice ? { choice: params.choice } : {}), ...(params.group ? { group: params.group } : {}), ...rest }, params.prompt);
     card("queued");
     const ended = lease.run("image", controller.signal, async () => {
-      if (options.hold) await new Promise<void>((resolve, reject) => { void held.then(resolve); controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }); });
+      if (options.hold && !(options.firstDone && jobId === "job-1")) await new Promise<void>((resolve, reject) => { void held.then(resolve); controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }); });
       card("done", { progress: 1, imagePath: `images/${jobId}.png` });
     }).catch(() => card("cancelled", { message: "The image was cancelled; try again when you are ready.", errorKind: "cancelled" }));
     jobs.set(jobId, { controller, ended });
@@ -195,6 +195,28 @@ describe("Image mode: the typed words go straight to the image model", () => {
       await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
       expect(t.store.getThread(t.thread.id).messages.map((m) => [m.role, m.imageJob?.state])).toEqual([["user", undefined], ["assistant", "done"]]);
     } finally { await t.close(); }
+  });
+
+  it("a count of 3: three jobs one after another, seeds one apart, one group; the thread keeps 3, and Stop keeps the finished picture", async () => {
+    const t = await rig({ hold: true, firstDone: true });
+    try {
+      const { turnId } = await t.send({ draw: DRAWN, drawCount: 3 });
+      expect(t.generate).toHaveBeenCalledTimes(3);
+      const sent = t.generate.mock.calls.map(([p]) => ({ group: p.group!, seed: p.seed! }));
+      expect(sent.map((p) => [p.group.index, p.group.of])).toEqual([[0, 3], [1, 3], [2, 3]]);
+      expect(new Set(sent.map((p) => p.group.id)).size).toBe(1);
+      expect(sent.map((p) => (p.seed - sent[0]!.seed + 2 ** 32) % 2 ** 32)).toEqual([0, 1, 2]);
+      expect(t.store.getThread(t.thread.id).thread.imageCount).toBe(3);
+      await vi.waitFor(() => expect(t.store.getMessage("job-1")?.imageJob?.state).toBe("done"));
+      await t.app.handlers["chat.cancel"]({ turnId }, { clientId: 1 });
+      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      expect(t.store.getThread(t.thread.id).messages.map((m) => m.imageJob?.state)).toEqual([undefined, "done", "cancelled", "cancelled"]);
+      // the thread's next send makes three again without saying so
+      t.release();
+      await t.send({ draw: DRAWN, content: "again" });
+      await vi.waitFor(() => expect(t.app.activeTurns()).toBe(0));
+      expect(t.generate).toHaveBeenCalledTimes(6);
+    } finally { t.release(); await t.close(); }
   });
 
   it("refuses attachments and keeps nothing", async () => {

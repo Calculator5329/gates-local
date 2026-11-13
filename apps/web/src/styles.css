@@ -490,6 +490,19 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .pill[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--foreground) 16%,transparent)}
 .pill[aria-pressed="false"]{color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong)}
 .pill[aria-pressed="false"]:hover{color:var(--foreground);background:var(--hover)}
+/* Image on: the circle holds the picture count, greyed at 1 like a pill that is off, filled from 2 */
+.pill.count{color:var(--muted-foreground);box-shadow:inset 0 0 0 1px var(--border-strong);font-variant-numeric:tabular-nums}
+.pill.count:hover{color:var(--foreground);background:var(--hover)}
+.pill.count.on{color:var(--foreground);background:var(--selected);box-shadow:none;font-weight:600}
+.pill.count.on:hover{background:color-mix(in srgb,var(--foreground) 16%,transparent)}
+.pill.count .cnt{font-size:13px;line-height:1}
+@media (hover:none){.pill.count .cnt{display:none}}
+.count-menu{min-width:168px}
+.count-menu .mi{align-items:center;gap:8px;padding:6px 10px}
+.count-menu .mi b{font-weight:400}
+.count-menu .mi small{margin:0 0 0 auto;font-variant-numeric:tabular-nums}
+.count-menu .mi[aria-checked] .chk{display:block;visibility:hidden;margin:0}
+.count-menu .mi[aria-checked="true"] .chk{visibility:visible}
 .mi .chk{display:none}
 .mi[aria-checked="true"] .chk{display:block;margin-left:auto;align-self:center;color:var(--foreground)}
 .mi .switch{margin-left:auto;align-self:center}
@@ -829,6 +842,12 @@ a.btn{text-decoration:none}
 .image-job-state{display:flex;align-items:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:var(--muted-foreground)}
 .image-job-state p{margin:0;font-variant-numeric:tabular-nums}
 /* a prompt the chat model wrote, under its own card */
+/* A send that made several pictures: one card, its model, size and count on top, the pictures as tiles (2 in a row, 3 or 4 two by two) */
+.image-group{width:768px;max-width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card)}
+.image-group-head{margin:0 0 8px;color:var(--muted-foreground);font-size:12px;line-height:16px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.image-tiles{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.image-tiles .image-job{width:100%;border-radius:calc(var(--r-sm) - 2px)}
+.image-tiles .image-job-state{padding:12px;gap:8px;font-size:13px}
 .image-job-fig{margin:0;max-width:100%}
 .image-job-prompt{margin:6px 0 0;max-width:768px;color:var(--muted-foreground);font-size:12px;line-height:18px;overflow-wrap:anywhere}
 .image-job[data-image-job="queued"] .ic,.image-job[data-image-job="running"] .ic{color:var(--amber)}

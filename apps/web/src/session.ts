@@ -362,6 +362,28 @@ export async function pickImage(choice: ImageChoice): Promise<ActionResult> {
   return updateSettings({ imageChoice: choice });
 }
 
+/** The count menu's pick: the open thread makes this many from now on; a new thread's first send carries it. */
+export async function pickImageCount(count: number): Promise<ActionResult> {
+  const s = getState();
+  const threadId = s.view === "thread" ? s.threadId : null;
+  if (threadId === null) {
+    setState({ imageCountNew: count });
+    return null;
+  }
+  const r = await act("threads.setImageCount", { threadId, count }, "save the picture count");
+  if (!r.ok) return r.message;
+  applyServerEvent((st) => ({ threads: st.threads.map((t) => (t.id === r.value.id ? r.value : t)) }));
+  return null;
+}
+
+/** ComfyUI's time for this computer's newest picture of this setup and size, or undefined when it has made none (or kept no time). */
+export async function lastImageRunMs(choice: ImageChoice): Promise<number | undefined> {
+  try {
+    const { pictures: list } = await call("pictures.list", { setup: choice.preset, limit: 20 });
+    return list.find((p) => p.runMs !== undefined && p.width === choice.width && p.height === choice.height)?.runMs;
+  } catch { return undefined; }
+}
+
 /** The picker's image actions say the server's own words (they are written to be shown), the connection's when it failed. */
 async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
   try { return { ok: true, value: await run() }; }

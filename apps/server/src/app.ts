@@ -603,21 +603,33 @@ export function createApp(deps: AppDeps): App {
    * lasts as long as the job: a second send in the thread waits, Stop (or deleting the thread or
    * the question, or shutdown) cancels the job, and the card ends the turn as its reply. A job
    * that fails says why on its card, the way a tool-made picture does.
+   *
+   * `count` pictures (the thread's count, chat.send drawCount): one job after another, seeds one
+   * apart, in one group the client shows as tiles of one card. The turn lasts until the last one
+   * settles; Stop cancels those not done and keeps the finished ones.
    */
-  const drawTurn = async (threadId: string, content: string, choice: ImageChoice, messageId: string | undefined, replaced: readonly string[], attached: boolean) => {
+  const drawTurn = async (threadId: string, content: string, choice: ImageChoice, count: { now: number; saved: number }, messageId: string | undefined, replaced: readonly string[], attached: boolean) => {
     const image = deps.image;
     if (attached) throw new AppError("image-input", "Image mode makes a picture from words alone. Remove the attachments, or turn Image off to ask a chat model about them.");
     if (image === undefined) throw new AppError("image-input", "Image generation is not available in this build.");
     const { turn, end } = reserve(threadId, choice.preset);
     turn.drawing = true;
-    let jobId: string;
+    const jobIds: string[] = [];
     let userMessage: Message;
     try {
       userMessage = store.appendMessage({ ...(messageId === undefined ? {} : { id: messageId }), threadId, role: "user", content }, replaced);
       try {
-        ({ jobId } = await queueImage(image, { prompt: content, threadId, choice }));
+        const group = count.now > 1 ? randomUUID() : undefined;
+        const seed = Math.floor(Math.random() * 2 ** 32);
+        for (let index = 0; index < count.now; index++) {
+          const tile = group === undefined ? {} : { group: { id: group, index, of: count.now }, seed: (seed + index) % 2 ** 32 };
+          jobIds.push((await queueImage(image, { prompt: content, threadId, choice, ...tile })).jobId);
+        }
       } catch (e) {
-        // Nothing was made: the question goes too, so the words return to the composer as unsent.
+        // Nothing was made: the question goes too, with any of its pictures already queued, so the words return to the composer as unsent.
+        for (const id of jobIds) image.cancel(id);
+        await Promise.all(jobIds.map((id) => image.wait(id).catch(() => undefined)));
+        for (const id of jobIds) { try { store.deleteMessage(threadId, id); } catch { /* already gone */ } }
         store.deleteMessage(threadId, userMessage.id);
         push("threads.changed", { threadId });
         throw e;
@@ -626,19 +638,27 @@ export function createApp(deps: AppDeps): App {
       end();
       throw e;
     }
+    // The thread makes this many from now on, as it keeps the choice it sent.
+    if (count.now !== count.saved) {
+      try { store.setImageCount(threadId, count.now); } catch (e) { log(`turn ${turn.turnId}: image count not kept: ${(e as Error).message}`); }
+    }
     push("threads.changed", { threadId });
     turn.start = { type: "start", model: choice.preset, userMessage, image: true };
     push("chat.event", { turnId: turn.turnId, threadId, event: turn.start });
-    const stop = () => image.cancel(jobId);
+    const stop = () => { for (const id of jobIds) image.cancel(id); };
     if (turn.controller.signal.aborted) stop();
     else turn.controller.signal.addEventListener("abort", stop, { once: true });
-    void image.wait(jobId).catch(() => undefined).then(() => {
+    void Promise.all(jobIds.map((id) => image.wait(id).catch(() => undefined))).then(() => {
       turn.terminal = true;
       turn.controller.signal.removeEventListener("abort", stop);
-      const card = store.getMessage(jobId);
-      // Deleting the question takes its picture with it, as it takes a chat reply.
-      if (turn.dropReply && card !== undefined) {
-        try { store.deleteMessage(threadId, jobId); } catch (e) { log(`turn ${turn.turnId}: image card not removed: ${(e as Error).message}`); }
+      const [first] = jobIds as [string, ...string[]];
+      const card = store.getMessage(first);
+      // Deleting the question takes its pictures with it, as it takes a chat reply.
+      if (turn.dropReply) {
+        for (const id of jobIds) {
+          if (store.getMessage(id) === undefined) continue;
+          try { store.deleteMessage(threadId, id); } catch (e) { log(`turn ${turn.turnId}: image card not removed: ${(e as Error).message}`); }
+        }
       }
       const event: WireEvent = card === undefined || turn.dropReply
         ? { type: "error", code: "cancelled", message: "cancelled: its question was deleted" }
@@ -677,6 +697,11 @@ export function createApp(deps: AppDeps): App {
     },
     "threads.setImageChoice": ({ threadId, choice }) => {
       const thread = store.setImageChoice(threadId, choice);
+      push("threads.changed", { threadId });
+      return thread;
+    },
+    "threads.setImageCount": ({ threadId, count }) => {
+      const thread = store.setImageCount(threadId, count);
       push("threads.changed", { threadId });
       return thread;
     },
@@ -737,13 +762,14 @@ export function createApp(deps: AppDeps): App {
     },
 
     // `image` is an older client's Image button: accepted and ignored (Tools › Make images decides now).
-    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, draw, stopOthers, stopTurns, askFirst }) => {
+    "chat.send": async ({ threadId, content, model, numCtx, messageId, retryOf, images = [], tools, think, draw, drawCount, stopOthers, stopTurns, askFirst }) => {
       if (closing) throw new AppError("shutting-down", "the server is stopping; no new turns");
       deps.admit?.();
       // The thread is going: its delete has already listed what it takes back.
       if (deleting.has(threadId)) throw threadGoing(threadId);
       // Keep unfinished text for the person, but never present it to a model as a completed answer.
-      const stored = store.getThread(threadId).messages;
+      const loaded = store.getThread(threadId);
+      const stored = loaded.messages;
       const replaced = retryOf === undefined ? [] : retriedRows(stored, retryOf);
       const prior = stored.filter(m => !replaced.includes(m.id) && (m.role !== "assistant" || m.interrupted !== true));
       const saved = messageId === undefined ? undefined : store.getMessage(messageId);
@@ -753,7 +779,10 @@ export function createApp(deps: AppDeps): App {
       }
       const active = byThread.get(threadId);
       if (active !== undefined) throw new AppError("turn-active", `thread ${threadId} already has turn ${active.turnId} streaming; cancel it or wait`);
-      if (draw !== undefined) return drawTurn(threadId, content, draw, messageId, replaced, images.length > 0);
+      if (draw !== undefined) {
+        const kept = loaded.thread.imageCount ?? 1;
+        return drawTurn(threadId, content, draw, { now: drawCount ?? kept, saved: kept }, messageId, replaced, images.length > 0);
+      }
       try { checkAttachments(images); }
       catch (e) { throw new AppError("image-input", e instanceof Error ? e.message : "Could not attach these images."); }
       const settings = turnSettings(deps.settings?.get(), model);

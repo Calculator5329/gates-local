@@ -11,7 +11,9 @@ import {
   FitTable,
   GpuStatus,
   ImageChoice,
+  ImageCount,
   ImageEvent,
+  ImageGroup,
   ImageDownload,
   ImagePresets,
   ImageStatus,
@@ -129,6 +131,8 @@ export const methods = {
   "threads.rename": { params: S.Struct({ threadId: S.String, title: S.String }), result: Thread, phone: "allow" },
   /** The picker's pick in an open thread: that thread sends with it from now on; other threads keep theirs. */
   "threads.setImageChoice": { params: S.Struct({ threadId: S.String, choice: ImageChoice }), result: Thread, phone: "allow" },
+  /** The Image-mode count menu's pick in an open thread: its sends make this many pictures from now on. */
+  "threads.setImageCount": { params: S.Struct({ threadId: S.String, count: ImageCount }), result: Thread, phone: "allow" },
   "threads.delete": { params: ThreadRef, result: S.Struct({ threadId: S.String }), phone: "deny" },
   "messages.delete": { params: S.Struct({ threadId: S.String, messageId: S.String }), result: S.Struct({ messageId: S.String }), phone: "deny" },
   "models.list": { params: NoParams, result: S.Array(ModelInfo), phone: "allow" },
@@ -168,6 +172,12 @@ export const methods = {
        * is the reply. Refused with attachments or while image generation is off.
        */
       draw: S.optional(ImageChoice),
+      /**
+       * With draw: how many pictures this send makes (1 to 4), one job after another with seeds
+       * one apart, shown as tiles of one card. The thread keeps it for its next sends. Omitted: the
+       * thread's saved count, else 1.
+       */
+      drawCount: S.optional(ImageCount),
       /**
        * When this turn's load needs GPU memory a model with a running turn holds (turns.blocking),
        * end those turns first: each saves its partial reply and ends with error code "preempted"
@@ -237,7 +247,13 @@ export const methods = {
   "image.presets": { params: NoParams, result: ImagePresets, phone: "allow" },
   "image.generate": {
     /** `choice` omitted: Settings' imageChoice. A retry runs its failed job's choice. */
-    params: S.Struct({ prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String), choice: S.optional(ImageChoice) }),
+    params: S.Struct({
+      prompt: S.String, threadId: S.optional(S.String), retryOf: S.optional(S.String), choice: S.optional(ImageChoice),
+      /** Image mode's several pictures from one send (chat.send drawCount): the card's tile. */
+      group: S.optional(ImageGroup),
+      /** The seed to run; omitted: a random one. */
+      seed: S.optional(S.Int.check(S.isBetween({ minimum: 0, maximum: 2 ** 32 - 1 }))),
+    }),
     result: S.Struct({ jobId: S.String }),
     phone: "allow",
   },

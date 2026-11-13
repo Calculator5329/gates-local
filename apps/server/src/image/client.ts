@@ -69,10 +69,9 @@ export function createComfyClient(baseUrl: string, deps: ComfyClientDeps = {}) {
       try { return comfyFolders(await (await request("/internal/folder_paths", undefined, signal)).json()); }
       catch { return undefined; }
     },
-    /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. */
-    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = []): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
+    /** `extra`: the workflows ComfyUI had, as setups (presets.ts workflowPreset), for a choice that names one. `seed` omitted: a random one. */
+    async render(prompt: string, clientId: string, signal: AbortSignal, progress: (value: number) => void, fetched: () => void = () => {}, choice: ImageChoice = DEFAULT_CHOICE, extra: readonly Preset[] = [], seed: number = Math.floor(Math.random() * 2 ** 32)): Promise<{ bytes: Buffer; seed: number; steps?: number }> {
       const { preset, size } = resolveChoice(choice, extra);
-      const seed = Math.floor(Math.random() * 2 ** 32);
       const graph = jobGraph(preset, await this.info(signal), { prompt, seed, width: size.width, height: size.height });
       // The steps the graph asks for, for the Pictures screen; a graph with none or several gives none.
       const { steps } = graphFacts(graph);
