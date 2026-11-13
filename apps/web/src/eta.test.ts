@@ -20,4 +20,9 @@ describe("download time left", () => {
     expect(etaText(p({ state: "verifying", completedBytes: 6.6 * GB, totalBytes: 6.6 * GB, bytesPerSecond: 90e6 }))).toBe("Verifying the download");
     expect(etaText(p({ completedBytes: 6.6 * GB, totalBytes: 6.6 * GB, bytesPerSecond: 90e6 }))).toBe("Finishing the download");
   });
+  // Owner 2026-11-13: a model in several files read "0.2 of 1.1 GB", the first file's size, as if it were the model's.
+  it("says what has arrived, with no total and no time left, while the whole size is unknown", () => {
+    expect(etaText(p({ completedBytes: 0.2 * 1024 ** 3, bytesPerSecond: 15e6 }))).toBe(`0.2${SP}GB so far · 15 MB/s`);
+    expect(etaText(p({ completedBytes: 0 }))).toBe("Starting");
+  });
 });

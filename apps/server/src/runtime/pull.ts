@@ -29,6 +29,12 @@ export interface PullManagerOptions {
   push: (progress: PullProgress) => void;
   /** After a download finishes: refresh the model list and the catalog. */
   onDone?: (name: string) => void | Promise<void>;
+  /**
+   * The whole download's size, from the curated list at once or from the registry a moment later.
+   * Ollama names one file at a time, so the sum of what it has named is not the model's size until
+   * the last file starts. With this set, no total goes out until the whole size is known.
+   */
+  sizeOf?: (name: string, signal: AbortSignal) => number | undefined | Promise<number | undefined>;
   now?: () => number;
   intervalMs?: number;
   log?: (line: string) => void;
@@ -39,6 +45,8 @@ interface Job {
   progress: PullProgress;
   controller: AbortController;
   layers: Map<string, { total: number; completed: number }>;
+  /** The whole download, when sizeOf knew it. */
+  size?: number;
   lastPushAt: number;
   /** A held-back progress push, sent when the interval is up if no newer line comes first. */
   trailing?: ReturnType<typeof setTimeout>;
@@ -90,16 +98,30 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     send(job);
   };
 
-  const progressed = (job: Job, flush = false) => {
-    let total = 0;
+  const sums = (job: Job) => {
+    let listed = 0;
     let completed = 0;
     for (const l of job.layers.values()) {
-      total += l.total;
+      listed += l.total;
       completed += l.completed;
     }
+    return { listed, completed };
+  };
+
+  const sized = (job: Job, size: number | undefined) => {
+    if (size === undefined || !Number.isFinite(size) || size <= 0 || running !== job) return;
+    job.size = Math.round(size);
+    if (job.progress.state === "downloading" && job.layers.size > 0) progressed(job);
+  };
+
+  const progressed = (job: Job, flush = false) => {
+    const { listed, completed } = sums(job);
+    // what Ollama has named so far is a floor, never the answer, until the whole size is known
+    const total = options.sizeOf === undefined ? listed : job.size === undefined ? 0 : Math.max(job.size, listed);
     const t = now();
     if (!flush && t - job.lastPushAt < interval && job.progress.state === "downloading") {
-      job.progress = { ...job.progress, completedBytes: completed, totalBytes: total };
+      const { totalBytes: _total, ...held } = job.progress;
+      job.progress = { ...held, completedBytes: completed, ...(total > 0 ? { totalBytes: total } : {}) };
       // Ollama can go quiet mid-layer; the latest numbers still reach the client.
       job.trailing ??= setTimeout(() => {
         job.trailing = undefined;
@@ -146,6 +168,13 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     if (baseUrl === undefined) throw new PullFailure("Ollama is not running, so nothing can be downloaded.", true);
     job.rateAt = now();
     setState(job, { state: "downloading", completedBytes: 0 });
+    try {
+      const size = options.sizeOf?.(job.name, job.controller.signal);
+      if (typeof size === "number" || size === undefined) sized(job, size);
+      else size.then((n) => sized(job, n)).catch(() => undefined);
+    } catch {
+      // no size: the row shows what has arrived, without a total
+    }
     const res = await fetch(new URL("/api/pull", baseUrl), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -196,7 +225,8 @@ export function createPullManager(options: PullManagerOptions): PullManager {
     running = job;
     run(job)
       .then(async () => {
-        const total = job.progress.totalBytes ?? job.progress.completedBytes;
+        // done: every file has been named, so their sum is the true size
+        const total = sums(job).listed || job.progress.totalBytes || job.progress.completedBytes;
         setState(job, { state: "done", completedBytes: total, ...(total > 0 ? { totalBytes: total } : {}) });
         try {
           await options.onDone?.(job.name);

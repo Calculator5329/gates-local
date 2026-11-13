@@ -740,7 +740,8 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
 .act-err.line{margin:0;padding:0 16px 12px}
 .inp{height:30px;width:230px;padding:0 10px;border:0;outline:0;border-radius:var(--r-ctl);background:transparent;box-shadow:inset 0 0 0 1px var(--border-strong);font-size:13.5px;font-family:var(--font-mono)}
 .inp::placeholder{color:var(--placeholder);font-family:var(--font-sans)}
-.inp:focus{box-shadow:inset 0 0 0 1px var(--green)}
+/* one ring: the field's own edge thickens and turns green; the page-wide input outline would draw a second box around it */
+.inp:focus,.inp:focus-visible{outline:0;box-shadow:inset 0 0 0 2px var(--green)}
 a.btn{text-decoration:none}
 /* runtime owner switch: an explicit action with a confirm step (F29) */
 .cfm{border-top:1px solid var(--border);padding:14px 16px 16px;background:color-mix(in srgb,var(--foreground) 3%,transparent);animation:fadein .15s}

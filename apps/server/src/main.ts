@@ -12,6 +12,10 @@
 //                                applies: "app" first tries the copy this data dir's ownership
 //                                record names, at its recorded port, then the pinned port and
 //                                the nine after it, as it does on 11435..11444 without a pin
+//   GATES_LOCAL_OLLAMA_REGISTRY  where a typed model's whole download size is read before Ollama has
+//                                named all its files; default https://registry.ollama.ai, the host
+//                                Ollama downloads from. "off", or a pinned GATES_LOCAL_OLLAMA_URL
+//                                without this set, never asks (tests reach no outside host)
 //   GATES_LOCAL_RUNTIME          "discover-only": never install, start or stop Ollama (tests)
 //   GATES_LOCAL_OLLAMA_BINARY    "none": never look for an Ollama binary (app install, PATH), as on
 //                                a machine with none, so tests do not depend on the host
@@ -66,6 +70,7 @@ import { createApp, type App } from "./app.ts";
 import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
 import { createNvidiaSmiRunner } from "./fit/gpu.ts";
+import { OLLAMA_REGISTRY } from "./runtime/registry-size.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
 import { createImportActivity, withImportAdmission } from "./sources/activity.ts";
@@ -162,6 +167,8 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     }
   }
   const discoverOnly = mode === "discover-only" || pinned !== undefined;
+  const registryKnob = process.env["GATES_LOCAL_OLLAMA_REGISTRY"]?.trim();
+  const modelRegistry = registryKnob === "off" ? undefined : registryKnob || (pinned === undefined && mode !== "discover-only" ? OLLAMA_REGISTRY : undefined);
   const extraOrigins = (process.env["GATES_LOCAL_ALLOWED_ORIGINS"] ?? "")
     .split(",")
     .map((o) => o.trim())
@@ -214,6 +221,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
         if (channel === "gpu.changed") fitTable?.changed();
         if (channel === "models.load") fitTable?.load(payload as Payload<"models.load">);
       },
+      ...(modelRegistry === undefined ? {} : { modelRegistry }),
       runtime: {
         ...(pinned ? { externalBaseUrl: pinned.origin, appPort: Number(pinned.port || 80) } : {}),
         ...(discoverOnly ? { allowInstall: false, allowStart: false } : {}),

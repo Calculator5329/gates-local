@@ -9,7 +9,7 @@ import { etaText, gb, k, noGpu, verdictOf } from "./format.ts";
 import { Icon } from "./icons.tsx";
 import { MakerMark } from "./MakerMark.tsx";
 import { answers, rowOf } from "./fit-table.ts";
-import { nameOf, shortTag, sizeText, splitTail } from "./models-rules.ts";
+import { nameOf, pullName, shortTag, sizeText, splitTail } from "./models-rules.ts";
 import { awaitingInstall, modelNameKey, pendingDownload } from "./pick.ts";
 import { type ActionResult, cancelPull, pull } from "./session.ts";
 import { PathText } from "./settings-controls.tsx";
@@ -178,7 +178,7 @@ function CustomPull({ actions }: { actions: DownloadActions }) {
   const [name, setName] = useState("");
   return (
     <Row
-      err={actions.error(name)}
+      err={actions.error(pullName(name))}
       label="Any model from the Ollama library"
       desc={
         <a className="link" href="https://ollama.com/library" target="_blank" rel="noreferrer noopener" aria-label="Browse the Ollama library at ollama.com/library (opens your browser)">
@@ -190,10 +190,10 @@ function CustomPull({ actions }: { actions: DownloadActions }) {
       <button
         type="button"
         className="qa"
-        disabled={name.trim() === ""}
+        disabled={pullName(name) === ""}
         onClick={() => {
           // the typed name stays until the download starts (W-07)
-          void actions.start(name).then(ok => { if (ok) setName(current => current === name ? "" : current); });
+          void actions.start(pullName(name)).then(ok => { if (ok) setName(current => current === name ? "" : current); });
         }}
       >
         Download

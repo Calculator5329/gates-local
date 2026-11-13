@@ -12,6 +12,7 @@ import {
   nameOf,
   nextDefault,
   optionVariants,
+  pullName,
   shortTag,
   sizeText,
   sortRows,
@@ -172,3 +173,17 @@ describe("optionVariants: what tells two options with the same name apart", () =
   });
 });
 
+
+describe("the name typed under Any model from the Ollama library", () => {
+  it("takes a command pasted from the Ollama site as the model it names", () => {
+    expect(pullName("ollama run gemma4:26b")).toBe("gemma4:26b");
+    expect(pullName("  ollama pull  phi5:14b ")).toBe("phi5:14b");
+    expect(pullName("Ollama Run hf.co/a/b:Q4_K_M")).toBe("hf.co/a/b:Q4_K_M");
+  });
+
+  it("leaves a plain name alone, trimmed", () => {
+    expect(pullName(" qwen3.5:9b ")).toBe("qwen3.5:9b");
+    expect(pullName("ollama")).toBe("ollama");
+    expect(pullName("   ")).toBe("");
+  });
+});

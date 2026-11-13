@@ -22,6 +22,32 @@ async function until(pred: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
+// Owner 2026-11-13: gemma4:26b read "0.2 of 1.1 GB" while its 15.9 GB weights had not started.
+const severalFiles = async (sizeOf?: (name: string) => number | undefined | Promise<number | undefined>) => {
+  let t = 0;
+  server = await startFakeServer({
+    "POST /api/pull": async (_b, res) => {
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      line(res, { status: "pulling manifest" });
+      for (const [digest, total] of [["sha256:projector", 100], ["sha256:weights", 900]] as const) {
+        for (let i = 1; i <= 4; i++) {
+          t += 300;
+          line(res, { status: "pulling", digest, total, completed: (total / 4) * i });
+          await tick();
+        }
+      }
+      line(res, { status: "success" });
+      res.end();
+    },
+  });
+  const pushes: PullProgress[] = [];
+  const done: string[] = [];
+  const m = createPullManager({ baseUrl: () => server?.baseUrl, push: (p) => pushes.push(p), onDone: (n) => void done.push(n), now: () => t, ...(sizeOf ? { sizeOf } : {}) });
+  m.pull("gemma4:26b");
+  await until(() => done.length === 1);
+  return pushes;
+};
+
 describe("models.pull", () => {
   it("AU-01 downloads pass admission before queuing or making a request", () => {
     const options = { baseUrl: () => undefined, push: () => undefined, admit: () => { throw Object.assign(new Error("Gates Local is closing to update."), { code: "update-installing" }); } };
@@ -65,6 +91,34 @@ describe("models.pull", () => {
     expect(pushes.at(-1)).toEqual({ name: "qwen3.5:9b", state: "done", completedBytes: 2000, totalBytes: 2000 });
     expect(done).toEqual(["qwen3.5:9b"]);
     expect(server.requests[0]?.body).toEqual({ model: "qwen3.5:9b", stream: true });
+  });
+
+  it("shows the whole model's size from the first push, not the first file's", async () => {
+    const pushes = await severalFiles(async () => 1000);
+    const downloading = pushes.filter((p) => p.state === "downloading" && p.completedBytes > 0);
+    expect(downloading.length).toBeGreaterThan(4);
+    expect(downloading.map((p) => p.totalBytes)).toEqual(downloading.map(() => 1000));
+    expect(pushes.at(-1)).toEqual({ name: "gemma4:26b", state: "done", completedBytes: 1000, totalBytes: 1000 });
+  });
+
+  it("a size known at once (the curated list) is on the very first progress", async () => {
+    const pushes = await severalFiles(() => 1000);
+    expect(pushes.filter((p) => p.state === "downloading" && p.totalBytes !== undefined && p.totalBytes !== 1000)).toEqual([]);
+    expect(pushes.find((p) => p.completedBytes > 0)?.totalBytes).toBe(1000);
+  });
+
+  it("gives no total while the whole size is unknown, then the true one when done", async () => {
+    const pushes = await severalFiles(async () => undefined);
+    expect(pushes.filter((p) => p.state === "downloading").map((p) => p.totalBytes)).toEqual(pushes.filter((p) => p.state === "downloading").map(() => undefined));
+    expect(pushes.at(-1)).toEqual({ name: "gemma4:26b", state: "done", completedBytes: 1000, totalBytes: 1000 });
+  });
+
+  it("never shows less than Ollama has already listed when the known size is too small", async () => {
+    const pushes = await severalFiles(() => 500);
+    const totals = pushes.filter((p) => p.state === "downloading" && p.completedBytes > 0).map((p) => p.totalBytes ?? 0);
+    expect(Math.min(...totals)).toBe(500);
+    expect(Math.max(...totals)).toBe(1000);
+    for (const p of pushes) if (p.totalBytes !== undefined) expect(p.completedBytes).toBeLessThanOrEqual(p.totalBytes);
   });
 
   it("runs one download at a time; the rest wait as queued and a queued one can be withdrawn", async () => {

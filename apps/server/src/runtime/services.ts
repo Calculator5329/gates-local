@@ -20,7 +20,8 @@ import { createModelCatalog, listLoaded, type ModelCatalog } from "./models.ts";
 import { canChat, pickChatModel } from "./pick.ts";
 import { probe } from "./probe.ts";
 import { createPullManager, type PullManager } from "./pull.ts";
-import { canonicalTag, modelLabel } from "./recommended.ts";
+import { canonicalTag, curated, modelLabel } from "./recommended.ts";
+import { registrySize } from "./registry-size.ts";
 import { createOllamaRuntime, DEFAULT_EXTERNAL_BASE_URL, type RuntimeOptions } from "./runtime.ts";
 import { createRuntimeSwitch, type RuntimeSwitch } from "./switch.ts";
 
@@ -60,6 +61,12 @@ export interface ModelServicesOptions {
   readonly fit?: Pick<FitDeps, "runNvidiaSmi" | "readMeminfo">;
   /** The app's one GPU lease: models.load takes a shared chat claim on it. */
   readonly lease?: GpuLease;
+  /**
+   * The registry asked for the size of a model the curated list does not hold, before Ollama has
+   * named all its files. Unset: never asked (tests, a pinned Ollama), and such a download shows no
+   * total until it is done.
+   */
+  readonly modelRegistry?: string;
   /** How long a switch waits for the old runtime's turns to end before it fails (default 10 s). */
   readonly turnDrainMs?: number;
 }
@@ -165,6 +172,11 @@ export async function createModelServices(options: ModelServicesOptions): Promis
     ...(options.admit ? { admit: options.admit } : {}),
     baseUrl: () => runtime.baseUrl(),
     push: (p) => options.push("models.pull", p),
+    sizeOf: (name, signal) => {
+      const known = curated(name)?.downloadBytes;
+      if (known !== undefined || options.modelRegistry === undefined) return known;
+      return registrySize(name, signal, { registry: options.modelRegistry });
+    },
     onDone: async () => {
       await catalog.refresh({ force: true });
     },

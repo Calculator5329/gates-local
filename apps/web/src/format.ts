@@ -242,7 +242,8 @@ export function etaText(p: PullProgress): string {
   if (p.state === "verifying") return "Verifying the download";
   const total = p.totalBytes;
   if (total && p.completedBytes >= total) return "Finishing the download";
-  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : "Starting"];
+  // no total: Ollama has not named every file yet and the registry gave no size, so only what arrived is true
+  const parts = [total ? `${(p.completedBytes / 1024 ** 3).toFixed(1)} of ${gb(total)}` : p.completedBytes > 0 ? `${gb(p.completedBytes)} so far` : "Starting"];
   if (p.bytesPerSecond) {
     parts.push(`${Math.round(p.bytesPerSecond / 1e6)} MB/s`);
     if (total) parts.push(`about ${timeLeft((total - p.completedBytes) / p.bytesPerSecond)} left`);

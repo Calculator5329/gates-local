@@ -149,3 +149,6 @@ export function nextDefault(sorted: readonly Row[], removed: string, def: string
   if (removed !== def) return undefined;
   return sorted.find((r) => r.name !== removed && r.chat && r.verdict !== "refuse")?.name ?? null;
 }
+
+/** The model a typed name asks for: a command pasted from the Ollama site ("ollama run x", "ollama pull x") means x. */
+export const pullName = (typed: string): string => typed.trim().replace(/^ollama\s+(?:run|pull)\s+/i, "").trim();

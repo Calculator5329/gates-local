@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13: Model downloads show their real size; the name field has one ring
+
+- Typing in a field such as "Model name" on Models › Download drew two
+  green boxes, one inside the other. It is one ring now, on the field's
+  own edge.
+- That field takes a command pasted from the Ollama site: "ollama run
+  gemma4:26b" downloads gemma4:26b.
+- A download shows the whole model's size from the start. A model that
+  comes in several files used to show the first file's size as the total
+  ("0.2 of 1.1 GB" for a 17.4 GB model), then jump when the next file
+  started. For a model outside the app's list, the size is read from the
+  Ollama registry, the host the download comes from. When it cannot be
+  read, the row says how much has arrived ("0.2 GB so far") and gives no
+  total and no time left until the download is done.
+
 ## 2026-11-13: Pictures, every picture you have made on one screen
 
 - A picture icon in the sidebar's footer, or Ctrl+Shift+P, opens Pictures:

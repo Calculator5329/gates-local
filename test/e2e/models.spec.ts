@@ -60,3 +60,26 @@ test("a running download shows its detail in the row and on Installed, and Cance
   await expect(row.getByRole("button", { name: "Download", exact: true })).toBeVisible();
   await expect(row.locator(".prog")).toHaveCount(0);
 });
+
+// Guards the owner's 2026-11-13 note on the model name field ("ew double border"): one ring when focused,
+// and a command pasted from the Ollama site downloads the model it names.
+test("the model name field has one focus ring and takes a pasted ollama command", async ({ page, open }, testInfo) => {
+  await open();
+  await waitReady(page);
+  await openModels(page);
+  await page.getByRole("tab", { name: /^Download/ }).click();
+
+  const field = page.getByRole("textbox", { name: "Model name" });
+  await field.fill("ollama run qwen3.5:4b");
+  await expect(field).toBeFocused();
+  const ring = await field.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { outline: cs.outlineStyle === "none" || cs.outlineWidth === "0px", shadow: cs.boxShadow };
+  });
+  expect(ring.outline, "the browser outline is off; the ring is the field's own edge").toBe(true);
+  expect(ring.shadow).not.toBe("none");
+  await field.locator("xpath=ancestor::*[contains(@class,'srow')][1]").screenshot({ path: testInfo.outputPath("model-name-focus.png") });
+
+  await page.getByRole("button", { name: "Download", exact: true }).last().click();
+  await expect(page.locator('.dlrow[data-cat="qwen3.5:4b"] .badge')).toHaveText("Installed", { timeout: 20_000 });
+});
