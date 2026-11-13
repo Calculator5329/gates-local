@@ -57,6 +57,8 @@ const props = (over: Partial<Parameters<Updates["UpdatesView"]>[0]> = {}) => ({
 });
 const view = (over: Partial<Parameters<Updates["UpdatesView"]>[0]> = {}) => renderToStaticMarkup(createElement(ui.UpdatesView, props(over)));
 const withCheck = (lastCheck: UpdateCheck) => ({ status: { ...CLONE, lastCheck } });
+/** An installed copy offered 1.2.4, checked at `checkedAt`, optionally downloading it. */
+const offer = (checkedAt: number, download?: "downloading") => ({ status: { version: { kind: "installed" as const, version: "1.2.3" }, result: null, lastCheck: { state: "newer" as const, checkedAt, current: "1.2.3", target: "1.2.4", forThisCopy: true, lines: ["Version 1.2.4 is available."], page: "https://example.invalid/releases/latest", ...(download === undefined ? {} : { download }) }, activity: [] } });
 /** The markup with tags dropped, for reading the words. */
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
@@ -163,23 +165,14 @@ describe("the Updates group", () => {
     expect(text(view(mainCheck))).toMatch(/A commit from \w+ \d+, 2026, between releases\./);
     expect(text(view({ ...mainCheck, settings: every }))).toMatch(/A commit from \w+ \d+, 2026 on the main branch\./);
     expect(text(view({ settings: every }))).toMatch(/A commit from \w+ \d+, 2026 on the main branch\./);
-    // UR-01: row 2 shows only a check of the channel the switch follows; another channel's result waits for a check of this one.
+    // Row 9: the server drops the last check when the switch flips, so row 2 shows the check it sends. A clone with
+    // no release tags checks main with the switch off, and that answer is offered.
     const mainFound: UpdateCheck = { state: "available", checkedAt: AT, channel: "main", current: "abc1234", target: "def5678", total: 2, changes: ["Two", "One"] };
-    for (const [name, over] of [
-      ["main up to date, switch off", mainCheck],
-      ["main found, switch off", { canUpdate: true, ...withCheck(mainFound) }],
-      ["release up to date, switch on", { settings: every, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) }],
-      ["release found, switch on", { canUpdate: true, settings: every, ...withCheck({ ...mainFound, channel: "release" }) }],
-    ] as const) {
-      const other = view(over);
-      expect(text(other), name).toContain("Not checked yet");
-      expect(said(other), name).not.toMatch(/Up to date|Update available|Update and restart|Checked at|def5678/);
-      expect(other, name).toMatch(/<button[^>]*>Check for updates<\/button>/);
-      expect(rowsAbove(other), name).toBe(2);
-    }
-    // A check of the channel the switch follows still shows.
+    expect(text(view(mainCheck))).toContain("Up to date");
+    const noTags = view({ canUpdate: true, ...withCheck(mainFound) });
+    expect(text(noTags)).toContain("Update available: def5678");
+    expect(text(noTags)).toContain("Update and restart");
     expect(text(view({ settings: every, ...mainCheck }))).toContain("Up to date");
-    expect(text(view({ canUpdate: true, settings: every, ...withCheck(mainFound) }))).toContain("Update and restart");
     // Before any check: the same two rows.
     expect(rowsAbove(view())).toBe(2);
     expect(text(view())).toContain("Not checked yet");
@@ -258,7 +251,17 @@ describe("the Updates group", () => {
     // A failure of a later click wins over the old check failure still standing.
     const found = withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 1, changes: ["One"] });
     expect(stateLine(view({ canUpdate: true, checkErr: callFailed, checkErrSince: AT, updateErr: "The update could not start.", ...found }))?.[2]).toBe("The update could not start.");
-    expect(stateLine(view({ checkErr: callFailed, checkErrSince: AT, downloadErr: "The download stopped.", ...found }))?.[2]).toBe("The download stopped.");
+    expect(stateLine(view({ checkErr: callFailed, checkErrSince: AT, downloadErr: "The download stopped.", downloadErrSince: AT, ...found }))?.[2]).toBe("The download stopped.");
+  });
+
+  it("row 11 a failed Download gives way to a newer check, or to the server saying it downloads", () => {
+    const failed = "The download stopped.";
+    // Clicked while the check at AT showed: still the newest news.
+    expect(stateLine(view({ downloadErr: failed, downloadErrSince: AT, ...offer(AT) }))?.[2]).toBe(failed);
+    // A check a minute later answers instead.
+    expect(text(view({ downloadErr: failed, downloadErrSince: AT, ...offer(AT + 60_000) }))).not.toContain(failed);
+    // The server says the download runs after all.
+    expect(text(view({ downloadErr: failed, downloadErrSince: AT, ...offer(AT, "downloading") }))).not.toContain(failed);
   });
 });
 

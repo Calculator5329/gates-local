@@ -238,7 +238,15 @@ test.describe("Version and the update state in two rows", () => {
         if (message.method === "update.status") reply({ ...copy.idle, lastCheck, canControl: true });
         // The check waits for the test, so the card can be measured while it runs.
         else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
-        else server.send(raw);
+        else {
+          server.send(raw);
+          // As the server does (update/module.ts): flipping Get every change drops the last check and says so.
+          const params = (message as { params?: { updateEveryChange?: boolean } }).params;
+          if (message.method === "settings.update" && params?.updateEveryChange !== undefined && lastCheck !== null) {
+            lastCheck = null;
+            socket.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...copy.idle, lastCheck, canControl: true } }));
+          }
+        }
       });
     });
     await open(); await waitReady(page);
@@ -292,7 +300,7 @@ test.describe("Version and the update state in two rows", () => {
         expect(text.split(copy.said).length - 1, `"${copy.said}" said ${text.split(copy.said).length - 1} times: ${text}`).toBe(1);
         expect(text).not.toContain("Asks this copy's git remote");
         if (copy.name === "clone") {
-          // UR-01: the switch now follows every change, so a check of releases says nothing about it; row 2 waits for a check, in the same space.
+          // UR-01, row 9: the switch now follows every change, so the server drops the release check; row 2 waits for a check, in the same space.
           const every = group.getByRole("switch", { name: "Get every change, not only releases", exact: true });
           const label = group.locator(".srow").nth(1).locator(".sl b");
           await every.click();
@@ -304,7 +312,8 @@ test.describe("Version and the update state in two rows", () => {
           await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-${i + 1}b-every-change-on.png`) });
           await every.click();
           await expect(every).toHaveAttribute("aria-checked", "false");
-          await expect(label).toHaveText("Up to date");
+          // Dropped, not kept for a flip back: the next check answers.
+          await expect(label).toHaveText("Not checked yet");
           same("every change switched off again", await measure());
         }
       }
@@ -367,5 +376,70 @@ test.describe("Version and the update state in two rows", () => {
       await group.screenshot({ path: test.info().outputPath(`update-phone-${i + 1}-${step.replaceAll(" ", "-")}.png`) });
     }
     expect(heights, "the card's height changed at 390px").toEqual([]);
+  });
+
+  test("row 9 a clone with no release tags and the switch off is offered the update its check found", async ({ page, open }) => {
+    await page.addInitScript(() => {
+      Object.assign(window, { gatesLocal: { updateApprovalVersion: 2, getServerUrl: async () => new URLSearchParams(location.search).get("server"), onState: () => () => undefined, updateAndRestart: async () => ({ ok: true }) } });
+    });
+    const idle: UpdateStatus = { version: { kind: "commit", commit: "7093c45", date: Date.UTC(2026, 10, 12, 18) }, result: null, lastCheck: null, activity: [] };
+    // With no release tags the server checks main even with the switch off (update/check.ts, choice auto).
+    const found: UpdateCheck = { state: "available", checkedAt: Date.UTC(2026, 10, 13, 6, 57), channel: "main", current: "7093c45", target: "def5678", targetCommit: `def5678${"0".repeat(33)}`, total: 2, changes: ["Faster chat", "A new setting"] };
+    let lastCheck: UpdateCheck | null = null;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
+        if (message.method === "update.status") reply({ ...idle, lastCheck, canControl: true });
+        else if (message.method === "update.check") { lastCheck = found; reply(found); }
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await expect(page.locator(".set .set-h h1")).toHaveText("General");
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    await expect(group.getByRole("switch", { name: "Get every change, not only releases", exact: true })).toHaveAttribute("aria-checked", "false");
+    await group.getByRole("button", { name: "Check for updates", exact: true }).click();
+    await expect(group.locator(".srow").nth(1).locator(".sl b")).toHaveText("Update available: def5678");
+    await expect(group.getByRole("button", { name: "Update and restart", exact: true })).toBeVisible();
+    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
+    await group.screenshot({ path: test.info().outputPath("update-row9-no-tags-switch-off.png") });
+  });
+
+  test("row 10 at 390px a listener's release page goes in the tip, so the row keeps its height", async ({ page, open }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 6, 57)), activity: [] };
+    const newer: UpdateCheck = { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: false, lines: ["Version 0.2.2 is available, but this copy cannot install it by itself. Download it from the release page."], page: "https://example.invalid/releases/latest" };
+    let route: WebSocketRoute | undefined;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      route = socket;
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        if (message.method === "update.status") socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result: { ...idle, canControl: false } }));
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await expect(page.locator(".set")).toBeVisible();
+    // The settings section may start on the phone section list.
+    const general = page.locator(".set-list").getByRole("button", { name: /General/ });
+    if (await general.isVisible()) await general.click();
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const row = group.locator(".srow").nth(1);
+    await expect(row.locator(".sl b")).toHaveText("Up to date");
+    await group.scrollIntoViewIfNeeded();
+    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
+    const height = () => row.evaluate((el) => el.getBoundingClientRect().height);
+    const before = await height();
+    route?.send(JSON.stringify({ type: "push", channel: "update.changed", payload: { ...idle, lastCheck: newer, canControl: false } }));
+    await expect(row.locator(".sl b")).toHaveText("Update available: 0.2.2");
+    await expect(group.getByRole("link", { name: "Open the release page" })).toHaveCount(0);
+    await expect(row.locator(".tipped")).toHaveAttribute("aria-description", /Release page: https:\/\/example\.invalid\/releases\/latest/);
+    expect(await height(), "the listener's state row changed height at 390px").toBe(before);
+    await group.screenshot({ path: test.info().outputPath("update-row10-listener-390.png") });
   });
 });

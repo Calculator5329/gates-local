@@ -294,6 +294,9 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
       dataDir,
       runner: realRunner,
       everyChange: () => services.settings.get().updateEveryChange === true,
+      onEveryChange: (listener) => services.settings.onChange((next, previous) => {
+        if ((next.updateEveryChange === true) !== (previous.updateEveryChange === true)) listener();
+      }),
       changed: (status) => server?.push("update.changed", status),
       activity,
       uninterruptible,

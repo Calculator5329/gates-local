@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13: Updates found on a clone without releases show again
+
+- A clone whose remote has no releases yet follows the main branch even
+  with Get every change off. Its updates showed as Not checked yet after
+  every check and never offered Update and restart; they show again.
+- Switching Get every change clears the last check everywhere at once, so
+  Settings and the footer stop offering the other choice's update.
+- On a phone, the release page address is in the state's tip instead of a
+  link under it, so the row keeps its height.
+- A failed Download gives way to a newer check, as a failed check does.
+
 ## 2026-11-13: Pictures are indexed and get thumbnails (no screen yet)
 
 - Every finished picture is recorded with its seed, steps, size, setup and

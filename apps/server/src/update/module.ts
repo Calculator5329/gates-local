@@ -25,6 +25,8 @@ export interface UpdateModuleDeps {
   readonly runner: Runner;
   /** Settings' "Get every change, not only releases". */
   readonly everyChange: () => boolean;
+  /** Calls the listener when that switch flips; returns the unsubscribe. The last check answered for the other choice, so it is dropped. */
+  readonly onEveryChange?: (listener: () => void) => () => void;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
   readonly version?: (root: string) => VersionInfo;
@@ -142,6 +144,15 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
     return { version: version(), result, lastCheck, activity, installing, ...(offer ? { approval: offer.token } : {}) };
   };
   const offAdmission = admission.onChange(() => deps.changed?.(status()));
+  // A flip of the switch makes the last check about the other choice: drop it and say so, and a check
+  // already running for the old choice is run again for the new one (choice counts the flips).
+  let choice = 0;
+  const offEveryChange = deps.onEveryChange?.(() => {
+    choice += 1;
+    if (lastCheck === null) return;
+    lastCheck = null;
+    deps.changed?.(status());
+  }) ?? (() => undefined);
 
   const runCheck = async (): Promise<UpdateCheck> => {
     const checkedAt = now();
@@ -167,15 +178,17 @@ export function createUpdateModule(deps: UpdateModuleDeps): UpdateModule {
     // Two clicks (or two windows) share one fetch.
     check: async (background = false) => {
       if (closed || admission.installing()) return { state: "cannot-check", checkedAt: now(), reason: "error", lines: [UPDATE_PAUSED] };
+      const asked = choice;
       running ??= runCheck().finally(() => { running = undefined; });
       const c = await running;
+      if (!closed && choice !== asked) return update.check(background);
       if (!closed && (!background || c.state !== "cannot-check")) {
         lastCheck = c;
         deps.changed?.(status());
       }
       return c;
     },
-    close: async () => { closed = true; offAdmission(); controller.abort(); await running; },
+    close: async () => { closed = true; offAdmission(); offEveryChange(); controller.abort(); await running; },
     prepare: async (approval) => {
       if (closed || admission.installing()) return { state: "blocked", message: UPDATE_PAUSED };
       if (busy().length > 0) return waiting();

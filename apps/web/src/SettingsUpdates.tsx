@@ -196,6 +196,8 @@ export interface UpdatesViewProps {
   readonly switchErr?: string | null;
   readonly updateErr?: string | null;
   readonly downloadErr?: string | null;
+  /** The same for a failed Download: a newer check, or the server saying it downloads, clears it. */
+  readonly downloadErrSince?: number | null;
   readonly onCheck: () => void;
   /** An installed copy's Download click. */
   readonly onDownload?: () => void;
@@ -225,8 +227,8 @@ export function UpdatesView(p: UpdatesViewProps) {
   // Settings waits for the version before it shows (whenSettingsReady); a placeholder covers a slow server.
   const version = p.status === undefined ? { value: <Skel w="6em" />, desc: <Skel w="14em" /> } : versionText(p.status.version, channel);
   const clone = p.status !== undefined && (p.status.version.kind === "release" || p.status.version.kind === "commit");
-  // A clone's check of the other channel says nothing about what the switch follows now, so row 2 waits for a check of this one.
-  const check = clone && last !== null && "channel" in last && last.channel !== channel ? null : last;
+  // The server drops the last check when the switch flips (update/module.ts), so the one it sends is about the choice now.
+  const check = last;
   const installed = p.status?.version.kind === "installed";
   const canControl = p.status?.canControl !== false;
   const automatic = settings !== undefined && settings.updateAutomatic !== false;
@@ -235,7 +237,11 @@ export function UpdatesView(p: UpdatesViewProps) {
   // A failure takes the grey line's place, so it never adds a line. The newest action's failure wins; a check that answered after a failed click clears it.
   const updateErr = restartHere ? p.updateErr : undefined;
   const checkErr = p.checkErr != null && !outdated({ click: "check", message: p.checkErr, since: p.checkErrSince ?? null }, last) ? p.checkErr : null;
-  const err = canControl ? (updateErr ?? p.downloadErr ?? checkErr) : null;
+  const downloadErr = p.downloadErr != null && !outdated({ click: "download", message: p.downloadErr, since: p.downloadErrSince ?? null }, last) ? p.downloadErr : null;
+  const err = canControl ? (updateErr ?? downloadErr ?? checkErr) : null;
+  // A listener (the phone) has no control line to share, so the release page goes in the tip instead of growing the row.
+  const tipPage = !canControl && check !== null ? linksPage(check) : undefined;
+  const tip = [stateTip(check, automatic, installed, canUpdate), tipPage === undefined ? undefined : `Release page: ${tipPage}`].filter((t) => t !== undefined).join(" ") || undefined;
   return (
     <Grp title="Updates" busy={p.status === undefined}>
       <Row label="Version" desc={version.desc}>
@@ -243,7 +249,7 @@ export function UpdatesView(p: UpdatesViewProps) {
       </Row>
       {clone || installed ? (
         <>
-          <Row label={stateLabel(check, p.checking)} desc={<StateLine text={stateLine(check, canControl, canUpdate)} err={err} calm={!troubled(check)} />} tip={stateTip(check, automatic, installed, canUpdate)}>
+          <Row label={stateLabel(check, p.checking)} desc={<StateLine text={stateLine(check, canControl, canUpdate)} err={err} calm={!troubled(check)} />} tip={tip}>
             {canControl ? (
               // One line for the link and the control, reserved on a phone, so the link showing never grows the row.
               <span className="upd-acts">
@@ -259,9 +265,7 @@ export function UpdatesView(p: UpdatesViewProps) {
                   onDownload={p.onDownload}
                 />
               </span>
-            ) : (
-              <PageLink check={check} />
-            )}
+            ) : null}
           </Row>
           {settings === undefined || p.settingsLocked || !canControl ? null : (
             <>
@@ -293,6 +297,7 @@ export function Updates() {
   const [checkErrSince, setCheckErrSince] = useState<number | null>(null);
   const [switchErr, runSwitch] = useAct();
   const [downloadErr, runDownload] = useAct();
+  const [downloadErrSince, setDownloadErrSince] = useState<number | null>(null);
   const updateErr = useStore((s) => s.updateError);
   const updating = useStore((s) => s.updateInstalling || (s.update !== NA && s.update?.installing === true));
   return (
@@ -308,11 +313,15 @@ export function Updates() {
       switchErr={switchErr}
       updateErr={updateErr}
       downloadErr={downloadErr}
+      downloadErrSince={downloadErrSince}
       onCheck={() => {
         setCheckErrSince(status === NA ? null : (status?.lastCheck?.checkedAt ?? null));
         void runCheck(checkForUpdates());
       }}
-      onDownload={() => void runDownload(downloadUpdate())}
+      onDownload={() => {
+        setDownloadErrSince(status === NA ? null : (status?.lastCheck?.checkedAt ?? null));
+        void runDownload(downloadUpdate());
+      }}
       onEveryChange={(on) => void runSwitch(updateSettings({ updateEveryChange: on }))}
       onAutomatic={(on) => void runSwitch(updateSettings({ updateAutomatic: on }))}
       onUpdate={() => void updateAndRestart()}

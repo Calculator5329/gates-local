@@ -146,6 +146,28 @@ describe("update.check", () => {
     encodes("update.check", a);
   });
 
+  it("drops the last check and says so when Get every change flips, since it answered for the other choice", async () => {
+    commit(r.seed, "Second");
+    publish(r.seed);
+    let every = false;
+    let flip: (() => void) | undefined;
+    const changed = vi.fn();
+    const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => every, onEveryChange: (listener) => { flip = listener; return () => { flip = undefined; }; }, changed, now: () => 7 });
+    // No release tags: switch off still checks main, and that check is the one shown.
+    expect(await update.check()).toMatchObject({ state: "available", channel: "main" });
+    changed.mockClear();
+    every = true;
+    flip?.();
+    expect(update.status().lastCheck).toBeNull();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed.mock.calls[0]?.[0]).toMatchObject({ lastCheck: null });
+    // Nothing to drop: no second push.
+    flip?.();
+    expect(changed).toHaveBeenCalledTimes(1);
+    await update.close();
+    expect(flip).toBeUndefined();
+  });
+
   it("says up to date", async () => {
     const update = createUpdateModule({ root: r.clone, dataDir: r.data, runner: counting().runner, everyChange: () => true, now: () => 1 });
     const check = await update.check();
