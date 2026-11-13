@@ -3,7 +3,9 @@
 // control endpoint the specs call between journeys.
 //
 //   GET  /health            200 once the fake and the server are up
-//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, comfyUrl?, imageTool?, phone?, sandbox?, ...fakeOptions}
+//   POST /reset {scenario?, seed?, seedAt?, runtimeMode?, comfyUrl?, imageTool?, phone?, sandbox?, engine?, ...fakeOptions}
+//                           (engine: fake-comfy's engine(), the app's own ComfyUI to set up;
+//                           its address also serves the model downloads)
 //                           (imageTool: true saves image generation and Tools ›
 //                           Make images on; sandbox: "off" makes the shell
 //                           sandbox's probe fail, as with no systemd user session)
@@ -73,6 +75,8 @@ let downloadOrigin = NO_DOWNLOADS;
  * would use the machine's own ComfyUI on 8188 and start or stop comfyui.service.
  */
 const NO_COMFY = "http://127.0.0.1:1";
+/** The reset's fake image engine (GATES_LOCAL_IMAGE_ENGINE, as JSON), or "" for none. */
+let engineKnob = "";
 /** The stand-in machine's shell sandbox (test/fake-ollama/systemd-run.ts); a reset's `sandbox: "off"` breaks it. */
 let sandbox: "ready" | "off" = "ready";
 
@@ -212,6 +216,8 @@ function serverEnv(): NodeJS.ProcessEnv {
     GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN: downloadOrigin,
     // A reset's comfyUrl (the fake's) is saved in Settings and wins over this.
     GATES_LOCAL_COMFY_URL: NO_COMFY,
+    // The app's own ComfyUI, installed from the test's fake (fake-comfy.ts engine()), never the pinned release.
+    GATES_LOCAL_IMAGE_ENGINE: engineKnob,
     XDG_DATA_HOME: path.join(runDir, "xdg"),
     // The server runs from this checkout; with the root here, a Check for
     // updates in a test is refused before any git command runs on it.
@@ -235,9 +241,10 @@ type Seed =
   | { readonly kind: "work-fold"; readonly at: number };
 
 /** Restart on a fresh data dir, seeding threads (and saved settings) first when asked; returns the seeded thread's id. */
-async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string, imageTool = false): Promise<string | null> {
+async function freshServer(seed: Seed = { kind: "none" }, runtimeMode?: Settings["runtimeMode"], comfyUrl?: string, imageTool = false, engine?: { address: string }): Promise<string | null> {
   await stopChild(server);
-  downloadOrigin = comfyUrl ?? NO_DOWNLOADS;
+  downloadOrigin = comfyUrl ?? engine?.address ?? NO_DOWNLOADS;
+  engineKnob = engine === undefined ? "" : JSON.stringify(engine);
   resets += 1;
   dataDir = path.join(runDir, `data-${resets}`);
   mkdirSync(dataDir, { recursive: true });
@@ -297,7 +304,8 @@ const control = createServer((req, res) => {
         res.writeHead(200).end("ok");
       } else if (route === "POST /reset") {
         const body = await readJson(req);
-        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, imageTool, phone, controlledRuntimePorts, sandbox: sandboxState, ...fakeBody } = body;
+        const { seed: _seed, seedAt: _at, runtimeMode, comfyUrl, imageTool, phone, controlledRuntimePorts, sandbox: sandboxState, engine, ...fakeBody } = body;
+        const fakeEngine = typeof engine === "object" && engine !== null && typeof (engine as { address?: unknown }).address === "string" ? engine as { address: string } : undefined;
         sandbox = sandboxState === "off" ? "off" : "ready";
         await stopChild(server);
         server = null;
@@ -308,7 +316,7 @@ const control = createServer((req, res) => {
         await standIn?.close();
         standIn = null;
         phonePort = phone === true ? await freePort() : null;
-        const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined, typeof comfyUrl === "string" ? comfyUrl : undefined, imageTool === true);
+        const threadId = await freshServer(seedOf(body), runtimeMode === "system" || runtimeMode === "app" ? runtimeMode : undefined, typeof comfyUrl === "string" ? comfyUrl : undefined, imageTool === true, fakeEngine);
         if (phonePort !== null) standIn = await startServeStandIn(phonePort, phoneSocket, PHONE_USER, PHONE_ADDR);
         const reply = phonePort === null ? { dataDir, threadId, phonePort } : { dataDir, threadId, phonePort, phoneSocket };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(reply));

@@ -180,3 +180,18 @@ export const STYLE_CELLS: readonly StyleCell[] = RECIPES.map((r) => {
 
 /** The cells the picker lists at this level, in the styles' order. */
 export const cellsFor = (level: Level | undefined): StyleCell[] => level === undefined ? [] : STYLE_CELLS.filter((c) => c.levels.includes(level));
+
+/** Cells on Klein with the compact FP4 encoder: the files of the setup's one download (setup.ts SETUP_PRESET). */
+const COMPACT = new Set(RECIPES.flatMap((r, i) => r.model === "klein" ? [STYLE_CELLS[i]!.id] : []));
+
+/**
+ * A style's stand-in on a GPU level whose winner needs a second download (MOSS-Image, or Klein with
+ * the full encoder): the style's compact Klein cell from the highest level at or under this one,
+ * else its nearest above. Undefined for a CPU level and for a winner that is compact already.
+ */
+export function compactStandIn(cell: StyleCell, level: Level): StyleCell | undefined {
+  if (level === "cpu" || COMPACT.has(cell.id)) return undefined;
+  const at = (c: StyleCell) => Math.max(...c.levels.map(Number));
+  const mine = STYLE_CELLS.filter((c) => c.style === cell.style && COMPACT.has(c.id)).toSorted((a, b) => at(b) - at(a));
+  return mine.find((c) => at(c) <= Number(level)) ?? mine.at(-1);
+}

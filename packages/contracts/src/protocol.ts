@@ -17,6 +17,8 @@ import {
   ImageGroup,
   ImageDownload,
   ImagePresets,
+  ImageSetup,
+  ImageSetupProgress,
   ImageStatus,
   ShellStatus,
   Message,
@@ -276,6 +278,10 @@ export const methods = {
   "image.stopDownload": { params: S.Struct({ preset: S.String }), result: S.Struct({ stopped: S.Boolean }), phone: "deny" },
   /** Start ComfyUI with no job (the picker's Start ComfyUI) and answer what it has; the idle stop still applies. */
   "image.start": { params: NoParams, result: ImagePresets, phone: "deny" },
+  /** What Set up images would fetch here (the app's own ComfyUI and this card's setup), or why it cannot run. */
+  "image.setupInfo": { params: NoParams, result: ImageSetup, phone: "allow" },
+  /** Set up images: fetch and start the app's own ComfyUI, then download the setup; progress on the image.setup push. */
+  "image.setup": { params: NoParams, result: S.Struct({ started: S.Boolean }), phone: "deny" },
   /** The Pictures screen: finished pictures, newest first, a page at a time. */
   "pictures.list": { params: PictureListParams, result: PictureList, phone: "allow" },
   // ---- setup (2026-11-07): read the machine, then plan models for it
@@ -319,6 +325,8 @@ export const pushes = {
   "image.event": { payload: ImageEvent },
   /** A model file image.download is fetching: its setup, its place in the list, its progress. */
   "image.download": { payload: ImageDownload },
+  /** Set up images' progress: each step, then done or error. */
+  "image.setup": { payload: ImageSetupProgress },
   /** A model request finished and was counted; usage.read has the new numbers. */
   "usage.changed": { payload: S.Struct({}) },
 } as const;

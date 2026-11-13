@@ -55,6 +55,11 @@ describe("gpu.status occupants", () => {
     expect(s.occupants.find((o) => o.kind === "chat-model")).toMatchObject({ label: "gemma4:12b", protected: true });
   });
 
+  it("the ComfyUI the app runs is ComfyUI by its pid, on whatever port it listens", async () => {
+    const s = await readGpuStatus(linux({ runNvidiaSmi: smi(MIXED), listeningPids: async () => new Set(), imagePid: () => 5700 }));
+    expect(s.occupants.find((o) => o.kind === "image")).toEqual({ label: "ComfyUI", bytes: 3110 * MIB, kind: "image", protected: false });
+  });
+
   it("whisper is matched by the service MainPID when its process name does not say whisper", async () => {
     const apps = "9001, /usr/bin/python3, 2100\n";
     const s = await readGpuStatus(linux({ runNvidiaSmi: smi(apps, "RTX, 16303, 2100, 14000"), whisperPid: async () => 9001 }));

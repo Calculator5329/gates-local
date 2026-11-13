@@ -11,6 +11,8 @@ export type RuntimeMode = "system" | "app";
 /** Threads written before the server starts: N messages in one thread, the design's sidebar ("design-code" adds a reply with a long code block, a table and a long URL; "usage" adds a week of three models' usage), the README's demo threads, saved tool turns ("work-fold"), or 0 for none. */
 export type Seed = number | "design" | "design-code" | "readme" | "usage" | "work-fold";
 export type Sandbox = "ready" | "off";
+/** The image engine the server installs in place of the pinned one (GATES_LOCAL_IMAGE_ENGINE): fake-comfy's engine(). */
+export type FakeEngine = { readonly manifest: Record<string, unknown>; readonly layout: "uv-venv"; readonly address: string };
 
 /** What Chromium fails an in-flight request with when the host's addresses change under it. */
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
@@ -58,9 +60,10 @@ async function control(route: string, body: unknown = {}): Promise<unknown> {
 
 export const stack = {
   /** Fresh data dir and a rediscovered runtime, with the fake set to this scenario; seed writes threads first (test/e2e/seed.ts). */
-  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string, controlledRuntimePorts = false, sandbox: Sandbox = "ready"): Promise<string | null> {
+  async reset(scenario: Scenario = "models", seed: Seed = 0, seedAt?: number, runtimeMode?: RuntimeMode, installed?: readonly string[], comfyUrl?: string, controlledRuntimePorts = false, sandbox: Sandbox = "ready", engine?: FakeEngine): Promise<string | null> {
     const r = await control("/reset", {
       ...(sandbox === "off" ? { sandbox } : {}),
+      ...(engine === undefined ? {} : { engine }),
       scenario,
       seed,
       ...(seedAt === undefined ? {} : { seedAt }),

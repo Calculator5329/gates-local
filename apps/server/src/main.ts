@@ -30,6 +30,11 @@
 //   GATES_LOCAL_COMFY_URL        tests: the ComfyUI address when Settings has none, in place of
 //                                http://127.0.0.1:8188, and comfyui.service is never touched
 //                                (systemctl); every test launcher sets it (test/server-env.test.ts)
+//   GATES_LOCAL_IMAGE_ENGINE     tests: JSON {manifest, layout, address}. Set images up installs this
+//                                engine (an http origin on this computer, never the pinned release),
+//                                the app's own ComfyUI is read at `address`, and before it is
+//                                installed the app reads `address` in place of GATES_LOCAL_COMFY_URL
+//                                and looks for no systemd unit (image/engine.ts engineKnob)
 //   GATES_LOCAL_UPDATE_TEST_ROOT tests: the update check refuses to run git or pnpm in any folder
 //                                outside this one (src/update/guard.ts); the e2e stack sets it
 //   GATES_LOCAL_INSTALLED_VERSION the packaged desktop app's version; set, Settings › Updates
@@ -66,13 +71,14 @@
 // With LISTEN set, a missing or malformed other knob stops the start (exit 2).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createApp, type App } from "./app.ts";
 import { createShellStatus } from "./chat/shell.ts";
 import { probeSandbox } from "../../../packages/harness/src/sandbox/index.ts";
-import { createNvidiaSmiRunner } from "./fit/gpu.ts";
+import { createNvidiaSmiRunner, parseMemTotal } from "./fit/gpu.ts";
 import { OLLAMA_REGISTRY } from "./runtime/registry-size.ts";
 import { createModelServices, type ModelServices } from "./runtime/services.ts";
 import { createSources } from "./sources/index.ts";
@@ -85,7 +91,12 @@ import { SETTINGS_FILE_NAME } from "./settings/store.ts";
 import { startWsServer, type WsServer } from "./ws/server.ts";
 import { ORDERED_DOMAINS, type Payload } from "@gates-local/contracts";
 import { createGpuLease } from "./gpu/lease.ts";
-import { createImageModule } from "./image/module.ts";
+import { createImageModule, type ImageModule } from "./image/module.ts";
+import { ENGINE_OFFERED, engineFor, engineKnob, type EngineKnob } from "./image/engine.ts";
+import { LINUX_ENGINE, linuxBuild, linuxPinned } from "./image/linux-build.ts";
+import { createOwnComfy, freePort, writeDevice } from "./image/own.ts";
+import { createImageSetup, type ImageSetupModule } from "./image/setup.ts";
+import type { ComfyService } from "./image/service.ts";
 import { createPicturesModule } from "./pictures/handlers.ts";
 import { makeThumbnail } from "./pictures/thumbs.ts";
 import { fetchFrom } from "./image/download.ts";
@@ -108,6 +119,13 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const TEST_BUILD_MARKER = path.resolve(import.meta.dirname, "..", "test-build.json");
 
 const TOKEN_ENV = "GATES_LOCAL_SERVER_TOKEN";
+
+/** Tests with a fake engine (GATES_LOCAL_IMAGE_ENGINE): no systemd unit is asked about. */
+const NO_UNIT: ComfyService = {
+  inspect: async () => ({ present: false, active: false, activeState: "inactive", pid: 0 }),
+  start: async () => { throw new Error("No ComfyUI unit in tests."); },
+  stop: async () => {},
+};
 /** The supervisor SIGKILLs at 3 s; exit before that whatever hangs. */
 
 // The Vite dev client. The desktop app serves the built client on
@@ -191,7 +209,11 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   const smiCommand = process.env["GATES_LOCAL_NVIDIA_SMI"];
   const meminfoPath = process.env["GATES_LOCAL_MEMINFO"];
   const downloadOrigin = process.env["GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN"];
-  const comfyDefault = process.env["GATES_LOCAL_COMFY_URL"];
+  let engineTest: EngineKnob | undefined;
+  try { engineTest = engineKnob(process.env["GATES_LOCAL_IMAGE_ENGINE"]); }
+  catch (e) { store.close(); die((e as Error).message); }
+  // a test's fake engine is read at its address before it is installed, in place of the test's ComfyUI address
+  const comfyDefault = engineTest?.address ?? process.env["GATES_LOCAL_COMFY_URL"];
   // Windows runs no #! line: a script there (the tests' fake) goes through this runtime.
   const [smiFile, smiPre] =
     smiCommand !== undefined && process.platform === "win32" && /\.[cm]?[jt]s$/.test(smiCommand) ? [process.execPath, [smiCommand]] : [smiCommand, []];
@@ -216,8 +238,11 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
   let services: ModelServices;
   // The fit table follows the GPU watcher's readings and the loader's loads (bound once the app exists).
   let fitTable: App["fitTable"] | undefined;
+  // The GPU status names the app's ComfyUI by the image module's held pid (bound once the module exists).
+  let imageModule: ImageModule | undefined;
   try {
     services = await createModelServices({
+      imagePid: () => imageModule?.engine().pid,
       admit: admission.admit,
       dataDir,
       push: (channel, payload, changes) => {
@@ -241,11 +266,20 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     die(`cannot open settings in ${dataDir}: ${(e as Error).message}`, 1);
   }
   const { runtime, catalog } = services;
+  // The app's own ComfyUI (image/own.ts), on a port free at startup; Set up images installs it.
+  const own = createOwnComfy({ appDataDir: dataDir, port: await freePort(), ...engineTest ? { address: engineTest.address } : {} });
+  let imageSetup: ImageSetupModule | undefined;
   const image = createImageModule({
     admit: admission.admit,
     dataDir, store, lease: gpuLease,
     log: (line) => log(`image ${line}`),
-    push: (channel, payload, changes) => server?.push(channel, payload, changes),
+    push: (channel, payload, changes) => {
+      imageSetup?.saw(channel, payload);
+      server?.push(channel, payload, changes);
+    },
+    own,
+    // tests with a fake engine: no systemd unit on the machine running them
+    ...engineTest ? { service: NO_UNIT } : {},
     thumbnail: (jobId, png) => makeThumbnail(dataDir, jobId, png),
     settings: () => services.settings.get(),
     imageMayUnload: () => services.loader.imageMayUnload(),
@@ -254,10 +288,30 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     ollamaUrl: () => runtime.baseUrl(),
     // The default and the picker's tiers read the GPU as the picker does.
     gpuStatus: () => services.gpu.read(),
+    // MOSS is a default only with 32 GB of memory: a test's fake meminfo, else this computer's
+    memTotal: async () => meminfoPath ? parseMemTotal(await readFile(meminfoPath, "utf8")) : os.totalmem(),
     // The image fit reads the same GPU the chat fits do: a test's fake nvidia-smi, never the real one.
     ...(fit.runNvidiaSmi ? { runNvidiaSmi: fit.runNvidiaSmi } : {}),
     ...(downloadOrigin ? { download: { fetch: fetchFrom(downloadOrigin), records: false } } : {}),
     ...(comfyDefault ? { defaultUrl: comfyDefault } : {}),
+  });
+  imageModule = image;
+  imageSetup = createImageSetup({
+    appDataDir: dataDir, own, image,
+    engine: (gpuName) => {
+      // the release switch (engine.ts): off until the pinned engine has been installed once for real
+      if (engineTest === undefined && !ENGINE_OFFERED) return undefined;
+      const pick = engineTest ?? engineFor(process.platform, process.arch, gpuName);
+      // an engine whose size and digest are not confirmed is not offered: the installer would refuse it at the click
+      if (pick !== undefined) return pick.manifest.verified ? { kind: "archive", manifest: pick.manifest, layout: pick.layout } : undefined;
+      // Linux x64 builds its engine (linux-build.ts), once its parts are pinned
+      return process.platform === "linux" && process.arch === "x64" && linuxPinned(LINUX_ENGINE) ? linuxBuild({ appDataDir: dataDir, pins: LINUX_ENGINE }) : undefined;
+    },
+    gpuStatus: () => services.gpu.read(),
+    settingsAddress: () => services.settings.get().comfyUrl,
+    push: (channel, payload) => server?.push(channel, payload),
+    setDevice: (device) => writeDevice(dataDir, device),
+    log: (line) => log(`image setup ${line}`),
   });
   const imports = createImportActivity(admission);
   const sources = withImportAdmission(createSources({ dataDir, log: (line) => log(`sources ${line}`) }), imports);
@@ -331,6 +385,7 @@ export async function main(options: { imports?: Omit<ImportsDeps, "sources"> } =
     libraryImports,
     update,
     image,
+    imageSetup,
     lease: gpuLease,
     store,
     sources,

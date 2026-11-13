@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Image engine pinned, Set up images held back
+
+- The engine downloads are now pinned in full: the Windows ComfyUI
+  portable (2.05 GB, and 1.95 GB for GTX 10-series and older cards) by its
+  exact size and checksum, and on Linux uv, ComfyUI's source and a lock of
+  103 wheels (about 3.8 GB) with a checksum each.
+- Set up images is still not offered in this release: the pop-up says the
+  app cannot set images up on this computer, as before. It turns on with
+  one switch once the pinned engine has been installed for real once.
+- A Linux setup would have stopped at the wheels: it now takes each wheel
+  from whichever index has the pinned version, as the lock was built.
+
+## 2026-11-13: Image picker, Defaults by this computer's memory
+
+- On a computer with under 32 GB of memory, no style's Defaults row runs
+  MOSS-Image: it took 13 to 15 GB of memory in the bench. The style's
+  compact FLUX.2 Klein runs instead, and MOSS-Image stays under Other
+  models. From 32 GB up, nothing changes.
+- A Defaults row has no tooltip any more: it named the model, which the
+  size pane already shows.
+
 ## 2026-11-13: Ctrl+C at the moment an update command starts still ends it
 
 - The source updater runs each command (git, pnpm) in its own process
@@ -71,6 +92,30 @@
 - Settings › Tools: a row no longer grows or shrinks when its status changes
   (Checking, Ready, Turned off). The status has a slot as wide as its
   longest words, so the description wraps the same way each time.
+
+## 2026-11-13: Set up images with one click
+
+- Where no ComfyUI is set up, the Image pop-up now offers the one
+  download: the app's own ComfyUI and FLUX.2 Klein 4B compact (8.26 GB),
+  with its size and the drive's free space. Set up images fetches both,
+  shows the progress, starts the engine and turns Image on. The engine
+  lives in the app's own folder, is started and stopped by the app on a
+  free port (never 8188), and is fetched like Ollama: a pinned release,
+  its checksum checked.
+- With no graphics card for pictures, the same engine runs on the
+  processor, and the pop-up says each picture takes about 2 to 4 minutes
+  before anything downloads.
+- Where pictures cannot run here, the pop-up says why in one sentence and
+  offers no download: a card under 4 GB, a card the app cannot read, a
+  computer the app has no engine for yet (macOS, ARM, and Linux until its
+  build is pinned), or a ComfyUI address in Settings that does not answer.
+- In the picker, a style whose best setup for your card is MOSS-Image or
+  the full Klein encoder uses the compact Klein until that second download
+  is there, so the default is always one you can run.
+- Windows downloads the ComfyUI portable; Linux builds the engine from
+  uv, its standalone Python, ComfyUI's source and a lock file of wheel
+  hashes. Neither is offered yet (see "Image engine pinned" above): until
+  then the pop-up says the app cannot set images up on this computer.
 
 ## 2026-11-13: Image stays off until there is a ComfyUI to draw with
 

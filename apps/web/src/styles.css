@@ -878,6 +878,11 @@ a.btn{text-decoration:none}
 .unset-pop .unset-t{margin:0 0 4px;font-weight:600}
 .unset-pop .unset-d{margin:0 0 8px;color:var(--muted-foreground);font-size:12px;line-height:18px;overflow-wrap:anywhere}
 .unset-pop .unset-acts{display:flex;gap:8px;margin-top:12px}
+.unset-pop .setup-card{border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border-strong);background:var(--card);padding:10px 12px;margin-top:8px}
+.unset-pop .setup-m{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.unset-pop .setup-sz{font-variant-numeric:tabular-nums;font-weight:400;color:var(--muted-foreground)}
+.unset-pop .setup-sub{font-size:12px;line-height:18px;color:var(--muted-foreground);margin-top:2px;font-variant-numeric:tabular-nums}
+.unset-pop .setup-card .prog{margin-top:8px}
 .md pre{background:var(--code-bg);box-shadow:inset 0 0 0 1px var(--border);border-radius:var(--r-md);padding:10px 12px;overflow-x:auto}
 .md pre code{background:none;box-shadow:none;padding:0;font-size:.87em}
 /* a fenced block: language at the top left, its own copy button at the top right on hover or focus (always on touch) */

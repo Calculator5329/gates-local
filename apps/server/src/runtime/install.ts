@@ -10,7 +10,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
-import { binaryIn, installDir, installRoot, installedBinary, runtimeDir } from "./paths.ts";
+import { binaryIn, installRoot, installedBinary, runtimeDir } from "./paths.ts";
 import type { InstallManifest } from "./schemas.ts";
 import type { InstallProgress } from "./types.ts";
 
@@ -30,9 +30,39 @@ export class InstallError extends Error {
   }
 }
 
+/**
+ * What a pinned release installs into. Ollama is the default; the image
+ * engine (image/engine.ts) is the other. Each target's staging folders sit
+ * where only its own installs clear them.
+ */
+export type InstallTarget = {
+  /** Its name in "The … download": "Ollama", "image engine". */
+  label: string;
+  /** Its name mid-sentence: "Ollama", "the image engine". */
+  name: string;
+  /** One folder per version. */
+  root: string;
+  /** Where staging folders go; stale ones there are cleared on each install. */
+  stagingRoot: string;
+  /** Rejects unless an unpacked tree is whole. */
+  check(tree: string): Promise<void>;
+};
+
+export function ollamaTarget(appDataDir: string): InstallTarget {
+  return {
+    label: "Ollama",
+    name: "Ollama",
+    root: installRoot(appDataDir),
+    stagingRoot: runtimeDir(appDataDir),
+    check: (tree) => access(binaryIn(tree), constants.X_OK),
+  };
+}
+
 export type InstallOptions = {
   appDataDir: string;
   manifest: InstallManifest;
+  /** Ollama when absent. */
+  target?: InstallTarget;
   onProgress?: (p: InstallProgress) => void;
   signal?: AbortSignal;
   /** Progress events during download fire at most this often. */
@@ -47,24 +77,25 @@ export function isInstalled(appDataDir: string, version: string): boolean {
   return existsSync(installedBinary(appDataDir, version));
 }
 
-async function removeStaleStaging(appDataDir: string): Promise<void> {
+async function removeStaleStaging(stagingRoot: string): Promise<void> {
   let entries: string[];
   try {
-    entries = await readdir(runtimeDir(appDataDir));
+    entries = await readdir(stagingRoot);
   } catch {
     return;
   }
   await Promise.all(
     entries
       .filter((e) => e.startsWith(STAGING_PREFIX))
-      .map((e) => rm(path.join(runtimeDir(appDataDir), e), { recursive: true, force: true })),
+      .map((e) => rm(path.join(stagingRoot, e), { recursive: true, force: true })),
   );
 }
 
 const mib = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MiB`;
 
-async function download(opts: InstallOptions, file: string): Promise<string> {
+async function download(opts: InstallOptions & { target: InstallTarget }, file: string): Promise<string> {
   const { manifest, onProgress, signal } = opts;
+  const { label, name } = opts.target;
   const interval = opts.progressIntervalMs ?? 250;
   const retry = "Check the network and retry; nothing was installed.";
   let res: Response;
@@ -74,7 +105,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
     throw new InstallError("download-failed", `Could not reach ${manifest.url} (${(e as Error).message}). ${retry}`);
   }
   if (!res.ok || !res.body) {
-    throw new InstallError("download-failed", `Downloading Ollama failed: HTTP ${res.status} from ${manifest.url}. ${retry}`);
+    throw new InstallError("download-failed", `Downloading ${name} failed: HTTP ${res.status} from ${manifest.url}. ${retry}`);
   }
   const hash = createHash("sha256");
   const fh = await open(file, "w");
@@ -89,7 +120,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
       if (received > manifest.sizeBytes) {
         throw new InstallError(
           "hash-mismatch",
-          `The Ollama download is larger than the pinned ${manifest.sizeBytes} bytes, so it is not the pinned release. Nothing was installed; the pinned manifest needs updating.`,
+          `The ${label} download is larger than the pinned ${manifest.sizeBytes} bytes, so it is not the pinned release. Nothing was installed; the pinned manifest needs updating.`,
         );
       }
       hash.update(buf);
@@ -104,7 +135,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
     if (e instanceof InstallError) throw e;
     throw new InstallError(
       "interrupted",
-      `The Ollama download stopped at ${mib(received)} of ${mib(manifest.sizeBytes)} (${(e as Error).message}). ${retry}`,
+      `The ${label} download stopped at ${mib(received)} of ${mib(manifest.sizeBytes)} (${(e as Error).message}). ${retry}`,
     );
   } finally {
     await fh.close();
@@ -113,7 +144,7 @@ async function download(opts: InstallOptions, file: string): Promise<string> {
   if (received !== manifest.sizeBytes) {
     throw new InstallError(
       "interrupted",
-      `The Ollama download ended early: ${mib(received)} of ${mib(manifest.sizeBytes)}. ${retry}`,
+      `The ${label} download ended early: ${mib(received)} of ${mib(manifest.sizeBytes)}. ${retry}`,
     );
   }
   return hash.digest("hex");
@@ -128,9 +159,14 @@ export function windowsTar(env: Readonly<Record<string, string | undefined>> = p
   return path.win32.join(env["SystemRoot"] ?? env["SYSTEMROOT"] ?? "C:\\Windows", "System32", "tar.exe");
 }
 
-function extractZip(archive: string, into: string): Promise<void> {
+/**
+ * ZIP and 7z go through libarchive: Windows' own tar.exe there (the image
+ * engine's portable is a 7z with the BCJ2 filter, which libarchive reads),
+ * bsdtar elsewhere (tests, and the 7z proof on Linux).
+ */
+function extractWithLibarchive(archive: string, into: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tar = spawn(windowsTar(), ["-x", "-f", archive, "-C", into], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const tar = spawn(process.platform === "win32" ? windowsTar() : "bsdtar", ["-x", "-f", archive, "-C", into], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     let stderr = "";
     tar.stderr.on("data", (c: Buffer) => {
       stderr += c.toString("utf8");
@@ -141,7 +177,7 @@ function extractZip(archive: string, into: string): Promise<void> {
 }
 
 function extract(archive: string, format: InstallManifest["format"], into: string): Promise<void> {
-  if (format === "zip") return extractZip(archive, into);
+  if (format === "zip" || format === "7z") return extractWithLibarchive(archive, into);
   return new Promise((resolve, reject) => {
     const tar = spawn("tar", ["-x", "-f", "-", "-C", into, "--no-same-owner"], { stdio: ["pipe", "ignore", "pipe"] });
     let stderr = "";
@@ -169,26 +205,32 @@ function extract(archive: string, format: InstallManifest["format"], into: strin
  */
 export async function installPinned(opts: InstallOptions): Promise<InstallResult> {
   const { appDataDir, manifest, onProgress } = opts;
-  const dir = installDir(appDataDir, manifest.version);
-  const binary = installedBinary(appDataDir, manifest.version);
-  if (isInstalled(appDataDir, manifest.version)) return { version: manifest.version, dir, binary, alreadyInstalled: true };
+  const target = opts.target ?? ollamaTarget(appDataDir);
+  const { label, name } = target;
+  const dir = path.join(target.root, manifest.version);
+  const ollama = opts.target === undefined;
+  const binary = ollama ? installedBinary(appDataDir, manifest.version) : dir;
+  const present = async () => target.check(dir).then(() => true, () => false);
+  if (await present()) return { version: manifest.version, dir, binary, alreadyInstalled: true };
   if (!manifest.verified) {
     throw new InstallError(
       "unverified-manifest",
-      `The pinned Ollama has no confirmed checksum, so the app will not install it. Install Ollama yourself or update the pinned manifest.`,
+      ollama
+        ? `The pinned Ollama has no confirmed checksum, so the app will not install it. Install Ollama yourself or update the pinned manifest.`
+        : `The pinned ${label} has no confirmed checksum and size, so the app will not download it. The pinned manifest needs its release's exact size and sha256.`,
     );
   }
-  await mkdir(runtimeDir(appDataDir), { recursive: true });
-  await removeStaleStaging(appDataDir);
-  const staging = await mkdtemp(path.join(runtimeDir(appDataDir), STAGING_PREFIX));
+  await mkdir(target.stagingRoot, { recursive: true });
+  await removeStaleStaging(target.stagingRoot);
+  const staging = await mkdtemp(path.join(target.stagingRoot, STAGING_PREFIX));
   try {
     const archive = path.join(staging, "asset");
-    const digest = await download(opts, archive);
+    const digest = await download({ ...opts, target }, archive);
     onProgress?.({ phase: "verify", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
     if (digest !== manifest.sha256.toLowerCase()) {
       throw new InstallError(
         "hash-mismatch",
-        `The Ollama download did not match its pinned checksum (expected sha256 ${manifest.sha256}, got ${digest}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`,
+        `The ${label} download did not match its pinned checksum (expected sha256 ${manifest.sha256}, got ${digest}). Nothing was installed. Retry once; if it fails again the release file changed and the pinned manifest needs updating.`,
       );
     }
     onProgress?.({ phase: "extract", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
@@ -196,19 +238,19 @@ export async function installPinned(opts: InstallOptions): Promise<InstallResult
     await mkdir(tree);
     try {
       await extract(archive, manifest.format, tree);
-      await access(binaryIn(tree), constants.X_OK);
+      await target.check(tree);
     } catch (e) {
       throw new InstallError(
         "extract-failed",
-        `Unpacking Ollama failed (${(e as Error).message}). Nothing was installed; check free disk space in ${appDataDir} and retry.`,
+        `Unpacking ${name} failed (${(e as Error).message}). Nothing was installed; check free disk space in ${appDataDir} and retry.`,
       );
     }
-    await mkdir(installRoot(appDataDir), { recursive: true });
+    await mkdir(target.root, { recursive: true });
     try {
       await rename(tree, dir);
     } catch (e) {
       // Another install finished first; keep its tree.
-      if (!isInstalled(appDataDir, manifest.version)) throw e;
+      if (!(await present())) throw e;
     }
     onProgress?.({ phase: "done", version: manifest.version, receivedBytes: manifest.sizeBytes, totalBytes: manifest.sizeBytes });
     return { version: manifest.version, dir, binary, alreadyInstalled: false };

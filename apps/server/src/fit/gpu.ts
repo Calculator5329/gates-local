@@ -221,6 +221,12 @@ export function parseMemAvailable(text: string): number {
   return Number(match[1]) * 1024;
 }
 
+/** MemTotal from /proc/meminfo (the computer's memory), in bytes; undefined without the line. */
+export function parseMemTotal(text: string): number | undefined {
+  const match = /^MemTotal:\s+(\d+)\s*kB/m.exec(text);
+  return match?.[1] ? Number(match[1]) * 1024 : undefined;
+}
+
 export async function readMemAvailable(read: MeminfoReader = defaultMeminfo, signal?: AbortSignal): Promise<number> {
   signal?.throwIfAborted();
   let text: string;

@@ -1117,6 +1117,55 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none" });
   });
 
+  it("the app's own engine, once installed, is what Start starts and the idle stop stops; an address in Settings still wins", async () => {
+    const own = { installed: false, active: false, calls: [] as string[] };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    const address = "http://127.0.0.1:41234";
+    f = await fixture({ own: {
+      installed: () => own.installed, address: () => address,
+      inspect: async () => ({ present: own.installed, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.calls.push("start"); own.active = true; f.configure({ answering: true }); },
+      stop: async () => { own.calls.push("stop"); own.active = false; f.configure({ answering: false }); },
+      onExit: () => {},
+    } });
+    f.configure({ answering: false, present: false });
+    await expect(f.module.start()).rejects.toThrow(IMAGES_UNSET);
+    own.installed = true;
+    expect(await f.module.status()).toMatchObject({ state: "stopped", baseUrl: address });
+    await f.module.start();
+    expect(own.calls).toEqual(["start"]);
+    expect(f.calls).not.toContain("start");
+    expect(f.module.current()).toMatchObject({ state: "ready", owner: "app", baseUrl: address });
+    await vi.waitFor(() => expect(own.calls).toEqual(["start", "stop"]));
+    expect(f.module.current()).toMatchObject({ state: "stopped", owner: "none", baseUrl: address });
+    f.configure({ comfyUrl: "http://127.0.0.1:9999" });
+    expect(await f.module.status()).toMatchObject({ state: "missing", baseUrl: "http://127.0.0.1:9999" });
+    expect(own.calls).toEqual(["start", "stop"]);
+  });
+
+  it("the held engine value: the own engine's end is written when it happens, and the room is read with the status", async () => {
+    let ended: ((pid: number) => void) | undefined;
+    const own = { active: false };
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    f = await fixture({ own: {
+      installed: () => true, address: () => "http://127.0.0.1:41234",
+      inspect: async () => ({ present: true, active: own.active, activeState: own.active ? "active" : "inactive", pid: own.active ? 77 : 0 }),
+      start: async () => { own.active = true; f.configure({ answering: true }); },
+      stop: async () => { own.active = false; f.configure({ answering: false }); },
+      onExit: (listener) => { ended = listener; },
+    }, gpuStatus: async () => ({ vendor: "nvidia", name: "Test card", totalBytes: 16 * 1024 ** 3, occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 }) });
+    f.configure({ answering: false });
+    await f.module.status();
+    expect(f.module.engine()).toMatchObject({ address: "http://127.0.0.1:41234", owner: "none", state: "stopped" });
+    expect(f.module.engine().room).toBeGreaterThan(15 * 1024 ** 3);
+    await f.module.start();
+    expect(f.module.engine()).toMatchObject({ owner: "app", state: "ready", pid: 77 });
+    own.active = false; f.configure({ answering: false });
+    ended!(77);
+    expect(f.module.engine()).toMatchObject({ owner: "none", state: "stopped" });
+    expect(f.module.engine().pid).toBeUndefined();
+  });
+
   it("Start ComfyUI says why when there is nothing to start", async () => {
     const f = await fixture();
     f.configure({ answering: false, present: false });

@@ -20,7 +20,7 @@ import { memoryRuler } from "./picker-models.ts";
 import { focusComposer } from "./Sidebar.tsx";
 import { downloadImageSetup, loadImagePresets, pickImage, startImage, stopImageDownload } from "./session.ts";
 import { NA, useStore } from "./store.ts";
-import { PHONE, closePop, closeTip, esc, isTouch, tabStops, useMedia } from "./ui.tsx";
+import { PHONE, closePop, closeTip, isTouch, tabStops, useMedia } from "./ui.tsx";
 
 /** Below this height the list and the sizes stop being usable. */
 const CRAMPED = 280;
@@ -273,7 +273,7 @@ export function ImagePicker() {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   }
 
-  /** What a row shows first: a Defaults row the style alone, the setup in its tip; any other row its mark and name. */
+  /** What a row shows first: a Defaults row the style alone (its setup is in the size pane, no tip); any other row its mark and name. */
   function rowLabel(p: Row, style: string | undefined) {
     return style === undefined ? <><ImageMark family={p.family} /><span className="pk-name"><span className="pk-nm">{p.name}</span>{tierTag(p)}{check(p)}</span></>
       : <span className="pk-name"><span className="pk-nm">{style}</span>{check(p)}</span>;
@@ -283,7 +283,7 @@ export function ImagePicker() {
   /** A row that runs now: picked by a press. */
   function readyRow(p: Row, style?: string) {
     return <div key={p.id} className={`pk-r${style === undefined ? "" : " style"}${p.id === chosen?.preset.id ? " sel" : ""}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={p.id === chosen?.preset.id} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
-      <button type="button" className="pk-select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={style ?? p.name} data-tip={style === undefined ? undefined : esc(p.name)} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
+      <button type="button" className="pk-select" tabIndex={p.id === (chosen?.preset.id ?? firstReady) ? 0 : -1} aria-label={style ?? p.name} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
     </div>;
   }
 
@@ -297,7 +297,7 @@ export function ImagePicker() {
     const shownDownload = running ? mine : waits ? download : undefined;
     const reason = rowError?.id === p.id ? rowError.message : stopped ? mine.message ?? "The download stopped." : needsText(p);
     return <div key={p.id} className={`pk-r off${style === undefined ? "" : " style"}${p.id === active?.id ? " hl" : ""}`} role="option" aria-selected={false} data-preset={p.id} onMouseMove={() => setHighlight(p.id)}>
-      <button type="button" className="pk-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} data-tip={style === undefined ? undefined : esc(p.name)} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
+      <button type="button" className="pk-select" tabIndex={-1} aria-disabled="true" aria-label={style ?? p.name} aria-describedby={`pk-why-${p.id}`} onClick={() => choose(p)}>{rowLabel(p, style)}</button>
       {running
         ? canStop ? <button type="button" className="pk-act" aria-label={`Stop downloading ${p.name}`} data-tip="Stop" onClick={() => void stopSetup(p)}><Icon id="x" /></button> : null
         : p.needs?.download === true && canDownload && !waits

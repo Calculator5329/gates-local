@@ -70,8 +70,8 @@ test("Image on: the button names the image model and size where the chat model w
   await expect(picker.locator(".pk-rail").getByRole("button").nth(0)).toHaveAccessibleName("Defaults");
   await expect(picker.locator(".pk-rail").getByRole("button").nth(1)).toHaveAccessibleName("Other models");
   await expect(picker.locator("input"), "the image picker has no search box").toHaveCount(0);
-  // a Defaults row's tip names its setup; no other row has one (every row is ready: no Download)
-  await expect(picker.locator(".pk-r[data-tip], .pk-r:not(.style) [data-tip]"), "no row tooltips but the styles'").toHaveCount(0);
+  // no row has a tooltip: a Defaults row's setup is in the size pane (every row is ready: no Download)
+  await expect(picker.locator(".pk-r [data-tip], .pk-r[data-tip]"), "no row tooltips").toHaveCount(0);
   // a style setup runs at the one size the bench ran it at
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(1);
   await shot(page, "image-after-picker.png", info);

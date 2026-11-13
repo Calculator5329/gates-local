@@ -69,6 +69,8 @@ export interface ModelServicesOptions {
   readonly modelRegistry?: string;
   /** How long a switch waits for the old runtime's turns to end before it fails (default 10 s). */
   readonly turnDrainMs?: number;
+  /** The ComfyUI process the app runs, from the image module's held engine value (bound late). */
+  readonly imagePid?: () => number | undefined;
 }
 
 export async function createModelServices(options: ModelServicesOptions): Promise<ModelServices> {
@@ -141,6 +143,7 @@ export async function createModelServices(options: ModelServicesOptions): Promis
         ...options.fit,
         whisperPid,
         listeningPids: procListeningPids,
+        ...options.imagePid ? { imagePid: options.imagePid } : {},
         modelLabel,
         // Unprotected is what an image job may unload (the loader's imageMayUnload), without a second /api/ps.
         mayUnload: () => loader?.loadedOrAnswered() ?? [],

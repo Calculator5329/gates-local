@@ -10,15 +10,30 @@
 // lists what a download put in their gates-local/ folders. It also serves every Hugging Face
 // path the app downloads from (the e2e stack points GATES_LOCAL_IMAGE_DOWNLOAD_ORIGIN here):
 // a few MiB per file, with Range, trickled and never finished while slowDownloads(true).
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { APP_FILES, comfyInfo, KLEIN_FILES, type FakeFiles } from "../../apps/server/test/comfy/info.ts";
+import type { FakeEngine } from "./fixtures.ts";
 
 const KINDS = ["checkpoints", "loras", "diffusion_models", "text_encoders", "vae"] as const;
+const ENGINE_PATH = "/engine/comfyui.tar.gz";
+/**
+ * The fake engine's run: it tells the fake it is up (with the arguments the app gave main.py),
+ * stays until the app stops it, then tells the fake it is down.
+ */
+const FAKE_ENGINE_SCRIPT = `const [address, ...args] = process.argv.slice(2);
+const tell = (state, body) => fetch(address + "/__engine/" + state, { method: "POST", body: JSON.stringify(body ?? []) }).catch(() => {});
+await tell("up", args);
+const end = async () => { await tell("down"); process.exit(0); };
+process.on("SIGTERM", end);
+process.on("SIGINT", end);
+setInterval(() => {}, 60_000);
+`;
 /** Each served file's size: enough for a progress bar to move. */
 const FILE_BYTES = 4 * 1024 * 1024;
 
@@ -30,6 +45,8 @@ export async function fakeComfy() {
   let folders: string | undefined, slow = false, slowFile: string | undefined;
   /** What /view serves: a 1×1 PNG unless a test set a picture of its own. */
   let viewPng: Buffer = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  /** engine(): the fake engine's tar.gz, its folder, and the arguments its last run started with. */
+  let engineArchive: Buffer | undefined, engineDir: string | undefined, engineArgs: string[] | undefined;
   /** Held downloads: each ends its response when released. */
   const held = new Set<() => void>();
   /** A held GET trickles 16 KiB every 100 ms, never the last piece, until released or the app stops it. */
@@ -66,6 +83,9 @@ export async function fakeComfy() {
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const url = new URL(req.url ?? "/", "http://fake");
     if (url.pathname.includes("/resolve/")) { serveFile(req.method ?? "GET", req.headers.range, path.basename(url.pathname), res); return; }
+    if (url.pathname === ENGINE_PATH && engineArchive !== undefined) { res.writeHead(200, { "content-length": String(engineArchive.length) }); res.end(engineArchive); return; }
+    if (url.pathname === "/__engine/up") { down = false; engineArgs = JSON.parse(Buffer.concat(chunks).toString("utf8") || "[]") as string[]; res.end("{}"); return; }
+    if (url.pathname === "/__engine/down") { down = true; res.end("{}"); return; }
     if (down) { res.writeHead(503); res.end("{}"); return; }
     let body: unknown = {};
     switch (url.pathname) {
@@ -108,8 +128,9 @@ export async function fakeComfy() {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("fake ComfyUI did not bind");
+  const url = `http://127.0.0.1:${address.port}`;
   return {
-    url: `http://127.0.0.1:${address.port}`,
+    url,
     state: () => runs.map((run) => ({ ...run })),
     prompts: () => prompts.map((p) => p.prompt),
     /** Serve this PNG for every finished prompt from now on. */
@@ -144,11 +165,39 @@ export async function fakeComfy() {
     slowDownloads: (on: boolean, file?: string) => { slow = on; slowFile = file; if (!on) for (const release of held) release(); },
     /** With an id, finish only that prompt so a queued successor stays held. */
     finish: (id?: string) => { if (id === undefined) complete = true; else completed.add(id); },
+    /**
+     * The app's own ComfyUI, to set up: a tar.gz laid out as the Linux engine (venv/bin/python
+     * beside ComfyUI/main.py) that this fake serves, and the knob the stack hands the server
+     * (stack.reset's engine). Its "python" answers for this fake while it runs: up when started,
+     * down when stopped. Pass the result to stack.reset; nothing is fetched from anywhere else.
+     */
+    engine: (): FakeEngine => {
+      const root = path.join(homedir(), ".cache", "gates-local-e2e");
+      mkdirSync(root, { recursive: true });
+      engineDir = mkdtempSync(path.join(root, "comfy-engine-"));
+      const tree = path.join(engineDir, "tree");
+      mkdirSync(path.join(tree, "venv", "bin"), { recursive: true });
+      mkdirSync(path.join(tree, "ComfyUI"), { recursive: true });
+      writeFileSync(path.join(tree, "ComfyUI", "main.py"), "# the fake engine runs engine.mjs, not this\n");
+      writeFileSync(path.join(tree, "ComfyUI", "engine.mjs"), FAKE_ENGINE_SCRIPT);
+      writeFileSync(path.join(tree, "venv", "bin", "python"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$(dirname "$0")/../../ComfyUI/engine.mjs" ${JSON.stringify(url)} "$@"\n`, { mode: 0o755 });
+      const out = path.join(engineDir, "comfyui.tar.gz");
+      execFileSync("tar", ["-czf", out, "-C", tree, "venv", "ComfyUI"]);
+      engineArchive = readFileSync(out);
+      const manifest = {
+        version: "0.0.0-test", url: `${url}${ENGINE_PATH}`, sha256: createHash("sha256").update(engineArchive).digest("hex"),
+        sizeBytes: engineArchive.length, format: "tar.gz", verified: true, source: "test/e2e/fake-comfy.ts",
+      };
+      return { manifest, layout: "uv-venv", address: url };
+    },
+    /** The arguments the fake engine's last run started with (main.py's), or undefined if none has run. */
+    engineArgs: () => engineArgs,
     missing: () => { missingModel = true; },
     restore: (finish = true) => { missingModel = false; complete = finish; },
     close: () => new Promise<void>((resolve, reject) => {
       for (const socket of sockets) socket.destroy();
       if (folders !== undefined) rmSync(folders, { recursive: true, force: true });
+      if (engineDir !== undefined) rmSync(engineDir, { recursive: true, force: true });
       server.close(error => error ? reject(error) : resolve());
       server.closeAllConnections();
     }),

@@ -22,7 +22,7 @@ import kleinPixel from "./setups/flux2-klein-4b-pixel.json" with { type: "json" 
 import moss from "./setups/moss-image.json" with { type: "json" };
 import zImage from "./setups/z-image-turbo-int8.json" with { type: "json" };
 import fileSources from "./setups/files.json" with { type: "json" };
-import { cellsFor, levelOf, STYLE_CELLS, type StyleCell } from "./styles.ts";
+import { cellsFor, compactStandIn, levelOf, STYLE_CELLS, type StyleCell } from "./styles.ts";
 
 export interface Preset {
   readonly id: string;
@@ -147,6 +147,14 @@ export const TIERS: readonly { readonly name: string; readonly presets: readonly
   { name: "Balanced", presets: ["z-image-int8", "flux2-klein-4b-compact"] },
   { name: "Best", presets: ["moss-image"] },
 ];
+
+/**
+ * MOSS-Image is a default only on a computer with 32 GB of system memory (bench rule A,
+ * 2026-11-13): it took 13 to 15 GiB of it in the bench, beside the desktop and the chat model.
+ * A 32 GB computer reports a little under 32 GiB, so the line is 30. Memory not known: it counts.
+ */
+export const MOSS_RAM = 30 * GIB;
+const mossFits = (ram: number | undefined): boolean => ram === undefined || ram >= MOSS_RAM;
 
 const firstBytes = (id: string): number => PRESETS.find((p) => p.id === id)!.sizes[0]!.bytes;
 /** Room unknown (no reading, or a ComfyUI on another machine) fits everything; the job's own check still runs. */
@@ -291,24 +299,39 @@ function needs(preset: Preset, missing: readonly GraphFile[]): NonNullable<Image
 /**
  * Every setup as the picker lists it: the ready ones, and the rest with what stops them. The style
  * cells are the ones of the level a card of `room` bytes runs at (levelOf; unknown: the top level).
+ * With `ram` bytes of system memory under MOSS_RAM, a MOSS cell is listed without its style (the
+ * picker shows it under Other models) and its style's compact Klein cell takes its place.
  */
-export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], room?: number): { ready: ImagePreset[]; others: ImagePreset[] } {
+export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], room?: number, ram?: number): { ready: ImagePreset[]; others: ImagePreset[] } {
   const ready: ImagePreset[] = [], others: ImagePreset[] = [];
-  for (const p of [...PRESETS, ...cellsFor(levelOf(room)), ...extra]) {
+  const level = levelOf(room);
+  const cells = new Set<Preset>(cellsFor(level));
+  const runs = (p: Preset) => { try { return judge(p, lists).missing.length === 0; } catch { return false; } };
+  // too little memory for MOSS: its cell's style goes to the compact Klein cell, listed first
+  const unstyled = new Set<Preset>(mossFits(ram) || level === undefined ? [] : cellsFor(level).filter((c) => c.family === "moss" && compactStandIn(c, level) !== undefined));
+  const list = [...PRESETS, ...cellsFor(level), ...extra].flatMap((p) => unstyled.has(p) ? [compactStandIn(p as StyleCell, level!)!, p] : [p]);
+  const listed = (p: Preset): ImagePreset => { const r = row(p); if (!unstyled.has(p)) return r; const { style: _, ...rest } = r; return rest; };
+  for (const p of list) {
     try {
       const { missing } = judge(p, lists);
-      if (missing.length === 0) ready.push(row(p));
-      else others.push({ ...row(p), needs: needs(p, missing) });
+      if (missing.length === 0) ready.push(listed(p));
+      else {
+        // A winner that needs the second download stays offered; its style's compact Klein cell
+        // stands in, so a style never shows a default this ComfyUI cannot run.
+        const standIn = cells.has(p) && !unstyled.has(p) && level !== undefined ? compactStandIn(p as StyleCell, level) : undefined;
+        if (standIn !== undefined && runs(standIn)) ready.push(row(standIn));
+        others.push({ ...listed(p), needs: needs(p, missing) });
+      }
     } catch (error) {
       if (!(error instanceof WorkflowRefusal)) throw error;
-      others.push({ ...row(p), why: error.message });
+      others.push({ ...listed(p), why: error.message });
     }
   }
   return { ready, others };
 }
 
 /** The presets ComfyUI has every class and file for, as the picker shows them. */
-export const availablePresets = (lists: ComfyLists, extra: readonly Preset[] = [], room?: number): ImagePreset[] => listPresets(lists, extra, room).ready;
+export const availablePresets = (lists: ComfyLists, extra: readonly Preset[] = [], room?: number, ram?: number): ImagePreset[] => listPresets(lists, extra, room, ram).ready;
 
 /**
  * The graph a job sends: the setup's workflow with the prompt, size and seed written in and each
@@ -390,14 +413,16 @@ export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool
  * style's cell for the card's level when it is ready, else the first of DEFAULT_ORDER that fits
  * and is ready, else the General cell even when not ready, so the send says which files are
  * missing (and the picker offers the download) rather than running some other row. On the CPU
- * only the General cell is a default. Never a template or a person's own.
+ * only the General cell is a default. Never a template or a person's own, and never MOSS-Image
+ * with `ram` bytes of system memory under MOSS_RAM.
  */
-export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = [], room?: number): ImageChoice | undefined {
+export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = [], room?: number, ram?: number): ImageChoice | undefined {
   const level = levelOf(room);
   if (level === undefined) return undefined;
-  const fitting = [cellChoice(generalCell(level)), ...level === "cpu" ? [] : DEFAULT_ORDER.filter((c) => fits(firstBytes(c.preset), room))];
+  const order = mossFits(ram) ? DEFAULT_ORDER : DEFAULT_ORDER.filter((c) => PRESETS.find((p) => p.id === c.preset)?.family !== "moss");
+  const fitting = [cellChoice(generalCell(level)), ...level === "cpu" ? [] : order.filter((c) => fits(firstBytes(c.preset), room))];
   if (lists === undefined) return fitting[0];
-  const available = availablePresets(lists, extra, room);
+  const available = availablePresets(lists, extra, room, ram);
   return fitting.find((c) => available.some((p) => p.id === c.preset)) ?? fitting[0];
 }
 

@@ -41,6 +41,11 @@ export interface GpuStatusDeps {
   residentModels?: () => Promise<readonly ResidentModel[]>;
   /** Which of these pids listen on the TCP port. */
   listeningPids?: (port: number, pids: readonly number[]) => Promise<ReadonlySet<number>>;
+  /**
+   * The ComfyUI process this app runs (the image module's held engine value), whatever its port.
+   * The port-8188 guess stays for a ComfyUI started outside the app.
+   */
+  imagePid?: () => number | undefined;
   /** Friendly model name for a tag ("Qwen 3.5 9B"). */
   modelLabel?: (tag: string) => string;
   /**
@@ -128,6 +133,7 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
   const whisperPid = platform === "linux" && deps.whisperPid ? await deps.whisperPid().catch(() => undefined) : undefined;
   const pythons = tenants.filter((t) => isPython(t.processName)).map((t) => t.pid);
   const comfy = pythons.length > 0 && deps.listeningPids ? await deps.listeningPids(COMFYUI_PORT, pythons).catch(() => new Set<number>()) : new Set<number>();
+  const imagePid = deps.imagePid?.();
   const label = deps.modelLabel ?? ((tag: string) => tag);
   // Unprotected is what an image job may unload (the loader's imageMayUnload), read here without a second /api/ps.
   const owns = deps.ownsRuntime?.() === true;
@@ -147,7 +153,7 @@ export async function readGpuStatus(deps: GpuStatusDeps = {}): Promise<GpuStatus
     accounted += bytes;
     if (t.role === "whisper" || t.pid === whisperPid) add({ label: "Whisper", bytes, kind: "whisper", protected: true });
     else if (t.role === "ollama") runnerBytes += bytes;
-    else if (comfy.has(t.pid)) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
+    else if (t.pid === imagePid || comfy.has(t.pid)) add({ label: "ComfyUI", bytes, kind: "image", protected: false });
     else add({ label: otherAppLabel(t.processName), bytes, kind: "other-app", protected: true });
   }
   const occupants = [...chatOccupants(runnerBytes, models, label, mine), ...grouped.values()];

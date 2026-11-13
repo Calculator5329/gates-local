@@ -234,6 +234,11 @@ export const methodSamples: { readonly [M in MethodName]: { readonly params: Par
   "image.cancel": { params: { jobId: "j1" }, result: { cancelled: true } },
   "image.download": { params: { preset: "flux2-klein-4b" }, result: { files: ["flux-2-klein-4b-fp8.safetensors", "qwen_3_4b.safetensors"] } },
   "image.stopDownload": { params: { preset: "flux2-klein-4b" }, result: { stopped: true } },
+  "image.setupInfo": {
+    params: {},
+    result: { engine: { version: "0.44.0", bytes: 2_054_400_000, installed: false }, model: { preset: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact", bytes: 8_260_000_000 }, cpu: { low: 100, high: 235 }, freeBytes: 120_000_000_000, needBytes: 16_477_600_000 },
+  },
+  "image.setup": { params: {}, result: { started: true } },
   "image.start": {
     params: {},
     result: {
@@ -347,6 +352,10 @@ export const pushSamples: { readonly [C in Channel]: readonly Payload<C>[] } = {
   "image.download": [
     { preset: "flux2-klein-4b", file: 2, files: 2, name: "qwen_3_4b.safetensors", state: "downloading", completedBytes: 1_000_000, totalBytes: 8_044_982_048, bytesPerSecond: 50_000_000 },
     { preset: "flux2-klein-4b", file: 2, files: 2, name: "qwen_3_4b.safetensors", state: "error", completedBytes: 0, message: "Not enough disk space for qwen_3_4b.safetensors: it needs 8.0 GB more, and 2.1 GB is free.", ended: true },
+  ],
+  "image.setup": [
+    { step: "engine", completedBytes: 1_000_000_000, totalBytes: 14_506_218_860 },
+    { step: "error", completedBytes: 0, totalBytes: 14_506_218_860, message: "The image engine download did not match its pinned checksum. Nothing was installed." },
   ],
   "usage.changed": [{}],
 };

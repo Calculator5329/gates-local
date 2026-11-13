@@ -21,6 +21,7 @@ import { downloadFile, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
 import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, resolveChoice, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
+import type { OwnComfy } from "./own.ts";
 
 /**
  * ComfyUI's last file lists and node classes, and the workflows it had (its templates and the
@@ -56,12 +57,23 @@ export interface ImageDeps extends ComfyClientDeps {
    * (imageRoom). Absent (tests, the real check): the room is unknown and every setup counts as fitting.
    */
   gpuStatus?(): Promise<GpuStatus>;
+  /**
+   * This computer's memory in bytes (MemTotal; the e2e stack's fake GATES_LOCAL_MEMINFO): under
+   * MOSS_RAM no MOSS setup is a default (presets.ts). Absent or undefined: not known, and MOSS counts.
+   */
+  memTotal?(): Promise<number | undefined>;
   /** The nvidia-smi the default readGpu runs; the e2e stack's fake (GATES_LOCAL_NVIDIA_SMI), as every chat fit uses. */
   runNvidiaSmi?: NvidiaSmiRunner;
   service?: ComfyService;
   /**
-   * Tests (GATES_LOCAL_COMFY_URL): the ComfyUI address when Settings has none, in place of the
-   * local 8188. Set, no address is managed: comfyui.service is never inspected, started or stopped.
+   * The app's own ComfyUI (own.ts): once installed, and while Settings names no address, it is
+   * the ComfyUI the app reads, starts and stops, at its own address, in place of the unit.
+   */
+  own?: OwnComfy;
+  /**
+   * Tests (GATES_LOCAL_COMFY_URL, GATES_LOCAL_IMAGE_ENGINE): the ComfyUI address when Settings has
+   * none and the own engine is not installed, in place of the local 8188. Set, that address is not
+   * managed: comfyui.service is never inspected, started or stopped.
    */
   defaultUrl?: string;
   requiredBytes?: number;
@@ -87,10 +99,29 @@ export interface ImageDeps extends ComfyClientDeps {
   log?(line: string): void;
 }
 
+/**
+ * What the app holds about its ComfyUI, read in one place: the address it reads, whose process
+ * that is, its state, the process the app started (while it runs), the card's room and the file
+ * list last read there. The setup and the GPU status read this rather than asking again. The
+ * app's own engine writes its end directly (own.ts onExit); an outside ComfyUI is read by status.
+ */
+export interface ImageEngine {
+  address?: string;
+  owner: "app" | "outside" | "none";
+  state: ImageStatus["state"];
+  /** The ComfyUI process this app started, while it runs. */
+  pid?: number;
+  /** imageRoom: undefined until read, and for a ComfyUI on another computer. */
+  room?: number;
+  files?: KnownFiles;
+}
+
 export interface ImageModule {
   /** Queued and running jobs, including jobs waiting for GPU memory. */
   activeJobs?(): number;
   current(): ImageStatus;
+  /** The held engine value (ImageEngine); reads nothing. */
+  engine(): ImageEngine;
   status(): Promise<ImageStatus>;
   /**
    * The presets ComfyUI has every file for. Reads ComfyUI's file list when it answers (never
@@ -270,7 +301,7 @@ const roomWords = (room: number | undefined): { noGpu?: string; slow?: string } 
 export function createImageModule(deps: ImageDeps): ImageModule {
   const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
   for (const job of deps.store.interruptImageJobs()) log(`job ${job.jobId} failed kind=restarted`);
-  const service = deps.service ?? createComfyService();
+  const systemUnit = deps.service ?? createComfyService();
   const jobs = new Map<string, { controller: AbortController; ended: Promise<void>; committing: boolean }>();
   let status: ImageStatus = { state: "off", owner: "none" };
   let owned: { pid: number; baseUrl: string } | undefined;
@@ -288,11 +319,15 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const update = (next: ImageStatus): ImageStatus => { status = next; emit("image.status", status); return status; };
   const config = () => {
     const settings = deps.settings();
-    const url = new URL(settings.comfyUrl ?? deps.defaultUrl ?? DEFAULT_URL);
+    const own = settings.comfyUrl === undefined && deps.own?.installed() === true ? deps.own.address() : undefined;
+    const url = new URL(settings.comfyUrl ?? own ?? deps.defaultUrl ?? DEFAULT_URL);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw imageError("image-config", "Set a ComfyUI HTTP address without credentials or query parameters in Settings.");
     const baseUrl = url.href.replace(/\/$/, "");
-    return { enabled: settings.imageGen, baseUrl, managed: deps.defaultUrl === undefined && baseUrl === DEFAULT_URL && settings.comfyUrl === undefined, hostname: url.hostname };
+    return { enabled: settings.imageGen, baseUrl, managed: settings.comfyUrl === undefined && (own !== undefined || (deps.defaultUrl === undefined && baseUrl === DEFAULT_URL)), hostname: url.hostname };
   };
+  /** What starts and stops the ComfyUI at `baseUrl`: the app's own engine at its address, else the unit. */
+  const serviceAt = (baseUrl: string): ComfyService =>
+    deps.own !== undefined && deps.own.installed() && deps.own.address().replace(/\/$/, "") === baseUrl ? deps.own : systemUnit;
   const client = (baseUrl: string) => createComfyClient(baseUrl, deps);
   const filesPath = path.join(deps.dataDir, FILES_NAME);
   let known: KnownFiles | undefined;
@@ -340,14 +375,14 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (await client(cfg.baseUrl).healthy()) {
       if (jobs.size > 0) return status;
       if (owned && cfg.managed) {
-        const unit = await service.inspect();
+        const unit = await serviceAt(cfg.baseUrl).inspect();
         if (unit.pid !== owned.pid || !unit.active) owned = undefined;
       }
       if (jobs.size > 0) return status;
       return update({ state: "ready", owner: owned?.baseUrl === cfg.baseUrl ? "app" : "external", baseUrl: cfg.baseUrl });
     }
-    const unit = cfg.managed ? await service.inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
-    const starting = unit.present && !["inactive", "failed"].includes(unit.activeState);
+    const unit = cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : { present: false, active: false, activeState: "unknown", pid: 0 };
+    const starting =unit.present && !["inactive", "failed"].includes(unit.activeState);
     if (jobs.size > 0) return status;
     if (owned?.baseUrl === cfg.baseUrl && (!unit.active || unit.pid !== owned.pid)) owned = undefined;
     return update({ state: starting ? "starting" : unit.present ? "stopped" : "missing", owner: owned?.baseUrl === cfg.baseUrl ? "app" : starting ? "external" : "none", baseUrl: cfg.baseUrl,
@@ -368,7 +403,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     signal.throwIfAborted();
     if (stats && stats.devices.length > 0 && stats.devices.every((device) => device.type === "cpu")) return;
     const estimate = deps.requiredBytes ?? needBytes;
-    const unit = stats && cfg.managed ? await service.inspect() : undefined;
+    const unit = stats && cfg.managed ? await serviceAt(cfg.baseUrl).inspect() : undefined;
     const resident = (gpu: Awaited<ReturnType<typeof measure>>) => {
       if (!stats) return 0;
       let bytes: number | undefined;
@@ -447,6 +482,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   };
   const ensure = async (baseUrl: string, managed: boolean, signal: AbortSignal) => {
     const comfy = client(baseUrl);
+    const service = serviceAt(baseUrl);
     if (await comfy.healthy()) {
       if (owned && managed) { const unit = await service.inspect(); if (owned.pid !== unit.pid || !unit.active) owned = undefined; }
       return comfy;
@@ -467,6 +503,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     while (!await comfy.healthy()) {
       signal.throwIfAborted();
       if (Date.now() >= deadline) throw new Error("ComfyUI did not become ready within the startup timeout. Check its log, then try again.");
+      // The app's own engine is a child: one that exited will not answer, so say so now, not at the timeout.
+      if (service === deps.own && !(await service.inspect()).active) { owned = undefined; throw new Error("ComfyUI stopped while it was starting. Check its log, then try again."); }
       await delay(250, undefined, { signal });
     }
     signal.throwIfAborted();
@@ -488,30 +526,60 @@ export function createImageModule(deps: ImageDeps): ImageModule {
   const say = (p: ImageDownload) => { lastDownload = p; emit("image.download", p); };
   /** The last room read (imageRoom), for the default between reads; undefined until one is. */
   let lastRoom: number | undefined;
+  /** This computer's memory, read with the room for a ComfyUI on this computer; undefined otherwise. */
+  let lastRam: number | undefined;
   /** The room now, for a ComfyUI on this machine; unknown for one elsewhere (its GPU is not this one). */
   const readRoom = async (signal?: AbortSignal): Promise<number | undefined> => {
-    if (deps.gpuStatus === undefined) return lastRoom = undefined;
+    const unknown = () => { lastRam = undefined; return lastRoom = undefined; };
+    if (deps.gpuStatus === undefined) return unknown();
     let cfg: ReturnType<typeof config>;
-    try { cfg = config(); } catch { return lastRoom = undefined; }
-    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return lastRoom = undefined;
+    try { cfg = config(); } catch { return unknown(); }
+    if (!await isLocalHost(cfg.hostname, deps.localAddresses?.() ?? localAddresses(), deps.lookupHost ?? lookupHost, signal)) return unknown();
     const stats = await client(cfg.baseUrl).stats(signal).catch(() => undefined);
     signal?.throwIfAborted();
     const gpu = await deps.gpuStatus().catch(() => undefined);
     signal?.throwIfAborted();
+    lastRam = await deps.memTotal?.().catch(() => undefined);
+    signal?.throwIfAborted();
     return lastRoom = imageRoom(gpu, stats === undefined || stats.devices.length === 0 ? undefined : stats.devices.every((d) => d.type === "cpu"));
   };
   /** The default for the files and room last read; DEFAULT_CHOICE stands in where there is none, and the job refuses it (settle). */
-  const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom) ?? DEFAULT_CHOICE;
+  const chooseDefault = () => defaultChoice(knownFiles(), extras(), lastRoom, lastRam) ?? DEFAULT_CHOICE;
   /** What a send runs now: the saved choice, or the default for the files last read. */
   const currentChoice = () => describeChoice(deps.settings().imageChoice ?? chooseDefault(), chooseDefault(), extras());
+  // The app's own engine says when its process ends without the app asking: the held value
+  // changes now, not at the next status read.
+  deps.own?.onExit((pid) => {
+    if (owned?.pid !== pid) return;
+    const baseUrl = owned.baseUrl;
+    owned = undefined;
+    clearIdle();
+    if (jobs.size === 0) update({ state: "stopped", owner: "none", baseUrl, detail: "ComfyUI stopped on its own. It starts again when you make an image; its log says why." });
+  });
   const module: ImageModule = {
     current: () => status,
+    engine: () => {
+      const files = knownFiles();
+      return {
+        ...status.baseUrl === undefined ? {} : { address: status.baseUrl },
+        owner: status.owner === "app" ? "app" : status.owner === "external" ? "outside" : "none",
+        state: status.state,
+        ...owned === undefined ? {} : { pid: owned.pid },
+        ...lastRoom === undefined ? {} : { room: lastRoom },
+        ...files === undefined ? {} : { files },
+      };
+    },
     activeJobs: () => jobs.size,
-    status: discover,
+    // The room is read with the status, so runnable() does not wait for a client to ask for presets.
+    status: async () => {
+      const read = await discover();
+      await readRoom().catch(() => undefined);
+      return read;
+    },
     defaultChoice: chooseDefault,
     runnable() {
       const files = knownFiles();
-      return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras(), lastRoom).ready.length > 0;
+      return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras(), lastRoom, lastRam).ready.length > 0;
     },
     async presets() {
       const cfg = config();
@@ -524,7 +592,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const room = await readRoom();
       const last = knownFiles();
       if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room) };
-      const { ready, others } = listPresets(last, extras(), room);
+      const { ready, others } = listPresets(last, extras(), room, lastRam);
       const tiers = tiersFor(room);
       const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => x.preset === p.id); return t === undefined ? p : { ...p, tier: t.tier }; };
       const download = lastDownload?.ended === true ? undefined : lastDownload;
@@ -620,7 +688,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
             };
             // With too little GPU room there is no default: the card says why, and no other setup runs.
             const settle = async () => {
-              const settled = defaultChoice(knownFiles(), extras(), await readRoom(signal));
+              const settled = defaultChoice(knownFiles(), extras(), await readRoom(signal), lastRam);
               if (settled === undefined) throw Object.assign(imageError("wont-fit", NO_GPU), { said: NO_GPU });
               if (same(settled, choice)) return;
               choice = settled;
@@ -731,6 +799,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       if (!owned || jobs.size > 0) return;
       await deps.lease.run("image", signal, async () => {
         if (!owned || jobs.size > 0) return;
+        const service = serviceAt(owned.baseUrl);
         // The reads end at the signal, so a cancel gives the claim back at once; the stop does not.
         const unit = await untilAborted(service.inspect(), signal);
         // A record from an earlier process at this address names no prompt this ComfyUI runs for us;
@@ -759,9 +828,9 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     reclaimable: () => (owned && jobs.size === 0 && !closed ? owned.pid : undefined),
     killRuntimeNow() {
       if (!owned) return;
-      const pid = owned.pid;
+      const { pid, baseUrl } = owned;
       owned = undefined;
-      service.killRuntimeNow?.(pid);
+      serviceAt(baseUrl).killRuntimeNow?.(pid);
     },
     async download(id) {
       const cfg = config();
@@ -793,7 +862,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (!isLocalComfy(baseUrl) || !await comfy.healthy()) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
     await module.presets();
     const last = knownFiles();
-    const row = last && listPresets(last, extras(), lastRoom).others.find((p) => p.id === id);
+    const row = last && listPresets(last, extras(), lastRoom, lastRam).others.find((p) => p.id === id);
     const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
     if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);

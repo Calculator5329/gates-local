@@ -58,6 +58,38 @@ describe("listPresets", () => {
     expect(cells(3 * GIB)).toEqual([]);
   });
 
+  it("with the setup's one download (compact Klein), every style has a ready cell at every level; MOSS and the full encoder are offered", () => {
+    const compact = lists(KLEIN_COMPACT_FILES);
+    for (const gib of [16, 12, 8, 6, 4]) {
+      const { ready, others } = listPresets(compact, [], gib * GIB);
+      const cells = ready.filter((p) => p.id.includes("--"));
+      expect(cells.map((c) => c.id.split("--")[0]), `${gib} GiB`).toEqual(CELLS.map((id) => id.split("--")[0]));
+      expect(cells.every((c) => c.id.includes("klein-compact")), `${gib} GiB`).toBe(true);
+      // the level's own winner, where it is not Klein compact, is the second download
+      for (const won of cellsFor(String(gib) as "16").filter((c) => !c.id.includes("klein-compact"))) {
+        expect(others.find((p) => p.id === won.id)?.needs, `${gib} GiB ${won.id}`).toMatchObject({ download: true });
+      }
+    }
+  });
+
+  it("under 32 GB of system memory no MOSS cell is a style's row: the style's compact Klein is, and MOSS stays listed without a style", () => {
+    const all = lists(...APP_FILES);
+    // the rows the picker can take as a style's default: every listed row that names a style
+    const styled = (gib: number, ram?: number) => { const { ready, others } = listPresets(all, [], gib * GIB, ram); return ids([...ready, ...others].filter((p) => p.style !== undefined)); };
+    expect(styled(16), "memory not known").toEqual(CELLS);
+    expect(styled(16, 31.25 * GIB), "a 32 GB computer reports a little under 32 GiB").toEqual(CELLS);
+    for (const gib of [16, 12, 6, 4]) {
+      const short = listPresets(all, [], gib * GIB, 16 * GIB);
+      const rows = ids([...short.ready, ...short.others].filter((p) => p.style !== undefined));
+      expect(rows.filter((id) => id.includes("moss")), `${gib} GiB`).toEqual([]);
+      expect(rows.map((id) => id.split("--")[0]), `${gib} GiB: one row per style still`).toEqual(CELLS.map((id) => id.split("--")[0]));
+      for (const cell of cellsFor(String(gib) as "16").filter((c) => c.family === "moss")) {
+        expect(short.ready.find((p) => p.id === cell.id), `${gib} GiB ${cell.id} stays under Other models`).toBeDefined();
+        expect(short.ready.find((p) => p.id === cell.id)?.style, `${gib} GiB ${cell.id}`).toBeUndefined();
+      }
+    }
+  });
+
   it("every file the app's own setups load has a pinned size, sha256 and download address", () => {
     const bare = listPresets(lists()).others;
     for (const id of [...GENERAL_IDS, ...CELLS]) expect(bare.find((p) => p.id === id)?.needs).toMatchObject({ download: true, bytes: expect.any(Number) });
@@ -143,6 +175,10 @@ describe("the app's own setups, by GPU room", () => {
     expect(at(lists(), 5)).toBe("general--fit-4a-klein-compact8");
     expect(at(undefined, 5)).toBe("general--fit-4a-klein-compact8");
     expect(defaultChoice(all)).toEqual({ preset: "general--r2-2a-klein-compact8", width: 896, height: 896 });
+    // under 32 GB of system memory MOSS-Image is never the default: the General cell stands, so the send names its files
+    expect(defaultChoice(lists(MOSS_FILES), [], 16 * GIB, 16 * GIB)?.preset).toBe("general--r2-2a-klein-compact8");
+    expect(defaultChoice(lists(ZIMAGE_FILES, MOSS_FILES), [], 5 * GIB, 16 * GIB)?.preset).toBe("general--fit-4a-klein-compact8");
+    expect(defaultChoice(lists(MOSS_FILES), [], 16 * GIB, 31.25 * GIB)?.preset).toBe("moss-image");
   });
 
   it("no default on a GPU under 4 GiB; on the CPU the General style's CPU cell, and no GPU setup stands in for it", () => {

@@ -95,8 +95,9 @@ test("(a) the rail is two named menus, Defaults and Other models, and the popup'
   await shot(page, info, "menus-other.png", picker.locator(".pk-menu:not([inert])"));
 });
 
-// Guards the owner's report (b): a Defaults row said its group and model again.
-test("(b) a Defaults row is the style's name alone, its setup in the tip and the size pane; the rest is in Other models", async ({ page, open }, info) => {
+// Guards the owner's report (b): a Defaults row said its group and model again. And the bug finder's
+// (image row 15): its tooltip repeated the setup the size pane names, so it has none.
+test("(b) a Defaults row is the style's name alone, its setup in the size pane only; the rest is in Other models", async ({ page, open }, info) => {
   comfy.withApp();
   const picker = await openPicker(page, open);
   await shot(page, info, "finding-b.png", picker.locator(".pk-list-scroll"));
@@ -107,10 +108,13 @@ test("(b) a Defaults row is the style's name alone, its setup in the tip and the
   const general = defaults.locator(".pk-r").first();
   await expect(general).toHaveAttribute("data-preset", "general--r2-2a-klein-compact8");
   await expect(general).toHaveAttribute("aria-selected", "true");
-  await expect(general.locator(".pk-select")).toHaveAttribute("data-tip", "FLUX.2 Klein 4B compact general");
   await general.hover();
-  await expect(page.locator("#tip")).toHaveText("FLUX.2 Klein 4B compact general");
   await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact general");
+  // the pointer stays on General past the tooltip delay: the shot shows whether one comes up
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: info.outputPath("finding-15.png"), animations: "disabled" });
+  await expect(defaults.locator("[data-tip]"), "no Defaults row has a tooltip").toHaveCount(0);
+  await expect(page.locator("#tip")).not.toBeVisible();
   const pixel = defaults.locator('.pk-r[data-preset="pixel-art--r2-1a-klein-compact8"]');
   await pixel.hover();
   await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact pixel art");

@@ -33,6 +33,7 @@ import type { ThreadStore } from "./threads/store.ts";
 import type { NewMessage } from "./threads/types.ts";
 import type { Handlers } from "./ws/server.ts";
 import { createImageHandlers } from "./image/handlers.ts";
+import type { ImageSetupModule } from "./image/setup.ts";
 import { IMAGES_UNSET, type ImageModule } from "./image/module.ts";
 import type { GpuLease } from "./gpu/lease.ts";
 import { createUpdateHandlers, type UpdateModule } from "./update/module.ts";
@@ -147,6 +148,8 @@ export interface AppDeps {
   readonly models?: { readonly handlers: Partial<Handlers>; readonly loader?: Pick<ModelLoader, "reserve"> };
   /** Image jobs: chat.send draw (Image mode) and a chat turn's image tool queue them here for their thread. */
   readonly image?: ImageModule;
+  /** Set up images: the app's own ComfyUI and this card's setup, one download (image/setup.ts). */
+  readonly imageSetup?: ImageSetupModule;
   /**
    * Tools › Make images: the preset and size a chat turn's image tool uses, or undefined while
    * that switch (or image generation) is off and no chat turn is offered the tool.
@@ -680,7 +683,7 @@ export function createApp(deps: AppDeps): App {
 
   const handlers = {
     ...deps.models?.handlers,
-    ...(deps.image ? createImageHandlers({ image: deps.image }) : {}),
+    ...(deps.image ? createImageHandlers({ image: deps.image, ...deps.imageSetup ? { setup: deps.imageSetup } : {} }) : {}),
     // Kept per thread like the tool's jobs, so threads.delete takes them back too.
     ...(deps.image ? { "image.generate": (params: Params<"image.generate">) => queueImage(deps.image!, params) } : {}),
     ...(deps.sources ? createSourcesHandlers({ sources: deps.sources }) : {}),

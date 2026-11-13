@@ -166,6 +166,11 @@ async function hydrateWith(
     applyServerEvent({ imageDownload });
     if (imageDownload.ended === true) void loadImagePresets();
   });
+  // Set up images: each step's push; at the end the status and the list are read again, so Image turns on
+  on("image.setup", (progress) => {
+    applyServerEvent((s) => ({ imageSetup: { ...s.imageSetup, progress } }));
+    if (progress.step === "done") { void checkImageStatus(); void loadImagePresets(); }
+  });
   // Install every receipt handler first. Ordered domains stay disabled until
   // their full migration lands; unsupported servers continue in legacy mode.
   const negotiated = await negotiate();
@@ -391,6 +396,20 @@ async function imageAct<T>(what: string, run: () => Promise<T>): Promise<{ ok: t
     const code = codeOf(e);
     return { ok: false, message: code.startsWith("image") && e instanceof Error ? e.message : failure(what, e) };
   }
+}
+
+/** What Set up images would fetch on this computer, or why it cannot run here. */
+export async function loadImageSetup(): Promise<ActionResult> {
+  const r = await imageAct("read the image setup", () => call("image.setupInfo", {}));
+  if (!r.ok) return r.message;
+  applyServerEvent({ imageSetup: r.value });
+  return null;
+}
+
+/** Set up images: the engine, then the recommended setup, as one download; image.setup pushes say how it goes. */
+export async function startImageSetup(): Promise<ActionResult> {
+  const r = await imageAct("set up images", () => call("image.setup", {}));
+  return r.ok ? null : r.message;
 }
 
 /** Fetch the files a setup needs into ComfyUI's folders; its row shows the download at once, then each image.download push. */

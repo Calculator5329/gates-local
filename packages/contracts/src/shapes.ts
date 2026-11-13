@@ -593,6 +593,38 @@ export const ImageDownload = S.Struct({
 });
 export type ImageDownload = typeof ImageDownload.Type;
 
+/**
+ * Set up images' run: the engine's download and unpack, its first start, then the model's
+ * download (which image.download also pushes). Bytes count the engine and the model together.
+ */
+export const ImageSetupProgress = S.Struct({
+  step: S.Literals(["engine", "starting", "model", "done", "error"]),
+  completedBytes: Count,
+  totalBytes: Count,
+  /** The error's own words. */
+  message: S.optional(S.String),
+});
+export type ImageSetupProgress = typeof ImageSetupProgress.Type;
+
+/**
+ * What Set up images would fetch on this computer, or why it cannot run here: the app's own
+ * ComfyUI (the engine) and the recommended setup for this card, as one download.
+ */
+export const ImageSetup = S.Struct({
+  /** One sentence, no unit or service names; absent when it can run. */
+  why: S.optional(S.String),
+  engine: S.optional(S.Struct({ version: S.String, bytes: Count, installed: S.Boolean })),
+  model: S.optional(S.Struct({ preset: S.String, name: S.String, bytes: Count })),
+  /** Set when pictures here run on the processor: the measured seconds a picture, said before anything downloads. */
+  cpu: S.optional(S.Struct({ low: Count, high: Count })),
+  /** Free space on the app's drive, and what the setup needs there (the engine unpacked, plus the model). */
+  freeBytes: S.optional(Count),
+  needBytes: S.optional(Count),
+  /** The running setup's step, or the last one's end. */
+  progress: S.optional(ImageSetupProgress),
+});
+export type ImageSetup = typeof ImageSetup.Type;
+
 export const ImagePresets = S.Struct({
   /** Only the presets whose every node class and file ComfyUI listed. */
   presets: S.Array(ImagePreset),

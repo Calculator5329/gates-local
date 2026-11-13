@@ -13,6 +13,7 @@ import type {
   GpuStatus,
   ImageChoice,
   ImageDownload,
+  ImageSetup,
   ImagePresets,
   ImageStatus,
   Message,
@@ -222,6 +223,8 @@ export interface State {
   readonly imagePresets: Maybe<ImagePresets>;
   /** A setup's download: the last image.download push, kept after it ends so its row can say how. */
   readonly imageDownload: ImageDownload | undefined;
+  /** Set up images: what it would fetch here or why it cannot run, with the last image.setup push as its progress. */
+  readonly imageSetup: ImageSetup | undefined;
   /** A new thread's pick where Settings cannot be written (the phone): its first send carries it, the computer's Settings keep theirs. */
   readonly imagePick: ImageChoice | undefined;
   /** A new thread's picture count (the count menu before its first send), which that send carries; then back to 1. */
@@ -292,6 +295,7 @@ const initial: State = {
   shellStatus: undefined,
   imagePresets: undefined,
   imageDownload: undefined,
+  imageSetup: undefined,
   imagePick: undefined,
   imageCountNew: 1,
   update: undefined,

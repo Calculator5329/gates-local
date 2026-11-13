@@ -4,7 +4,7 @@ import { GIB, MIB, RAM_SAFETY_MARGIN_BYTES, RUNTIME_OVERHEAD_BYTES, VRAM_SAFETY_
 import { estimateKvCache, parseArchInfo } from "./estimate.ts";
 import { json, startFakeServer, type FakeServer } from "./fake-http.ts";
 import { blockingModels, checkFit, checkModels, decideFit, fitEach, measuredFit, planLoad } from "./fit.ts";
-import { createNvidiaSmiRunner, GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
+import { createNvidiaSmiRunner, GPU_APPS_ARGS, GPU_TOTALS_ARGS, parseComputeApps, parseGpuTotals, parseMemAvailable, parseMemTotal, readGpu, readMemAvailable, readNvidiaSmi } from "./gpu.ts";
 import type { NvidiaSmiRunner } from "./types.ts";
 import { readGpuStatus } from "./gpu-status.ts";
 
@@ -323,6 +323,11 @@ describe("nvidia-smi parsing", () => {
   it("reads MemAvailable", () => {
     expect(parseMemAvailable(MACHINE_MEMINFO)).toBe(14822112 * 1024);
     expect(() => parseMemAvailable("MemTotal: 1 kB")).toThrow(/MemAvailable/);
+  });
+
+  it("reads MemTotal, the computer's memory: undefined when the line is not there", () => {
+    expect(parseMemTotal(MACHINE_MEMINFO)).toBe(32768000 * 1024);
+    expect(parseMemTotal("MemAvailable: 1 kB")).toBeUndefined();
   });
 });
 
