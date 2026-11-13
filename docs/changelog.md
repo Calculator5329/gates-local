@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-13: Settings › Updates is two rows that never move
+
+- Version says the version or commit once, with what this copy follows.
+  The second row is labelled with the state of the last check and has one
+  control on the right: Check for updates, Update and restart, Restart to
+  update or Download.
+- Checking, up to date, found and failed no longer add or remove anything,
+  so the card does not jump. The rest of a state is in the label's tip.
+- After Get every change is switched, the row waits for a check of the new
+  choice instead of showing the old one.
+- A newer check clears an old failed check.
+
+## 2026-11-13: An accent colour in Settings
+
+- Settings › General › Appearance has an Accent row under Theme: Neutral,
+  Green, Blue, Violet, Amber, Red. Neutral is the default and changes
+  nothing. Reset puts Neutral back.
+- Each colour has its own step in the light and the dark theme, chosen so
+  it stays readable on that background. Status green, amber and red never
+  follow the accent.
+
 ## 2026-11-13: The start screen is the mark and the bar
 
 - A new thread opens on the gate mark above the chat bar. The headline, the
