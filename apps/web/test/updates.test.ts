@@ -59,6 +59,18 @@ const view = (over: Partial<Parameters<Updates["UpdatesView"]>[0]> = {}) => rend
 const withCheck = (lastCheck: UpdateCheck) => ({ status: { ...CLONE, lastCheck } });
 /** The markup with tags dropped, for reading the words. */
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+const unescape = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+/** Everything a person can read: the words, and each label's tip (hover or keyboard focus). */
+const said = (html: string) => `${text(html)} ${[...html.matchAll(/aria-description="([^"]*)"/g)].map((m) => unescape(m[1] ?? "")).join(" ")}`;
+/** Row 2's grey line: one element that never wraps (src-help), holding the state's line or the failure in its place. */
+const stateLine = (html: string) => /<span class="(src-help(?: act-err)?)"[^>]*>([^<]*)<\/span>/.exec(html);
+/** Rows and result blocks above the first switch: what the version and the check take up. */
+const rowsAbove = (html: string) => {
+  const swatch = html.indexOf('role="switch"');
+  // The switch's own row starts before it.
+  const end = swatch === -1 ? html.length : html.lastIndexOf('class="srow"', swatch);
+  return (html.slice(0, end).match(/class="(?:srow|upd-res)"/g) ?? []).length;
+};
 
 describe("the Updates group", () => {
   it("AV-05 the notice belongs to Settings scrolling content instead of its horizontal sibling", async () => {
@@ -85,7 +97,7 @@ describe("the Updates group", () => {
     } finally { useStore.mockRestore(); }
   });
   it("AV-01 a phone status offer exposes no update or preference controls", () => {
-    const html = view({ status: { ...OFFERED, canControl: false }, canUpdate: false });
+    const html = view({ status: { ...OFFERED, canControl: false }, settings: { ...SETTINGS, updateEveryChange: true }, canUpdate: false });
     expect(text(html)).toContain("bbbbbbb");
     expect(text(html)).toContain("computer");
     expect(html).not.toContain('>Check for updates</button>');
@@ -126,53 +138,127 @@ describe("the Updates group", () => {
     expect(text(before)).toContain("Version");
   });
 
-  it("shows checking while the check runs", () => {
-    const html = view({ checking: true, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "main", current: "abc1234" }) });
+  it("shows checking in the state row's label, keeping the button and the last checked time where they were", () => {
+    const html = view({ checking: true, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) });
     expect(text(html)).toContain("Checking…");
-    expect(html).toContain("disabled");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Check for updates<\/button>/);
     expect(text(html)).not.toContain("Up to date");
+    expect(text(html)).toMatch(/Checked at \S+/);
+    expect(rowsAbove(html)).toBe(rowsAbove(view(withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }))));
   });
 
-  it("shows up to date with the channel and the time it checked", () => {
-    const plain = text(view(withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "v0.2.0" })));
+  it("is two rows when up to date: Version with the commit said once, then the state with the time it checked and the button", () => {
+    const html = view(withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }));
+    const plain = text(html);
+    expect(rowsAbove(html)).toBe(2);
+    expect(plain.split("abc1234").length - 1).toBe(1);
     expect(plain).toContain("Up to date");
-    expect(plain).toContain("Following releases.");
     expect(plain).toMatch(/Checked at \S+/);
+    expect(plain).toMatch(/A commit from \w+ \d+, 2026, between releases\./);
+    expect(plain).not.toContain("Asks this copy's git remote");
+    expect(plain).not.toContain("Following every change on the main branch.");
+    // The channel is said once, in the version's row, and follows the switch: a check made before it flipped does not say otherwise.
+    const every = { ...SETTINGS, updateEveryChange: true };
+    const mainCheck = withCheck({ state: "up-to-date", checkedAt: AT, channel: "main", current: "abc1234" });
+    expect(text(view(mainCheck))).toMatch(/A commit from \w+ \d+, 2026, between releases\./);
+    expect(text(view({ ...mainCheck, settings: every }))).toMatch(/A commit from \w+ \d+, 2026 on the main branch\./);
+    expect(text(view({ settings: every }))).toMatch(/A commit from \w+ \d+, 2026 on the main branch\./);
+    // UR-01: row 2 shows only a check of the channel the switch follows; another channel's result waits for a check of this one.
+    const mainFound: UpdateCheck = { state: "available", checkedAt: AT, channel: "main", current: "abc1234", target: "def5678", total: 2, changes: ["Two", "One"] };
+    for (const [name, over] of [
+      ["main up to date, switch off", mainCheck],
+      ["main found, switch off", { canUpdate: true, ...withCheck(mainFound) }],
+      ["release up to date, switch on", { settings: every, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) }],
+      ["release found, switch on", { canUpdate: true, settings: every, ...withCheck({ ...mainFound, channel: "release" }) }],
+    ] as const) {
+      const other = view(over);
+      expect(text(other), name).toContain("Not checked yet");
+      expect(said(other), name).not.toMatch(/Up to date|Update available|Update and restart|Checked at|def5678/);
+      expect(other, name).toMatch(/<button[^>]*>Check for updates<\/button>/);
+      expect(rowsAbove(other), name).toBe(2);
+    }
+    // A check of the channel the switch follows still shows.
+    expect(text(view({ settings: every, ...mainCheck }))).toContain("Up to date");
+    expect(text(view({ canUpdate: true, settings: every, ...withCheck(mainFound) }))).toContain("Update and restart");
+    // Before any check: the same two rows.
+    expect(rowsAbove(view())).toBe(2);
+    expect(text(view())).toContain("Not checked yet");
   });
 
-  it("lists the changes with the rest folded, and the button only where it can update", () => {
+  it("lists the first changes in the label's tip, and the button only where it can update", () => {
     const changes = ["Five", "Four", "Three", "Two", "One"];
-    const check: UpdateCheck = { state: "available", checkedAt: AT, channel: "main", current: "abc1234", target: "def5678", total: 25, changes };
+    const check: UpdateCheck = { state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 25, changes };
     const html = view(withCheck(check));
     const plain = text(html);
-    expect(plain).toContain("25 changes from abc1234 to def5678");
-    const shown = html.slice(0, html.indexOf("<details"));
-    expect(shown).toContain("Five");
-    expect(shown).toContain("Three");
-    expect(shown).not.toContain("Two");
-    expect(plain).toContain("Show all 25 changes");
-    expect(plain).toContain("…and 20 more.");
+    expect(plain).toContain("Update available: def5678");
+    expect(plain.split("abc1234").length - 1).toBe(1);
+    expect(said(html)).toContain("25 changes: Five; Four; Three; and 22 more.");
+    expect(said(html)).not.toContain("Two");
     expect(plain).not.toContain("Update and restart");
     expect(plain).toContain("pnpm run app-update");
-    const desktop = text(view({ canUpdate: true, ...withCheck(check) }));
-    expect(desktop).toContain("Update and restart");
-    expect(desktop).toContain("goes back to abc1234");
+    const desktop = view({ canUpdate: true, ...withCheck(check) });
+    expect(text(desktop)).toContain("Update and restart");
+    expect(text(desktop)).toMatch(/25 changes\. Checked at \S+/);
+    expect(said(desktop)).toContain("goes back to abc1234");
     expect(text(view({ canUpdate: true, updating: true, ...withCheck(check) }))).toContain("Closing to update…");
   });
 
-  it("shows a release's notes instead of the subjects", () => {
+  it("puts a release's notes in the tip instead of the subjects", () => {
     const check: UpdateCheck = { state: "available", checkedAt: AT, channel: "release", current: "v0.1.0", target: "v0.2.0", total: 4, changes: ["a", "b"], notes: "Faster chat\nA new setting" };
-    const plain = text(view(withCheck(check)));
-    expect(plain).toContain("Faster chat");
-    expect(plain).toContain("A new setting");
-    expect(plain).not.toContain("Show all");
+    const all = said(view(withCheck(check)));
+    expect(all).toContain("Release notes: Faster chat; A new setting.");
+    expect(all).not.toContain("4 changes");
   });
 
-  it("shows every reason it cannot check, with what to do", () => {
+  it("says every reason it cannot check: the first on the row, all of them and when it tried in the tip", () => {
     const lines = ["These files have changes that are not saved in git:", "  app.txt", "Nothing was changed."];
-    const plain = text(view(withCheck({ state: "cannot-check", checkedAt: AT, reason: "local-changes", lines })));
-    expect(plain).toContain("Could not check for updates.");
-    for (const l of lines) expect(plain).toContain(l.trim());
+    const html = view(withCheck({ state: "cannot-check", checkedAt: AT, reason: "local-changes", lines }));
+    expect(text(html)).toContain("Couldn’t check");
+    expect(stateLine(html)?.[2]).toBe(lines[0]);
+    for (const l of lines) expect(said(html)).toContain(l.trim());
+    expect(said(html)).toMatch(/Tried at \S+/);
+  });
+
+  it("every state is the same two rows: one grey line that never wraps, a failure in its place, nothing added under them", () => {
+    const states: [string, Partial<Parameters<Updates["UpdatesView"]>[0]>][] = [
+      ["not checked", {}],
+      ["checking first", { checking: true }],
+      ["up to date", withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" })],
+      ["found", withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 25, changes: ["Five", "Four", "Three", "Two"] })],
+      ["found, desktop", { canUpdate: true, ...withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 2, changes: ["Two", "One"] }) }],
+      ["failed", withCheck({ state: "cannot-check", checkedAt: AT, reason: "error", lines: ["The check stopped on an error: git fetch failed", "Try again, or run pnpm run app-update --check in the Gates Local folder to see more."] })],
+      // Clicked while the check at AT showed, so that check is no newer than the failure.
+      ["the call failed", { checkErr: "Gates Local is not answering. Try again in a moment.", checkErrSince: AT, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) }],
+      ["the update failed", { canUpdate: true, updateErr: "The update could not start.", ...withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 1, changes: ["One"] }) }],
+    ];
+    for (const [name, over] of states) {
+      const html = view(over);
+      expect(rowsAbove(html), name).toBe(2);
+      expect(html, name).not.toContain("upd-res");
+      expect(html, name).not.toContain('class="act-err"');
+      expect(stateLine(html)?.[2]?.trim(), `${name}: row 2 has its one grey line`).not.toBe(undefined);
+    }
+    const failed = view(states[6]?.[1]);
+    expect(stateLine(failed)?.[1]).toBe("src-help act-err");
+    expect(stateLine(failed)?.[2]).toBe("Gates Local is not answering. Try again in a moment.");
+    expect(text(failed)).not.toMatch(/Checked at/);
+    expect(stateLine(view(states[7]?.[1]))?.[2]).toBe("The update could not start.");
+  });
+
+  it("UR-02 a newer check or a later action's failure replaces an old check failure", () => {
+    const callFailed = "Gates Local is not answering. Try again in a moment.";
+    const newer = withCheck({ state: "cannot-check", checkedAt: AT + 60_000, reason: "error", lines: ["The check stopped on an error: git fetch failed"] });
+    // The click failed while the check at AT showed; a background check answered a minute later.
+    const later = view({ checkErr: callFailed, checkErrSince: AT, ...newer });
+    expect(stateLine(later)?.[1]).toBe("src-help");
+    expect(stateLine(later)?.[2]).toBe("The check stopped on an error: git fetch failed");
+    expect(text(later)).not.toContain(callFailed);
+    // Failed before any check; any check since is newer.
+    expect(text(view({ checkErr: callFailed, checkErrSince: null, ...withCheck({ state: "up-to-date", checkedAt: AT, channel: "release", current: "abc1234" }) }))).not.toContain(callFailed);
+    // A failure of a later click wins over the old check failure still standing.
+    const found = withCheck({ state: "available", checkedAt: AT, channel: "release", current: "abc1234", target: "def5678", total: 1, changes: ["One"] });
+    expect(stateLine(view({ canUpdate: true, checkErr: callFailed, checkErrSince: AT, updateErr: "The update could not start.", ...found }))?.[2]).toBe("The update could not start.");
+    expect(stateLine(view({ checkErr: callFailed, checkErrSince: AT, downloadErr: "The download stopped.", ...found }))?.[2]).toBe("The download stopped.");
   });
 });
 
@@ -185,8 +271,9 @@ describe("the Updates group of an installed copy", () => {
   it("names the copy, checks the release page and has no git words or clone switches", () => {
     const html = view({ status: INSTALLED });
     const plain = text(html);
-    expect(plain).toContain("Installed copy 1.2.3");
-    expect(plain).toContain("Updates come from the Gates Local release page.");
+    expect(plain.split("1.2.3").length - 1).toBe(1);
+    expect(plain).toContain("An installed copy, following releases.");
+    expect(rowsAbove(html)).toBe(2);
     expect(plain).toContain("Check for updates");
     expect(html).toContain('aria-label="Check for updates automatically"');
     expect(plain).not.toContain("Get every change");
@@ -208,7 +295,7 @@ describe("the Updates group of an installed copy", () => {
     ["not for this copy", { state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: false, lines: ["Version 1.3.0 is available, but this copy cannot install it by itself. Download it from the release page."], page: PAGE }, true],
   ] satisfies [string, UpdateCheck, boolean][])("%s: says the server's words, links the release page only when they send the person there", (_name, check, linked) => {
     const html = view({ canUpdate: true, ...installedWith(check) });
-    const plain = text(html);
+    const plain = said(html);
     for (const line of check.lines) expect(plain).toContain(line);
     expect(html.includes(link)).toBe(linked);
     expect(plain).not.toContain("Could not check for updates.");
@@ -222,7 +309,7 @@ describe("the Updates group of an installed copy", () => {
     const plain = text(html);
     expect(plain).toContain("Version 1.3.0 is downloaded and checked.");
     expect(html).toMatch(/<button[^>]*>Restart to update<\/button>/);
-    expect(plain).toContain("Gates Local will close, update and reopen.");
+    expect(said(html)).toContain("Gates Local will close, update and reopen.");
     expect(html.includes(link)).toBe(false);
     expect(text(view({ canUpdate: true, updating: true, ...ready }))).toContain("Closing to update…");
     // A browser tab or the phone never gets the button.
@@ -240,13 +327,13 @@ describe("the Updates group of an installed copy", () => {
   ] as const)("%s: says it will try again only while automatic checks are on now", (_name, reason, line) => {
     const failed = installedWith({ state: "cannot-check", checkedAt: AT, reason, lines: [line] });
     const again = "Gates Local will try again in an hour.";
-    expect(text(view({ ...failed, settings: SETTINGS }))).toContain(again);
-    expect(text(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: true } }))).toContain(again);
-    const off = text(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: false } }));
+    expect(said(view({ ...failed, settings: SETTINGS }))).toContain(again);
+    expect(said(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: true } }))).toContain(again);
+    const off = said(view({ ...failed, settings: { ...SETTINGS, updateAutomatic: false } }));
     expect(off).toContain(line);
     expect(off).not.toContain(again);
     // Other failures never promise a retry.
-    expect(text(view(installedWith({ state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["x"], page: PAGE })))).not.toContain(again);
+    expect(said(view(installedWith({ state: "cannot-check", checkedAt: AT, reason: "bad-signature", lines: ["x"], page: PAGE })))).not.toContain(again);
   });
 
   const newer = (over: Partial<UpdateCheck & { state: "newer" }> = {}): UpdateCheck => ({ state: "newer", checkedAt: AT, current: "1.2.3", target: "1.3.0", forThisCopy: true, lines: ["Version 1.3.0 is available."], page: PAGE, ...over });
@@ -258,11 +345,11 @@ describe("the Updates group of an installed copy", () => {
     ["could not download", "failed", "Gates Local will try again in an hour."],
   ] as const)("%s: says how it is tried again only while automatic checks are on now", (_name, download, again) => {
     const failed = installedWith(newer({ download, lines: ["x"] }));
-    expect(text(view({ ...failed, settings: ON }))).toContain(again);
-    expect(text(view({ ...failed, settings: OFF }))).not.toContain(again);
+    expect(said(view({ ...failed, settings: ON }))).toContain(again);
+    expect(said(view({ ...failed, settings: OFF }))).not.toContain(again);
     // Neither bracket belongs to any other state.
     for (const other of ["downloading", "disk", "ready"] as const) {
-      const plain = text(view({ ...installedWith(newer({ download: other })), settings: ON }));
+      const plain = said(view({ ...installedWith(newer({ download: other })), settings: ON }));
       expect(plain).not.toContain("Use Check for updates to try again");
       expect(plain).not.toContain("try again in an hour");
     }
@@ -273,7 +360,8 @@ describe("the Updates group of an installed copy", () => {
     const onDownload = vi.fn();
     const off = view({ ...installedWith(newer()), settings: OFF, onDownload });
     expect(off).toContain(button);
-    expect(text(off)).toContain("Version 1.3.0 is available.");
+    expect(text(off)).toContain("Update available: 1.3.0");
+    expect(said(off)).toContain("Version 1.3.0 is available.");
     expect(view({ ...installedWith(newer()), settings: ON, onDownload })).not.toContain(button);
     expect(view({ ...installedWith(newer({ forThisCopy: false })), settings: OFF, onDownload })).not.toContain(button);
     for (const download of ["downloading", "bad", "failed", "disk", "ready"] as const) {
@@ -283,10 +371,14 @@ describe("the Updates group of an installed copy", () => {
     expect(view({ status: { ...INSTALLED, lastCheck: newer(), canControl: false }, settings: OFF, onDownload })).not.toContain(button);
   });
 
-  it("none found", () => {
-    const plain = text(view(installedWith({ state: "up-to-date", checkedAt: AT, channel: "release", current: "1.2.3" })));
-    expect(plain).toContain("No newer version was found.");
-    expect(plain).not.toContain("Up to date");
+  it("none found: two rows, the version said once", () => {
+    const html = view(installedWith({ state: "up-to-date", checkedAt: AT, channel: "release", current: "1.2.3" }));
+    const plain = text(html);
+    expect(rowsAbove(html)).toBe(2);
+    expect(plain).toContain("Up to date");
+    expect(plain).toMatch(/Checked at \S+/);
+    expect(plain.split("1.2.3").length - 1).toBe(1);
+    expect(plain).not.toContain("No newer version was found.");
     expect(plain).not.toContain("Following releases");
   });
 

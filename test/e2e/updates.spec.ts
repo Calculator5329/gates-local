@@ -1,5 +1,6 @@
 // UI probe only: the existing updater has separate real-clone runtime acceptance.
 // Run through the virtual-screen runner, never on the implementation host.
+import type { UpdateCheck, UpdateStatus } from "@gates-local/contracts";
 import type { Page, WebSocketRoute } from "@playwright/test";
 import { test, expect, sendMessage, stack, waitReady } from "./fixtures.ts";
 import { updateFixtureState } from "./update-fixture.ts";
@@ -202,4 +203,169 @@ test("a phone has status and computer-update instructions without update control
   await expect(notice).toBeVisible();
   await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
   await expect(notice).toHaveCount(0);
+});
+
+const upToDate = (current: string, channel: "main" | "release", checkedAt: number): UpdateCheck => ({ state: "up-to-date", checkedAt, channel, current });
+
+test.describe("Version and the update state in two rows", () => {
+  test.use({ colorScheme: "dark" });
+  const CHECKED = Date.UTC(2026, 10, 13, 6, 57);
+  interface Copy { readonly name: string; readonly idle: UpdateStatus; readonly said: string; readonly found: UpdateCheck; readonly failed: UpdateCheck & { state: "cannot-check" } }
+  const copies: readonly Copy[] = [
+    {
+      name: "clone",
+      idle: { version: { kind: "commit", commit: "7093c45", date: Date.UTC(2026, 10, 12, 18) }, result: null, lastCheck: null, activity: [] },
+      said: "7093c45",
+      found: { state: "available", checkedAt: CHECKED, channel: "release", current: "7093c45", target: "def5678", total: 25, changes: ["Faster chat", "A new setting", "Fewer words in Settings", "Two", "One"] },
+      failed: { state: "cannot-check", checkedAt: CHECKED, reason: "error", lines: ["The check stopped on an error: git fetch exited with code 128", "Try again, or run pnpm run app-update --check in the Gates Local folder to see more."] },
+    },
+    {
+      name: "installed",
+      idle: { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: null, activity: [] },
+      said: "0.2.1",
+      found: { state: "newer", checkedAt: CHECKED, current: "0.2.1", target: "0.2.2", forThisCopy: true, lines: ["Downloading version 0.2.2 (12 of 98 MB). You can keep chatting."], page: "https://example.invalid/releases/latest", download: "downloading" },
+      failed: { state: "cannot-check", checkedAt: CHECKED, reason: "unreachable", lines: ["Could not reach the update server. Check your connection."] },
+    },
+  ];
+  for (const copy of copies) test(`${copy.name}: Version once, then one row for the state; the card keeps its size through checking, up to date, found and failed`, async ({ page, open }) => {
+    let lastCheck: UpdateCheck | null = null;
+    let answer: ((next: UpdateCheck) => void) | undefined;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
+        if (message.method === "update.status") reply({ ...copy.idle, lastCheck, canControl: true });
+        // The check waits for the test, so the card can be measured while it runs.
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await expect(page.locator(".set .set-h h1")).toHaveText("General");
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const card = group.locator(".box");
+    await expect(card).toContainText(copy.said);
+    // The card, and each row above the automatic-check switches: what the version and the check take up.
+    const measure = () => card.evaluate((box) => {
+      const r = box.getBoundingClientRect();
+      const above: HTMLElement[] = [];
+      for (const child of Array.from(box.children) as HTMLElement[]) {
+        if (child.querySelector("[role=switch]") !== null) break;
+        above.push(child);
+      }
+      return {
+        card: [r.x, r.y, r.width, r.height],
+        rows: above.map((el) => { const b = el.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; }),
+        text: above.map((el) => el.innerText.split("\n").join(" / ")),
+      };
+    });
+    // Inside the edge, so an element shot keeps it.
+    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
+    const start = await measure();
+    const moves: string[] = [];
+    const same = (step: string, now: Awaited<ReturnType<typeof measure>>) => {
+      if (JSON.stringify([now.card, now.rows]) !== JSON.stringify([start.card, start.rows])) moves.push(`${step}: card ${JSON.stringify(start.card)} -> ${JSON.stringify(now.card)}, rows ${start.rows.length} -> ${now.rows.length} (${now.text.join(" | ")})`);
+    };
+    // The one control on the state's row: its first button, whatever its words.
+    const control = group.locator(".srow").filter({ has: page.locator("button.btn") }).first().locator("button.btn");
+    const steps: readonly (readonly [string, UpdateCheck, string])[] = [
+      ["up to date", upToDate(copy.said, "release", CHECKED), "Up to date"],
+      ["found", copy.found, copy.found.state === "available" || copy.found.state === "newer" ? copy.found.target : ""],
+      ["failed", copy.failed, copy.failed.lines[0] ?? ""],
+      ["up to date again", upToDate(copy.said, "release", CHECKED + 60_000), "Up to date"],
+    ];
+    await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-0-not-checked.png`) });
+    for (const [i, [step, next, words]] of steps.entries()) {
+      await control.click();
+      await expect(control).toBeDisabled();
+      same(`checking before ${step}`, await measure());
+      answer?.(next);
+      await expect(card).toContainText(words);
+      await expect(control).toBeEnabled();
+      same(step, await measure());
+      await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-${i + 1}-${step.replaceAll(" ", "-")}.png`) });
+      if (step === "up to date") {
+        const text = (await measure()).text.join("\n");
+        expect(start.rows.length, `rows above the switches: ${start.text.join(" | ")}`).toBe(2);
+        expect(text.split(copy.said).length - 1, `"${copy.said}" said ${text.split(copy.said).length - 1} times: ${text}`).toBe(1);
+        expect(text).not.toContain("Asks this copy's git remote");
+        if (copy.name === "clone") {
+          // UR-01: the switch now follows every change, so a check of releases says nothing about it; row 2 waits for a check, in the same space.
+          const every = group.getByRole("switch", { name: "Get every change, not only releases", exact: true });
+          const label = group.locator(".srow").nth(1).locator(".sl b");
+          await every.click();
+          await expect(every).toHaveAttribute("aria-checked", "true");
+          await expect(label).toHaveText("Not checked yet");
+          await expect(control).toHaveText("Check for updates");
+          await expect(control).toBeEnabled();
+          same("every change switched on after a release check", await measure());
+          await group.screenshot({ path: test.info().outputPath(`update-steady-${copy.name}-${i + 1}b-every-change-on.png`) });
+          await every.click();
+          await expect(every).toHaveAttribute("aria-checked", "false");
+          await expect(label).toHaveText("Up to date");
+          same("every change switched off again", await measure());
+        }
+      }
+    }
+    expect(moves, "the card or a row changed size or place").toEqual([]);
+  });
+
+  test("UR-03 at 390px the release page link shows beside the control without growing the card", async ({ page, open }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const PAGE = "https://example.invalid/releases/latest";
+    const idle: UpdateStatus = { version: { kind: "installed", version: "0.2.1" }, result: null, lastCheck: null, activity: [] };
+    let lastCheck: UpdateCheck | null = null;
+    let answer: ((next: UpdateCheck) => void) | undefined;
+    await page.routeWebSocket(/\/\?token=/, (socket) => {
+      const server = socket.connectToServer();
+      socket.onMessage((raw) => {
+        const message = JSON.parse(String(raw)) as { method?: string; id: string };
+        const reply = (result: unknown) => socket.send(JSON.stringify({ type: "response", id: message.id, ok: true, result }));
+        if (message.method === "update.status") reply({ ...idle, lastCheck, canControl: true });
+        else if (message.method === "update.check") answer = (next) => { lastCheck = next; reply(next); };
+        else server.send(raw);
+      });
+    });
+    await open(); await waitReady(page);
+    await page.keyboard.press("Control+Comma");
+    await expect(page.locator(".set")).toBeVisible();
+    // The settings section may start on the phone section list.
+    const general = page.locator(".set-list").getByRole("button", { name: /General/ });
+    if (await general.isVisible()) await general.click();
+    const group = page.locator(".grp").filter({ has: page.locator(".grp-t", { hasText: /^Updates$/ }) });
+    const card = group.locator(".box");
+    await expect(card).toContainText("0.2.1");
+    await group.scrollIntoViewIfNeeded();
+    await group.evaluate((el) => { el.style.outline = "3px solid #e5484d"; el.style.outlineOffset = "-3px"; });
+    const height = () => card.evaluate((box) => box.getBoundingClientRect().height);
+    const control = group.locator(".srow").nth(1).locator("button.btn");
+    const link = group.getByRole("link", { name: "Open the release page" });
+    const start = await height();
+    const heights: string[] = [];
+    const steps: readonly (readonly [string, UpdateCheck, boolean])[] = [
+      ["up to date", upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 6, 57)), false],
+      ["not for this copy", { state: "newer", checkedAt: Date.UTC(2026, 10, 13, 7, 0), current: "0.2.1", target: "0.2.2", forThisCopy: false, lines: ["Version 0.2.2 is available, but this copy cannot install it by itself. Download it from the release page."], page: PAGE }, true],
+      ["bad signature", { state: "cannot-check", checkedAt: Date.UTC(2026, 10, 13, 7, 1), reason: "bad-signature", lines: ["The release list did not pass its signature check, so Gates Local ignored it."], page: PAGE }, true],
+      ["up to date again", upToDate("0.2.1", "release", Date.UTC(2026, 10, 13, 7, 2)), false],
+    ];
+    await group.screenshot({ path: test.info().outputPath("update-phone-0-not-checked.png") });
+    for (const [i, [step, next, linked]] of steps.entries()) {
+      await control.click();
+      answer?.(next);
+      await expect(link).toHaveCount(linked ? 1 : 0);
+      await expect(control).toBeEnabled();
+      if (linked) {
+        await expect(link).toBeVisible();
+        // The link and the control share one line.
+        const [l, c] = [await link.boundingBox(), await control.boundingBox()];
+        expect.soft(l !== null && c !== null && Math.abs((l.y + l.height / 2) - (c.y + c.height / 2)) < 2, `${step}: link ${JSON.stringify(l)} and control ${JSON.stringify(c)} on one line`).toBe(true);
+      }
+      const now = await height();
+      if (now !== start) heights.push(`${step}: ${start} -> ${now}`);
+      await group.screenshot({ path: test.info().outputPath(`update-phone-${i + 1}-${step.replaceAll(" ", "-")}.png`) });
+    }
+    expect(heights, "the card's height changed at 390px").toEqual([]);
+  });
 });

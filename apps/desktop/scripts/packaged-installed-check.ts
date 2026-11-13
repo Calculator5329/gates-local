@@ -125,6 +125,12 @@ async function open(artifact: string, name: string, feed: Feed, automatic: boole
 
 const AGAIN = "Gates Local will try again in an hour.";
 const automaticSwitch = (copy: Copy) => copy.group.getByRole("switch", { name: "Check for updates automatically" });
+/** The state row's label tip: what the state says beyond its one line. */
+const stateTip = (copy: Copy) => copy.group.locator(".srow").nth(1).locator(".tipped");
+/** The Version row's value: the version said once, so a match elsewhere in the group proves nothing. */
+const versionValue = (copy: Copy) => copy.group.locator(".srow").first().locator(".sv .mono");
+/** Row 2's label: the state, which is "Not checked yet" or "Checking…" until an answer arrives. */
+const stateLabel = (copy: Copy) => copy.group.locator(".srow").nth(1).locator(".sl b");
 
 const shots: string[] = [];
 async function shoot(copy: Copy, name: string): Promise<void> {
@@ -159,8 +165,8 @@ try {
   const next = nextAfter(version);
   report["version"] = version;
 
-  await expect(copy.group).toContainText(`Installed copy ${version}`, { timeout: 10_000 });
-  await expect(copy.group).toContainText("Updates come from the Gates Local release page.");
+  await expect(versionValue(copy)).toHaveText(version, { timeout: 10_000 });
+  await expect(copy.group).toContainText("An installed copy, following releases.");
   await expect(automaticSwitch(copy)).toHaveAttribute("aria-checked", "false");
   await shoot(copy, "version-row");
   // Past the 15-second start-up delay with the switch off: nothing was read.
@@ -172,7 +178,7 @@ try {
   feed.serve(signedList(next, [ownPlatform, otherPlatform], testKey.privateKey));
   // A version for this copy, switch off: the Download offer (never clicked
   // here; packaged-installed-download.ts covers it) and no release-page link.
-  await check(copy, `Version ${next} is available.`);
+  await check(copy, `Update available: ${next}`);
   await expect(download).toBeVisible();
   await expect(releasePage).toHaveCount(0);
   // Nothing installs from here yet: no install button, no sidebar update button.
@@ -194,23 +200,23 @@ try {
   // With the switch off, a failed read promises no retry.
   feed.serve("missing");
   await check(copy, "No release list was found on the release page.");
-  await expect(copy.group).not.toContainText(AGAIN);
+  await expect(stateTip(copy)).not.toHaveAttribute("aria-description", new RegExp(AGAIN));
   await shoot(copy, "no-list");
 
   feed.serve(signedList(version, [ownPlatform], testKey.privateKey));
-  await check(copy, "No newer version was found.");
+  await check(copy, "Up to date");
   await shoot(copy, "none-found");
 
   await feed.stop();
   await check(copy, "Could not reach the update server. Check your connection.");
-  await expect(copy.group).not.toContainText(AGAIN);
+  await expect(stateTip(copy)).not.toHaveAttribute("aria-description", new RegExp(AGAIN));
   await shoot(copy, "could-not-reach");
   const clicked = feed.requests.length;
 
-  // Turning the switch on makes the sentence true, on the result already shown.
+  // Turning the switch on makes the sentence true, on the result already shown (in the state's tip).
   await automaticSwitch(copy).click();
   await expect(automaticSwitch(copy)).toHaveAttribute("aria-checked", "true");
-  await expect(copy.group).toContainText(AGAIN);
+  await expect(stateTip(copy)).toHaveAttribute("aria-description", new RegExp(AGAIN));
   await shoot(copy, "could-not-reach-automatic-on");
 
   expect(clicked).toBeGreaterThan(0);
@@ -272,12 +278,14 @@ try {
     const plainVersion = await plainCopy.app.evaluate(({ app }) => app.getVersion());
     const next = nextAfter(plainVersion);
     quiet.serve(signedList(next, [ownPlatform, otherPlatform], testKey.privateKey));
-    await expect(plainCopy.group).toContainText(`Installed copy ${plainVersion}`, { timeout: 10_000 });
+    await expect(versionValue(plainCopy)).toHaveText(plainVersion, { timeout: 10_000 });
     await expect(automaticSwitch(plainCopy)).toHaveAttribute("aria-checked", "false");
     await plainCopy.group.getByRole("button", { name: "Check for updates", exact: true }).click();
-    // Every answer ends with when it was checked or tried; the real page may be slow.
-    await expect(plainCopy.group).toContainText(/(Checked|Tried) at /, { timeout: 45_000 });
-    const shown = await plainCopy.group.innerText();
+    // Any answer replaces the label's "Not checked yet" and "Checking…"; the real page may be slow.
+    await expect(stateLabel(plainCopy)).not.toHaveText(/^(Not checked yet|Checking…)$/, { timeout: 45_000 });
+    // A failed check says when it tried in the label's tip, the rest of the words beside it.
+    const tip = (await stateTip(plainCopy).count()) === 0 ? null : await stateTip(plainCopy).getAttribute("aria-description");
+    const shown = `${await plainCopy.group.innerText()}\n${tip ?? ""}`;
     await shoot(plainCopy, "plain");
     expect(quiet.requests).toEqual([]);
     expect(shown).not.toContain("This build has no release key");

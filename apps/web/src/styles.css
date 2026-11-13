@@ -799,6 +799,7 @@ a.btn{text-decoration:none}
 .upd-act{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:12px}
 .upd-act .d{flex:1;min-width:200px}
 .upd-act .act-err{flex-basis:100%;margin:0}
+.upd-acts{display:flex;align-items:center;gap:8px;white-space:nowrap}
 .banner-slot .banner+.banner{margin-top:8px}
 /* an image the server serves; the placeholder is quiet when the file is missing */
 .img-out{max-width:100%;border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--border);display:block}
@@ -1108,6 +1109,8 @@ a.btn{text-decoration:none}
   .srow{flex-wrap:wrap}
   .sl{flex:1 1 200px}
   .sv{flex-wrap:wrap;min-width:0;max-width:100%}
+  /* Settings > Updates: the release link and the control keep their own line, whether or not the link shows. */
+  .srow:has(>.sv>.upd-acts)>.sv{flex:1 1 100%}
   .srow .inp{flex:1 1 140px;min-width:0;width:auto}
   /* A changing status must not resize the path column. */
   .srow.src{display:grid;grid-template-columns:18px minmax(0,1fr) 44px;gap:4px 16px}

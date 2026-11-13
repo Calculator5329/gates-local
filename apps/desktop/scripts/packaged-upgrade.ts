@@ -706,16 +706,17 @@ async function openUpdates(page: Page, notes: string[], timeoutMs = 90_000): Pro
 
 /** The download of N+1 is checked: either Restart to update, or the words for a copy that cannot use it. */
 async function waitDownloaded(group: Locator): Promise<string> {
-  await expect(group.locator(".upd-res")).toContainText(/Restart to update|cannot install it by itself|cannot replace its own file|cannot update itself/, { timeout: 180_000 });
-  return await group.locator(".upd-res").innerText();
+  // The state is row 2 (its label and its control) and the block under it.
+  await expect(group.locator(".box")).toContainText(/Restart to update|cannot install it by itself|cannot replace its own file|cannot update itself/, { timeout: 180_000 });
+  return await group.locator(".box").innerText();
 }
 
-const restartButton = (group: Locator) => group.locator(".upd-res").getByRole("button", { name: "Restart to update", exact: true });
+const restartButton = (group: Locator) => group.getByRole("button", { name: "Restart to update", exact: true });
 
 /** The Updates group at one fixed crop, the result line outlined; and the footer's update icon when the sidebar shows it. */
 async function shoot(page: Page, group: Locator, output: string, name: string): Promise<string[]> {
   const files: string[] = [];
-  await page.addStyleTag({ content: ".upd-res, .ibtn.upd { outline: 3px solid #e5484d !important; outline-offset: 2px; }" });
+  await page.addStyleTag({ content: ".grp .srow:nth-child(2), .ibtn.upd { outline: 3px solid #e5484d !important; outline-offset: -3px; }" });
   const box = await group.boundingBox();
   if (box !== null) {
     const file = path.join(output, `${name}-settings.png`);
@@ -1112,8 +1113,8 @@ function earlierFailureRow(run: Run): Promise<Outcome> {
     await c.step("the earlier failure page", () => expect(page.locator("main")).toContainText(earlierFailure().text, { timeout: 60_000 }));
     await personClick(page.getByRole("link", { name: "Start Gates Local", exact: true }), rig.notes);
     const group = await c.step("Settings › Updates", () => openUpdates(page, rig.notes));
-    await c.step("N+1 downloaded and checked", () => expect(group.locator(".upd-res")).toContainText(/An earlier update did not finish|is downloaded and checked/, { timeout: 180_000 }));
-    const text = await group.locator(".upd-res").innerText();
+    await c.step("N+1 downloaded and checked", () => expect(group.locator(".box")).toContainText(/An earlier update did not finish|is downloaded and checked/, { timeout: 180_000 }));
+    const text = await group.locator(".box").innerText();
     c.that(text.split(earlierFailure().text).length - 1 === 1, `the Updates row says: ${text.split("\n").join(" / ")}`);
     c.that(await restartButton(group).count() === 0, "Restart to update is offered while the earlier failure is undismissed");
     const footer = await page.locator(".ibtn.upd").first().getAttribute("aria-label", { timeout: 2_000 }).catch(() => null);

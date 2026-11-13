@@ -195,6 +195,8 @@ async function open(artifact: string, name: string, feed: Feed, automatic: boole
 const automaticSwitch = (copy: Copy) => copy.group.getByRole("switch", { name: "Check for updates automatically" });
 const downloadButton = (copy: Copy) => copy.group.getByRole("button", { name: "Download", exact: true });
 const releasePage = (copy: Copy) => copy.group.getByRole("link", { name: "Open the release page" });
+/** The state row's label tip: what the state says beyond its one line. */
+const stateTip = (copy: Copy) => copy.group.locator(".srow").nth(1).locator(".tipped");
 
 const shots: string[] = [];
 async function shoot(copy: Copy, name: string): Promise<void> {
@@ -277,7 +279,7 @@ try {
   await checkNow(probe);
   await expect(probe.group).toContainText(bad(v(2)), { timeout: 30_000 });
   await expect(probe.group.getByRole("alert")).toContainText(bad(v(2)));
-  await expect(probe.group.getByRole("alert")).toContainText(AGAIN);
+  await expect(stateTip(probe)).toHaveAttribute("aria-description", new RegExp(AGAIN));
   await shoot(probe, "2-wrong-hash");
   // Gone, and the older prepared version went when the newer list arrived.
   expect(folders(probe)).toEqual([]);
@@ -290,7 +292,7 @@ try {
   fixture.serve(v(3), signedList(v(3), { size: SIZE, sha512: sha512(randomBytes(SIZE)) }), { mode: "endless" });
   await checkNow(probe);
   await expect(probe.group).toContainText(bad(v(3)), { timeout: 30_000 });
-  await expect(probe.group.getByRole("alert")).toContainText(AGAIN);
+  await expect(stateTip(probe)).toHaveAttribute("aria-description", new RegExp(AGAIN));
   await shoot(probe, "3-oversize");
   expect(folders(probe)).toEqual([]);
   const endless = artifactReads(fixture, v(3));
@@ -312,7 +314,7 @@ try {
   const fourthList = signedList(v(4), { size: SIZE, sha512: sha512(fourth) });
   fixture.serve(v(4), fourthList, { mode: "whole", bytes: fourth });
   await checkNow(probe);
-  await expect(probe.group).toContainText(`Version ${v(4)} is available.`, { timeout: 15_000 });
+  await expect(probe.group).toContainText(`Update available: ${v(4)}`, { timeout: 15_000 });
   await expect(downloadButton(probe)).toBeVisible();
   await pause(5_000);
   expect(fixture.requests.slice(before).map((r) => r.url)).toEqual(["/latest/download/release.json", "/latest/download/release.json.sig"]);
@@ -340,7 +342,7 @@ try {
   expect(folders(probe)).toEqual([v(5)]);
   await automaticSwitch(probe).click();
   await expect(automaticSwitch(probe)).toHaveAttribute("aria-checked", "false");
-  await expect(probe.group).toContainText(`Version ${v(5)} is available.`, { timeout: 15_000 });
+  await expect(probe.group).toContainText(`Update available: ${v(5)}`, { timeout: 15_000 });
   await expect(downloadButton(probe)).toBeVisible();
   await shoot(probe, "5-switched-off");
   expect(folders(probe)).toEqual([]);

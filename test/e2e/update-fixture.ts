@@ -1,7 +1,8 @@
 import type { UpdatePreparation, UpdateStatus } from "@gates-local/contracts";
 
 const IDLE: UpdateStatus = { version: { kind: "commit", commit: "abc1234" }, result: null, lastCheck: null, activity: [] };
-const AVAILABLE: UpdateStatus = { ...IDLE, lastCheck: { state: "available", checkedAt: 1, current: "abc1234", target: "def5678", targetCommit: `def5678${"0".repeat(33)}`, channel: "main", total: 1, changes: ["Faster chat"] } };
+// A check of the channel the test server's switch follows (releases), as a real server's would be: Settings shows only that one.
+const AVAILABLE: UpdateStatus = { ...IDLE, lastCheck: { state: "available", checkedAt: 1, current: "abc1234", target: "def5678", targetCommit: `def5678${"0".repeat(33)}`, channel: "release", total: 1, changes: ["Faster chat"] } };
 
 /** One fixture owner for both announced state and subsequent RPC reads. */
 export function updateFixtureState() {
