@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-13: Ctrl+C at the moment an update command starts still ends it
+
+- The source updater runs each command (git, pnpm) in its own process
+  group and ends the group when it gets Ctrl+C. It began listening for
+  Ctrl+C only after the command had started. A signal in that gap ended
+  the updater and left the command running: 9 of 400 runs on a busy
+  machine, and the cause of one red release check. It now listens before
+  the command starts; 0 of 800 runs after.
+
 ## 2026-11-13: Work lands on dev; main moves only at a release
 
 - Every change used to land on `main`, and `main` had to stand still

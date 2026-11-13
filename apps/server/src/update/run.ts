@@ -156,17 +156,20 @@ function onStopSignal(signal: NodeJS.Signals): void {
   if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
 }
 
-function trackGroup(pid: number): void {
-  if (liveGroups.size === 0) {
-    // Run before once-listeners remove themselves during signal delivery.
-    for (const s of STOP_SIGNALS) process.prependListener(s, onStopSignal);
-    process.on("exit", killTrackedGroups);
-  }
-  liveGroups.add(pid);
+// Commands starting or running. The listeners go in before a command is
+// started: a signal that arrives between the start and the next line of this
+// file would otherwise end the process by default and leave the group running.
+let listeningFor = 0;
+
+function listenForStop(): void {
+  if (listeningFor++ > 0) return;
+  // Run before once-listeners remove themselves during signal delivery.
+  for (const s of STOP_SIGNALS) process.prependListener(s, onStopSignal);
+  process.on("exit", killTrackedGroups);
 }
 
-function untrackGroup(pid: number): void {
-  if (!liveGroups.delete(pid) || liveGroups.size > 0) return;
+function stopListening(): void {
+  if (--listeningFor > 0) return;
   for (const s of STOP_SIGNALS) process.removeListener(s, onStopSignal);
   process.removeListener("exit", killTrackedGroups);
 }
@@ -186,6 +189,7 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
       let failure: RunResult["failure"];
       let stopping = false;
       let child: ChildProcessByStdio<null, Readable, Readable>;
+      if (ownGroup) listenForStop();
       try {
         child = spawn(command, [...args], {
           cwd: path.resolve(options.cwd),
@@ -196,18 +200,20 @@ export function createRunner(stop: Partial<TreeStop> = {}): Runner {
           stdio: ["ignore", "pipe", "pipe"],
         });
       } catch (e) {
+        if (ownGroup) stopListening();
         resolve({ code: null, stdout, stderr: (e as Error).message, failure: "spawn-error" });
         return;
       }
       const group = ownGroup ? child.pid : undefined;
-      if (group !== undefined) trackGroup(group);
+      if (group !== undefined) liveGroups.add(group);
       let settled = false;
       const finish = (code: number | null, treeStillRunning = false) => {
         if (settled) return;
         settled = true;
         if (timer !== undefined) clearTimeout(timer);
         options.signal?.removeEventListener("abort", abort);
-        if (group !== undefined) untrackGroup(group);
+        if (group !== undefined) liveGroups.delete(group);
+        if (ownGroup) stopListening();
         resolve({ code: failure === undefined ? code : null, stdout, stderr, ...(failure === undefined ? {} : { failure }), ...(treeStillRunning ? { treeStillRunning } : {}) });
       };
       const stopTree = (why: NonNullable<RunResult["failure"]>) => {
