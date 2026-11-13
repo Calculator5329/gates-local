@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-12: Successful updates stay silent
+
+- Successful updates no longer leave a message to dismiss at startup or in
+  Settings, on the computer or phone. The current version stays in Settings.
+- Unsuccessful updates still show the recovery details and Dismiss button;
+  updates in progress still show their activity.
+
 ## 2026-11-12: Windows and Linux downloads are available
 
 - Published 0.2.1 from `655e45eb` with the latest chat, image-model and Linux

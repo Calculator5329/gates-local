@@ -1,4 +1,4 @@
-// The note after an update, on a phone: dismissing it clears the phone's own
+// The note after an unsuccessful update, on a phone: dismissing it clears the phone's own
 // copy and never writes to the computer, so the button stays.
 import { isValidElement, type ReactElement } from "react";
 import { expect, it, vi } from "vitest";
@@ -18,9 +18,9 @@ function nodes(node: unknown): Node[] {
   return [node, ...nodes(node.props["children"])];
 }
 
-it("a phone, where update.dismissResult is computer-only, still offers Dismiss, and pressing it dismisses", () => {
+it("a phone, where update.dismissResult is computer-only, still offers Dismiss for an unsuccessful update, and pressing it dismisses", () => {
   store.state = {
-    update: { canControl: false, result: { at: 1, outcome: "updated", line: "Updated to v0.2.0." } },
+    update: { canControl: false, result: { at: 1, outcome: "stopped", line: "The update stopped. The previous version is restored." } },
     unavailable: { "update.dismissResult": true },
   };
   const dismiss = nodes(UpdateNote()).find(n => n.type === "button" && n.props["children"] === "Dismiss");

@@ -4,14 +4,14 @@ import { Icon } from "./icons.tsx";
 import { dismissUpdateResult } from "./session.ts";
 import { NA, useStore } from "./store.ts";
 
-/** The one-time note after an update: shown on the first start after it, until dismissed. */
+/** Keep unsuccessful update results visible until dismissed; successful updates stay silent. */
 export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; onDismiss: () => void }) {
-  const ok = result.outcome === "updated";
+  if (result.outcome === "updated") return null;
   return (
-    <div className="banner upd-note" role={ok ? "status" : "alert"}>
-      <Icon id={ok ? "checkc" : "alert"} cls={ok ? undefined : "warn"} />
+    <div className="banner upd-note" role="alert">
+      <Icon id="alert" cls="warn" />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="bt">{ok ? "Gates Local updated" : "The update did not finish"}</div>
+        <div className="bt">The update did not finish</div>
         <div className="bm">{result.line}</div>
         {result.commands !== undefined && result.commands.length > 0 ? (
           <div className="bm upd-lines mono">
@@ -20,7 +20,7 @@ export function UpdateNoteView({ result, onDismiss }: { result: UpdateResult; on
             ))}
           </div>
         ) : null}
-        {!ok && result.logPath !== undefined ? (
+        {result.logPath !== undefined ? (
           <div className="bm">
             The full log is in <span className="mono">{result.logPath}</span>.
           </div>

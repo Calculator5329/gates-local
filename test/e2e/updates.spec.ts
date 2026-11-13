@@ -4,9 +4,12 @@ import type { Page, WebSocketRoute } from "@playwright/test";
 import { test, expect, sendMessage, stack, waitReady } from "./fixtures.ts";
 import { updateFixtureState } from "./update-fixture.ts";
 
-async function updates(page: Page, desktop = true) {
+test.use({ video: "on" });
+
+async function updates(page: Page, desktop = true, successful = false) {
   let route: WebSocketRoute | undefined;
   const fixture = updateFixtureState();
+  if (successful) fixture.notice();
   if (desktop) await page.addInitScript(() => {
     const bridge = {
       updateApprovalVersion: 2 as const,
@@ -50,11 +53,15 @@ for (const width of [1440, 390]) test(`long rollback text and its complete log p
   await page.screenshot({ path: test.info().outputPath(`rollback-note-${width}.png`) });
 });
 
-test("AV-05 Settings notice spans the content top and dismissal never shifts its width", async ({ page, open }) => {
-  const update = await updates(page);
+test("AV-05 success stays silent; failure spans the Settings top and dismisses without a width shift", async ({ page, open }) => {
+  const update = await updates(page, true, true);
   await open(); await waitReady(page);
+  await expect(page.locator(".sb-foot .upd")).toHaveAccessibleName("Check for updates");
+  await expect(page.locator(".upd-note")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("startup-success-silent.png") });
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set .set-h h1")).toHaveText("General");
+  await expect(page.locator(".set").getByText("abc1234", { exact: true })).toBeVisible();
   const geometry = async () => Promise.all([".set", ".set-in", ".set-h"].map(async selector => {
     const box = await page.locator(selector).boundingBox();
     if (!box) throw new Error(`No geometry for ${selector}`);
@@ -62,7 +69,12 @@ test("AV-05 Settings notice spans the content top and dismissal never shifts its
   }));
   const before = await geometry();
   update.notice();
-  const notice = page.getByRole("status").filter({ hasText: "Gates Local updated" });
+  await expect(page.locator(".upd-note")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0);
+  expect(await geometry(), "AV-05 successful update changed Settings width").toEqual(before);
+  await page.screenshot({ path: test.info().outputPath("settings-success-silent.png") });
+  update.failure();
+  const notice = page.getByRole("alert").filter({ hasText: "The update did not finish" });
   await expect(notice).toBeVisible();
   await notice.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)); });
   expect(await geometry(), "AV-05 notice changed Settings width").toEqual(before);
@@ -70,7 +82,7 @@ test("AV-05 Settings notice spans the content top and dismissal never shifts its
   const contentBox = await page.locator(".set-in").boundingBox();
   if (!bannerBox || !contentBox) throw new Error("No Settings notice geometry");
   expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(contentBox.y);
-  await page.screenshot({ path: test.info().outputPath("settings-notice.png") });
+  await page.screenshot({ path: test.info().outputPath("settings-failure-notice.png") });
   await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
   await expect(notice).toHaveCount(0);
   expect(await geometry(), "AV-05 dismissing changed Settings width").toEqual(before);
@@ -168,18 +180,26 @@ test("what is running changes behind an open ask: the panel's words follow and i
 
 test("a phone has status and computer-update instructions without update controls", async ({ page, open }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const update = await updates(page, false);
+  const update = await updates(page, false, true);
   await open();
   await waitReady(page);
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".set")).toBeVisible();
-  update.show();
   // The settings section may start on the phone section list.
   const general = page.locator(".set-list").getByRole("button", { name: /General/ });
   if (await general.isVisible()) await general.click();
+  await expect(page.locator(".set").getByText("abc1234", { exact: true })).toBeVisible();
+  await expect(page.locator(".upd-note")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("phone-settings-success-silent.png") });
+  update.show();
   await expect(page.getByRole("button", { name: "Check for updates", exact: true })).toHaveCount(0);
   await expect(page.getByRole("switch", { name: "Check for updates automatically", exact: true })).toHaveCount(0);
   await expect(page.locator(".sb-foot .upd")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Update and restart", exact: true })).toHaveCount(0);
   await expect(page.getByText("To install it, close Gates Local on the computer it runs on", { exact: false })).toBeVisible();
+  update.failure();
+  const notice = page.getByRole("alert").filter({ hasText: "The update did not finish" });
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await expect(notice).toHaveCount(0);
 });

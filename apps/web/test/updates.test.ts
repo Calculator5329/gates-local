@@ -67,7 +67,7 @@ describe("the Updates group", () => {
     const { settingsScreen } = await import("../src/screen-loaders.ts");
     await settingsScreen.load();
     session.openSettings();
-    store.setState({ update: { ...CLONE, result: { at: 1, outcome: "updated", line: "Approved commit is ready." } } });
+    store.setState({ update: { ...CLONE, result: { at: 1, outcome: "stopped", line: "The update stopped. The previous version is restored." } } });
     vi.stubGlobal("matchMedia", () => ({ matches: false }));
     const useStore = vi.spyOn(store, "useStore").mockImplementation(<T,>(select: (state: State) => T) => select(store.getState()));
     try {
@@ -78,7 +78,7 @@ describe("the Updates group", () => {
       for (const token of html.match(/<[^>]*>|[^<]+/g) ?? []) {
         if (token.startsWith("</")) parents.pop();
         else if (/^<[a-z]/i.test(token) && !/^<(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b/i.test(token) && !token.endsWith("/>")) parents.push(/\bclass="([^"]*)"/.exec(token)?.[1]?.split(" ") ?? []);
-        else if (token.includes("Gates Local updated")) { noticeParents = [...parents]; break; }
+        else if (token.includes("The update did not finish")) { noticeParents = [...parents]; break; }
       }
       expect(noticeParents, "The actual app renders its update notice").toBeDefined();
       expect(noticeParents?.some(classes => classes.includes("set")), "AV-05 notice must share the Settings scrolling surface").toBe(true);
@@ -303,11 +303,8 @@ const hydrated = () => store.getState().imageStatus !== undefined && store.getSt
 
 describe("the note after an update", () => {
 
-  it("says it updated", () => {
-    const plain = text(note({ at: 1, outcome: "updated", line: "Updated to v0.2.0, 3 changes." }));
-    expect(plain).toContain("Gates Local updated");
-    expect(plain).toContain("Updated to v0.2.0, 3 changes.");
-    expect(plain).toContain("Dismiss");
+  it("keeps successful updates silent", () => {
+    expect(note({ at: 1, outcome: "updated", line: "Updated to v0.2.0, 3 changes." })).toBe("");
   });
 
   it("says where a failed update stopped, the log, and the commands to finish by hand", () => {
