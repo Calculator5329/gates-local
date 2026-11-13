@@ -3,7 +3,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-// a GPU: the image call's job has no default on the CPU
+// a GPU: on the CPU the image call's default needs an encoder Klein's files lack
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 

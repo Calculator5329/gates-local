@@ -45,8 +45,8 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await page.getByRole("switch", { name: "Generate images" }).click();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Image", exact: true }).click();
-    // A: nothing picked anywhere, so the composer sends the default it shows (Klein)
-    await expect(button).toContainText("Klein 4B");
+    // A: nothing picked anywhere, so the composer sends the default it shows (General's style setup, on Klein's weights)
+    await expect(button).toContainText("General");
     await sendMessage(page, "IR320 A default");
     await run(0);
     expect(weights(0)).toBe("flux-2-klein-4b-fp8.safetensors");
@@ -57,10 +57,10 @@ test("A sends the default without a pick, then B picks: A's next send runs what 
     await expect(button).toContainText("Z-Image");
     await sendMessage(page, "IR320 B picks Z-Image");
     await run(1);
-    // back in A: the composer and the next send are still Klein
+    // back in A: the composer and the next send are still General's setup
     await page.locator(".sb-row", { hasText: "IR320 A default" }).click();
     await expect(cards).toHaveCount(1);
-    await expect(button).toContainText("Klein 4B");
+    await expect(button).toContainText("General");
     await page.screenshot({ path: info.outputPath("a-after-b-picks.png"), animations: "disabled" });
     await sendMessage(page, "IR320 A again");
     await run(2);

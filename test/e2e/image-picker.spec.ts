@@ -12,9 +12,12 @@ import { state } from "./threads-support.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] ? "on" : "off" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-// FLUX.2 Klein 4B's files on a GPU: on the CPU Image mode has no default
+// FLUX.2 Klein 4B's files on a GPU: on the CPU the default needs an encoder they lack
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
+
+/** Defaults on a 16 GB card: each style's setup (styles.ts), in the menu's order. */
+const STYLES_16 = ["general--r2-2a-klein-compact8", "portraits--moss-official25", "characters--klein-official4", "pixel-art--r2-1a-klein-compact8", "sprites--r2-1a-moss-official25", "backgrounds--r2-1b-moss-official25", "icons--r2-2a-moss-official25", "text-logos--moss-official25", "painterly--r2-2a-moss-official25"];
 
 async function shot(page: Page, name: string, info: { outputPath: (n: string) => string }, clip?: { x: number; y: number; width: number; height: number }) {
   await page.screenshot({ path: info.outputPath(name), animations: "disabled", ...(clip ? { clip } : {}) });
@@ -50,9 +53,9 @@ test("Image on: the button names the image model and size where the chat model w
   const button = page.locator("#modelBtn");
   const before = await boxes(page);
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  // unset: the first default ComfyUI has every file for, FLUX.2 Klein 4B at 1024x1024
-  await expect(button).toContainText("Klein 4B");
-  await expect(button).toContainText("1024×1024");
+  // unset: the General style setup of the card's level (16 GB here: the GPU reading is the stack's default)
+  await expect(button).toContainText("General");
+  await expect(button).toContainText("896×896");
   expect(await boxes(page), "the Image pill and Send keep their boxes, the button its right edge").toEqual(before);
   await page.mouse.move(5, 5);
   await shot(page, "image-after-button.png", info, await composerClip(page));
@@ -60,35 +63,41 @@ test("Image on: the button names the image model and size where the chat model w
   await button.click();
   const picker = page.locator("#imagePicker");
   await expect(picker).toBeVisible();
-  await expect(picker.locator(".pk-r")).toHaveCount(8);
-  // Defaults: General's Fast-tier setup, then one per theme; Other models: the rest of General in tier order
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
+  await expect(picker.locator(".pk-r")).toHaveCount(STYLES_16.length + 4);
+  // Defaults: one setup per style, the bench's winner at this level; Other models: General's setups in tier order
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual([...STYLES_16, "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
   await expect(picker.locator(".pk-rail").getByRole("button"), "the rail is the two menus").toHaveText(["", ""]);
   await expect(picker.locator(".pk-rail").getByRole("button").nth(0)).toHaveAccessibleName("Defaults");
   await expect(picker.locator(".pk-rail").getByRole("button").nth(1)).toHaveAccessibleName("Other models");
   await expect(picker.locator("input"), "the image picker has no search box").toHaveCount(0);
   // a Defaults row's tip names its setup; no other row has one (every row is ready: no Download)
   await expect(picker.locator(".pk-r[data-tip], .pk-r:not(.style) [data-tip]"), "no row tooltips but the styles'").toHaveCount(0);
-  await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
+  // a style setup runs at the one size the bench ran it at
+  await expect(picker.locator(".pk-ctx-row")).toHaveCount(1);
   await shot(page, "image-after-picker.png", info);
 
   // a row picks that model at the size nearest the current one, as the chat picker picks a model
-  await picker.locator('.pk-r[data-preset="flux2-klein-4b-pixel"] .pk-select').click();
+  await picker.locator('.pk-r[data-preset="pixel-art--r2-1a-klein-compact8"] .pk-select').click();
   await expect(picker).toBeHidden();
   await expect(button).toContainText("Retro pixel");
-  await expect(button).toContainText("1024×1024");
-  // a size row picks that size
+  await expect(button).toContainText("640×640");
+  // a size row picks that size: Klein, from Other models, runs at three
+  await button.click();
+  await picker.getByRole("button", { name: "Other models" }).click();
+  await picker.locator('.pk-r[data-preset="flux2-klein-4b"] .pk-select').click();
+  await expect(picker).toBeHidden();
+  await expect(button).toContainText("Klein 4B");
   await button.click();
   await expect(picker.locator(".pk-ctx-row")).toHaveCount(3);
-  await picker.locator('.pk-ctx-row[data-size="512x512"]').click();
+  await picker.locator('.pk-ctx-row[data-size="1024x768"]').click();
   await expect(picker).toBeHidden();
-  await expect(button).toContainText("Retro pixel");
-  await expect(button).toContainText("512×512");
+  await expect(button).toContainText("Klein 4B");
+  await expect(button).toContainText("1024×768");
   expect(await boxes(page)).toEqual(before);
 
   // Image off: the chat model again, at the same right edge
   await page.getByRole("button", { name: "Image", exact: true }).click();
-  await expect(button).not.toContainText("Retro pixel");
+  await expect(button).not.toContainText("Klein 4B");
   expect(await boxes(page)).toEqual(before);
 });
 
@@ -112,10 +121,12 @@ test("the picker lists only presets whose files ComfyUI reports", async ({ page,
   await expect(picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select')).toHaveAttribute("aria-disabled", "true");
   // its Download button stays a button: the row itself is not marked disabled, only its pick
   await expect(picker.locator('.pk-r.off[aria-disabled]')).toHaveCount(0);
-  // the pick is in Other models, so it opens there; Klein is General's default, greyed
+  // the pick is in Other models, so it opens there; Klein is greyed beside it, and so is General's style setup
   await expect(picker.getByRole("button", { name: "Other models" })).toHaveAttribute("aria-pressed", "true");
-  await picker.getByRole("button", { name: "Defaults" }).click();
   await picker.locator('.pk-r.off[data-preset="flux2-klein-4b"] .pk-select').click({ force: true });
+  await expect(picker, "a greyed row picks nothing").toBeVisible();
+  await picker.getByRole("button", { name: "Defaults" }).click();
+  await picker.locator('.pk-r.off[data-preset="general--r2-2a-klein-compact8"] .pk-select').click({ force: true });
   await expect(picker, "a greyed row picks nothing").toBeVisible();
   await expect(page.locator("#modelBtn")).toContainText("Z-Image1024×1024");
   await expect(picker.locator(".pk-ctx-row:enabled"), "its sizes show, not pickable").toHaveCount(0);
@@ -142,16 +153,21 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await expect(picker.locator(".pk-r").first()).toBeVisible();
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-groups.png", info);
-  // Defaults: each style's setup, downloaded or not; the theme groups live there, not in Other models
+  // Defaults: each style's setup, downloaded or not; the styles live there, not in Other models
   expect(await groups(page)).toEqual([
-    ["Defaults", "flux2-klein-4b", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"],
-    ["Other models", ["General", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]],
+    ["Defaults", ...STYLES_16],
+    ["Other models", ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"]],
   ]);
-  await expect(picker.getByRole("listbox", { name: "Defaults" }).locator(".pk-nm")).toHaveText(["General", "People", "Pixel art", "Game sprites", "Backgrounds"]);
+  const defaults = picker.getByRole("listbox", { name: "Defaults" });
+  await expect(defaults.locator(".pk-nm")).toHaveText(["General", "People", "Characters", "Pixel art", "Game sprites", "Backgrounds", "Icons", "Text and logos", "Painterly and concept art"]);
   // each Other tier setup says its tier, downloaded or not; a style row is the style alone
-  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual([null, null, null, null, null, "Balanced", "Best", null]);
+  expect(await picker.locator(".pk-r").evaluateAll((rows) => rows.map((r) => r.querySelector(".pk-variant")?.textContent ?? null))).toEqual([...STYLES_16.map(() => null), "Fast", "Balanced", "Best", null]);
   await expect(picker.locator(".pk-title"), "no heading saying the button's name again").toHaveCount(0);
   await expect(picker).not.toContainText("Image model");
+  // Klein is in Other models; the Characters style setup loads the same three files
+  const characters = defaults.locator('.pk-r[data-preset="characters--klein-official4"]');
+  await expect(characters.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+  await picker.getByRole("button", { name: "Other models" }).click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   await expect(klein).toHaveClass(/\boff\b/);
   await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
@@ -166,27 +182,33 @@ test("the picker groups setups by theme, greys what ComfyUI lacks with the reaso
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
   await expect(klein.getByRole("progressbar")).toBeVisible();
   await expect(klein.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
-  // the setups that load the same files show that download, said once: no "Needs 3 files" and no button to press
-  const portraits = picker.locator('.pk-r[data-preset="flux2-klein-4b-portraits"]');
-  await expect(portraits.getByRole("progressbar")).toBeVisible();
-  await expect(portraits.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
-  await expect(portraits.getByRole("button", { name: /^(Download|Stop)/ })).toHaveCount(0);
   await expect.poll(async () => Number(await klein.getByRole("progressbar").getAttribute("aria-valuenow")), "the bar moves").toBeGreaterThan(0);
   await page.mouse.move(5, 5);
   await shot(page, "image-picker-downloading.png", info);
+  // the setups that load the same files show that download, said once: no "Needs 3 files" and no button to press
+  await picker.getByRole("button", { name: "Defaults" }).click();
+  await expect(characters.getByRole("progressbar")).toBeVisible();
+  await expect(characters.locator(".pk-why")).toContainText(/File 1\/3 · \d+%/);
+  await expect(characters.getByRole("button", { name: /^(Download|Stop)/ })).toHaveCount(0);
+  await picker.getByRole("button", { name: "Other models" }).click();
 
   await klein.getByRole("button", { name: "Stop downloading FLUX.2 Klein 4B" }).click();
   await expect(klein.locator(".pk-why")).toHaveText("Download stopped; the part already downloaded is kept.");
   await expect(klein.getByRole("progressbar")).toHaveCount(0);
-  await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B portraits" })).toBeEnabled();
+  await picker.getByRole("button", { name: "Defaults" }).click();
+  await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B characters" })).toBeEnabled();
+  await picker.getByRole("button", { name: "Other models" }).click();
 
   // again, unheld: it carries on from the part and the row turns ready, with the setups sharing its files
   comfy.slowDownloads(false);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();
   await expect(klein).not.toHaveClass(/\boff\b/, { timeout: 20_000 });
-  // the themes load Klein's three files; compact, Z-Image and MOSS need their own
-  await expect(picker.locator(".pk-r.off")).toHaveCount(3);
-  expect(await picker.locator(".pk-r.off").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
+  await picker.getByRole("button", { name: "Defaults" }).click();
+  await expect(characters).not.toHaveClass(/\boff\b/);
+  await picker.getByRole("button", { name: "Other models" }).click();
+  // compact, Z-Image and MOSS need their own files
+  const other = picker.getByRole("listbox", { name: "Other models" });
+  expect(await other.locator(".pk-r.off").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["z-image-int8", "moss-image", "flux2-klein-4b-compact"]);
   await klein.locator(".pk-select").click();
   await expect(picker).toBeHidden();
   await expect(page.locator("#modelBtn")).toContainText("Klein 4B");
@@ -205,6 +227,8 @@ async function downloadable(page: Page, open: () => Promise<void>) {
   await page.getByRole("button", { name: "Image", exact: true }).click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
+  // the default (General's style setup) is in Defaults; Klein is in Other models
+  await picker.getByRole("button", { name: "Other models" }).click();
   return { picker, klein: picker.locator('.pk-r[data-preset="flux2-klein-4b"]') };
 }
 
@@ -236,10 +260,12 @@ test.describe("across a server restart", () => {
     await stack.restart(500, true);
     await waitReady(page);
     if (!await picker.isVisible()) await page.locator("#modelBtn").click();
+    await picker.getByRole("button", { name: "Other models" }).click();
     await expect(klein.getByRole("progressbar")).toHaveCount(0);
     await expect(klein.getByRole("button", { name: "Stop downloading FLUX.2 Klein 4B" })).toHaveCount(0);
     await expect(klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" })).toBeEnabled();
-    await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B portraits" })).toBeEnabled();
+    await picker.getByRole("button", { name: "Defaults" }).click();
+    await expect(picker.getByRole("button", { name: "Download FLUX.2 Klein 4B characters" })).toBeEnabled();
   });
 });
 
@@ -264,10 +290,10 @@ test.describe("on the phone", () => {
     await page.keyboard.press("Escape");
     await page.locator("#modelBtn").click();
     const picker = page.locator("#imagePicker");
-    const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
-    // Klein is General's default, greyed; the pick (Z-Image) is in Other models, where the picker opens
+    const general = picker.locator('.pk-r[data-preset="general--r2-2a-klein-compact8"]');
+    // General's style setup is greyed in Defaults; the pick (Z-Image) is in Other models, where the picker opens
     await picker.getByRole("button", { name: "Defaults" }).click();
-    await expect(klein.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
+    await expect(general.locator(".pk-why")).toHaveText(/^Needs 3 files · \d+\.\d\sGB$/);
     await page.mouse.move(5, 5);
     await shot(page, "image-picker-phone.png", info);
     await expect(picker.getByRole("button", { name: /^(Download|Stop downloading)/ })).toHaveCount(0);
@@ -304,8 +330,8 @@ test("ComfyUI not answering and never listed: one full-width row says so with Ch
   await expect(blank).toContainText("ComfyUI did not answer.");
   comfy.down(false);
   await check.click();
-  // Klein and the four themes on its files
-  await expect(picker.locator(".pk-r:not(.off)")).toHaveCount(5);
+  // Klein: no GPU here, and the basic-PC style setups need the FP4 encoder Klein's files lack
+  await expect.poll(() => picker.locator(".pk-r:not(.off)").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-preset")))).toEqual(["flux2-klein-4b"]);
   await expect(picker.locator(".pk-blank")).toHaveCount(0);
   await expect(picker.locator(".pk-context")).toBeVisible();
 });

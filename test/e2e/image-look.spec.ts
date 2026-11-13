@@ -8,7 +8,7 @@ import { expect, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: "off" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-// Klein's files on a GPU: on the CPU Image mode has no default
+// Klein's files on a GPU: on the CPU the default needs an encoder they lack
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 
@@ -39,7 +39,11 @@ test("the picker's look: the button names the setup whole, the size list says it
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
   await open(); await waitReady(page);
   await imageOn(page);
+  // Klein picked: a setup that runs at three sizes (each style setup runs at one)
+  const client = connect(page);
+  try { await client.call("settings.update", { imageChoice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }); } finally { client.close(); }
   const button = page.locator("#modelBtn");
+  await expect(button).toContainText("Klein 4B");
   await expect(button).toContainText("1024×1024");
   await button.click();
   const picker = page.locator("#imagePicker");
@@ -66,16 +70,18 @@ test("two Klein setups never look the same on the button, wide or narrow", async
   const button = page.locator("#modelBtn");
   try {
     const tip = () => button.evaluate((b) => b.getAttribute("data-tip") ?? b.getAttribute("data-tipt"));
+    // Klein and the Characters style setup on the same files: each at its own size
     const look = async (preset: string) => {
-      await client.call("settings.update", { imageChoice: { preset, width: 1024, height: 1024 } });
-      await expect.poll(tip).toContain(preset === "flux2-klein-4b" ? "FLUX.2 Klein 4B" : "pixel art");
-      if (preset === "flux2-klein-4b") await expect.poll(tip).not.toContain("pixel art");
+      const klein = preset === "flux2-klein-4b";
+      await client.call("settings.update", { imageChoice: klein ? { preset, width: 1024, height: 1024 } : { preset, width: 768, height: 1024 } });
+      await expect.poll(tip).toContain(klein ? "FLUX.2 Klein 4B" : "characters");
+      if (klein) await expect.poll(tip).not.toContain("characters");
       await page.mouse.move(5, 5);
       return button.screenshot({ animations: "disabled" });
     };
     for (const size of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
       await page.setViewportSize(size);
-      expect((await look("flux2-klein-4b")).equals(await look("flux2-klein-4b-pixel")), `${size.width} px wide`).toBe(false);
+      expect((await look("flux2-klein-4b")).equals(await look("characters--klein-official4")), `${size.width} px wide`).toBe(false);
     }
   } finally { client.close(); }
 });

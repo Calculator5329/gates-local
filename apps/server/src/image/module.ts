@@ -19,7 +19,7 @@ import type { ThreadStore } from "../threads/store.ts";
 import { createComfyClient, type ComfyClientDeps } from "./client.ts";
 import { downloadFile, type DownloadOptions } from "./download.ts";
 import { isLocalComfy } from "./installed.ts";
-import { cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, PRESETS, resolveChoice, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
+import { appPreset, cardBytes, DEFAULT_CHOICE, defaultChoice, describeChoice, isDefaultChoice, listPresets, MIN_ROOM, NO_GPU, resolveChoice, SLOW, smallerFit, tiersFor, workflowPreset, type ComfyLists, type KnownWorkflow, type Preset } from "./presets.ts";
 import { createComfyService, type ComfyService } from "./service.ts";
 
 /**
@@ -252,8 +252,9 @@ export function imageRoom(gpu: GpuStatus | undefined, cpuOnly: boolean | undefin
   return cardBytes(gpu.totalBytes);
 }
 
-/** The picker's words when no setup is a default at this room. */
-const roomWords = (room: number | undefined) => room !== undefined && room < MIN_ROOM ? { noGpu: NO_GPU } : {};
+/** The picker's words: on a GPU too small for any default why, and on the CPU how slow. */
+const roomWords = (room: number | undefined): { noGpu?: string; slow?: string } =>
+  room === 0 ? { slow: SLOW } : room !== undefined && room < MIN_ROOM ? { noGpu: NO_GPU } : {};
 
 export function createImageModule(deps: ImageDeps): ImageModule {
   const log = deps.log ?? ((line: string) => console.error(`[image] ${line}`));
@@ -499,7 +500,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     defaultChoice: chooseDefault,
     runnable() {
       const files = knownFiles();
-      return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras()).ready.length > 0;
+      return files !== undefined && roomWords(lastRoom).noGpu === undefined && listPresets(files, extras(), lastRoom).ready.length > 0;
     },
     async presets() {
       const cfg = config();
@@ -512,7 +513,7 @@ export function createImageModule(deps: ImageDeps): ImageModule {
       const room = await readRoom();
       const last = knownFiles();
       if (last === undefined) return { presets: [], current: currentChoice(), ...roomWords(room) };
-      const { ready, others } = listPresets(last, extras());
+      const { ready, others } = listPresets(last, extras(), room);
       const tiers = tiersFor(room);
       const tag = <T extends { id: string }>(p: T): T => { const t = tiers.find((x) => x.preset === p.id); return t === undefined ? p : { ...p, tier: t.tier }; };
       const download = lastDownload?.ended === true ? undefined : lastDownload;
@@ -774,8 +775,8 @@ export function createImageModule(deps: ImageDeps): ImageModule {
     if (!isLocalComfy(baseUrl) || !await comfy.healthy()) throw imageError("image-download", "Start ComfyUI on this computer first: downloads go into its model folders.");
     await module.presets();
     const last = knownFiles();
-    const row = last && listPresets(last, extras()).others.find((p) => p.id === id);
-    const preset = [...PRESETS, ...extras()].find((p) => p.id === id);
+    const row = last && listPresets(last, extras(), lastRoom).others.find((p) => p.id === id);
+    const preset = appPreset(id) ?? extras().find((p) => p.id === id);
     if (preset === undefined) throw imageError("image-model", `There is no image setup ${id}.`);
     if (row?.why !== undefined) throw imageError("image-model", `${preset.name}: ${row.why}`);
     const folders = await comfy.folders();

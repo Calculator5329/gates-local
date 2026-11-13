@@ -3,8 +3,8 @@
 // the progress frames a test asks for with progress().
 // Its file list is FLUX.2 Klein 4B's (the Fast default) unless withApp(), only() or bare()
 // says otherwise; missing() drops every diffusion model, so no built-in setup can run.
-// gpu(): /system_stats names a CUDA device, so the image fit runs and Image mode has a
-// default (on the CPU it has none). Use it only with the e2e stack, whose server reads the
+// gpu(): /system_stats names a CUDA device, so the image fit runs and Image mode's default runs
+// on Klein's files (on the CPU the default needs the FP4 encoder they lack). Use it only with the e2e stack, whose server reads the
 // fake nvidia-smi (GATES_LOCAL_NVIDIA_SMI), never the real one.
 // withFolders(): it names model folders of its own (under ~/.cache, never a real ComfyUI's) and
 // lists what a download put in their gates-local/ folders. It also serves every Hugging Face

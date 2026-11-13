@@ -27,21 +27,22 @@ const CRAMPED = 280;
 /** The server's tier labels in their order (presets.ts TIERS); one setup can be two tiers' pick. */
 const TIER_ORDER = ["Fast", "Fast and balanced", "Balanced", "Best"];
 /** The server's groups, theme defaults first (presets.ts GROUPS); one it names that is not here goes last. */
-const GROUP_ORDER = ["General", "Portraits and people", "Pixel art", "Game sprites", "Backgrounds", "ComfyUI templates", "Your workflows", "Your models"];
+const GROUP_ORDER = ["General", "Portraits and people", "Characters", "Pixel art", "Game sprites", "Backgrounds", "Icons", "Text and logos", "Painterly and concept art", "ComfyUI templates", "Your workflows", "Your models"];
 /**
- * Defaults' styles, named and ordered as the style bench names them, each with the server group
- * its setup is listed under. A style shows once the app ships a setup for it: Icons, Text and
- * logos and Painterly and concept art have none until the bench measures a winner.
+ * Defaults' styles, named and ordered as the style bench names them, each with the server's key
+ * for it (ImagePreset.style, styles.ts). The server lists one setup per style, the bench's
+ * winner at this machine's level; a style it lists none for has no row.
  */
-const STYLES: readonly { readonly name: string; readonly group: string }[] = [
-  { name: "General", group: "General" },
-  { name: "People", group: "Portraits and people" },
-  { name: "Pixel art", group: "Pixel art" },
-  { name: "Game sprites", group: "Game sprites" },
-  { name: "Backgrounds", group: "Backgrounds" },
-  { name: "Icons", group: "Icons" },
-  { name: "Text and logos", group: "Text and logos" },
-  { name: "Painterly and concept art", group: "Painterly and concept art" },
+const STYLES: readonly { readonly name: string; readonly key: string }[] = [
+  { name: "General", key: "general" },
+  { name: "People", key: "portraits" },
+  { name: "Characters", key: "characters" },
+  { name: "Pixel art", key: "pixel-art" },
+  { name: "Game sprites", key: "sprites" },
+  { name: "Backgrounds", key: "backgrounds" },
+  { name: "Icons", key: "icons" },
+  { name: "Text and logos", key: "text-logos" },
+  { name: "Painterly and concept art", key: "painterly" },
 ];
 
 type Row = ImagePreset & { readonly ready: boolean };
@@ -65,17 +66,11 @@ function grouped(rows: readonly Row[]): { name: string; rows: Row[] }[] {
   return [...by.entries()].toSorted(([a], [b]) => rank(a) - rank(b)).map(([name, list]) => ({ name, rows: order(list) }));
 }
 
-/**
- * Defaults: one row per style the app has a setup for, the one this card's level runs. General's
- * is the Fast tier's, the server's pick for the card; a theme's is its group's first. With no
- * tier (under 4 GB, or the CPU) there is no measured pick for General, so it has no row here and
- * its setups stay in Other models.
- */
+/** Defaults: one row per style the server lists a setup for, the one this machine's level runs. */
 function defaultsOf(rows: readonly Row[]): { style: string; row: Row }[] {
   const out: { style: string; row: Row }[] = [];
   for (const s of STYLES) {
-    const list = grouped(rows.filter((r) => r.group === s.group))[0]?.rows ?? [];
-    const row = s.group === "General" ? list.find((r) => r.tier?.startsWith("Fast") === true) : list[0];
+    const row = rows.find((r) => r.style === s.key);
     if (row !== undefined) out.push({ style: s.name, row });
   }
   return out;
@@ -171,6 +166,8 @@ export function ImagePicker() {
   const [startError, setStartError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const known = presets === undefined || presets === NA ? undefined : presets;
+  // the server's word on this machine: no default on too small a GPU, or how slow the CPU is
+  const note = known?.noGpu ?? known?.slow;
   const listed: Row[] = known === undefined ? [] : [...known.presets.map((p) => ({ ...p, ready: true })), ...(known.others ?? []).map((p) => ({ ...p, ready: false }))];
   const defaults = defaultsOf(listed);
   const isDefault = new Set(defaults.map((d) => d.row.id));
@@ -378,7 +375,7 @@ export function ImagePicker() {
         {error === null ? null : <p className="pk-help pk-choice" role="status">{error}</p>}
       </section>
     </div>
-    {/* under 4 GB or on the CPU: no default, said once; the free figure stays when there is one */}
-    <footer className="pk-bottom"><span className="pk-nogpu" role={known?.noGpu === undefined ? undefined : "status"}>{known?.noGpu}</span><span>{known?.noGpu !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
+    {/* under 4 GB no default, on the CPU how slow, said once; the free figure stays when there is one */}
+    <footer className="pk-bottom"><span className="pk-nogpu" role={note === undefined ? undefined : "status"}>{note}</span><span>{note !== undefined && (cpu || free === undefined) ? null : cpu ? "Runs in system memory" : free === undefined ? "GPU reading unavailable" : `${gb(free)} free`}</span></footer>
   </div>;
 }

@@ -526,6 +526,8 @@ export const ImagePreset = S.Struct({
   group: S.optional(S.String),
   /** The quality tier this setup is for this GPU's free memory ("Fast", "Balanced", "Best", or two joined); absent for the rest. */
   tier: S.optional(S.String),
+  /** Set on a Defaults row: the style it is the default for at this machine's level ("general", "portraits", "pixel-art"…). */
+  style: S.optional(S.String),
   sizes: S.Array(ImageSize),
   /** False: the bytes are an estimate, not a measured peak. */
   measured: S.Boolean,
@@ -568,6 +570,8 @@ export const ImagePresets = S.Struct({
   current: S.Struct({ preset: ImagePreset, width: S.Int, height: S.Int }),
   /** Set when this machine has too little GPU memory for any default (or none): why, in words. An unset send is then refused. */
   noGpu: S.optional(S.String),
+  /** Set when ComfyUI runs on the processor: pictures are made, slowly; how slowly, in words. */
+  slow: S.optional(S.String),
   /** The download running now, as its last image.download push said. */
   download: S.optional(ImageDownload),
 });

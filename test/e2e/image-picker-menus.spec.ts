@@ -16,7 +16,7 @@ test.afterEach(async () => { await comfy.close(); });
 
 /** Another program's MiB that leaves 3072 MiB (3.0 GB) free on the fake card. */
 const THREE_GB_FREE = 16_303 - 4182 - 3072;
-const DEFAULTS = ["General", "People", "Pixel art", "Game sprites", "Backgrounds"];
+const DEFAULTS = ["General", "People", "Characters", "Pixel art", "Game sprites", "Backgrounds", "Icons", "Text and logos", "Painterly and concept art"];
 
 async function openPicker(page: Page, open: () => Promise<void>, otherMib = 0) {
   await stack.reset("models", 0, undefined, "system", undefined, comfy.url);
@@ -34,7 +34,8 @@ async function openPicker(page: Page, open: () => Promise<void>, otherMib = 0) {
   } else await page.getByRole("button", { name: "Image", exact: true }).click();
   await page.locator("#modelBtn").click();
   const picker = page.locator("#imagePicker");
-  await expect(picker.locator(".pk-r").first()).toBeVisible();
+  // the menu open is Defaults, or Other models when the picked setup is there
+  await expect(picker.locator(".pk-r:visible").first()).toBeVisible();
   return picker;
 }
 
@@ -102,25 +103,25 @@ test("(b) a Defaults row is the style's name alone, its setup in the tip and the
   expect(await shownNames(picker)).toEqual(DEFAULTS);
   const defaults = picker.getByRole("listbox", { name: "Defaults" });
   await expect(defaults.locator(".pk-group, .maker-mark, .mark, .pk-variant"), "no group header, mark or tier tag").toHaveCount(0);
-  // this 16 GB card's General is the Fast tier's setup, FLUX.2 Klein 4B, and it is the button's
+  // this 16 GB card's General is the style bench's 16 GB winner, and it is the button's
   const general = defaults.locator(".pk-r").first();
-  await expect(general).toHaveAttribute("data-preset", "flux2-klein-4b");
+  await expect(general).toHaveAttribute("data-preset", "general--r2-2a-klein-compact8");
   await expect(general).toHaveAttribute("aria-selected", "true");
-  await expect(general.locator(".pk-select")).toHaveAttribute("data-tip", "FLUX.2 Klein 4B");
+  await expect(general.locator(".pk-select")).toHaveAttribute("data-tip", "FLUX.2 Klein 4B compact general");
   await general.hover();
-  await expect(page.locator("#tip")).toHaveText("FLUX.2 Klein 4B");
-  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B");
-  const pixel = defaults.locator('.pk-r[data-preset="flux2-klein-4b-pixel"]');
+  await expect(page.locator("#tip")).toHaveText("FLUX.2 Klein 4B compact general");
+  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact general");
+  const pixel = defaults.locator('.pk-r[data-preset="pixel-art--r2-1a-klein-compact8"]');
   await pixel.hover();
-  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B pixel art");
+  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B compact pixel art");
 
-  // Other models: the non-winning General setups, marked and tagged as before; no theme repeats
+  // Other models: the General tier setups, marked and tagged as before; no style repeats
   await picker.getByRole("button", { name: "Other models" }).click();
   const other = picker.getByRole("listbox", { name: "Other models" });
   expect(await other.locator("[role=group]").evaluateAll((gs) => gs.map((g) => [g.getAttribute("aria-label"), ...[...g.querySelectorAll("[data-preset]")].map((r) => r.getAttribute("data-preset"))]))).toEqual([
-    ["General", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
+    ["General", "flux2-klein-4b", "z-image-int8", "moss-image", "flux2-klein-4b-compact"],
   ]);
-  await expect(other.locator(".pk-r .maker-mark")).toHaveCount(3);
+  await expect(other.locator(".pk-r .maker-mark")).toHaveCount(4);
   // a pick from Other models runs that setup, and the picker opens on its menu next time
   await other.locator('.pk-r[data-preset="moss-image"] .pk-select').click();
   await expect(picker).toBeHidden();
@@ -132,7 +133,7 @@ test("(b) a Defaults row is the style's name alone, its setup in the tip and the
 
 // Guards the owner's report (c): every size said the same number and a bar was green that did not fit.
 test("(c) with 3.0 GB free every size of an 8 GB setup is red and says Too big, the number is said once, and the server refuses it the same way", async ({ page, open }, info) => {
-  comfy.withApp();
+  // Klein's files alone: the General style setup needs the FP4 encoder, so the default is Klein, 8 GB at three sizes
   const picker = await openPicker(page, open, THREE_GB_FREE);
   await expect(picker.locator(".pk-bottom")).toContainText(/3\.0\sGB free/);
   const sizes = picker.locator(".pk-context");
@@ -165,8 +166,8 @@ test("(c) with 3.0 GB free every size of an 8 GB setup is red and says Too big, 
 
 // Guards the owner's report (c), the other side: sizes that fit are green.
 test("(c) with room free the same sizes are green and fit", async ({ page, open }) => {
-  comfy.withApp();
-  const picker = await openPicker(page, open);
+  const picker = await openPicker(page, open); // Klein's files alone, as above
+  await expect(picker.locator(".pk-context-head")).toContainText("FLUX.2 Klein 4B");
   const sizes = picker.locator(".pk-context");
   await expect(sizes.locator(".pk-cost.gpu")).toHaveCount(3);
   const green = await paint(page, "--green");
@@ -179,6 +180,7 @@ test("(d) a greyed row's reason that does not fit shows whole in its tip", async
   comfy.bare();
   comfy.withFolders();
   const picker = await openPicker(page, open);
+  await picker.getByRole("button", { name: "Other models" }).click();
   const klein = picker.locator('.pk-r[data-preset="flux2-klein-4b"]');
   comfy.down(true);
   await klein.getByRole("button", { name: "Download FLUX.2 Klein 4B" }).click();

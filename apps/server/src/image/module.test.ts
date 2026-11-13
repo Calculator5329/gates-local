@@ -10,7 +10,8 @@ import { imageFitEdges } from "@gates-local/contracts/testing";
 import { startFakeOllama } from "../../../../test/fake-ollama/fake-ollama.ts";
 import { createModelLoader } from "../runtime/load.ts";
 import { listLoaded } from "../runtime/models.ts";
-import { DEFAULT_CHOICE, NO_GPU, PRESETS, resolveChoice } from "./presets.ts";
+import { DEFAULT_CHOICE, NO_GPU, PRESETS, resolveChoice, SLOW } from "./presets.ts";
+import { cellsFor } from "./styles.ts";
 import { comfyInfo, KLEIN_COMPACT_FILES, KLEIN_FILES, MOSS_FILES, SDXL_FILES, ZIMAGE_FILES } from "../../test/comfy/info.ts";
 import { createGpuLease } from "../gpu/lease.ts";
 import { openThreadStore } from "../threads/store.ts";
@@ -517,7 +518,7 @@ describe("image lifecycle (injected fake Comfy HTTP/WebSocket and Ollama)", () =
       const f = await fixture({ requiredBytes: undefined, imageMayUnload: () => [],
         readGpu: async () => ({ freeBytes, holders: "steam", tenants: [{ pid: 9, label: "steam", role: "occupant", usedBytes: 5 * gib }] }) });
       f.files({ flux: true }); f.choose(choice);
-      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual(PRESETS.map((p) => p.id));
+      expect((await f.module.presets()).presets.map((p) => p.id), "the list the picker shows").toEqual([...PRESETS, ...cellsFor("16")].map((p) => p.id));
       const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "error", errorKind: "wont-fit" });
       return f.events.at(-1)?.message;
@@ -1027,19 +1028,24 @@ async function run(f: Awaited<ReturnType<typeof fixture>>) {
 
 describe("image presets (fake ComfyUI file lists)", () => {
   const ids = presetIds;
+  // a 16 GB card's style cells: the MOSS-Image ones run on the fixture's MOSS files, the rest need Klein's
+  const cells16 = cellsFor("16").map((c) => c.id);
+  const moss16 = cellsFor("16").filter((c) => c.family === "moss").map((c) => c.id);
+  const general16 = { preset: "general--r2-2a-klein-compact8", width: 896, height: 896 };
 
   it("each preset's button name starts with a letter no other preset's does, so no cut makes two alike", async () => {
     const f = await fixture();
     f.files({ flux: true });
     const shorts = (await f.module.presets()).presets.map((p) => p.short ?? "");
-    expect(shorts).toEqual(["Klein 4B", "Compact", "Z-Image", "MOSS", "Faces", "Retro pixel", "Sprites", "Backgrounds"]);
-    expect(new Set(shorts.map((s) => s.slice(0, 1).toLowerCase())).size).toBe(PRESETS.length);
+    expect(shorts).toEqual(["Klein 4B", "Compact", "Z-Image", "MOSS", "General", "Faces", "Heroes", "Retro pixel", "Sprites", "Backgrounds", "Icons", "Text", "Painterly"]);
+    expect(new Set(shorts.map((s) => s.slice(0, 1).toLowerCase())).size).toBe(shorts.length);
   });
 
   it("lists only the presets whose every file ComfyUI reports, with estimated memory per size", async () => {
     const f = await fixture();
     const listed = await f.module.presets();
-    expect(listed.presets.map((p) => p.id)).toEqual(["z-image-int8", "moss-image"]);
+    expect(listed.presets.map((p) => p.id)).toEqual(["z-image-int8", "moss-image", ...moss16]);
+    expect(moss16).toEqual(["portraits--moss-official25", "sprites--r2-1a-moss-official25", "backgrounds--r2-1b-moss-official25", "icons--r2-2a-moss-official25", "text-logos--moss-official25", "painterly--r2-2a-moss-official25"]);
     expect(listed.presets[1]).toMatchObject({ name: "MOSS-Image", family: "moss", measured: false });
     expect(listed.presets[1]!.sizes.map((s) => `${s.width}x${s.height}`)).toEqual(["1024x1024", "1024x768", "768x1024"]);
     expect(listed.presets[1]!.sizes[0]!.bytes).toBe(4 * 1024 ** 3);
@@ -1048,11 +1054,12 @@ describe("image presets (fake ComfyUI file lists)", () => {
     f.configure({ missingModel: true });
     expect(await ids(f)).toEqual([]);
     f.configure({ missingModel: false }); f.files({ noMoss: false, flux: true });
-    // the General group's tier setups, then the themes
-    expect(await ids(f)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image", "flux2-klein-4b-portraits", "flux2-klein-4b-pixel", "flux2-klein-4b-sprites", "flux2-klein-4b-backgrounds"]);
+    // the General group's tier setups, then the card level's style cells in the Defaults menu's order
+    expect(await ids(f)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image", ...cells16]);
+    expect(cells16.map((id) => id.split("--")[0])).toEqual(["general", "portraits", "characters", "pixel-art", "sprites", "backgrounds", "icons", "text-logos", "painterly"]);
     // Off is off: nothing is read from ComfyUI.
     f.configure({ enabled: false }); f.calls.length = 0;
-    expect(await f.module.presets()).toMatchObject({ presets: [], current: { preset: { id: "flux2-klein-4b" } } });
+    expect(await f.module.presets()).toMatchObject({ presets: [], current: { preset: { id: general16.preset } } });
     expect(f.calls).toEqual([]);
   });
 
@@ -1070,7 +1077,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
     expect((await f.module.presets()).current).toMatchObject({ preset: { id: "z-image-int8" }, width: 1024, height: 1024 });
     const fresh = await fixture();
     fresh.configure({ answering: false });
-    expect(await fresh.module.presets()).toMatchObject({ presets: [], current: { preset: { name: "FLUX.2 Klein 4B" }, width: 1024, height: 1024 } });
+    expect(await fresh.module.presets()).toMatchObject({ presets: [], current: { preset: { id: general16.preset, name: "FLUX.2 Klein 4B compact general" }, width: 896, height: 896 } });
   });
 
   it("keeps ComfyUI's last file list while it is not running, also after a restart, and never starts it to read one", async () => {
@@ -1127,7 +1134,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       const f = await fixture();
       f.workflows(routes);
       const first = await f.module.presets();
-      expect(first.presets.map((p) => p.id)).toEqual(["z-image-int8", "moss-image", "saved:mine.json"]);
+      expect(first.presets.map((p) => p.id)).toEqual(["z-image-int8", "moss-image", ...moss16, "saved:mine.json"]);
       expect(first.presets.at(-1)).toMatchObject({ name: "mine", group: "Your workflows", family: "moss", sizes: [{ width: 1024, height: 1024 }] });
       expect(first.others?.at(-1)).toMatchObject({ id: "template:image_sdxl_simple", group: "ComfyUI templates", needs: { files: ["sd_xl_base_1.0.safetensors"] } });
       f.configure({ answering: false });
@@ -1369,7 +1376,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
   it("each thread keeps the choice it sent with, a default once it has made a picture; one with none follows Settings; a retry changes nothing", async () => {
     const f = await fixture(); f.files({ flux: true });
     // pixel art is no default: a send that names it is a pick
-    const pixel = { preset: "flux2-klein-4b-pixel", width: 768, height: 768 }, klein = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    const pixel = { preset: "flux2-klein-4b-pixel", width: 768, height: 768 }, klein = general16;
     const a = f.store.createThread(), b = f.store.createThread(), c = f.store.createThread();
     const send = async (params: Params<"image.generate">) => { const job = await f.module.generate(params); await f.module.wait(job.jobId); return f.events.at(-1)!; };
     // A sends pixel art: A keeps it, and the thread list hears at once (not only when the image is done)
@@ -1401,7 +1408,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
 
   it("A sends the default without a pick, then B picks: A's next send runs what A ran", async () => {
     const f = await fixture(); f.files({ flux: true });
-    const moss = { preset: "moss-image", width: 1024, height: 1024 }, klein = { preset: "flux2-klein-4b", width: 1024, height: 1024 };
+    const moss = { preset: "moss-image", width: 1024, height: 1024 }, klein = general16;
     const a = f.store.createThread(), b = f.store.createThread();
     const send = async (params: Params<"image.generate">) => { const job = await f.module.generate(params); await f.module.wait(job.jobId); return f.events.at(-1)!; };
     // the composer sends the default it shows, with nothing picked anywhere
@@ -1426,11 +1433,11 @@ describe("image presets (fake ComfyUI file lists)", () => {
       const f = await fixture(); f.files({ flux: true });
       const a = f.store.createThread();
       const release = await f.lease.acquire("chat");
-      const job = await f.module.generate({ prompt: "a", threadId: a.id, choice: klein });
+      const job = await f.module.generate({ prompt: "a", threadId: a.id, choice: general16 });
       // the user picks MOSS in A while the first picture waits: the picker saves A's choice and Settings
       f.store.setImageChoice(a.id, moss); f.choose(moss);
       release(); await f.module.wait(job.jobId);
-      expect(f.events.at(-1)).toMatchObject({ state: "done", choice: klein });
+      expect(f.events.at(-1)).toMatchObject({ state: "done", choice: general16 });
       expect(f.store.imageChoiceOf(a.id), "A's pick kept").toEqual(moss);
     });
 
@@ -1521,11 +1528,12 @@ describe("image presets (fake ComfyUI file lists)", () => {
   });
 
   describe("an unset choice runs the first default ComfyUI has every file for", () => {
-    it("all files present: FLUX.2 Klein 4B at 1024x1024", async () => {
+    it("all files present: the card level's General cell, at 896x896 on 16 GB", async () => {
       const f = await fixture(); f.files({ flux: true });
       const { last } = await run(f);
-      expect(last).toMatchObject({ state: "done", choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } });
+      expect(last).toMatchObject({ state: "done", choice: general16 });
       expect(f.graphs[0]!["1"]).toMatchObject({ class_type: "UNETLoader" });
+      expect(f.graphs[0]!["2"]).toMatchObject({ class_type: "CLIPLoader", inputs: { clip_name: "qwen_3_4b_fp4_flux2.safetensors" } });
     });
 
     it("Z-Image's files and no Klein: Z-Image int8 at 1024x1024, and nothing names Klein", async () => {
@@ -1542,7 +1550,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       f.configure({ missingModel: true }); // no diffusion model listed: neither Z-Image's nor MOSS's
       expect(await presetIds(f)).toEqual([]);
       f.configure({ missingModel: false });
-      expect(await presetIds(f)).toEqual(["z-image-int8", "moss-image"]);
+      expect(await presetIds(f)).toEqual(["z-image-int8", "moss-image", ...moss16]);
       f.files({ noMoss: true });
       expect(await presetIds(f)).toEqual(["z-image-int8"]);
     });
@@ -1558,7 +1566,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
 
     it("a default whose files went missing since the last read is passed over in the job, without a word", async () => {
       const f = await fixture(); f.files({ flux: true });
-      expect((await f.module.presets()).current).toMatchObject({ preset: { id: "flux2-klein-4b" } });
+      expect((await f.module.presets()).current).toMatchObject({ preset: { id: general16.preset } });
       f.files({ flux: false });
       const { last, said } = await run(f);
       expect(last).toMatchObject({ state: "done", choice: { preset: "z-image-int8", width: 1024, height: 1024 } });
@@ -1569,7 +1577,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       const f = await fixture(); f.files({ flux: true });
       await f.module.presets();
       f.files({ flux: false });
-      const job = await f.module.generate({ prompt: "a tree", choice: { preset: "flux2-klein-4b", width: 1024, height: 1024 } }); await f.module.wait(job.jobId);
+      const job = await f.module.generate({ prompt: "a tree", choice: general16 }); await f.module.wait(job.jobId);
       expect(f.events.at(-1)).toMatchObject({ state: "done", choice: { preset: "z-image-int8", width: 1024, height: 1024 } });
       expect(f.events.map((e) => e.message ?? "").join(" ")).not.toMatch(/flux|klein/i);
     });
@@ -1592,7 +1600,7 @@ describe("image presets (fake ComfyUI file lists)", () => {
       const f = await fixture(); const thread = f.store.createThread();
       f.configure({ missingModel: true });
       const failed = await f.module.generate({ prompt: "a tree", threadId: thread.id }); await f.module.wait(failed.jobId);
-      expect(f.events.at(-1)).toMatchObject({ state: "error", choice: { preset: "flux2-klein-4b" } });
+      expect(f.events.at(-1)).toMatchObject({ state: "error", choice: { preset: general16.preset } });
       f.configure({ missingModel: false });
       const retry = await f.module.generate({ prompt: "ignored", threadId: thread.id, retryOf: failed.jobId }); await f.module.wait(retry.jobId);
       expect(f.events.at(-1)).toMatchObject({ jobId: retry.jobId, state: "done", choice: { preset: "z-image-int8", width: 1024, height: 1024 } });
@@ -1638,7 +1646,7 @@ it("serves only token-authorized PNGs inside images, refusing traversal and syml
 
 const nvidia = (total: number, free = total, occupants: GpuStatus["occupants"] = []): GpuStatus => ({ vendor: "nvidia", totalBytes: total, freeBytes: free, occupants, systemMemoryAvailableBytes: 0, measuredAt: 0 });
 
-describe("the card Image mode is judged by: each tier's row by its memory, and no default under 4 GB or on the CPU", () => {
+describe("the card Image mode is judged by: each tier's row by its memory, no default under 4 GB, the CPU cell alone on the CPU", () => {
   const gib = 1024 ** 3, mib = 1024 ** 2;
   const none: GpuStatus = { vendor: "none", occupants: [], systemMemoryAvailableBytes: 0, measuredAt: 0 };
 
@@ -1658,10 +1666,10 @@ describe("the card Image mode is judged by: each tier's row by its memory, and n
   });
 
   it.each([
-    [16, "flux2-klein-4b", [["flux2-klein-4b", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
-    [8, "flux2-klein-4b", [["flux2-klein-4b", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
-    [6, "flux2-klein-4b-compact", [["flux2-klein-4b-compact", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
-    [4, "flux2-klein-4b-compact", [["flux2-klein-4b-compact", "Fast and balanced"], ["moss-image", "Best"]]],
+    [16, "general--r2-2a-klein-compact8", [["flux2-klein-4b", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
+    [8, "general--fit-8b-klein-compact8", [["flux2-klein-4b", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
+    [6, "general--fit-8b-klein-compact8", [["flux2-klein-4b-compact", "Fast"], ["z-image-int8", "Balanced"], ["moss-image", "Best"]]],
+    [4, "general--fit-4a-klein-compact8", [["flux2-klein-4b-compact", "Fast and balanced"], ["moss-image", "Best"]]],
   ])("a %i GB card with 1 GiB free: the default is %s, and the tier rows are these", async (card, current, rows) => {
     // what is free now never moves the tier: the job's own fit check judges the moment it runs
     const f = await fixture({ gpuStatus: async () => nvidia(card * gib, gib) }); f.files({ flux: true });
@@ -1671,8 +1679,22 @@ describe("the card Image mode is judged by: each tier's row by its memory, and n
     expect(listed.noGpu).toBeUndefined();
   });
 
+  it("ComfyUI on the CPU: no tier row, the basic-PC cells, the list says it is slow, and a send with nothing picked runs the CPU General cell", async () => {
+    const f = await fixture({ gpuStatus: async () => none }); f.files({ flux: true });
+    f.configure({ cpu: true });
+    const listed = await f.module.presets();
+    expect(listed.noGpu).toBeUndefined();
+    expect(listed.slow).toBe(SLOW);
+    expect([...listed.presets, ...listed.others ?? []].filter((p) => p.tier !== undefined)).toEqual([]);
+    expect(listed.presets.map((p) => p.id)).toEqual(["flux2-klein-4b", "flux2-klein-4b-compact", "z-image-int8", "moss-image", ...cellsFor("cpu").map((c) => c.id)]);
+    const cpuGeneral = { preset: "general--cpu-klein-fp4-768-2", width: 768, height: 768 };
+    expect(listed.current).toMatchObject({ preset: { id: cpuGeneral.preset }, width: 768, height: 768 });
+    const { jobId } = await f.module.generate({ prompt: "a tree" }); await f.module.wait(jobId);
+    expect(f.events.at(-1)).toMatchObject({ state: "done", choice: cpuGeneral });
+    expect(f.graphs.at(-1)!["1"]).toMatchObject({ class_type: "UNETLoader", inputs: { weight_dtype: "fp8_e4m3fn" } });
+  });
+
   it.each([
-    ["ComfyUI on the CPU", none, true],
     ["a 3 GB card", nvidia(3 * gib), false],
   ])("%s: no tier row, the list says why, and a send with nothing picked is refused with that reason", async (_, gpu, cpu) => {
     const f = await fixture({ gpuStatus: async () => gpu }); f.files({ flux: true });

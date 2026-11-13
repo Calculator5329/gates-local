@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13: Every image style has a default, also without a GPU
+
+- The image picker's Defaults menu has a setup for nine styles: General,
+  People, Characters, Pixel art, Game sprites, Backgrounds, Icons, Text and
+  logos, and Painterly and concept art. Each one is the style test's
+  provisional winner for your card's memory (16, 12, 8, 6 or 4 GB). Icons,
+  Text and logos, Painterly and Characters are new.
+- With nothing picked, a picture uses the General setup for your card.
+  If ComfyUI lacks its files, it falls back to the first setup it can
+  run, as before.
+- When ComfyUI runs on the CPU, Image mode works: the Defaults are the
+  basic-PC setups, and the picker says a picture takes 2 to 4 minutes.
+  Under 4 GB on a GPU there is still no default.
+- The older Faces, Retro pixel, Sprites and Backgrounds setups are no
+  longer listed. A pick saved earlier, or a retry of an old card, still
+  runs them.
 
 ## 2026-11-13: Usage has an X in its corner and no bar under a model's name
 

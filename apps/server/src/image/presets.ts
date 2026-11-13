@@ -5,10 +5,11 @@
 // ComfyUI's /object_info lists every node class it uses and names every file it loads; one that
 // is not is still listed, with the reason.
 //
-// The app's own setups are the API-format files in setups/ (origin in setups/README.md), one or
-// more per theme; a theme's prompt wrapping is written around the person's words. The setups
-// ComfyUI has (its templates and the person's saved workflows, sources.ts) come after them, and
-// then the model files already in its folders (installed.ts).
+// The app's own setups are the API-format files in setups/ (origin in setups/README.md): the four
+// models of Other models (PRESETS), and the Defaults menu's style cells (styles.ts), the style
+// bench's winner for each style at this machine's level, whose words go before the person's. The
+// setups ComfyUI has (its templates and the person's saved workflows, sources.ts) come after them,
+// and then the model files already in its folders (installed.ts).
 import type { ImageChoice, ImagePreset, Settings } from "@gates-local/contracts";
 import * as Option from "effect/Option";
 import * as S from "effect/Schema";
@@ -21,6 +22,7 @@ import kleinPixel from "./setups/flux2-klein-4b-pixel.json" with { type: "json" 
 import moss from "./setups/moss-image.json" with { type: "json" };
 import zImage from "./setups/z-image-turbo-int8.json" with { type: "json" };
 import fileSources from "./setups/files.json" with { type: "json" };
+import { cellsFor, levelOf, STYLE_CELLS, type StyleCell } from "./styles.ts";
 
 export interface Preset {
   readonly id: string;
@@ -51,7 +53,7 @@ export interface Preset {
 export interface ModelSource { readonly directory?: string; readonly url?: string; readonly bytes?: number; readonly sha256?: string }
 
 /** The picker's groups, theme defaults first. */
-export const GROUPS = { general: "General", portraits: "Portraits and people", pixel: "Pixel art", sprites: "Game sprites", backgrounds: "Backgrounds", templates: "ComfyUI templates", saved: "Your workflows", installed: "Your models" } as const;
+export const GROUPS = { general: "General", portraits: "Portraits and people", characters: "Characters", pixel: "Pixel art", sprites: "Game sprites", backgrounds: "Backgrounds", icons: "Icons", text: "Text and logos", painterly: "Painterly and concept art", templates: "ComfyUI templates", saved: "Your workflows", installed: "Your models" } as const;
 
 /** The files the app's own setups load: where each is downloaded from, its size and sha256 (setups/files.json). */
 const APP_FILES: Readonly<Record<string, ModelSource>> = fileSources;
@@ -68,18 +70,21 @@ const kleinSizes = sized(8);
 const square = [[1024, 1024], [1024, 768], [768, 1024]] as const;
 const klein4b = { family: "flux", sources: APP_FILES, measured: false } as const;
 
-/**
- * The picker's rows: the General group's tier setups (TIERS) first, then the themes, which are
- * never a default.
- */
+/** Other models' rows from the app: the General group's tier setups (TIERS). */
 export const PRESETS: readonly Preset[] = [
   { ...klein4b, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", short: "Klein 4B", group: GROUPS.general, workflow: klein, sizes: kleinSizes(square) },
   // The same model with the FP4 text encoder and 12 steps (the matrix's compact-12): for a card with under 8 GiB free.
   { ...klein4b, id: "flux2-klein-4b-compact", name: "FLUX.2 Klein 4B compact", short: "Compact", group: GROUPS.general, workflow: kleinCompact, sizes: sized(4)(square) },
   { id: "z-image-int8", name: "Z-Image Turbo int8", short: "Z-Image", family: "zimage", group: GROUPS.general, workflow: zImage, sizes: sized(6)(square), sources: APP_FILES, measured: false },
   { id: "moss-image", name: "MOSS-Image", short: "MOSS", family: "moss", group: GROUPS.general, workflow: moss, sizes: sized(4)(square), sources: APP_FILES, measured: false },
-  // The themes, on the model the 16 GB level uses for all five (the image-themes research,
-  // 2026-11-12): its prompt wrapping and sizes; no quality or timing claim is measured.
+];
+
+/**
+ * The themes before the style bench (the image-themes research, 2026-11-12), on Klein with its
+ * prompt wrapping and sizes. No longer listed: the Defaults menu's style cells took their place
+ * (owner ruling 2026-11-13). They still resolve, so a saved pick and a card's Retry still run.
+ */
+export const RETIRED: readonly Preset[] = [
   {
     ...klein4b, id: "flux2-klein-4b-portraits", name: "FLUX.2 Klein 4B portraits", short: "Faces", group: GROUPS.portraits, workflow: klein,
     wrap: { prefix: "Natural editorial portrait photograph. ", suffix: " Soft window light, realistic skin texture, clear eyes, both hands visible with relaxed separated fingers, simple uncluttered background." },
@@ -106,11 +111,11 @@ export const PRESETS: readonly Preset[] = [
 ];
 
 /**
- * What an unset Settings choice runs: the first of these that fits the GPU room and is ready
- * (defaultChoice). Klein first, its compact setup standing in below 8 GiB (the Fast tier's own
- * swap), then Z-Image Turbo int8, then MOSS-Image. A saved choice is never replaced by one of
- * these. Its own rule, not "the first row", so a row added to PRESETS never becomes the default by
- * its place.
+ * What an unset Settings choice runs when the General style's cell for the card is not ready
+ * (defaultChoice): the first of these that fits the GPU room and is ready. Klein first, its compact
+ * setup standing in below 8 GiB (the Fast tier's own swap), then Z-Image Turbo int8, then
+ * MOSS-Image. A saved choice is never replaced by one of these. Its own rule, not "the first
+ * row", so a row added to PRESETS never becomes the default by its place.
  */
 export const DEFAULT_ORDER: readonly ImageChoice[] = [
   { preset: "flux2-klein-4b", width: 1024, height: 1024 },
@@ -119,9 +124,11 @@ export const DEFAULT_ORDER: readonly ImageChoice[] = [
   { preset: "moss-image", width: 1024, height: 1024 },
 ];
 
-/** On a card smaller than this no setup of the app's runs: there is no default and the picker says so. */
+/** On a card smaller than this no setup of the app's runs: there is no default and the picker says so. On the CPU there is one. */
 export const MIN_ROOM = 4 * GIB;
 export const NO_GPU = "Image mode needs a GPU with 4 GB.";
+/** The picker's line when ComfyUI runs on the processor: the basic-PC bench's times were 100 to 235 seconds a picture. */
+export const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
 
 /**
  * A card's size from nvidia-smi's total, to the nearest GB as cards are sold: 8188 MiB is an 8 GB
@@ -162,19 +169,29 @@ export function tiersFor(room: number | undefined): { preset: string; tier: stri
   return out.map((o) => ({ preset: o.preset, tier: o.names.join(" and ") }));
 }
 
-/** Absent, or one of DEFAULT_ORDER. */
-export const isDefaultChoice = (c: ImageChoice | undefined): boolean =>
-  c === undefined || DEFAULT_ORDER.some((d) => d.preset === c.preset && d.width === c.width && d.height === c.height);
+/** A cell's one size as a choice. */
+const cellChoice = (c: StyleCell): ImageChoice => ({ preset: c.id, width: c.sizes[0]!.width, height: c.sizes[0]!.height });
+/** The General style's cell at a level: what an unset choice runs there when it is ready. */
+const generalCell = (level: NonNullable<ReturnType<typeof levelOf>>): StyleCell => cellsFor(level).find((c) => c.style === "general")!;
 
-/** An unset choice before ComfyUI's lists have been read: the first of DEFAULT_ORDER. */
-export const DEFAULT_CHOICE: ImageChoice = DEFAULT_ORDER[0]!;
+/** Absent, one of DEFAULT_ORDER, or a General cell of any level. */
+export const isDefaultChoice = (c: ImageChoice | undefined): boolean =>
+  c === undefined || [...DEFAULT_ORDER, ...STYLE_CELLS.filter((s) => s.style === "general").map(cellChoice)].some((d) => d.preset === c.preset && d.width === c.width && d.height === c.height);
+
+/** An unset choice before ComfyUI's lists or the card have been read: the General cell of the top level. */
+export const DEFAULT_CHOICE: ImageChoice = cellChoice(generalCell("16"));
+
+/** Every setup of the app's that a choice can name: listed or not. */
+const APP_PRESETS: readonly Preset[] = [...PRESETS, ...STYLE_CELLS, ...RETIRED];
+/** One of the app's own setups by id, listed at this level or not. */
+export const appPreset = (id: string): Preset | undefined => APP_PRESETS.find((p) => p.id === id);
 
 /**
  * The preset and size a choice names, from the app's own and `extra` (the workflows ComfyUI had,
  * workflowPresets). An unknown preset or a size it does not run at is refused, never swapped.
  */
 export function resolveChoice(choice: ImageChoice, extra: readonly Preset[] = []): { preset: Preset; size: Preset["sizes"][number] } {
-  const preset = PRESETS.find((p) => p.id === choice.preset) ?? extra.find((p) => p.id === choice.preset);
+  const preset = appPreset(choice.preset) ?? extra.find((p) => p.id === choice.preset);
   if (preset === undefined) throw Object.assign(new Error(`There is no image preset ${choice.preset}. Pick an image model in the composer.`), { code: "image-model" });
   const size = preset.sizes.find((s) => s.width === choice.width && s.height === choice.height);
   if (size === undefined) throw Object.assign(new Error(`${preset.name} does not run at ${choice.width} x ${choice.height}. Pick one of its sizes.`), { code: "image-model" });
@@ -249,7 +266,10 @@ function judge(preset: Preset, lists: ComfyLists): { graph: ApiGraph; missing: G
   return { graph, missing: graphFiles(graph).filter((f) => findFile(lists.files, f) === undefined) };
 }
 
-const row = (p: Preset): ImagePreset => ({ id: p.id, name: p.name, short: p.short, family: p.family, group: p.group, measured: p.measured, sizes: p.sizes.map((s) => ({ ...s })) });
+const row = (p: Preset): ImagePreset => ({
+  id: p.id, name: p.name, short: p.short, family: p.family, group: p.group, measured: p.measured, sizes: p.sizes.map((s) => ({ ...s })),
+  ...(p as Partial<StyleCell>).style === undefined ? {} : { style: (p as StyleCell).style },
+});
 
 /** A Hugging Face address and a folder kind: what image.download needs to fetch a file. */
 const fetchable = (source: ModelSource | undefined): boolean => {
@@ -268,10 +288,13 @@ function needs(preset: Preset, missing: readonly GraphFile[]): NonNullable<Image
   };
 }
 
-/** Every setup as the picker lists it: the ready ones, and the rest with what stops them. */
-export function listPresets(lists: ComfyLists, extra: readonly Preset[] = []): { ready: ImagePreset[]; others: ImagePreset[] } {
+/**
+ * Every setup as the picker lists it: the ready ones, and the rest with what stops them. The style
+ * cells are the ones of the level a card of `room` bytes runs at (levelOf; unknown: the top level).
+ */
+export function listPresets(lists: ComfyLists, extra: readonly Preset[] = [], room?: number): { ready: ImagePreset[]; others: ImagePreset[] } {
   const ready: ImagePreset[] = [], others: ImagePreset[] = [];
-  for (const p of [...PRESETS, ...extra]) {
+  for (const p of [...PRESETS, ...cellsFor(levelOf(room)), ...extra]) {
     try {
       const { missing } = judge(p, lists);
       if (missing.length === 0) ready.push(row(p));
@@ -285,7 +308,7 @@ export function listPresets(lists: ComfyLists, extra: readonly Preset[] = []): {
 }
 
 /** The presets ComfyUI has every class and file for, as the picker shows them. */
-export const availablePresets = (lists: ComfyLists, extra: readonly Preset[] = []): ImagePreset[] => listPresets(lists, extra).ready;
+export const availablePresets = (lists: ComfyLists, extra: readonly Preset[] = [], room?: number): ImagePreset[] => listPresets(lists, extra, room).ready;
 
 /**
  * The graph a job sends: the setup's workflow with the prompt, size and seed written in and each
@@ -362,17 +385,19 @@ export function imageToolChoice(settings: Pick<Settings, "imageGen" | "imageTool
 }
 
 /**
- * The default for an unset choice, for a card of `room` bytes (cardBytes; undefined: unknown, so any):
- * undefined below MIN_ROOM (no CPU default; NO_GPU says why). Else the first of DEFAULT_ORDER that
- * fits and is ready, else the first that fits even when not ready, so the send says which files
- * are missing (and the picker offers the download) rather than running some other row. Only
- * DEFAULT_ORDER's setups are ever a default, never a template or a person's own.
+ * The default for an unset choice, for a card of `room` bytes (cardBytes; undefined: unknown, so
+ * the top level; 0: the CPU): undefined on a GPU under MIN_ROOM (NO_GPU says why). Else the General
+ * style's cell for the card's level when it is ready, else the first of DEFAULT_ORDER that fits
+ * and is ready, else the General cell even when not ready, so the send says which files are
+ * missing (and the picker offers the download) rather than running some other row. On the CPU
+ * only the General cell is a default. Never a template or a person's own.
  */
 export function defaultChoice(lists: ComfyLists | undefined, extra: readonly Preset[] = [], room?: number): ImageChoice | undefined {
-  if (room !== undefined && room < MIN_ROOM) return undefined;
-  const fitting = DEFAULT_ORDER.filter((c) => fits(firstBytes(c.preset), room));
+  const level = levelOf(room);
+  if (level === undefined) return undefined;
+  const fitting = [cellChoice(generalCell(level)), ...level === "cpu" ? [] : DEFAULT_ORDER.filter((c) => fits(firstBytes(c.preset), room))];
   if (lists === undefined) return fitting[0];
-  const available = availablePresets(lists, extra);
+  const available = availablePresets(lists, extra, room);
   return fitting.find((c) => available.some((p) => p.id === c.preset)) ?? fitting[0];
 }
 

@@ -39,7 +39,18 @@ prompt, seed and size written in the files are placeholders.
   `area`) and ImageQuantize (32 colours, no dither) between the decode and the save, for the
   pixel-art and game-sprite themes. The theme rows themselves (prompt wrapping and sizes) are in
   `presets.ts`, taken from the image-themes research of 2026-11-12, whose 16 GB level uses Klein
-  4B for all five themes. None of its quality, timing or memory figures is measured.
+  4B for all five themes. None of its quality, timing or memory figures is measured. The themes
+  are retired (no longer listed) but still run for a saved pick or a retry.
+- `flux2-klein-4b-style.json`: the Klein graph as the style bench of 2026-11-13 ran it, the base
+  of the Defaults menu's Klein cells (`styles.ts`): the negative is the positive's conditioning
+  zeroed (`ConditioningZeroOut`) instead of an empty prompt, and the text encoder loads on the
+  default device. `styles.ts` tunes it per cell: the FP4 encoder or the full one, the weights in
+  fp8 for the CPU cells, the steps, the guidance, the size, and the bench's resize and colour
+  cut after the decode where its graph had them. The MOSS-Image cells tune `moss-image.json` the
+  same way (steps and guidance). Each cell's graph equals its bench finalist's, prompt, seed and
+  output prefix aside, except the CPU text-and-logos cell's 4 steps (the bench coordinator's
+  correction). The bench's prompt prefixes are in `styles.ts`; the CPU cells run the person's
+  words alone, as the basic-PC finalists did.
 - `files.json`: where each file these setups load is downloaded from (a pinned Hugging Face
   revision), its size in bytes and its sha256, from the GPU runs of 2026-11-12 and the
   image-themes research. Its `licence` field is what the model card states; the licence texts
@@ -54,4 +65,6 @@ not part of this repository and come under their own licenses.
 The memory each setup needs is in `presets.ts`: 8 GiB for Klein and its
 themes, 6 GiB for Z-Image int8, 4 GiB for compact and MOSS. They are the tier
 thresholds the owner set (2026-11-13), used as caps; none is a measured peak or
-a hard GPU reservation, so every preset says `measured: false`.
+a hard GPU reservation, so every preset says `measured: false`. The style cells
+take their model's figure the same way: 4 GiB for Klein with the FP4 encoder
+and for MOSS-Image, 8 GiB for Klein with the full encoder.

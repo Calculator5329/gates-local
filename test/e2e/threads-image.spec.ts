@@ -5,7 +5,7 @@ import { INSTALLED, SMALL, configure, contextSize, finished, pick, release, shot
 
 test.use({ installed: INSTALLED, video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", screenshot: "only-on-failure" });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-// a GPU: the image tool's job has no default on the CPU
+// a GPU: on the CPU the image tool's default needs an encoder Klein's files lack
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 

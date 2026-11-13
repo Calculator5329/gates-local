@@ -6,7 +6,7 @@ import { expect, sendMessage, stack, test, waitReady } from "./fixtures.ts";
 
 test.use({ video: process.env["GL_E2E_RECORD"] || process.env["GL_FLICKER_MEASURE"] ? "on" : "off", allowedErrors: [/WebSocket connection to .* failed/] });
 let comfy: Awaited<ReturnType<typeof fakeComfy>>;
-// a GPU: a send with nothing picked has no default on the CPU
+// a GPU: on the CPU a send with nothing picked needs an encoder Klein's files lack
 test.beforeEach(async () => { comfy = await fakeComfy(); comfy.gpu(); });
 test.afterEach(async () => { await comfy.close(); });
 

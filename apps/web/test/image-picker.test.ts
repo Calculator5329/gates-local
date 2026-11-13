@@ -167,34 +167,37 @@ it("the default ComfyUI lists is named, as the first row", () => {
 const KLEIN: ImagePreset = { ...PIXEL, id: "flux2-klein-4b", name: "FLUX.2 Klein 4B", group: "General" };
 const ZIMAGE: ImagePreset = { ...MOSS, id: "z-image-int8", name: "Z-Image Turbo int8", family: "zimage", group: "General" };
 
-it("Defaults runs this GPU's Fast tier for General and names it by the style alone; Other models shows the other tier rows first, in tier order, each with its tier; a tier row still to download keeps its place", () => {
-  // the server's order is not the tier order, and Z-Image's files are not there yet
+/** The style cells the server lists for a card's level (styles.ts): one per style, in its style's group. */
+const GENERAL: ImagePreset = { ...PLAIN, id: "general--r2-2a-klein-compact8", name: "FLUX.2 Klein 4B compact general", group: "General", style: "general" };
+const PIXEL_CELL: ImagePreset = { ...PIXEL, id: "pixel-art--r2-1a-klein-compact8", name: "FLUX.2 Klein 4B compact pixel art", group: "Pixel art", style: "pixel-art" };
+
+it("Defaults runs the server's setup for each style and names it by the style alone; Other models shows the tier rows first, in tier order, each with its tier; a tier row still to download keeps its place", () => {
+  // the server's order is not the Defaults order nor the tier order, and Z-Image's files are not there yet
   const imagePresets: ImagePresets = {
-    presets: [{ ...MOSS, group: "General", tier: "Best" }, { ...PIXEL, group: "Pixel art" }, { ...PLAIN, group: "General" }, { ...KLEIN, tier: "Fast" }],
+    presets: [{ ...MOSS, group: "General", tier: "Best" }, PIXEL_CELL, { ...PLAIN, group: "General" }, { ...KLEIN, tier: "Fast" }, GENERAL],
     others: [{ ...ZIMAGE, tier: "Balanced", needs: { files: ["z_image_turbo_int8.safetensors"], download: true } }],
-    readAt: 1, current: { preset: KLEIN, width: 1024, height: 1024 },
+    readAt: 1, current: { preset: GENERAL, width: 896, height: 896 },
   };
   setState({ image: true, pop: { id: "images", kb: false }, imagePresets });
   const html = picker();
   // Defaults, then Other models: the styles by name, then the rest by their own
-  expect(rowNames(html)).toEqual(["General", "Pixel art", ZIMAGE.name, MOSS.name, PLAIN.name]);
-  expect(html.match(/<div class="pk-r style[^"]*"[^>]*data-preset="([^"]*)"/g)?.map((r) => /data-preset="([^"]*)"/.exec(r)?.[1])).toEqual([KLEIN.id, PIXEL.id]);
-  expect(html, "the style row's setup is in its tip").toContain(`data-tip="${KLEIN.name}"`);
-  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Balanced", "Best"]);
-  expect(html.match(/class="maker-mark"/g), "the three Other models rows keep their family marks; the rail and the styles have none").toHaveLength(3);
+  expect(rowNames(html)).toEqual(["General", "Pixel art", KLEIN.name, ZIMAGE.name, MOSS.name, PLAIN.name]);
+  expect(html.match(/<div class="pk-r style[^"]*"[^>]*data-preset="([^"]*)"/g)?.map((r) => /data-preset="([^"]*)"/.exec(r)?.[1])).toEqual([GENERAL.id, PIXEL_CELL.id]);
+  expect(html, "the style row's setup is in its tip").toContain(`data-tip="${GENERAL.name}"`);
+  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast", "Balanced", "Best"]);
+  expect(html.match(/class="maker-mark"/g), "the four Other models rows keep their family marks; the rail and the styles have none").toHaveLength(4);
 });
 
-it("one setup that is two tiers' pick is listed once: General's default, not again in Other models", () => {
-  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: { presets: [{ ...PLAIN, group: "General", tier: "Fast and balanced" }, { ...MOSS, group: "General", tier: "Best" }], readAt: 1, current: { preset: PLAIN, width: 768, height: 768 } } });
+it("a style's setup is listed once: in Defaults, not again in Other models", () => {
+  setState({ image: true, pop: { id: "images", kb: false }, imagePresets: { presets: [{ ...PLAIN, group: "General", tier: "Fast and balanced" }, { ...MOSS, group: "General", tier: "Best" }, GENERAL], readAt: 1, current: { preset: GENERAL, width: 896, height: 896 } } });
   const html = picker();
-  expect(html.match(new RegExp(`data-preset="${PLAIN.id}"`, "g"))).toHaveLength(1);
-  expect(rowNames(html)).toEqual(["General", MOSS.name]);
-  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Best"]);
+  expect(html.match(new RegExp(`data-preset="${GENERAL.id}"`, "g"))).toHaveLength(1);
+  expect(rowNames(html)).toEqual(["General", PLAIN.name, MOSS.name]);
+  expect([...html.matchAll(/<span class="pk-variant">([^<]*)<\/span>/g)].map((m) => m[1])).toEqual(["Fast and balanced", "Best"]);
 });
 
 const NO_GPU = "Image mode needs a GPU with 4 GB.";
 it.each([
-  ["on the CPU", { ...methodSamples["gpu.status"].result, vendor: "none" } as GpuStatus, ""],
   ["with 3 GB free", { ...methodSamples["gpu.status"].result, freeBytes: 3 * GIB, occupants: [] } as GpuStatus, "3.0 GB free"],
 ])("%s: no default is named or marked, and the picker says why once", (_, gpu, figure) => {
   // what the server answers below 4 GB: Klein listed by its files, no tier rows, the reason
@@ -212,6 +215,23 @@ it.each([
   expect(footer, "not a second line saying the opposite").not.toContain("Runs in system memory");
   // gb() joins the number and its unit with a no-break space
   if (figure !== "") expect(footer.replace(/\s/g, " ")).toContain(figure);
+});
+
+it("on the CPU: the basic-PC General setup is the default, named and marked, and the picker says once how slow it is", () => {
+  // what the server answers when ComfyUI runs on the CPU: the CPU cells and the slow line, no noGpu
+  const SLOW = "No GPU: a picture takes 2 to 4 minutes.";
+  const CPU_GENERAL: ImagePreset = { ...PLAIN, id: "general--cpu-klein-fp4-768-2", name: "FLUX.2 Klein 4B general on the CPU", group: "General", style: "general" };
+  const imagePresets: ImagePresets = { presets: [KLEIN, MOSS, CPU_GENERAL], readAt: 1, current: { preset: CPU_GENERAL, width: 768, height: 768 }, slow: SLOW };
+  setState({ image: true, imagePresets, gpu: { ...methodSamples["gpu.status"].result, vendor: "none" } as GpuStatus, pop: null });
+  expect(button()).toContain("768×768");
+  expect(button()).not.toContain('<span class="t">Image model</span>');
+  setState({ pop: { id: "images", kb: false } });
+  const html = picker();
+  expect(html).toContain(`aria-selected="true" data-preset="${CPU_GENERAL.id}"`);
+  const footer = html.slice(html.indexOf('class="pk-bottom"'));
+  expect(footer).toContain(SLOW);
+  expect(html.split(SLOW)).toHaveLength(2);
+  expect(footer, "not a second line saying it again").not.toContain("Runs in system memory");
 });
 
 it("a saved pick on a machine with no default is still named: an explicit pick runs", () => {
