@@ -2,6 +2,7 @@
 // same pinned installer as Ollama. fixtures/fake-portable.7z has the Windows
 // portable's layout (python_embeded/, ComfyUI/main.py) and the release's own
 // 7z options (LZMA2 with the BCJ2 filter), a few files and no real program.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -24,6 +25,11 @@ describe("engineOffered, the release switch and the owner's try-it switch", () =
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "fake-portable.7z");
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+// The 7z goes through libarchive: Windows has its own reader, anywhere else it
+// is bsdtar, which a plain Linux install may not have. Without it the two
+// cases that unpack are skipped and counted as skipped; the second of them
+// would otherwise pass on "no bsdtar" where it means "wrong tree".
+const CAN_UNPACK = process.platform === "win32" || spawnSync("bsdtar", ["--version"]).status === 0;
 
 let work: string;
 let appDataDir: string;
@@ -47,7 +53,7 @@ afterEach(async () => {
 });
 
 describe("installEngine", () => {
-  it("unpacks the portable 7z into runtime/comfyui/<version>, with nothing left in staging", async () => {
+  it.skipIf(!CAN_UNPACK)("unpacks the portable 7z into runtime/comfyui/<version>, with nothing left in staging", async () => {
     const events: InstallProgress[] = [];
     const r = await installEngine({ appDataDir, manifest: manifest(), layout: "windows-portable", onProgress: (p) => events.push(p), progressIntervalMs: 0 });
     expect(r.dir).toBe(engineDir(appDataDir, "0.0.1-test"));
@@ -67,7 +73,7 @@ describe("installEngine", () => {
     expect(existsSync(engineDir(appDataDir, "0.0.1-test"))).toBe(false);
   });
 
-  it("a tree without the layout's entry files is not installed", async () => {
+  it.skipIf(!CAN_UNPACK)("a tree without the layout's entry files is not installed", async () => {
     const e = await installEngine({ appDataDir, manifest: manifest(), layout: "uv-venv" }).catch((err: unknown) => err);
     expect((e as InstallError).code).toBe("extract-failed");
     expect((e as InstallError).message).toContain("Unpacking the image engine failed");
