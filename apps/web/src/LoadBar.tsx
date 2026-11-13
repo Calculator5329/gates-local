@@ -1,10 +1,10 @@
-// The model button while its model loads into memory (chat row 16): a 2 px
-// bar on the button's bottom edge and the time beside the name. A model this
-// machine has loaded before fills over its last load and holds at 90% until
-// the server says ready; a first load has no end to aim at, so its line moves
-// without a percentage and the seconds count up. Nothing here changes size.
-import { useEffect, useState } from "react";
-import { loadGuess } from "./load-times.ts";
+// A model loading into memory, shown where the wait is (chat row 34, owner's
+// pick D, 2026-11-13): a ring around Send while a message waits for the load,
+// and nothing on the model button. A model this machine has loaded before
+// fills the ring over its last load and holds at 90% until the server says
+// ready; a first load has no end to aim at, so an arc turns without one. The
+// time is in the model button's tip.
+import { useState } from "react";
 
 interface Load {
   /** When this client saw the load start; undefined when it never did. */
@@ -13,26 +13,18 @@ interface Load {
   readonly ms: number | undefined;
 }
 
-export function LoadBar({ since, ms }: Load) {
+export function LoadRing({ since, ms }: Load) {
   // started before this mounted (another screen, a remount): the fill is already that far along
   const [delay] = useState(() => (since === undefined ? 0 : Math.min(0, since - Date.now())));
-  if (ms === undefined) return <span className="ldbar wait" aria-hidden="true" />;
-  return <span className="ldbar" aria-hidden="true" style={{ animationDuration: `${ms}ms`, animationDelay: `${delay}ms` }} />;
+  return (
+    <svg className={ms === undefined ? "ldring wait" : "ldring"} viewBox="0 0 40 40" aria-hidden="true">
+      <circle className="ldring-t" cx="20" cy="20" r="18.75" />
+      <circle className="ldring-f" cx="20" cy="20" r="18.75" pathLength="100" style={ms === undefined ? undefined : { animationDuration: `${ms}ms`, animationDelay: `${delay}ms` }} />
+    </svg>
+  );
 }
 
-/** The model's download on the same edge (chat row 29): filled to its percent, which the button's tip says in numbers. */
+/** The model's download, a 2 px bar on the model button's bottom edge (chat row 29): filled to its percent, which the button's tip says in numbers. */
 export function DownloadBar({ pct }: { pct: number }) {
   return <span className="ldbar dl" aria-hidden="true" style={{ transform: `scaleX(${Math.min(100, Math.max(0, pct)) / 100})` }} />;
-}
-
-/** "~4 s" for a model loaded before; seconds so far for a first load. */
-export function LoadTime({ since, ms }: Load) {
-  const [start] = useState(() => since ?? Date.now());
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (ms !== undefined) return undefined;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [ms]);
-  return <>{ms === undefined ? `${Math.max(0, Math.floor((now - start) / 1000))} s` : loadGuess(ms)}</>;
 }

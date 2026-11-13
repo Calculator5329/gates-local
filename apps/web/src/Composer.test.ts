@@ -113,6 +113,49 @@ it("a model that fits once another chat's reply stops can be sent to, and Send s
   expect(refused).toContain("not enough memory at 16k");
 });
 
+const modelButton = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*id="modelBtn"[\s\S]*?<\/button>/)?.[0] ?? "";
+const slot = (html: string) => html.match(/<small class="picker-trigger-ctx">([^<]*)<\/small>/)?.[1];
+const mark = (html: string) => html.match(/<span class="maker-mark"[\s\S]*?<\/span>/)?.[0];
+/** A button's contents, without its own tag: the tip on the tag may say more while the face stays the same. */
+const body = (html: string) => html.replace(/^<button\b[^>]*>/, "");
+const sendWhole = () => renderToStaticMarkup(createElement(Composer)).match(/<button\b[^>]*class="send(?: [^"]*)?"[\s\S]*?<\/button>/)?.[0] ?? "";
+// Guards the owner's pick (2026-11-13: "doing too much" on a spinner, a bar and "3 s" on the model button, then option D,
+// "On Send, not on the model": the model button never changes, and a ring fills around Send only while a message waits for the load).
+it("a loading model leaves its button alone: a ring fills around Send, and only while a message waits for the load", () => {
+  const tag = "qwen3.5:9b";
+  const loadingModel: State = { ...ready, loads: { [tag]: { model: tag, numCtx: 16384, state: "loading" } }, loadSince: { [tag]: 0 }, loadTimes: { [tag]: 4200 } };
+  setFixture(ready);
+  const idle = modelButton();
+  expect(slot(idle)).toMatch(/^\d+k$/);
+  expect(sendWhole(), "no ring on an idle Send").not.toContain("ldring");
+
+  // a load nobody is waiting on (a model just picked, a chat just opened): nothing moves anywhere
+  setFixture(loadingModel);
+  const loading = modelButton();
+  expect(body(loading), "the model button's contents do not change").toBe(body(idle));
+  expect(mark(loading), "the maker's mark stays").toBe(mark(idle));
+  expect(sendWhole(), "nothing is waiting, so no ring").not.toContain("ldring");
+  // the time is still there for whoever asks
+  expect(loading).toMatch(/data-tip="[^"]*Loading into GPU memory, ~4 s"/);
+  // a computer with no supported GPU has no GPU memory to load into
+  setFixture({ ...loadingModel, gpu: { vendor: "none" } as State["gpu"] });
+  expect(modelButton()).toMatch(/data-tip="[^"]*Loading into memory, ~4 s"/);
+
+  // a message is waiting for the load: the ring is on the button being waited on, filling over the last load
+  setFixture({ ...loadingModel, turns });
+  expect(body(modelButton()), "still unchanged").toBe(body(idle));
+  const waiting = sendWhole();
+  expect(waiting).toMatch(/class="ldring"/);
+  expect(waiting, "it fills over this machine's last load").toMatch(/animation-duration:4200ms/);
+  // a first load has no time to aim at: the ring turns without an end
+  setFixture({ ...loadingModel, turns, loadTimes: {} });
+  expect(sendWhole()).toMatch(/class="ldring wait"/);
+  expect(modelButton()).toMatch(/data-tip="[^"]*Loading into GPU memory"/);
+  // a reply already running on a loaded model is not waiting for anything
+  setFixture({ ...ready, turns });
+  expect(sendWhole()).not.toContain("ldring");
+});
+
 it("F6: before the first read, Send claims nothing about Ollama or models and the model button still has a name", () => {
   setFixture({ ...initial, conn: { kind: "connecting" }, runtime: undefined, models: undefined, model: undefined, hydrationSettled: false, bootWaited: false, view: "new", threadId: null });
   const html = renderToStaticMarkup(createElement(Composer));

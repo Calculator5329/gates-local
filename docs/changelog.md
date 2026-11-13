@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-13: A loading model is a ring on Send, and the model button stays still
+
+- While a model loaded, the model button showed it three ways: a spinner
+  in place of the maker's mark, a bar under the name, and the seconds in
+  place of the context size. The button does not change for a load now.
+- A load shows in one place, and only when you are waiting on it: after you
+  send a message to a model that is not in memory yet, a ring fills around
+  the composer's main button. It fills over that model's last load on this
+  computer; a model loading here for the first time shows a turning arc.
+- A model that loads with nobody waiting (one you just picked, a chat you
+  just opened) shows nothing.
+- The time is in the model button's tooltip: "Loading into GPU memory,
+  ~4 s". On a computer with no supported GPU it says "Loading into memory".
+- A browser check still expected the old sentence under Default context
+  after Advanced was reworded. It checks the sentence that is there now.
+
 ## 2026-11-13: Usage and Settings are pop-ups like Models
 
 - Usage opens in the middle of the window, two-thirds of its width and only

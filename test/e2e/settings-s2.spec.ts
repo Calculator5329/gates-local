@@ -10,8 +10,7 @@ test("context is one size across chats, and Settings says so", async ({ page, op
   await waitReady(page);
   const gpu = await openGpuMemory(page);
   const desc = gpu.locator(".srow", { hasText: "Default context" }).locator(".sl .d").first();
-  await expect(desc).toContainText("one size for all your chats");
-  await expect(desc).toContainText("changes every chat until you reopen the app");
+  await expect(desc).toContainText("One size for every chat");
   await expect(desc).not.toContainText("each chat");
   await page.keyboard.press("Escape");
 

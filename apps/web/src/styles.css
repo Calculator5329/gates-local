@@ -468,14 +468,19 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible,select:focus-v
    at its right end; a longer name widens it up to 240 px, past which it is cut (the tag is its tooltip). */
 .cf-r>#modelBtn{flex:0 1 auto;min-width:13em;max-width:240px;justify-content:flex-end}
 #modelBtn>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-/* a load (LoadBar.tsx): 2 px on the button's bottom edge, filling to 90% over the last load; a first load's line moves with no amount */
+/* a download (LoadBar.tsx): 2 px on the model button's bottom edge, filled to its percent */
 #modelBtn{position:relative;overflow:hidden}
-.ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transform:scaleX(.9);animation:ldfill linear both;pointer-events:none}
-.ldbar.wait{width:30%;transform:none;animation:ldslide 1.4s ease-in-out infinite}
-.ldbar.dl{animation:none;transition:transform .25s linear}
-@keyframes ldfill{from{transform:scaleX(0)}to{transform:scaleX(.9)}}
-@keyframes ldslide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
-@media (prefers-reduced-motion:reduce){.ldbar{animation:none}.ldbar.wait{width:100%;opacity:.4}.ldbar.dl{transition:none}}
+.ldbar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:var(--accent);transform-origin:left;transition:transform .25s linear;pointer-events:none}
+/* a load a message waits on (LoadBar.tsx): a ring just outside Send, filling to 90% over the last load; a first load's arc turns with no amount */
+.send{position:relative}
+.ldring{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);fill:none;stroke-width:2;transform:rotate(-90deg);pointer-events:none}
+.ldring-t{stroke:var(--border-strong)}
+.ldring-f{stroke:var(--accent);stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:10;animation:ldfill linear both}
+.ldring.wait{animation:ldturn 1.1s linear infinite}
+.ldring.wait .ldring-f{stroke-dasharray:25 75;stroke-dashoffset:0;animation:none}
+@keyframes ldfill{from{stroke-dashoffset:100}to{stroke-dashoffset:10}}
+@keyframes ldturn{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
+@media (prefers-reduced-motion:reduce){.ldbar{transition:none}.ldring-f,.ldring.wait{animation:none}.ldring.wait .ldring-f{stroke-dasharray:100;opacity:.4}}
 .cf-r{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
 .cf-r>*{flex:none}
 .stop-sq .sqr{width:9px;height:9px;background:currentColor;display:block}
@@ -940,6 +945,7 @@ a.btn{text-decoration:none}
 .ctl{padding:0 8px;min-height:44px}
 .ctl.sq{width:44px}
 .send{width:44px;height:44px;padding:4px;background-clip:content-box;transform:none!important}
+.send .ldring{inset:-2px;width:calc(100% + 4px);height:calc(100% + 4px)}
 #modelBtn{min-width:0}
 #modelBtn span{overflow:hidden;text-overflow:ellipsis}
 /* while a reply runs a touch row holds Stop and Send both: 44 px targets 2 px apart keep it inside 360 px */
@@ -1025,6 +1031,7 @@ a.btn{text-decoration:none}
 .ctl,.pill,.meter,.btn,.think,.wr-line,.qa,.link,.sb-row,.sb-act,.sb-search{min-height:44px}
 .sb-clear{width:44px;height:44px;margin-right:-10px}
 .send{width:44px;height:44px;padding:4px;transform:none!important}
+.send .ldring{inset:-2px;width:calc(100% + 4px);height:calc(100% + 4px)}
 .cf-r .send{background-clip:content-box}
 .seg2 button,.mini-seg button{height:40px;min-width:44px}
 .switch{box-sizing:content-box;border:11px solid transparent;background-clip:padding-box;margin:-11px}

@@ -8,8 +8,9 @@ import { useActionPress } from "./composer-press.ts";
 import { CONNECTING, PLACEHOLDER, booting, rtOf, unread } from "./Banner.tsx";
 import { openFit } from "./fit-actions.ts";
 import { fitFor, stopsChat } from "./fit-table.ts";
-import { ctxFor, describeModel, gb, k, modelFacts, verdictOf } from "./format.ts";
-import { DownloadBar, LoadBar, LoadTime } from "./LoadBar.tsx";
+import { ctxFor, describeModel, gb, k, modelFacts, noGpu, verdictOf } from "./format.ts";
+import { DownloadBar, LoadRing } from "./LoadBar.tsx";
+import { loadGuess } from "./load-times.ts";
 import { MakerMark } from "./MakerMark.tsx";
 import { pickerLabels } from "./picker-models.ts";
 import { imagePickerScreen, pickerScreen, threadScreen } from "./screen-loaders.ts";
@@ -126,6 +127,7 @@ export function Composer() {
   const loadState = useStore((s) => (s.model === undefined ? undefined : s.loads[s.model]?.state));
   const loadSince = useStore((s) => (s.model === undefined ? undefined : s.loadSince[s.model]));
   const loadMs = useStore((s) => (s.model === undefined ? undefined : s.loadTimes[s.model]));
+  const cpu = useStore((s) => noGpu(s.gpu));
   const used = useStore(usedTokens);
   const pop = useStore((s) => s.pop?.id ?? null);
   const pickerPending = useStore(s => s.pop?.id === "picker" && !s.pop.ready);
@@ -165,6 +167,8 @@ export function Composer() {
   const name = shownTag === undefined ? "No model" : pickerLabels([...chatModels(models ?? []).map(m => m.name), shownTag], catalog).get(shownTag) ?? shownTag;
   const loading = loadState === "loading";
   const loadingNow = loading && first === undefined;
+  // a message of this chat is waiting for its model to load: the one time a load is shown, on the button being waited on
+  const waitsOnLoad = loadingNow && isStreaming && !drawingNow;
   // The fit table's row: the server builds none while a load runs, so a loading model keeps the verdict from before it.
   const v = fit === undefined ? undefined : verdictOf(fit);
   const text = hasText || images.length > 0;
@@ -184,7 +188,7 @@ export function Composer() {
         : first !== undefined
           ? `${tagTip(name, info, shownTag)}<br>Downloading ${firstProgress}%`
           : loading
-            ? `${tagTip(name, info, shownTag)}<br>Loading into GPU memory…`
+            ? `${tagTip(name, info, shownTag)}<br>Loading into ${cpu ? "memory" : "GPU memory"}${loadMs === undefined ? "" : `, ${loadGuess(loadMs)}`}`
             : `${tagTip(name, info, shownTag)}${info ? ` · ${gb(info.sizeBytes)} on disk` : ""}`;
 
   const ctx = ctxFor(numCtx, models, model);
@@ -383,11 +387,11 @@ export function Composer() {
                 <span className="t">{named === undefined ? "Image model" : named.preset.short ?? named.preset.name}</span>
                 {named === undefined ? null : <small className="picker-trigger-ctx">{sizeLabel(named.width, named.height)}</small>}
               </> : boot && shownTag === undefined ? <Skel w="8.5em" /> : <>
-                {/* loading shows in the tile, the time slot and the bar, never in the label: the trigger keeps its width */}
-                {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending || loadingNow} />}
+                {/* a load changes nothing here (owner's pick D): it is the ring around Send, and its time is in this button's tip */}
+                {shownTag === undefined ? null : <MakerMark tag={shownTag} busy={pickerPending} />}
                 <span>{name}</span>
-                <small className="picker-trigger-ctx">{loadingNow ? <LoadTime key={loadSince} since={loadSince} ms={loadMs} /> : k(ctx)}</small>
-                {first !== undefined ? <DownloadBar pct={firstProgress} /> : loadingNow ? <LoadBar key={loadSince} since={loadSince} ms={loadMs} /> : null}
+                <small className="picker-trigger-ctx">{k(ctx)}</small>
+                {first === undefined ? null : <DownloadBar pct={firstProgress} />}
               </>}
             </button>
             {/* a phone has no room for the pills and the meter: they live in this sheet */}
@@ -407,6 +411,7 @@ export function Composer() {
               {...primaryPress}
             >
               {showStop ? <span className="sqr" /> : <SendArrow />}
+              {waitsOnLoad ? <LoadRing key={loadSince} since={loadSince} ms={loadMs} /> : null}
             </button>
           </div>
         </div>
