@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-14: A page cannot swap its own document, and a dragged link goes nowhere
+
+- A page a model wrote could replace its own document through a
+  `javascript:` address, and the fresh document had the browser's
+  peer-connection feature back, which the app removes from pages. Each
+  script in a page now runs by a one-time code the server writes as it
+  serves the page; a `javascript:` address has none and is refused. A
+  link written as `href="javascript:..."` inside a page no longer runs;
+  handlers on elements and ordinary scripts run as before.
+- A link or text dragged out of a page (or from anywhere else) onto the
+  app's window is refused everywhere a person could not type. It used to
+  make the window follow the link, which in the desktop app opened it in
+  the system browser, address and all.
+- `docs/design/pages.md` says how a page is held and lists what a page
+  can still do (ask the browser to look up a host, write the clipboard
+  on a click), browser by browser. Only Chromium has been probed.
+
 ## 2026-11-14: Stop on the processor waits for the picture to end, and the processor build always runs there
 
 - Stop on a computer that makes pictures on the processor waits as long as

@@ -3,6 +3,10 @@
 // way out and writes what happened into itself; the tests read that, and check
 // the app's side: the frame's attributes, no message listener, the app's own
 // frame policy, and the page's own window.
+//
+// These results are for Chromium only (the browser the suite runs and the one
+// inside the desktop app). Safari and Firefox have not been probed. What a
+// page can still do is listed in docs/design/pages.md.
 import { appendFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { BIG_PROMPT, LEFT_PATH, LOAN_PROMPTS, MOVING, NAVIGATE_PROMPT, PROBE_PROMPT } from "../fake-ollama/page-replies.ts";
@@ -78,6 +82,9 @@ test("a page learns nothing of the app and reaches nothing outside its frame", a
   expect.soft(r["dataImage"]).toBe("loaded");
   expect.soft(r["violations"]).toEqual(expect.arrayContaining(["connect-src", "img-src", "script-src"]));
   expect.soft(r["eval"]).toBe("threw EvalError");
+  // its own document stays: a javascript: address is refused as a script element with no nonce
+  expect.soft(r["violations"]).toContain("script-src-elem");
+  await expect.soft(page.frameLocator('[data-testid="pages.frame"]').locator("#swapped")).toHaveCount(0);
   // WebRTC and popups: no constructor, and no frame of its own to find one in
   expect.soft(r["rtc"]).toBe("undefined,undefined,undefined");
   expect.soft(r["rtcNew"]).toBe("threw TypeError");

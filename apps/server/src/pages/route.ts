@@ -5,7 +5,8 @@
 // it. The first GET of an id serves the page and forgets it; an unknown, used
 // or expired id gets an empty 404. The page's limits travel as response
 // headers, so a page that replaces its own document cannot take them off:
-// no network, no child frames, no forms, scripts sandboxed to an opaque origin.
+// no network, no child frames, no forms, scripts sandboxed to an opaque origin,
+// and no `javascript:` address to swap its document through.
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
@@ -17,41 +18,62 @@ export const PAGE_TTL_MS = 60_000;
 export const PAGES_KEPT = 32;
 
 /**
- * Everything the page may use: its own inline scripts and styles, and pictures, fonts and media
- * from data: addresses. Nothing loads from or goes out to anywhere else, it cannot hold a frame of
- * its own (a fresh child window would have the WebRTC constructors back), and the sandbox gives it
- * an opaque origin with scripts only, even if its address is opened on its own.
+ * Everything the page may use: its own scripts and styles, and pictures, fonts and media from
+ * data: addresses. Nothing loads from or goes out to anywhere else, it cannot hold a frame of its
+ * own (a fresh child window would have the WebRTC constructors back), and the sandbox gives it an
+ * opaque origin with scripts only, even if its address is opened on its own.
+ *
+ * Script elements run by the nonce the server writes onto each one as it serves the page, and
+ * handlers written on elements run as before. A `javascript:` address carries no nonce, so the
+ * page cannot navigate its frame to one: that would swap in a new document, in a new window
+ * with the WebRTC constructors back. `script-src` stays for eval and for a browser that does not
+ * know the two narrower directives.
  */
-export const PAGE_POLICY = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data:",
-  "font-src data:",
-  "media-src data:",
-  "frame-src 'none'",
-  "child-src 'none'",
-  "worker-src 'none'",
-  "form-action 'none'",
-  "base-uri 'none'",
-  "sandbox allow-scripts",
-].join("; ");
+export function pagePolicy(nonce: string): string {
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    `script-src-elem 'nonce-${nonce}' 'strict-dynamic'`,
+    "script-src-attr 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    "img-src data:",
+    "font-src data:",
+    "media-src data:",
+    "frame-src 'none'",
+    "child-src 'none'",
+    "worker-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "sandbox allow-scripts",
+  ].join("; ");
+}
+
+/** A fresh nonce for one served page. */
+export const pageNonce = (): string => randomBytes(16).toString("hex");
 
 const RTC = ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate"];
 /** Runs before the page's own scripts: the WebRTC constructors are gone, and cannot be put back. */
-const HEAD = `<script>for(const k of ${JSON.stringify(RTC)}){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch{}}</script>`;
+const head = (nonce: string) => `<script nonce=${nonce}>for(const k of ${JSON.stringify(RTC)}){try{Object.defineProperty(window,k,{value:undefined,writable:false,configurable:false})}catch{}}</script>`;
+/**
+ * Every script start tag in the page's code: each gets the nonce, first, so one the page wrote
+ * itself is ignored. The nonce is hex and written with no quotes, so a start tag that sits inside
+ * a string in the page's own script does not end that string.
+ */
+const SCRIPT_TAG = /<script(?=[\s/>])/gi;
 
-/** The page's code with the WebRTC removal first, after its doctype so it keeps standards mode. */
-export function pageDocument(code: string): string {
+/** The page's code with the WebRTC removal first, after its doctype so it keeps standards mode, and the nonce on each of its scripts. */
+export function pageDocument(code: string, nonce: string): string {
   const doctype = /^\s*<!doctype[^>]*>/i.exec(code);
-  return doctype === null ? `<!doctype html>${HEAD}${code}` : `${doctype[0]}${HEAD}${code.slice(doctype[0].length)}`;
+  const rest = (doctype === null ? code : code.slice(doctype[0].length)).replace(SCRIPT_TAG, `<script nonce=${nonce} `);
+  return `${doctype === null ? "<!doctype html>" : doctype[0]}${head(nonce)}${rest}`;
 }
 
 /** The headers a served page carries; `frameAncestors` names the one origin that may frame it. */
-export function pageHeaders(frameAncestors?: string): Record<string, string> {
+export function pageHeaders(nonce: string, frameAncestors?: string): Record<string, string> {
+  const policy = pagePolicy(nonce);
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": frameAncestors === undefined ? PAGE_POLICY : `${PAGE_POLICY}; frame-ancestors ${frameAncestors}`,
+    "Content-Security-Policy": frameAncestors === undefined ? policy : `${policy}; frame-ancestors ${frameAncestors}`,
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-DNS-Prefetch-Control": "off",
@@ -85,7 +107,7 @@ export interface PageRoute {
 
 export function createPageRoute(options: PageRouteOptions = {}): PageRoute {
   const now = options.now ?? Date.now;
-  const kept = new Map<string, { readonly doc: string; readonly until: number }>();
+  const kept = new Map<string, { readonly doc: string; readonly nonce: string; readonly until: number }>();
 
   const sweep = () => {
     const t = now();
@@ -114,7 +136,8 @@ export function createPageRoute(options: PageRouteOptions = {}): PageRoute {
       sweep();
       while (kept.size >= PAGES_KEPT) kept.delete(kept.keys().next().value!);
       const id = randomBytes(16).toString("hex");
-      kept.set(id, { doc: pageDocument(Buffer.concat(chunks).toString("utf8")), until: now() + PAGE_TTL_MS });
+      const nonce = pageNonce();
+      kept.set(id, { doc: pageDocument(Buffer.concat(chunks).toString("utf8"), nonce), nonce, until: now() + PAGE_TTL_MS });
       const body = JSON.stringify({ id });
       res.writeHead(201, { ...cors, "Content-Type": "application/json", "Content-Length": String(Buffer.byteLength(body)), "Cache-Control": "no-store" }).end(body);
     });
@@ -142,7 +165,7 @@ export function createPageRoute(options: PageRouteOptions = {}): PageRoute {
       const body = Buffer.from(page.doc, "utf8");
       // the phone listener frames nothing else: its page alone may be framed, by its own origin
       res.removeHeader("X-Frame-Options");
-      res.writeHead(200, { ...pageHeaders(options.frameAncestors), "Content-Length": String(body.length) }).end(body);
+      res.writeHead(200, { ...pageHeaders(page.nonce, options.frameAncestors), "Content-Length": String(body.length) }).end(body);
     },
     get size() {
       sweep();

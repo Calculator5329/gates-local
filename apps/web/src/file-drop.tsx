@@ -13,6 +13,25 @@ import { getState } from "./store.ts";
 let inPage = false;
 const carriesFiles = (e: DragEvent) => !inPage && (e.dataTransfer?.types.includes("Files") ?? false);
 
+/**
+ * A drag from outside the window that carries no files (a link, some text)
+ * lands only where the person could type. Anywhere else the window would
+ * follow a dropped link, and a page in a frame can offer one to drag: the
+ * drag is refused there, so nothing navigates.
+ */
+export function refusesDrop(target: EventTarget | null): boolean {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  if (el === null || typeof el.closest !== "function") return true;
+  return el.closest("input, textarea, [contenteditable]:not([contenteditable='false'])") === null;
+}
+/** Refuses a drag this window does not take; true when it did. */
+function refuse(e: DragEvent): boolean {
+  if (inPage || carriesFiles(e) || !refusesDrop(e.target)) return false;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+  return true;
+}
+
 /** Set while a composer is mounted; when it cannot be used a drop is still claimed, and nothing is attached. */
 let mark: ((at: { x: number; y: number } | null) => void) | null = null;
 // A drag that ends outside the window without a leave event (Esc, a lost
@@ -40,6 +59,7 @@ function usable(): boolean {
 }
 
 function over(e: DragEvent): void {
+  if (refuse(e)) return;
   if (!carriesFiles(e)) return;
   e.preventDefault();
   const ok = usable();
@@ -59,6 +79,7 @@ function leave(e: DragEvent): void {
 
 function drop(e: DragEvent): void {
   if (inPage) { inPage = false; return; }
+  if (refuse(e)) return;
   if (!carriesFiles(e)) return;
   e.preventDefault();
   const attaching = usable();

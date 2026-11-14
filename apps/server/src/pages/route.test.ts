@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type WsServer, startWsServer } from "../ws/server.ts";
-import { PAGES_KEPT, PAGE_MAX_BYTES, PAGE_POLICY, PAGE_TTL_MS, createPageRoute, pageDocument } from "./route.ts";
+import { PAGES_KEPT, PAGE_MAX_BYTES, PAGE_TTL_MS, createPageRoute, pageDocument, pagePolicy } from "./route.ts";
 
 const TOKEN = "per-launch-secret";
 const APP = "http://127.0.0.1:5187";
@@ -88,15 +88,21 @@ describe("the page route on the computer's listener", () => {
     expect(address).not.toContain(TOKEN);
     expect(address).not.toContain("token");
     const r = await send(server, "GET", new URL(address).pathname);
-    expect(r.headers["content-security-policy"]).toBe(PAGE_POLICY);
-    expect(PAGE_POLICY).toContain("default-src 'none'");
-    expect(PAGE_POLICY).toContain("frame-src 'none'");
-    expect(PAGE_POLICY).toContain("child-src 'none'");
-    expect(PAGE_POLICY).toContain("sandbox allow-scripts");
-    expect(PAGE_POLICY).not.toMatch(/connect-src|unsafe-eval/);
+    const policy = String(r.headers["content-security-policy"]);
+    const nonce = /script-src-elem 'nonce-([0-9a-f]{32})' 'strict-dynamic'/.exec(policy)?.[1];
+    expect(nonce, policy).toBeDefined();
+    expect(policy).toBe(pagePolicy(nonce!));
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("frame-src 'none'");
+    expect(policy).toContain("child-src 'none'");
+    expect(policy).toContain("sandbox allow-scripts");
+    expect(policy).not.toMatch(/connect-src|unsafe-eval/);
+    // script elements run by the nonce alone: a javascript: address has none, so it cannot swap the document
+    expect(policy).not.toMatch(/script-src-elem[^;]*unsafe-inline/);
+    expect(policy).toContain("script-src-attr 'unsafe-inline'");
     expect(r.headers).toMatchObject({ "content-type": "text/html; charset=utf-8", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "cache-control": "no-store" });
     // the WebRTC constructors go first, after the page's doctype
-    expect(r.body.startsWith("<!doctype html><script>for(const k of [\"RTCPeerConnection\"")).toBe(true);
+    expect(r.body.startsWith(`<!doctype html><script nonce=${nonce}>for(const k of ["RTCPeerConnection"`)).toBe(true);
     expect(r.body).not.toContain(TOKEN);
   });
 
@@ -134,7 +140,8 @@ describe("the page route on the phone's listener", () => {
     expect(r.status).toBe(200);
     // everything else on this listener refuses framing; its pages are framed by the phone's own origin
     expect(r.headers["x-frame-options"]).toBeUndefined();
-    expect(r.headers["content-security-policy"]).toBe(`${PAGE_POLICY}; frame-ancestors ${PHONE_ORIGIN}`);
+    expect(r.headers["content-security-policy"]).toMatch(/^default-src 'none'; .*; sandbox allow-scripts; frame-ancestors /);
+    expect(String(r.headers["content-security-policy"]).endsWith(`; frame-ancestors ${PHONE_ORIGIN}`)).toBe(true);
     expect((await send(phone, "GET", `/pages/${id}`, SERVE)).status).toBe(404);
     expect((await send(phone, "GET", "/", SERVE)).headers["x-frame-options"]).toBe("DENY");
   });
@@ -166,7 +173,28 @@ describe("pages waiting for their frame", () => {
   });
 
   it("a page without a doctype gets one before the WebRTC removal", () => {
-    expect(pageDocument("<p>x</p>")).toMatch(/^<!doctype html><script>.*<\/script><p>x<\/p>$/);
-    expect(pageDocument("  <!DOCTYPE html><p>x</p>")).toMatch(/^ {2}<!DOCTYPE html><script>/);
+    expect(pageDocument("<p>x</p>", "ab12")).toMatch(/^<!doctype html><script nonce=ab12>.*<\/script><p>x<\/p>$/);
+    expect(pageDocument("  <!DOCTYPE html><p>x</p>", "ab12")).toMatch(/^ {2}<!DOCTYPE html><script nonce=ab12>/);
+  });
+
+  it("every script of the page gets the page's nonce, ahead of one the page wrote", () => {
+    const doc = pageDocument('<script>a()</script><SCRIPT type="module">b()</SCRIPT><script nonce="mine">c()</script><svg><script/></svg><scripted>', "ab12");
+    expect(doc).toContain("<script nonce=ab12 >a()</script>");
+    expect(doc).toContain('<script nonce=ab12  type="module">b()</SCRIPT>');
+    expect(doc).toContain('<script nonce=ab12  nonce="mine">c()</script>');
+    expect(doc).toContain("<script nonce=ab12 /></svg>");
+    expect(doc).toContain("<scripted>");
+  });
+
+  it("a script start tag inside a string of the page's own script does not end that string", () => {
+    const doc = pageDocument(`<script>el.innerHTML = "<script>x</script>";</script>`, "ab12");
+    expect(doc).toContain(`el.innerHTML = "<script nonce=ab12 >x</script>";`);
+  });
+
+  it("two pages get two nonces", async () => {
+    const server = await desktop();
+    const policies: string[] = [];
+    for (let i = 0; i < 2; i++) policies.push(String((await send(server, "GET", `/pages/${await hand(server)}`)).headers["content-security-policy"]));
+    expect(policies[0]).not.toBe(policies[1]);
   });
 });

@@ -126,6 +126,8 @@ result.popup = tryIt(() => window.open("${PROBE_TARGET}") === null ? "null" : "o
 result.ancestors = tryIt(() => location.ancestorOrigins ? [...location.ancestorOrigins].join(",") : "none");
 result.eval = tryIt(() => eval("1 + 1"));
 try { parent.postMessage({ from: "page" }, "*"); result.posted = "sent"; } catch (e) { result.posted = "threw " + e.name; }
+// swapping its own document through a javascript: address would give it a new window; a refusal shows in violations
+location.href = "javascript:'<p id=swapped>swapped</p>'";
 const img = (src) => new Promise((done) => { const i = new Image(); i.onload = () => done("loaded"); i.onerror = () => done("failed"); i.src = src; });
 Promise.all([
   fetch("${PROBE_TARGET}").then(() => "reached", (e) => "failed " + e.name),
